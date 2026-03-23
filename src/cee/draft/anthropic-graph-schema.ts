@@ -1,43 +1,30 @@
 /**
  * JSON Schema for Anthropic Structured Outputs — draft_graph
  *
+ * COMPLIANT BY CONSTRUCTION — every `type: "object"` with defined properties
+ * has `additionalProperties: false`. Dynamic maps use `additionalProperties: true`.
+ * No runtime normalisation needed.
+ *
  * Used with Anthropic's GA structured outputs parameter:
  *   output_config: { format: { type: "json_schema", schema: <this schema> } }
- * when CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. Guarantees parseable JSON and
- * correct top-level structure at the token generation level.
+ * when CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true.
  *
- * Deliberately not maximally strict — field-level validation (node kinds, edge
- * patterns, belief distributions) is handled downstream by Stage 4 (Repair).
- * The schema goal is: eliminate JSON parse failures and ensure `nodes` + `edges`
- * arrays are always present.
+ * Anthropic Structured Outputs requirements (GA since Jan 2026):
+ * - Every object with properties MUST have `additionalProperties: false`
+ * - Dynamic maps (Record<string, T>) use `additionalProperties: true`
+ * - No `$ref`, no `oneOf`, no validation keywords (min/max/pattern/format)
+ * - `required` lists only fields the LLM must always produce
  *
- * IMPORTANT: The nested key is "schema", NOT "json_schema" — the API returns
- * 400 "Unexpected key" if the wrong key is used.
- *
- * Anthropic Structured Outputs (GA since Jan 2026):
- * - GA parameter: output_config.format (no beta header required)
- * - Deprecated parameter: output_format (still works during transition)
- * - Supported models: Claude Sonnet 4.5+, Opus 4+, Haiku 4.5+
- * - Schema must use JSON Schema draft-07 subset (no $ref, $defs, allOf, anyOf
- *   at the top level of required properties)
- *
- * Reference: https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/increase-consistency
+ * The prompt contract (draft_graph_v187.txt OUTPUT_SCHEMA) is the authority
+ * for what fields exist and which are required.
  */
 
-/**
- * Minimal JSON schema that guarantees parseable JSON with correct top-level
- * structure for a draft_graph response.
- *
- * All fields except `nodes` and `edges` are optional — the pipeline's repair
- * stage (Stage 4) fills missing fields.
- */
 export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
   type: "object" as const,
   properties: {
     topology_plan: {
       type: "array",
       items: { type: "string" },
-      description: "Pre-generation topology plan — list of node IDs in draft order",
     },
     nodes: {
       type: "array",
@@ -54,19 +41,73 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             type: "string",
             enum: ["controllable", "observable", "external"],
           },
-          data: { type: "object" },
-          prior: { type: "object" },
+          data: {
+            type: "object",
+            properties: {
+              // Factor data fields
+              value: { type: "number" },
+              raw_value: { type: "number" },
+              unit: { type: "string" },
+              cap: { type: "number" },
+              baseline: { type: "number" },
+              extractionType: {
+                type: "string",
+                enum: ["explicit", "inferred", "range", "observed"],
+              },
+              factor_type: {
+                type: "string",
+                enum: ["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"],
+              },
+              uncertainty_drivers: {
+                type: "array",
+                items: { type: "string" },
+              },
+              range: {
+                type: "object",
+                properties: {
+                  min: { type: "number" },
+                  max: { type: "number" },
+                },
+                required: [] as string[],
+                additionalProperties: false,
+              },
+              confidence: { type: "number" },
+              rangeMin: { type: "number" },
+              rangeMax: { type: "number" },
+              // Option data fields — dynamic map: factor_id → number
+              interventions: {
+                type: "object",
+                additionalProperties: true,
+              },
+              // Constraint data fields
+              operator: {
+                type: "string",
+                enum: [">=", "<="],
+              },
+            },
+            required: [] as string[],
+            additionalProperties: false,
+          },
+          prior: {
+            type: "object",
+            properties: {
+              distribution: { type: "string" },
+              range_min: { type: "number" },
+              range_max: { type: "number" },
+            },
+            required: [] as string[],
+            additionalProperties: false,
+          },
           goal_threshold: { type: "number" },
           goal_threshold_raw: { type: "number" },
           goal_threshold_unit: { type: "string" },
           goal_threshold_cap: { type: "number" },
           baseline: { type: "number" },
-          interventions: { type: "object" },
+          body: { type: "string" },
         },
         required: ["id", "kind"],
-        additionalProperties: true,
+        additionalProperties: false,
       },
-      description: "Graph nodes — minimum required for a valid graph response",
     },
     edges: {
       type: "array",
@@ -81,11 +122,9 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               mean: { type: "number" },
               std: { type: "number" },
             },
+            required: ["mean", "std"],
+            additionalProperties: false,
           },
-          belief: { type: "number" },
-          weight: { type: "number" },
-          strength_mean: { type: "number" },
-          strength_std: { type: "number" },
           exists_probability: { type: "number" },
           effect_direction: {
             type: "string",
@@ -95,13 +134,16 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             type: "string",
             enum: ["directed", "bidirected"],
           },
-          provenance: { type: "object" },
           provenance_source: { type: "string" },
+          // Legacy fields — accepted for backward compatibility
+          belief: { type: "number" },
+          weight: { type: "number" },
+          strength_mean: { type: "number" },
+          strength_std: { type: "number" },
         },
         required: ["from", "to"],
-        additionalProperties: true,
+        additionalProperties: false,
       },
-      description: "Graph edges connecting nodes",
     },
     rationales: {
       type: "array",
@@ -113,7 +155,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           provenance_source: { type: "string" },
         },
         required: ["target", "why"],
-        additionalProperties: true,
+        additionalProperties: false,
       },
     },
     causal_claims: {
@@ -129,7 +171,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           stated_strength: { type: "string" },
         },
         required: ["type"],
-        additionalProperties: true,
+        additionalProperties: false,
       },
     },
     goal_constraints: {
@@ -148,7 +190,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           provenance: { type: "string" },
         },
         required: ["node_id"],
-        additionalProperties: true,
+        additionalProperties: false,
       },
     },
     coaching: {
@@ -167,15 +209,16 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               bias_category: { type: "string" },
             },
             required: ["id"],
-            additionalProperties: true,
+            additionalProperties: false,
           },
         },
       },
-      additionalProperties: true,
+      required: [] as string[],
+      additionalProperties: false,
     },
   },
-  required: ["nodes", "edges"],
+  required: ["nodes", "edges", "causal_claims", "topology_plan", "coaching"],
   additionalProperties: false,
-} as const;
+};
 
 export type AnthropicDraftGraphSchema = typeof ANTHROPIC_DRAFT_GRAPH_SCHEMA;

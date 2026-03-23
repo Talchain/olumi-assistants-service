@@ -100,6 +100,9 @@ export interface DraftGraphResult {
     prompt_store_version?: number | null;
     pipeline_checkpoints?: unknown[];
 
+    // Structured outputs telemetry
+    structured_outputs_used?: boolean;
+
     // Unsafe (admin-gated)
     raw_output_preview?: string;
     raw_llm_text?: string;

@@ -46,10 +46,11 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA", () => {
     expect(kindEnum).toContain("action");
   });
 
-  it("coaching, goal_constraints, and topology_plan are optional", () => {
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("coaching");
+  it("coaching, topology_plan, and causal_claims are required; goal_constraints is optional", () => {
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("coaching");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("topology_plan");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("causal_claims");
     expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("goal_constraints");
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("topology_plan");
   });
 
   it("top-level type is object with closed envelope (additionalProperties: false)", () => {
@@ -497,7 +498,8 @@ describe("chatWithAnthropic — output_config.format contract", () => {
 
     const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
-    const testSchema = { type: "object", properties: { foo: { type: "string" } }, required: ["foo"] };
+    // Schema must be Anthropic-compliant by construction (no runtime normaliser)
+    const testSchema = { type: "object", properties: { foo: { type: "string" } }, required: ["foo"], additionalProperties: false };
 
     await chatWithAnthropic({
       system: "You are a test assistant.",
@@ -513,7 +515,7 @@ describe("chatWithAnthropic — output_config.format contract", () => {
     expect(body).toHaveProperty("output_config");
     expect(body).not.toHaveProperty("output_format");
     expect(body.output_config.format.type).toBe("json_schema");
-    // Schema passes through the compliance normaliser — verify normalised shape
+    // Schema is passed through directly (compliant by construction, no normaliser)
     expect(body.output_config.format.schema.type).toBe("object");
     expect(body.output_config.format.schema.properties).toHaveProperty("foo");
     expect(body.output_config.format.schema.additionalProperties).toBe(false);

@@ -586,7 +586,7 @@ function extractToolLLMTelemetry(
     latency_ms: typeof durationMs === 'number' ? durationMs : 0,
     stop_reason: typeof finishReason === 'string' ? finishReason : 'end_turn',
     thinking_enabled: false,
-    structured_outputs_used: !!body._structured_outputs_used,
+    structured_outputs_used: !!(body._structured_outputs_used ?? llmMeta?.structured_outputs_used),
     prompt_version: typeof promptVersion === 'string' ? promptVersion : undefined,
     prompt_hash: typeof promptHash === 'string' ? promptHash : undefined,
   };

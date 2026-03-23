@@ -1,20 +1,19 @@
 /**
  * JSON Schema for Anthropic Structured Outputs — edit_graph
  *
+ * COMPLIANT BY CONSTRUCTION — every `type: "object"` with defined properties
+ * has `additionalProperties: false`. Dynamic maps use `additionalProperties: true`.
+ * No runtime normalisation needed.
+ *
  * Used with Anthropic's GA structured outputs parameter:
  *   output_config: { format: { type: "json_schema", schema: <this schema> } }
- * when CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. Guarantees parseable JSON and
- * correct top-level structure at the token generation level.
+ * when CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true.
  *
  * Matches the EditGraphLLMResult shape:
  *   { operations: PatchOperation[], removed_edges: RemovedEdgeInfo[], warnings: string[], coaching: object | null }
  *
- * Deliberately not maximally strict — field-level validation of PatchOperation
- * discriminants and referential integrity is handled downstream by
- * patch-validation.ts and the PLoT validate-patch endpoint.
- *
- * The schema goal is: eliminate JSON parse failures and ensure the four
- * top-level arrays/objects are always present.
+ * Field-level validation of PatchOperation discriminants and referential integrity
+ * is handled downstream by patch-validation.ts and the PLoT validate-patch endpoint.
  */
 
 export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
@@ -30,15 +29,15 @@ export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
             enum: ["add_node", "remove_node", "update_node", "add_edge", "remove_edge", "update_edge"],
           },
           path: { type: "string" },
-          value: { type: "object" },
-          old_value: { type: "object" },
+          // Dynamic patch payloads — keys vary by op type (node fields, edge fields, etc.)
+          value: { type: "object", additionalProperties: true },
+          old_value: { type: "object", additionalProperties: true },
           impact: { type: "string" },
           rationale: { type: "string" },
         },
         required: ["op", "path"],
-        additionalProperties: true,
+        additionalProperties: false,
       },
-      description: "Patch operations to apply to the graph",
     },
     removed_edges: {
       type: "array",
@@ -50,14 +49,12 @@ export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
           reason: { type: "string" },
         },
         required: ["from", "to", "reason"],
-        additionalProperties: true,
+        additionalProperties: false,
       },
-      description: "Edges removed as a consequence of node removal",
     },
     warnings: {
       type: "array",
       items: { type: "string" },
-      description: "Advisory warnings about the edit",
     },
     coaching: {
       type: "object",
@@ -65,12 +62,12 @@ export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
         summary: { type: "string" },
         rerun_recommended: { type: "boolean" },
       },
-      additionalProperties: true,
-      description: "Coaching output for the user",
+      required: [] as string[],
+      additionalProperties: false,
     },
   },
   required: ["operations", "removed_edges", "warnings", "coaching"],
   additionalProperties: false,
-} as const;
+};
 
 export type AnthropicEditGraphSchema = typeof ANTHROPIC_EDIT_GRAPH_SCHEMA;

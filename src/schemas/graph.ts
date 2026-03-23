@@ -31,6 +31,7 @@ export const ProvenanceSource = z.enum([
   "structural",        // structural edges (decision→option, option→factor)
   "domain_knowledge",  // inferred from domain expertise
   "inferred",          // inferred from context (also used in goal_constraints)
+  "explicit",          // goal_constraints provenance (from prompt examples)
 ]);
 export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action", "factor", "constraint"]);
 

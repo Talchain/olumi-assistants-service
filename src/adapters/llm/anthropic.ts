@@ -28,7 +28,8 @@ import {
 } from './shared-schemas.js';
 import { extractZodIssues } from '../../schemas/llmExtraction.js';
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from '../../cee/draft/anthropic-graph-schema.js';
-import { enforceAnthropicSchemaCompliance } from './anthropic-schema-compliance.js';
+// enforceAnthropicSchemaCompliance removed from runtime — schemas are compliant by construction.
+// The function is retained in anthropic-schema-compliance.ts as a test-only utility.
 
 export type DraftArgs = {
   brief: string;
@@ -427,18 +428,7 @@ export type UsageMetrics = {
 // Uses output_config.format (GA path), no beta header required.
 // Only models listed here will receive the output_config body.
 // Add new models here once confirmed via API testing.
-// Lazily-cached normalised schema for draft_graph structured outputs.
-// Avoids re-normalising the static schema on every API call/retry.
-let _normalisedDraftGraphSchema: Record<string, unknown> | null = null;
-function getNormalisedDraftGraphSchema(): Record<string, unknown> {
-  if (!_normalisedDraftGraphSchema) {
-    _normalisedDraftGraphSchema = enforceAnthropicSchemaCompliance(
-      ANTHROPIC_DRAFT_GRAPH_SCHEMA as Record<string, unknown>,
-      "draft_graph",
-    );
-  }
-  return _normalisedDraftGraphSchema;
-}
+// Schema is compliant by construction — no runtime normalisation needed.
 
 const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
   "claude-sonnet-4-5-20250929",
@@ -640,7 +630,7 @@ export async function draftGraphWithAnthropic(
               output_config: {
                 format: {
                   type: "json_schema",
-                  schema: getNormalisedDraftGraphSchema(),
+                  schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA as Record<string, unknown>,
                 },
               },
             }
@@ -949,6 +939,8 @@ export async function draftGraphWithAnthropic(
         finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
         provider_latency_ms: providerLatencyMs,
         node_kinds_raw_json: rawNodeKinds,
+        // Structured outputs telemetry — propagated through unified pipeline to diagnostic trace
+        structured_outputs_used: useStructuredOutputs,
         // Pipeline checkpoint / provenance fields
         prompt_source: promptMeta.source,
         prompt_store_version: promptMeta.version ?? null,
@@ -2287,10 +2279,8 @@ export async function chatWithAnthropic(
   try {
     const apiClient = getClient();
 
-    // Normalise schema once before buildChatCallParams (avoids re-normalising on retry)
-    const normalisedOutputSchema = args.outputSchema
-      ? enforceAnthropicSchemaCompliance(args.outputSchema, "chat")
-      : undefined;
+    // Schema is compliant by construction — no runtime normalisation needed.
+    const normalisedOutputSchema = args.outputSchema;
 
     function buildChatCallParams(withStructuredOutputs: boolean): {
       body: Anthropic.MessageCreateParamsNonStreaming;

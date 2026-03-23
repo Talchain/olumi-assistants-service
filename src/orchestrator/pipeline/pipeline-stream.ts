@@ -339,8 +339,66 @@ export async function* executePipelineStream(
     yield { type: 'turn_complete', seq: seq++, envelope };
 
   } catch (error) {
+    // Yield immediate error event for fast client feedback (backward compatible)
     const errorEvent = mapErrorToStreamEvent(error, seq++);
     yield errorEvent;
+
+    // Build error envelope with diagnostic trace (parity with non-streaming pipeline.ts).
+    // Wrapped in try-catch: error event above is the critical path; envelope is additive.
+    try {
+      const turnId = enrichedContext?.turn_id ?? 'pipeline-stream-error';
+      const errMessage = error instanceof Error ? error.message : String(error);
+
+      // Unwrap ToolDispatchError to access the original error's properties.
+      // ToolDispatchError wraps the original error in `cause` (line 258-261) but doesn't
+      // forward orchestratorError/toolLLMTelemetry. Traverse the cause chain to find them.
+      const rootError = (error instanceof ToolDispatchError && error.cause)
+        ? error.cause
+        : error;
+
+      // Extract typed error from tool dispatch / LLM errors (same as pipeline.ts lines 476-480)
+      const orchError = (rootError != null && typeof rootError === 'object' && 'orchestratorError' in rootError)
+        ? (rootError as { orchestratorError: { code?: string; message?: string; recoverable?: boolean } }).orchestratorError
+        : undefined;
+      const errorCode = orchError?.code ?? 'PIPELINE_ERROR';
+      const userMsg = orchError?.message ?? 'Something went wrong.';
+
+      const errorEnvelope = buildErrorEnvelope(
+        turnId,
+        errorCode,
+        userMsg,
+        enrichedContext,
+      );
+
+      // Extract upstream HTTP status — check both wrapper and root cause
+      const statusSource = (rootError != null && typeof rootError === 'object' && 'status' in rootError && typeof (rootError as Record<string, unknown>).status === 'number')
+        ? rootError
+        : (error != null && typeof error === 'object' && 'status' in error && typeof (error as Record<string, unknown>).status === 'number')
+          ? error
+          : null;
+      const upstreamStatus = statusSource ? (statusSource as { status: number }).status : 500;
+
+      // Extract tool-level telemetry — check both wrapper and root cause
+      const thrownToolTelemetry = (rootError != null && typeof rootError === 'object' && 'toolLLMTelemetry' in rootError)
+        ? (rootError as { toolLLMTelemetry?: import("./types.js").ToolResult['_tool_llm_telemetry'] }).toolLLMTelemetry
+        : (error != null && typeof error === 'object' && 'toolLLMTelemetry' in error)
+          ? (error as { toolLLMTelemetry?: import("./types.js").ToolResult['_tool_llm_telemetry'] }).toolLLMTelemetry
+          : undefined;
+
+      attachDiagnosticTrace(errorEnvelope, {
+        enrichedContext: enrichedContext ?? undefined,
+        error: { status: upstreamStatus, type: errorCode, message: errMessage },
+        streaming: true,
+        ...(thrownToolTelemetry && {
+          toolResult: { _tool_llm_telemetry: thrownToolTelemetry } as import("./types.js").ToolResult,
+        }),
+      });
+
+      // Yield turn_complete with error envelope — carries _diagnostic_trace for observability
+      yield { type: 'turn_complete', seq: seq++, envelope: errorEnvelope };
+    } catch (envelopeErr) {
+      log.warn({ err: envelopeErr }, 'pipeline-stream: failed to build error envelope for diagnostic trace');
+    }
   }
 }
 

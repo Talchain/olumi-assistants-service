@@ -53,7 +53,15 @@ vi.mock("../../src/orchestrator/pipeline/phase5-validation/index.js", () => ({
   phase5Validate: vi.fn(),
 }));
 vi.mock("../../src/orchestrator/pipeline/phase5-validation/envelope-assembler.js", () => ({
-  buildErrorEnvelope: vi.fn(),
+  buildErrorEnvelope: vi.fn(() => ({
+    turn_id: "error-turn",
+    assistant_text: "Something went wrong.",
+    blocks: [],
+    suggested_actions: [],
+    guidance_items: [],
+    lineage: { context_hash: "error-hash" },
+    error: { code: "PIPELINE_ERROR", message: "Something went wrong." },
+  })),
   resolveContextHash: vi.fn(() => "hash"),
 }));
 vi.mock("../../src/orchestrator/system-event-router.js", () => ({

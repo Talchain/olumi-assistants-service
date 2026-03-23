@@ -498,6 +498,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
           cache_age_ms: ctx.llmMeta.cache_age_ms,
           cache_status: ctx.llmMeta.cache_status,
           use_staging_mode: ctx.llmMeta.use_staging_mode,
+          structured_outputs_used: ctx.llmMeta.structured_outputs_used,
         }
       : { model: ctx.draftAdapter?.model },
     validation_summary: ctx.validationSummary,
@@ -676,6 +677,10 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   }
 
   // ── Step 16: Populate ctx outputs ────────────────────────────────────────
+  // Propagate structured outputs flag for diagnostic trace extraction
+  if (ctx.llmMeta?.structured_outputs_used) {
+    (verifiedResponse as Record<string, unknown>)._structured_outputs_used = true;
+  }
   ctx.ceeResponse = verifiedResponse;
   ctx.pipelineTrace = pipelineTrace;
 }

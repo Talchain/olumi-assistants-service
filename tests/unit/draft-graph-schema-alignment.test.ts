@@ -259,7 +259,7 @@ describe("Three-way schema alignment — Anthropic ↔ Zod ↔ Prompt", () => {
   });
 
   it("Anthropic schema top-level required matches Zod LLMDraftResponse", () => {
-    expect(anthropicSchema.required).toEqual(["nodes", "edges"]);
+    expect(anthropicSchema.required).toEqual(["nodes", "edges", "causal_claims", "topology_plan", "coaching"]);
   });
 
   it("Anthropic node required fields match Zod LLMNode required fields", () => {
