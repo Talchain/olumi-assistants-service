@@ -566,7 +566,6 @@ function extractToolLLMTelemetry(
   const tokenUsage = (llmMeta?.token_usage ?? trace.token_usage) as
     | { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
     | undefined;
-  if (!tokenUsage) return undefined;
 
   const model = (llmMeta?.model ?? trace.model) as string | undefined;
   const durationMs = (llmMeta?.duration_ms ?? (trace.engine as Record<string, unknown> | undefined)?.provider_latency_ms) as number | undefined;
@@ -574,12 +573,16 @@ function extractToolLLMTelemetry(
   const promptVersion = (llmMeta?.prompt_version ?? trace.prompt_version) as string | undefined;
   const promptHash = (llmMeta?.prompt_hash ?? trace.prompt_hash) as string | undefined;
 
+  // Emit telemetry whenever an LLM call occurred (model present), even if
+  // token_usage is missing. Zero tokens is better than invisible LLM calls.
+  if (!tokenUsage && !model) return undefined;
+
   return {
     tool: 'draft_graph',
     model: typeof model === 'string' ? model : '',
     provider: 'anthropic',
-    input_tokens: tokenUsage.prompt_tokens ?? 0,
-    output_tokens: tokenUsage.completion_tokens ?? 0,
+    input_tokens: tokenUsage?.prompt_tokens ?? 0,
+    output_tokens: tokenUsage?.completion_tokens ?? 0,
     latency_ms: typeof durationMs === 'number' ? durationMs : 0,
     stop_reason: typeof finishReason === 'string' ? finishReason : 'end_turn',
     thinking_enabled: false,

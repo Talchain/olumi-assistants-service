@@ -792,7 +792,28 @@ export async function draftGraphWithAnthropic(
       const formIssues = (flatErrors.formErrors || []).join('; ');
       const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
 
-      throw new Error(`anthropic_response_invalid_schema: ${details || 'unknown validation error'}`);
+      // Attach LLM metadata to the error so Stage 1 parse.ts can capture it
+      // even when the adapter throws. Without this, ctx.llmMeta is never set
+      // and _diagnostic_trace.llm_calls remains empty on validation failures.
+      const schemaError = Object.assign(
+        new Error(`anthropic_response_invalid_schema: ${details || 'unknown validation error'}`),
+        {
+          _llm_meta: {
+            model,
+            prompt_version: promptMeta.prompt_version,
+            prompt_hash: promptMeta.prompt_hash,
+            temperature: 0,
+            provider_latency_ms: providerLatencyMs,
+            finish_reason: (response as any)?.stop_reason ?? (response as any)?.stopReason,
+            token_usage: {
+              prompt_tokens: response.usage.input_tokens,
+              completion_tokens: response.usage.output_tokens,
+              total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+            },
+          },
+        },
+      );
+      throw schemaError;
     }
 
     const parsed = parseResult.data;

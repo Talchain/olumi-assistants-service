@@ -332,6 +332,13 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
             err,
           );
         }
+        // Capture partial LLM metadata from adapter error (e.g. schema validation
+        // failure after a successful LLM call). Without this, ctx.llmMeta stays
+        // undefined and _diagnostic_trace.llm_calls is empty on 400 responses.
+        const errMeta = (err as any)?._llm_meta;
+        if (errMeta && !ctx.llmMeta) {
+          ctx.llmMeta = errMeta;
+        }
         throw err;
       }
 

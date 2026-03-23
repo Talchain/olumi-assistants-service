@@ -405,7 +405,7 @@ describe("Diagnostic trace — error path LLM telemetry", () => {
     expect(telemetry).toBeUndefined();
   });
 
-  it("extractToolLLMTelemetry returns undefined when trace has no token_usage", async () => {
+  it("extractToolLLMTelemetry emits partial telemetry when model present but token_usage missing", async () => {
     const { __test_only } = await import("../../src/orchestrator/tools/draft-graph.js");
     const { extractToolLLMTelemetry } = __test_only;
 
@@ -414,7 +414,30 @@ describe("Diagnostic trace — error path LLM telemetry", () => {
         pipeline: {
           llm_metadata: {
             model: "claude-sonnet-4-6",
-            // No token_usage — extractToolLLMTelemetry should return undefined
+            duration_ms: 3500,
+            // No token_usage — should still emit with zero tokens
+          },
+        },
+      },
+    };
+
+    const telemetry = extractToolLLMTelemetry(errorBody);
+    expect(telemetry).toBeDefined();
+    expect(telemetry!.model).toBe("claude-sonnet-4-6");
+    expect(telemetry!.input_tokens).toBe(0);
+    expect(telemetry!.output_tokens).toBe(0);
+    expect(telemetry!.latency_ms).toBe(3500);
+  });
+
+  it("extractToolLLMTelemetry returns undefined when neither model nor token_usage present", async () => {
+    const { __test_only } = await import("../../src/orchestrator/tools/draft-graph.js");
+    const { extractToolLLMTelemetry } = __test_only;
+
+    const errorBody: Record<string, unknown> = {
+      trace: {
+        pipeline: {
+          llm_metadata: {
+            // Neither model nor token_usage
           },
         },
       },
