@@ -25,7 +25,13 @@
  */
 import { z } from "zod";
 
-export const ProvenanceSource = z.enum(["document", "metric", "hypothesis", "engine", "synthetic"]);
+export const ProvenanceSource = z.enum([
+  "document", "metric", "hypothesis", "engine", "synthetic",
+  // Extended set: LLM legitimately produces these for edge provenance
+  "structural",        // structural edges (decision→option, option→factor)
+  "domain_knowledge",  // inferred from domain expertise
+  "inferred",          // inferred from context (also used in goal_constraints)
+]);
 export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk", "action", "factor", "constraint"]);
 
 /**

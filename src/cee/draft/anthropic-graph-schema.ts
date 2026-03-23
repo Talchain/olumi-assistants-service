@@ -47,7 +47,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           id: { type: "string" },
           kind: {
             type: "string",
-            enum: ["goal", "decision", "option", "outcome", "risk", "factor", "action"],
+            enum: ["goal", "decision", "option", "outcome", "risk", "factor", "action", "constraint"],
           },
           label: { type: "string" },
           category: {
@@ -75,6 +75,13 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
         properties: {
           from: { type: "string" },
           to: { type: "string" },
+          strength: {
+            type: "object",
+            properties: {
+              mean: { type: "number" },
+              std: { type: "number" },
+            },
+          },
           belief: { type: "number" },
           weight: { type: "number" },
           strength_mean: { type: "number" },

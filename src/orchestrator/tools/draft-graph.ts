@@ -588,3 +588,6 @@ function extractToolLLMTelemetry(
     prompt_hash: typeof promptHash === 'string' ? promptHash : undefined,
   };
 }
+
+// Test-only exports for contract testing
+export const __test_only = { extractToolLLMTelemetry };
