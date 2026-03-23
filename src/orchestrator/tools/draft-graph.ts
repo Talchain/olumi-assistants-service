@@ -508,6 +508,9 @@ export function extractAnalysisReady(
     blockers: Array.isArray(ar.blockers) ? ar.blockers : undefined,
     model_adjustments: Array.isArray(ar.model_adjustments) ? ar.model_adjustments : undefined,
     goal_threshold: typeof ar.goal_threshold === 'number' ? ar.goal_threshold : undefined,
+    bias_findings: Array.isArray(ar.bias_findings)
+      ? ar.bias_findings as NonNullable<GraphPatchBlockData['analysis_ready']>['bias_findings']
+      : [],
   };
 
   // Validate against AnalysisReadyPayload contract before emitting.

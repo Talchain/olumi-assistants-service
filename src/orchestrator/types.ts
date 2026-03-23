@@ -456,6 +456,14 @@ export interface GraphPatchBlockData {
     blockers?: unknown[];
     model_adjustments?: unknown[];
     goal_threshold?: number;
+    bias_findings?: Array<{
+      id: string;
+      category: string;
+      severity: string;
+      node_ids?: string[];
+      explanation?: string;
+      code?: string;
+    }>;
   };
 }
 
