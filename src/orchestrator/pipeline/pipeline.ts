@@ -496,10 +496,18 @@ export async function executePipeline(
     const upstreamStatus = (error != null && typeof error === 'object' && 'status' in error && typeof (error as Record<string, unknown>).status === 'number')
       ? (error as { status: number }).status
       : 500;
+    // Extract tool-level telemetry from thrown error (if tool attached it before throwing)
+    const thrownToolTelemetry = (error != null && typeof error === 'object' && 'toolLLMTelemetry' in error)
+      ? (error as { toolLLMTelemetry?: import("./types.js").ToolResult['_tool_llm_telemetry'] }).toolLLMTelemetry
+      : undefined;
+
     attachDiagnosticTrace(errorEnvelope, {
       enrichedContext: enrichedContext ?? undefined,
       error: { status: upstreamStatus, type: errorCode, message },
       streaming: false,
+      ...(thrownToolTelemetry && {
+        toolResult: { _tool_llm_telemetry: thrownToolTelemetry } as import("./types.js").ToolResult,
+      }),
     });
 
     return errorEnvelope;
@@ -1355,12 +1363,52 @@ function _buildAndAttachTrace(
     });
   }
 
-  // --- Structured output config ---
-  if (input.llmResult?._llm_telemetry || input.llmResult?.route_metadata) {
-    const soEnabled = config.cee.anthropicStructuredOutputs ?? false;
+  // --- Tool-level LLM call (e.g. draft_graph, edit_graph making their own adapter calls) ---
+  const toolTel = input.toolResult?._tool_llm_telemetry;
+  if (toolTel) {
+    collector.recordLLMCall({
+      role: toolTel.tool,
+      provider: toolTel.provider,
+      model: toolTel.model,
+      input_tokens: toolTel.input_tokens,
+      output_tokens: toolTel.output_tokens,
+      cache_read_tokens: toolTel.cache_read_input_tokens ?? null,
+      cache_creation_tokens: toolTel.cache_creation_input_tokens ?? null,
+      latency_ms: toolTel.latency_ms,
+      stop_reason: toolTel.stop_reason,
+      thinking_enabled: toolTel.thinking_enabled,
+      error: toolTel.error ?? null,
+    });
+
+    if (toolTel.prompt_version || toolTel.prompt_hash) {
+      collector.recordPromptIdentity({
+        task_id: toolTel.tool,
+        prompt_id: toolTel.tool,
+        version: toolTel.prompt_version ?? '',
+        hash: toolTel.prompt_hash ?? '',
+        source: 'store',
+        is_staging: false,
+      });
+    }
+
+    collector.recordProviderResolution({
+      task: toolTel.tool,
+      env_default_provider: config.llm.provider ?? '',
+      env_model_override: config.llm.model ?? null,
+      prompt_config_model: null,
+      resolved_model: toolTel.model,
+      resolved_provider: toolTel.provider,
+      switch_reason: null,
+    });
+  }
+
+  // --- Structured output config (prefer tool-level actual outcome over env flag) ---
+  const soEnabled = config.cee.anthropicStructuredOutputs ?? false;
+  const toolSoUsed = toolTel?.structured_outputs_used ?? false;
+  if (input.llmResult?._llm_telemetry || input.llmResult?.route_metadata || toolTel) {
     collector.recordStructuredOutputConfig({
-      enabled: soEnabled,
-      api_shape: soEnabled ? 'output_config_ga' : 'none',
+      enabled: soEnabled || toolSoUsed,
+      api_shape: (soEnabled || toolSoUsed) ? 'output_config_ga' : 'none',
       schema_hash: null,
       beta_header_present: false,
     });

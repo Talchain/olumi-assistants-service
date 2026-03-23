@@ -132,6 +132,7 @@ export async function phase4Execute(
   let routeMetadata = llmResult.route_metadata;
   let appliedChanges: ToolResult['applied_changes'];
   let deterministicAnswerTier: ToolResult['deterministic_answer_tier'];
+  let toolLLMTelemetry: ToolResult['_tool_llm_telemetry'];
 
   for (const invocation of toExecute) {
     // Stage policy guard — skip tool if not allowed at current stage
@@ -204,6 +205,9 @@ export async function phase4Execute(
     }
     if (result.deterministic_answer_tier !== undefined) {
       deterministicAnswerTier = result.deterministic_answer_tier;
+    }
+    if (result._tool_llm_telemetry) {
+      toolLLMTelemetry = result._tool_llm_telemetry;
     }
 
     // Accumulate side effects from the actual tool result, not the tool name.
@@ -283,6 +287,7 @@ export async function phase4Execute(
     ...(routeMetadata && { route_metadata: routeMetadata }),
     ...(appliedChanges && { applied_changes: appliedChanges }),
     ...(deterministicAnswerTier !== undefined && { deterministic_answer_tier: deterministicAnswerTier }),
+    ...(toolLLMTelemetry && { _tool_llm_telemetry: toolLLMTelemetry }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
     ...(stageFallbackInjected && { stage_fallback_injected: true }),
@@ -344,6 +349,7 @@ export function createProductionToolDispatcher(
         }),
         ...(result.appliedChanges && { applied_changes: result.appliedChanges }),
         ...(result.deterministicAnswerTier !== undefined && { deterministic_answer_tier: result.deterministicAnswerTier }),
+        ...(result.toolLLMTelemetry && { _tool_llm_telemetry: result.toolLLMTelemetry }),
       };
     },
   };

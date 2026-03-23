@@ -513,7 +513,11 @@ describe("chatWithAnthropic — output_config.format contract", () => {
     expect(body).toHaveProperty("output_config");
     expect(body).not.toHaveProperty("output_format");
     expect(body.output_config.format.type).toBe("json_schema");
-    expect(body.output_config.format.schema).toEqual(testSchema);
+    // Schema passes through the compliance normaliser — verify normalised shape
+    expect(body.output_config.format.schema.type).toBe("object");
+    expect(body.output_config.format.schema.properties).toHaveProperty("foo");
+    expect(body.output_config.format.schema.additionalProperties).toBe(false);
+    expect(body.output_config.format.schema.required).toContain("foo");
 
     // No beta header
     const headers: Record<string, string> = opts?.headers ?? {};

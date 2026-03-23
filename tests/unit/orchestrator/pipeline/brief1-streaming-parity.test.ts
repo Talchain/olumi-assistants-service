@@ -73,9 +73,10 @@ vi.mock("../../../../src/orchestrator/dsk-loader.js", () => ({
   getDskVersionHash: () => null,
   resolveDskHash: () => null,
 }));
-// Mock pipeline.ts emitTurnTrace so we can assert it's called without pulling all deps
+// Mock pipeline.ts emitTurnTrace + attachDiagnosticTrace so we can assert calls without pulling all deps
 vi.mock("../../../../src/orchestrator/pipeline/pipeline.js", () => ({
   emitTurnTrace: vi.fn(),
+  attachDiagnosticTrace: vi.fn(),
 }));
 vi.mock("../../../../src/orchestrator/analysis-state.js", () => ({
   normalizeAnalysisEnvelope: vi.fn((a: unknown) => a),

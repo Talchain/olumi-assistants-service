@@ -478,6 +478,28 @@ export interface ToolResult {
   applied_changes?: AppliedChanges;
   /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
   deterministic_answer_tier?: 1 | 2 | 3;
+  /**
+   * Tool-level LLM call telemetry (e.g. from draft_graph or edit_graph).
+   * Additive — absent when the tool did not make its own LLM call.
+   * Used by _diagnostic_trace to capture tool-level LLM calls alongside
+   * the orchestrator-level call from Phase 3.
+   */
+  _tool_llm_telemetry?: {
+    tool: string;
+    model: string;
+    provider: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    latency_ms: number;
+    stop_reason: string;
+    thinking_enabled: boolean;
+    structured_outputs_used: boolean;
+    prompt_version?: string;
+    prompt_hash?: string;
+    error?: { status: number; type: string; message: string };
+  };
 }
 
 // ============================================================================

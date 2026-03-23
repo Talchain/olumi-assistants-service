@@ -60,7 +60,7 @@ describe("DecisionReviewAdapter", () => {
 
   it("loads all decision-review fixtures", async () => {
     const cases = await adapter.loadCases(fixturesDir);
-    expect(cases.length).toBe(8);
+    expect(cases.length).toBe(9);
     expect(cases[0].id).toBe("dr-01-clear-winner");
     expect(cases[0].input).toBeDefined();
     expect(cases[0].input.winner).toBeDefined();

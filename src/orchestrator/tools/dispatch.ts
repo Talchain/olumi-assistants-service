@@ -26,7 +26,7 @@ import type { GuidanceItem } from "../types/guidance-item.js";
 import type { ExerciseType } from "../types/guidance-item.js";
 import { handleRunExercise } from "./run-exercise.js";
 import { handleResearchTopic } from "./research-topic.js";
-import type { RouteMetadata, RouteOutcome } from "../pipeline/types.js";
+import type { RouteMetadata, RouteOutcome, ToolResult } from "../pipeline/types.js";
 import { isAnalysisExplainable } from "../analysis-state.js";
 import { log } from "../../utils/telemetry.js";
 import type { LLMAdapter } from "../../adapters/llm/types.js";
@@ -80,6 +80,8 @@ export interface ToolDispatchResult {
   appliedChanges?: AppliedChanges;
   /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
   deterministicAnswerTier?: 1 | 2 | 3;
+  /** Tool-level LLM telemetry (from tools that make their own LLM calls). */
+  toolLLMTelemetry?: ToolResult['_tool_llm_telemetry'];
 }
 
 export interface ToolDispatchOpts {
@@ -234,6 +236,7 @@ export async function dispatchToolHandler(
         toolLatencyMs: result.latencyMs,
         guidanceItems: draftGuidance,
         routeMetadata: buildToolRouteMetadata('draft_graph'),
+        toolLLMTelemetry: result.toolLLMTelemetry,
       };
     }
 

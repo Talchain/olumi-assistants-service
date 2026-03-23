@@ -45,6 +45,22 @@ export interface DraftGraphResult {
   draftWarnings: CEEDraftWarning[];
   /** The drafted graph, for post-draft structural analysis */
   graphOutput: GraphV3T | null;
+  /** Tool-level LLM telemetry extracted from the pipeline response. */
+  toolLLMTelemetry?: {
+    tool: string;
+    model: string;
+    provider: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    latency_ms: number;
+    stop_reason: string;
+    thinking_enabled: boolean;
+    structured_outputs_used: boolean;
+    prompt_version?: string;
+    prompt_hash?: string;
+  };
 }
 
 // ============================================================================
@@ -108,7 +124,13 @@ export async function handleDraftGraph(
       recoverable: pipelineResult.statusCode >= 500,
       suggested_retry: pipelineResult.statusCode >= 500 ? 'Try drafting the graph again.' : undefined,
     };
-    throw Object.assign(new Error(message), { orchestratorError: err });
+    // Preserve tool telemetry even on failure so _diagnostic_trace captures the error
+    const failureTelemetry = extractToolLLMTelemetry(body);
+    const failureError = Object.assign(new Error(message), {
+      orchestratorError: err,
+      toolLLMTelemetry: failureTelemetry,
+    });
+    throw failureError;
   }
 
   // Extract graph from pipeline response
@@ -166,6 +188,9 @@ export async function handleDraftGraph(
 
   const block = createGraphPatchBlock(patchData, turnId);
 
+  // Extract tool-level LLM telemetry from pipeline trace for diagnostic trace capture
+  const toolLLMTelemetry = extractToolLLMTelemetry(body);
+
   log.info(
     {
       elapsed_ms: latencyMs,
@@ -185,6 +210,7 @@ export async function handleDraftGraph(
     narrationHint,
     draftWarnings,
     graphOutput,
+    toolLLMTelemetry,
   };
 }
 
@@ -512,4 +538,50 @@ export function extractAnalysisReady(
   }
 
   return payload;
+}
+
+/**
+ * Extract tool-level LLM telemetry from the pipeline response body.
+ *
+ * The unified pipeline writes LLM metadata in two locations:
+ *   1. trace.pipeline.llm_metadata.* (authoritative — Step 14 of package.ts)
+ *   2. trace.* (root level — Step 9 legacy shape)
+ *
+ * We prefer llm_metadata (complete set), falling back to root trace fields.
+ */
+function extractToolLLMTelemetry(
+  body: Record<string, unknown>,
+): DraftGraphResult['toolLLMTelemetry'] {
+  const trace = body.trace as Record<string, unknown> | undefined;
+  if (!trace) return undefined;
+
+  // Authoritative: trace.pipeline.llm_metadata
+  const pipeline = trace.pipeline as Record<string, unknown> | undefined;
+  const llmMeta = pipeline?.llm_metadata as Record<string, unknown> | undefined;
+
+  // Fallback: root trace fields (Step 9)
+  const tokenUsage = (llmMeta?.token_usage ?? trace.token_usage) as
+    | { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+    | undefined;
+  if (!tokenUsage) return undefined;
+
+  const model = (llmMeta?.model ?? trace.model) as string | undefined;
+  const durationMs = (llmMeta?.duration_ms ?? (trace.engine as Record<string, unknown> | undefined)?.provider_latency_ms) as number | undefined;
+  const finishReason = (llmMeta?.finish_reason ?? trace.finish_reason) as string | undefined;
+  const promptVersion = (llmMeta?.prompt_version ?? trace.prompt_version) as string | undefined;
+  const promptHash = (llmMeta?.prompt_hash ?? trace.prompt_hash) as string | undefined;
+
+  return {
+    tool: 'draft_graph',
+    model: typeof model === 'string' ? model : '',
+    provider: 'anthropic',
+    input_tokens: tokenUsage.prompt_tokens ?? 0,
+    output_tokens: tokenUsage.completion_tokens ?? 0,
+    latency_ms: typeof durationMs === 'number' ? durationMs : 0,
+    stop_reason: typeof finishReason === 'string' ? finishReason : 'end_turn',
+    thinking_enabled: false,
+    structured_outputs_used: !!body._structured_outputs_used,
+    prompt_version: typeof promptVersion === 'string' ? promptVersion : undefined,
+    prompt_hash: typeof promptHash === 'string' ? promptHash : undefined,
+  };
 }
