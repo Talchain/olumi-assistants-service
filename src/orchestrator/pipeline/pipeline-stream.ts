@@ -137,6 +137,7 @@ export async function* executePipelineStream(
       if (lookupResult.matched) {
         yield { type: 'turn_start', seq: seq++, turn_id: enrichedContext.turn_id, routing: 'deterministic', stage };
         const envelope = buildLookupEnvelope(enrichedContext, lookupResult);
+        attachDiagnosticTrace(envelope, { enrichedContext, streaming: true });
         yield { type: 'turn_complete', seq: seq++, envelope };
         return;
       }
@@ -159,6 +160,12 @@ export async function* executePipelineStream(
       // Run phase4 + phase5 with the deterministic result
       const toolResult = await phase4Execute(prep.result, enrichedContext, deps.toolDispatcher, requestId);
       const envelope = phase5Validate(prep.result, toolResult, enrichedContext, specialistResult);
+      attachDiagnosticTrace(envelope, {
+        enrichedContext,
+        llmResult: prep.result,
+        toolResult,
+        streaming: true,
+      });
       yield { type: 'turn_complete', seq: seq++, envelope };
       return;
     }

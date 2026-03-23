@@ -83,6 +83,17 @@ function makeLLMResult(overrides?: Partial<LLMResult>): LLMResult {
     extracted_blocks: [],
     diagnostics: null,
     parse_warnings: [],
+    _llm_telemetry: {
+      input_tokens: 1200,
+      output_tokens: 450,
+      cache_read_input_tokens: 500,
+      cache_creation_input_tokens: 100,
+      latency_ms: 850,
+      stop_reason: 'end_turn',
+      model: 'claude-sonnet-4-6',
+      provider: 'anthropic',
+      thinking_enabled: false,
+    },
     route_metadata: {
       outcome: 'default_llm',
       reasoning: 'no_deterministic_route_applied',
@@ -262,14 +273,24 @@ describe("emptyDiagnosticTrace", () => {
 // Import attachDiagnosticTrace lazily so mocks are in place
 let attachDiagnosticTrace: typeof import("../../../../src/orchestrator/pipeline/pipeline.js").attachDiagnosticTrace;
 
+const originalEnv = { ...process.env };
+
 beforeEach(async () => {
   diagnosticTraceEnabled = true;
   anthropicStructuredOutputs = false;
   artefactAppendixEnabled = false;
 
+  // Explicitly enable trace via env var to make isDiagnosticTraceEnabled() check the config flag
+  process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+
   // Fresh import to ensure mocks are in effect
   const pipeline = await import("../../../../src/orchestrator/pipeline/pipeline.js");
   attachDiagnosticTrace = pipeline.attachDiagnosticTrace;
+});
+
+afterEach(() => {
+  // Restore env
+  process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = originalEnv.CEE_DIAGNOSTIC_TRACE_ENABLED;
 });
 
 describe("attachDiagnosticTrace", () => {
@@ -297,8 +318,9 @@ describe("attachDiagnosticTrace", () => {
     expect(trace.fallback_trace).toBeInstanceOf(Array);
   });
 
-  it("_diagnostic_trace is absent when flag is disabled", () => {
+  it("_diagnostic_trace is absent when flag is explicitly disabled", () => {
     diagnosticTraceEnabled = false;
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'false';
     const envelope = makeEnvelope();
 
     attachDiagnosticTrace(envelope, {
@@ -309,8 +331,9 @@ describe("attachDiagnosticTrace", () => {
     expect(envelope._diagnostic_trace).toBeUndefined();
   });
 
-  it("removes pre-existing _diagnostic_trace when flag is disabled", () => {
+  it("removes pre-existing _diagnostic_trace when flag is explicitly disabled", () => {
     diagnosticTraceEnabled = false;
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'false';
     const envelope = makeEnvelope();
     envelope._diagnostic_trace = emptyDiagnosticTrace();
 
@@ -491,6 +514,152 @@ describe("attachDiagnosticTrace", () => {
     expect(soCfg.enabled).toBe(true);
     expect(soCfg.api_shape).toBe('output_config_ga');
     expect(soCfg.beta_header_present).toBe(false);
+  });
+
+  it("llm_calls populated from _llm_telemetry with accurate tokens, latency, stop_reason", () => {
+    diagnosticTraceEnabled = true;
+    const envelope = makeEnvelope();
+    const llmResult = makeLLMResult();
+
+    attachDiagnosticTrace(envelope, {
+      enrichedContext: makeEnrichedContext(),
+      llmResult,
+      toolResult: makeToolResult(),
+      streaming: false,
+    });
+
+    const trace = envelope._diagnostic_trace!;
+    expect(trace.llm_calls).toHaveLength(1);
+    const call = trace.llm_calls[0];
+    expect(call.input_tokens).toBe(1200);
+    expect(call.output_tokens).toBe(450);
+    expect(call.cache_read_tokens).toBe(500);
+    expect(call.cache_creation_tokens).toBe(100);
+    expect(call.latency_ms).toBe(850);
+    expect(call.stop_reason).toBe('end_turn');
+    expect(call.model).toBe('claude-sonnet-4-6');
+    expect(call.provider).toBe('anthropic');
+    expect(call.thinking_enabled).toBe(false);
+    expect(call.error).toBeNull();
+  });
+
+  it("deterministic route has no llm_calls but still has prompt_identity", () => {
+    diagnosticTraceEnabled = true;
+    const envelope = makeEnvelope();
+    // No _llm_telemetry means deterministic route
+    const llmResult = makeLLMResult({ _llm_telemetry: undefined });
+
+    attachDiagnosticTrace(envelope, {
+      enrichedContext: makeEnrichedContext(),
+      llmResult,
+      streaming: false,
+    });
+
+    const trace = envelope._diagnostic_trace!;
+    expect(trace.llm_calls).toHaveLength(0);
+    expect(trace.prompt_identity).toHaveLength(1);
+  });
+
+  it("error envelope with upstream status propagates real status code", () => {
+    diagnosticTraceEnabled = true;
+    const envelope = makeEnvelope({
+      error: { code: 'LLM_ERROR', message: 'Rate limited' },
+    });
+
+    attachDiagnosticTrace(envelope, {
+      enrichedContext: makeEnrichedContext(),
+      error: { status: 429, type: 'LLM_ERROR', message: 'Rate limited' },
+      streaming: false,
+    });
+
+    const trace = envelope._diagnostic_trace!;
+    expect(trace.fallback_trace).toHaveLength(1);
+    expect(trace.fallback_trace[0].reason).toBe('LLM_ERROR');
+  });
+
+  it("defaults to enabled in non-production when env var is not set", () => {
+    diagnosticTraceEnabled = false;
+    delete process.env.CEE_DIAGNOSTIC_TRACE_ENABLED;
+    // NODE_ENV is 'test' in vitest, so isDiagnosticTraceEnabled() should return true
+    const envelope = makeEnvelope();
+
+    attachDiagnosticTrace(envelope, {
+      enrichedContext: makeEnrichedContext(),
+      streaming: false,
+    });
+
+    expect(envelope._diagnostic_trace).toBeDefined();
+  });
+
+  it("streamingMetrics are included when provided", () => {
+    diagnosticTraceEnabled = true;
+    const envelope = makeEnvelope();
+
+    attachDiagnosticTrace(envelope, {
+      enrichedContext: makeEnrichedContext(),
+      streaming: true,
+      streamingMetrics: {
+        time_to_first_event_ms: 50,
+        time_to_first_text_delta_ms: 120,
+        total_stream_duration_ms: 3000,
+        event_count: 45,
+        text_delta_count: 30,
+        disconnect_reason: null,
+      },
+    });
+
+    const trace = envelope._diagnostic_trace!;
+    expect(trace.streaming_metrics).not.toBeNull();
+    expect(trace.streaming_metrics!.time_to_first_event_ms).toBe(50);
+    expect(trace.streaming_metrics!.event_count).toBe(45);
+    expect(trace.streaming_metrics!.text_delta_count).toBe(30);
+  });
+
+  it("fallback events are captured when provided", () => {
+    diagnosticTraceEnabled = true;
+    const envelope = makeEnvelope();
+
+    attachDiagnosticTrace(envelope, {
+      enrichedContext: makeEnrichedContext(),
+      llmResult: makeLLMResult(),
+      streaming: false,
+      fallbackEvents: [
+        {
+          stage: 'draft_graph',
+          reason: 'structured_outputs_rejected',
+          original_error: 'unexpected key: output_config',
+          fallback_action: 'retry_without_structured_outputs',
+          fallback_succeeded: true,
+        },
+      ],
+    });
+
+    const trace = envelope._diagnostic_trace!;
+    expect(trace.fallback_trace).toHaveLength(1);
+    expect(trace.fallback_trace[0].stage).toBe('draft_graph');
+    expect(trace.fallback_trace[0].fallback_succeeded).toBe(true);
+  });
+
+  it("tool_policy uses toolFilterSnapshot when provided", () => {
+    diagnosticTraceEnabled = true;
+    const envelope = makeEnvelope();
+
+    attachDiagnosticTrace(envelope, {
+      enrichedContext: makeEnrichedContext(),
+      llmResult: makeLLMResult(),
+      streaming: false,
+      toolFilterSnapshot: {
+        stage: 'frame',
+        tools_before: ['draft_graph', 'edit_graph', 'run_analysis', 'explain_results'],
+        tools_after: ['draft_graph'],
+      },
+    });
+
+    const trace = envelope._diagnostic_trace!;
+    expect(trace.tool_policy).not.toBeNull();
+    expect(trace.tool_policy!.tools_offered).toEqual(['draft_graph', 'edit_graph', 'run_analysis', 'explain_results']);
+    expect(trace.tool_policy!.tools_permitted).toEqual(['draft_graph']);
+    expect(trace.tool_policy!.filtered_count).toBe(3);
   });
 });
 

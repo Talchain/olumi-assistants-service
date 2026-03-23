@@ -17,6 +17,7 @@ vi.mock("../../../../src/orchestrator/pipeline/pipeline.js", () => ({
     observability: { triggers_fired: [], triggers_suppressed: [], intent_classification: "conversational", specialist_contributions: [], specialist_disagreement: null },
     turn_plan: { selected_tool: null, routing: "llm", long_running: false },
   }),
+  attachDiagnosticTrace: vi.fn(),
 }));
 
 // Mock production deps factories

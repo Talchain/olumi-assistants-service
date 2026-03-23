@@ -124,6 +124,11 @@ export async function executePipeline(
               }
             : null,
         });
+        attachDiagnosticTrace(envelope, {
+          enrichedContext,
+          error: { status: 422, type: routerResult.error.code, message: routerResult.error.message },
+          streaming: false,
+        });
         return envelope;
       }
 
@@ -176,6 +181,12 @@ export async function executePipeline(
             narration_branch: 'llm_interpret',
             stale_state_reused: hasStaleAnalysisState(request.analysis_state ?? null, request.graph_state ?? updatedEnrichedContext.graph),
           },
+        });
+        attachDiagnosticTrace(envelope, {
+          enrichedContext: interpretContext,
+          llmResult,
+          toolResult,
+          streaming: false,
         });
         return envelope;
       }
@@ -280,6 +291,10 @@ export async function executePipeline(
             }
           : null,
       });
+      attachDiagnosticTrace(envelope, {
+        enrichedContext: updatedEnrichedContext,
+        streaming: false,
+      });
       return envelope;
     }
 
@@ -309,7 +324,9 @@ export async function executePipeline(
           { request_id: requestId, pattern: lookupResult.pattern },
           "V2 pipeline: analysis lookup matched — skipping LLM",
         );
-        return buildLookupEnvelope(enrichedContext, lookupResult);
+        const lookupEnvelope = buildLookupEnvelope(enrichedContext, lookupResult);
+        attachDiagnosticTrace(lookupEnvelope, { enrichedContext, streaming: false });
+        return lookupEnvelope;
       }
     }
 
@@ -474,10 +491,14 @@ export async function executePipeline(
       enrichedContext,
     );
 
-    // Attach partial diagnostic trace to error envelope — errors are when diagnostics matter most
+    // Attach partial diagnostic trace to error envelope — errors are when diagnostics matter most.
+    // Extract real upstream HTTP status when available (e.g. UpstreamHTTPError carries .status).
+    const upstreamStatus = (error != null && typeof error === 'object' && 'status' in error && typeof (error as Record<string, unknown>).status === 'number')
+      ? (error as { status: number }).status
+      : 500;
     attachDiagnosticTrace(errorEnvelope, {
       enrichedContext: enrichedContext ?? undefined,
-      error: { status: 500, type: errorCode, message: userMessage },
+      error: { status: upstreamStatus, type: errorCode, message },
       streaming: false,
     });
 
@@ -741,6 +762,13 @@ async function runAnalysisViaPipeline(
       normalised_message: '[direct_analysis_run]',
     },
     llmRouteDebug: llmResult.route_debug,
+  });
+
+  attachDiagnosticTrace(envelope, {
+    enrichedContext,
+    llmResult,
+    toolResult,
+    streaming: false,
   });
 
   return envelope;
@@ -1106,6 +1134,20 @@ function shouldExposeDebugBundleInEnvelope(): boolean {
   return process.env.NODE_ENV !== 'production' || process.env.ORCHESTRATOR_DEBUG_BUNDLE === 'true';
 }
 
+/**
+ * Diagnostic trace is enabled when:
+ * 1. CEE_DIAGNOSTIC_TRACE_ENABLED is explicitly set to true, OR
+ * 2. Running in non-production (staging/dev/test) — diagnostic trace defaults on outside production
+ */
+function isDiagnosticTraceEnabled(): boolean {
+  // Explicit flag always wins
+  if (process.env.CEE_DIAGNOSTIC_TRACE_ENABLED !== undefined) {
+    return config.features.diagnosticTraceEnabled;
+  }
+  // Default: on in non-production (staging/dev/test), off in production
+  return process.env.NODE_ENV !== 'production';
+}
+
 function resolveTriggerSource(
   request: OrchestratorTurnRequest,
   routeDebug: Phase3RouteDebug | null,
@@ -1170,107 +1212,136 @@ function hasStaleAnalysisState(
 // Diagnostic Trace — builds _diagnostic_trace from pipeline phase outputs
 // ============================================================================
 
-interface AttachDiagnosticTraceInput {
+export interface AttachDiagnosticTraceInput {
   enrichedContext?: EnrichedContext;
   llmResult?: import("./types.js").LLMResult;
   toolResult?: import("./types.js").ToolResult;
   error?: { status: number; type: string; message: string };
   streaming: boolean;
+  streamingMetrics?: import("./diagnostic-trace.js").StreamingMetrics;
+  /** Fallback events captured during the pipeline turn. */
+  fallbackEvents?: import("./diagnostic-trace.js").FallbackTrace[];
+  /** Tool definitions before/after stage filtering (from phase3). */
+  toolFilterSnapshot?: { stage: string; tools_before: string[]; tools_after: string[] };
 }
 
 /**
  * Build and attach `_diagnostic_trace` to a V2 envelope.
  * Gated by `CEE_DIAGNOSTIC_TRACE_ENABLED`. When disabled the field is omitted entirely.
  *
- * Exported for streaming pipeline parity.
+ * Must be called on EVERY envelope-producing path (success, error, deterministic, system event).
+ * Exported for streaming pipeline parity and route-v2 error paths.
  */
 export function attachDiagnosticTrace(
   envelope: OrchestratorResponseEnvelopeV2,
   input: AttachDiagnosticTraceInput,
 ): void {
-  if (!config.features.diagnosticTraceEnabled) {
+  if (!isDiagnosticTraceEnabled()) {
     delete envelope._diagnostic_trace;
     return;
   }
 
+  try {
+    _buildAndAttachTrace(envelope, input);
+  } catch (err) {
+    // Diagnostic trace is non-fatal — never break the response envelope
+    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'diagnostic_trace: failed to build — omitted');
+  }
+}
+
+function _buildAndAttachTrace(
+  envelope: OrchestratorResponseEnvelopeV2,
+  input: AttachDiagnosticTraceInput,
+): void {
   const collector = new DiagnosticTraceCollector();
 
-  // --- Prompt identity ---
+  // --- Prompt identity (true source enum: store / default / env) ---
   const promptMeta = getSystemPromptMeta('orchestrator');
   collector.recordPromptIdentity({
     task_id: promptMeta.taskId,
     prompt_id: promptMeta.promptId ?? promptMeta.taskId,
     version: promptMeta.version ?? promptMeta.prompt_version,
     hash: promptMeta.prompt_hash ?? '',
-    source: promptMeta.source === 'store' ? 'store' : 'fallback',
+    source: promptMeta.source, // preserve as-is: 'store' | 'default' (maps to 'fallback' in spec) | env-provided
     is_staging: promptMeta.isStaging ?? false,
   });
 
   // --- Zone 2 assembly (reconstructed from enriched context) ---
   if (input.enrichedContext) {
     const ec = input.enrichedContext;
+    const hasIslFields = ec.gap_summary != null || ec.voi_ranking != null
+      || ec.edge_e_values != null || ec.conditional_winners != null;
+    const sectionsPresent = {
+      continuity: ec.decision_continuity != null,
+      graph: ec.graph_compact != null,
+      analysis: ec.analysis_response != null,
+      entities: (ec.referenced_entities?.length ?? 0) > 0,
+      entity_memory: ec.entity_state_map != null,
+      event_log: ec.event_log_summary != null,
+      isl_fields: hasIslFields,
+      artefact_appendix: config.features.artefactAppendixEnabled,
+    };
+    const sectionCount = Object.values(sectionsPresent).filter(Boolean).length;
     collector.recordZone2Assembly({
-      total_chars: 0, // Not available from enriched context — set below from route_metadata
+      total_chars: 0, // exact char counts only available inside prompt assembler
       zone2_chars: 0,
-      section_count: [
-        ec.decision_continuity != null,
-        ec.graph_compact != null,
-        ec.analysis_response != null,
-        (ec.referenced_entities?.length ?? 0) > 0,
-        ec.entity_state_map != null,
-        ec.event_log_summary != null,
-        // ISL fields and artefact appendix presence inferred from config
-        true, // ISL fields placeholder — always attempted
-        config.features.artefactAppendixEnabled,
-      ].filter(Boolean).length,
-      sections_present: {
-        continuity: ec.decision_continuity != null,
-        graph: ec.graph_compact != null,
-        analysis: ec.analysis_response != null,
-        entities: (ec.referenced_entities?.length ?? 0) > 0,
-        entity_memory: ec.entity_state_map != null,
-        event_log: ec.event_log_summary != null,
-        isl_fields: ec.gap_summary != null || ec.voi_ranking != null,
-        artefact_appendix: config.features.artefactAppendixEnabled,
-      },
+      section_count: sectionCount,
+      sections_present: sectionsPresent,
     });
   }
 
-  // --- LLM call + provider resolution ---
-  const routeMeta = input.llmResult?.route_metadata ?? envelope._route_metadata;
-  if (routeMeta) {
-    const resolvedModel = routeMeta.resolved_model ?? '';
-    const resolvedProvider = routeMeta.resolved_provider ?? '';
+  // --- LLM call from _llm_telemetry (authoritative adapter-level data) ---
+  const tel = input.llmResult?._llm_telemetry;
+  if (tel) {
+    collector.recordLLMCall({
+      role: 'orchestrator',
+      provider: tel.provider,
+      model: tel.model,
+      input_tokens: tel.input_tokens,
+      output_tokens: tel.output_tokens,
+      cache_read_tokens: tel.cache_read_input_tokens ?? null,
+      cache_creation_tokens: tel.cache_creation_input_tokens ?? null,
+      latency_ms: tel.latency_ms,
+      stop_reason: tel.stop_reason,
+      thinking_enabled: tel.thinking_enabled,
+      error: input.error ?? null,
+    });
 
-    if (resolvedModel) {
-      collector.recordLLMCall({
-        role: 'orchestrator',
-        provider: resolvedProvider,
-        model: resolvedModel,
-        input_tokens: 0, // not available at pipeline level — adapter-internal
-        output_tokens: 0,
-        cache_read_tokens: routeMeta.cache_read_input_tokens ?? null,
-        cache_creation_tokens: routeMeta.cache_creation_input_tokens ?? null,
-        latency_ms: input.toolResult?.tool_latency_ms ?? 0,
-        stop_reason: null,
-        thinking_enabled: false,
-        error: input.error ?? null,
-      });
-
+    collector.recordProviderResolution({
+      task: 'orchestrator',
+      env_default_provider: config.llm.provider ?? '',
+      env_model_override: config.llm.model ?? null,
+      prompt_config_model: null,
+      resolved_model: tel.model,
+      resolved_provider: tel.provider,
+      switch_reason: tel.provider !== (config.llm.provider ?? '') ? 'provider_switch' : null,
+    });
+  } else {
+    // Deterministic routes have no LLM call — still record provider resolution if route_metadata exists
+    const routeMeta = envelope._route_metadata;
+    if (routeMeta?.resolved_model) {
       collector.recordProviderResolution({
         task: 'orchestrator',
         env_default_provider: config.llm.provider ?? '',
         env_model_override: config.llm.model ?? null,
         prompt_config_model: null,
-        resolved_model: resolvedModel,
-        resolved_provider: resolvedProvider,
-        switch_reason: routeMeta.reasoning?.includes('provider_switch') ? 'provider_switch' : null,
+        resolved_model: routeMeta.resolved_model,
+        resolved_provider: routeMeta.resolved_provider ?? '',
+        switch_reason: null,
       });
     }
   }
 
-  // --- Tool policy ---
-  if (input.enrichedContext && envelope._route_metadata) {
+  // --- Tool policy (from phase3 filtering snapshot when available, else inferred from envelope) ---
+  if (input.toolFilterSnapshot) {
+    const snap = input.toolFilterSnapshot;
+    collector.recordToolPolicy({
+      stage: snap.stage,
+      tools_offered: snap.tools_before,
+      tools_permitted: snap.tools_after,
+      filtered_count: snap.tools_before.length - snap.tools_after.length,
+    });
+  } else if (input.enrichedContext && envelope._route_metadata) {
     const stage = input.enrichedContext.stage_indicator.stage;
     const toolSelected = envelope._route_metadata.tool_selected ?? null;
     const toolPermitted = envelope._route_metadata.tool_permitted ?? true;
@@ -1285,19 +1356,29 @@ export function attachDiagnosticTrace(
   }
 
   // --- Structured output config ---
-  if (input.llmResult?.route_metadata) {
-    const rm = input.llmResult.route_metadata;
-    // Infer structured output config from route metadata and config
+  if (input.llmResult?._llm_telemetry || input.llmResult?.route_metadata) {
     const soEnabled = config.cee.anthropicStructuredOutputs ?? false;
     collector.recordStructuredOutputConfig({
       enabled: soEnabled,
       api_shape: soEnabled ? 'output_config_ga' : 'none',
       schema_hash: null,
-      beta_header_present: false, // GA since Jan 2026 — no beta header required
+      beta_header_present: false,
     });
   }
 
-  // --- Error as LLM call error + fallback ---
+  // --- Streaming metrics ---
+  if (input.streamingMetrics) {
+    collector.recordStreamingMetrics(input.streamingMetrics);
+  }
+
+  // --- Fallback events ---
+  if (input.fallbackEvents) {
+    for (const fb of input.fallbackEvents) {
+      collector.recordFallback(fb);
+    }
+  }
+
+  // --- Error as fallback ---
   if (input.error) {
     collector.recordFallback({
       stage: 'pipeline',

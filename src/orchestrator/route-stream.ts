@@ -219,8 +219,19 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
             streamMetrics.time_to_first_block_ms = Date.now() - startTime;
           }
 
-          // Cache envelope on turn_complete
+          // Cache envelope on turn_complete and inject streaming metrics into diagnostic trace
           if (event.type === 'turn_complete') {
+            // Inject streaming metrics into _diagnostic_trace if present
+            if (event.envelope._diagnostic_trace) {
+              event.envelope._diagnostic_trace.streaming_metrics = {
+                time_to_first_event_ms: streamMetrics.time_to_first_event_ms,
+                time_to_first_text_delta_ms: streamMetrics.time_to_first_text_delta_ms > 0 ? streamMetrics.time_to_first_text_delta_ms : null,
+                total_stream_duration_ms: Date.now() - startTime,
+                event_count: streamMetrics.event_count,
+                text_delta_count: streamMetrics.text_delta_count,
+                disconnect_reason: streamMetrics.disconnect_reason,
+              };
+            }
             setIdempotentResponse(
               turnRequest.scenario_id,
               turnRequest.client_turn_id,

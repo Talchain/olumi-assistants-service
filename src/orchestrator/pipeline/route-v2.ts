@@ -23,6 +23,7 @@ import { createProductionToolDispatcher } from "./phase4-tools/index.js";
 import type { PLoTClientRunOpts } from "../plot-client.js";
 import { createPLoTClient } from "../plot-client.js";
 import { buildErrorEnvelope } from "./phase5-validation/envelope-assembler.js";
+import { attachDiagnosticTrace } from "./pipeline.js";
 import { getGateToolNames } from "../intent-gate.js";
 import { validateGatePatternsAgainstRegistry } from "../tools/registry.js";
 
@@ -120,14 +121,16 @@ export async function handleTurnV2(
         { scenario_id: turnRequest.scenario_id, turn_nonce: turnNonce, last_nonce: lastNonce },
         "Stale turn nonce rejected",
       );
-      return {
-        envelope: buildErrorEnvelope(
-          'nonce-rejected',
-          'STALE_TURN',
-          'Turn nonce is stale — a newer turn has been processed',
-        ),
-        httpStatus: 409,
-      };
+      const nonceEnvelope = buildErrorEnvelope(
+        'nonce-rejected',
+        'STALE_TURN',
+        'Turn nonce is stale — a newer turn has been processed',
+      );
+      attachDiagnosticTrace(nonceEnvelope, {
+        error: { status: 409, type: 'STALE_TURN', message: 'Turn nonce is stale' },
+        streaming: false,
+      });
+      return { envelope: nonceEnvelope, httpStatus: 409 };
     }
   }
 
@@ -200,6 +203,10 @@ export async function handleTurnV2(
         "V2 turn handler budget timeout (AbortError)",
       );
       const envelope = buildErrorEnvelope('error', 'TURN_BUDGET_EXCEEDED', 'Turn budget exceeded.');
+      attachDiagnosticTrace(envelope, {
+        error: { status: 504, type: 'TURN_BUDGET_EXCEEDED', message: 'Turn budget exceeded.' },
+        streaming: false,
+      });
       resolveInflight(envelope);
       return { envelope, httpStatus: 504 };
     }
@@ -210,6 +217,10 @@ export async function handleTurnV2(
     );
 
     const envelope = buildErrorEnvelope('error', 'PIPELINE_ERROR', 'Something went wrong.');
+    attachDiagnosticTrace(envelope, {
+      error: { status: 500, type: 'PIPELINE_ERROR', message },
+      streaming: false,
+    });
     resolveInflight(envelope);
 
     return { envelope, httpStatus: 500 };

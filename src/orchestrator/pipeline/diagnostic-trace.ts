@@ -156,14 +156,14 @@ export class DiagnosticTraceCollector {
    */
   freeze(): DiagnosticTrace {
     return {
-      llm_calls: [...this.llmCalls],
-      prompt_identity: [...this.promptIdentities],
-      zone2_assembly: this.zone2,
-      tool_policy: this.toolPol,
-      provider_resolution: [...this.providerResolutions],
-      structured_output_config: this.structuredOutputCfg,
-      streaming_metrics: this.streamingMet,
-      fallback_trace: [...this.fallbacks],
+      llm_calls: this.llmCalls.map(c => ({ ...c })),
+      prompt_identity: this.promptIdentities.map(p => ({ ...p })),
+      zone2_assembly: this.zone2 ? { ...this.zone2, sections_present: { ...this.zone2.sections_present } } : null,
+      tool_policy: this.toolPol ? { ...this.toolPol, tools_offered: [...this.toolPol.tools_offered], tools_permitted: [...this.toolPol.tools_permitted] } : null,
+      provider_resolution: this.providerResolutions.map(r => ({ ...r })),
+      structured_output_config: this.structuredOutputCfg ? { ...this.structuredOutputCfg } : null,
+      streaming_metrics: this.streamingMet ? { ...this.streamingMet } : null,
+      fallback_trace: this.fallbacks.map(f => ({ ...f })),
     };
   }
 }

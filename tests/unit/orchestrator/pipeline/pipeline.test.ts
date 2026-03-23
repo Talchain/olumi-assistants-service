@@ -15,7 +15,11 @@ const { mockHandleExplainResults } = vi.hoisted(() => ({
 // Mock config for isProduction check
 vi.mock("../../../../src/config/index.js", () => ({
   isProduction: () => false,
-  config: { features: { orchestratorV2: false, contextFabric: false } },
+  config: {
+    features: { orchestratorV2: false, contextFabric: false, diagnosticTraceEnabled: false, artefactAppendixEnabled: false },
+    llm: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    cee: { anthropicStructuredOutputs: false },
+  },
 }));
 
 // Mock intent gate

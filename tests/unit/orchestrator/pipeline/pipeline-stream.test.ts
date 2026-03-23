@@ -45,7 +45,11 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
   TelemetryEvents: {},
 }));
 vi.mock("../../../../src/config/index.js", () => ({
-  config: { features: { contextFabric: false } },
+  config: {
+    features: { contextFabric: false, diagnosticTraceEnabled: false, artefactAppendixEnabled: false },
+    llm: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    cee: { anthropicStructuredOutputs: false },
+  },
 }));
 
 import { executePipelineStream } from "../../../../src/orchestrator/pipeline/pipeline-stream.js";

@@ -432,6 +432,22 @@ export interface LLMResult {
   parse_warnings: string[];
   route_metadata?: RouteMetadata;
   route_debug?: Phase3RouteDebug;
+  /**
+   * LLM call telemetry captured from ChatWithToolsResult.
+   * Additive — absent on deterministic routes that skip the LLM.
+   * Used by _diagnostic_trace to populate accurate token/latency/stop_reason fields.
+   */
+  _llm_telemetry?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    latency_ms: number;
+    stop_reason: string;
+    model: string;
+    provider: string;
+    thinking_enabled: boolean;
+  };
 }
 
 // ============================================================================

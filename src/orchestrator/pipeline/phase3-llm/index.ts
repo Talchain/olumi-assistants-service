@@ -518,6 +518,19 @@ export async function phase3Generate(
 
   return {
     ...parsed,
+    ...(llmResult.usage ? {
+      _llm_telemetry: {
+        input_tokens: llmResult.usage.input_tokens,
+        output_tokens: llmResult.usage.output_tokens,
+        cache_read_input_tokens: llmResult.usage.cache_read_input_tokens,
+        cache_creation_input_tokens: llmResult.usage.cache_creation_input_tokens,
+        latency_ms: llmResult.latencyMs ?? 0,
+        stop_reason: llmResult.stop_reason ?? 'end_turn',
+        model: llmResult.model ?? '',
+        provider: resolvedModelInfo?.provider ?? '',
+        thinking_enabled: false,
+      },
+    } : {}),
     route_metadata: {
       outcome: 'default_llm',
       reasoning: 'no_deterministic_route_applied',
@@ -1383,6 +1396,19 @@ export async function phase3PrepareForStreaming(
 
     return {
       ...parsed,
+      ...(llmResult.usage ? {
+        _llm_telemetry: {
+          input_tokens: llmResult.usage.input_tokens,
+          output_tokens: llmResult.usage.output_tokens,
+          cache_read_input_tokens: llmResult.usage.cache_read_input_tokens,
+          cache_creation_input_tokens: llmResult.usage.cache_creation_input_tokens,
+          latency_ms: llmResult.latencyMs ?? 0,
+          stop_reason: llmResult.stop_reason ?? 'end_turn',
+          model: llmResult.model ?? '',
+          provider: resolvedModelInfo?.provider ?? '',
+          thinking_enabled: false,
+        },
+      } : {}),
       route_metadata: {
         outcome: 'default_llm',
         reasoning: 'no_deterministic_route_applied',
