@@ -242,10 +242,12 @@ describe("Three-way schema alignment — Anthropic ↔ Zod ↔ Prompt", () => {
     expect(edgeProps.strength.properties.std.type).toBe("number");
   });
 
-  it("Anthropic edge has flat strength_mean/std fields matching Zod fallback", () => {
+  it("Anthropic edge does NOT include legacy flat strength_mean/std (trimmed for optional param limit)", () => {
     const edgeProps = (anthropicSchema.properties.edges.items as any).properties;
-    expect(edgeProps.strength_mean.type).toBe("number");
-    expect(edgeProps.strength_std.type).toBe("number");
+    // Legacy fields removed from Anthropic schema to stay under 24-optional limit.
+    // Zod still accepts them via normalisation; they are just not in the structured output constraint.
+    expect(edgeProps.strength_mean).toBeUndefined();
+    expect(edgeProps.strength_std).toBeUndefined();
   });
 
   it("Anthropic edge effect_direction enum matches Zod", () => {

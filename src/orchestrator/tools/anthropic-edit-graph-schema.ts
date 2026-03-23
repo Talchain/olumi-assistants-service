@@ -1,9 +1,8 @@
 /**
  * JSON Schema for Anthropic Structured Outputs — edit_graph
  *
- * COMPLIANT BY CONSTRUCTION — every `type: "object"` with defined properties
- * has `additionalProperties: false`. Dynamic maps use `additionalProperties: true`.
- * No runtime normalisation needed.
+ * COMPLIANT BY CONSTRUCTION — every `type: "object"` has
+ * `additionalProperties: false`. No exceptions. No runtime normalisation.
  *
  * Used with Anthropic's GA structured outputs parameter:
  *   output_config: { format: { type: "json_schema", schema: <this schema> } }
@@ -29,9 +28,10 @@ export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
             enum: ["add_node", "remove_node", "update_node", "add_edge", "remove_edge", "update_edge"],
           },
           path: { type: "string" },
-          // Dynamic patch payloads — keys vary by op type (node fields, edge fields, etc.)
-          value: { type: "object", additionalProperties: true },
-          old_value: { type: "object", additionalProperties: true },
+          // Patch payloads — closed empty object; Anthropic rejects additionalProperties:true.
+          // LLM produces content inside; downstream patch-validation handles shape.
+          value: { type: "object", properties: {} as Record<string, never>, required: [] as string[], additionalProperties: false },
+          old_value: { type: "object", properties: {} as Record<string, never>, required: [] as string[], additionalProperties: false },
           impact: { type: "string" },
           rationale: { type: "string" },
         },

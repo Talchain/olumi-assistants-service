@@ -159,37 +159,30 @@ function findUnsupportedKeywords(
 describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — compliant by construction", () => {
   const schema = ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as SchemaNode;
 
-  it("enumerates every type:object node and asserts additionalProperties", () => {
+  it("every type:object node has additionalProperties:false — no exceptions", () => {
     const objects = collectObjectNodes(schema);
 
     // Print full inventory for reviewers
     console.log("\n=== Draft Graph Schema: Object Node Inventory ===");
     for (const obj of objects) {
-      const status = obj.hasProperties
-        ? (obj.additionalProperties === false ? "LOCKED" : obj.additionalProperties === true ? "DYNAMIC" : "MISSING")
-        : "BARE";
+      const status = obj.additionalProperties === false ? "LOCKED" : "VIOLATION";
       console.log(`  ${status} ${obj.path} (additionalProperties: ${JSON.stringify(obj.additionalProperties)})`);
     }
     console.log(`  Total: ${objects.length} object nodes\n`);
 
-    // Assert: every object with defined properties has additionalProperties: false OR true (dynamic maps)
+    // STRICT: every type:"object" must have additionalProperties: false. No allowlist.
     for (const obj of objects) {
-      if (obj.hasProperties) {
-        expect(
-          obj.additionalProperties === false || obj.additionalProperties === true,
-          `${obj.path}: additionalProperties must be explicitly false or true, got ${JSON.stringify(obj.additionalProperties)}`,
-        ).toBe(true);
-      }
-    }
-
-    // Assert: objects with additionalProperties: true are only the known dynamic maps
-    const dynamicMaps = objects.filter(o => o.additionalProperties === true);
-    for (const dm of dynamicMaps) {
       expect(
-        dm.path,
-        `Unexpected dynamic map at ${dm.path} — only interventions, value, old_value should use additionalProperties: true`,
-      ).toMatch(/interventions|value|old_value/);
+        obj.additionalProperties,
+        `${obj.path}: additionalProperties must be false, got ${JSON.stringify(obj.additionalProperties)}`,
+      ).toBe(false);
     }
+  });
+
+  it("serialised payload contains no additionalProperties:true (string-level check)", () => {
+    const payload = JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
+    expect(payload).not.toContain('"additionalProperties":true');
+    expect(payload).not.toContain('"additionalProperties": true');
   });
 
   it("has no $ref nodes", () => {
@@ -254,16 +247,19 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — compliant by construction", () => {
     console.log("\n=== Emitted output_config.format payload ===");
     console.log(JSON.stringify(payload, null, 2).slice(0, 500) + "...\n");
 
-    // Run compliance assertions on the schema within the payload
+    // STRICT string-level check on the serialised payload — cannot be fooled by allowlists
+    const serialised = JSON.stringify(payload);
+    expect(serialised).not.toContain('"additionalProperties":true');
+    expect(serialised).not.toContain('"additionalProperties": true');
+
+    // Structural checks
     const payloadSchema = payload.schema as SchemaNode;
     const objects = collectObjectNodes(payloadSchema);
     for (const obj of objects) {
-      if (obj.hasProperties) {
-        expect(
-          obj.additionalProperties === false || obj.additionalProperties === true,
-          `PAYLOAD ${obj.path}: additionalProperties must be explicitly set`,
-        ).toBe(true);
-      }
+      expect(
+        obj.additionalProperties,
+        `PAYLOAD ${obj.path}: additionalProperties must be false`,
+      ).toBe(false);
     }
     expect(findRefs(payloadSchema)).toHaveLength(0);
     expect(findUnsupportedKeywords(payloadSchema)).toHaveLength(0);
@@ -319,26 +315,28 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — compliant by construction", () => {
 describe("ANTHROPIC_EDIT_GRAPH_SCHEMA — compliant by construction", () => {
   const schema = ANTHROPIC_EDIT_GRAPH_SCHEMA as unknown as SchemaNode;
 
-  it("enumerates every type:object node and asserts additionalProperties", () => {
+  it("every type:object node has additionalProperties:false — no exceptions", () => {
     const objects = collectObjectNodes(schema);
 
     console.log("\n=== Edit Graph Schema: Object Node Inventory ===");
     for (const obj of objects) {
-      const status = obj.hasProperties
-        ? (obj.additionalProperties === false ? "LOCKED" : obj.additionalProperties === true ? "DYNAMIC" : "MISSING")
-        : "BARE";
+      const status = obj.additionalProperties === false ? "LOCKED" : "VIOLATION";
       console.log(`  ${status} ${obj.path} (additionalProperties: ${JSON.stringify(obj.additionalProperties)})`);
     }
     console.log(`  Total: ${objects.length} object nodes\n`);
 
     for (const obj of objects) {
-      if (obj.hasProperties) {
-        expect(
-          obj.additionalProperties === false || obj.additionalProperties === true,
-          `${obj.path}: additionalProperties must be explicitly false or true`,
-        ).toBe(true);
-      }
+      expect(
+        obj.additionalProperties,
+        `${obj.path}: additionalProperties must be false`,
+      ).toBe(false);
     }
+  });
+
+  it("serialised payload contains no additionalProperties:true (string-level check)", () => {
+    const payload = JSON.stringify(ANTHROPIC_EDIT_GRAPH_SCHEMA);
+    expect(payload).not.toContain('"additionalProperties":true');
+    expect(payload).not.toContain('"additionalProperties": true');
   });
 
   it("has no $ref nodes", () => {
