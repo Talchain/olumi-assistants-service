@@ -4,15 +4,14 @@
  * COMPLIANT BY CONSTRUCTION — every `type: "object"` has
  * `additionalProperties: false`. No exceptions. No runtime normalisation.
  *
- * Used with Anthropic's GA structured outputs parameter:
- *   output_config: { format: { type: "json_schema", schema: <this schema> } }
- * when CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true.
- *
- * Matches the EditGraphLLMResult shape:
- *   { operations: PatchOperation[], removed_edges: RemovedEdgeInfo[], warnings: string[], coaching: object | null }
- *
- * Field-level validation of PatchOperation discriminants and referential integrity
- * is handled downstream by patch-validation.ts and the PLoT validate-patch endpoint.
+ * Matches the EditGraphLLMResult top-level shape. The `value` and `old_value`
+ * fields are intentionally omitted — they carry arbitrary patch payloads that
+ * cannot be represented as a closed schema. The LLM still produces them via
+ * prompt instructions; they are parsed downstream by patch-validation.ts.
+ * With additionalProperties:false on operations.items, the LLM cannot include
+ * unlisted fields — this means value/old_value are NOT schema-constrained.
+ * The structured output guarantees the envelope shape (operations array with
+ * op/path, removed_edges, warnings, coaching); patch content relies on prompt.
  */
 
 export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
@@ -28,10 +27,6 @@ export const ANTHROPIC_EDIT_GRAPH_SCHEMA = {
             enum: ["add_node", "remove_node", "update_node", "add_edge", "remove_edge", "update_edge"],
           },
           path: { type: "string" },
-          // Patch payloads — closed empty object; Anthropic rejects additionalProperties:true.
-          // LLM produces content inside; downstream patch-validation handles shape.
-          value: { type: "object", properties: {} as Record<string, never>, required: [] as string[], additionalProperties: false },
-          old_value: { type: "object", properties: {} as Record<string, never>, required: [] as string[], additionalProperties: false },
           impact: { type: "string" },
           rationale: { type: "string" },
         },
