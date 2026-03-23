@@ -266,7 +266,14 @@ describe("buildStrictAnthropicTools", () => {
 // =============================================================================
 
 describe("isStructuredOutputsRejection", () => {
-  it("returns true for capability rejection (output_format not recognized)", () => {
+  // --- Capability rejections → should return true (allow fallback) ---
+
+  it("returns true for capability rejection (output_config not recognized)", () => {
+    const err = { status: 400, message: "Unknown parameter: output_config" };
+    expect(isStructuredOutputsRejection(err)).toBe(true);
+  });
+
+  it("returns true for legacy output_format capability rejection", () => {
     const err = { status: 400, message: "Unknown parameter: output_format" };
     expect(isStructuredOutputsRejection(err)).toBe(true);
   });
@@ -275,6 +282,18 @@ describe("isStructuredOutputsRejection", () => {
     const err = { status: 400, message: "Structured outputs not supported for this model" };
     expect(isStructuredOutputsRejection(err)).toBe(true);
   });
+
+  it("returns true when top-level 'output_config' is the unexpected key (capability rejection)", () => {
+    const err = { status: 400, message: "Unexpected key 'output_config' in request body" };
+    expect(isStructuredOutputsRejection(err)).toBe(true);
+  });
+
+  it("returns true when top-level 'output_format' is the unexpected key (capability rejection)", () => {
+    const err = { status: 400, message: "Unexpected key 'output_format' in request body" };
+    expect(isStructuredOutputsRejection(err)).toBe(true);
+  });
+
+  // --- Schema/shape errors → should return false (fail loudly) ---
 
   it("returns false for malformed schema error (invalid + schema)", () => {
     const err = { status: 400, message: "Invalid JSON schema: unsupported keyword '$ref'" };
@@ -286,8 +305,24 @@ describe("isStructuredOutputsRejection", () => {
     expect(isStructuredOutputsRejection(err)).toBe(false);
   });
 
+  it("returns false for nested 'unexpected key' in output_config.format (schema shape error)", () => {
+    // Wrong nested key inside the structured outputs body — developer must fix payload.
+    const err = {
+      status: 400,
+      message: "output_config.format: Unexpected key 'json_schema'. The expected format is {\"type\": \"json_schema\", \"schema\": {...}}.",
+    };
+    expect(isStructuredOutputsRejection(err)).toBe(false);
+  });
+
+  it("returns false for generic 'unexpected key' in request body", () => {
+    const err = { status: 400, message: "Unexpected key 'foo' in request body" };
+    expect(isStructuredOutputsRejection(err)).toBe(false);
+  });
+
+  // --- Edge cases → should return false ---
+
   it("returns false for non-400 status", () => {
-    const err = { status: 500, message: "output_format internal error" };
+    const err = { status: 500, message: "output_config internal error" };
     expect(isStructuredOutputsRejection(err)).toBe(false);
   });
 

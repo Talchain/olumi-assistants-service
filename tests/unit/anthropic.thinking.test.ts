@@ -367,7 +367,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
   });
 
   it("disables structured outputs when thinking is enabled", async () => {
-    vi.stubEnv("ANTHROPIC_STRUCTURED_OUTPUTS_ENABLED", "true");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
     await draftGraphWithAnthropic({
@@ -379,8 +379,8 @@ describe("draftGraphWithAnthropic — thinking", () => {
     });
 
     const [body] = mockCreate.mock.calls[0];
-    // output_format must be absent when thinking is enabled
-    expect(body.output_format).toBeUndefined();
+    // output_config must be absent when thinking is enabled (incompatible)
+    expect(body.output_config).toBeUndefined();
   });
 });
 

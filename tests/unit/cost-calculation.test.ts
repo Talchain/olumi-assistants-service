@@ -35,6 +35,95 @@ describe("Cost Calculation", () => {
     });
   });
 
+  describe("Anthropic Claude 4.x pricing (no unknown-model warning)", () => {
+    it("calculates cost for claude-sonnet-4-6", () => {
+      // 1000 input tokens, 500 output tokens
+      const cost = calculateCost("claude-sonnet-4-6", 1000, 500);
+      // $3 per 1M input = $0.003/1K → 1K * $0.003 = $0.003
+      // $15 per 1M output = $0.015/1K → 0.5K * $0.015 = $0.0075
+      expect(cost).toBeCloseTo(0.0105, 6);
+    });
+
+    it("calculates cost for claude-sonnet-4-20250514", () => {
+      const cost = calculateCost("claude-sonnet-4-20250514", 1000, 500);
+      expect(cost).toBeCloseTo(0.0105, 6);
+    });
+
+    it("calculates cost for claude-sonnet-4-5-20250929", () => {
+      const cost = calculateCost("claude-sonnet-4-5-20250929", 1000, 500);
+      expect(cost).toBeCloseTo(0.0105, 6);
+    });
+
+    it("calculates cost for claude-opus-4-20250514", () => {
+      const cost = calculateCost("claude-opus-4-20250514", 1000, 1000);
+      // $15/1M in + $75/1M out → $0.015 + $0.075 = $0.09
+      expect(cost).toBeCloseTo(0.09, 6);
+    });
+
+    it("calculates cost for claude-opus-4-5-20251101", () => {
+      const cost = calculateCost("claude-opus-4-5-20251101", 1000, 1000);
+      expect(cost).toBeCloseTo(0.09, 6);
+    });
+
+    it("calculates cost for claude-3-5-haiku-20241022", () => {
+      const cost = calculateCost("claude-3-5-haiku-20241022", 1000, 1000);
+      // $0.80/1M in + $4/1M out → $0.0008 + $0.004 = $0.0048
+      expect(cost).toBeCloseTo(0.0048, 6);
+    });
+
+    it("calculates cost for claude-opus-4-6", () => {
+      const cost = calculateCost("claude-opus-4-6", 1000, 1000);
+      // $15/1M in + $75/1M out → $0.015 + $0.075 = $0.09
+      expect(cost).toBeCloseTo(0.09, 6);
+    });
+
+    it("does not emit CostCalculationUnknownModel for any Claude 4.x model", async () => {
+      const sink = new TelemetrySink();
+      await sink.install();
+      try {
+        calculateCost("claude-sonnet-4-6", 1000, 500);
+        calculateCost("claude-sonnet-4-20250514", 1000, 500);
+        calculateCost("claude-sonnet-4-5-20250929", 1000, 500);
+        calculateCost("claude-opus-4-6", 1000, 500);
+        calculateCost("claude-opus-4-20250514", 1000, 500);
+        calculateCost("claude-opus-4-5-20251101", 1000, 500);
+        expect(sink.hasEvent(TelemetryEvents.CostCalculationUnknownModel)).toBe(false);
+      } finally {
+        sink.uninstall();
+      }
+    });
+  });
+
+  describe("OpenAI GPT-4.1/o-series pricing", () => {
+    it("calculates cost for gpt-4.1-2025-04-14", () => {
+      const cost = calculateCost("gpt-4.1-2025-04-14", 1000, 1000);
+      // $2/1M in + $8/1M out → $0.002 + $0.008 = $0.01
+      expect(cost).toBeCloseTo(0.01, 6);
+    });
+
+    it("calculates cost for o4-mini", () => {
+      const cost = calculateCost("o4-mini", 1000, 1000);
+      // $1.10/1M in + $4.40/1M out → $0.0011 + $0.0044 = $0.0055
+      expect(cost).toBeCloseTo(0.0055, 6);
+    });
+
+    it("does not emit CostCalculationUnknownModel for gpt-4.1 or o-series", async () => {
+      const sink = new TelemetrySink();
+      await sink.install();
+      try {
+        calculateCost("gpt-4.1-2025-04-14", 1000, 500);
+        calculateCost("gpt-4.1-mini-2025-04-14", 1000, 500);
+        calculateCost("gpt-4.1-nano-2025-04-14", 1000, 500);
+        calculateCost("o1", 1000, 500);
+        calculateCost("o3", 1000, 500);
+        calculateCost("o4-mini", 1000, 500);
+        expect(sink.hasEvent(TelemetryEvents.CostCalculationUnknownModel)).toBe(false);
+      } finally {
+        sink.uninstall();
+      }
+    });
+  });
+
   describe("OpenAI pricing", () => {
     it("calculates cost for gpt-4o-mini", () => {
       // 1000 input tokens, 500 output tokens

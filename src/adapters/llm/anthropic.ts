@@ -422,12 +422,14 @@ export type UsageMetrics = {
   cache_read_input_tokens?: number;
 };
 
-// Models confirmed to support the Anthropic Structured Outputs beta parameter.
-// Only models listed here will receive the output_format body + anthropic-beta header.
+// Models confirmed to support Anthropic Structured Outputs (GA since Jan 2026).
+// Uses output_config.format (GA path), no beta header required.
+// Only models listed here will receive the output_config body.
 // Add new models here once confirmed via API testing.
 const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
   "claude-sonnet-4-5-20250929",
   "claude-sonnet-4-6",
+  "claude-opus-4-6",
   "claude-opus-4-20250514",
   "claude-opus-4-5-20251101",
 ]);
@@ -464,11 +466,19 @@ const DRAFT_MAX_TOKENS_DEFAULT = 16384;
 
 /**
  * Determine if a caught error is a Structured Outputs **capability** rejection
- * (model/version/beta header not supported) — NOT a schema validation error.
+ * (model/version/parameter not supported) — NOT a schema validation error.
  *
  * Capability rejections → safe to fall back to prompt-only JSON.
- * Schema errors (malformed schema, unsupported JSON Schema features) → must fail
- * loudly so developers catch broken schemas rather than silently degrading.
+ * Schema errors (malformed schema, wrong nested keys) → must fail loudly so
+ * developers catch broken payloads rather than silently degrading.
+ *
+ * Classification:
+ * - "Unexpected key 'output_config'" or "Unknown parameter: output_config"
+ *     → capability rejection (API doesn't know the parameter) → fall back
+ * - "output_config.format: Unexpected key 'json_schema'"
+ *     → schema shape error (wrong nested key) → fail loudly
+ * - "Invalid JSON schema: unsupported keyword '$ref'"
+ *     → schema validation error → fail loudly
  */
 function isStructuredOutputsRejection(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
@@ -476,14 +486,32 @@ function isStructuredOutputsRejection(err: unknown): boolean {
   if (apiErr.status !== 400) return false;
   const msg = (apiErr.message ?? '').toLowerCase();
 
-  // Schema validation errors should NOT trigger fallback — fail loudly
+  // Schema validation errors should NOT trigger fallback — fail loudly.
   const isSchemaError =
-    msg.includes('invalid') && msg.includes('schema') ||
-    msg.includes('unsupported') && msg.includes('schema');
+    (msg.includes('invalid') && msg.includes('schema')) ||
+    (msg.includes('unsupported') && msg.includes('schema'));
   if (isSchemaError) return false;
 
+  // "Unexpected key" inside the structured outputs parameter body (e.g. wrong
+  // nested key like 'json_schema' instead of 'schema') is a schema shape error.
+  // But "Unexpected key 'output_config'" or "Unexpected key 'output_format'" is
+  // a capability rejection (the top-level parameter itself is unknown).
+  if (msg.includes('unexpected key')) {
+    // Top-level parameter rejection → capability issue → allow fallback
+    if (msg.includes("unexpected key 'output_config'") ||
+        msg.includes("unexpected key 'output_format'") ||
+        msg.includes('unexpected key: output_config') ||
+        msg.includes('unexpected key: output_format')) {
+      return true;
+    }
+    // Any other "unexpected key" (nested key errors) → schema shape error → fail loudly
+    return false;
+  }
+
   // Only fall back for capability/parameter rejections
-  return msg.includes('output_format') || msg.includes('not supported');
+  return msg.includes('output_config') ||
+    msg.includes('output_format') ||
+    msg.includes('not supported');
 }
 
 export async function draftGraphWithAnthropic(
@@ -578,8 +606,10 @@ export async function draftGraphWithAnthropic(
 
     /**
      * Build the messages.create params for a given structured-outputs mode.
-     * When useStructuredOutputs=true, adds the beta header + output_format body.
-     * When false, plain call with no output_format — prompt instructions enforce JSON.
+     * When useStructuredOutputs=true, adds the GA output_config.format body.
+     * Shape: output_config: { format: { type: "json_schema", schema: {...} } }
+     * No beta header required — structured outputs is GA since Jan 2026.
+     * When false, plain call — prompt instructions enforce JSON.
      */
     function buildCallParams(useStructuredOutputs: boolean): {
       body: Anthropic.MessageCreateParamsNonStreaming;
@@ -593,9 +623,11 @@ export async function draftGraphWithAnthropic(
         messages: [{ role: "user", content: prompt.userContent }],
         ...(useStructuredOutputs
           ? {
-              output_format: {
-                type: "json_schema",
-                json_schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+              output_config: {
+                format: {
+                  type: "json_schema",
+                  schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+                },
               },
             }
           : {}),
@@ -603,9 +635,6 @@ export async function draftGraphWithAnthropic(
       };
       const headers: Record<string, string> = {
         "Idempotency-Key": idempotencyKey,
-        ...(useStructuredOutputs
-          ? { "anthropic-beta": "structured-outputs-2025-11-13" }
-          : {}),
       };
       return { body, options: { signal: abortController.signal, headers } };
     }
@@ -2153,7 +2182,7 @@ interface ChatWithAnthropicArgs {
   /** Extended thinking configuration. When enabled, temperature is forced to 1. */
   thinking?: ThinkingConfig;
   /**
-   * JSON Schema for Anthropic Structured Outputs (output_format).
+   * JSON Schema for Anthropic Structured Outputs (output_config.format).
    * When provided and the model supports it, guarantees the response matches this schema.
    * Incompatible with extended thinking — automatically skipped when thinking is enabled.
    */
@@ -2235,9 +2264,11 @@ export async function chatWithAnthropic(
         messages: [{ role: "user", content: args.userMessage }],
         ...(withStructuredOutputs && args.outputSchema
           ? {
-              output_format: {
-                type: "json_schema",
-                json_schema: args.outputSchema,
+              output_config: {
+                format: {
+                  type: "json_schema",
+                  schema: args.outputSchema,
+                },
               },
             }
           : {}),
@@ -2245,9 +2276,6 @@ export async function chatWithAnthropic(
       };
       const headers: Record<string, string> = {
         "Idempotency-Key": idempotencyKey,
-        ...(withStructuredOutputs
-          ? { "anthropic-beta": "structured-outputs-2025-11-13" }
-          : {}),
       };
       return { body, options: { signal: abortController.signal, headers } };
     }

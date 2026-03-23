@@ -37,6 +37,7 @@ import type { PLoTClientRunOpts } from "../plot-client.js";
 import type { ChatWithToolsResult, ChatWithToolsArgs, ChatWithToolsStreamEvent, CallOpts } from "../../adapters/llm/types.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
+import type { DiagnosticTrace } from "./diagnostic-trace.js";
 
 // ============================================================================
 // Shared Value Types
@@ -565,6 +566,14 @@ export interface OrchestratorResponseEnvelopeV2 {
   parse_warnings?: string[];
   _route_metadata?: RouteMetadata;
   _debug_bundle?: TurnDebugBundle;
+  /**
+   * Diagnostic trace — LLM calls, prompt identity, zone 2 assembly, tool policy,
+   * provider resolution, structured output config, streaming metrics, and fallback
+   * events accumulated during this pipeline turn.
+   * Gated by CEE_DIAGNOSTIC_TRACE_ENABLED (default false in production).
+   * Response-only — never fed back into LLM context or Zone 2 assembly.
+   */
+  _diagnostic_trace?: DiagnosticTrace;
   /**
    * Contract violation codes from Phase 5 validation. Populated by phase5Validate
    * when violations are found; used by emitTurnTrace for structured log diagnostics.

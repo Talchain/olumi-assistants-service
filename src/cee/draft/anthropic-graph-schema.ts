@@ -1,20 +1,23 @@
 /**
  * JSON Schema for Anthropic Structured Outputs — draft_graph
  *
- * Used with Anthropic's `output_format: { type: "json_schema" }` parameter when
- * CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. Guarantees parseable JSON and correct
- * top-level structure at the token generation level.
+ * Used with Anthropic's GA structured outputs parameter:
+ *   output_config: { format: { type: "json_schema", schema: <this schema> } }
+ * when CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. Guarantees parseable JSON and
+ * correct top-level structure at the token generation level.
  *
  * Deliberately not maximally strict — field-level validation (node kinds, edge
  * patterns, belief distributions) is handled downstream by Stage 4 (Repair).
  * The schema goal is: eliminate JSON parse failures and ensure `nodes` + `edges`
  * arrays are always present.
  *
- * Anthropic Structured Outputs status (as of 2026-03):
- * - Available for Claude Sonnet 4.5 and later via the beta header
- *   `anthropic-beta: structured-outputs-2025-11-13`
- * - Claude Sonnet 4.6: confirmed supported (same capability class as 4.5)
- * - The beta header is required; GA path not yet available as of this writing
+ * IMPORTANT: The nested key is "schema", NOT "json_schema" — the API returns
+ * 400 "Unexpected key" if the wrong key is used.
+ *
+ * Anthropic Structured Outputs (GA since Jan 2026):
+ * - GA parameter: output_config.format (no beta header required)
+ * - Deprecated parameter: output_format (still works during transition)
+ * - Supported models: Claude Sonnet 4.5+, Opus 4+, Haiku 4.5+
  * - Schema must use JSON Schema draft-07 subset (no $ref, $defs, allOf, anyOf
  *   at the top level of required properties)
  *

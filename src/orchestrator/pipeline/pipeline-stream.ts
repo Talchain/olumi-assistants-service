@@ -40,7 +40,7 @@ import { STREAM_ERROR_CODES } from "./stream-events.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { DailyBudgetExceededError } from "../../adapters/llm/errors.js";
 import { normalizeAnalysisEnvelope } from "../analysis-state.js";
-import { emitTurnTrace } from "./pipeline.js";
+import { emitTurnTrace, attachDiagnosticTrace } from "./pipeline.js";
 
 // Long-running tools that warrant a tool_start event with long_running: true
 const LONG_RUNNING_TOOLS = new Set(['run_analysis', 'draft_graph']);
@@ -319,6 +319,14 @@ export async function* executePipelineStream(
       llmRouteDebug: llmResult.route_debug,
       pendingClarification: toolResult.result.pending_clarification,
       pendingProposal: toolResult.result.pending_proposal,
+    });
+
+    // Diagnostic trace — attach to envelope when feature flag is enabled
+    attachDiagnosticTrace(envelope, {
+      enrichedContext,
+      llmResult,
+      toolResult: toolResult.result,
+      streaming: true,
     });
 
     yield { type: 'turn_complete', seq: seq++, envelope };

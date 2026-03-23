@@ -292,6 +292,7 @@ const ConfigSchema = z.object({
     optionShortcutRepair: booleanString.default(true), // ENABLE_OPTION_SHORTCUT_REPAIR — deterministic option→risk and option→goal shortcut handlers
     deterministicRoutingV2: booleanString.default(false), // CEE_DETERMINISTIC_ROUTING_V2 — v2 deterministic routing patterns (parameter assignment hardening, chip passthrough, system event text)
     artefactAppendixEnabled: booleanString.default(false), // CEE_ARTEFACT_APPENDIX_ENABLED — inject artefact design appendix when artefact generation is likely
+    diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
   }),
 
   // Prompt Cache Configuration
@@ -387,11 +388,11 @@ const ConfigSchema = z.object({
     patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
-    // Anthropic Structured Outputs for draft_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
-    // When true, adds output_format: { type: "json_schema" } to Anthropic API calls for
-    // draft_graph, guaranteeing parseable JSON at the token generation level.
-    // Requires beta header "anthropic-beta: structured-outputs-2025-11-13".
-    // Default false until validated on Claude Sonnet 4.6.
+    // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
+    // When true, adds output_config: { format: { type: "json_schema", schema } } (GA path)
+    // to Anthropic API calls, guaranteeing parseable JSON at the token generation level.
+    // No beta header required — structured outputs is GA since Jan 2026.
+    // Default false — enable via CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true.
     retryOnDefaultStrengths: booleanString.default(false), // Retry LLM call once when ≥80% of edges have default strength signature (enable via CEE_RETRY_ON_DEFAULT_STRENGTHS=true in staging)
     anthropicStructuredOutputs: booleanString.default(false),
     // Extended thinking configuration per operation (Anthropic claude-sonnet-4-6+ only)
@@ -633,6 +634,7 @@ function parseConfig(): Config {
       optionShortcutRepair: env.ENABLE_OPTION_SHORTCUT_REPAIR,
       deterministicRoutingV2: env.CEE_DETERMINISTIC_ROUTING_V2,
       artefactAppendixEnabled: env.CEE_ARTEFACT_APPENDIX_ENABLED,
+      diagnosticTraceEnabled: env.CEE_DIAGNOSTIC_TRACE_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

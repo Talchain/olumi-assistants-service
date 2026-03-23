@@ -89,22 +89,27 @@ describe("MODEL_REGISTRY — claude-sonnet-4-6", () => {
 });
 
 // =============================================================================
-// Structured Outputs output_format shape
+// Structured Outputs — GA output_config.format shape
 // =============================================================================
 
-describe("Structured Outputs output_format shape", () => {
-  it("schema can be embedded in output_format body", () => {
-    const outputFormat = {
-      type: "json_schema",
-      json_schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+describe("Structured Outputs GA output_config.format shape", () => {
+  it("uses output_config.format with schema key (GA path, not deprecated output_format)", () => {
+    const outputConfig = {
+      format: {
+        type: "json_schema" as const,
+        schema: ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+      },
     };
-    expect(outputFormat.type).toBe("json_schema");
-    expect(outputFormat.json_schema.required).toContain("nodes");
+    expect(outputConfig.format.type).toBe("json_schema");
+    expect(outputConfig.format.schema.required).toContain("nodes");
+    expect(outputConfig.format.schema.required).toContain("edges");
+    // Must NOT use the old json_schema key — that causes 400 from the API
+    expect(outputConfig.format).not.toHaveProperty("json_schema");
   });
 
-  it("beta header value matches Anthropic documented format", () => {
-    const EXPECTED_BETA_HEADER = "structured-outputs-2025-11-13";
-    expect(EXPECTED_BETA_HEADER).toMatch(/^structured-outputs-\d{4}-\d{2}-\d{2}$/);
+  it("no beta header required for GA structured outputs", () => {
+    // GA since Jan 2026 — beta header "structured-outputs-2025-11-13" is NOT sent.
+    // This test documents the expected state; the mock-based tests below verify it.
   });
 });
 
@@ -188,7 +193,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     vi.unstubAllEnvs();
   });
 
-  it("sends temperature=0, max_tokens≥8192, and no output_format when flag is off", async () => {
+  it("sends temperature=0, max_tokens≥8192, and no output_config when flag is off", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
 
@@ -210,15 +215,16 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // max_tokens must meet the 8192 hard floor
     expect(body.max_tokens).toBeGreaterThanOrEqual(8192);
 
-    // No output_format when Structured Outputs disabled
+    // No structured outputs params when flag is off
+    expect(body).not.toHaveProperty("output_config");
     expect(body).not.toHaveProperty("output_format");
 
-    // No beta header when Structured Outputs disabled
+    // No beta header (GA — never sent)
     const headers: Record<string, string> = opts?.headers ?? {};
     expect(headers["anthropic-beta"]).toBeUndefined();
   });
 
-  it("sends output_format + beta header when flag is on and model is supported", async () => {
+  it("sends output_config.format (GA) when flag is on and model is supported", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
@@ -234,19 +240,21 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(createSpy).toHaveBeenCalledOnce();
     const [body, opts] = createSpy.mock.calls[0];
 
-    // output_format must be present with correct type
-    expect(body).toHaveProperty("output_format");
-    expect(body.output_format.type).toBe("json_schema");
-    expect(body.output_format.json_schema).toBeDefined();
-    expect(body.output_format.json_schema.required).toContain("nodes");
-    expect(body.output_format.json_schema.required).toContain("edges");
+    // GA parameter: output_config.format (NOT deprecated output_format)
+    expect(body).toHaveProperty("output_config");
+    expect(body).not.toHaveProperty("output_format");
+    expect(body.output_config.format.type).toBe("json_schema");
+    expect(body.output_config.format).toHaveProperty("schema");
+    expect(body.output_config.format).not.toHaveProperty("json_schema");
+    expect(body.output_config.format.schema.required).toContain("nodes");
+    expect(body.output_config.format.schema.required).toContain("edges");
 
-    // Beta header must be present
+    // No beta header — GA since Jan 2026
     const headers: Record<string, string> = opts?.headers ?? {};
-    expect(headers["anthropic-beta"]).toBe("structured-outputs-2025-11-13");
+    expect(headers["anthropic-beta"]).toBeUndefined();
   });
 
-  it("does NOT send output_format when model is unsupported even if flag is on", async () => {
+  it("does NOT send output_config when model is unsupported even if flag is on", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
@@ -263,6 +271,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(createSpy).toHaveBeenCalledOnce();
     const [body, opts] = createSpy.mock.calls[0];
 
+    expect(body).not.toHaveProperty("output_config");
     expect(body).not.toHaveProperty("output_format");
     const headers: Record<string, string> = opts?.headers ?? {};
     expect(headers["anthropic-beta"]).toBeUndefined();
@@ -324,14 +333,14 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(body.max_tokens).toBe(32768);
   });
 
-  it("falls back to prompt-only mode when API rejects output_format with 400", async () => {
+  it("falls back to prompt-only mode when API rejects output_config as unsupported", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
-    // First call throws a 400 mentioning output_format; second call succeeds
+    // First call throws a 400 mentioning output_config; second call succeeds
     createSpy
       .mockRejectedValueOnce(
-        Object.assign(new Error("Invalid parameter: output_format not supported"), { status: 400 })
+        Object.assign(new Error("Invalid parameter: output_config not supported"), { status: 400 })
       )
       .mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
 
@@ -347,12 +356,36 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // Should have been called twice: once with structured outputs, once without
     expect(createSpy).toHaveBeenCalledTimes(2);
 
-    // Second call (fallback) should have no output_format
-    const [fallbackBody, fallbackOpts] = createSpy.mock.calls[1];
+    // Second call (fallback) should have no output_config
+    const [fallbackBody] = createSpy.mock.calls[1];
+    expect(fallbackBody).not.toHaveProperty("output_config");
     expect(fallbackBody).not.toHaveProperty("output_format");
-    expect(fallbackOpts?.headers?.["anthropic-beta"]).toBeUndefined();
 
     // The call should ultimately succeed and return a valid graph
+    expect(result.graph.nodes.length).toBeGreaterThan(0);
+  });
+
+  it("falls back when API returns 'Unexpected key output_config' (capability rejection)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    createSpy
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Unexpected key 'output_config' in request body"), { status: 400 })
+      )
+      .mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const result = await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    // Should fall back — two calls total
+    expect(createSpy).toHaveBeenCalledTimes(2);
     expect(result.graph.nodes.length).toBeGreaterThan(0);
   });
 
@@ -383,6 +416,34 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(firstMessage.content).toContain("Should I hire a contractor");
   });
 
+  it("does NOT fall back when API returns nested 'unexpected key' error (schema shape error)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    // Nested "unexpected key" is a schema shape error — must NOT trigger fallback.
+    // This is different from "Unexpected key 'output_config'" which is a capability rejection.
+    createSpy.mockRejectedValue(
+      Object.assign(
+        new Error("output_config.format: Unexpected key 'json_schema'. The expected format is {\"type\": \"json_schema\", \"schema\": {...}}."),
+        { status: 400 }
+      )
+    );
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await expect(
+      draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      })
+    ).rejects.toThrow("Unexpected key");
+
+    // Must NOT have retried with fallback — only the single failing call
+    expect(createSpy).toHaveBeenCalledOnce();
+  });
+
   it("uses safeExtractJson (not JSON.parse) when fallback response contains markdown fences", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
@@ -392,7 +453,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
     createSpy
       .mockRejectedValueOnce(
-        Object.assign(new Error("Invalid parameter: output_format not supported"), { status: 400 })
+        Object.assign(new Error("Invalid parameter: output_config not supported"), { status: 400 })
       )
       .mockResolvedValueOnce(makeAnthropicResponse(fencedResponse));
 
@@ -407,5 +468,135 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     expect(result.graph.nodes.length).toBeGreaterThan(0);
+  });
+});
+
+// =============================================================================
+// chatWithAnthropic — structured outputs contract test (edit_graph path)
+// =============================================================================
+
+describe("chatWithAnthropic — output_config.format contract", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    createSpy.mockResolvedValue({
+      content: [{ type: "text", text: '{"operations":[],"removed_edges":[],"warnings":[],"coaching":{}}' }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 100, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    });
+  });
+
+  afterEach(() => {
+    createSpy.mockReset();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("sends output_config.format (GA) with outputSchema and no beta header", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const testSchema = { type: "object", properties: { foo: { type: "string" } }, required: ["foo"] };
+
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-4-6",
+      outputSchema: testSchema,
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body, opts] = createSpy.mock.calls[0];
+
+    // Must use GA output_config.format, NOT deprecated output_format
+    expect(body).toHaveProperty("output_config");
+    expect(body).not.toHaveProperty("output_format");
+    expect(body.output_config.format.type).toBe("json_schema");
+    expect(body.output_config.format.schema).toEqual(testSchema);
+
+    // No beta header
+    const headers: Record<string, string> = opts?.headers ?? {};
+    expect(headers["anthropic-beta"]).toBeUndefined();
+  });
+
+  it("does NOT send output_config when no outputSchema provided", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-4-6",
+    });
+
+    const [body] = createSpy.mock.calls[0];
+    expect(body).not.toHaveProperty("output_config");
+    expect(body).not.toHaveProperty("output_format");
+  });
+});
+
+// =============================================================================
+// OpenAI adapter regression — draft_graph with gpt-4.1 is unaffected
+// =============================================================================
+
+describe("OpenAI draft_graph — unaffected by Anthropic structured outputs changes", () => {
+  // This test uses a separate mock for the OpenAI SDK to verify the OpenAI
+  // draft_graph path is independent of the Anthropic output_config changes.
+  const openaiCreateSpy = vi.hoisted(() => vi.fn());
+
+  vi.mock("openai", () => {
+    return {
+      default: class MockOpenAI {
+        chat = {
+          completions: {
+            create: openaiCreateSpy,
+          },
+        };
+      },
+    };
+  });
+
+  beforeEach(() => {
+    vi.resetModules();
+    openaiCreateSpy.mockResolvedValue({
+      choices: [{
+        message: {
+          content: VALID_GRAPH_JSON,
+          role: "assistant",
+        },
+        finish_reason: "stop",
+      }],
+      usage: { prompt_tokens: 100, completion_tokens: 200, total_tokens: 300 },
+    });
+  });
+
+  afterEach(() => {
+    openaiCreateSpy.mockReset();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("sends response_format json_object (not output_config) for gpt-4.1", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const adapter = new OpenAIAdapter("gpt-4.1-2025-04-14");
+
+    await adapter.draftGraph(
+      { brief: "Should I expand into the EU market?", docs: [], seed: 42 },
+      { requestId: "test-req-1" },
+    );
+
+    expect(openaiCreateSpy).toHaveBeenCalled();
+    const [callArgs] = openaiCreateSpy.mock.calls[0];
+
+    // OpenAI uses response_format, NOT output_config
+    expect(callArgs.response_format).toEqual({ type: "json_object" });
+    expect(callArgs).not.toHaveProperty("output_config");
+    expect(callArgs).not.toHaveProperty("output_format");
+    expect(callArgs.model).toBe("gpt-4.1-2025-04-14");
   });
 });

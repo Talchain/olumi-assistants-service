@@ -544,10 +544,42 @@ function sanitizeTelemetryData(data: Event): TelemetryShape {
 }
 
 /**
- * Anthropic pricing (as of 2025-01, Claude 3.5 Sonnet)
+ * Anthropic pricing (updated 2026-03)
  * Update these if pricing changes or using different models
+ * Reference: https://www.anthropic.com/pricing
  */
 const ANTHROPIC_PRICING = {
+  // Claude 4.x family
+  "claude-sonnet-4-20250514": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.015,  // $15 per million output tokens
+  },
+  "claude-sonnet-4-6": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.015,  // $15 per million output tokens
+  },
+  "claude-sonnet-4-5-20250929": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.015,  // $15 per million output tokens
+  },
+  "claude-opus-4-20250514": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.075,  // $75 per million output tokens
+  },
+  "claude-opus-4-6": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.075,  // $75 per million output tokens
+  },
+  "claude-opus-4-5-20251101": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.075,  // $75 per million output tokens
+  },
+  // Claude 3.5 family
+  "claude-3-5-haiku-20241022": {
+    input_per_1k: 0.0008,  // $0.80 per million input tokens
+    output_per_1k: 0.004,  // $4 per million output tokens
+  },
+  // Legacy Claude 3 (kept for historical cost tracking)
   "claude-3-5-sonnet-20241022": {
     input_per_1k: 0.003,   // $3 per million input tokens
     output_per_1k: 0.015,  // $15 per million output tokens
@@ -566,7 +598,12 @@ const ANTHROPIC_PRICING = {
   },
 } as const;
 
+/**
+ * OpenAI pricing (updated 2026-03)
+ * Reference: https://openai.com/pricing
+ */
 const OPENAI_PRICING = {
+  // GPT-5 family
   "gpt-5.2": {
     input_per_1k: 0.015,   // $15 per million input tokens (reasoning model)
     output_per_1k: 0.06,   // $60 per million output tokens (reasoning model)
@@ -575,6 +612,20 @@ const OPENAI_PRICING = {
     input_per_1k: 0.0003,  // $0.30 per million input tokens (fast tier)
     output_per_1k: 0.0012, // $1.20 per million output tokens (fast tier)
   },
+  // GPT-4.1 family
+  "gpt-4.1-2025-04-14": {
+    input_per_1k: 0.002,   // $2 per million input tokens
+    output_per_1k: 0.008,  // $8 per million output tokens
+  },
+  "gpt-4.1-mini-2025-04-14": {
+    input_per_1k: 0.0004,  // $0.40 per million input tokens
+    output_per_1k: 0.0016, // $1.60 per million output tokens
+  },
+  "gpt-4.1-nano-2025-04-14": {
+    input_per_1k: 0.0001,  // $0.10 per million input tokens
+    output_per_1k: 0.0004, // $0.40 per million output tokens
+  },
+  // GPT-4o family
   "gpt-4o": {
     input_per_1k: 0.0025,  // $2.50 per million input tokens
     output_per_1k: 0.01,   // $10 per million output tokens
@@ -583,6 +634,32 @@ const OPENAI_PRICING = {
     input_per_1k: 0.00015, // $0.15 per million input tokens
     output_per_1k: 0.0006, // $0.60 per million output tokens
   },
+  // o-series reasoning models
+  "o1": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.06,   // $60 per million output tokens
+  },
+  "o1-mini": {
+    input_per_1k: 0.003,   // $3 per million input tokens
+    output_per_1k: 0.012,  // $12 per million output tokens
+  },
+  "o1-preview": {
+    input_per_1k: 0.015,   // $15 per million input tokens
+    output_per_1k: 0.06,   // $60 per million output tokens
+  },
+  "o3": {
+    input_per_1k: 0.01,    // $10 per million input tokens
+    output_per_1k: 0.04,   // $40 per million output tokens
+  },
+  "o3-mini": {
+    input_per_1k: 0.0011,  // $1.10 per million input tokens
+    output_per_1k: 0.0044, // $4.40 per million output tokens
+  },
+  "o4-mini": {
+    input_per_1k: 0.0011,  // $1.10 per million input tokens
+    output_per_1k: 0.0044, // $4.40 per million output tokens
+  },
+  // Legacy models
   "gpt-4-turbo": {
     input_per_1k: 0.01,    // $10 per million input tokens
     output_per_1k: 0.03,   // $30 per million output tokens

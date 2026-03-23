@@ -1,9 +1,10 @@
 /**
  * JSON Schema for Anthropic Structured Outputs — edit_graph
  *
- * Used with Anthropic's `output_format: { type: "json_schema" }` parameter when
- * CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. Guarantees parseable JSON and correct
- * top-level structure at the token generation level.
+ * Used with Anthropic's GA structured outputs parameter:
+ *   output_config: { format: { type: "json_schema", schema: <this schema> } }
+ * when CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. Guarantees parseable JSON and
+ * correct top-level structure at the token generation level.
  *
  * Matches the EditGraphLLMResult shape:
  *   { operations: PatchOperation[], removed_edges: RemovedEdgeInfo[], warnings: string[], coaching: object | null }
