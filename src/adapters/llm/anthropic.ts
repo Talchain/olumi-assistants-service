@@ -802,7 +802,7 @@ export async function draftGraphWithAnthropic(
             model,
             prompt_version: promptMeta.prompt_version,
             prompt_hash: promptMeta.prompt_hash,
-            temperature: 0,
+            temperature: draftTemperature,
             provider_latency_ms: providerLatencyMs,
             finish_reason: (response as any)?.stop_reason ?? (response as any)?.stopReason,
             token_usage: {

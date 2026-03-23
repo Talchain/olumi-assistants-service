@@ -213,31 +213,38 @@ function buildRawOutputResponse(ctx: StageContext): UnifiedPipelineResult {
 function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineResult {
   const err = error instanceof Error ? error : new Error(String(error));
 
-  // Build a minimal trace with LLM metadata so that diagnostic trace can
-  // record the LLM call even when the pipeline errors after the LLM responded.
+  // Merge LLM metadata into error response bodies so that diagnostic trace
+  // can record the LLM call even when the pipeline errors after the LLM responded.
   // ctx.llmMeta is populated by Stage 1 (Parse) before downstream stages fail.
-  const errorTrace = ctx.llmMeta
-    ? {
-        trace: {
-          pipeline: {
-            llm_metadata: {
-              model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
-              prompt_version: ctx.llmMeta.prompt_version,
-              prompt_hash: ctx.llmMeta.prompt_hash,
-              duration_ms: ctx.llmMeta.provider_latency_ms,
-              finish_reason: ctx.llmMeta.finish_reason,
-              token_usage: ctx.llmMeta.token_usage,
-            },
+  // Uses shallow merge to preserve request_id/correlation_id from buildCeeErrorResponse.
+  function withLlmTrace(base: Record<string, unknown>): Record<string, unknown> {
+    if (!ctx.llmMeta) return base;
+    const baseTrace = (base.trace ?? {}) as Record<string, unknown>;
+    const basePipeline = (baseTrace.pipeline ?? {}) as Record<string, unknown>;
+    return {
+      ...base,
+      trace: {
+        ...baseTrace,
+        pipeline: {
+          ...basePipeline,
+          llm_metadata: {
+            model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
+            prompt_version: ctx.llmMeta.prompt_version,
+            prompt_hash: ctx.llmMeta.prompt_hash,
+            duration_ms: ctx.llmMeta.provider_latency_ms,
+            finish_reason: ctx.llmMeta.finish_reason,
+            token_usage: ctx.llmMeta.token_usage,
           },
         },
-      }
-    : {};
+      },
+    };
+  }
 
   if (err instanceof LLMTimeoutError) {
     log.error({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM timeout");
     return {
       statusCode: 504,
-      body: { ...buildCeeErrorResponse("CEE_TIMEOUT", err.message, { requestId: ctx.requestId, retryable: true }), ...errorTrace },
+      body: withLlmTrace(buildCeeErrorResponse("CEE_TIMEOUT", err.message, { requestId: ctx.requestId, retryable: true })),
     };
   }
 
@@ -245,7 +252,7 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: budget exceeded");
     return {
       statusCode: 429,
-      body: { ...buildCeeErrorResponse("CEE_RATE_LIMIT", err.message, { requestId: ctx.requestId }), ...errorTrace },
+      body: withLlmTrace(buildCeeErrorResponse("CEE_RATE_LIMIT", err.message, { requestId: ctx.requestId })),
     };
   }
 
@@ -253,7 +260,7 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     log.info({ error: err, requestId: ctx.requestId }, "Unified pipeline: client disconnect");
     return {
       statusCode: 499,
-      body: { ...buildCeeErrorResponse("CEE_INTERNAL_ERROR", "Client disconnected", { requestId: ctx.requestId }), ...errorTrace },
+      body: withLlmTrace(buildCeeErrorResponse("CEE_INTERNAL_ERROR", "Client disconnected", { requestId: ctx.requestId })),
     };
   }
 
@@ -262,7 +269,7 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM returned non-JSON response");
     return {
       statusCode: 400,
-      body: { ...buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM response could not be parsed — the brief may be too vague or nonsensical", {
+      body: withLlmTrace(buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM response could not be parsed — the brief may be too vague or nonsensical", {
         requestId: ctx.requestId,
         reason: "llm_non_json",
         recovery: {
@@ -273,7 +280,7 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
             "Describe what success looks like",
           ],
         },
-      }), ...errorTrace },
+      })),
     };
   }
 
@@ -282,10 +289,10 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     log.error({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM upstream HTTP error");
     return {
       statusCode: 502,
-      body: { ...buildCeeErrorResponse("CEE_LLM_UPSTREAM_ERROR", "LLM provider returned an error", {
+      body: withLlmTrace(buildCeeErrorResponse("CEE_LLM_UPSTREAM_ERROR", "LLM provider returned an error", {
         requestId: ctx.requestId,
         retryable: true,
-      }), ...errorTrace },
+      })),
     };
   }
 
@@ -304,7 +311,7 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM response failed schema validation");
     return {
       statusCode: 400,
-      body: { ...buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM produced a response that does not match the expected graph schema", {
+      body: withLlmTrace(buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM produced a response that does not match the expected graph schema", {
         requestId: ctx.requestId,
         reason: "llm_schema_invalid",
         recovery: {
@@ -315,14 +322,14 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
             "Describe what success looks like",
           ],
         },
-      }), ...errorTrace },
+      })),
     };
   }
 
   log.error({ error: err, requestId: ctx.requestId }, "Unified pipeline: unexpected error");
   return {
     statusCode: 500,
-    body: { ...buildCeeErrorResponse("CEE_INTERNAL_ERROR", "Internal pipeline error", { requestId: ctx.requestId }), ...errorTrace },
+    body: withLlmTrace(buildCeeErrorResponse("CEE_INTERNAL_ERROR", "Internal pipeline error", { requestId: ctx.requestId })),
   };
 }
 

@@ -23,8 +23,9 @@ import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../src/orchestrator/tools/anthro
 // ============================================================================
 
 /**
- * Recursively assert that every object node in a JSON schema has
- * additionalProperties: false and a complete required array.
+ * Recursively assert that every object node WITH defined properties in a JSON
+ * schema has additionalProperties: false.
+ * Bare { type: "object" } (no properties) are intentionally left unlocked.
  */
 function assertAllObjectsCompliant(
   node: Record<string, unknown>,
@@ -33,16 +34,12 @@ function assertAllObjectsCompliant(
   if (!node || typeof node !== "object" || Array.isArray(node)) return;
 
   if (node.type === "object") {
-    expect(node.additionalProperties, `${path}: additionalProperties must be false`).toBe(false);
-
     const props = node.properties as Record<string, unknown> | undefined;
-    if (props && typeof props === "object") {
-      const allKeys = Object.keys(props);
-      const required = node.required as string[] | undefined;
-      expect(required, `${path}: required must be defined`).toBeDefined();
-      for (const key of allKeys) {
-        expect(required, `${path}: required must include "${key}"`).toContain(key);
-      }
+    const hasDefinedProperties = props && typeof props === "object" && Object.keys(props).length > 0;
+
+    // Only objects with defined properties should be locked
+    if (hasDefinedProperties) {
+      expect(node.additionalProperties, `${path}: additionalProperties must be false`).toBe(false);
     }
   }
 
@@ -176,7 +173,7 @@ describe("enforceAnthropicSchemaCompliance", () => {
     expect(result.additionalProperties).toBe(false);
   });
 
-  it("expands required to list all properties", () => {
+  it("preserves original required array (does not expand to all properties)", () => {
     const schema = {
       type: "object",
       properties: {
@@ -188,10 +185,9 @@ describe("enforceAnthropicSchemaCompliance", () => {
     };
     const result = enforceAnthropicSchemaCompliance(schema);
     const required = result.required as string[];
+    // Original required preserved — not expanded
     expect(required).toContain("id");
-    expect(required).toContain("name");
-    expect(required).toContain("optional_field");
-    expect(required).toHaveLength(3);
+    expect(required).toHaveLength(1);
   });
 
   it("converts oneOf to anyOf", () => {
@@ -354,8 +350,9 @@ describe("enforceAnthropicSchemaCompliance", () => {
     const items = (result.properties as Record<string, Record<string, unknown>>).items;
     const itemSchema = items.items as Record<string, unknown>;
     expect(itemSchema.additionalProperties).toBe(false);
+    // Original required preserved — not expanded to include "name"
     expect(itemSchema.required).toContain("id");
-    expect(itemSchema.required).toContain("name");
+    expect(itemSchema.required).toHaveLength(1);
   });
 
   // ============================================================================
@@ -474,11 +471,13 @@ describe("enforceAnthropicSchemaCompliance", () => {
     expect(result).toEqual({});
   });
 
-  it("handles schema with no properties on object", () => {
+  it("does not lock bare { type: 'object' } with no defined properties", () => {
     const schema = { type: "object" };
     const result = enforceAnthropicSchemaCompliance(schema);
-    expect(result.additionalProperties).toBe(false);
-    expect(result.required).toEqual([]);
+    // Bare objects (like data, prior) should NOT get additionalProperties: false
+    // because they are flexible containers the LLM fills with nested content
+    expect(result.additionalProperties).toBeUndefined();
+    expect(result.required).toBeUndefined();
   });
 
   it("handles anyOf with object variants", () => {
@@ -491,7 +490,7 @@ describe("enforceAnthropicSchemaCompliance", () => {
     const result = enforceAnthropicSchemaCompliance(schema);
     const variants = result.anyOf as Record<string, unknown>[];
     expect(variants[0].additionalProperties).toBe(false);
-    expect((variants[0].required as string[])).toContain("a");
+    // required is not expanded — original schema had no required array, so it stays absent or empty
   });
 
   // ============================================================================

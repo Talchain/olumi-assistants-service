@@ -213,30 +213,26 @@ function normaliseNode(
 
   // --- Object type enforcement ---
   if (node.type === "object") {
-    // Force additionalProperties: false
-    if (node.additionalProperties !== false) {
+    const properties = node.properties as Record<string, unknown> | undefined;
+    const hasDefinedProperties = properties && typeof properties === "object" && Object.keys(properties).length > 0;
+
+    // Only set additionalProperties: false on objects WITH defined properties.
+    // Bare `{ type: "object" }` (e.g. data, prior) are flexible containers —
+    // locking them prevents the LLM from nesting content inside, which breaks
+    // option nodes (data.interventions) and factor nodes (data.value).
+    if (hasDefinedProperties && node.additionalProperties !== false) {
       node.additionalProperties = false;
       stats.additionalProperties_set++;
     }
 
-    // Ensure required lists ALL properties
-    const properties = node.properties as Record<string, unknown> | undefined;
-    if (properties && typeof properties === "object") {
-      const allKeys = Object.keys(properties);
-      const currentRequired = Array.isArray(node.required)
-        ? (node.required as string[])
-        : [];
-
-      const missingFromRequired = allKeys.filter(
-        (k) => !currentRequired.includes(k),
-      );
-      if (missingFromRequired.length > 0) {
-        node.required = allKeys;
-        stats.required_expanded++;
-      }
-    } else if (!node.required) {
-      // Object with no properties — ensure required is present (empty array)
+    // Preserve the schema author's original `required` array.
+    // Expanding to ALL properties forces the LLM to output every field
+    // (e.g. goal_threshold on decision nodes, prior on option nodes),
+    // which produces invalid output that fails downstream Zod validation.
+    // The Anthropic API accepts schemas with optional properties.
+    if (!node.required && hasDefinedProperties) {
       node.required = [];
+      stats.required_expanded++;
     }
   }
 
