@@ -482,6 +482,8 @@ const ConfigSchema = z.object({
     entityMemoryEnabled: booleanString.default(false), // CEE_ENTITY_MEMORY_ENABLED
     // Two-pass graph parameter validation pipeline (CEE_VALIDATION_PIPELINE_ENABLED)
     validationPipelineEnabled: booleanString.default(false),
+    // Post-assembly Zod schema verification pipeline (CEE_VERIFICATION_PIPELINE_ENABLED)
+    verificationPipelineEnabled: booleanString.default(true),
   }),
 
   // ISL (Inference Service Layer) Configuration
@@ -834,6 +836,7 @@ function parseConfig(): Config {
       draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,
       entityMemoryEnabled: env.CEE_ENTITY_MEMORY_ENABLED,
       validationPipelineEnabled: env.CEE_VALIDATION_PIPELINE_ENABLED,
+      verificationPipelineEnabled: env.CEE_VERIFICATION_PIPELINE_ENABLED,
     },
     isl: {
       baseUrl: env.ISL_BASE_URL,
