@@ -59,6 +59,9 @@ export interface DraftGraphResult {
   graph: GraphT;
   rationales?: Array<{ target: string; why: string }>;
   questions?: Array<{ question: string; context?: string }>;
+  /** Goal constraints emitted by the LLM (from structured outputs).
+   *  Merged with regex-extracted constraints in Stage 4 compound-goals. */
+  goal_constraints?: Array<Record<string, unknown>>;
   debug?: {
     influence_scores?: Array<{ node_id: string; score: number }>;
     [key: string]: unknown;

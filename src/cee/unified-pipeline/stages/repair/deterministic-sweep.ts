@@ -398,30 +398,29 @@ function fixObservableMissingData(
     if (node.kind !== "factor") continue;
     if ((node as any).category !== "observable") continue;
 
-    let changed = false;
-
-    if (!(node as any).observed_state || (node as any).observed_state.value === undefined) {
-      (node as any).observed_state = {
-        ...((node as any).observed_state ?? {}),
-        value: 0.5,
-      };
-      changed = true;
-    }
-
-    // Only add extractionType to data if data already has a union-satisfying key
-    // (FactorData requires `value`). Creating data={extractionType:"observed"} alone
-    // would fail the NodeData union validation in DraftGraphOutput.parse().
+    // Write to data.value — the field the V3 transform reads to create
+    // observed_state. Do NOT write to node.observed_state directly, as
+    // that's a V3-only field created by transformNodeToV3.
     const data = (node as any).data;
-    if (data && data.value !== undefined && data.extractionType === undefined) {
-      data.extractionType = "observed";
-      changed = true;
-    }
+    const hasValue = data && typeof data.value === "number";
 
-    if (changed) {
+    if (!hasValue) {
+      (node as any).data = {
+        ...(data ?? {}),
+        value: 0.5,
+        extractionType: "observed",
+      };
       repairs.push({
         code: "OBSERVABLE_MISSING_DATA",
         path: `nodes[${node.id}]`,
-        action: `Added observed_state.value=0.5 and extractionType="observed"`,
+        action: `Added data.value=0.5 and extractionType="observed"`,
+      });
+    } else if (data.extractionType === undefined) {
+      data.extractionType = "observed";
+      repairs.push({
+        code: "OBSERVABLE_MISSING_DATA",
+        path: `nodes[${node.id}]`,
+        action: `Added extractionType="observed"`,
       });
     }
   }

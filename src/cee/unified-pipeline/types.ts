@@ -91,6 +91,8 @@ export interface StageContext {
   coaching?: unknown;
   /** LLM causal claims — validated and passed through to response (Phase 2B) */
   causalClaims?: unknown;
+  /** LLM-emitted goal constraints — merged with regex-extracted constraints in Stage 4 */
+  llmGoalConstraints?: Array<Record<string, unknown>>;
   /** True if parse stage retried the LLM call due to default strength detection. */
   strengthDefaultRetried?: boolean;
   /** Strength default detection result from the initial attempt (for telemetry). */
