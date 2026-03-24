@@ -26,6 +26,15 @@ vi.mock("../../src/orchestrator/index.js", () => ({
 // Mock repair
 vi.mock("../../src/services/repair.js", () => ({
   simpleRepair: vi.fn(),
+  ALLOWED_EDGE_PATTERNS: [
+    { from: "decision", to: "option" },
+    { from: "option", to: "factor" },
+    { from: "factor", to: "outcome" },
+    { from: "factor", to: "risk" },
+    { from: "factor", to: "factor" },
+    { from: "outcome", to: "goal" },
+    { from: "risk", to: "goal" },
+  ],
 }));
 
 // Mock telemetry
