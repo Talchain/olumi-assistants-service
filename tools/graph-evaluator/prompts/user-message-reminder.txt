@@ -4,3 +4,5 @@ COMPLIANCE REMINDER:
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal
 - 2–6 options maximum
 - topology_plan is required — plan before you build
+
+Respond with ONLY the JSON object. No reasoning, no markdown, no text before or after the JSON.

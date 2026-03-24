@@ -6,7 +6,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
  * Allowed edge patterns (closed-world).
  * These match the v4 prompt EDGE_TABLE.
  */
-const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
+export const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
   { from: "decision", to: "option" },
   { from: "option", to: "factor" },
   { from: "factor", to: "outcome" },
@@ -324,14 +324,15 @@ function pruneUnreachable(
 const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk", "factor"]);
 
 /**
- * Simple repair that trims counts to caps.
+ * Simple repair that trims counts to caps, wires orphaned nodes, prunes unreachable
+ * nodes, and removes invalid edge patterns (closed-world ALLOWED_EDGE_PATTERNS).
  *
- * IMPORTANT: Does NOT filter edges by closed-world rules to preserve graph connectivity.
- * Invalid edge patterns are logged for monitoring but kept in the graph.
- * The v3-validator will emit warnings for invalid patterns during validation.
+ * Invalid edge patterns are REMOVED, not preserved. If removal disconnects a node,
+ * a warning is logged but the invalid edge is still removed. The connectivity substep
+ * (Stage 4.8) will attempt rewiring afterwards.
  *
- * Protected node kinds (goal, decision, option, outcome, risk) are ALWAYS preserved
- * regardless of their position in the array, to prevent structural validation failures.
+ * Protected node kinds (goal, decision, option, outcome, risk, factor) are ALWAYS
+ * preserved regardless of their position in the array, to prevent structural failures.
  *
  * Node/edge caps use GRAPH_MAX_NODES (50) and GRAPH_MAX_EDGES (200) from graphCaps.ts.
  */

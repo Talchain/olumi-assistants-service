@@ -487,20 +487,21 @@ export function ensureControllableFactorBaselines(response: unknown): {
       return node; // Already has value
     }
 
-    // Add default baseline value
+    // Add default baseline value (0.5 = neutral midpoint per prompt guidance).
+    // Must match the default in deterministic-sweep.ts fixControllableMissingData.
     defaultedFactors.push(nodeId);
     log.info({
       event: 'llm.normalisation.factor_baseline_defaulted',
       factor_id: nodeId,
-      default_value: 1.0,
+      default_value: 0.5,
       extraction_type: 'inferred',
-    }, `Controllable factor ${nodeId} missing data.value, defaulting to 1.0`);
+    }, `Controllable factor ${nodeId} missing data.value, defaulting to 0.5`);
 
     return {
       ...node,
       data: {
         ...(data || {}),
-        value: 1.0,
+        value: 0.5,
         extractionType: 'inferred',
       },
     };

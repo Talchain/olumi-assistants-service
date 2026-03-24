@@ -9,7 +9,7 @@ import type { StageContext } from "../types.js";
 import { enrichGraphWithFactorsAsync } from "../../factor-extraction/enricher.js";
 import { detectCycles } from "../../../utils/graphGuards.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../../../orchestrator/index.js";
-import { simpleRepair } from "../../../services/repair.js";
+import { simpleRepair, ALLOWED_EDGE_PATTERNS } from "../../../services/repair.js";
 import { log, emit } from "../../../utils/telemetry.js";
 
 /**
@@ -93,6 +93,30 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
 
   // ── Step 5: simpleRepair ────────────────────────────────────────────────
   const repaired = simpleRepair(candidate, ctx.requestId);
+
+  // ── Step 5b: Post-repair edge-pattern assertion ────────────────────────
+  // simpleRepair is the authoritative owner of invalid-edge removal.
+  // This defensive check should never fire — if it does, a later stage is
+  // re-adding edges that simpleRepair already removed.
+  {
+    const kindMap = new Map<string, string>();
+    for (const n of repaired.nodes) kindMap.set(n.id, n.kind);
+    let invalidCount = 0;
+    for (const e of repaired.edges) {
+      const fk = kindMap.get(e.from);
+      const tk = kindMap.get(e.to);
+      if (fk && tk && !ALLOWED_EDGE_PATTERNS.some((p) => p.from === fk && p.to === tk)) {
+        invalidCount++;
+      }
+    }
+    if (invalidCount > 0) {
+      log.warn({
+        event: "cee.enrich.post_repair_invalid_edges",
+        request_id: ctx.requestId,
+        invalid_count: invalidCount,
+      }, `Post-simpleRepair assertion: ${invalidCount} invalid edge pattern(s) survived — this should not happen`);
+    }
+  }
 
   // ── Step 6: Second stabilise ────────────────────────────────────────────
   candidate = stabiliseGraph(ensureDagAndPrune(repaired, { collector: ctx.collector }), { collector: ctx.collector });

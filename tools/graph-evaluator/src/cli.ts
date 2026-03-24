@@ -43,6 +43,7 @@ import { DecisionReviewAdapter } from "./adapters/decision-review.js";
 import { ResearchAdapter, runResearchFixture } from "./adapters/research.js";
 import { OrchestratorAdapter } from "./adapters/orchestrator.js";
 import { RepairGraphAdapter } from "./adapters/repair-graph.js";
+import { ValidateGraphAdapter } from "./adapters/validate-graph.js";
 
 import { judgeOrchestratorResponse } from "./orchestrator-judge.js";
 import type {
@@ -88,6 +89,8 @@ function getAdapter(type: PromptType): EvaluatorAdapter {
       return new OrchestratorAdapter();
     case "repair_graph":
       return new RepairGraphAdapter();
+    case "validate_graph":
+      return new ValidateGraphAdapter();
     default:
       throw new Error(`Unknown prompt type: ${type}`);
   }
@@ -107,6 +110,8 @@ function getCasesDir(type: PromptType): string {
       return join(TOOL_ROOT, "fixtures", "orchestrator");
     case "repair_graph":
       return join(TOOL_ROOT, "fixtures", "repair-graph");
+    case "validate_graph":
+      return join(TOOL_ROOT, "fixtures", "validate-graph");
     default:
       throw new Error(`Unknown prompt type: ${type}`);
   }
@@ -181,8 +186,8 @@ async function main(): Promise<void> {
   const numRuns = Math.max(1, parseInt(opts.runs, 10) || 1);
 
   const promptType = opts.type as PromptType;
-  if (!["draft_graph", "edit_graph", "decision_review", "research", "orchestrator", "repair_graph"].includes(promptType)) {
-    console.error(`Invalid --type: ${opts.type}. Must be draft_graph, edit_graph, decision_review, research, orchestrator, or repair_graph.`);
+  if (!["draft_graph", "edit_graph", "decision_review", "research", "orchestrator", "repair_graph", "validate_graph"].includes(promptType)) {
+    console.error(`Invalid --type: ${opts.type}. Must be draft_graph, edit_graph, decision_review, research, orchestrator, repair_graph, or validate_graph.`);
     process.exit(1);
   }
 
