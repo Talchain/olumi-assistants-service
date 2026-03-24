@@ -221,6 +221,11 @@ export interface OrchestratorResponseEnvelope {
   dsk_coaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
   /** Server-constructed model receipt after draft_graph. */
   model_receipt?: ModelReceipt;
+  /**
+   * Diagnostic trace — tool-level LLM calls captured during this turn.
+   * Gated by CEE_DIAGNOSTIC_TRACE_ENABLED. V1 pipeline parity with V2.
+   */
+  _diagnostic_trace?: import("./pipeline/diagnostic-trace.js").DiagnosticTrace;
 }
 
 export interface OrchestratorDebugPayload {

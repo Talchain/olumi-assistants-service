@@ -71,7 +71,7 @@ import { adminModelRoutes } from "./routes/admin.models.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
-import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
+import { config, shouldUseStagingPrompts, validateConfig, checkDeprecatedEnvVars, checkDeadEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
 import { TASK_MODEL_DEFAULTS } from "./config/model-routing.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
@@ -143,8 +143,14 @@ export async function build() {
 
   // Check for deprecated environment variables and log warnings
   const deprecationWarnings = checkDeprecatedEnvVars();
-  for (const warning of deprecationWarnings) {
-    log.warn({ event: 'config.deprecated_env_var' }, warning);
+  for (const w of deprecationWarnings) {
+    log.warn({ event: 'config.deprecated_env_var', key: w.key, replacement: w.replacement }, w.message);
+  }
+
+  // Check for dead environment variables (set but have no effect)
+  const deadVarWarnings = checkDeadEnvVars();
+  for (const w of deadVarWarnings) {
+    log.warn({ event: 'config.dead_env_var', key: w.key }, w.message);
   }
 
   // Fail-fast: Verify LLM provider and API key configuration
@@ -228,6 +234,27 @@ export async function build() {
 
   // Feature health check — log which enabled features have satisfied dependencies
   logFeatureHealth();
+
+  // Startup health summary — single structured log line for deployment diagnostics
+  const diagnosticTraceEnabled = process.env.CEE_DIAGNOSTIC_TRACE_ENABLED !== undefined
+    ? config.features.diagnosticTraceEnabled
+    : nodeEnv !== 'production';
+  log.info({
+    event: 'config.startup_health',
+    pipeline: 'unified_v2',
+    orchestrator_version: config.features.orchestratorV2 ? 'V2' : 'V1',
+    diagnostic_trace: diagnosticTraceEnabled,
+    streaming: config.features.orchestratorStreaming,
+    models: {
+      orchestrator: effectiveTaskModels.orchestrator,
+      draft: effectiveTaskModels.draft_graph,
+      edit_graph: effectiveTaskModels.edit_graph,
+      repair: effectiveTaskModels.repair_graph,
+      decision_review: effectiveTaskModels.decision_review,
+    },
+    deprecated_vars_detected: deprecationWarnings.length,
+    dead_vars_detected: deadVarWarnings.length,
+  }, 'Startup health summary');
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
