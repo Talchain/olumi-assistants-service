@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { DraftGraphInput } from "../schemas/assist.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
-import { finaliseCeeDraftResponse, buildCeeErrorResponse } from "../cee/validation/pipeline.js";
+import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
+import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
@@ -468,16 +469,14 @@ export default async function route(app: FastifyInstance) {
     let sseEndState: "complete" | "timeout" | "aborted" | "error";
 
     try {
-      // Run the CEE draft pipeline (includes all validations: single goal, outcome beliefs, etc.)
-      const { statusCode, body, headers } = await finaliseCeeDraftResponse(input, req.body, req);
-
-      // Add CEE headers to SSE if provided
-      if (headers) {
-        for (const [key, value] of Object.entries(headers)) {
-          // Can't set headers after writeHead, but we can include in payload
-          log.debug({ key, value }, "CEE response header (included in payload)");
-        }
-      }
+      // Run the unified CEE draft pipeline (same as non-streaming route)
+      const { statusCode, body } = await runUnifiedPipeline(input, req.body, req, {
+        schemaVersion,
+        strictMode: false,
+        includeDebug: false,
+        rawOutput: false,
+        requestStartMs: start,
+      });
 
       // Determine if this is an error response
       if (statusCode >= 400) {

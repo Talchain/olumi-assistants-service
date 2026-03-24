@@ -388,26 +388,29 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
 
   // === End Connectivity Repair ===
 
-  // Detect invalid edge patterns for telemetry (but don't drop them)
+  // Remove invalid edge patterns that violate the closed-world topology.
+  // Previously these were preserved for connectivity, but invalid patterns like
+  // outcome→outcome and outcome→risk cause downstream ISL analysis failures.
   const invalidEdges: Array<{ from: string; to: string; fromKind: string; toKind: string }> = [];
-  for (const edge of validEdges) {
+  validEdges = validEdges.filter((edge) => {
     const fromKind = finalNodeKindMap.get(edge.from);
     const toKind = finalNodeKindMap.get(edge.to);
     if (fromKind && toKind && !isEdgeAllowed(fromKind, toKind)) {
       invalidEdges.push({ from: edge.from, to: edge.to, fromKind, toKind });
+      return false; // Remove the invalid edge
     }
-  }
+    return true;
+  });
 
-  // Log invalid patterns for monitoring (helps track v4 prompt effectiveness)
   if (invalidEdges.length > 0) {
     log.warn({
-      event: "cee.simple_repair.invalid_edges_preserved",
+      event: "cee.simple_repair.invalid_edges_removed",
       request_id: requestId,
-      invalid_count: invalidEdges.length,
-      total_edge_count: validEdges.length,
-      invalid_patterns: invalidEdges.map((e) => `${e.fromKind}→${e.toKind}`),
-      invalid_edges: invalidEdges,
-    }, "simpleRepair detected invalid edge patterns (preserved for connectivity)");
+      removed_count: invalidEdges.length,
+      remaining_edge_count: validEdges.length,
+      removed_patterns: invalidEdges.map((e) => `${e.fromKind}→${e.toKind}`),
+      removed_edges: invalidEdges,
+    }, `simpleRepair removed ${invalidEdges.length} invalid edge pattern(s)`);
   }
 
   const edges = validEdges

@@ -298,8 +298,9 @@ describe("simpleRepair connectivity", () => {
 
       const result = simpleRepair(graph);
 
-      // No new edges added (no goal to wire to)
-      expect(result.edges.length).toBe(2);
+      // opt→outcome is not in the allowed edge pattern list, so it is removed.
+      // Only dec→opt survives.
+      expect(result.edges.length).toBe(1);
     });
   });
 
@@ -446,6 +447,7 @@ describe("simpleRepair connectivity", () => {
           { id: "opt_a", kind: "option", label: "Option A" },
           { id: "fac_1", kind: "factor", label: "Factor 1" },
           { id: "orphan_fac", kind: "factor", label: "Orphan Factor" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
           { id: "goal_1", kind: "goal", label: "Goal" },
         ],
         edges: [
@@ -467,16 +469,24 @@ describe("simpleRepair connectivity", () => {
           },
           {
             from: "fac_1",
-            to: "goal_1",
+            to: "out_1",
             strength_mean: 0.7,
             strength_std: 0.15,
             belief_exists: 0.85,
             effect_direction: "positive",
           },
-          // Edge FROM orphan_fac (should be removed when orphan_fac is pruned)
+          {
+            from: "out_1",
+            to: "goal_1",
+            strength_mean: 0.9,
+            strength_std: 0.05,
+            belief_exists: 1.0,
+            effect_direction: "positive",
+          },
+          // Edge FROM orphan_fac via valid pattern (factor→outcome)
           {
             from: "orphan_fac",
-            to: "goal_1",
+            to: "out_1",
             strength_mean: 0.5,
             strength_std: 0.2,
             belief_exists: 0.7,
@@ -487,12 +497,12 @@ describe("simpleRepair connectivity", () => {
 
       const result = simpleRepair(graph);
 
-      // Edge from orphan factor is preserved (factors are now protected)
+      // Edge from orphan factor is preserved (factors are protected, edge pattern is valid)
       const orphanEdge = result.edges.find((e) => e.from === "orphan_fac");
       expect(orphanEdge).toBeDefined();
 
-      // Both edges to goal_1 preserved (fac_1→goal_1 and orphan_fac→goal_1)
-      expect(result.edges.filter((e) => e.to === "goal_1").length).toBe(2);
+      // Both factor→outcome edges preserved (fac_1→out_1 and orphan_fac→out_1)
+      expect(result.edges.filter((e) => e.to === "out_1" && (e.from === "fac_1" || e.from === "orphan_fac")).length).toBe(2);
     });
 
     it("handles multiple unreachable factor nodes", () => {
@@ -500,9 +510,11 @@ describe("simpleRepair connectivity", () => {
         nodes: [
           { id: "dec_1", kind: "decision", label: "Decision" },
           { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_main", kind: "factor", label: "Main Factor" },
           { id: "orphan_1", kind: "factor", label: "Orphan Factor 1" },
           { id: "orphan_2", kind: "factor", label: "Orphan Factor 2" },
           { id: "orphan_3", kind: "factor", label: "Orphan Factor 3" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
           { id: "goal_1", kind: "goal", label: "Goal" },
         ],
         edges: [
@@ -516,10 +528,26 @@ describe("simpleRepair connectivity", () => {
           },
           {
             from: "opt_a",
-            to: "goal_1",
+            to: "fac_main",
             strength_mean: 0.8,
             strength_std: 0.1,
             belief_exists: 0.9,
+            effect_direction: "positive",
+          },
+          {
+            from: "fac_main",
+            to: "out_1",
+            strength_mean: 0.7,
+            strength_std: 0.15,
+            belief_exists: 0.85,
+            effect_direction: "positive",
+          },
+          {
+            from: "out_1",
+            to: "goal_1",
+            strength_mean: 0.9,
+            strength_std: 0.05,
+            belief_exists: 1.0,
             effect_direction: "positive",
           },
           // orphan_1 -> orphan_2 -> orphan_3 chain (all unreachable factors from dec_1)
@@ -549,11 +577,11 @@ describe("simpleRepair connectivity", () => {
       expect(result.nodes.find((n) => n.id === "orphan_2")).toBeDefined();
       expect(result.nodes.find((n) => n.id === "orphan_3")).toBeDefined();
 
-      // All 6 nodes preserved
-      expect(result.nodes.length).toBe(6);
+      // All 8 nodes preserved
+      expect(result.nodes.length).toBe(8);
 
-      // All edges preserved (dec->opt, opt->goal, orphan_1->orphan_2, orphan_2->orphan_3)
-      expect(result.edges.length).toBe(4);
+      // Valid edges: dec→opt, opt→fac, fac→out, out→goal, orphan_1→orphan_2, orphan_2→orphan_3
+      expect(result.edges.length).toBe(6);
     });
 
     it("preserves external factors with outbound-only causal edges", () => {

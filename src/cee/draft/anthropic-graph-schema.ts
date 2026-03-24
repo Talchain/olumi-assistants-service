@@ -4,16 +4,16 @@
  * COMPLIANT BY CONSTRUCTION — every `type: "object"` has
  * `additionalProperties: false`. No exceptions. No runtime normalisation.
  *
- * Anthropic limits optional parameters to 24 across the schema tree.
- * This schema has been trimmed to stay within that limit: complex
- * sub-objects (data, prior) and legacy/rarely-used fields are omitted.
- * The normalisation layer and repair stage handle those downstream.
- *
  * Anthropic Structured Outputs requirements (GA since Jan 2026):
  * - Every `type: "object"` MUST have `additionalProperties: false`
  * - No `$ref`, no `oneOf`, no validation keywords (min/max/pattern/format)
  * - `required` lists only fields the LLM must always produce
- * - Max 24 optional parameters across the full schema tree
+ *
+ * SCHEMA ALIGNMENT (v2 — 2026-03-24):
+ * This version restores factor `data`, `prior`, option `interventions`,
+ * goal threshold raw/cap, coaching `action_type`/`bias_category`, and rich
+ * goal constraint fields. Without these the LLM cannot produce factor
+ * values, and the entire ISL inference pipeline receives empty data.
  */
 
 export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
@@ -38,8 +38,60 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             type: "string",
             enum: ["controllable", "observable", "external"],
           },
+          // ── Factor data (controllable/observable) ──────────────────────
+          data: {
+            type: "object",
+            properties: {
+              value: { type: "number" },
+              raw_value: { type: "number" },
+              unit: { type: "string" },
+              cap: { type: "number" },
+              extractionType: {
+                type: "string",
+                enum: ["explicit", "inferred"],
+              },
+              factor_type: {
+                type: "string",
+                enum: ["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"],
+              },
+              uncertainty_drivers: {
+                type: "array",
+                items: { type: "string" },
+              },
+              // Option node interventions: array of {factor_id, value} pairs.
+              // The prompt produces object form — the normaliser converts post-parse.
+              interventions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    factor_id: { type: "string" },
+                    value: { type: "number" },
+                  },
+                  required: ["factor_id", "value"],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+          // ── Prior (external factors) ───────────────────────────────────
+          prior: {
+            type: "object",
+            properties: {
+              distribution: { type: "string" },
+              range_min: { type: "number" },
+              range_max: { type: "number" },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+          // ── Goal threshold fields ──────────────────────────────────────
           goal_threshold: { type: "number" },
+          goal_threshold_raw: { type: "number" },
           goal_threshold_unit: { type: "string" },
+          goal_threshold_cap: { type: "number" },
         },
         required: ["id", "kind", "label"],
         additionalProperties: false,
@@ -109,9 +161,15 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
       items: {
         type: "object",
         properties: {
+          constraint_id: { type: "string" },
           node_id: { type: "string" },
           operator: { type: "string" },
           value: { type: "number" },
+          label: { type: "string" },
+          unit: { type: "string" },
+          source_quote: { type: "string" },
+          confidence: { type: "number" },
+          provenance: { type: "string" },
         },
         required: ["node_id"],
         additionalProperties: false,
@@ -129,6 +187,14 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               id: { type: "string" },
               label: { type: "string" },
               detail: { type: "string" },
+              action_type: {
+                type: "string",
+                enum: ["add_option", "add_constraint", "add_risk", "reframe_goal"],
+              },
+              bias_category: {
+                type: "string",
+                enum: ["anchoring", "framing", "confidence", "blindspots"],
+              },
             },
             required: ["id"],
             additionalProperties: false,
