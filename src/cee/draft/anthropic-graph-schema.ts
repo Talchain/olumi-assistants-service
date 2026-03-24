@@ -17,7 +17,7 @@
  * the LLM always emits them (or emits null), so they don't count as
  * optional. The normaliser coerces null → undefined post-parse.
  *
- * Current optional count: 19 / 24.
+ * Current optional count: 16 / 24.
  */
 
 // Helpers for nullable types (required field that can be null)
@@ -74,12 +74,12 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
                 required: ["factor_id", "value"],
                 additionalProperties: false,
               }),
-              // Optional within data (only when brief provides numbers)
+              // Required-nullable within data (high value for scale consistency checks)
               raw_value: nullable("number"),
               unit: nullable("string"),
               cap: nullable("number"),
             },
-            ["value", "extractionType", "factor_type", "uncertainty_drivers", "interventions"],
+            ["value", "extractionType", "factor_type", "uncertainty_drivers", "interventions", "raw_value", "unit", "cap"],
           ),
           // ── Prior (external factors) ───────────────────────────────────
           prior: nullableObject(

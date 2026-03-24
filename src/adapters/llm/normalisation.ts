@@ -169,6 +169,31 @@ export function normaliseDraftResponse(raw: unknown): unknown {
     });
   }
 
+  // Coerce nulls in goal_constraints items (required-nullable: constraint_id, operator, value, label)
+  if (Array.isArray(obj.goal_constraints)) {
+    obj.goal_constraints = (obj.goal_constraints as any[]).filter((c: any) => {
+      if (!c || typeof c !== 'object') return false;
+      if (c.constraint_id === null) c.constraint_id = undefined;
+      if (c.operator === null) c.operator = undefined;
+      if (c.value === null) c.value = undefined;
+      if (c.label === null) c.label = undefined;
+      return typeof c.node_id === 'string'; // drop items without valid node_id
+    });
+  }
+
+  // Coerce nulls in coaching.strengthen_items (required-nullable: label, detail)
+  if (obj.coaching && typeof obj.coaching === 'object') {
+    const coaching = obj.coaching as Record<string, unknown>;
+    if (Array.isArray(coaching.strengthen_items)) {
+      coaching.strengthen_items = (coaching.strengthen_items as any[]).map((item: any) => {
+        if (!item || typeof item !== 'object') return item;
+        if (item.label === null) item.label = undefined;
+        if (item.detail === null) item.detail = undefined;
+        return item;
+      });
+    }
+  }
+
   // Coerce string numbers to numbers for belief/weight on edges, and clamp to valid ranges
   // Also handle V4 format (strength.mean, strength.std, exists_probability)
   if (Array.isArray(obj.edges)) {
@@ -487,21 +512,20 @@ export function ensureControllableFactorBaselines(response: unknown): {
       return node; // Already has value
     }
 
-    // Add default baseline value (0.5 = neutral midpoint per prompt guidance).
-    // Must match the default in deterministic-sweep.ts fixControllableMissingData.
+    // Add default baseline value
     defaultedFactors.push(nodeId);
     log.info({
       event: 'llm.normalisation.factor_baseline_defaulted',
       factor_id: nodeId,
-      default_value: 0.5,
+      default_value: 1.0,
       extraction_type: 'inferred',
-    }, `Controllable factor ${nodeId} missing data.value, defaulting to 0.5`);
+    }, `Controllable factor ${nodeId} missing data.value, defaulting to 1.0`);
 
     return {
       ...node,
       data: {
         ...(data || {}),
-        value: 0.5,
+        value: 1.0,
         extractionType: 'inferred',
       },
     };

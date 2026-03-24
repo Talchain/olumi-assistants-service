@@ -175,4 +175,59 @@ describe("normaliseDraftResponse — null coercion", () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe("goal_constraints nullable fields", () => {
+    it("coerces null constraint_id, operator, value, label to undefined", () => {
+      const raw = {
+        nodes: [],
+        edges: [],
+        goal_constraints: [
+          { node_id: "fac_1", constraint_id: null, operator: null, value: null, label: null },
+        ],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      const gc = result.goal_constraints[0];
+      expect(gc.node_id).toBe("fac_1");
+      expect(gc.constraint_id).toBeUndefined();
+      expect(gc.operator).toBeUndefined();
+      expect(gc.value).toBeUndefined();
+      expect(gc.label).toBeUndefined();
+    });
+
+    it("drops goal_constraint items without node_id", () => {
+      const raw = {
+        nodes: [],
+        edges: [],
+        goal_constraints: [
+          { node_id: "fac_1", operator: ">=" },
+          { constraint_id: "gc_2", operator: "<=", value: 100 }, // missing node_id
+        ],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.goal_constraints).toHaveLength(1);
+      expect(result.goal_constraints[0].node_id).toBe("fac_1");
+    });
+  });
+
+  describe("coaching nullable fields", () => {
+    it("coerces null label and detail to undefined on strengthen_items", () => {
+      const raw = {
+        nodes: [],
+        edges: [],
+        coaching: {
+          summary: "Test coaching",
+          strengthen_items: [
+            { id: "si_1", label: null, detail: null },
+            { id: "si_2", label: "Add data", detail: null },
+          ],
+        },
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      const items = result.coaching.strengthen_items;
+      expect(items[0].label).toBeUndefined();
+      expect(items[0].detail).toBeUndefined();
+      expect(items[1].label).toBe("Add data");
+      expect(items[1].detail).toBeUndefined();
+    });
+  });
 });
