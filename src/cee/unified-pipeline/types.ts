@@ -172,6 +172,38 @@ export interface StageContext {
 
   // ── ContextPack v1 (Stream C — assembled in Stage 5 Package) ──
   contextPack?: ContextPackV1;
+
+  // ── Pipeline outcome (Track 1: progressive degradation) ──
+  pipelineOutcome: PipelineOutcome;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline Outcome (Track 1: progressive degradation metadata)
+// ---------------------------------------------------------------------------
+
+export type SoftGateStatus = 'passed' | 'skipped' | 'failed_degraded';
+export type EnrichmentStatus = 'complete' | 'partial' | 'skipped';
+export type CoachingStatus = 'complete' | 'partial' | 'failed_degraded';
+
+export interface PipelineWarning {
+  stage: string;
+  error: string;
+  degraded: boolean;
+}
+
+/**
+ * Present on every response (success and error). Tracks which stages
+ * passed, were skipped, or failed with degradation.
+ */
+export interface PipelineOutcome {
+  graph_drafted: boolean;
+  graph_structurally_valid: boolean;
+  deterministic_sweep_violations: number;
+  verification_status: SoftGateStatus;
+  validation_status: SoftGateStatus;
+  enrichment_status: EnrichmentStatus;
+  coaching_status: CoachingStatus;
+  warnings: PipelineWarning[];
 }
 
 /**

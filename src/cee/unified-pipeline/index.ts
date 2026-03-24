@@ -13,11 +13,11 @@
  *  5.  Package         — Caps + warnings + quality + trace assembly
  *  6.  Boundary        — V3 transform + analysis_ready + model_adjustments
  *
- * Feature flag: CEE_UNIFIED_PIPELINE_ENABLED (default false)
+ * Always-on (CEE_UNIFIED_PIPELINE_ENABLED retired — legacy Pipeline A+B removed)
  */
 
 import type { FastifyRequest } from "fastify";
-import type { StageContext, StageSnapshot, PlanAnnotationCheckpoint, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras } from "./types.js";
+import type { StageContext, StageSnapshot, PlanAnnotationCheckpoint, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras, PipelineOutcome } from "./types.js";
 import { getRequestId, generateRequestId } from "../../utils/request-id.js";
 import { computeResponseHash } from "../../utils/response-hash.js";
 import { config } from "../../config/index.js";
@@ -99,6 +99,18 @@ function buildInitialContext(
     collector: createCorrectionCollector(),
     pipelineCheckpoints: [],
     checkpointsEnabled: config.cee.pipelineCheckpointsEnabled,
+
+    // Pipeline outcome (Track 1: progressive degradation)
+    pipelineOutcome: {
+      graph_drafted: false,
+      graph_structurally_valid: false,
+      deterministic_sweep_violations: 0,
+      verification_status: 'skipped',
+      validation_status: 'skipped',
+      enrichment_status: 'skipped',
+      coaching_status: 'partial',
+      warnings: [],
+    },
   };
 }
 
@@ -333,6 +345,28 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
   };
 }
 
+/**
+ * Attach _pipeline_outcome to any response body (success or error).
+ * Safe for non-object bodies (returns body unchanged).
+ */
+function attachPipelineOutcome(body: unknown, outcome: PipelineOutcome): unknown {
+  if (body && typeof body === "object") {
+    (body as Record<string, unknown>)._pipeline_outcome = outcome;
+  }
+  return body;
+}
+
+/**
+ * Helper: if earlyReturn is set, attach pipeline outcome and return it.
+ * Avoids TS control-flow narrowing issues with repeated earlyReturn checks.
+ */
+function drainEarlyReturn(ctx: StageContext): UnifiedPipelineResult | undefined {
+  const er = ctx.earlyReturn;
+  if (!er) return undefined;
+  attachPipelineOutcome(er.body, ctx.pipelineOutcome);
+  return er;
+}
+
 export async function runUnifiedPipeline(
   input: DraftInputWithCeeExtras,
   rawBody: unknown,
@@ -344,8 +378,15 @@ export async function runUnifiedPipeline(
   try {
     // Stage 1: Parse — LLM draft + adapter normalisation
     await runStageParse(ctx);
-    if (ctx.earlyReturn) return ctx.earlyReturn;
-    if (ctx.opts.rawOutput) return buildRawOutputResponse(ctx);
+    { const er = drainEarlyReturn(ctx); if (er) return er; }
+    if (ctx.opts.rawOutput) {
+      const rawResult = buildRawOutputResponse(ctx);
+      attachPipelineOutcome(rawResult.body, ctx.pipelineOutcome);
+      return rawResult;
+    }
+
+    // Graph was drafted successfully
+    ctx.pipelineOutcome.graph_drafted = true;
     ctx.stageSnapshots = { stage_1_parse: captureStageSnapshot(ctx) };
 
     // Stage 2: Normalise — STRP + risk coefficients
@@ -356,6 +397,7 @@ export async function runUnifiedPipeline(
     // can crash enrichment. Catch and return structured error instead of 500.
     try {
       await runStageEnrich(ctx);
+      ctx.pipelineOutcome.enrichment_status = 'complete';
     } catch (enrichErr: any) {
       const nodeCount = Array.isArray((ctx.graph as any)?.nodes) ? (ctx.graph as any).nodes.length : 0;
       const edgeCount = Array.isArray((ctx.graph as any)?.edges) ? (ctx.graph as any).edges.length : 0;
@@ -375,30 +417,42 @@ export async function runUnifiedPipeline(
         likely_degenerate: isLikelyDegenerateGraph,
       }, `Stage 3 (Enrich) crashed — ${isLikelyDegenerateGraph ? "degenerate graph" : "possible internal defect"}`);
 
-      return {
-        statusCode: 400,
-        body: buildCeeErrorResponse("CEE_GRAPH_INVALID", "Unable to construct a valid decision model from this brief", {
-          requestId: ctx.requestId,
-          reason: "enrichment_failed",
-          nodeCount,
-          edgeCount,
-          recovery: {
-            suggestion: "Add more detail to your decision brief before drafting a model.",
-            hints: [
-              "State the specific decision you are trying to make",
-              "List 2-3 concrete options you are considering",
-              "Describe what success looks like",
-            ],
-          },
-        }),
-      };
+      ctx.pipelineOutcome.enrichment_status = 'partial';
+      const errorBody = buildCeeErrorResponse("CEE_GRAPH_INVALID", "Unable to construct a valid decision model from this brief", {
+        requestId: ctx.requestId,
+        reason: "enrichment_failed",
+        nodeCount,
+        edgeCount,
+        recovery: {
+          suggestion: "Add more detail to your decision brief before drafting a model.",
+          hints: [
+            "State the specific decision you are trying to make",
+            "List 2-3 concrete options you are considering",
+            "Describe what success looks like",
+          ],
+        },
+      });
+      attachPipelineOutcome(errorBody, ctx.pipelineOutcome);
+      return { statusCode: 400, body: errorBody };
     }
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
     ctx.planAnnotation = capturePlanAnnotation(ctx);
 
     // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
     await runStageRepair(ctx);
-    if (ctx.earlyReturn) return ctx.earlyReturn;
+
+    // Update sweep violations count from repair trace
+    const sweepTrace = ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined;
+    const bucketSummary = sweepTrace?.bucket_summary as Record<string, number> | undefined;
+    if (bucketSummary) {
+      ctx.pipelineOutcome.deterministic_sweep_violations =
+        (bucketSummary.A ?? 0) + (bucketSummary.B ?? 0) + (bucketSummary.C ?? 0);
+    }
+
+    { const er = drainEarlyReturn(ctx); if (er) return er; }
+
+    // Graph survived repair — structurally valid
+    ctx.pipelineOutcome.graph_structurally_valid = true;
     ctx.stageSnapshots.stage_4_repair = captureStageSnapshot(ctx);
 
     // Validation pipeline (Pass 2) — fired immediately after Repair, runs
@@ -406,7 +460,9 @@ export async function runUnifiedPipeline(
     // by validation errors. Awaited before Stage 5 so metadata is ready.
     let validationPromise: Promise<void>;
     if (config.cee.validationPipelineEnabled) {
-      validationPromise = runValidationPipeline(ctx).catch((err: unknown) => {
+      validationPromise = runValidationPipeline(ctx).then(() => {
+        ctx.pipelineOutcome.validation_status = 'passed';
+      }).catch((err: unknown) => {
         const isTimeout = err instanceof Error && (err.name === 'AbortError' || err.message.includes('timeout'));
         const isParse = err instanceof Error && err.message.includes('parse_error');
         log.warn(
@@ -418,6 +474,12 @@ export async function runUnifiedPipeline(
           },
           "cee.validation_pipeline.failed",
         );
+        ctx.pipelineOutcome.validation_status = 'failed_degraded';
+        ctx.pipelineOutcome.warnings.push({
+          stage: 'validation_pipeline',
+          error: err instanceof Error ? err.message : String(err),
+          degraded: true,
+        });
       });
     } else {
       log.debug(
@@ -438,6 +500,11 @@ export async function runUnifiedPipeline(
         error: sweepErr?.message,
         stack: sweepErr?.stack,
       }, "Stage 4b (threshold sweep) failed — continuing without threshold stripping");
+      ctx.pipelineOutcome.warnings.push({
+        stage: 'threshold_sweep',
+        error: sweepErr?.message ?? 'unknown',
+        degraded: true,
+      });
     }
     ctx.stageSnapshots.stage_4b_threshold_sweep = captureStageSnapshot(ctx);
 
@@ -446,31 +513,79 @@ export async function runUnifiedPipeline(
     await validationPromise;
 
     // Stage 5: Package — Quality + warnings + caps + trace
-    await runStagePackage(ctx);
-    if (ctx.earlyReturn) return ctx.earlyReturn;
+    // Soft gate: both the verification pipeline inside Package and the
+    // Package stage itself must not discard a structurally valid graph.
+    try {
+      await runStagePackage(ctx);
+    } catch (packageErr: any) {
+      log.warn({
+        event: "pipeline.soft_gate_degraded",
+        stage: "package",
+        error: packageErr?.message,
+        request_id: ctx.requestId,
+      }, "Stage 5 (Package) threw — degrading to graph-only response (soft gate)");
+      ctx.pipelineOutcome.warnings.push({
+        stage: 'package',
+        error: packageErr?.message ?? 'unknown',
+        degraded: true,
+      });
+      ctx.pipelineOutcome.coaching_status = 'failed_degraded';
+      // Return the structurally valid graph without packaging
+      const fallback = { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
+      attachPipelineOutcome(fallback, ctx.pipelineOutcome);
+      return { statusCode: 200, body: fallback };
+    }
+    { const er = drainEarlyReturn(ctx); if (er) return er; }
     ctx.stageSnapshots.stage_5_package = captureStageSnapshot(ctx);
 
     // Stage 6: Boundary — V3/V2/V1 transform
-    await runStageBoundary(ctx);
-    if (ctx.earlyReturn) return ctx.earlyReturn;
+    // Soft gate: boundary transform failure must not discard a packaged response.
+    try {
+      await runStageBoundary(ctx);
+    } catch (boundaryErr: any) {
+      log.warn({
+        event: "pipeline.soft_gate_degraded",
+        stage: "boundary",
+        error: boundaryErr?.message,
+        request_id: ctx.requestId,
+      }, "Stage 6 (Boundary) threw — returning packaged V1 response (soft gate)");
+      ctx.pipelineOutcome.warnings.push({
+        stage: 'boundary',
+        error: boundaryErr?.message ?? 'unknown',
+        degraded: true,
+      });
+      // Return the packaged V1 response without boundary transform
+      const fallback = ctx.ceeResponse ?? { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
+      ctx.pipelineOutcome.coaching_status = 'complete';
+      attachPipelineOutcome(fallback, ctx.pipelineOutcome);
+      return { statusCode: 200, body: fallback };
+    }
+    { const er = drainEarlyReturn(ctx); if (er) return er; }
 
     // Defensive guard — all stages wired, so this should never fire
     if (ctx.finalResponse === undefined) {
       log.error({ requestId: ctx.requestId }, "Unified pipeline: no finalResponse after all stages completed");
-      return {
-        statusCode: 501,
-        body: buildCeeErrorResponse("CEE_SERVICE_UNAVAILABLE", "Unified pipeline stages not yet wired", {
-          requestId: ctx.requestId,
-          reason: "incomplete_wiring",
-        }),
-      };
+      const errorBody = buildCeeErrorResponse("CEE_SERVICE_UNAVAILABLE", "Unified pipeline stages not yet wired", {
+        requestId: ctx.requestId,
+        reason: "incomplete_wiring",
+      });
+      attachPipelineOutcome(errorBody, ctx.pipelineOutcome);
+      return { statusCode: 501, body: errorBody };
     }
 
+    // Coaching status: if we got here with a response, coaching passed
+    ctx.pipelineOutcome.coaching_status = 'complete';
+
+    attachPipelineOutcome(ctx.finalResponse, ctx.pipelineOutcome);
     return {
       statusCode: 200,
       body: ctx.finalResponse,
     };
   } catch (error) {
-    return mapPipelineError(error, ctx);
+    // Pre-sweep failures (Stage 1-3) or unexpected errors still map to error responses.
+    // Post-sweep failures are caught by the stage-level try/catch above.
+    const result = mapPipelineError(error, ctx);
+    attachPipelineOutcome(result.body, ctx.pipelineOutcome);
+    return result;
   }
 }
