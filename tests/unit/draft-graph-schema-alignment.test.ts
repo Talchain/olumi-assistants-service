@@ -230,7 +230,9 @@ describe("Three-way schema alignment — Anthropic ↔ Zod ↔ Prompt", () => {
 
   it("Anthropic node category enum matches Zod FactorCategory", () => {
     const zodCategories = FactorCategory.options;
-    const anthropicCategories = (anthropicSchema.properties.nodes.items as any).properties.category.enum;
+    const catProp = (anthropicSchema.properties.nodes.items as any).properties.category;
+    // category is nullable: { anyOf: [{ type: "string", enum: [...] }, { type: "null" }] }
+    const anthropicCategories = catProp.enum ?? catProp.anyOf?.[0]?.enum;
     expect(anthropicCategories).toEqual(expect.arrayContaining(zodCategories));
   });
 
@@ -252,7 +254,9 @@ describe("Three-way schema alignment — Anthropic ↔ Zod ↔ Prompt", () => {
 
   it("Anthropic edge effect_direction enum matches Zod", () => {
     const edgeProps = (anthropicSchema.properties.edges.items as any).properties;
-    expect(edgeProps.effect_direction.enum).toEqual(["positive", "negative"]);
+    // effect_direction is nullable: { anyOf: [{ type: "string", enum: [...] }, { type: "null" }] }
+    const dirEnum = edgeProps.effect_direction.enum ?? edgeProps.effect_direction.anyOf?.[0]?.enum;
+    expect(dirEnum).toEqual(["positive", "negative"]);
   });
 
   it("Anthropic edge edge_type enum matches Zod", () => {

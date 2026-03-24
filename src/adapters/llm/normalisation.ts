@@ -131,12 +131,54 @@ export function normaliseDraftResponse(raw: unknown): unknown {
     });
   }
 
+  // ========================================================================
+  // NULL COERCION: Anthropic required-nullable fields produce null for
+  // fields the LLM can't fill. Coerce null → undefined so downstream
+  // code treats them as absent (deterministic sweep fills defaults).
+  // ========================================================================
+  if (Array.isArray(obj.nodes)) {
+    obj.nodes = (obj.nodes as any[]).map((node: any) => {
+      if (!node || typeof node !== 'object') return node;
+      // Top-level nullable fields
+      if (node.category === null) node.category = undefined;
+      if (node.data === null) node.data = undefined;
+      if (node.prior === null) node.prior = undefined;
+      if (node.goal_threshold === null) node.goal_threshold = undefined;
+      if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
+      if (node.goal_threshold_unit === null) node.goal_threshold_unit = undefined;
+      // Nullable fields inside data object
+      if (node.data && typeof node.data === 'object') {
+        const d = node.data;
+        if (d.value === null) d.value = undefined;
+        if (d.extractionType === null) d.extractionType = undefined;
+        if (d.factor_type === null) d.factor_type = undefined;
+        if (d.uncertainty_drivers === null) d.uncertainty_drivers = undefined;
+        if (d.interventions === null) d.interventions = undefined;
+        if (d.raw_value === null) d.raw_value = undefined;
+        if (d.unit === null) d.unit = undefined;
+        if (d.cap === null) d.cap = undefined;
+      }
+      // Nullable fields inside prior object
+      if (node.prior && typeof node.prior === 'object') {
+        const p = node.prior;
+        if (p.distribution === null) p.distribution = undefined;
+        if (p.range_min === null) p.range_min = undefined;
+        if (p.range_max === null) p.range_max = undefined;
+      }
+      return node;
+    });
+  }
+
   // Coerce string numbers to numbers for belief/weight on edges, and clamp to valid ranges
   // Also handle V4 format (strength.mean, strength.std, exists_probability)
   if (Array.isArray(obj.edges)) {
     obj.edges = obj.edges.map((edge: unknown) => {
       if (!edge || typeof edge !== 'object') return edge;
       const e = edge as Record<string, unknown>;
+
+      // Coerce required-nullable edge fields (null → undefined)
+      if (e.exists_probability === null) e.exists_probability = undefined;
+      if (e.effect_direction === null) e.effect_direction = undefined;
 
       // ========================================================================
       // V4 FORMAT HANDLING: strength.mean/std and exists_probability

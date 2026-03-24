@@ -8,13 +8,34 @@
  * - Every `type: "object"` MUST have `additionalProperties: false`
  * - No `$ref`, no `oneOf`, no validation keywords (min/max/pattern/format)
  * - `required` lists only fields the LLM must always produce
+ * - Max 24 optional parameters across the full schema tree
  *
- * SCHEMA ALIGNMENT (v2 — 2026-03-24):
- * This version restores factor `data`, `prior`, option `interventions`,
- * goal threshold raw/cap, coaching `action_type`/`bias_category`, and rich
- * goal constraint fields. Without these the LLM cannot produce factor
- * values, and the entire ISL inference pipeline receives empty data.
+ * OPTIONAL BUDGET (v3 — 2026-03-24):
+ * Anthropic counts fields in `properties` that are NOT in `required` as
+ * "optional parameters", with a hard limit of 24. To stay under the limit
+ * while keeping all fields, we make most fields required-but-nullable:
+ * the LLM always emits them (or emits null), so they don't count as
+ * optional. The normaliser coerces null → undefined post-parse.
+ *
+ * Current optional count: 19 / 24.
  */
+
+// Helpers for nullable types (required field that can be null)
+const nullable = (typeName: string) => ({
+  anyOf: [{ type: typeName }, { type: "null" }],
+});
+const nullableEnum = (values: string[]) => ({
+  anyOf: [{ type: "string", enum: values }, { type: "null" }],
+});
+const nullableArray = (items: Record<string, unknown>) => ({
+  anyOf: [{ type: "array", items }, { type: "null" }],
+});
+const nullableObject = (props: Record<string, unknown>, req: string[]) => ({
+  anyOf: [
+    { type: "object", properties: props, required: req, additionalProperties: false },
+    { type: "null" },
+  ],
+});
 
 export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
   type: "object" as const,
@@ -34,66 +55,54 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             enum: ["goal", "decision", "option", "outcome", "risk", "factor", "action", "constraint"],
           },
           label: { type: "string" },
-          category: {
-            type: "string",
-            enum: ["controllable", "observable", "external"],
-          },
-          // ── Factor data (controllable/observable) ──────────────────────
-          data: {
-            type: "object",
-            properties: {
-              value: { type: "number" },
-              raw_value: { type: "number" },
-              unit: { type: "string" },
-              cap: { type: "number" },
-              extractionType: {
-                type: "string",
-                enum: ["explicit", "inferred"],
-              },
-              factor_type: {
-                type: "string",
-                enum: ["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"],
-              },
-              uncertainty_drivers: {
-                type: "array",
-                items: { type: "string" },
-              },
-              // Option node interventions: array of {factor_id, value} pairs.
-              // The prompt produces object form — the normaliser converts post-parse.
-              interventions: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    factor_id: { type: "string" },
-                    value: { type: "number" },
-                  },
-                  required: ["factor_id", "value"],
-                  additionalProperties: false,
+          // ── Required-nullable: LLM always classifies (or null for non-factors) ──
+          category: nullableEnum(["controllable", "observable", "external"]),
+          // ── Factor data (controllable/observable) or option interventions ──
+          data: nullableObject(
+            {
+              // Required-nullable within data (LLM always decides)
+              value: nullable("number"),
+              extractionType: nullableEnum(["explicit", "inferred"]),
+              factor_type: nullableEnum(["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"]),
+              uncertainty_drivers: nullableArray({ type: "string" }),
+              interventions: nullableArray({
+                type: "object",
+                properties: {
+                  factor_id: { type: "string" },
+                  value: { type: "number" },
                 },
-              },
+                required: ["factor_id", "value"],
+                additionalProperties: false,
+              }),
+              // Optional within data (only when brief provides numbers)
+              raw_value: nullable("number"),
+              unit: nullable("string"),
+              cap: nullable("number"),
             },
-            required: [],
-            additionalProperties: false,
-          },
+            ["value", "extractionType", "factor_type", "uncertainty_drivers", "interventions"],
+          ),
           // ── Prior (external factors) ───────────────────────────────────
-          prior: {
-            type: "object",
-            properties: {
-              distribution: { type: "string" },
-              range_min: { type: "number" },
-              range_max: { type: "number" },
+          prior: nullableObject(
+            {
+              distribution: nullable("string"),
+              range_min: nullable("number"),
+              range_max: nullable("number"),
             },
-            required: [],
-            additionalProperties: false,
-          },
+            ["distribution", "range_min", "range_max"],
+          ),
           // ── Goal threshold fields ──────────────────────────────────────
-          goal_threshold: { type: "number" },
-          goal_threshold_raw: { type: "number" },
-          goal_threshold_unit: { type: "string" },
+          goal_threshold: nullable("number"),
+          goal_threshold_raw: nullable("number"),
+          goal_threshold_unit: nullable("string"),
+          // (goal_threshold_cap stays optional — 1 optional slot)
           goal_threshold_cap: { type: "number" },
         },
-        required: ["id", "kind", "label"],
+        required: [
+          "id", "kind", "label",
+          // Required-nullable fields (don't count against optional limit)
+          "category", "data", "prior",
+          "goal_threshold", "goal_threshold_raw", "goal_threshold_unit",
+        ],
         additionalProperties: false,
       },
     },
@@ -113,18 +122,17 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             required: ["mean", "std"],
             additionalProperties: false,
           },
-          exists_probability: { type: "number" },
-          effect_direction: {
-            type: "string",
-            enum: ["positive", "negative"],
-          },
+          // Required-nullable: LLM always emits these for edges
+          exists_probability: nullable("number"),
+          effect_direction: nullableEnum(["positive", "negative"]),
+          // Optional: sometimes produced
           edge_type: {
             type: "string",
             enum: ["directed", "bidirected"],
           },
           provenance_source: { type: "string" },
         },
-        required: ["from", "to", "strength"],
+        required: ["from", "to", "strength", "exists_probability", "effect_direction"],
         additionalProperties: false,
       },
     },
@@ -161,17 +169,19 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          constraint_id: { type: "string" },
+          // Required-nullable: LLM always produces these for constraints
+          constraint_id: nullable("string"),
           node_id: { type: "string" },
-          operator: { type: "string" },
-          value: { type: "number" },
-          label: { type: "string" },
+          operator: nullable("string"),
+          value: nullable("number"),
+          label: nullable("string"),
+          // Optional: lower-value metadata
           unit: { type: "string" },
           source_quote: { type: "string" },
           confidence: { type: "number" },
           provenance: { type: "string" },
         },
-        required: ["node_id"],
+        required: ["node_id", "constraint_id", "operator", "value", "label"],
         additionalProperties: false,
       },
     },
@@ -185,8 +195,10 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             type: "object",
             properties: {
               id: { type: "string" },
-              label: { type: "string" },
-              detail: { type: "string" },
+              // Required-nullable: LLM always produces label/detail
+              label: nullable("string"),
+              detail: nullable("string"),
+              // Optional: sometimes produced
               action_type: {
                 type: "string",
                 enum: ["add_option", "add_constraint", "add_risk", "reframe_goal"],
@@ -196,7 +208,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
                 enum: ["anchoring", "framing", "confidence", "blindspots"],
               },
             },
-            required: ["id"],
+            required: ["id", "label", "detail"],
             additionalProperties: false,
           },
         },

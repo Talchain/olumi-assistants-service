@@ -132,6 +132,41 @@ function findUnsupportedKeywords(
   return results;
 }
 
+/** Count optional parameters across the full schema tree.
+ *  A field is optional if it's in `properties` but NOT in `required`. */
+function countOptionalParams(node: SchemaNode, path = "root"): number {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return 0;
+  let count = 0;
+
+  if (node.type === "object" && node.properties && typeof node.properties === "object") {
+    const required = new Set(Array.isArray(node.required) ? (node.required as string[]) : []);
+    const props = Object.keys(node.properties as object);
+    count += props.filter((p) => !required.has(p)).length;
+  }
+
+  // Recurse into properties
+  if (node.properties && typeof node.properties === "object") {
+    for (const val of Object.values(node.properties as Record<string, unknown>)) {
+      if (val && typeof val === "object") {
+        count += countOptionalParams(val as SchemaNode, path);
+      }
+    }
+  }
+  // Recurse into items
+  if (node.items && typeof node.items === "object" && !Array.isArray(node.items)) {
+    count += countOptionalParams(node.items as SchemaNode, path);
+  }
+  // Recurse into anyOf/allOf
+  for (const combiner of ["anyOf", "allOf"] as const) {
+    if (Array.isArray(node[combiner])) {
+      for (const variant of node[combiner] as SchemaNode[]) {
+        count += countOptionalParams(variant, path);
+      }
+    }
+  }
+  return count;
+}
+
 /** Count object nodes, total properties, and max nesting depth. */
 function schemaComplexity(node: SchemaNode, depth = 0): { objects: number; properties: number; maxDepth: number } {
   if (!node || typeof node !== "object" || Array.isArray(node)) return { objects: 0, properties: 0, maxDepth: depth };
@@ -230,6 +265,13 @@ function assertFullCompliance(schema: SchemaNode, label: string) {
       expect(objects).toBeLessThan(100);
       expect(maxDepth).toBeLessThanOrEqual(6);
     });
+
+    // 8. Optional parameter count (hard Anthropic limit: 24)
+    it("optional parameter count ≤ 24 (Anthropic hard limit)", () => {
+      const optionals = countOptionalParams(schema);
+      console.log(`  ${label} optional params: ${optionals}/24`);
+      expect(optionals).toBeLessThanOrEqual(24);
+    });
   });
 }
 
@@ -295,7 +337,10 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — prompt contract", () => {
   it("factor category enum matches Zod FactorCategory", () => {
     const props = schema.properties as Record<string, SchemaNode>;
     const nodeProps = ((props.nodes as SchemaNode).items as SchemaNode).properties as Record<string, SchemaNode>;
-    const schemaCats = (nodeProps.category as SchemaNode).enum as string[];
+    // category is now nullable: { anyOf: [{ type: "string", enum: [...] }, { type: "null" }] }
+    const categoryNode = nodeProps.category as SchemaNode;
+    const schemaCats = categoryNode.enum as string[]
+      ?? ((categoryNode.anyOf as SchemaNode[])?.[0]?.enum as string[]);
     for (const zodCat of FactorCategory.options) {
       expect(schemaCats, `Zod FactorCategory "${zodCat}" missing`).toContain(zodCat);
     }
@@ -304,8 +349,12 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — prompt contract", () => {
   it("edge enums cover required values", () => {
     const props = schema.properties as Record<string, SchemaNode>;
     const edgeProps = ((props.edges as SchemaNode).items as SchemaNode).properties as Record<string, SchemaNode>;
-    expect((edgeProps.effect_direction as SchemaNode).enum).toContain("positive");
-    expect((edgeProps.effect_direction as SchemaNode).enum).toContain("negative");
+    // effect_direction is now nullable: { anyOf: [{ type: "string", enum: [...] }, { type: "null" }] }
+    const directionNode = edgeProps.effect_direction as SchemaNode;
+    const directionEnum = directionNode.enum as string[]
+      ?? ((directionNode.anyOf as SchemaNode[])?.[0]?.enum as string[]);
+    expect(directionEnum).toContain("positive");
+    expect(directionEnum).toContain("negative");
     expect((edgeProps.edge_type as SchemaNode).enum).toContain("directed");
     expect((edgeProps.edge_type as SchemaNode).enum).toContain("bidirected");
   });
