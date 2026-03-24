@@ -153,6 +153,18 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     }
   }
 
+  // ── Step 2c: Default missing strengthen_item fields ───────────────────────
+  // LLM structured output schema does not include action_type, but the Zod
+  // response schema (DraftGraphOutput) requires it. Default to "improve" for
+  // any LLM-generated items missing the field.
+  if (ctx.coaching && Array.isArray((ctx.coaching as any).strengthen_items)) {
+    for (const item of (ctx.coaching as any).strengthen_items) {
+      if (!item.action_type) {
+        item.action_type = "improve";
+      }
+    }
+  }
+
   // ── Step 3: Validate causal claims against post-STRP graph (Phase 2B) ────
   // Claims are validated here (not earlier) because node ID validation must
   // run against the post-repair graph — STRP may remove nodes.
