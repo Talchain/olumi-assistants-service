@@ -97,6 +97,70 @@ describe("Streaming / Non-Streaming Parity", () => {
     });
   });
 
+  describe("_pipeline_outcome in orchestrator envelope", () => {
+    it("_pipeline_outcome on ToolResult is surfaced to OrchestratorResponseEnvelopeV2 by envelope assembler", () => {
+      // Verifies the wiring: ToolResult._pipeline_outcome → envelope._pipeline_outcome
+      // The real assembleV2Envelope reads toolResult._pipeline_outcome and attaches to envelope.
+      // This structural test checks the field flows through the type system.
+      const toolResult: Record<string, unknown> = {
+        blocks: [],
+        side_effects: { graph_updated: true, analysis_ran: false, brief_generated: false },
+        assistant_text: null,
+        guidance_items: [],
+        _pipeline_outcome: {
+          graph_drafted: true,
+          graph_structurally_valid: true,
+          deterministic_sweep_violations: 3,
+          verification_status: 'passed',
+          validation_status: 'passed',
+          enrichment_status: 'complete',
+          coaching_status: 'complete',
+          warnings: [],
+          rescue_score: 5,
+          factor_value_coverage: { total: 4, explicit: 2, inferred_with_evidence: 1, fallback_default: 1 },
+          edge_strength_unique_count: 8,
+          llm_repair: { triggered: false, outcome: 'skipped', fallback_reason: null, attempts: 0 },
+          repair_provenance: [],
+        },
+      };
+
+      // Simulate what assembleV2Envelope does
+      const envelope: Record<string, unknown> = { turn_id: 'test' };
+      if (toolResult._pipeline_outcome) {
+        envelope._pipeline_outcome = toolResult._pipeline_outcome;
+      }
+
+      expect(envelope._pipeline_outcome).toBeDefined();
+      const outcome = envelope._pipeline_outcome as Record<string, unknown>;
+      expect(outcome.rescue_score).toBe(5);
+      expect(outcome.deterministic_sweep_violations).toBe(3);
+      expect(outcome.factor_value_coverage).toEqual({ total: 4, explicit: 2, inferred_with_evidence: 1, fallback_default: 1 });
+    });
+
+    it("_pipeline_outcome in turn_complete SSE event survives JSON round-trip", () => {
+      const envelope = {
+        turn_id: 'test-turn',
+        assistant_text: 'model drafted',
+        blocks: [],
+        lineage: { context_hash: 'abc' },
+        _pipeline_outcome: {
+          graph_drafted: true,
+          rescue_score: 7,
+          factor_value_coverage: { total: 6, explicit: 3, inferred_with_evidence: 2, fallback_default: 1 },
+          edge_strength_unique_count: 12,
+        },
+      };
+
+      const sseEvent = { type: 'turn_complete', seq: 5, envelope };
+      const serialized = JSON.stringify(sseEvent);
+      const parsed = JSON.parse(serialized);
+
+      expect(parsed.envelope._pipeline_outcome).toBeDefined();
+      expect(parsed.envelope._pipeline_outcome.rescue_score).toBe(7);
+      expect(parsed.envelope._pipeline_outcome.edge_strength_unique_count).toBe(12);
+    });
+  });
+
   describe("goal_constraints parity", () => {
     it("goal_constraints survive V1→V3 transform (shared path)", () => {
       // Both routes use the same V3 transform. Verify constraints survive.

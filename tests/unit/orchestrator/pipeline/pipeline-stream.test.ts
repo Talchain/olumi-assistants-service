@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { OrchestratorStreamEvent } from "../../../../src/orchestrator/pipeline/stream-events.js";
+import { OrchestratorStreamEventSchema } from "../../../../src/orchestrator/pipeline/stream-events.js";
 
 // Mock dependencies before imports
 vi.mock("../../../../src/orchestrator/pipeline/phase1-enrichment/index.js", () => ({
@@ -34,6 +35,9 @@ vi.mock("../../../../src/adapters/llm/router.js", () => ({
 }));
 vi.mock("../../../../src/orchestrator/intent-gate.js", () => ({
   classifyIntent: vi.fn(() => ({ tool: null, routing: "llm", confidence: "none" })),
+}));
+vi.mock("../../../../src/orchestrator/tools/registry.js", () => ({
+  isLongRunningTool: vi.fn((name: string) => ['run_analysis', 'draft_graph'].includes(name)),
 }));
 vi.mock("../../../../src/orchestrator/lookup/analysis-lookup.js", () => ({
   tryAnalysisLookup: vi.fn(() => ({ matched: false })),
@@ -732,6 +736,298 @@ describe("executePipelineStream", () => {
       expect(passedContext.analysis_response).not.toBe(contextAnalysis); // new object via spread
       expect(passedContext.analysis_response.analysis_status).toBe("completed");
       expect(passedContext.analysis_response.meta.response_hash).toBe("ctx-hash");
+    });
+  });
+
+  describe("progress events during tool execution", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function setupLLMPathWithTool(toolName: string) {
+      const enriched = makeEnrichedContext();
+      const envelope = makeEnvelope();
+      const chatResult = {
+        content: [
+          { type: "text" as const, text: "Working on it" },
+          { type: "tool_use" as const, id: "t1", name: toolName, input: {} },
+        ],
+        stop_reason: "tool_use" as const,
+        usage: { input_tokens: 100, output_tokens: 50 },
+        model: "test",
+        latencyMs: 500,
+      };
+      const llmResult = {
+        assistant_text: "Working on it",
+        tool_invocations: [{ name: toolName, input: {} }],
+        science_annotations: [],
+        raw_response: "",
+        suggested_actions: [],
+        diagnostics: null,
+        parse_warnings: [],
+      };
+
+      (phase1Enrich as any).mockReturnValue(enriched);
+      (phase3PrepareForStreaming as any).mockResolvedValue({
+        kind: "llm",
+        callArgs: { system: "sys", messages: [], tools: [] },
+        callOpts: { requestId: "req-1", timeoutMs: 30000 },
+        postProcess: () => llmResult,
+      });
+
+      mockLLMClient.streamChatWithTools = async function* () {
+        yield { type: "text_delta" as const, delta: "Working on it" };
+        yield { type: "message_complete" as const, result: chatResult };
+      };
+
+      (phase5Validate as any).mockReturnValue(envelope);
+      return { enriched, envelope };
+    }
+
+    it("emits progress events every 5s during long-running tool execution", async () => {
+      setupLLMPathWithTool("draft_graph");
+
+      // phase4Execute takes 12 seconds to complete
+      let resolvePhase4!: (v: any) => void;
+      (phase4Execute as any).mockReturnValue(new Promise(resolve => { resolvePhase4 = resolve; }));
+
+      const events: OrchestratorStreamEvent[] = [];
+      const gen = executePipelineStream(makeRequest(), "req-1", deps);
+
+      // Start consuming the generator
+      const done = (async () => {
+        for await (const event of gen) {
+          events.push(event);
+        }
+      })();
+
+      // Let microtasks flush so we reach the phase4 await
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Advance 5s — should get first progress event
+      await vi.advanceTimersByTimeAsync(5000);
+      const progressAfter5s = events.filter(e => e.type === 'progress');
+      expect(progressAfter5s.length).toBeGreaterThanOrEqual(1);
+
+      // Advance another 5s — should get second progress event
+      await vi.advanceTimersByTimeAsync(5000);
+      const progressAfter10s = events.filter(e => e.type === 'progress');
+      expect(progressAfter10s.length).toBeGreaterThanOrEqual(2);
+
+      // Resolve phase4
+      resolvePhase4({
+        blocks: [{ block_type: "graph_patch", data: {} }],
+        executed_tools: ["draft_graph"],
+        deferred_tools: [],
+        tool_latency_ms: 12000,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await done;
+
+      // Verify progress event shape
+      const firstProgress = events.find(e => e.type === 'progress') as any;
+      expect(firstProgress.tool_name).toBe("draft_graph");
+      expect(firstProgress.elapsed_ms).toBeGreaterThanOrEqual(5000);
+      expect(firstProgress.message).toBe("Building decision model\u2026");
+    });
+
+    it("no progress events for fast tool execution", async () => {
+      setupLLMPathWithTool("draft_graph");
+
+      // phase4Execute resolves immediately
+      (phase4Execute as any).mockResolvedValue({
+        blocks: [],
+        executed_tools: ["draft_graph"],
+        deferred_tools: [],
+        tool_latency_ms: 50,
+      });
+
+      const events: OrchestratorStreamEvent[] = [];
+      const gen = executePipelineStream(makeRequest(), "req-1", deps);
+      const done = (async () => {
+        for await (const event of gen) {
+          events.push(event);
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(200);
+      await done;
+
+      const progressEvents = events.filter(e => e.type === 'progress');
+      expect(progressEvents).toHaveLength(0);
+    });
+
+    it("full event ordering: tool_start → progress* → tool_result → block → turn_complete", async () => {
+      setupLLMPathWithTool("draft_graph");
+
+      let resolvePhase4!: (v: any) => void;
+      (phase4Execute as any).mockReturnValue(new Promise(resolve => { resolvePhase4 = resolve; }));
+
+      const events: OrchestratorStreamEvent[] = [];
+      const gen = executePipelineStream(makeRequest(), "req-1", deps);
+      const done = (async () => {
+        for await (const event of gen) {
+          events.push(event);
+        }
+      })();
+
+      // Advance to get progress events
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(5000);
+
+      // Resolve phase4
+      resolvePhase4({
+        blocks: [{ block_type: "graph_patch", data: {} }],
+        executed_tools: ["draft_graph"],
+        deferred_tools: [],
+        tool_latency_ms: 10500,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await done;
+
+      const types = events.map(e => e.type);
+
+      // Find indices for ordering verification
+      const turnStartIdx = types.indexOf("turn_start");
+      const firstTextDeltaIdx = types.indexOf("text_delta");
+      const toolStartIdx = types.indexOf("tool_start");
+      const firstProgressIdx = types.indexOf("progress");
+      const lastProgressIdx = types.lastIndexOf("progress");
+      const toolResultIdx = types.indexOf("tool_result");
+      const blockIdx = types.indexOf("block");
+      const turnCompleteIdx = types.indexOf("turn_complete");
+
+      expect(turnStartIdx).toBeLessThan(firstTextDeltaIdx);
+      expect(firstTextDeltaIdx).toBeLessThan(toolStartIdx);
+      expect(toolStartIdx).toBeLessThan(firstProgressIdx);
+      expect(lastProgressIdx).toBeLessThan(toolResultIdx);
+      expect(toolResultIdx).toBeLessThan(blockIdx);
+      expect(blockIdx).toBeLessThan(turnCompleteIdx);
+    });
+
+    it("abort during tool execution stops progress emission", async () => {
+      setupLLMPathWithTool("draft_graph");
+
+      const controller = new AbortController();
+
+      (phase4Execute as any).mockReturnValue(new Promise(() => {})); // never resolves
+
+      const events: OrchestratorStreamEvent[] = [];
+      const gen = executePipelineStream(makeRequest(), "req-1", deps, controller.signal);
+      const done = (async () => {
+        for await (const event of gen) {
+          events.push(event);
+        }
+      })();
+
+      // Let it get to the phase4 call
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(5000);
+
+      // Abort
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(5100);
+      await done;
+
+      // Should NOT have turn_complete
+      expect(events.some(e => e.type === "turn_complete")).toBe(false);
+      // Should NOT have tool_result
+      expect(events.some(e => e.type === "tool_result")).toBe(false);
+    });
+
+    it("progress events share the same seq counter as other events", async () => {
+      setupLLMPathWithTool("draft_graph");
+
+      let resolvePhase4!: (v: any) => void;
+      (phase4Execute as any).mockReturnValue(new Promise(resolve => { resolvePhase4 = resolve; }));
+
+      const events: OrchestratorStreamEvent[] = [];
+      const gen = executePipelineStream(makeRequest(), "req-1", deps);
+      const done = (async () => {
+        for await (const event of gen) {
+          events.push(event);
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(5000);
+
+      resolvePhase4({
+        blocks: [],
+        executed_tools: ["draft_graph"],
+        deferred_tools: [],
+        tool_latency_ms: 5500,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await done;
+
+      // All seq numbers must be monotonically increasing
+      for (let i = 1; i < events.length; i++) {
+        expect(events[i].seq).toBeGreaterThan(events[i - 1].seq);
+      }
+    });
+
+    it("turn_complete envelope is unchanged by progress events", async () => {
+      const { envelope } = setupLLMPathWithTool("draft_graph");
+
+      let resolvePhase4!: (v: any) => void;
+      (phase4Execute as any).mockReturnValue(new Promise(resolve => { resolvePhase4 = resolve; }));
+
+      const events: OrchestratorStreamEvent[] = [];
+      const gen = executePipelineStream(makeRequest(), "req-1", deps);
+      const done = (async () => {
+        for await (const event of gen) {
+          events.push(event);
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(5000);
+
+      resolvePhase4({
+        blocks: [],
+        executed_tools: ["draft_graph"],
+        deferred_tools: [],
+        tool_latency_ms: 5500,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await done;
+
+      const turnComplete = events.find(e => e.type === "turn_complete") as any;
+      expect(turnComplete).toBeDefined();
+      expect(turnComplete.envelope.turn_id).toBe(envelope.turn_id);
+      expect(turnComplete.envelope.assistant_text).toBe(envelope.assistant_text);
+      expect(turnComplete.envelope.lineage).toEqual(envelope.lineage);
+    });
+  });
+
+  describe("progress event Zod schema", () => {
+    it("validates a well-formed progress event", () => {
+      const result = OrchestratorStreamEventSchema.safeParse({
+        type: "progress",
+        seq: 5,
+        tool_name: "draft_graph",
+        elapsed_ms: 5000,
+        message: "Building decision model\u2026",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects progress event with missing fields", () => {
+      const result = OrchestratorStreamEventSchema.safeParse({
+        type: "progress",
+        seq: 5,
+        // missing tool_name, elapsed_ms, message
+      });
+      expect(result.success).toBe(false);
     });
   });
 });

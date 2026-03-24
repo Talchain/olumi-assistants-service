@@ -11,7 +11,7 @@
 import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
-import type { DraftInputWithCeeExtras, UnifiedPipelineOpts } from "../../cee/unified-pipeline/types.js";
+import type { DraftInputWithCeeExtras, UnifiedPipelineOpts, PipelineOutcome } from "../../cee/unified-pipeline/types.js";
 import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
@@ -61,6 +61,8 @@ export interface DraftGraphResult {
     prompt_version?: string;
     prompt_hash?: string;
   };
+  /** Pipeline outcome metadata from the CEE unified pipeline. */
+  pipelineOutcome?: PipelineOutcome;
 }
 
 // ============================================================================
@@ -203,6 +205,9 @@ export async function handleDraftGraph(
     "draft_graph completed",
   );
 
+  // Extract _pipeline_outcome from unified pipeline response (CEE-specific diagnostic metadata)
+  const pipelineOutcome = (body._pipeline_outcome as PipelineOutcome | undefined) ?? undefined;
+
   return {
     blocks: [block],
     assistantText,
@@ -211,6 +216,7 @@ export async function handleDraftGraph(
     draftWarnings,
     graphOutput,
     toolLLMTelemetry,
+    pipelineOutcome,
   };
 }
 

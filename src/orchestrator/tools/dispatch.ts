@@ -82,6 +82,8 @@ export interface ToolDispatchResult {
   deterministicAnswerTier?: 1 | 2 | 3;
   /** Tool-level LLM telemetry (from tools that make their own LLM calls). */
   toolLLMTelemetry?: ToolResult['_tool_llm_telemetry'];
+  /** CEE pipeline outcome metadata from draft_graph. */
+  pipelineOutcome?: ToolResult['_pipeline_outcome'];
 }
 
 export interface ToolDispatchOpts {
@@ -237,6 +239,7 @@ export async function dispatchToolHandler(
         guidanceItems: draftGuidance,
         routeMetadata: buildToolRouteMetadata('draft_graph'),
         toolLLMTelemetry: result.toolLLMTelemetry,
+        pipelineOutcome: result.pipelineOutcome,
       };
     }
 

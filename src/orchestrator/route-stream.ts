@@ -75,6 +75,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         disconnect_reason: null as string | null,
         event_count: 0,
         text_delta_count: 0,
+        progress_count: 0,
       };
 
       // Validate request — same schema as non-streaming
@@ -215,6 +216,9 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
               streamMetrics.time_to_first_text_delta_ms = Date.now() - startTime;
             }
           }
+          if (event.type === 'progress') {
+            streamMetrics.progress_count++;
+          }
           if (event.type === 'block' && streamMetrics.time_to_first_block_ms === 0) {
             streamMetrics.time_to_first_block_ms = Date.now() - startTime;
           }
@@ -226,9 +230,11 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
               event.envelope._diagnostic_trace.streaming_metrics = {
                 time_to_first_event_ms: streamMetrics.time_to_first_event_ms,
                 time_to_first_text_delta_ms: streamMetrics.time_to_first_text_delta_ms > 0 ? streamMetrics.time_to_first_text_delta_ms : null,
+                time_to_first_block_ms: streamMetrics.time_to_first_block_ms > 0 ? streamMetrics.time_to_first_block_ms : null,
                 total_stream_duration_ms: Date.now() - startTime,
                 event_count: streamMetrics.event_count,
                 text_delta_count: streamMetrics.text_delta_count,
+                progress_count: streamMetrics.progress_count,
                 disconnect_reason: streamMetrics.disconnect_reason,
               };
             }
