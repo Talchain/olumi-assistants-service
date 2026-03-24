@@ -110,6 +110,11 @@ function buildInitialContext(
       enrichment_status: 'skipped',
       coaching_status: 'partial',
       warnings: [],
+      rescue_score: 0,
+      factor_value_coverage: { total: 0, explicit: 0, inferred_with_evidence: 0, fallback_default: 0 },
+      edge_strength_unique_count: 0,
+      llm_repair: { triggered: false, outcome: 'skipped', fallback_reason: null, attempts: 0 },
+      repair_provenance: [],
     },
   };
 }
@@ -346,6 +351,32 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
 }
 
 /**
+ * Infer provenance source category from a repair violation code.
+ * Used to populate repair_provenance[].source without retrofitting every fix function.
+ */
+function inferProvenanceSource(code: string): 'structure' | 'brief_extraction' | 'fallback_default' {
+  const STRUCTURAL_CODES = new Set([
+    "CATEGORY_MISMATCH", "SIGN_MISMATCH", "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+    "INVALID_EDGE_REF", "GOAL_HAS_OUTGOING", "DECISION_HAS_INCOMING",
+    "INVALID_EDGE_TYPE", "CYCLE_DETECTED", "FORBIDDEN_EDGE_AUTO_FIXED",
+    "FACTOR_GOAL_EDGE_SPLIT", "NODE_LIMIT_EXCEEDED", "EDGE_LIMIT_EXCEEDED",
+    "GOAL_THRESHOLD_STRIPPED_NO_RAW", "GOAL_THRESHOLD_POSSIBLY_INFERRED",
+    "STATUS_QUO_FACTOR_WIRED", "STATUS_QUO_WIRED", "STATUS_QUO_NO_TARGETS",
+    "STATUS_QUO_STILL_INVALID", "DISCONNECTED_OBSERVABLE_PRUNED",
+    "UNREACHABLE_FACTOR_RETAINED", "UNREACHABLE_FACTOR_WIRED_TO_GOAL",
+    "UNREACHABLE_FACTOR_RECLASSIFIED", "COMPLEXITY_CAP_PRUNE",
+    "INVALID_INTERVENTION_REF",
+  ]);
+  const DEFAULT_CODES = new Set([
+    "CONTROLLABLE_MISSING_DATA", "OBSERVABLE_MISSING_DATA", "NAN_VALUE",
+    "EXTERNAL_HAS_DATA", "OBSERVABLE_EXTRA_DATA",
+  ]);
+  if (STRUCTURAL_CODES.has(code)) return 'structure';
+  if (DEFAULT_CODES.has(code)) return 'fallback_default';
+  return 'structure'; // conservative default for any unrecognized codes
+}
+
+/**
  * Attach _pipeline_outcome to any response body (success or error).
  * Safe for non-object bodies (returns body unchanged).
  */
@@ -441,13 +472,76 @@ export async function runUnifiedPipeline(
     // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
     await runStageRepair(ctx);
 
-    // Update sweep violations count from repair trace
+    // Update sweep violations count and diagnostic metrics from repair trace
     const sweepTrace = ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined;
     const bucketSummary = sweepTrace?.bucket_summary as Record<string, number> | undefined;
     if (bucketSummary) {
       ctx.pipelineOutcome.deterministic_sweep_violations =
         (bucketSummary.A ?? 0) + (bucketSummary.B ?? 0) + (bucketSummary.C ?? 0);
     }
+
+    // Rescue score (computed inside deterministic sweep)
+    if (typeof sweepTrace?.rescue_score === "number") {
+      ctx.pipelineOutcome.rescue_score = sweepTrace.rescue_score;
+    }
+
+    // LLM repair outcome
+    ctx.pipelineOutcome.llm_repair = {
+      triggered: ctx.llmRepairNeeded ?? false,
+      outcome: ctx.llmRepairNeeded
+        ? (ctx.repairFallbackReason ? 'rejected' : 'accepted')
+        : 'skipped',
+      fallback_reason: ctx.repairFallbackReason ?? null,
+      attempts: ctx.llmRepairNeeded ? 1 : 0,
+    };
+
+    // Factor value coverage + edge strength unique count (computed from graph)
+    if (ctx.graph) {
+      const graphNodes = (ctx.graph as any).nodes as Array<{ id: string; kind: string; data?: any }>;
+      const graphEdges = (ctx.graph as any).edges as Array<{ from: string; to: string; strength_mean?: number }>;
+
+      // Factor value coverage (three-tier):
+      //   explicit: extractionType is "explicit" or "observed" (real data from brief or environment)
+      //   inferred_with_evidence: extractionType is "inferred" but value differs from 0.5 default
+      //   fallback_default: no extractionType, or inferred with default 0.5
+      const factors = graphNodes.filter((n) => n.kind === "factor");
+      let explicit = 0, inferredWithEvidence = 0, fallbackDefault = 0;
+      for (const f of factors) {
+        const et = f.data?.extractionType;
+        if (et === "explicit" || et === "observed") explicit++;
+        else if (et === "inferred" && f.data?.value !== 0.5) inferredWithEvidence++;
+        else fallbackDefault++;
+      }
+      ctx.pipelineOutcome.factor_value_coverage = {
+        total: factors.length,
+        explicit,
+        inferred_with_evidence: inferredWithEvidence,
+        fallback_default: fallbackDefault,
+      };
+
+      // Edge strength unique count (exclude structural edges)
+      const nodeKindMap = new Map<string, string>();
+      for (const n of graphNodes) nodeKindMap.set(n.id, n.kind);
+      const strengths = new Set<number>();
+      for (const e of graphEdges) {
+        const fk = nodeKindMap.get(e.from);
+        const tk = nodeKindMap.get(e.to);
+        if ((fk === "decision" && tk === "option") || (fk === "option" && tk === "factor")) continue;
+        if (e.strength_mean !== undefined) strengths.add(Math.round(e.strength_mean * 1000) / 1000);
+      }
+      ctx.pipelineOutcome.edge_strength_unique_count = strengths.size;
+    }
+
+    // Repair provenance — map from deterministicRepairs
+    ctx.pipelineOutcome.repair_provenance = (ctx.deterministicRepairs ?? []).map((r) => ({
+      rule: r.code,
+      code: r.code,
+      node_or_edge_id: r.path,
+      field: "graph",
+      before: null,
+      after: null,
+      source: inferProvenanceSource(r.code),
+    }));
 
     { const er = drainEarlyReturn(ctx); if (er) return er; }
 

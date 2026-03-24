@@ -35,6 +35,11 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
+  },
+  emit: vi.fn(),
+  TelemetryEvents: {
+    FactorBaselineDefaulted: "FactorBaselineDefaulted",
   },
 }));
 
@@ -1212,6 +1217,81 @@ describe("simpleRepair connectivity", () => {
 
       expect(result.version).toBe("1");
       expect(result.default_seed).toBe(123);
+    });
+  });
+
+  describe("invalid edge pattern removal", () => {
+    it("removes outcome→outcome edges", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_1", kind: "factor", label: "Factor 1" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
+          { id: "out_2", kind: "outcome", label: "Outcome 2" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "dec_1", to: "opt_a", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "opt_a", to: "fac_1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "fac_1", to: "out_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+          { from: "out_1", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+          { from: "out_1", to: "out_2", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.5, effect_direction: "positive" },
+        ],
+      });
+      const result = simpleRepair(graph);
+      const invalidEdges = result.edges.filter((e) => {
+        const fNode = result.nodes.find((n) => n.id === e.from);
+        const tNode = result.nodes.find((n) => n.id === e.to);
+        return fNode?.kind === "outcome" && tNode?.kind === "outcome";
+      });
+      expect(invalidEdges).toHaveLength(0);
+    });
+
+    it("removes outcome→risk edges", () => {
+      const graph = createTestGraph({
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "Option A" },
+          { id: "fac_1", kind: "factor", label: "Factor 1" },
+          { id: "out_1", kind: "outcome", label: "Outcome 1" },
+          { id: "risk_1", kind: "risk", label: "Risk 1" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "dec_1", to: "opt_a", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "opt_a", to: "fac_1", strength_mean: 1.0, strength_std: 0.01, belief_exists: 1.0, effect_direction: "positive" },
+          { from: "fac_1", to: "out_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+          { from: "out_1", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+          { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.5, effect_direction: "positive" },
+        ],
+      });
+      const result = simpleRepair(graph);
+      const invalidEdges = result.edges.filter((e) => {
+        const fNode = result.nodes.find((n) => n.id === e.from);
+        const tNode = result.nodes.find((n) => n.id === e.to);
+        return fNode?.kind === "outcome" && tNode?.kind === "risk";
+      });
+      expect(invalidEdges).toHaveLength(0);
+    });
+  });
+
+  describe("baseline default value consistency", () => {
+    it("controllable factor gets 0.5 default from ensureControllableFactorBaselines", async () => {
+      const { ensureControllableFactorBaselines } = await import("../../src/adapters/llm/normalisation.js");
+      const response = {
+        nodes: [
+          { id: "dec_1", kind: "decision", label: "D" },
+          { id: "opt_a", kind: "option", label: "A" },
+          { id: "fac_1", kind: "factor", label: "F", category: "controllable" },
+          { id: "goal_1", kind: "goal", label: "G" },
+        ],
+        edges: [{ from: "dec_1", to: "opt_a" }, { from: "opt_a", to: "fac_1" }],
+      };
+      const result = ensureControllableFactorBaselines(response);
+      const factor = result.response.nodes.find((n: any) => n.id === "fac_1");
+      expect(factor?.data?.value).toBe(0.5);
+      expect(factor?.data?.extractionType).toBe("inferred");
     });
   });
 });

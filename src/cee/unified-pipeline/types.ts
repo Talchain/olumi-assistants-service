@@ -193,6 +193,30 @@ export interface PipelineWarning {
   degraded: boolean;
 }
 
+export interface RepairProvenanceEntry {
+  rule: string;
+  code: string;
+  node_or_edge_id: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  source: 'structure' | 'brief_extraction' | 'fallback_default';
+}
+
+export interface LlmRepairOutcome {
+  triggered: boolean;
+  outcome: 'accepted' | 'rejected' | 'timed_out' | 'skipped';
+  fallback_reason: string | null;
+  attempts: number;
+}
+
+export interface FactorValueCoverage {
+  total: number;
+  explicit: number;
+  inferred_with_evidence: number;
+  fallback_default: number;
+}
+
 /**
  * Present on every response (success and error). Tracks which stages
  * passed, were skipped, or failed with degradation.
@@ -206,6 +230,13 @@ export interface PipelineOutcome {
   enrichment_status: EnrichmentStatus;
   coaching_status: CoachingStatus;
   warnings: PipelineWarning[];
+
+  // Deterministic pipeline diagnostic metrics (CEE-only, not forwarded through orchestrator)
+  rescue_score: number;
+  factor_value_coverage: FactorValueCoverage;
+  edge_strength_unique_count: number;
+  llm_repair: LlmRepairOutcome;
+  repair_provenance: RepairProvenanceEntry[];
 }
 
 /**

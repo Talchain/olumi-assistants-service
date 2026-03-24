@@ -224,7 +224,7 @@ export interface ScoreResult {
 // Prompt type system
 // =============================================================================
 
-export type PromptType = "draft_graph" | "edit_graph" | "decision_review" | "research" | "orchestrator" | "repair_graph";
+export type PromptType = "draft_graph" | "edit_graph" | "decision_review" | "research" | "orchestrator" | "repair_graph" | "validate_graph";
 
 // =============================================================================
 // Generic fixture / score for multi-type support
@@ -527,6 +527,41 @@ export interface RepairGraphScore {
   external_prior_present: boolean;
   inbound_sum_valid: boolean;
   no_json_comments: boolean;
+  overall: number;
+}
+
+// =============================================================================
+// Validate-graph types
+// =============================================================================
+
+/** Expected edge properties for validate_graph scoring. */
+export interface ValidateGraphExpectedEdge {
+  from: string;
+  to: string;
+}
+
+export interface ValidateGraphFixture extends BaseFixture {
+  /** The graph to send for independent parameter estimation. */
+  graph: ParsedGraph;
+  /** Brief text for context. */
+  brief: string;
+  /** Scoring expectations. */
+  expected: {
+    /** In-scope directed causal edges (excludes structural + bidirected). */
+    in_scope_edges: ValidateGraphExpectedEdge[];
+  };
+}
+
+export interface ValidateGraphScore {
+  valid_json: boolean;
+  edge_coverage: boolean;
+  budget_constraint: boolean;
+  uncertainty_constraint: boolean;
+  basis_consistency: boolean;
+  no_zero_means: boolean;
+  differentiation: boolean;
+  edge_ordering: boolean;
+  precision: boolean;
   overall: number;
 }
 

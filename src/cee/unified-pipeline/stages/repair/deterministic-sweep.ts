@@ -13,7 +13,9 @@
 
 import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
+import { isDirectedEdge } from "../../../../schemas/graph.js";
 import type { ValidationIssue } from "../../../../validators/graph-validator.types.js";
+import { fuzzyMatchNodeId } from "../../../../validators/structural-reconciliation.js";
 import { NAN_FIX_SIGNATURE_STD } from "../../../constants.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 import { detectEdgeFormat, canonicalStructuralEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
@@ -39,6 +41,7 @@ const BUCKET_A_CODES = new Set([
   "DECISION_HAS_INCOMING",
   "NODE_LIMIT_EXCEEDED",   // Unfixable here; passes through for upstream handling
   "EDGE_LIMIT_EXCEEDED",   // Unfixable here; passes through for upstream handling
+  "CYCLE_DETECTED",        // Deterministic: remove weakest back-edge iteratively
 ]);
 
 /** Bucket B: deterministic, only when specific violation is cited */
@@ -48,6 +51,7 @@ const BUCKET_B_CODES = new Set([
   "OBSERVABLE_MISSING_DATA",
   "OBSERVABLE_EXTRA_DATA",
   "EXTERNAL_HAS_DATA",
+  "INVALID_INTERVENTION_REF",  // Fuzzy-match intervention keys against factor node IDs
 ]);
 
 /** Bucket C: semantic, LLM only — we identify these to decide llmRepairNeeded */
@@ -59,11 +63,11 @@ const BUCKET_C_CODES = new Set([
   "MISSING_GOAL",
   "MISSING_DECISION",
   "INVALID_EDGE_TYPE",
-  "CYCLE_DETECTED",
+  // CYCLE_DETECTED: moved to Bucket A (deterministic back-edge removal)
   "OPTIONS_IDENTICAL",
   "GOAL_NUMBER_AS_FACTOR",
   "INSUFFICIENT_OPTIONS",
-  "INVALID_INTERVENTION_REF",
+  // INVALID_INTERVENTION_REF: moved to Bucket B (fuzzy matching)
 ]);
 
 // ---------------------------------------------------------------------------
@@ -354,7 +358,9 @@ function fixControllableMissingData(
     const data = (node as any).data ?? {};
     let changed = false;
 
-    if (data.value === undefined) {
+    // INVARIANT: Never overwrite an explicit or earlier-justified value.
+    // Only default when truly absent (Stage 1 adapter sets 0.5; this is a safety net).
+    if (data.value === undefined || data.value === null) {
       data.value = 0.5;
       changed = true;
     }
@@ -521,6 +527,284 @@ function fixExternalHasData(
   }
 
   return { repairs, fieldDeletions: deletions };
+}
+
+// ---------------------------------------------------------------------------
+// Bucket A: Deterministic cycle breaking
+// ---------------------------------------------------------------------------
+
+/** Check if an edge is structural (decision→option or canonical option→factor). */
+function isStructuralEdge(edge: EdgeT, nodeKindMap: Map<string, string>): boolean {
+  const fk = nodeKindMap.get(edge.from);
+  const tk = nodeKindMap.get(edge.to);
+  return (fk === "decision" && tk === "option") ||
+         (fk === "option" && tk === "factor" && edge.strength_mean === 1.0);
+}
+
+/** Find one cycle via DFS. Returns edges forming the cycle, or null if DAG. */
+function findOneCycleDFS(nodes: NodeT[], edges: EdgeT[]): EdgeT[] | null {
+  const adj = new Map<string, Array<{ edge: EdgeT; to: string }>>();
+  for (const node of nodes) adj.set(node.id, []);
+  for (const edge of edges) {
+    if (!isDirectedEdge(edge)) continue;
+    const list = adj.get(edge.from);
+    if (list) list.push({ edge, to: edge.to });
+  }
+
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map<string, number>();
+  const parentEdge = new Map<string, EdgeT | null>();
+  const parentNode = new Map<string, string | null>();
+  for (const node of nodes) {
+    color.set(node.id, WHITE);
+    parentEdge.set(node.id, null);
+    parentNode.set(node.id, null);
+  }
+
+  for (const startNode of nodes) {
+    if (color.get(startNode.id) !== WHITE) continue;
+    const stack: Array<{ nodeId: string; neighborIdx: number }> = [{ nodeId: startNode.id, neighborIdx: 0 }];
+    color.set(startNode.id, GRAY);
+
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      const neighbors = adj.get(top.nodeId) ?? [];
+      if (top.neighborIdx >= neighbors.length) {
+        color.set(top.nodeId, BLACK);
+        stack.pop();
+        continue;
+      }
+      const { edge, to } = neighbors[top.neighborIdx];
+      top.neighborIdx++;
+
+      if (color.get(to) === GRAY) {
+        const cycleEdges: EdgeT[] = [edge];
+        let current = top.nodeId;
+        const maxSteps = nodes.length; // Safety: cycle can't be longer than node count
+        let steps = 0;
+        while (current !== to && steps < maxSteps) {
+          const pe = parentEdge.get(current);
+          if (!pe) break;
+          cycleEdges.push(pe);
+          current = parentNode.get(current)!;
+          steps++;
+        }
+        return cycleEdges;
+      }
+      if (color.get(to) === WHITE) {
+        color.set(to, GRAY);
+        parentEdge.set(to, edge);
+        parentNode.set(to, top.nodeId);
+        stack.push({ nodeId: to, neighborIdx: 0 });
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Deterministically break all cycles by iteratively removing the weakest back-edge.
+ * Structural edges (decision→option, canonical option→factor) are never removed.
+ * Bidirected edges are excluded from cycle detection.
+ */
+export function fixCyclesDeterministic(graph: GraphT): Repair[] {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  let edges = (graph as any).edges as EdgeT[];
+
+  const MAX_ITERATIONS = 50;
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    const cycleEdges = findOneCycleDFS(nodes, edges);
+    if (!cycleEdges) break;
+
+    const nodeKindMap = new Map<string, string>();
+    for (const n of nodes) nodeKindMap.set(n.id, n.kind);
+
+    const removable = cycleEdges.filter((e) => !isStructuralEdge(e, nodeKindMap));
+    if (removable.length === 0) {
+      log.error({
+        event: "cee.deterministic_sweep.cycle_all_structural",
+        cycle_edges: cycleEdges.map((e) => `${e.from}→${e.to}`),
+      }, "Cycle contains only structural edges — cannot break deterministically");
+      break;
+    }
+
+    let weakest: EdgeT = removable[0];
+    let weakestIdx = edges.indexOf(weakest);
+    for (let i = 1; i < removable.length; i++) {
+      const candidate = removable[i];
+      const candidateIdx = edges.indexOf(candidate);
+      const candidateBelief = candidate.belief_exists ?? 1.0;
+      const weakestBelief = weakest.belief_exists ?? 1.0;
+      if (candidateBelief < weakestBelief || (candidateBelief === weakestBelief && candidateIdx > weakestIdx)) {
+        weakest = candidate;
+        weakestIdx = candidateIdx;
+      }
+    }
+
+    edges = edges.filter((e) => e !== weakest);
+    (graph as any).edges = edges;
+
+    repairs.push({
+      code: "CYCLE_DETECTED",
+      path: `edges[${weakest.from}→${weakest.to}]`,
+      action: `Removed back-edge to break cycle (belief_exists=${weakest.belief_exists ?? "undefined"})`,
+    });
+    log.info({
+      event: "cee.deterministic_sweep.cycle_broken",
+      removed_edge: `${weakest.from}→${weakest.to}`,
+      belief_exists: weakest.belief_exists,
+      iteration: iter + 1,
+    }, `Cycle broken: removed ${weakest.from}→${weakest.to}`);
+  }
+  return repairs;
+}
+
+// ---------------------------------------------------------------------------
+// Bucket B: Fuzzy intervention reference matching
+// ---------------------------------------------------------------------------
+
+/**
+ * Fix INVALID_INTERVENTION_REF violations by fuzzy-matching intervention keys
+ * against actual factor node IDs. Uses fuzzyMatchNodeId (substring-based with
+ * strict uniqueness: returns undefined if >1 candidate matches, which is
+ * stricter than a 0.1-similarity threshold — it requires exactly 1 match).
+ */
+function fixInvalidInterventionRefs(graph: GraphT): Repair[] {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  const factorNodeIds: string[] = [];
+  const factorLabelMap = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.kind === "factor") {
+      factorNodeIds.push(node.id);
+      if (node.label) factorLabelMap.set(node.id, node.label);
+    }
+  }
+  const factorIdSet = new Set(factorNodeIds);
+
+  for (const node of nodes) {
+    if (node.kind !== "option") continue;
+    const data = (node as any).data;
+    if (!data?.interventions || typeof data.interventions !== "object") continue;
+
+    const interventions = data.interventions as Record<string, unknown>;
+    const keysToRemap: Array<{ oldKey: string; newKey: string }> = [];
+    const keysToRemove: string[] = [];
+
+    for (const key of Object.keys(interventions)) {
+      if (factorIdSet.has(key)) continue;
+
+      // 1. Exact prefix match
+      const prefixMatches = factorNodeIds.filter((fid) => fid.startsWith(key) || key.startsWith(fid));
+      if (prefixMatches.length === 1) { keysToRemap.push({ oldKey: key, newKey: prefixMatches[0] }); continue; }
+
+      // 2. Fuzzy match (strict uniqueness — undefined if ambiguous)
+      const fuzzyMatch = fuzzyMatchNodeId(key, factorNodeIds, factorLabelMap);
+      if (fuzzyMatch) { keysToRemap.push({ oldKey: key, newKey: fuzzyMatch }); continue; }
+
+      // 3. No match — remove
+      keysToRemove.push(key);
+    }
+
+    for (const { oldKey, newKey } of keysToRemap) {
+      interventions[newKey] = interventions[oldKey];
+      delete interventions[oldKey];
+      for (const edge of edges) { if (edge.from === node.id && edge.to === oldKey) edge.to = newKey; }
+      repairs.push({ code: "INVALID_INTERVENTION_REF", path: `nodes[${node.id}].data.interventions[${oldKey}]`, action: `Fuzzy-matched "${oldKey}" → "${newKey}"` });
+      log.info({ event: "cee.deterministic_sweep.intervention_ref_remapped", option_id: node.id, old_key: oldKey, new_key: newKey }, `Remapped intervention ref: ${oldKey} → ${newKey}`);
+    }
+
+    for (const key of keysToRemove) {
+      delete interventions[key];
+      repairs.push({ code: "INVALID_INTERVENTION_REF", path: `nodes[${node.id}].data.interventions[${key}]`, action: `Removed unmatched key "${key}"` });
+      log.warn({ event: "cee.deterministic_sweep.intervention_ref_removed", option_id: node.id, key }, `Removed unmatched intervention ref: ${key}`);
+    }
+  }
+  return repairs;
+}
+
+// ---------------------------------------------------------------------------
+// Proactive: Remaining forbidden edge removal
+// ---------------------------------------------------------------------------
+
+const SIMPLE_REMOVE_PATTERNS: ReadonlyArray<[string, string]> = [
+  ["decision", "outcome"], ["decision", "risk"], ["decision", "factor"],
+  ["outcome", "outcome"], ["risk", "risk"],
+];
+
+/**
+ * Remove remaining forbidden edge patterns not covered by existing shortcut handlers.
+ * Logs a reachability warning when removal disconnects a target node from all inbound edges.
+ */
+export function fixRemainingForbiddenEdges(
+  graph: GraphT,
+  requestId?: string,
+): { repairs: Repair[]; removedCount: number } {
+  const repairs: Repair[] = [];
+  const nodes = (graph as any).nodes as NodeT[];
+  const edges = (graph as any).edges as EdgeT[];
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) nodeKindMap.set(node.id, node.kind);
+
+  const keptEdges: EdgeT[] = [];
+  let removedCount = 0;
+  const removedTargets: string[] = [];
+
+  for (const edge of edges) {
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+    const isForbidden = fromKind && toKind &&
+      SIMPLE_REMOVE_PATTERNS.some(([fk, tk]) => fk === fromKind && tk === toKind);
+
+    if (isForbidden) {
+      removedCount++;
+      removedTargets.push(edge.to);
+      repairs.push({ code: "FORBIDDEN_EDGE_AUTO_FIXED", path: `edges[${edge.from}→${edge.to}]`, action: `Removed forbidden ${fromKind}→${toKind} edge` });
+      log.info({ event: "cee.deterministic_sweep.forbidden_edge_removed", from: edge.from, to: edge.to, pattern: `${fromKind}_${toKind}`, request_id: requestId }, `Removed forbidden edge: ${fromKind}→${toKind} (${edge.from}→${edge.to})`);
+    } else {
+      keptEdges.push(edge);
+    }
+  }
+
+  if (removedCount > 0) {
+    (graph as any).edges = keptEdges;
+
+    // Check if any removed target lost ALL inbound edges — log reachability warning
+    const uniqueTargets = [...new Set(removedTargets)];
+    for (const targetId of uniqueTargets) {
+      const hasInbound = keptEdges.some((e) => e.to === targetId);
+      if (!hasInbound) {
+        log.warn({
+          event: "cee.deterministic_sweep.forbidden_edge_disconnected_target",
+          target_id: targetId,
+          target_kind: nodeKindMap.get(targetId),
+          request_id: requestId,
+        }, `Forbidden edge removal disconnected target "${targetId}" — connectivity substep will attempt rewiring`);
+      }
+    }
+  }
+
+  return { repairs, removedCount };
+}
+
+// ---------------------------------------------------------------------------
+// Rescue score computation
+// ---------------------------------------------------------------------------
+
+function computeRescueScore(repairs: Repair[], unreachableResult: { reclassified: string[] }, llmRepairNeeded: boolean): number {
+  let score = 0;
+  for (const r of repairs) {
+    if (BUCKET_A_CODES.has(r.code)) score += 1;
+    else if (BUCKET_B_CODES.has(r.code)) score += 2;
+    else score += 1;
+  }
+  score += (unreachableResult.reclassified?.length ?? 0) * 2;
+  if (llmRepairNeeded) score += 10;
+  return score;
 }
 
 // ---------------------------------------------------------------------------
@@ -1506,6 +1790,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     allRepairs.push(...fixInvalidEdgeRefs(graph, bucketA));
     allRepairs.push(...fixGoalHasOutgoing(graph, bucketA));
     allRepairs.push(...fixDecisionHasIncoming(graph, bucketA));
+    allRepairs.push(...fixCyclesDeterministic(graph));
 
     // Apply Bucket B only for codes present in violations
     if (citedBCodes.has("CATEGORY_MISMATCH")) {
@@ -1526,6 +1811,9 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       const extResult = fixExternalHasData(graph, bucketB);
       allRepairs.push(...extResult.repairs);
       allDeletions.push(...extResult.fieldDeletions);
+    }
+    if (citedBCodes.has("INVALID_INTERVENTION_REF")) {
+      allRepairs.push(...fixInvalidInterventionRefs(graph));
     }
   }
 
@@ -1606,6 +1894,18 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
         skipped_count: optionGoalResult.skippedCount,
       }, `Fixed ${optionGoalResult.removedCount} option→goal shortcut(s)`);
     }
+  }
+
+  // Step 4g: Remaining forbidden edge patterns — ALWAYS run.
+  const remainingForbiddenResult = fixRemainingForbiddenEdges(graph, ctx.requestId);
+  allRepairs.push(...remainingForbiddenResult.repairs);
+
+  if (remainingForbiddenResult.removedCount > 0) {
+    log.info({
+      event: "cee.deterministic_sweep.remaining_forbidden_edges",
+      request_id: ctx.requestId,
+      removed_count: remainingForbiddenResult.removedCount,
+    }, `Removed ${remainingForbiddenResult.removedCount} remaining forbidden edge(s)`);
   }
 
   // Step 5: Proactive unreachable factor handling — ALWAYS run regardless of violations.
@@ -1736,6 +2036,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
       option_goal_shortcuts_removed: optionGoalResult.removedCount,
       option_goal_shortcuts_rerouted: optionGoalResult.rerouted,
       option_goal_shortcuts_skipped: optionGoalResult.skippedCount,
+      remaining_forbidden_edges_removed: remainingForbiddenResult.removedCount,
       disconnected_observables_pruned: disconnectedObservableResult.pruned,
       complexity_cap_pruned: complexityCapResult.prunedCount,
       status_quo: {
@@ -1754,6 +2055,7 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
         edges_before: edgesBefore,
         edges_after: ((graph as any).edges as EdgeT[]).length,
       },
+      rescue_score: computeRescueScore(allRepairs, unreachableResult, llmRepairNeeded),
     },
   };
 
