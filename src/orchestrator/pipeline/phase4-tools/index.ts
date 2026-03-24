@@ -133,6 +133,7 @@ export async function phase4Execute(
   let appliedChanges: ToolResult['applied_changes'];
   let deterministicAnswerTier: ToolResult['deterministic_answer_tier'];
   let toolLLMTelemetry: ToolResult['_tool_llm_telemetry'];
+  let pipelineOutcome: ToolResult['_pipeline_outcome'];
 
   for (const invocation of toExecute) {
     // Stage policy guard — skip tool if not allowed at current stage
@@ -208,6 +209,9 @@ export async function phase4Execute(
     }
     if (result._tool_llm_telemetry) {
       toolLLMTelemetry = result._tool_llm_telemetry;
+    }
+    if (result._pipeline_outcome) {
+      pipelineOutcome = result._pipeline_outcome;
     }
 
     // Accumulate side effects from the actual tool result, not the tool name.
@@ -288,6 +292,7 @@ export async function phase4Execute(
     ...(appliedChanges && { applied_changes: appliedChanges }),
     ...(deterministicAnswerTier !== undefined && { deterministic_answer_tier: deterministicAnswerTier }),
     ...(toolLLMTelemetry && { _tool_llm_telemetry: toolLLMTelemetry }),
+    ...(pipelineOutcome && { _pipeline_outcome: pipelineOutcome }),
     executed_tools: executedTools,
     deferred_tools: deferred.map(t => t.name),
     ...(stageFallbackInjected && { stage_fallback_injected: true }),
@@ -350,6 +355,7 @@ export function createProductionToolDispatcher(
         ...(result.appliedChanges && { applied_changes: result.appliedChanges }),
         ...(result.deterministicAnswerTier !== undefined && { deterministic_answer_tier: result.deterministicAnswerTier }),
         ...(result.toolLLMTelemetry && { _tool_llm_telemetry: result.toolLLMTelemetry }),
+        ...(result.pipelineOutcome && { _pipeline_outcome: result.pipelineOutcome }),
       };
     },
   };

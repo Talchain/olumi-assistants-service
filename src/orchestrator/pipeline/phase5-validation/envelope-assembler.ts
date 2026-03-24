@@ -271,6 +271,10 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     envelope.applied_changes = toolResult.applied_changes;
   }
 
+  if (toolResult._pipeline_outcome) {
+    envelope._pipeline_outcome = toolResult._pipeline_outcome;
+  }
+
   if (toolResult.deterministic_answer_tier !== undefined) {
     envelope.deterministic_answer_tier = toolResult.deterministic_answer_tier;
   }

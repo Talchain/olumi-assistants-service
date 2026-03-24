@@ -478,6 +478,8 @@ export interface ToolResult {
   applied_changes?: AppliedChanges;
   /** Which explain_results tier resolved this turn: 1 = cached, 2 = review data, 3 = LLM. */
   deterministic_answer_tier?: 1 | 2 | 3;
+  /** CEE pipeline outcome metadata from draft_graph. Surfaced in turn_complete envelope. */
+  _pipeline_outcome?: import("../../cee/unified-pipeline/types.js").PipelineOutcome;
   /**
    * Tool-level LLM call telemetry (e.g. from draft_graph or edit_graph).
    * Additive — absent when the tool did not make its own LLM call.
@@ -602,6 +604,8 @@ export interface OrchestratorResponseEnvelopeV2 {
   diagnostics?: string;
   /** Parse warnings from XML envelope extraction. Non-production only. */
   parse_warnings?: string[];
+  /** CEE pipeline outcome metadata — progressive degradation diagnostics from draft_graph. */
+  _pipeline_outcome?: import("../../cee/unified-pipeline/types.js").PipelineOutcome;
   _route_metadata?: RouteMetadata;
   _debug_bundle?: TurnDebugBundle;
   /**

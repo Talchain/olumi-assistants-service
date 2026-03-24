@@ -33,6 +33,7 @@ import { routeSystemEvent, appendSystemMessages } from "../system-event-router.j
 import { getAdapter } from "../../adapters/llm/router.js";
 import { classifyIntent, classifyIntentWithContext } from "../intent-gate.js";
 import type { IntentGateResult } from "../intent-gate.js";
+import { isLongRunningTool } from "../tools/registry.js";
 import { config } from "../../config/index.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { OrchestratorStreamEvent } from "./stream-events.js";
@@ -42,8 +43,14 @@ import { DailyBudgetExceededError } from "../../adapters/llm/errors.js";
 import { normalizeAnalysisEnvelope } from "../analysis-state.js";
 import { emitTurnTrace, attachDiagnosticTrace } from "./pipeline.js";
 
-// Long-running tools that warrant a tool_start event with long_running: true
-const LONG_RUNNING_TOOLS = new Set(['run_analysis', 'draft_graph']);
+// Human-readable progress messages for long-running tools.
+// Falls back to DEFAULT_PROGRESS_MESSAGE for unknown tools.
+const PROGRESS_MESSAGES: Record<string, string> = {
+  draft_graph: 'Building decision model\u2026',
+  run_analysis: 'Running analysis\u2026',
+};
+const DEFAULT_PROGRESS_MESSAGE = 'Processing\u2026';
+const PROGRESS_INTERVAL_MS = 5_000;
 
 /** Wrapper error for tool dispatch failures — allows mapErrorToStreamEvent to use TOOL_ERROR code. */
 class ToolDispatchError extends Error {
@@ -241,10 +248,15 @@ export async function* executePipelineStream(
       });
     }
 
-    // Phase 4: Tool Execution — yield events per tool
-    let toolResult: { result: Phase4Result; events: OrchestratorStreamEvent[] } | null;
+    // Phase 4: Tool Execution — yield events per tool with live progress
+    //
+    // resultHolder passes the Phase4Result back from the async generator.
+    // Async generators can only yield values; they cannot return a result to
+    // the caller through `yield*`. The holder is a mutable container that the
+    // generator assigns before its final yield.
+    const phase4ResultHolder: { result: Phase4Result | null } = { result: null };
     try {
-      toolResult = await executePhase4WithEvents(
+      yield* executePhase4WithEvents(
         llmResult,
         enrichedContext,
         deps,
@@ -252,6 +264,7 @@ export async function* executePipelineStream(
         request.message,
         signal,
         () => seq++,
+        phase4ResultHolder,
       );
     } catch (phase4Error) {
       // Wrap tool dispatch errors so mapErrorToStreamEvent can distinguish them
@@ -262,12 +275,8 @@ export async function* executePipelineStream(
       throw wrapped;
     }
 
-    if (!toolResult) return; // aborted
-
-    // Yield tool events
-    for (const event of toolResult.events) {
-      yield event;
-    }
+    if (!phase4ResultHolder.result) return; // aborted
+    const toolResult = { result: phase4ResultHolder.result };
 
     if (signal?.aborted) return;
 
@@ -403,16 +412,19 @@ export async function* executePipelineStream(
 }
 
 /**
- * Execute phase4 and collect streaming events to yield.
- * Returns the Phase4Result and the events to yield, or null if aborted.
+ * Execute phase4 as an async generator that yields streaming events in real-time.
  *
- * Note: phase4Execute runs all tools before returning, so events are emitted
- * post-hoc. tool_start/tool_result pairs bracket each executed tool, and
- * blocks are emitted once (after tool events) to avoid duplication — blocks
- * are aggregated across all tools in Phase4Result and cannot be attributed
- * to individual tools without modifying phase4Execute.
+ * Emits tool_start BEFORE execution begins, progress events every 5s during
+ * execution, then tool_result and block events once execution completes.
+ *
+ * The Phase4Result is passed back via `resultHolder` because async generators
+ * can only yield values — `yield*` does not propagate the generator's return
+ * value to the delegating generator.
+ *
+ * The progress interval is explicitly cleared on every exit path (completion,
+ * error, abort) to prevent leaked timers after the stream closes.
  */
-async function executePhase4WithEvents(
+async function* executePhase4WithEvents(
   llmResult: LLMResult,
   enrichedContext: EnrichedContext,
   deps: PipelineDeps,
@@ -420,43 +432,127 @@ async function executePhase4WithEvents(
   userMessage: string,
   signal: AbortSignal | undefined,
   nextSeq: () => number,
-): Promise<{ result: Phase4Result; events: OrchestratorStreamEvent[] } | null> {
-  const events: OrchestratorStreamEvent[] = [];
+  resultHolder: { result: Phase4Result | null },
+): AsyncGenerator<OrchestratorStreamEvent> {
+  // Pre-compute which tool will be the primary (long-running) tool.
+  // Mirrors the reorder logic in phase4-tools/index.ts:90-97.
+  const longRunning = llmResult.tool_invocations.filter(t => isLongRunningTool(t.name));
+  const lightweight = llmResult.tool_invocations.filter(t => !isLongRunningTool(t.name));
+  const primaryTool = longRunning[0]?.name ?? lightweight[0]?.name ?? null;
 
-  // Run phase4Execute normally (non-streaming)
-  const startTime = Date.now();
-  const toolResult = await phase4Execute(llmResult, enrichedContext, deps.toolDispatcher, requestId);
-
-  if (signal?.aborted) return null;
-
-  // Emit tool_start/tool_result per executed tool
-  for (const toolName of toolResult.executed_tools) {
-    events.push({
+  // Yield tool_start for the primary tool BEFORE execution begins
+  if (primaryTool) {
+    yield {
       type: 'tool_start',
       seq: nextSeq(),
-      tool_name: toolName,
-      long_running: LONG_RUNNING_TOOLS.has(toolName),
-    });
-
-    events.push({
-      type: 'tool_result',
-      seq: nextSeq(),
-      tool_name: toolName,
-      success: !toolResult.stage_fallback_injected,
-      duration_ms: toolResult.tool_latency_ms,
-    });
+      tool_name: primaryTool,
+      long_running: isLongRunningTool(primaryTool),
+    };
   }
 
-  // Emit blocks once — aggregated across all tools, no duplication
-  for (const block of toolResult.blocks) {
-    events.push({
-      type: 'block',
-      seq: nextSeq(),
-      block,
-    });
-  }
+  const startTime = Date.now();
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+  // Collects progress events emitted by the interval timer.
+  // The timer cannot yield directly (it runs outside the generator), so events
+  // are buffered here and drained after each Promise.race tick.
+  const pendingProgress: OrchestratorStreamEvent[] = [];
 
-  return { result: toolResult, events };
+  try {
+    let phase4Done = false;
+    let toolResult: Phase4Result | undefined;
+
+    const phase4Promise = phase4Execute(
+      llmResult, enrichedContext, deps.toolDispatcher, requestId,
+    ).then(result => {
+      phase4Done = true;
+      toolResult = result;
+      return result;
+    });
+
+    // Start the progress interval — pushes events into pendingProgress
+    if (primaryTool) {
+      progressTimer = setInterval(() => {
+        if (!phase4Done) {
+          pendingProgress.push({
+            type: 'progress',
+            seq: nextSeq(),
+            tool_name: primaryTool,
+            elapsed_ms: Date.now() - startTime,
+            message: PROGRESS_MESSAGES[primaryTool] ?? DEFAULT_PROGRESS_MESSAGE,
+          });
+        }
+      }, PROGRESS_INTERVAL_MS);
+    }
+
+    // Poll: race phase4 completion against progress ticks
+    while (!phase4Done) {
+      const tick = new Promise<'tick'>(resolve =>
+        setTimeout(() => resolve('tick'), PROGRESS_INTERVAL_MS),
+      );
+
+      await Promise.race([phase4Promise, tick]);
+
+      if (signal?.aborted) {
+        resultHolder.result = null;
+        return;
+      }
+
+      // Drain any pending progress events
+      while (pendingProgress.length > 0) {
+        yield pendingProgress.shift()!;
+      }
+    }
+
+    // Ensure we have the result
+    if (!toolResult) {
+      toolResult = await phase4Promise;
+    }
+
+    if (signal?.aborted) {
+      resultHolder.result = null;
+      return;
+    }
+
+    // Yield tool_result for the primary tool
+    if (primaryTool && toolResult.executed_tools.includes(primaryTool)) {
+      yield {
+        type: 'tool_result',
+        seq: nextSeq(),
+        tool_name: primaryTool,
+        success: !toolResult.stage_fallback_injected,
+        duration_ms: toolResult.tool_latency_ms,
+      };
+    }
+
+    // Yield tool_start/tool_result for additional executed tools
+    for (const toolName of toolResult.executed_tools) {
+      if (toolName === primaryTool) continue;
+      yield {
+        type: 'tool_start',
+        seq: nextSeq(),
+        tool_name: toolName,
+        long_running: isLongRunningTool(toolName),
+      };
+      yield {
+        type: 'tool_result',
+        seq: nextSeq(),
+        tool_name: toolName,
+        success: !toolResult.stage_fallback_injected,
+      };
+    }
+
+    // Yield blocks — aggregated across all tools
+    for (const block of toolResult.blocks) {
+      yield { type: 'block', seq: nextSeq(), block };
+    }
+
+    resultHolder.result = toolResult;
+  } finally {
+    // Clean up progress timer on ALL exit paths (completion, error, abort)
+    if (progressTimer !== null) {
+      clearInterval(progressTimer);
+    }
+  }
 }
 
 /**

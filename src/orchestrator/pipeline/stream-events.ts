@@ -19,6 +19,7 @@ export type OrchestratorStreamEvent =
   | { type: 'turn_start'; seq: number; turn_id: string; routing: 'deterministic' | 'llm'; stage: string }
   | { type: 'text_delta'; seq: number; delta: string }
   | { type: 'tool_start'; seq: number; tool_name: string; long_running: boolean }
+  | { type: 'progress'; seq: number; tool_name: string; elapsed_ms: number; message: string }
   | { type: 'block'; seq: number; block: TypedConversationBlock }
   | { type: 'tool_result'; seq: number; tool_name: string; success: boolean; duration_ms?: number }
   | { type: 'turn_complete'; seq: number; envelope: OrchestratorResponseEnvelopeV2 }
@@ -60,6 +61,14 @@ const ToolStartEventSchema = z.object({
   seq: z.number().int().nonnegative(),
   tool_name: z.string().min(1),
   long_running: z.boolean(),
+});
+
+const ProgressEventSchema = z.object({
+  type: z.literal('progress'),
+  seq: z.number().int().nonnegative(),
+  tool_name: z.string().min(1),
+  elapsed_ms: z.number().nonnegative(),
+  message: z.string().min(1),
 });
 
 const BlockEventSchema = z.object({
@@ -106,6 +115,7 @@ export const OrchestratorStreamEventSchema = z.discriminatedUnion('type', [
   TurnStartEventSchema,
   TextDeltaEventSchema,
   ToolStartEventSchema,
+  ProgressEventSchema,
   BlockEventSchema,
   ToolResultEventSchema,
   TurnCompleteEventSchema,

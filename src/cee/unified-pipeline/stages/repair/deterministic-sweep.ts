@@ -167,7 +167,8 @@ function fixStructuralEdgesNotCanonical(
 ): Repair[] {
   const repairs: Repair[] = [];
   const canonViolations = violations.filter((v) => v.code === "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR");
-  if (canonViolations.length === 0) return repairs;
+  // Note: don't early-return when canonViolations is empty — decision→option
+  // edges are fixed proactively (not gated by violations).
 
   const nodes = (graph as any).nodes as NodeT[];
   const edges = (graph as any).edges as EdgeT[];
@@ -178,7 +179,12 @@ function fixStructuralEdgesNotCanonical(
 
   for (let i = 0; i < edges.length; i++) {
     const edge = edges[i];
-    if (nodeKindMap.get(edge.from) !== "option" || nodeKindMap.get(edge.to) !== "factor") continue;
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+    // Fix both option→factor (Bucket A violation-driven) and decision→option (proactive)
+    const isOptionFactor = fromKind === "option" && toKind === "factor";
+    const isDecisionOption = fromKind === "decision" && toKind === "option";
+    if (!isOptionFactor && !isDecisionOption) continue;
 
     // Only canonicalise if not already canonical (format-aware check)
     const isCanonical = format === "LEGACY"
@@ -186,8 +192,9 @@ function fixStructuralEdgesNotCanonical(
       : edge.strength_mean === 1 && edge.strength_std === 0.01 && edge.belief_exists === 1;
 
     if (!isCanonical) {
-      // Check if this specific edge was cited by a violation
-      const isCited = canonViolations.some((v) =>
+      // decision→option: always fix proactively (LLMs frequently produce probability splits)
+      // option→factor: only fix when cited by a validation violation
+      const shouldFix = isDecisionOption || canonViolations.some((v) =>
         v.path && (
           v.path.includes(edge.from) ||
           v.path.includes(edge.to) ||
@@ -196,12 +203,12 @@ function fixStructuralEdgesNotCanonical(
         ),
       );
 
-      if (isCited) {
+      if (shouldFix) {
         edges[i] = canonicalStructuralEdge(edge, format);
         repairs.push({
           code: "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
           path: `edges[${edge.from}→${edge.to}]`,
-          action: `Canonicalised structural edge to mean=1, std=0.01, existence=1.0`,
+          action: `Canonicalised structural ${fromKind}→${toKind} edge to mean=1, std=0.01, existence=1.0`,
         });
       }
     }

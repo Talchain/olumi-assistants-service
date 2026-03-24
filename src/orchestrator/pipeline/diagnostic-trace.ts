@@ -79,9 +79,11 @@ export interface StructuredOutputConfig {
 export interface StreamingMetrics {
   time_to_first_event_ms: number | null;
   time_to_first_text_delta_ms: number | null;
+  time_to_first_block_ms: number | null;
   total_stream_duration_ms: number | null;
   event_count: number;
   text_delta_count: number;
+  progress_count: number;
   disconnect_reason: string | null;
 }
 

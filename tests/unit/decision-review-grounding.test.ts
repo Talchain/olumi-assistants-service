@@ -503,3 +503,65 @@ describe("margin grounding — pre-computed margin accepted as citable number", 
     expect(ungrounded.some((w) => w.includes('"25"'))).toBe(true);
   });
 });
+
+describe("compound number grounding — £200k, $1.5m expressions", () => {
+  it("'200' is grounded when label contains '£200k' (via compound extraction)", () => {
+    const input: ReviewInputForGrounding = {
+      ...makeReviewInput(),
+      winner: { win_probability: 0.77, outcome_mean: 59, label: "Achieve £200k MRR" },
+    };
+    const data = makeValidReviewOutput({
+      narrative_summary: "With a 200 thousand runway this is feasible.",
+    });
+    const result = performShapeCheck(data, input);
+    const ungrounded = result.warnings.filter((w) => w.startsWith("UNGROUNDED_NUMBER"));
+    expect(ungrounded.some((w) => w.includes('"200"'))).toBe(false);
+  });
+
+  it("'200' is grounded when corpus contains 200000 (via magnitude multiplier in isGrounded)", () => {
+    // Even without compound label extraction, isGrounded checks n*1000
+    const input: ReviewInputForGrounding = {
+      ...makeReviewInput(),
+      winner: { win_probability: 0.77, outcome_mean: 200000 },
+    };
+    const data = makeValidReviewOutput({
+      bias_findings: [{ description: "The team's anchoring on 200 as a target could skew assessment." }],
+    });
+    const result = performShapeCheck(data, input);
+    const ungrounded = result.warnings.filter((w) => w.startsWith("UNGROUNDED_NUMBER"));
+    expect(ungrounded.some((w) => w.includes('"200"'))).toBe(false);
+  });
+
+  it("compound extraction produces both base and expanded: '£1.5m' → [1.5, 1500000]", () => {
+    const input: ReviewInputForGrounding = {
+      ...makeReviewInput(),
+      winner: { win_probability: 0.77, outcome_mean: 59, label: "Target $1.5m ARR" },
+    };
+    const nums = extractGroundedNumbers(input);
+    expect(nums).toContain(1.5);
+    expect(nums).toContain(1500000);
+  });
+
+  it("still flags truly fabricated numbers even with compound extraction", () => {
+    const input: ReviewInputForGrounding = {
+      ...makeReviewInput(),
+      winner: { win_probability: 0.77, outcome_mean: 59, label: "Achieve £200k MRR" },
+    };
+    const data = makeValidReviewOutput({
+      narrative_summary: "This will cost 999 thousand in unexpected expenses.",
+    });
+    const result = performShapeCheck(data, input);
+    const ungrounded = result.warnings.filter((w) => w.startsWith("UNGROUNDED_NUMBER"));
+    expect(ungrounded.some((w) => w.includes('"999"'))).toBe(true);
+  });
+
+  it("compound extraction handles 'bn' suffix: '3bn' → [3, 3000000000]", () => {
+    const input: ReviewInputForGrounding = {
+      ...makeReviewInput(),
+      winner: { win_probability: 0.77, outcome_mean: 59, label: "Reach $3bn valuation" },
+    };
+    const nums = extractGroundedNumbers(input);
+    expect(nums).toContain(3);
+    expect(nums).toContain(3_000_000_000);
+  });
+});

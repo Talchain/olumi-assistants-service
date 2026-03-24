@@ -82,16 +82,37 @@ export interface ReviewInputForGrounding {
 // Used to add label-embedded numbers (e.g. "£59" from "Increase Price to £59") to the corpus.
 const LABEL_NUMBER_PATTERN = /(-?\d+(?:\.\d+)?)/g;
 
+// Regex to extract compound number expressions like "£200k", "$1.5m", "3bn" from labels.
+// Captures: (number)(multiplier suffix). Supports "bn" as a two-letter billion suffix.
+const COMPOUND_NUMBER_PATTERN = /(-?\d+(?:\.\d+)?)\s*(bn|[kmb])\b/gi;
+const MULTIPLIER_MAP: Record<string, number> = { k: 1_000, m: 1_000_000, b: 1_000_000_000, bn: 1_000_000_000 };
+
 /**
  * Extract numeric tokens from a label string (e.g. winner.label, option_label).
  * Numbers appearing in labels are legitimately cited by the LLM and must be in the corpus.
+ * Also expands compound expressions: "£200k" → [200, 200000].
  */
 function extractNumbersFromLabel(label: unknown): number[] {
   if (typeof label !== 'string' || label.length === 0) return [];
   const nums: number[] = [];
   let m: RegExpExecArray | null;
+
+  // Extract compound number expressions first (e.g. "200k" → 200 + 200000)
+  COMPOUND_NUMBER_PATTERN.lastIndex = 0;
+  const compoundPositions = new Set<number>();
+  while ((m = COMPOUND_NUMBER_PATTERN.exec(label)) !== null) {
+    const base = parseFloat(m[1]);
+    const mult = MULTIPLIER_MAP[m[2].toLowerCase()];
+    if (isFinite(base) && mult) {
+      nums.push(base, base * mult);
+      compoundPositions.add(m.index);
+    }
+  }
+
+  // Extract plain numbers (skip those already captured as part of compound expressions)
   LABEL_NUMBER_PATTERN.lastIndex = 0;
   while ((m = LABEL_NUMBER_PATTERN.exec(label)) !== null) {
+    if (compoundPositions.has(m.index)) continue;
     const n = parseFloat(m[1]);
     if (isFinite(n)) nums.push(n);
   }
@@ -166,7 +187,10 @@ export function extractGroundedNumbers(input: ReviewInputForGrounding): number[]
  */
 function isGrounded(n: number, groundedNums: number[]): boolean {
   if (groundedNums.length === 0) return true; // No corpus → can't check, skip
-  const candidates = [n, n / 100, n * 100];
+  // Check the original number, percentage equivalents (n/100, n*100),
+  // and common magnitude multipliers (k=1000, m=1000000) so that
+  // "200" is grounded when the corpus contains 200000 (from "£200k").
+  const candidates = [n, n / 100, n * 100, n * 1000, n * 1_000_000];
   for (const candidate of candidates) {
     for (const g of groundedNums) {
       if (g === 0 && candidate === 0) return true;
