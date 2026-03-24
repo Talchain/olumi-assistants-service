@@ -912,6 +912,9 @@ export async function draftGraphWithAnthropic(
       rationales: parsed.rationales || [],
       // Coaching passthrough: preserved via .passthrough() on LLMDraftResponse
       ...((parsed as any).coaching ? { coaching: (parsed as any).coaching } : {}),
+      // Goal constraints passthrough: LLM-emitted constraints have richer metadata
+      // (source_quote, confidence, provenance) than the regex extractor.
+      ...((parsed as any).goal_constraints ? { goal_constraints: (parsed as any).goal_constraints } : {}),
       debug: unsafeCaptureEnabled ? {
         raw_llm_output: rawOutput.output,
         raw_llm_output_truncated: rawOutput.truncated,

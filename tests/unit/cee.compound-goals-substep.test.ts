@@ -179,8 +179,8 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
       rejected_no_match: 1,
     });
     (toGoalConstraints as any).mockReturnValue([
-      { constraint_id: "c1", node_id: "fac_retention_rate" },
-      { constraint_id: "c2", node_id: "fac_retention_rate" },
+      { constraint_id: "c1", node_id: "fac_retention_rate", operator: ">=" },
+      { constraint_id: "c2", node_id: "fac_retention_rate", operator: "<=" },
     ]);
 
     const ctx = makeCtx();
@@ -188,7 +188,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
     const originalEdgeCount = ctx.graph.edges.length;
     runCompoundGoals(ctx);
 
-    // goal_constraints should have 2 entries
+    // goal_constraints should have 2 entries (different operators)
     expect(ctx.goalConstraints).toHaveLength(2);
 
     // Graph must not be mutated

@@ -396,6 +396,8 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   ctx.coaching = (draftResult as any).coaching;
   // Causal claims passthrough (Phase 2B): stash raw for post-STRP validation
   ctx.causalClaims = (draftResult as any).causal_claims;
+  // Goal constraints passthrough: LLM-emitted constraints merged with regex in Stage 4
+  ctx.llmGoalConstraints = (draftResult as any).goal_constraints;
 
   // Graph shape assertion — must come before createEdgeFieldStash()
   if (!Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
