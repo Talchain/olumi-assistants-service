@@ -319,6 +319,58 @@ export function normaliseDraftResponse(raw: unknown): unknown {
     }
   }
 
+  // ========================================================================
+  // NODE DATA NORMALISATION (single pass):
+  //  1. Convert array-form interventions → object-form on option nodes
+  //     (Anthropic structured outputs cannot produce Record<K,V>)
+  //  2. Strip empty/partial data objects that would fail the Zod NodeData
+  //     union (requires value, interventions, or operator)
+  // ========================================================================
+  if (Array.isArray(obj.nodes)) {
+    obj.nodes = (obj.nodes as any[]).map((node: any) => {
+      if (!node || typeof node !== 'object') return node;
+
+      // Step 1: Convert array-form interventions on option nodes
+      if (node.kind === 'option' && node.data && typeof node.data === 'object') {
+        const interventions = node.data.interventions;
+        if (Array.isArray(interventions)) {
+          const mapped: Record<string, number> = {};
+          for (const item of interventions) {
+            if (item && typeof item === 'object' && typeof item.factor_id === 'string' && typeof item.value === 'number') {
+              mapped[item.factor_id] = item.value;
+            }
+          }
+          if (Object.keys(mapped).length > 0) {
+            log.debug({
+              event: 'llm.normalisation.interventions_array_to_object',
+              node_id: node.id,
+              count: Object.keys(mapped).length,
+            }, `Converted array-form interventions to object for ${node.id}`);
+          }
+          node = { ...node, data: { ...node.data, interventions: mapped } };
+        }
+      }
+
+      // Step 2: Strip data objects that lack a union-discriminating key
+      const data = node.data;
+      if (data && typeof data === 'object') {
+        const hasUnionKey = typeof data.value === 'number' || data.interventions || data.operator;
+        if (!hasUnionKey) {
+          const { data: _stripped, ...rest } = node;
+          log.debug({
+            event: 'llm.normalisation.empty_data_stripped',
+            node_id: node.id,
+            node_kind: node.kind,
+            data_keys: Object.keys(data),
+          }, `Stripped empty data object from ${node.id} (no value/interventions/operator)`);
+          return rest;
+        }
+      }
+
+      return node;
+    });
+  }
+
   if (normalisedCount > 0) {
     log.info({ normalised_count: normalisedCount }, `Normalised ${normalisedCount} non-standard node kind(s)`);
   }

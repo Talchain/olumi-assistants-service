@@ -237,6 +237,14 @@ export function transformNodeToV3(
     }
   }
 
+  // Preserve prior distribution data for external factors.
+  // prior is set by the LLM (via Anthropic schema) or synthesised by unreachable-factors
+  // repair. ISL needs prior ranges to run Monte Carlo sampling on external factors.
+  const nodePrior = (node as any).prior;
+  if (nodePrior && typeof nodePrior === "object") {
+    (v3Node as any).prior = nodePrior;
+  }
+
   return v3Node;
 }
 
@@ -437,8 +445,10 @@ export function transformEdgeToV3(
   // Derive effect direction from strength_mean
   const effectDirection = deriveEffectDirection(strengthMean);
 
-  // Extract provenance
-  const provenance = extractProvenanceForV3(edge.provenance);
+  // Extract provenance — prefer structured edge.provenance, fall back to
+  // edge.provenance_source (flat enum from Anthropic structured outputs).
+  const provenance = extractProvenanceForV3(edge.provenance)
+    ?? (edge.provenance_source ? { source: mapToV3ProvenanceSource(edge.provenance_source) } : undefined);
 
   return {
     edge: {
