@@ -114,7 +114,7 @@ describe("runUnifiedPipeline", () => {
     const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, baseOpts);
 
     expect(result.statusCode).toBe(200);
-    expect(result.body).toEqual({ test: true });
+    expect(result.body).toMatchObject({ test: true });
     expect(callOrder).toEqual(["parse", "normalise", "enrich", "repair", "package", "boundary"]);
   });
 
@@ -126,7 +126,7 @@ describe("runUnifiedPipeline", () => {
     const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, baseOpts);
 
     expect(result.statusCode).toBe(400);
-    expect(result.body).toEqual({ error: "bad input" });
+    expect(result.body).toMatchObject({ error: "bad input" });
     expect(runStageNormalise).not.toHaveBeenCalled();
   });
 

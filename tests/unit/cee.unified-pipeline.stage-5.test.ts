@@ -202,6 +202,16 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     ceeResponse: undefined,
     pipelineTrace: undefined,
     earlyReturn: undefined,
+    pipelineOutcome: {
+      graph_drafted: false,
+      graph_structurally_valid: false,
+      deterministic_sweep_violations: 0,
+      verification_status: 'skipped',
+      validation_status: 'skipped',
+      enrichment_status: 'skipped',
+      coaching_status: 'partial',
+      warnings: [],
+    },
     ...overrides,
   };
 }
@@ -472,18 +482,23 @@ describe("runStagePackage", () => {
     );
   });
 
-  it("sets earlyReturn 400 when verification fails", async () => {
+  it("soft-gates verification failure — no earlyReturn, warning recorded (Track 1)", async () => {
     (verificationPipeline.verify as any).mockRejectedValue(new Error("Schema validation failed"));
     const ctx = makeCtx();
     await runStagePackage(ctx);
 
-    expect(ctx.earlyReturn).toBeDefined();
-    expect(ctx.earlyReturn!.statusCode).toBe(400);
-    expect(buildCeeErrorResponse).toHaveBeenCalledWith(
-      "CEE_GRAPH_INVALID",
-      "Schema validation failed",
-      expect.objectContaining({ requestId: "test-req-5" }),
+    // Track 1: verification failure is a soft gate — no earlyReturn
+    expect(ctx.earlyReturn).toBeUndefined();
+    // Response is built from unverified ceeResponse
+    expect(ctx.ceeResponse).toBeDefined();
+    // Warning recorded on pipeline outcome
+    expect(ctx.pipelineOutcome.verification_status).toBe("failed_degraded");
+    const verifyWarning = ctx.pipelineOutcome.warnings.find(
+      (w: any) => w.stage === "verification",
     );
+    expect(verifyWarning).toBeDefined();
+    expect(verifyWarning.error).toBe("Schema validation failed");
+    expect(verifyWarning.degraded).toBe(true);
   });
 
   it("skips verification when verificationPipelineEnabled = false", async () => {

@@ -13,8 +13,6 @@ import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../
 import { CEEGraphResponseV3 } from "../../../schemas/cee-v3.js";
 import { extractZodIssues } from "../../../schemas/llmExtraction.js";
 import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
-import { isAdminAuthorized } from "../../validation/pipeline.js";
-import { DETERMINISTIC_SWEEP_VERSION } from "../../constants/versions.js";
 import { config } from "../../../config/index.js";
 import { getRuntimeEnv } from "../../../config/env-resolver.js";
 import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
@@ -129,75 +127,48 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       }
     }
 
-    // Strict mode validation (Stream F: return blocked response instead of 422)
+    // Strict mode validation (Track 1 soft gate — log and continue)
     if (ctx.opts.strictMode) {
       try {
         validateStrictModeV3(v3Body);
       } catch (err) {
-        log.error({
-          event: "cee.boundary.strict_mode_failed",
+        const errMsg = (err as Error).message;
+        log.warn({
+          event: "pipeline.soft_gate_degraded",
+          stage: "boundary_strict_mode",
+          error: errMsg,
           request_id: ctx.requestId,
-          error: (err as Error).message,
-        }, "V3 strict mode validation failed");
+        }, "V3 strict mode validation failed — continuing with graph (soft gate)");
 
-        // Emit telemetry event
+        // Emit telemetry event (still useful for monitoring)
         emit(TelemetryEvents.CeeBoundaryBlocked, {
           request_id: ctx.requestId,
-          error_code: "CEE_V3_STRICT_MODE_FAILED",
-          error_message: (err as Error).message,
+          error_code: "CEE_V3_STRICT_MODE_DEGRADED",
+          error_message: errMsg,
           validation_issues: [],
           graph_hash: (v3Body as any)?.meta?.graph_hash,
         });
 
-        /**
-         * TRACE PRESERVATION CONTRACT:
-         * - When upstream response includes trace fields → preserve them in blocked response
-         * - When upstream response omits trace → pipeline may add minimal trace for observability
-         * - Custom fields (correlation_id, etc.) are passed through unchanged
-         */
-
-        // Return backward-compatible blocked response
-        // CONTRACT: Blocked responses ALWAYS return graph: null (never omitted).
-        // Schema allows omission for legacy compatibility, but production code
-        // must use explicit null for consistent downstream consumption.
-        const blockedResponse: any = {
-          ...v3Body,
-          meta: (ctx.ceeResponse as any)?.meta || v3Body.meta,
-          trace: (ctx.ceeResponse as any)?.trace || v3Body.trace,
-          graph: null, // CANONICAL: always explicit null, never omitted
-          nodes: [],
-          edges: [],
-          analysis_ready: {
-            options: [],
-            goal_node_id: (v3Body as any)?.goal_node_id || "",
-            status: "blocked",
-            bias_findings: [],
-            blockers: [
-              {
-                code: "strict_mode_validation_failure",
-                severity: "error",
-                message: (err as Error).message,
-                details: {
-                  deterministic_sweep_ran: (ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined)?.sweep_ran ?? false,
-                  deterministic_sweep_version: DETERMINISTIC_SWEEP_VERSION,
-                  llm_repair_called: ctx.orchestratorRepairUsed ?? false,
-                },
-              },
-            ],
-          },
-        };
-
-        ctx.finalResponse = blockedResponse;
-        return;
+        ctx.pipelineOutcome.warnings.push({
+          stage: 'boundary_strict_mode',
+          error: errMsg,
+          degraded: true,
+        });
+        // Continue — do NOT null the graph or return blocked response
       }
     }
 
     // Belt-and-suspenders: validate V3 output before returning.
-    // Stream F: V3 validation failures return blocked status (no invalid graph)
+    // Track 1 (progressive degradation): V3 validation failures log a warning
+    // and pass through the graph rather than returning a blocked response.
+    // A valid graph must never be discarded by schema validation failures.
     const parseResult = CEEGraphResponseV3.safeParse(v3Body);
     if (!parseResult.success) {
       const runtimeEnv = getRuntimeEnv();
       const allowInvalid = config.cee.boundaryAllowInvalid;
+
+      const validationIssues = extractZodIssues(parseResult.error, 5);
+      const errMsg = `V3 schema validation failed: ${parseResult.error.issues.length} issues`;
 
       // Dev escape hatch: allow invalid graphs in local/test if explicitly enabled
       // (Config-level enforcement already prevents this flag from being true in staging/prod)
@@ -214,54 +185,30 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
         return;
       }
 
-      // Default behavior: return blocked status with validation errors
-      log.error({
-        event: "cee.boundary.output_validation_failed",
+      // Soft gate (Track 1): log, record warning, pass through graph
+      log.warn({
+        event: "pipeline.soft_gate_degraded",
+        stage: "boundary_v3_validation",
         error_count: parseResult.error.issues.length,
         first_issues: extractZodIssues(parseResult.error, 3),
         request_id: ctx.requestId,
-      }, "V3 output failed CEEGraphResponseV3 schema validation");
+        runtime_env: runtimeEnv,
+      }, "V3 output failed schema validation — continuing with graph (soft gate)");
 
-      // Emit telemetry event
-      const validationIssues = extractZodIssues(parseResult.error, 5);
+      // Emit telemetry event (still useful for monitoring)
       emit(TelemetryEvents.CeeBoundaryBlocked, {
         request_id: ctx.requestId,
-        error_code: "CEE_V3_VALIDATION_FAILED",
-        error_message: `V3 schema validation failed: ${parseResult.error.issues.length} issues`,
+        error_code: "CEE_V3_VALIDATION_DEGRADED",
+        error_message: errMsg,
         validation_issues: validationIssues,
         graph_hash: (v3Body as any)?.meta?.graph_hash,
       });
 
-      // Return backward-compatible blocked response
-      // Preserve existing envelope (including meta, trace from original response), set analysis_ready.status to blocked
-      // CONTRACT: Blocked responses ALWAYS return graph: null (never omitted).
-      // Schema allows omission for legacy compatibility, but production code
-      // must use explicit null for consistent downstream consumption.
-      const blockedResponse: any = {
-        ...v3Body,
-        meta: (ctx.ceeResponse as any)?.meta || v3Body.meta, // Preserve meta from original response
-        trace: (ctx.ceeResponse as any)?.trace || v3Body.trace, // Preserve trace from original response
-        graph: null, // CANONICAL: always explicit null, never omitted
-        nodes: [], // Empty nodes array (V3 format)
-        edges: [], // Empty edges array (V3 format)
-        analysis_ready: {
-          options: [],
-          goal_node_id: (v3Body as any)?.goal_node_id || "",
-          status: "blocked",
-          bias_findings: [],
-          blockers: [
-            {
-              code: "validation_failure",
-              severity: "error",
-              message: `V3 schema validation failed: ${parseResult.error.issues.length} issues`,
-              details: validationIssues,
-            },
-          ],
-        },
-      };
-
-      ctx.finalResponse = blockedResponse;
-      return;
+      ctx.pipelineOutcome.warnings.push({
+        stage: 'boundary_v3_validation',
+        error: errMsg,
+        degraded: true,
+      });
     }
 
     ctx.finalResponse = v3Body;

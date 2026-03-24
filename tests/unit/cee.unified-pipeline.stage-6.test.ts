@@ -83,6 +83,16 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     },
     finalResponse: undefined,
     earlyReturn: undefined,
+    pipelineOutcome: {
+      graph_drafted: false,
+      graph_structurally_valid: false,
+      deterministic_sweep_violations: 0,
+      verification_status: 'skipped',
+      validation_status: 'skipped',
+      enrichment_status: 'skipped',
+      coaching_status: 'partial',
+      warnings: [],
+    },
     ...overrides,
   };
 }
@@ -190,30 +200,32 @@ describe("runStageBoundary", () => {
     expect(ctx.earlyReturn).toBeUndefined();
   });
 
-  it("returns blocked response when strict mode validation fails (Stream F)", async () => {
+  it("soft-gates strict mode validation failure — graph passes through with warning (Track 1)", async () => {
     (validateStrictModeV3 as any).mockImplementation(() => {
       throw new Error("Missing required field: edges");
     });
     const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
     await runStageBoundary(ctx);
 
-    // Should return blocked response, not 422 earlyReturn
+    // Track 1: strict mode is now a soft gate — graph passes through
     expect(ctx.earlyReturn).toBeUndefined();
     expect(ctx.finalResponse).toBeDefined();
-    expect((ctx.finalResponse as any).analysis_ready?.status).toBe("blocked");
-    expect((ctx.finalResponse as any).graph).toBeNull();
-    expect((ctx.finalResponse as any).analysis_ready?.blockers).toBeDefined();
+    // Graph is preserved (NOT nulled)
+    expect((ctx.finalResponse as any).graph).not.toBeNull();
 
-    const blocker = (ctx.finalResponse as any).analysis_ready?.blockers?.[0];
-    expect(blocker?.code).toBe("strict_mode_validation_failure");
-    expect(blocker?.severity).toBe("error");
-    expect(blocker?.message).toContain("Missing required field: edges");
+    // Warning recorded on pipeline outcome
+    const strictWarning = ctx.pipelineOutcome.warnings.find(
+      (w: any) => w.stage === "boundary_strict_mode",
+    );
+    expect(strictWarning).toBeDefined();
+    expect(strictWarning.error).toContain("Missing required field: edges");
+    expect(strictWarning.degraded).toBe(true);
 
     // Should emit telemetry event
     expect(emit).toHaveBeenCalledWith(
       TelemetryEvents.CeeBoundaryBlocked,
       expect.objectContaining({
-        error_code: "CEE_V3_STRICT_MODE_FAILED",
+        error_code: "CEE_V3_STRICT_MODE_DEGRADED",
         error_message: "Missing required field: edges",
       })
     );
@@ -491,18 +503,19 @@ describe("runStageBoundary", () => {
     expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
   });
 
-  it("includes bias_findings: [] in strict-mode blocked response", async () => {
+  it("strict mode failure adds warning but preserves graph (Track 1)", async () => {
     (validateStrictModeV3 as any).mockImplementation(() => {
       throw new Error("strict validation failed");
     });
     const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
     await runStageBoundary(ctx);
 
-    expect(ctx.finalResponse.analysis_ready.status).toBe("blocked");
-    expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
+    // Track 1: graph preserved, warning recorded
+    expect(ctx.finalResponse).toBeDefined();
+    expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_strict_mode")).toBe(true);
   });
 
-  it("includes bias_findings: [] in schema-validation blocked response", async () => {
+  it("V3 schema validation failure adds warning but preserves graph (Track 1)", async () => {
     const { CEEGraphResponseV3 } = await import("../../src/schemas/cee-v3.js");
     (CEEGraphResponseV3.safeParse as any).mockReturnValue({
       success: false,
@@ -512,8 +525,11 @@ describe("runStageBoundary", () => {
       const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: false, includeDebug: false } });
       await runStageBoundary(ctx);
 
-      expect(ctx.finalResponse.analysis_ready.status).toBe("blocked");
-      expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
+      // Track 1: graph preserved, warning recorded
+      expect(ctx.finalResponse).toBeDefined();
+      // Graph is NOT nulled (soft gate)
+      expect((ctx.finalResponse as any).graph).not.toBeNull();
+      expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_v3_validation")).toBe(true);
     } finally {
       // Restore safeParse so subsequent tests aren't affected
       (CEEGraphResponseV3.safeParse as any).mockReturnValue({ success: true });

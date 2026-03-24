@@ -33,7 +33,6 @@ import {
 import { matchesStatusQuoLabel } from "../../structure/status-quo-patterns.js";
 import { verificationPipeline } from "../../verification/index.js";
 import { CEEDraftGraphResponseV1Schema } from "../../../schemas/ceeResponses.js";
-import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 import {
   captureCheckpoint,
   applyCheckpointSizeGuard,
@@ -458,7 +457,9 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     ctx.pipelineCheckpoints.push(captureCheckpoint("post_stabilisation", (cappedPayload as any).graph));
   }
 
-  // ── Step 13: Verification pipeline ───────────────────────────────────────
+  // ── Step 13: Verification pipeline (SOFT GATE — Track 1) ────────────────
+  // Verification failure must not discard a valid graph. Log, record warning,
+  // and continue with the unverified response.
   let verifiedResponse: any;
   if (config.cee.verificationPipelineEnabled) {
     try {
@@ -468,19 +469,33 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
         { endpoint: "draft-graph", requiresEngineValidation: false, requestId: ctx.requestId },
       );
       verifiedResponse = response;
+      ctx.pipelineOutcome.verification_status = 'passed';
 
       if (ctx.checkpointsEnabled) {
         ctx.pipelineCheckpoints.push(captureCheckpoint("pre_boundary", (verifiedResponse as any).graph));
       }
     } catch (error) {
-      log.warn({ error, request_id: ctx.requestId }, "Verification pipeline failed");
-      ctx.earlyReturn = {
-        statusCode: 400,
-        body: buildCeeErrorResponse("CEE_GRAPH_INVALID", error instanceof Error ? error.message : "verification failed", {
-          requestId: ctx.requestId,
-        }),
-      };
-      return;
+      const errMsg = error instanceof Error ? error.message : "verification failed";
+      log.warn({
+        event: "pipeline.soft_gate_degraded",
+        stage: "verification",
+        error: errMsg,
+        request_id: ctx.requestId,
+      }, "Verification pipeline failed — continuing with unverified response (soft gate)");
+
+      ctx.pipelineOutcome.verification_status = 'failed_degraded';
+      ctx.pipelineOutcome.warnings.push({
+        stage: 'verification',
+        error: errMsg,
+        degraded: true,
+      });
+
+      // Continue with unverified response — do NOT set earlyReturn
+      verifiedResponse = ceeResponse;
+
+      if (ctx.checkpointsEnabled) {
+        ctx.pipelineCheckpoints.push(captureCheckpoint("pre_boundary", (verifiedResponse as any).graph));
+      }
     }
   } else {
     log.debug(
