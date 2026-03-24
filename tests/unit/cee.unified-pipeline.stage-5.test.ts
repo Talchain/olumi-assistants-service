@@ -251,6 +251,7 @@ describe("runStagePackage", () => {
     (config.cee as any).draftArchetypesEnabled = true;
     (config.cee as any).draftStructuralWarningsEnabled = true;
     (config.cee as any).pipelineCheckpointsEnabled = false;
+    (config.cee as any).verificationPipelineEnabled = true;
     (isProduction as any).mockReturnValue(false);
     setupDefaultMocks();
   });
@@ -464,6 +465,25 @@ describe("runStagePackage", () => {
       "Schema validation failed",
       expect.objectContaining({ requestId: "test-req-5" }),
     );
+  });
+
+  it("skips verification when verificationPipelineEnabled = false", async () => {
+    (config.cee as any).verificationPipelineEnabled = false;
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(verificationPipeline.verify).not.toHaveBeenCalled();
+    expect(ctx.ceeResponse).toBeDefined();
+    expect(ctx.earlyReturn).toBeUndefined();
+  });
+
+  it("runs verification when verificationPipelineEnabled = true (default)", async () => {
+    (config.cee as any).verificationPipelineEnabled = true;
+    const ctx = makeCtx();
+    await runStagePackage(ctx);
+
+    expect(verificationPipeline.verify).toHaveBeenCalledTimes(1);
+    expect(ctx.ceeResponse).toBeDefined();
   });
 
   // ── Pipeline trace assembly ─────────────────────────────────────────────

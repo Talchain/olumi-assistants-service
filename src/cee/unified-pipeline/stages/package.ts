@@ -448,26 +448,38 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
 
   // ── Step 13: Verification pipeline ───────────────────────────────────────
   let verifiedResponse: any;
-  try {
-    const { response } = await verificationPipeline.verify(
-      ceeResponse,
-      CEEDraftGraphResponseV1Schema,
-      { endpoint: "draft-graph", requiresEngineValidation: false, requestId: ctx.requestId },
+  if (config.cee.verificationPipelineEnabled) {
+    try {
+      const { response } = await verificationPipeline.verify(
+        ceeResponse,
+        CEEDraftGraphResponseV1Schema,
+        { endpoint: "draft-graph", requiresEngineValidation: false, requestId: ctx.requestId },
+      );
+      verifiedResponse = response;
+
+      if (ctx.checkpointsEnabled) {
+        ctx.pipelineCheckpoints.push(captureCheckpoint("pre_boundary", (verifiedResponse as any).graph));
+      }
+    } catch (error) {
+      log.warn({ error, request_id: ctx.requestId }, "Verification pipeline failed");
+      ctx.earlyReturn = {
+        statusCode: 400,
+        body: buildCeeErrorResponse("CEE_GRAPH_INVALID", error instanceof Error ? error.message : "verification failed", {
+          requestId: ctx.requestId,
+        }),
+      };
+      return;
+    }
+  } else {
+    log.debug(
+      { event: "cee.verification.skipped", request_id: ctx.requestId },
+      "cee.verification.skipped",
     );
-    verifiedResponse = response;
+    verifiedResponse = ceeResponse;
 
     if (ctx.checkpointsEnabled) {
       ctx.pipelineCheckpoints.push(captureCheckpoint("pre_boundary", (verifiedResponse as any).graph));
     }
-  } catch (error) {
-    log.warn({ error, request_id: ctx.requestId }, "Verification pipeline failed");
-    ctx.earlyReturn = {
-      statusCode: 400,
-      body: buildCeeErrorResponse("CEE_GRAPH_INVALID", error instanceof Error ? error.message : "verification failed", {
-        requestId: ctx.requestId,
-      }),
-    };
-    return;
   }
 
   // ── Step 14: Pipeline trace assembly ─────────────────────────────────────

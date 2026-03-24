@@ -460,6 +460,45 @@ describe("VerificationPipeline", () => {
 
       emitSpy.mockRestore();
     });
+
+    it("logs diagnostic Zod issues on schema failure (paths and codes only)", async () => {
+      const logSpy = vi.spyOn(telemetry.log, "warn");
+
+      const invalid: any = {
+        graph: { nodes: [], edges: [] },
+        // Missing required trace/quality fields
+      };
+
+      await expect(
+        verificationPipeline.verify(
+          invalid,
+          CEEDraftGraphResponseV1Schema,
+          {
+            endpoint: "draft-graph",
+            requiresEngineValidation: false,
+            requestId: "req_diag_log",
+          },
+        ),
+      ).rejects.toThrow();
+
+      const diagCall = logSpy.mock.calls.find(
+        (call) => (call[0] as any)?.event === "cee.verification.schema_invalid_detail",
+      );
+      expect(diagCall).toBeDefined();
+      const diagData = diagCall![0] as any;
+      expect(diagData.error_count).toBeGreaterThan(0);
+      expect(Array.isArray(diagData.issues)).toBe(true);
+      expect(diagData.issues.length).toBeGreaterThan(0);
+      expect(diagData.issues.length).toBeLessThanOrEqual(5);
+      // Each issue should have path, code, message — no user content
+      for (const issue of diagData.issues) {
+        expect(issue).toHaveProperty("path");
+        expect(issue).toHaveProperty("code");
+        expect(issue).toHaveProperty("message");
+      }
+
+      logSpy.mockRestore();
+    });
   });
 
   describe("engine validation", () => {
