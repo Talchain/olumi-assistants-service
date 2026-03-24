@@ -435,6 +435,25 @@ describe("runStagePackage", () => {
     expect(resp.seed).toBe("abc123");
   });
 
+  // ── Strengthen item action_type defaulting ─────────────────────────────
+
+  it("defaults action_type to 'improve' on LLM strengthen_items missing it", async () => {
+    const ctx = makeCtx({
+      coaching: {
+        summary: "Some coaching",
+        strengthen_items: [
+          { id: "str_1", label: "Add detail", detail: "More info needed" },
+          { id: "str_2", label: "Refine", detail: "Refine weights", action_type: "refine" },
+        ],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const items = (ctx.coaching as any).strengthen_items;
+    expect(items[0].action_type).toBe("improve");
+    expect(items[1].action_type).toBe("refine");
+  });
+
   // ── Verification pipeline ──────────────────────────────────────────────
 
   it("calls verificationPipeline.verify with CEEDraftGraphResponseV1Schema", async () => {

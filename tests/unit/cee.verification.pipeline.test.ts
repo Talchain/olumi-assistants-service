@@ -501,6 +501,48 @@ describe("VerificationPipeline", () => {
     });
   });
 
+  describe("coaching.strengthen_items action_type", () => {
+    it("fails schema validation when strengthen_items lack action_type", async () => {
+      const payload = {
+        ...buildMinimalDraftResponse(),
+        coaching: {
+          summary: "Some coaching",
+          strengthen_items: [
+            { id: "str_1", label: "Add detail", detail: "More info needed" },
+          ],
+        },
+      };
+
+      await expect(
+        verificationPipeline.verify(
+          payload,
+          CEEDraftGraphResponseV1Schema,
+          { endpoint: "draft-graph", requiresEngineValidation: false, requestId: "req_action_type_missing" },
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("passes schema validation when strengthen_items have action_type", async () => {
+      const payload = {
+        ...buildMinimalDraftResponse(),
+        coaching: {
+          summary: "Some coaching",
+          strengthen_items: [
+            { id: "str_1", label: "Add detail", detail: "More info needed", action_type: "improve" },
+          ],
+        },
+      };
+
+      const { response } = await verificationPipeline.verify(
+        payload,
+        CEEDraftGraphResponseV1Schema,
+        { endpoint: "draft-graph", requiresEngineValidation: false, requestId: "req_action_type_present" },
+      );
+
+      expect((response as any).coaching.strengthen_items[0].action_type).toBe("improve");
+    });
+  });
+
   describe("engine validation", () => {
     it("skips engine validation when requiresEngineValidation is false", async () => {
       const payload = buildMinimalDraftResponse();
