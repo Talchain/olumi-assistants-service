@@ -55,6 +55,7 @@ import { handleUndoPatch } from "./tools/undo-patch.js";
 import { detectValueMissingFactors, buildGapCoachingText, GAP_COACHING_FINGERPRINT } from "./tools/gap-detection.js";
 import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
 import { isProduction, config } from "../config/index.js";
+import { DiagnosticTraceCollector } from "./pipeline/diagnostic-trace.js";
 import { extractBriefIntelligence } from "./brief-intelligence/extract.js";
 import { formatBilForCoaching } from "./brief-intelligence/format.js";
 import { selectPrimaryGap } from "./brief-intelligence/primary-gap.js";
@@ -903,6 +904,7 @@ async function dispatchTool(
     let analysisResponse = undefined;
     let toolLatencyMs: number | undefined;
     let editGraphSuggestedActions: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }> | undefined;
+    let toolLLMTelemetry: import("./tools/draft-graph.js").DraftGraphResult['toolLLMTelemetry'];
 
     switch (toolName) {
       case 'run_analysis': {
@@ -946,6 +948,7 @@ async function dispatchTool(
         blocks = result.blocks;
         assistantText = result.assistantText;
         toolLatencyMs = result.latencyMs;
+        toolLLMTelemetry = result.toolLLMTelemetry;
         break;
       }
 
@@ -1013,6 +1016,9 @@ async function dispatchTool(
       computedStage,
     });
 
+    // V1 diagnostic trace — attach tool-level LLM telemetry (parity with V2 pipeline)
+    attachV1DiagnosticTrace(envelope, toolLLMTelemetry);
+
     log.info(
       { tool: toolName, elapsed_ms: Date.now() - startTime, blocks_count: blocks.length },
       "Tool dispatch completed",
@@ -1033,6 +1039,12 @@ async function dispatchTool(
       dskCoaching,
       computedStage,
     });
+
+    // V1 error path: extract tool telemetry from thrown error (same as V2 pipeline.ts:500)
+    const thrownToolTelemetry = (error != null && typeof error === 'object' && 'toolLLMTelemetry' in error)
+      ? (error as { toolLLMTelemetry?: import("./pipeline/types.js").ToolResult['_tool_llm_telemetry'] }).toolLLMTelemetry
+      : undefined;
+    attachV1DiagnosticTrace(envelope, thrownToolTelemetry);
 
     const status = getHttpStatusForError(orchestratorError);
     return { envelope, httpStatus: status };
@@ -1273,4 +1285,60 @@ function extractOrchestratorError(error: unknown, tool?: string): OrchestratorEr
     tool,
     recoverable: false,
   };
+}
+
+// ============================================================================
+// V1 Diagnostic Trace
+// ============================================================================
+
+/**
+ * Attach lightweight _diagnostic_trace to V1 envelopes.
+ * Mirrors V2's attachDiagnosticTrace but only captures tool-level LLM telemetry
+ * (the V1 pipeline doesn't have a Phase 3 LLM call to capture).
+ * Gated by CEE_DIAGNOSTIC_TRACE_ENABLED (same as V2).
+ */
+function attachV1DiagnosticTrace(
+  envelope: import("./types.js").OrchestratorResponseEnvelope,
+  toolTelemetry?: import("./pipeline/types.js").ToolResult['_tool_llm_telemetry'],
+): void {
+  const isEnabled = process.env.CEE_DIAGNOSTIC_TRACE_ENABLED !== undefined
+    ? config.features.diagnosticTraceEnabled
+    : process.env.NODE_ENV !== 'production';
+
+  if (!isEnabled) return;
+
+  try {
+    const collector = new DiagnosticTraceCollector();
+
+    if (toolTelemetry) {
+      collector.recordLLMCall({
+        role: toolTelemetry.tool,
+        provider: toolTelemetry.provider,
+        model: toolTelemetry.model,
+        input_tokens: toolTelemetry.input_tokens,
+        output_tokens: toolTelemetry.output_tokens,
+        cache_read_tokens: toolTelemetry.cache_read_input_tokens ?? null,
+        cache_creation_tokens: toolTelemetry.cache_creation_input_tokens ?? null,
+        latency_ms: toolTelemetry.latency_ms,
+        stop_reason: toolTelemetry.stop_reason,
+        thinking_enabled: toolTelemetry.thinking_enabled,
+        error: toolTelemetry.error ?? null,
+      });
+
+      const soUsed = toolTelemetry.structured_outputs_used ?? false;
+      collector.recordStructuredOutputConfig({
+        enabled: soUsed,
+        api_shape: soUsed ? 'output_config_ga' : 'none',
+        schema_hash: null,
+        beta_header_present: false,
+      });
+    }
+
+    envelope._diagnostic_trace = collector.freeze();
+  } catch (err) {
+    log.warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      'V1 diagnostic_trace: failed to build — omitted',
+    );
+  }
 }

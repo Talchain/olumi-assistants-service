@@ -470,8 +470,7 @@ const ConfigSchema = z.object({
     debugLoggingEnabled: booleanString.default(false), // If true, emit V3-CAT diagnostic logs
     // Pipeline checkpoint settings
     pipelineCheckpointsEnabled: booleanString.default(false), // If true, capture edge field presence snapshots at 5 pipeline stages
-    // Unified pipeline (CIL Phase 3B)
-    unifiedPipelineEnabled: booleanString.default(true), // Unified 6-stage pipeline (always-on; legacy Pipeline A+B removed)
+    // Unified pipeline is always-on (legacy Pipeline A+B removed; CEE_UNIFIED_PIPELINE_ENABLED retired)
     // Boundary security (Stream F)
     boundaryAllowInvalid: createEnvEnforcedBoolean(false, "CEE_BOUNDARY_ALLOW_INVALID", false), // Dev-only (local/test): if true, allow invalid V3 graphs through boundary (locked in staging/prod)
     // Draft compliance reminder (appended to user message for initial graph generation only)
@@ -616,6 +615,10 @@ function parseConfig(): Config {
       // CEE_GROUNDING_ENABLED preferred; falls back to GROUNDING_ENABLED
       grounding: env.CEE_GROUNDING_ENABLED ?? env.GROUNDING_ENABLED,
       critique: env.CRITIQUE_ENABLED,
+      // NOTE: features.clarifier is the per-request override gate (used by feature-flags.ts
+      // and v1.status.ts). It is DISTINCT from cee.clarifierEnabled which gates the
+      // in-pipeline Stage 4 multi-turn clarifier. Both read CLARIFIER_ENABLED but serve
+      // different purposes. Prefer CEE_CLARIFIER_ENABLED for the pipeline gate.
       clarifier: env.CLARIFIER_ENABLED,
       piiGuard: env.PII_GUARD_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
@@ -831,7 +834,7 @@ function parseConfig(): Config {
       debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
-      unifiedPipelineEnabled: env.CEE_UNIFIED_PIPELINE_ENABLED,
+      // CEE_UNIFIED_PIPELINE_ENABLED removed — unified pipeline is always-on
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
       draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,
       entityMemoryEnabled: env.CEE_ENTITY_MEMORY_ENABLED,
@@ -1139,10 +1142,13 @@ export function getClientBlockedModels(): string[] {
  * Deprecated environment variable mapping
  * Maps deprecated env var names to their preferred replacements
  */
-const DEPRECATED_ENV_VARS: Record<string, string> = {
+const DEPRECATED_ENV_VARS: Record<string, string | null> = {
   HMAC_SECRET: 'CEE_HMAC_SECRET',
   SHARE_SECRET: 'CEE_SHARE_SECRET',
   GROUNDING_ENABLED: 'CEE_GROUNDING_ENABLED',
+  CLARIFIER_ENABLED: 'CEE_CLARIFIER_ENABLED',
+  CEE_MODEL_DRAFT_GRAPH: 'CEE_MODEL_DRAFT',
+  ENABLE_LEGACY_SSE: null,  // No replacement — legacy SSE path returns 426; remove the flag
 };
 
 /**
@@ -1153,19 +1159,70 @@ const DEPRECATED_ENV_VARS: Record<string, string> = {
  *
  * @returns Array of warning messages for deprecated env vars in use
  */
-export function checkDeprecatedEnvVars(): string[] {
-  const warnings: string[] = [];
+export interface EnvVarWarning {
+  key: string;
+  replacement?: string;
+  message: string;
+}
+
+export function checkDeprecatedEnvVars(): EnvVarWarning[] {
+  const warnings: EnvVarWarning[] = [];
   const env = process.env;
 
   for (const [deprecated, preferred] of Object.entries(DEPRECATED_ENV_VARS)) {
+    if (!env[deprecated]) continue;
+
+    // null replacement means "remove entirely, no successor"
+    if (preferred === null) {
+      warnings.push({
+        key: deprecated,
+        message: `Deprecated env var '${deprecated}' is set. Remove it — the feature has no replacement.`,
+      });
+      continue;
+    }
+
     // Only warn if deprecated is set AND preferred is NOT set
     // (i.e., the deprecated value is actually being used as fallback)
-    if (env[deprecated] && !env[preferred]) {
-      warnings.push(
-        `Deprecated env var '${deprecated}' is in use. Please migrate to '${preferred}' before the next major release.`
-      );
+    if (!env[preferred]) {
+      warnings.push({
+        key: deprecated,
+        replacement: preferred,
+        message: `Deprecated env var '${deprecated}' is in use. Please migrate to '${preferred}' before the next major release.`,
+      });
     }
   }
 
+  return warnings;
+}
+
+/**
+ * Known dead environment variables — parsed by nothing, have no effect.
+ * If set in a deployment, they waste cognitive overhead and invite confusion.
+ */
+const DEAD_ENV_VARS: string[] = [
+  'CEE_LEGACY_PIPELINE_ENABLED',       // Legacy pipeline code removed
+  'CEE_BIAS_LLM_DETECTION_ENABLED',    // Never existed in config schema
+  'CAUSAL_CLAIMS_ENABLED',             // Feature gated by CEE_CAUSAL_VALIDATION_ENABLED, not this
+  'ORCHESTRATOR_ENABLED',              // Actual legacy name is ENABLE_ORCHESTRATOR
+  'VITE_ENABLE_ORCHESTRATOR_V2',       // Frontend-only (Vite prefix); not read by backend
+  'CEE_UNIFIED_PIPELINE_ENABLED',      // Unified pipeline is always-on; flag retired
+  'CEE_MODEL_REPAIR_GRAPH',            // Never existed; canonical name is CEE_MODEL_REPAIR
+];
+
+/**
+ * Check for dead environment variables that are set but have no effect.
+ *
+ * @returns Array of warning messages for dead env vars found in process.env
+ */
+export function checkDeadEnvVars(): EnvVarWarning[] {
+  const warnings: EnvVarWarning[] = [];
+  for (const key of DEAD_ENV_VARS) {
+    if (process.env[key] !== undefined) {
+      warnings.push({
+        key,
+        message: `Environment variable '${key}' is set but has no effect. Remove it from deployment config.`,
+      });
+    }
+  }
   return warnings;
 }
