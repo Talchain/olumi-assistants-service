@@ -29,7 +29,8 @@ import { log } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
-import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
+// ANTHROPIC_EDIT_GRAPH_SCHEMA import removed — structured outputs disabled for edit_graph
+// (operations[].value carries arbitrary patch payloads incompatible with closed schemas)
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import type {
@@ -1155,11 +1156,12 @@ export async function handleEditGraph(
       const editGraphThinking = config.cee.thinking?.editGraphEnabled
         ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.editGraphBudget }
         : undefined;
-      // Structured Outputs: pass edit_graph schema when thinking is not enabled.
-      // The adapter checks the feature flag and model allowlist internally.
-      const editGraphOutputSchema = !editGraphThinking
-        ? ANTHROPIC_EDIT_GRAPH_SCHEMA as Record<string, unknown>
-        : undefined;
+      // Structured Outputs DISABLED for edit_graph: the operations[].value field
+      // carries arbitrary patch payloads (node/edge objects) that cannot be represented
+      // as a closed Anthropic schema. With additionalProperties:false on operations items,
+      // the LLM cannot produce value/old_value, making add/update operations non-functional.
+      // edit_graph relies on prompt-driven JSON output instead.
+      const editGraphOutputSchema = undefined;
       chatResult = await adapter.chat(
         {
           system: effectiveInstruction,
