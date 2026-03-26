@@ -368,6 +368,10 @@ export const TelemetryEvents = {
   PromptApprovalGranted: "prompt.approval.granted",
   PromptApprovalRejected: "prompt.approval.rejected",
 
+  // Prompt Activation Guard events (v2.2)
+  PromptActivationBlocked: "prompt.activation.blocked",
+  PromptStagingActivated: "prompt.staging.activated",
+
   // Graph Validation events (v2.2)
   CeeGraphValidation: "cee.graph.validation",
   CeeGraphGoalsMerged: "cee.graph.goals_merged",

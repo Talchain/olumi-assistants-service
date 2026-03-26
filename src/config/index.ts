@@ -386,6 +386,7 @@ const ConfigSchema = z.object({
     // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
     patchPreValidationEnabled: booleanString.default(true), // If true, apply structural validation to edit_graph patches before assembly
     patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
+    editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
@@ -465,6 +466,9 @@ const ConfigSchema = z.object({
     // Repair loop settings
     maxPatchOperations: z.coerce.number().int().min(1).max(100).default(15), // Max operations per edit_graph patch
     maxRepairRetries: z.coerce.number().int().min(0).max(5).default(1), // Max repair retries in graph orchestrator
+    // explain_results response enrichment
+    explainHeadlineEnabled: booleanString.default(true), // CEE_EXPLAIN_HEADLINE_ENABLED — generate assistant_text headline from explanation narrative
+    explainChipsEnabled: booleanString.default(true), // CEE_EXPLAIN_CHIPS_ENABLED — generate suggested_actions chips after explain_results
     // Debug logging settings
     debugCategoryTrace: booleanString.default(false), // If true, emit V3-CAT diagnostic logs for category field tracing
     debugLoggingEnabled: booleanString.default(false), // If true, emit V3-CAT diagnostic logs
@@ -572,6 +576,7 @@ const ConfigSchema = z.object({
     adminRoutesEnabled: booleanString.default(true), // Enable admin routes (set to false in production)
     useStaging: booleanString.optional(), // Explicit override: true = use staging prompts, false = use production prompts
     environment: z.string().optional(), // Environment name for prompt selection (e.g., "staging", "production"). Falls back to DD_ENV.
+    activationGuardEnabled: booleanString.default(true), // CEE_PROMPT_ACTIVATION_GUARD_ENABLED — prevents automated processes from setting stagingVersion/activeVersion
   }),
 });
 
@@ -743,6 +748,7 @@ function parseConfig(): Config {
       // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
       patchPreValidationEnabled: env.CEE_PATCH_PRE_VALIDATION_ENABLED,
       patchBudgetEnabled: env.CEE_PATCH_BUDGET_ENABLED,
+      editNormalisationEnabled: env.CEE_EDIT_NORMALISATION_ENABLED,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs
@@ -830,6 +836,9 @@ function parseConfig(): Config {
       // Repair loop settings
       maxPatchOperations: env.MAX_PATCH_OPERATIONS,
       maxRepairRetries: env.CEE_MAX_REPAIR_RETRIES,
+      // explain_results response enrichment
+      explainHeadlineEnabled: env.CEE_EXPLAIN_HEADLINE_ENABLED,
+      explainChipsEnabled: env.CEE_EXPLAIN_CHIPS_ENABLED,
       // Debug logging settings
       debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
@@ -907,6 +916,7 @@ function parseConfig(): Config {
       adminRoutesEnabled: env.ADMIN_ROUTES_ENABLED,
       useStaging: env.PROMPTS_USE_STAGING,
       environment: env.PROMPTS_ENVIRONMENT ?? env.DD_ENV, // PROMPTS_ENVIRONMENT takes precedence over DD_ENV
+      activationGuardEnabled: env.CEE_PROMPT_ACTIVATION_GUARD_ENABLED,
     },
   };
 

@@ -15,6 +15,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   classifyExplainQuestion,
   handleExplainResults,
+  extractHeadline,
 } from "../../../../src/orchestrator/tools/explain-results.js";
 import type { V2RunResponseEnvelope, ConversationContext } from "../../../../src/orchestrator/types.js";
 
@@ -439,5 +440,79 @@ describe("handleExplainResults — deterministic_answer_tier trace", () => {
       context, adapter as never, "req-1", "turn-1", "why did A win?",
     );
     expect(result.deterministic_answer_tier).toBe(3);
+  });
+});
+
+// ============================================================================
+// extractHeadline (Issue 2)
+// ============================================================================
+
+describe("extractHeadline", () => {
+  it("returns first sentence from multi-sentence text", () => {
+    const text = "Option A leads at 70%. The biggest driver is Pricing. Market size also contributes.";
+    expect(extractHeadline(text)).toBe("Option A leads at 70%.");
+  });
+
+  it("truncates to 120 chars with ellipsis when no sentence boundary", () => {
+    const text = "A".repeat(200);
+    const result = extractHeadline(text);
+    expect(result.length).toBe(120);
+    expect(result.endsWith("...")).toBe(true);
+  });
+
+  it("returns full text when under 120 chars with no sentence boundary", () => {
+    const text = "No sentence boundary here";
+    expect(extractHeadline(text)).toBe("No sentence boundary here");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(extractHeadline("")).toBe("");
+    expect(extractHeadline("  ")).toBe("");
+  });
+
+  it("handles question mark as sentence ending", () => {
+    expect(extractHeadline("Why does A win? Because of pricing.")).toBe("Why does A win?");
+  });
+
+  it("handles exclamation mark as sentence ending", () => {
+    expect(extractHeadline("A is the clear winner! The margin is large.")).toBe("A is the clear winner!");
+  });
+});
+
+// ============================================================================
+// Tier 1/2 assistant_text headline (Issue 2)
+// ============================================================================
+
+describe("explain_results assistant_text headline", () => {
+  it("Tier 1 returns non-null assistantText", async () => {
+    const adapter = makeAdapter();
+    const context = makeContext();
+    const result = await handleExplainResults(
+      context, adapter as never, "req-1", "turn-1", "who is winning?",
+    );
+    expect(result.deterministic_answer_tier).toBe(1);
+    expect(result.assistantText).not.toBeNull();
+    expect(typeof result.assistantText).toBe("string");
+    expect(result.assistantText!.length).toBeGreaterThan(0);
+  });
+
+  it("Tier 2 returns non-null assistantText", async () => {
+    const adapter = makeAdapter();
+    const context = makeContext({
+      analysis_response: makeAnalysisResponse({
+        review_cards: [
+          {
+            card_type: "narrative_summary",
+            narrative_summary: "Option A leads due to strong pricing fundamentals. The margin is significant.",
+          },
+        ],
+      }),
+    });
+    const result = await handleExplainResults(
+      context, adapter as never, "req-1", "turn-1", "summarise the results",
+    );
+    expect(result.deterministic_answer_tier).toBe(2);
+    expect(result.assistantText).not.toBeNull();
+    expect(typeof result.assistantText).toBe("string");
   });
 });

@@ -595,6 +595,96 @@ function buildIntentRecoveryResult(
 }
 
 // ============================================================================
+// Edit Operation Normalisation (CEE_EDIT_NORMALISATION_ENABLED)
+// ============================================================================
+
+/**
+ * Known controllable/observable data sub-fields that the LLM may nest under
+ * an extra `value.data` wrapper instead of placing at top level.
+ */
+const NODE_DATA_SUBFIELDS = new Set([
+  'value', 'raw_value', 'unit', 'cap', 'extractionType', 'factor_type', 'uncertainty_drivers',
+]);
+
+/**
+ * Normalise non-canonical field shapes in edit_graph operations before Zod
+ * validation and PLoT submission.
+ *
+ * **Node normalisation (add_node):**
+ * - Unwrap spurious `value.data` wrapper when `value.category` is absent
+ * - Rename `value.observed_state` → `value.data`
+ *
+ * **Edge normalisation (add_edge / update_edge):**
+ * - Rename `belief_exists` → `exists_probability`
+ *
+ * Returns a new array — original is not mutated.
+ * @internal Exported for testing.
+ */
+export function normaliseEditOpsForPlot(ops: PatchOperation[]): PatchOperation[] {
+  if (!config.cee.editNormalisationEnabled) return ops;
+
+  return ops.map((op, index) => {
+    if (!op.value || typeof op.value !== 'object') return op;
+    const value = { ...(op.value as Record<string, unknown>) };
+    let changed = false;
+
+    // ---- Node normalisation (add_node) ----
+    if (op.op === 'add_node') {
+      // Unwrap spurious `data` wrapper: model puts data sub-fields inside value.data
+      // instead of at top level. Only act when `category` is absent (canonical nodes have
+      // category at top level, so its presence means the shape is intentional).
+      if (value.data && typeof value.data === 'object' && !value.category) {
+        const inner = value.data as Record<string, unknown>;
+
+        // External factor: data.prior → value.prior
+        if (inner.prior && typeof inner.prior === 'object') {
+          value.prior = inner.prior;
+          delete value.data;
+          changed = true;
+          logNormalisation('data.prior→prior', 'prior', index);
+        } else {
+          // Controllable/observable: move recognised sub-fields up into a clean `data`
+          const hasSubfields = Object.keys(inner).some((k) => NODE_DATA_SUBFIELDS.has(k));
+          if (hasSubfields) {
+            // The `data` key is correct, but ensure it contains the right fields directly
+            // (no double nesting). If inner already has the sub-fields, data is fine.
+            // Nothing to move — data shape is already correct.
+          }
+        }
+      }
+
+      // Rename observed_state → data
+      if ('observed_state' in value && !('data' in value)) {
+        value.data = value.observed_state;
+        delete value.observed_state;
+        changed = true;
+        logNormalisation('observed_state', 'data', index);
+      }
+    }
+
+    // ---- Edge normalisation (add_edge / update_edge) ----
+    if (op.op === 'add_edge' || op.op === 'update_edge') {
+      // belief_exists → exists_probability
+      if ('belief_exists' in value && !('exists_probability' in value)) {
+        value.exists_probability = value.belief_exists;
+        delete value.belief_exists;
+        changed = true;
+        logNormalisation('belief_exists', 'exists_probability', index);
+      }
+    }
+
+    return changed ? { ...op, value } : op;
+  });
+}
+
+function logNormalisation(fieldFrom: string, fieldTo: string, opIndex: number): void {
+  log.info(
+    { event: 'edit_graph.field_normalised', field_from: fieldFrom, field_to: fieldTo, op_index: opIndex },
+    `edit_graph normalised field: ${fieldFrom} → ${fieldTo}`,
+  );
+}
+
+// ============================================================================
 // Legacy Field Detection
 // ============================================================================
 
@@ -715,17 +805,53 @@ function populateOldValues(
 /**
  * Map CEE PatchOperation[] to PLoT's expected field names.
  * CEE uses `old_value`; PLoT uses `previous`.
+ * CEE internal edge paths use `from::to`; PLoT expects `from->to`.
+ * @internal Exported for testing only.
  */
-function mapOpsForPlot(ops: PatchOperation[]): Record<string, unknown>[] {
+const EDGE_OPS = new Set(['add_edge', 'remove_edge', 'update_edge']);
+
+export function mapOpsForPlot(ops: PatchOperation[]): Record<string, unknown>[] {
   return ops.map(op => {
+    // Convert CEE internal edge path format (from::to) to PLoT format (from->to).
+    // Only apply to edge operations to avoid corrupting node IDs that might
+    // contain colons (defensive — canonical IDs collapse :: to : but guard anyway).
+    const isEdgeOp = EDGE_OPS.has(op.op);
     const mapped: Record<string, unknown> = {
       op: op.op,
-      path: op.path,
+      path: isEdgeOp && op.path.includes('::') ? op.path.replace('::', '->') : op.path,
     };
-    if (op.value !== undefined) mapped.value = op.value;
+    if (op.value !== undefined) {
+      // Re-nest flat strength_mean/strength_std into strength: { mean, std } for PLoT.
+      // Zod schema uses flat fields; PLoT expects nested canonical format.
+      mapped.value = isEdgeOp ? nestEdgeStrengthForPlot(op.value) : op.value;
+    }
     if (op.old_value !== undefined) mapped.previous = op.old_value;
     return mapped;
   });
+}
+
+/**
+ * Convert flat `strength_mean` / `strength_std` to nested `strength: { mean, std }`
+ * for PLoT's canonical edge format. If `strength` is already nested, leave it alone.
+ * If both flat and nested exist, nested wins.
+ * @internal Exported for testing.
+ */
+export function nestEdgeStrengthForPlot(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const v = value as Record<string, unknown>;
+
+  // Already nested — leave as-is
+  if (v.strength && typeof v.strength === 'object') return value;
+
+  const hasFlat = 'strength_mean' in v || 'strength_std' in v;
+  if (!hasFlat) return value;
+
+  const { strength_mean, strength_std, ...rest } = v;
+  const nested: Record<string, unknown> = {};
+  if (strength_mean !== undefined) nested.mean = strength_mean;
+  if (strength_std !== undefined) nested.std = strength_std;
+
+  return { ...rest, strength: nested };
 }
 
 // ============================================================================
@@ -1238,7 +1364,14 @@ export async function handleEditGraph(
       const assistantText = parts.join('\n\n') || 'No changes were needed for this request.';
 
       log.info(
-        { request_id: requestId, attempt, warnings: llmResult.warnings.length, has_coaching: !!llmResult.coaching },
+        {
+          request_id: requestId,
+          attempt,
+          warnings: llmResult.warnings.length,
+          has_coaching: !!llmResult.coaching,
+          preceded_by_plot_rejection: !!lastPlotErrors,
+          preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
+        },
         "edit_graph returned empty operations (no-op)",
       );
       validationOutcome = 'no_operations';
@@ -1259,8 +1392,11 @@ export async function handleEditGraph(
 
     // Strip impact/rationale from operations for the validation pipeline
     const { operations: strippedOps, meta: operationMeta } = stripOperationMeta(llmResult.operations);
-    setOpsTelemetry(strippedOps);
-    const rawOps: unknown[] = strippedOps;
+
+    // Normalise non-canonical field names before Zod validation (CEE_EDIT_NORMALISATION_ENABLED)
+    const normalisedOps = normaliseEditOpsForPlot(strippedOps);
+    setOpsTelemetry(normalisedOps);
+    const rawOps: unknown[] = normalisedOps;
     lastRawOps = rawOps;
 
     if (intentCategory !== 'structural' && hasStructuralOperations(strippedOps)) {

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { routeSystemEvent, appendSystemMessages } from "../../../src/orchestrator/system-event-router.js";
+import { routeSystemEvent, appendSystemMessages, hasPendingPatch } from "../../../src/orchestrator/system-event-router.js";
 import type { SystemEvent, OrchestratorTurnRequest, ConversationMessage } from "../../../src/orchestrator/types.js";
 import type { PLoTClient, ValidatePatchResult } from "../../../src/orchestrator/plot-client.js";
 import type { V2RunResponseEnvelope } from "../../../src/orchestrator/types.js";
@@ -952,5 +952,49 @@ describe('Confirmation text (Task 2)', () => {
       expect(result.guidanceItems).toEqual([]);
       expect(result.error).toBeUndefined();
     });
+  });
+});
+
+// ============================================================================
+// hasPendingPatch — string content handling (Issue 3)
+// ============================================================================
+
+describe("hasPendingPatch", () => {
+  it("returns true for JSON-stringified content with pending graph_patch", () => {
+    const msg: ConversationMessage = {
+      role: "assistant",
+      content: JSON.stringify({
+        blocks: [{ block_type: "graph_patch", data: { patch_type: "edit", operations: [], status: "proposed" } }],
+      }),
+    } as unknown as ConversationMessage;
+    expect(hasPendingPatch([msg])).toBe(true);
+  });
+
+  it("returns true for object content with pending graph_patch (regression)", () => {
+    const msg: ConversationMessage = {
+      role: "assistant",
+      content: {
+        blocks: [{ block_type: "graph_patch", data: { patch_type: "edit", operations: [], status: "previewed" } }],
+      },
+    } as unknown as ConversationMessage;
+    expect(hasPendingPatch([msg])).toBe(true);
+  });
+
+  it("returns false for plain text string content", () => {
+    const msg: ConversationMessage = {
+      role: "assistant",
+      content: "Here is a text response with no blocks.",
+    } as unknown as ConversationMessage;
+    expect(hasPendingPatch([msg])).toBe(false);
+  });
+
+  it("returns false when graph_patch status is 'accepted'", () => {
+    const msg: ConversationMessage = {
+      role: "assistant",
+      content: JSON.stringify({
+        blocks: [{ block_type: "graph_patch", data: { patch_type: "edit", operations: [], status: "accepted" } }],
+      }),
+    } as unknown as ConversationMessage;
+    expect(hasPendingPatch([msg])).toBe(false);
   });
 });

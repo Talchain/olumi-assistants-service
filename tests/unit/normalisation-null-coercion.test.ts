@@ -132,6 +132,88 @@ describe("normaliseDraftResponse — null coercion", () => {
     });
   });
 
+  describe("data.value string coercion", () => {
+    it("coerces string data.value to number and preserves data object", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1", kind: "factor", label: "F",
+          data: { value: "0.6", factor_type: "cost", extractionType: "explicit" },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data).toBeDefined();
+      expect(result.nodes[0].data.value).toBe(0.6);
+      expect(result.nodes[0].data.factor_type).toBe("cost");
+      expect(result.nodes[0].data.extractionType).toBe("explicit");
+    });
+
+    it("coerces string data.raw_value and data.cap to number", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1", kind: "factor", label: "F",
+          data: { value: 0.5, raw_value: "180000", cap: "300000" },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.raw_value).toBe(180000);
+      expect(result.nodes[0].data.cap).toBe(300000);
+    });
+
+    it("does not strip data with NaN string value but preserves factor metadata", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1", kind: "factor", label: "F",
+          data: { value: "not_a_number", factor_type: "cost", extractionType: "explicit" },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      // factor_type/extractionType should prevent stripping
+      expect(result.nodes[0].data).toBeDefined();
+      expect(result.nodes[0].data.factor_type).toBe("cost");
+    });
+  });
+
+  describe("data preservation with null value but factor metadata", () => {
+    it("preserves data object when value is null but factor_type present", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1", kind: "factor", label: "F",
+          data: {
+            value: null,
+            factor_type: "cost",
+            extractionType: "explicit",
+            uncertainty_drivers: ["Market volatility"],
+          },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      // data should NOT be stripped — factor metadata preserved
+      expect(result.nodes[0].data).toBeDefined();
+      expect(result.nodes[0].data.factor_type).toBe("cost");
+      expect(result.nodes[0].data.extractionType).toBe("explicit");
+      expect(result.nodes[0].data.uncertainty_drivers).toEqual(["Market volatility"]);
+      // value should be coerced null → undefined
+      expect(result.nodes[0].data.value).toBeUndefined();
+    });
+
+    it("still strips truly empty data objects", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1", kind: "factor", label: "F",
+          data: { value: null, extractionType: null, factor_type: null },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      // All fields became undefined — no union key and no factor metadata
+      expect(result.nodes[0].data).toBeUndefined();
+    });
+  });
+
   describe("Zod DraftGraphOutput parse with nullable fields", () => {
     it("graph with mix of populated and null factor data passes DraftGraphOutput", () => {
       // Simulates Anthropic output after null coercion by normaliser

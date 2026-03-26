@@ -778,22 +778,39 @@ export function hasPendingPatch(messages: ConversationMessage[]): boolean {
 
     // Structured content (internal callers, unit-test mocks, future type widening)
     if (typeof content === 'object' && content !== null) {
-      const blocks = (content as Record<string, unknown>).blocks;
-      if (Array.isArray(blocks)) {
-        for (const block of blocks) {
-          if (
-            typeof block === 'object' && block !== null &&
-            (block as Record<string, unknown>).block_type === 'graph_patch'
-          ) {
-            const data = (block as Record<string, unknown>).data as Record<string, unknown> | undefined;
-            if (data && (data.status === 'proposed' || data.status === 'previewed')) {
-              return true;
-            }
-          }
+      if (scanBlocksForPendingPatch(content as Record<string, unknown>)) return true;
+    }
+
+    // String-typed content (Zod-coerced at route boundary — the common production path)
+    if (typeof content === 'string') {
+      try {
+        const parsed = JSON.parse(content);
+        if (typeof parsed === 'object' && parsed !== null) {
+          if (scanBlocksForPendingPatch(parsed as Record<string, unknown>)) return true;
         }
+      } catch {
+        // Not JSON (plain text content) — skip
       }
     }
   }
 
+  return false;
+}
+
+/** Scan a content object's blocks array for a pending graph_patch. */
+function scanBlocksForPendingPatch(content: Record<string, unknown>): boolean {
+  const blocks = content.blocks;
+  if (!Array.isArray(blocks)) return false;
+  for (const block of blocks) {
+    if (
+      typeof block === 'object' && block !== null &&
+      (block as Record<string, unknown>).block_type === 'graph_patch'
+    ) {
+      const data = (block as Record<string, unknown>).data as Record<string, unknown> | undefined;
+      if (data && (data.status === 'proposed' || data.status === 'previewed')) {
+        return true;
+      }
+    }
+  }
   return false;
 }

@@ -16,7 +16,7 @@ import { getDraftGraphPromptV15, DRAFT_GRAPH_PROMPT_V15 } from './defaults-v15.j
 import { getDraftGraphPromptV19, DRAFT_GRAPH_PROMPT_V19 } from './defaults-v19.js';
 import { getDraftGraphPromptV22, DRAFT_GRAPH_PROMPT_V22 } from './defaults-v22.js';
 import { getEnrichFactorsPrompt, ENRICH_FACTORS_PROMPT } from './enrich-factors.js';
-import { getOrchestratorPromptV26, ORCHESTRATOR_PROMPT_CF_V26 } from './orchestrator-cf-v26.js';
+import { getOrchestratorPromptV28, ORCHESTRATOR_PROMPT_CF_V28 } from './orchestrator-cf-v28.js';
 import { getDraftGraphPromptV187, DRAFT_GRAPH_PROMPT_V187 } from './defaults-v187.js';
 import { getEditGraphPromptV6, EDIT_GRAPH_PROMPT_V6 } from './edit-graph-v6.js';
 import { log } from '../utils/telemetry.js';
@@ -2170,12 +2170,12 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('decision_review', DECISION_REVIEW_PROMPT);
   registerDefaultPrompt('edit_graph', getEditGraphPromptV6());
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
-  registerDefaultPrompt('orchestrator', getOrchestratorPromptV26());
+  registerDefaultPrompt('orchestrator', getOrchestratorPromptV28());
   registerDefaultPrompt('validate_graph', VALIDATE_GRAPH_PROMPT);
 
   // Log prompt versions at registration (read from actually-registered content)
   log.info({
-    orchestrator: 'cf-v26',
+    orchestrator: 'cf-v28',
     draft_graph: version,
     edit_graph: 'v6',
     decision_review: DECISION_REVIEW_PROMPT_VERSION,
@@ -2214,7 +2214,7 @@ export const PROMPT_TEMPLATES = {
   decision_review: DECISION_REVIEW_PROMPT,
   edit_graph: EDIT_GRAPH_PROMPT_V6,
   repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
-  orchestrator: ORCHESTRATOR_PROMPT_CF_V26,
+  orchestrator: ORCHESTRATOR_PROMPT_CF_V28,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 
