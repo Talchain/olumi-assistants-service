@@ -470,6 +470,17 @@ export interface GraphPatchBlockData {
       code?: string;
     }>;
   };
+  /**
+   * Explicit intervention updates extracted from edit_graph operations.
+   * Each entry maps an option→factor intervention to its normalised numeric value.
+   * Enables downstream consumers to merge intervention edits into the options[]
+   * payload without re-parsing the graph.
+   */
+  intervention_updates?: Array<{
+    option_id: string;
+    factor_id: string;
+    value: number;
+  }>;
 }
 
 // ---- Fact Block ----

@@ -19,35 +19,36 @@ describe('checkPatchBudget', () => {
     expect(result.edgeOps).toBe(4);
   });
 
-  it('4 node ops + 2 edge ops: rejected (node budget)', () => {
+  it('5 node ops + 2 edge ops: rejected (node budget)', () => {
     const ops: PatchOperation[] = [
       { op: 'add_node', path: 'n1', value: { id: 'n1', kind: 'factor', label: 'A' } },
       { op: 'add_node', path: 'n2', value: { id: 'n2', kind: 'factor', label: 'B' } },
-      { op: 'update_node', path: 'n3', value: { label: 'C' } },
-      { op: 'remove_node', path: 'n4' },
+      { op: 'add_node', path: 'n3', value: { id: 'n3', kind: 'factor', label: 'C' } },
+      { op: 'update_node', path: 'n4', value: { label: 'D' } },
+      { op: 'remove_node', path: 'n5' },
       { op: 'add_edge', path: 'n1::n2', value: { from: 'n1', to: 'n2' } },
       { op: 'add_edge', path: 'n2::n3', value: { from: 'n2', to: 'n3' } },
     ];
     const result = checkPatchBudget(ops);
     expect(result.allowed).toBe(false);
-    expect(result.nodeOps).toBe(4);
+    expect(result.nodeOps).toBe(5);
     expect(result.edgeOps).toBe(2);
   });
 
-  it('2 node ops + 5 edge ops: rejected (edge budget)', () => {
+  it('2 node ops + 9 edge ops: rejected (edge budget)', () => {
     const ops: PatchOperation[] = [
       { op: 'add_node', path: 'n1', value: { id: 'n1', kind: 'factor', label: 'A' } },
       { op: 'update_node', path: 'n2', value: { label: 'B' } },
-      { op: 'add_edge', path: 'n1::n2', value: { from: 'n1', to: 'n2' } },
-      { op: 'add_edge', path: 'n2::n3', value: { from: 'n2', to: 'n3' } },
-      { op: 'remove_edge', path: 'n3::n4' },
-      { op: 'update_edge', path: 'n4::n5', value: { strength_mean: 0.5 } },
-      { op: 'add_edge', path: 'n5::n6', value: { from: 'n5', to: 'n6' } },
+      ...Array.from({ length: 9 }, (_, i) => ({
+        op: 'add_edge' as const,
+        path: `n1::n${i + 10}`,
+        value: { from: 'n1', to: `n${i + 10}` },
+      })),
     ];
     const result = checkPatchBudget(ops);
     expect(result.allowed).toBe(false);
     expect(result.nodeOps).toBe(2);
-    expect(result.edgeOps).toBe(5);
+    expect(result.edgeOps).toBe(9);
   });
 
   it('option-addition with 6 edge ops: passes (elevated budget)', () => {
@@ -96,60 +97,61 @@ describe('checkPatchBudget', () => {
     expect(result.edgeOps).toBe(5);
   });
 
-  it('non-option add_node with 5 edge ops: rejected (standard budget)', () => {
+  it('non-option add_node with 9 edge ops: rejected (standard budget)', () => {
     // A factor-addition does NOT get the elevated edge budget
     const ops: PatchOperation[] = [
       { op: 'add_node', path: 'fac_new', value: { id: 'fac_new', kind: 'factor', label: 'New Factor' } },
-      { op: 'add_edge', path: 'fac_new::n1', value: { from: 'fac_new', to: 'n1' } },
-      { op: 'add_edge', path: 'fac_new::n2', value: { from: 'fac_new', to: 'n2' } },
-      { op: 'add_edge', path: 'fac_new::n3', value: { from: 'fac_new', to: 'n3' } },
-      { op: 'add_edge', path: 'fac_new::n4', value: { from: 'fac_new', to: 'n4' } },
-      { op: 'add_edge', path: 'fac_new::n5', value: { from: 'fac_new', to: 'n5' } },
+      ...Array.from({ length: 9 }, (_, i) => ({
+        op: 'add_edge' as const,
+        path: `fac_new::n${i}`,
+        value: { from: 'fac_new', to: `n${i}` },
+      })),
     ];
     const result = checkPatchBudget(ops);
     expect(result.allowed).toBe(false);
-    expect(result.edgeOps).toBe(5);
+    expect(result.edgeOps).toBe(9);
   });
 
   it('option-addition with unrelated edge rewires: unrelated edges capped at standard budget', () => {
-    // Option-add has 3 incident edges (within elevated 8-cap), but also has 5 unrelated
-    // edge ops which exceed the standard 4-cap. Should be rejected.
+    // Option-add has 3 incident edges (within elevated 8-cap), but also has 9 unrelated
+    // edge ops which exceed the standard 8-cap. Should be rejected.
     const ops: PatchOperation[] = [
       { op: 'add_node', path: 'opt_3', value: { id: 'opt_3', kind: 'option', label: 'New Option' } },
       // 3 edges incident to opt_3 (within elevated cap)
       { op: 'add_edge', path: 'opt_3::fac_1', value: { from: 'opt_3', to: 'fac_1' } },
       { op: 'add_edge', path: 'opt_3::fac_2', value: { from: 'opt_3', to: 'fac_2' } },
       { op: 'add_edge', path: 'opt_3::fac_3', value: { from: 'opt_3', to: 'fac_3' } },
-      // 5 unrelated edge rewires (exceeds standard 4-cap)
-      { op: 'update_edge', path: 'fac_a::fac_b', value: { from: 'fac_a', to: 'fac_b', strength_mean: 0.9 } },
-      { op: 'update_edge', path: 'fac_c::fac_d', value: { from: 'fac_c', to: 'fac_d', strength_mean: 0.8 } },
-      { op: 'add_edge', path: 'fac_e::fac_f', value: { from: 'fac_e', to: 'fac_f' } },
-      { op: 'remove_edge', path: 'fac_g::fac_h' },
-      { op: 'add_edge', path: 'fac_i::fac_j', value: { from: 'fac_i', to: 'fac_j' } },
+      // 9 unrelated edge rewires (exceeds standard 8-cap)
+      ...Array.from({ length: 9 }, (_, i) => ({
+        op: 'add_edge' as const,
+        path: `fac_${String.fromCharCode(97 + i)}::fac_${String.fromCharCode(97 + i + 1)}`,
+        value: { from: `fac_${String.fromCharCode(97 + i)}`, to: `fac_${String.fromCharCode(97 + i + 1)}` },
+      })),
     ];
     const result = checkPatchBudget(ops);
     expect(result.allowed).toBe(false);
-    expect(result.edgeOps).toBe(8); // total
+    expect(result.edgeOps).toBe(12); // total
     expect(result.breachedLimit).toBe('unrelated');
-    expect(result.effectiveMaxEdgeOps).toBe(4); // standard cap for unrelated edges
+    expect(result.effectiveMaxEdgeOps).toBe(8); // standard cap for unrelated edges
   });
 
-  it('option-addition with 4 unrelated edge ops: passes (within standard cap)', () => {
+  it('option-addition with 8 unrelated edge ops: passes (within standard cap)', () => {
     const ops: PatchOperation[] = [
       { op: 'add_node', path: 'opt_3', value: { id: 'opt_3', kind: 'option', label: 'New Option' } },
       // 3 edges incident to opt_3
       { op: 'add_edge', path: 'opt_3::fac_1', value: { from: 'opt_3', to: 'fac_1' } },
       { op: 'add_edge', path: 'opt_3::fac_2', value: { from: 'opt_3', to: 'fac_2' } },
       { op: 'add_edge', path: 'opt_3::fac_3', value: { from: 'opt_3', to: 'fac_3' } },
-      // 4 unrelated edge ops (within standard 4-cap)
-      { op: 'update_edge', path: 'fac_a::fac_b', value: { from: 'fac_a', to: 'fac_b', strength_mean: 0.9 } },
-      { op: 'update_edge', path: 'fac_c::fac_d', value: { from: 'fac_c', to: 'fac_d', strength_mean: 0.8 } },
-      { op: 'add_edge', path: 'fac_e::fac_f', value: { from: 'fac_e', to: 'fac_f' } },
-      { op: 'remove_edge', path: 'fac_g::fac_h' },
+      // 8 unrelated edge ops (within standard 8-cap)
+      ...Array.from({ length: 8 }, (_, i) => ({
+        op: 'add_edge' as const,
+        path: `fac_${String.fromCharCode(97 + i)}::fac_${String.fromCharCode(97 + i + 1)}`,
+        value: { from: `fac_${String.fromCharCode(97 + i)}`, to: `fac_${String.fromCharCode(97 + i + 1)}` },
+      })),
     ];
     const result = checkPatchBudget(ops);
     expect(result.allowed).toBe(true);
-    expect(result.edgeOps).toBe(7); // total
+    expect(result.edgeOps).toBe(11); // total
   });
 
   it('remove_node with 3 connected edges: 1 node op, 0 edge ops', () => {

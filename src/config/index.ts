@@ -387,6 +387,7 @@ const ConfigSchema = z.object({
     patchPreValidationEnabled: booleanString.default(true), // If true, apply structural validation to edit_graph patches before assembly
     patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
     editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
+    editInterventionRoutingEnabled: booleanString.default(true), // CEE_EDIT_INTERVENTION_ROUTING_ENABLED — read interventions from data.interventions + slash-keyed entries
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
@@ -749,6 +750,7 @@ function parseConfig(): Config {
       patchPreValidationEnabled: env.CEE_PATCH_PRE_VALIDATION_ENABLED,
       patchBudgetEnabled: env.CEE_PATCH_BUDGET_ENABLED,
       editNormalisationEnabled: env.CEE_EDIT_NORMALISATION_ENABLED,
+      editInterventionRoutingEnabled: env.CEE_EDIT_INTERVENTION_ROUTING_ENABLED,
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs
