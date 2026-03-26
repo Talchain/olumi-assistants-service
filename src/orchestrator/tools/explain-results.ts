@@ -18,6 +18,7 @@
  */
 
 import { log } from "../../utils/telemetry.js";
+import { config } from "../../config/index.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import type { TypedConversationBlock, ConversationContext, V2RunResponseEnvelope, OrchestratorError, SupportingRef } from "../types.js";
@@ -707,7 +708,7 @@ export async function handleExplainResults(
         );
         return {
           blocks: [createCommentaryBlock(tier1Text, turnId, 'tool:explain_results:tier1')],
-          assistantText: null,
+          assistantText: config.cee.explainHeadlineEnabled ? extractHeadline(tier1Text) : null,
           latencyMs: Date.now() - startTime,
           deterministic_answer_tier: 1,
         };
@@ -725,7 +726,7 @@ export async function handleExplainResults(
       );
       return {
         blocks: [createCommentaryBlock(tier2Text, turnId, 'tool:explain_results:tier2')],
-        assistantText: null,
+        assistantText: config.cee.explainHeadlineEnabled ? extractHeadline(tier2Text) : null,
         latencyMs: Date.now() - startTime,
         deterministic_answer_tier: 2,
       };
@@ -736,13 +737,10 @@ export async function handleExplainResults(
   // When analysis is stale and the question is causal/open (Tier 3), return a
   // recovery message instead of calling the LLM — a stale explanation would be misleading.
   if (stale) {
+    const staleText = 'The graph has changed since that run — please re-run the analysis to get an up-to-date explanation.';
     return {
-      blocks: [createCommentaryBlock(
-        'The graph has changed since that run — please re-run the analysis to get an up-to-date explanation.',
-        turnId,
-        'tool:explain_results:stale',
-      )],
-      assistantText: null,
+      blocks: [createCommentaryBlock(staleText, turnId, 'tool:explain_results:stale')],
+      assistantText: config.cee.explainHeadlineEnabled ? extractHeadline(staleText) : null,
       latencyMs: Date.now() - startTime,
     };
   }
@@ -810,7 +808,7 @@ export async function handleExplainResults(
 
     return {
       blocks: [block],
-      assistantText: null,
+      assistantText: config.cee.explainHeadlineEnabled ? extractHeadline(cleaned) : null,
       latencyMs,
       deterministic_answer_tier: 3,
     };
@@ -833,10 +831,76 @@ export async function handleExplainResults(
 
     return {
       blocks: [block],
-      assistantText: null,
+      assistantText: config.cee.explainHeadlineEnabled ? extractHeadline(fallbackText) : null,
       latencyMs: Date.now() - startTime,
     };
   }
+}
+
+// ============================================================================
+// Headline Extraction (Issue 2)
+// ============================================================================
+
+/**
+ * Extract a 1-2 sentence headline from explanation narrative text.
+ * Returns the first sentence (up to the first `.`, `!`, or `?` followed by whitespace or end),
+ * falling back to the first 120 characters with ellipsis if no sentence boundary is found.
+ * @internal Exported for testing.
+ */
+export function extractHeadline(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/^(.+?[.!?])(?:\s|$)/);
+  if (match) return match[1];
+  return trimmed.length <= 120 ? trimmed : `${trimmed.slice(0, 117)}...`;
+}
+
+// ============================================================================
+// Explain Chips (Issue 6)
+// ============================================================================
+
+/**
+ * Build default suggested_actions chips for explain_results turns.
+ * Uses analysis context (factor_sensitivity) to generate a contextual top-driver chip.
+ * @internal Exported for testing and dispatch wiring.
+ */
+export function buildExplainChips(
+  context: ConversationContext,
+): Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }> {
+  const chips: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }> = [];
+
+  // Contextual chip: top driver from factor_sensitivity
+  const r = context.analysis_response as Record<string, unknown> | undefined;
+  // Handle both top-level and nested (results[]) shapes
+  const nestedResults = r?.results;
+  const nestedObj = nestedResults && typeof nestedResults === 'object' && !Array.isArray(nestedResults)
+    ? nestedResults as Record<string, unknown> : null;
+  const rawFactors = r?.factor_sensitivity ?? nestedObj?.factor_sensitivity;
+  const factors = Array.isArray(rawFactors) ? rawFactors as Array<Record<string, unknown>> : [];
+  const topDriver = factors[0];
+  const driverLabel = topDriver ? String(topDriver.label ?? topDriver.factor_label ?? '') : '';
+
+  if (driverLabel) {
+    chips.push({
+      label: `What if ${driverLabel} changed?`,
+      prompt: `What would happen if ${driverLabel} changed significantly?`,
+      role: 'facilitator',
+    });
+  }
+
+  chips.push({
+    label: 'Re-run with different assumptions',
+    prompt: 'I want to re-run the analysis with different assumptions.',
+    role: 'facilitator',
+  });
+
+  chips.push({
+    label: 'Challenge the weakest edge',
+    prompt: 'Which relationship in the model is weakest and how does it affect the result?',
+    role: 'challenger',
+  });
+
+  return chips;
 }
 
 // ============================================================================

@@ -19,7 +19,7 @@ import {
 import { computeContentHash } from './schema.js';
 import { getDefaultPrompts } from './loader.js';
 import { shouldUseStagingPrompts } from '../config/index.js';
-import { log } from '../utils/telemetry.js';
+import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 
 /**
@@ -179,7 +179,7 @@ export async function checkSeedStatus(): Promise<{
 
 /**
  * Ensure the orchestrator prompt in the store has a staging version whose
- * content matches the registered default (cf-v26).
+ * content matches the registered default (cf-v28).
  *
  * If the current staging version's content hash differs from the default,
  * creates a new version and sets it as the staging version. This allows
@@ -232,24 +232,48 @@ async function ensureOrchestratorStagingVersion(
     const updated = await repo.createVersion(PROMPT_ID, {
       content: defaultContent,
       createdBy: 'system-migration',
-      changeNote: 'Auto-migrated orchestrator prompt from registered default (cf-v26)',
+      changeNote: 'Auto-migrated orchestrator prompt from registered default (cf-v28)',
     });
 
     // Find the newly created version number (highest)
     const newVersionNum = Math.max(...updated.versions.map(v => v.version));
 
-    // Set it as the staging version
-    await repo.update(PROMPT_ID, { stagingVersion: newVersionNum });
+    // Guard: check if automated activation is permitted
+    const guardEnabled = config.prompts?.activationGuardEnabled ?? true;
 
-    log.info(
-      {
+    if (guardEnabled) {
+      // Version was created but NOT activated.
+      // A human must set stagingVersion via the admin API.
+      emit(TelemetryEvents.PromptActivationBlocked, {
+        author: 'system-migration',
         prompt_id: PROMPT_ID,
-        new_version: newVersionNum,
+        version: newVersionNum,
+        target_environment: 'staging',
+        reason: 'automated_activation_not_permitted',
         hash: defaultHash.slice(0, 16),
-        event: 'prompt.staging_migration.complete',
-      },
-      'Orchestrator staging version migrated to cf-v26',
-    );
+      });
+      log.warn(
+        {
+          prompt_id: PROMPT_ID,
+          new_version: newVersionNum,
+          hash: defaultHash.slice(0, 16),
+          event: 'prompt.activation.blocked',
+        },
+        `Prompt activation guard enabled — automated staging activation blocked for ${existing.taskId}. Version ${newVersionNum} created but not activated. Use admin API to set stagingVersion.`,
+      );
+    } else {
+      // Guard disabled: old behavior — activate the version automatically
+      await repo.update(PROMPT_ID, { stagingVersion: newVersionNum });
+      log.info(
+        {
+          prompt_id: PROMPT_ID,
+          new_version: newVersionNum,
+          hash: defaultHash.slice(0, 16),
+          event: 'prompt.staging_migration.complete',
+        },
+        'Orchestrator staging version migrated (guard disabled)',
+      );
+    }
   } catch (err) {
     // Non-fatal — staging migration failure should not block startup
     log.warn(

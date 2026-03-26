@@ -107,6 +107,46 @@ export function normaliseDraftResponse(raw: unknown): unknown {
   const obj = raw as Record<string, unknown>;
   let normalisedCount = 0;
 
+  // ========================================================================
+  // PRE-NORMALISATION DIAGNOSTIC: Capture raw LLM output shape for edge
+  // strength and factor data BEFORE any coercion/stripping runs.
+  // Helps distinguish "LLM didn't produce it" from "pipeline lost it".
+  // ========================================================================
+  if (Array.isArray(obj.edges)) {
+    const rawEdges = obj.edges as any[];
+    const withNestedStrength = rawEdges.filter((e: any) => e && typeof e.strength === 'object' && e.strength !== null).length;
+    const withFlatStrength = rawEdges.filter((e: any) => e && e.strength_mean !== undefined).length;
+    const withWeight = rawEdges.filter((e: any) => e && e.weight !== undefined).length;
+    log.debug({
+      event: 'llm.raw_diagnostic.edges',
+      edge_count: rawEdges.length,
+      with_nested_strength: withNestedStrength,
+      with_flat_strength_mean: withFlatStrength,
+      with_legacy_weight: withWeight,
+    }, `[RAW] Edge strengths before normalisation: ${withNestedStrength} nested, ${withFlatStrength} flat, ${withWeight} legacy out of ${rawEdges.length}`);
+  }
+  if (Array.isArray(obj.nodes)) {
+    const rawNodes = obj.nodes as any[];
+    const factors = rawNodes.filter((n: any) => n && (n.kind === 'factor' || n.kind === 'Factor'));
+    const withDataValue = factors.filter((n: any) => n.data && (typeof n.data.value === 'number' || typeof n.data.value === 'string')).length;
+    const withDataNull = factors.filter((n: any) => n.data && n.data.value === null).length;
+    const withNoData = factors.filter((n: any) => !n.data).length;
+    const withMetadataNoValue = factors.filter((n: any) => {
+      if (!n.data) return false;
+      const hasValue = typeof n.data.value === 'number' || typeof n.data.value === 'string';
+      const hasMeta = n.data.factor_type || n.data.extractionType || n.data.uncertainty_drivers;
+      return !hasValue && n.data.value !== null && hasMeta;
+    }).length;
+    log.debug({
+      event: 'llm.raw_diagnostic.factor_data',
+      factor_count: factors.length,
+      with_data_value: withDataValue,
+      with_data_value_null: withDataNull,
+      with_no_data: withNoData,
+      with_metadata_no_value: withMetadataNoValue,
+    }, `[RAW] Factor data before normalisation: ${withDataValue} have value, ${withDataNull} null, ${withNoData} no data, ${withMetadataNoValue} metadata-only out of ${factors.length}`);
+  }
+
   // Normalise node kinds
   if (Array.isArray(obj.nodes)) {
     obj.nodes = obj.nodes.map((node: unknown) => {
@@ -157,6 +197,29 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         if (d.raw_value === null) d.raw_value = undefined;
         if (d.unit === null) d.unit = undefined;
         if (d.cap === null) d.cap = undefined;
+
+        // Numeric coercion: LLMs may emit data.value / data.raw_value / data.cap
+        // as strings (e.g. "0.6", "180000"). Coerce to number so the downstream
+        // union-key check (typeof data.value === 'number') doesn't strip the
+        // entire data object, losing factor_type/extractionType/uncertainty_drivers.
+        if (typeof d.value === 'string') {
+          const parsed = Number(d.value);
+          if (!Number.isNaN(parsed)) {
+            d.value = parsed;
+          }
+        }
+        if (typeof d.raw_value === 'string') {
+          const parsed = Number(d.raw_value);
+          if (!Number.isNaN(parsed)) {
+            d.raw_value = parsed;
+          }
+        }
+        if (typeof d.cap === 'string') {
+          const parsed = Number(d.cap);
+          if (!Number.isNaN(parsed)) {
+            d.cap = parsed;
+          }
+        }
       }
       // Nullable fields inside prior object
       if (node.prior && typeof node.prior === 'object') {
@@ -418,18 +481,22 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         }
       }
 
-      // Step 2: Strip data objects that lack a union-discriminating key
+      // Step 2: Strip data objects that lack a union-discriminating key.
+      // Preserve data if it contains factor metadata (factor_type, extractionType,
+      // uncertainty_drivers) even when value is absent — the deterministic sweep
+      // fills value defaults and these metadata fields must survive.
       const data = node.data;
       if (data && typeof data === 'object') {
         const hasUnionKey = typeof data.value === 'number' || data.interventions || data.operator;
-        if (!hasUnionKey) {
+        const hasFactorMetadata = data.factor_type || data.extractionType || data.uncertainty_drivers;
+        if (!hasUnionKey && !hasFactorMetadata) {
           const { data: _stripped, ...rest } = node;
           log.debug({
             event: 'llm.normalisation.empty_data_stripped',
             node_id: node.id,
             node_kind: node.kind,
             data_keys: Object.keys(data),
-          }, `Stripped empty data object from ${node.id} (no value/interventions/operator)`);
+          }, `Stripped empty data object from ${node.id} (no value/interventions/operator/factor metadata)`);
           return rest;
         }
       }
@@ -450,7 +517,7 @@ export function normaliseDraftResponse(raw: unknown): unknown {
  *
  * Controllable factors are factors with incoming option→factor edges.
  * When LLM fails to output data.value for a controllable factor,
- * we add a default value of 1.0 with extractionType: "inferred".
+ * we add a default value of 0.5 with extractionType: "inferred".
  *
  * This ensures ISL can compute sensitivity analysis.
  *
@@ -506,8 +573,15 @@ export function ensureControllableFactorBaselines(response: unknown): {
       return node;
     }
 
-    // Check if node already has data.value
+    // Check if node already has data.value (coerce string → number if needed)
     const data = node.data as Record<string, unknown> | undefined;
+    if (data && typeof data.value === 'string') {
+      const parsed = Number(data.value);
+      if (!Number.isNaN(parsed)) {
+        // Return a new node with coerced value — avoid mutating the input
+        return { ...node, data: { ...data, value: parsed } };
+      }
+    }
     if (data && typeof data.value === 'number') {
       return node; // Already has value
     }

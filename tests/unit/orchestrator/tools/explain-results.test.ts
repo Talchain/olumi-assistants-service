@@ -6,6 +6,7 @@ import {
   extractGraphNumbers,
   detectConstraintTension,
   handleExplainResults,
+  buildExplainChips,
 } from "../../../../src/orchestrator/tools/explain-results.js";
 import type { V2RunResponseEnvelope, ConversationContext } from "../../../../src/orchestrator/types.js";
 
@@ -412,7 +413,8 @@ describe("handleExplainResults handler", () => {
 
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].block_type).toBe("commentary");
-    expect(result.assistantText).toBeNull();
+    // With CEE_EXPLAIN_HEADLINE_ENABLED (default true), Tier 3 generates a headline
+    expect(result.assistantText).toBe("Option A is the clear winner.");
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
   });
 
@@ -1221,5 +1223,57 @@ describe("stripUngroundedNumerics — grounding scope contract", () => {
       expect(cleaned).toContain("[value]");
       expect(cleaned).not.toContain("150");
     });
+  });
+});
+
+// ============================================================================
+// buildExplainChips (Issue 6)
+// ============================================================================
+
+describe("buildExplainChips", () => {
+  it("includes contextual chip when top driver available from factor_sensitivity", () => {
+    const context = makeContext({
+      analysis_response: makeAnalysisResponse({
+        factor_sensitivity: [
+          { label: "Pricing", sensitivity: 0.85, direction: "positive" },
+          { label: "Market Size", sensitivity: 0.62, direction: "positive" },
+        ],
+      }),
+    });
+    const chips = buildExplainChips(context);
+    expect(chips.length).toBe(3);
+    expect(chips[0].label).toContain("Pricing");
+    expect(chips[0].role).toBe("facilitator");
+  });
+
+  it("returns 2 default chips when no factor_sensitivity data", () => {
+    const context = makeContext({
+      analysis_response: makeAnalysisResponse({ factor_sensitivity: undefined }),
+    });
+    const chips = buildExplainChips(context);
+    expect(chips.length).toBe(2);
+    expect(chips.some(c => c.label.includes("Re-run"))).toBe(true);
+    expect(chips.some(c => c.role === "challenger")).toBe(true);
+  });
+
+  it("returns 2 default chips when analysis_response is null", () => {
+    const context = makeContext({ analysis_response: null as unknown as V2RunResponseEnvelope });
+    const chips = buildExplainChips(context);
+    expect(chips.length).toBe(2);
+  });
+
+  it("reads factor_sensitivity from nested results shape", () => {
+    const context = makeContext({
+      analysis_response: {
+        analysis_status: "completed",
+        meta: { seed_used: 42, n_samples: 1000, response_hash: "h" },
+        results: {
+          factor_sensitivity: [{ factor_label: "Churn", sensitivity: 0.9 }],
+        },
+      } as unknown as V2RunResponseEnvelope,
+    });
+    const chips = buildExplainChips(context);
+    expect(chips.length).toBe(3);
+    expect(chips[0].label).toContain("Churn");
   });
 });

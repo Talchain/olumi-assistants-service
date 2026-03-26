@@ -557,6 +557,18 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      // Emit telemetry when stagingVersion is explicitly set via admin API
+      if (body.data.stagingVersion !== undefined && body.data.stagingVersion !== beforePrompt.stagingVersion) {
+        emit(TelemetryEvents.PromptStagingActivated, {
+          promptId: params.data.id,
+          taskId: prompt.taskId,
+          version: body.data.stagingVersion,
+          target_environment: 'staging',
+          previousStagingVersion: beforePrompt.stagingVersion ?? null,
+          actor,
+        });
+      }
+
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'update',
         promptId: params.data.id,

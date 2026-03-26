@@ -18,7 +18,7 @@ import { handleDraftGraph } from "./draft-graph.js";
 import { handleGenerateBrief } from "./generate-brief.js";
 import { handleEditGraph } from "./edit-graph.js";
 import type { EditGraphTraceDiagnostics } from "./edit-graph.js";
-import { handleExplainResults } from "./explain-results.js";
+import { handleExplainResults, buildExplainChips } from "./explain-results.js";
 import { handleUndoPatch } from "./undo-patch.js";
 import { generatePostDraftGuidance } from "../guidance/post-draft.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
@@ -28,6 +28,7 @@ import { handleRunExercise } from "./run-exercise.js";
 import { handleResearchTopic } from "./research-topic.js";
 import type { RouteMetadata, RouteOutcome, ToolResult } from "../pipeline/types.js";
 import { isAnalysisExplainable } from "../analysis-state.js";
+import { config } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
 import type { LLMAdapter } from "../../adapters/llm/types.js";
 import { detectValueMissingFactors, buildGapGuidanceItems, buildGapCoachingText } from "./gap-detection.js";
@@ -298,6 +299,7 @@ export async function dispatchToolHandler(
         guidanceItems: [],
         routeMetadata: buildToolRouteMetadata('explain_results', 'results_explanation', adapter),
         ...(result.deterministic_answer_tier !== undefined && { deterministicAnswerTier: result.deterministic_answer_tier }),
+        ...(config.cee.explainChipsEnabled && { suggestedActions: buildExplainChips(context) }),
       };
     }
 

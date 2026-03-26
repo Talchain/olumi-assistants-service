@@ -609,7 +609,7 @@ export function getCacheWarmingState(): Readonly<CacheWarmingState> {
 // Fallback version identifiers for health check comparison.
 // Must match the versions registered in registerAllDefaultPrompts().
 const FALLBACK_VERSIONS: Record<string, string> = {
-  orchestrator: 'cf-v26',
+  orchestrator: 'cf-v28',
   draft_graph: 'v187',
   edit_graph: 'v6',
   decision_review: 'v11',

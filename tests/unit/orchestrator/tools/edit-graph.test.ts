@@ -31,7 +31,7 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
   };
 });
 
-import { handleEditGraph, type EditGraphResult } from "../../../../src/orchestrator/tools/edit-graph.js";
+import { handleEditGraph, mapOpsForPlot, type EditGraphResult } from "../../../../src/orchestrator/tools/edit-graph.js";
 import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
 import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
@@ -1115,5 +1115,51 @@ describe("handleEditGraph", () => {
 
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.auto_apply).toBe(false);
+  });
+});
+
+// ============================================================================
+// mapOpsForPlot — edge path format conversion (Issue 4)
+// ============================================================================
+
+describe("mapOpsForPlot", () => {
+  it("converts from::to edge paths to from->to for PLoT", () => {
+    const ops: PatchOperation[] = [
+      { op: "add_edge", path: "price_1::churn_5", value: { from: "price_1", to: "churn_5", strength: { mean: 0.5, std: 0.1 } } },
+      { op: "remove_edge", path: "rev_2::cost_3", old_value: {} },
+    ];
+    const mapped = mapOpsForPlot(ops);
+    expect(mapped[0].path).toBe("price_1->churn_5");
+    expect(mapped[1].path).toBe("rev_2->cost_3");
+  });
+
+  it("preserves node-only paths unchanged", () => {
+    const ops: PatchOperation[] = [
+      { op: "add_node", path: "factor_new", value: { id: "factor_new", kind: "factor", label: "New" } },
+      { op: "remove_node", path: "opt_old", old_value: {} },
+    ];
+    const mapped = mapOpsForPlot(ops);
+    expect(mapped[0].path).toBe("factor_new");
+    expect(mapped[1].path).toBe("opt_old");
+  });
+
+  it("does not convert :: in node paths even if present (defensive)", () => {
+    // Node IDs should never contain :: (canonical regex collapses them),
+    // but guard against corruption if they somehow do.
+    const ops: PatchOperation[] = [
+      { op: "update_node", path: "some::id", value: { label: "X" } },
+    ];
+    const mapped = mapOpsForPlot(ops);
+    expect(mapped[0].path).toBe("some::id");
+  });
+
+  it("maps old_value to previous for PLoT field naming", () => {
+    const ops: PatchOperation[] = [
+      { op: "update_edge", path: "a::b", value: 0.8, old_value: 0.5 },
+    ];
+    const mapped = mapOpsForPlot(ops);
+    expect(mapped[0].previous).toBe(0.5);
+    expect(mapped[0].value).toBe(0.8);
+    expect((mapped[0] as Record<string, unknown>).old_value).toBeUndefined();
   });
 });
