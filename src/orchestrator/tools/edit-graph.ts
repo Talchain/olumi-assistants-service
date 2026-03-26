@@ -599,19 +599,19 @@ function buildIntentRecoveryResult(
 // ============================================================================
 
 /**
- * Known controllable/observable data sub-fields that the LLM may nest under
- * an extra `value.data` wrapper instead of placing at top level.
+ * Top-level node fields that belong on the operation value root, not inside `data`.
+ * Used to detect and fix LLM wrapping the whole node payload inside `value.data`.
  */
-const NODE_DATA_SUBFIELDS = new Set([
-  'value', 'raw_value', 'unit', 'cap', 'extractionType', 'factor_type', 'uncertainty_drivers',
-]);
+const TOP_LEVEL_NODE_FIELDS = ['category', 'kind', 'label', 'id'];
 
 /**
  * Normalise non-canonical field shapes in edit_graph operations before Zod
  * validation and PLoT submission.
  *
  * **Node normalisation (add_node):**
- * - Unwrap spurious `value.data` wrapper when `value.category` is absent
+ * - Unwrap spurious `value.data` wrapper when `value.category` is absent:
+ *   - External factor: `data.prior` → `value.prior` (data removed)
+ *   - Controllable/observable: hoist `category`/`kind`/`label`/`id` from `data` to value root
  * - Rename `value.observed_state` → `value.data`
  *
  * **Edge normalisation (add_edge / update_edge):**
@@ -643,13 +643,29 @@ export function normaliseEditOpsForPlot(ops: PatchOperation[]): PatchOperation[]
           changed = true;
           logNormalisation('data.prior→prior', 'prior', index);
         } else {
-          // Controllable/observable: move recognised sub-fields up into a clean `data`
-          const hasSubfields = Object.keys(inner).some((k) => NODE_DATA_SUBFIELDS.has(k));
-          if (hasSubfields) {
-            // The `data` key is correct, but ensure it contains the right fields directly
-            // (no double nesting). If inner already has the sub-fields, data is fine.
-            // Nothing to move — data shape is already correct.
+          // Controllable/observable: the LLM may wrap the entire payload in `data`
+          // instead of keeping `data` as the factor-data sub-object. Detect this by
+          // checking whether `data` contains top-level node fields (category, kind, label)
+          // that should be at the value root, and hoist them out.
+          const hoistable = TOP_LEVEL_NODE_FIELDS.filter((k) => k in inner && !(k in value));
+          if (hoistable.length > 0) {
+            // Deep-copy inner to avoid mutating the original op's data reference
+            const cleaned = { ...inner };
+            for (const k of hoistable) {
+              value[k] = cleaned[k];
+              delete cleaned[k];
+            }
+            // If data still has remaining fields, keep it; otherwise drop it
+            const remainingKeys = Object.keys(cleaned);
+            if (remainingKeys.length === 0) {
+              delete value.data;
+            } else {
+              value.data = cleaned;
+            }
+            changed = true;
+            logNormalisation('data→top_level', hoistable.join(','), index);
           }
+          // If data already contains only sub-fields (value, raw_value, etc.), shape is correct — no-op.
         }
       }
 
@@ -823,7 +839,10 @@ export function mapOpsForPlot(ops: PatchOperation[]): Record<string, unknown>[] 
     if (op.value !== undefined) {
       // Re-nest flat strength_mean/strength_std into strength: { mean, std } for PLoT.
       // Zod schema uses flat fields; PLoT expects nested canonical format.
-      mapped.value = isEdgeOp ? nestEdgeStrengthForPlot(op.value) : op.value;
+      // Gated behind CEE_EDIT_NORMALISATION_ENABLED — flag off preserves pre-change behaviour.
+      mapped.value = (isEdgeOp && config.cee.editNormalisationEnabled)
+        ? nestEdgeStrengthForPlot(op.value)
+        : op.value;
     }
     if (op.old_value !== undefined) mapped.previous = op.old_value;
     return mapped;
@@ -840,16 +859,32 @@ export function nestEdgeStrengthForPlot(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
   const v = value as Record<string, unknown>;
 
-  // Already nested — leave as-is
-  if (v.strength && typeof v.strength === 'object') return value;
-
   const hasFlat = 'strength_mean' in v || 'strength_std' in v;
+
+  // Already nested — if flat fields also present, drop them (nested wins per spec)
+  if (v.strength && typeof v.strength === 'object') {
+    if (hasFlat) {
+      const { strength_mean: _sm, strength_std: _ss, ...rest } = v;
+      log.info(
+        { event: 'edit_graph.field_normalised', field_from: 'strength_mean+strength_std', field_to: 'dropped (nested wins)', op_index: -1 },
+        'edit_graph dropped flat strength fields — nested strength already present',
+      );
+      return { ...rest, strength: v.strength };
+    }
+    return value;
+  }
+
   if (!hasFlat) return value;
 
   const { strength_mean, strength_std, ...rest } = v;
   const nested: Record<string, unknown> = {};
   if (strength_mean !== undefined) nested.mean = strength_mean;
   if (strength_std !== undefined) nested.std = strength_std;
+
+  log.info(
+    { event: 'edit_graph.field_normalised', field_from: 'strength_mean/strength_std', field_to: 'strength.mean/strength.std', op_index: -1 },
+    'edit_graph re-nested flat strength fields for PLoT',
+  );
 
   return { ...rest, strength: nested };
 }
@@ -1399,7 +1434,7 @@ export async function handleEditGraph(
     const rawOps: unknown[] = normalisedOps;
     lastRawOps = rawOps;
 
-    if (intentCategory !== 'structural' && hasStructuralOperations(strippedOps)) {
+    if (intentCategory !== 'structural' && hasStructuralOperations(normalisedOps)) {
       consecutiveNarrowStructuralFailures++;
       validationOutcome = 'intent_guard_failed';
       setViolationCodes(['intent_guard_structural_ops']);
