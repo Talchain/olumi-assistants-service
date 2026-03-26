@@ -701,6 +701,92 @@ function logNormalisation(fieldFrom: string, fieldTo: string, opIndex: number): 
 }
 
 // ============================================================================
+// Structural Edge Enforcement (A1)
+// ============================================================================
+
+/**
+ * Canonical defaults for structural edges (decision→option, option→factor).
+ * These edges represent graph topology, not causal beliefs, so their strength
+ * and existence probability are fixed at 1.0.
+ */
+const STRUCTURAL_EDGE_DEFAULTS = {
+  exists_probability: 1.0,
+  strength: { mean: 1.0, std: 0.01 },
+  effect_direction: 'positive' as const,
+};
+
+/**
+ * Enforce canonical strength/probability on structural edges (decision→option,
+ * option→factor). Only applies to `add_edge` operations where BOTH the source
+ * and target node kinds match the structural pattern.
+ *
+ * Node kinds are validated against the existing graph + newly added nodes in
+ * the same operation set — ID prefix matching alone is NOT sufficient. A factor
+ * whose ID happens to start with `opt_` (naming error) must NOT be silently
+ * normalised. Only nodes whose `kind` is 'decision'/'option'/'factor' qualify.
+ *
+ * Edges between non-structural pairs (factor→outcome, factor→risk, factor→factor)
+ * are never touched, even if their IDs coincidentally match structural prefixes.
+ *
+ * @internal Exported for testing.
+ */
+export function enforceStructuralEdgeDefaults(
+  ops: PatchOperation[],
+  graph: { nodes: Array<{ id: string; kind?: string }>; edges?: unknown[] },
+): PatchOperation[] {
+  // Build kind lookup from existing graph + add_node ops in this batch
+  const kindMap = new Map<string, string>();
+  for (const node of graph.nodes) {
+    if (node.kind) kindMap.set(node.id, node.kind);
+  }
+  for (const op of ops) {
+    if (op.op === 'add_node' && op.value && typeof op.value === 'object') {
+      const v = op.value as Record<string, unknown>;
+      if (typeof v.id === 'string' && typeof v.kind === 'string') {
+        kindMap.set(v.id, v.kind);
+      }
+    }
+  }
+
+  return ops.map((op, index) => {
+    if (op.op !== 'add_edge' || !op.value || typeof op.value !== 'object') return op;
+    const v = op.value as Record<string, unknown>;
+    const from = String(v.from ?? '');
+    const to = String(v.to ?? '');
+
+    const fromKind = kindMap.get(from);
+    const toKind = kindMap.get(to);
+
+    // Structural: decision→option or option→factor (by kind, not ID prefix)
+    const isStructural =
+      (fromKind === 'decision' && toKind === 'option') ||
+      (fromKind === 'option' && toKind === 'factor');
+
+    if (!isStructural) return op;
+
+    log.info(
+      {
+        event: 'edit_graph.structural_edge_enforced',
+        op_index: index,
+        from,
+        to,
+        from_kind: fromKind,
+        to_kind: toKind,
+        field_from: 'llm_values',
+        field_to: 'structural_defaults',
+      },
+      `edit_graph enforced structural edge defaults: ${from}(${fromKind}) → ${to}(${toKind})`,
+    );
+
+    // Strip flat strength fields that would conflict with nested STRUCTURAL_EDGE_DEFAULTS.
+    // nestEdgeStrengthForPlot() handles this later too, but cleaning here avoids
+    // stale non-canonical fields surviving through Zod validation.
+    const { strength_mean: _sm, strength_std: _ss, ...cleaned } = v;
+    return { ...op, value: { ...cleaned, ...STRUCTURAL_EDGE_DEFAULTS } };
+  });
+}
+
+// ============================================================================
 // Legacy Field Detection
 // ============================================================================
 
@@ -1429,7 +1515,12 @@ export async function handleEditGraph(
     const { operations: strippedOps, meta: operationMeta } = stripOperationMeta(llmResult.operations);
 
     // Normalise non-canonical field names before Zod validation (CEE_EDIT_NORMALISATION_ENABLED)
-    const normalisedOps = normaliseEditOpsForPlot(strippedOps);
+    const fieldNormalisedOps = normaliseEditOpsForPlot(strippedOps);
+    // Enforce structural edge defaults (decision→option, option→factor) before Zod
+    const normalisedOps = enforceStructuralEdgeDefaults(
+      fieldNormalisedOps,
+      context.graph as { nodes: Array<{ id: string; kind?: string }>; edges?: unknown[] },
+    );
     setOpsTelemetry(normalisedOps);
     const rawOps: unknown[] = normalisedOps;
     lastRawOps = rawOps;
@@ -1965,6 +2056,12 @@ export async function handleEditGraph(
     const readinessGraph = appliedGraph ?? candidateGraph;
     const analysisReady = readinessGraph ? computeStructuralReadiness(readinessGraph) : undefined;
 
+    // Extract explicit intervention_updates from operations for downstream consumers.
+    // Gated behind CEE_EDIT_INTERVENTION_ROUTING_ENABLED.
+    const interventionUpdates = config.cee.editInterventionRoutingEnabled
+      ? extractInterventionUpdates(operations)
+      : [];
+
     const patchData: GraphPatchBlockData = {
       patch_type: 'edit',
       operations,
@@ -1977,6 +2074,7 @@ export async function handleEditGraph(
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),
       ...(allWarnings.length > 0 && { validation_warnings: allWarnings }),
       ...(analysisReady && { analysis_ready: analysisReady }),
+      ...(interventionUpdates.length > 0 && { intervention_updates: interventionUpdates }),
     };
 
     const block = createGraphPatchBlock(patchData, turnId);
@@ -2281,41 +2379,65 @@ export function parseEditGraphResponse(text: string): EditGraphLLMResult {
   throw new Error('LLM response is neither an array nor an object');
 }
 
-/**
- * Normalise edge value: if `strength` is a nested object `{ mean, std }`,
- * flatten to `strength_mean` / `strength_std` for the Zod schema.
- * Preserves all other fields.
- */
-function normaliseEdgeValue(value: unknown): unknown {
-  if (!value || typeof value !== 'object') return value;
-  const v = value as Record<string, unknown>;
+// ============================================================================
+// Dotted-Key Restructuring
+// ============================================================================
 
-  // Check for nested strength: { mean, std }
-  if (v.strength && typeof v.strength === 'object') {
-    const s = v.strength as Record<string, unknown>;
-    const { strength, ...rest } = v;
-    return {
-      ...rest,
-      ...(s.mean !== undefined && { strength_mean: s.mean }),
-      ...(s.std !== undefined && { strength_std: s.std }),
-    };
+/**
+ * Known dotted keys that must be restructured into nested objects.
+ * Only these explicit keys are handled — unknown dotted paths pass through
+ * unchanged and fail explicitly at PLoT validation.
+ */
+const DOTTED_KEY_SEGMENTS: ReadonlyMap<string, readonly [string, string]> = new Map([
+  ['strength.mean', ['strength', 'mean']],
+  ['strength.std', ['strength', 'std']],
+  ['prior.range_min', ['prior', 'range_min']],
+  ['prior.range_max', ['prior', 'range_max']],
+]);
+
+/**
+ * Restructure known dotted keys into nested objects for PLoT's canonical format.
+ * e.g. `{ "strength.mean": -0.6 }` → `{ strength: { mean: -0.6 } }`
+ *
+ * Merges into existing nested objects when present.
+ * @internal Exported for testing.
+ */
+export function nestDottedKeys(value: Record<string, unknown>): Record<string, unknown> {
+  let result: Record<string, unknown> | undefined;
+
+  for (const [dotted, [outer, inner]] of DOTTED_KEY_SEGMENTS) {
+    if (!(dotted in value)) continue;
+
+    if (!result) result = { ...value };
+    const val = result[dotted];
+    delete result[dotted];
+
+    const existing = result[outer];
+    if (existing && typeof existing === 'object') {
+      result[outer] = { ...(existing as Record<string, unknown>), [inner]: val };
+    } else {
+      result[outer] = { [inner]: val };
+    }
+
+    log.info(
+      { event: 'edit_graph.dotted_key_nested', field_from: dotted, field_to: `${outer}.${inner}` },
+      `edit_graph restructured dotted key: ${dotted} → ${outer}.${inner}`,
+    );
   }
 
-  return value;
+  return result ?? value;
 }
 
 /**
  * Normalise a single raw operation from the LLM:
  * - Convert v2 paths to pipeline format
- * - Flatten nested strength objects to strength_mean/strength_std
+ * - Restructure dotted keys (strength.mean → nested) for canonical format
  * - Preserve impact/rationale as extra fields (stripped later)
  */
 function normaliseOperation(raw: Record<string, unknown>): PatchOperation & { impact?: string; rationale?: string } {
   const { path: normalisedPath, field } = normalisePath(String(raw.path ?? ''));
 
-  // Normalise edge values (add_edge, update_edge) for nested strength format
-  const isEdgeOp = raw.op === 'add_edge' || raw.op === 'update_edge';
-  let value = isEdgeOp ? normaliseEdgeValue(raw.value) : raw.value;
+  let value = raw.value as unknown;
   let oldValue = raw.old_value;
 
   // For field-level update ops (path had /field suffix), wrap scalar value into { field: value }
@@ -2327,6 +2449,15 @@ function normaliseOperation(raw: Record<string, unknown>): PatchOperation & { im
     if (oldValue !== undefined && (typeof oldValue !== 'object' || oldValue === null)) {
       oldValue = { [field]: oldValue };
     }
+  }
+
+  // Restructure dotted keys into nested objects for canonical format.
+  // e.g. { "strength.mean": -0.6 } → { strength: { mean: -0.6 } }
+  if (value && typeof value === 'object' && value !== null) {
+    value = nestDottedKeys(value as Record<string, unknown>);
+  }
+  if (oldValue && typeof oldValue === 'object' && oldValue !== null) {
+    oldValue = nestDottedKeys(oldValue as Record<string, unknown>);
   }
 
   return {
@@ -2362,11 +2493,97 @@ function stripOperationMeta(
 }
 
 // ============================================================================
+// Intervention Update Extraction (M5)
+// ============================================================================
+
+/**
+ * Scan operations for intervention-related data on option nodes and extract
+ * a flat `{ option_id, factor_id, value }` array for downstream consumers.
+ *
+ * Checks both `update_node` and `add_node` operations targeting `opt_*` paths.
+ * Reads interventions from:
+ * 1. `value.data.interventions` — nested prompt-taught location
+ * 2. `value.interventions` — top-level passthrough location
+ * 3. Slash-keyed flat entries (`data/interventions/fac_*`)
+ *
+ * @internal Exported for testing.
+ */
+export function extractInterventionUpdates(
+  operations: PatchOperation[],
+): Array<{ option_id: string; factor_id: string; value: number }> {
+  const updates: Array<{ option_id: string; factor_id: string; value: number }> = [];
+  const seen = new Set<string>(); // deduplicate by "optionId::factorId"
+
+  for (const op of operations) {
+    const isOptionOp = (op.op === 'update_node' || op.op === 'add_node') && op.path?.startsWith('opt_');
+    if (!isOptionOp) continue;
+    if (!op.value || typeof op.value !== 'object') continue;
+
+    const optionId = op.path;
+    const value = op.value as Record<string, unknown>;
+
+    const addUpdate = (facId: string, num: number): void => {
+      const key = `${optionId}::${facId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      updates.push({ option_id: optionId, factor_id: facId, value: num });
+    };
+
+    const extractNum = (intv: unknown): number | undefined => {
+      if (typeof intv === 'number') return intv;
+      if (intv && typeof intv === 'object' && 'value' in intv) {
+        const inner = (intv as Record<string, unknown>).value;
+        if (typeof inner === 'number') return inner;
+      }
+      return undefined;
+    };
+
+    // Source 1: data.interventions nested structure
+    const data = value.data;
+    if (data && typeof data === 'object') {
+      const interventions = (data as Record<string, unknown>).interventions;
+      if (interventions && typeof interventions === 'object') {
+        for (const [facId, intv] of Object.entries(interventions as Record<string, unknown>)) {
+          const num = extractNum(intv);
+          if (num !== undefined) addUpdate(facId, num);
+        }
+      }
+    }
+
+    // Source 2: top-level value.interventions
+    if (value.interventions && typeof value.interventions === 'object') {
+      for (const [facId, intv] of Object.entries(value.interventions as Record<string, unknown>)) {
+        const num = extractNum(intv);
+        if (num !== undefined) addUpdate(facId, num);
+      }
+    }
+
+    // Source 3: slash-keyed flat entries
+    for (const [k, v] of Object.entries(value)) {
+      const match = k.match(/^data\/interventions\/(.+)$/);
+      if (match) {
+        const num = extractNum(v);
+        if (num !== undefined) addUpdate(match[1], num);
+      }
+    }
+  }
+
+  if (updates.length > 0) {
+    log.info(
+      { event: 'edit_graph.intervention_updates_extracted', count: updates.length, updates },
+      `edit_graph extracted ${updates.length} intervention update(s) from operations`,
+    );
+  }
+
+  return updates;
+}
+
+// ============================================================================
 // Patch Budget (cf-v11.1)
 // ============================================================================
 
-const MAX_NODE_OPS = 3;
-const MAX_EDGE_OPS = 4;
+const MAX_NODE_OPS = 4;
+const MAX_EDGE_OPS = 8;
 /** Elevated edge budget for option-addition edits — adding an option naturally
  *  requires connecting to multiple factors, so the default 4-edge limit is too tight. */
 const OPTION_ADD_MAX_EDGE_OPS = 8;

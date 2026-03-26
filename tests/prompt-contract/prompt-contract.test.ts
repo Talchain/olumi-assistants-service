@@ -28,7 +28,6 @@ import {
   validateNodeFields,
   validateEdgeFields,
   validateEdgePath,
-  simulateNormaliseEdgeValue,
   isNodeShape,
   isEdgeShape,
   isPatchOperation,
@@ -234,11 +233,12 @@ describe('Prompt contract: edit_graph v6', () => {
     });
   });
 
-  // ---------- CEE-transform-level validation (M1) ----------
+  // ---------- CEE-transform-level validation (M1 FIXED) ----------
 
-  describe('CEE-transform-level: normaliseEdgeValue breaks canonical edges [M1 P0]', () => {
-    it('every add_edge in prompt examples is broken by normaliseEdgeValue', () => {
-      // Collect edges with their source example info for clear failure reporting
+  describe('CEE-transform-level: M1 fix — canonical edges pass through unchanged', () => {
+    it('all prompt example edges with nested strength pass canonical validation', () => {
+      // After M1 fix: normaliseEdgeValue was removed, so canonical edges
+      // from the prompt are no longer flattened into non-canonical format.
       const edgesWithSource: Array<{ edge: Record<string, unknown>; ex: ExtractedExample }> = [];
       for (const ex of examples) {
         const edges = findEdges(ex.json);
@@ -251,22 +251,17 @@ describe('Prompt contract: edit_graph v6', () => {
       expect(edgesWithSource.length).toBeGreaterThan(0);
 
       for (const { edge, ex } of edgesWithSource) {
-        const transformed = simulateNormaliseEdgeValue(edge);
+        // Canonical edges should pass validation WITHOUT any transform
         const violations = validateEdgeFields(
-          transformed as Record<string, unknown>,
+          edge,
           ex.exampleIndex,
-          `M1 post-normaliseEdgeValue | ${ex.context.slice(-40)}`,
+          `M1 fix: canonical passthrough | ${ex.context.slice(-40)}`,
         );
         expect(
-          violations.some(v => v.field === 'strength_mean'),
-          `Expected strength_mean violation after normaliseEdgeValue for edge ` +
-          `${edge.from}->${edge.to} in example ${ex.exampleIndex}`,
-        ).toBe(true);
-        expect(
-          violations.some(v => v.field === 'strength_std'),
-          `Expected strength_std violation after normaliseEdgeValue for edge ` +
-          `${edge.from}->${edge.to} in example ${ex.exampleIndex}`,
-        ).toBe(true);
+          violations.length,
+          `Unexpected violation(s) for canonical edge ${edge.from}->${edge.to} ` +
+          `in example ${ex.exampleIndex}: ${violations.map(v => v.field).join(', ')}`,
+        ).toBe(0);
       }
     });
   });
@@ -490,10 +485,10 @@ describe('Prompt contract: draft_graph v187', () => {
     });
   });
 
-  // ---------- CEE-transform-level: M1 affects draft_graph too ----------
+  // ---------- CEE-transform-level: M1 FIXED for draft_graph too ----------
 
-  describe('CEE-transform-level: normaliseEdgeValue would break draft_graph edges [M1 P0]', () => {
-    it('every edge with nested strength would be flattened by normaliseEdgeValue', () => {
+  describe('CEE-transform-level: M1 fix — draft_graph edges pass canonical validation', () => {
+    it('all draft_graph edges with nested strength pass validation without flattening', () => {
       const edgesWithSource: Array<{ edge: Record<string, unknown>; ex: ExtractedExample }> = [];
       for (const ex of examples) {
         const edges = findEdges(ex.json);
@@ -506,17 +501,17 @@ describe('Prompt contract: draft_graph v187', () => {
       expect(edgesWithSource.length).toBeGreaterThan(0);
 
       for (const { edge, ex } of edgesWithSource) {
-        const transformed = simulateNormaliseEdgeValue(edge);
+        // After M1 fix: canonical edges pass validation without any transform
         const violations = validateEdgeFields(
-          transformed as Record<string, unknown>,
+          edge,
           ex.exampleIndex,
-          `M1 draft_graph post-normaliseEdgeValue | ${ex.context.slice(-40)}`,
+          `M1 fix: draft_graph canonical passthrough | ${ex.context.slice(-40)}`,
         );
         expect(
-          violations.some(v => v.field === 'strength_mean'),
-          `Expected strength_mean violation after normaliseEdgeValue for edge ` +
-          `${edge.from}->${edge.to} in example ${ex.exampleIndex}`,
-        ).toBe(true);
+          violations.length,
+          `Unexpected violation(s) for canonical edge ${edge.from}->${edge.to} ` +
+          `in example ${ex.exampleIndex}: ${violations.map(v => v.field).join(', ')}`,
+        ).toBe(0);
       }
     });
   });

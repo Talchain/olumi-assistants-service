@@ -241,7 +241,7 @@ describe("parseEditGraphResponse", () => {
   });
 
   // Test 5: Path syntax — /edges/fac_a->out_b/strength.mean
-  it("normalises /edges/<from>-><to>/<field> path syntax", () => {
+  it("normalises /edges/<from>-><to>/<field> path syntax and nests dotted keys", () => {
     const response = {
       operations: [
         {
@@ -259,8 +259,8 @@ describe("parseEditGraphResponse", () => {
     const result = parseEditGraphResponse(JSON.stringify(response));
 
     expect(result.operations[0].path).toBe("factor_1::out_1");
-    expect(result.operations[0].value).toEqual({ "strength.mean": 0.7 });
-    expect(result.operations[0].old_value).toEqual({ "strength.mean": 0.4 });
+    expect(result.operations[0].value).toEqual({ strength: { mean: 0.7 } });
+    expect(result.operations[0].old_value).toEqual({ strength: { mean: 0.4 } });
   });
 
   // Markdown fence handling
@@ -272,8 +272,8 @@ describe("parseEditGraphResponse", () => {
     expect(result.coaching).not.toBeNull();
   });
 
-  // Nested strength normalisation
-  it("flattens nested strength: { mean, std } to strength_mean, strength_std", () => {
+  // Nested strength passes through unchanged (no longer flattened)
+  it("preserves nested strength: { mean, std } without flattening", () => {
     const response = {
       operations: [
         {
@@ -296,9 +296,9 @@ describe("parseEditGraphResponse", () => {
     const result = parseEditGraphResponse(JSON.stringify(response));
 
     const value = result.operations[0].value as Record<string, unknown>;
-    expect(value.strength_mean).toBe(0.6);
-    expect(value.strength_std).toBe(0.15);
-    expect(value.strength).toBeUndefined();
+    expect(value.strength).toEqual({ mean: 0.6, std: 0.15 });
+    expect(value.strength_mean).toBeUndefined();
+    expect(value.strength_std).toBeUndefined();
   });
 });
 
@@ -859,12 +859,11 @@ describe("full round-trip", () => {
     expect(data.operations[0].op).toBe("add_node");
     expect(data.operations[0].path).toBe("fac_competitor");
 
-    // add_edge — strength should be flattened
+    // add_edge — strength stays nested (canonical format)
     expect(data.operations[1].op).toBe("add_edge");
     expect(data.operations[1].path).toBe("fac_competitor::out_1");
     const edgeValue = data.operations[1].value as Record<string, unknown>;
-    expect(edgeValue.strength_mean).toBe(-0.3);
-    expect(edgeValue.strength_std).toBe(0.15);
+    expect(edgeValue.strength).toEqual({ mean: -0.3, std: 0.15 });
 
     // No impact/rationale on canonical PatchOperations
     for (const op of data.operations) {
@@ -1055,6 +1054,7 @@ describe("prompt loading", () => {
         { op: "update_node", path: "/nodes/factor_1/label", value: "Price B", old_value: "Price A", impact: "low", rationale: "B" },
         { op: "update_node", path: "/nodes/factor_1/label", value: "Price C", old_value: "Price B", impact: "low", rationale: "C" },
         { op: "update_node", path: "/nodes/factor_1/label", value: "Price D", old_value: "Price C", impact: "low", rationale: "D" },
+        { op: "update_node", path: "/nodes/factor_1/label", value: "Price E", old_value: "Price D", impact: "low", rationale: "E" },
       ],
       removed_edges: [],
       warnings: [],
@@ -1074,7 +1074,7 @@ describe("prompt loading", () => {
     expect(result.diagnostics?.validation_outcome).toBe("budget_exceeded");
     expect(result.diagnostics?.validation_violation_codes).toEqual(["budget_exceeded"]);
     expect(result.diagnostics?.recovery_path_chosen).toBe("rejection_block");
-    expect(result.diagnostics?.operations_proposed_count).toBe(4);
+    expect(result.diagnostics?.operations_proposed_count).toBe(5);
   });
 
   it("includes diagnostics on graph_structure_invalid early exit", async () => {
@@ -1203,8 +1203,8 @@ describe("all op types through v2 parser", () => {
     ])));
     expect(result.operations[0].path).toBe("fac_x::out_y");
     const val = result.operations[0].value as Record<string, unknown>;
-    expect(val.strength_mean).toBe(0.5);
-    expect(val.strength_std).toBe(0.1);
+    expect(val.strength).toEqual({ mean: 0.5, std: 0.1 });
+    expect(val.strength_mean).toBeUndefined();
   });
 
   it("remove_edge with /edges/ path", () => {
@@ -1214,12 +1214,12 @@ describe("all op types through v2 parser", () => {
     expect(result.operations[0].path).toBe("fac_x::out_y");
   });
 
-  it("update_edge with /edges/<from>-><to>/<field> path", () => {
+  it("update_edge with /edges/<from>-><to>/<field> path nests dotted key", () => {
     const result = parseEditGraphResponse(JSON.stringify(makeResponse([
       { op: "update_edge", path: "/edges/fac_x->out_y/strength.mean", value: 0.9, old_value: 0.5 },
     ])));
     expect(result.operations[0].path).toBe("fac_x::out_y");
-    expect(result.operations[0].value).toEqual({ "strength.mean": 0.9 });
+    expect(result.operations[0].value).toEqual({ strength: { mean: 0.9 } });
   });
 });
 

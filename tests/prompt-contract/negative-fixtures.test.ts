@@ -13,7 +13,6 @@ import {
   validateNodeFields,
   validateEdgeFields,
   validateEdgePath,
-  simulateNormaliseEdgeValue,
 } from './canonical-fields.js';
 
 // ---------------------------------------------------------------------------
@@ -138,8 +137,8 @@ describe('Negative fixtures: intervention value as node update', () => {
 // M1: CEE normaliseEdgeValue breaks canonical format
 // ---------------------------------------------------------------------------
 
-describe('M1 [P0]: CEE normaliseEdgeValue flattens canonical edge format', () => {
-  it('transforms canonical strength: { mean, std } into non-canonical strength_mean, strength_std', () => {
+describe('M1 [FIXED]: normaliseEdgeValue removed — canonical edges pass through unchanged', () => {
+  it('canonical nested strength passes validation without flattening', () => {
     const canonicalEdge = {
       from: 'fac_a', to: 'out_b',
       strength: { mean: 0.5, std: 0.15 },
@@ -147,25 +146,9 @@ describe('M1 [P0]: CEE normaliseEdgeValue flattens canonical edge format', () =>
       effect_direction: 'positive',
     };
 
-    // Simulate the CEE transform
-    const transformed = simulateNormaliseEdgeValue(canonicalEdge);
-
-    // The transform should have flattened strength
-    expect(transformed).toHaveProperty('strength_mean', 0.5);
-    expect(transformed).toHaveProperty('strength_std', 0.15);
-    expect(transformed).not.toHaveProperty('strength');
-
-    // Validate the transformed output against PLoT canonical fields
-    const violations = validateEdgeFields(
-      transformed as Record<string, unknown>,
-      0,
-      'M1: normaliseEdgeValue output',
-    );
-    const fields = violations.map(v => v.field);
-
-    // This MUST fail — the CEE transform produces non-canonical output
-    expect(fields).toContain('strength_mean');
-    expect(fields).toContain('strength_std');
+    // After fix: canonical edges pass through without flattening
+    const violations = validateEdgeFields(canonicalEdge, 0, 'M1 fix: canonical passthrough');
+    expect(violations).toHaveLength(0);
   });
 
   it('the prompt teaches canonical format (nested strength) — prompt is correct', () => {
@@ -180,25 +163,17 @@ describe('M1 [P0]: CEE normaliseEdgeValue flattens canonical edge format', () =>
     expect(violations).toHaveLength(0);
   });
 
-  it('CEE transform breaks canonical edge for every add_edge and update_edge', () => {
-    // All edges from the prompt would be broken by normaliseEdgeValue
-    const edges = [
-      { from: 'a', to: 'b', strength: { mean: 0.4, std: 0.20 }, exists_probability: 0.70, effect_direction: 'positive' },
-      { from: 'c', to: 'd', strength: { mean: -0.6, std: 0.15 }, exists_probability: 0.80, effect_direction: 'negative' },
-      { from: 'e', to: 'f', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' },
-    ];
-
-    for (const edge of edges) {
-      const transformed = simulateNormaliseEdgeValue(edge);
-      const violations = validateEdgeFields(
-        transformed as Record<string, unknown>,
-        0,
-        'M1 systematic check',
-      );
-      // Every edge must fail after CEE transform
-      expect(violations.length).toBeGreaterThan(0);
-      expect(violations.some(v => v.field === 'strength_mean')).toBe(true);
-    }
+  it('flat strength_mean/strength_std still rejected by PLoT contract', () => {
+    // Flat format should always be rejected
+    const flatEdge = {
+      from: 'a', to: 'b',
+      strength_mean: 0.4, strength_std: 0.20,
+      exists_probability: 0.70,
+      effect_direction: 'positive',
+    };
+    const violations = validateEdgeFields(flatEdge, 0, 'M1 regression guard');
+    expect(violations.some(v => v.field === 'strength_mean')).toBe(true);
+    expect(violations.some(v => v.field === 'strength_std')).toBe(true);
   });
 });
 

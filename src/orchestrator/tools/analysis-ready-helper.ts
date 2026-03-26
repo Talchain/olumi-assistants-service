@@ -11,12 +11,107 @@
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
+import { config } from "../../config/index.js";
+import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
+
+// ============================================================================
+// Intervention Extraction
+// ============================================================================
+
+/**
+ * Extract a normalised numeric value (0-1 scale) from an intervention entry.
+ * Handles both flat numbers and InterventionV3 objects `{ value: number, ... }`.
+ * Extracts `.value` (the normalised numeric), NOT `.raw_value`.
+ * @internal Exported for testing.
+ */
+export function extractNumericIntervention(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (v && typeof v === 'object' && 'value' in v) {
+    const inner = (v as Record<string, unknown>).value;
+    if (typeof inner === 'number' && Number.isFinite(inner)) return inner;
+  }
+  return undefined;
+}
+
+/**
+ * Merge intervention values from all known locations on an option node.
+ *
+ * Sources (in precedence order — first write wins per factor_id):
+ * 1. `node.data.interventions` — prompt-taught canonical edit location (wins on conflict)
+ * 2. `node["data/interventions/<fac_id>"]` — slash-keyed flat entries from scalar wrapping
+ * 3. `node.interventions` — top-level passthrough (fallback only)
+ *
+ * data.interventions wins over top-level because edit_graph writes to
+ * data.interventions per the prompt, while top-level may contain stale
+ * values from a prior pipeline run.
+ *
+ * Sources 1 and 2 are gated behind CEE_EDIT_INTERVENTION_ROUTING_ENABLED.
+ *
+ * @internal Exported for testing.
+ */
+export function mergeInterventionSources(nodeAny: Record<string, unknown>): Record<string, number> | undefined {
+  const merged: Record<string, number> = {};
+  let found = false;
+
+  // Sources 1+2: gated behind feature flag
+  if (config.cee.editInterventionRoutingEnabled) {
+    // Source 1 (highest precedence): node.data.interventions — canonical edit location
+    const data = nodeAny.data;
+    if (data && typeof data === 'object') {
+      const dataInterventions = (data as Record<string, unknown>).interventions;
+      if (dataInterventions && typeof dataInterventions === 'object') {
+        for (const [k, v] of Object.entries(dataInterventions as Record<string, unknown>)) {
+          const num = extractNumericIntervention(v);
+          if (num !== undefined) {
+            merged[k] = num;
+            found = true;
+            log.info(
+              { event: 'analysis_ready.intervention_merged', source: 'data.interventions', factor_id: k },
+              `analysis_ready merged intervention from data.interventions: ${k}`,
+            );
+          }
+        }
+      }
+    }
+
+    // Source 2: flat slash-keyed entries like "data/interventions/fac_1"
+    for (const [k, v] of Object.entries(nodeAny)) {
+      const match = k.match(/^data\/interventions\/(.+)$/);
+      if (!match) continue;
+      const facId = match[1];
+      if (facId in merged) continue; // data.interventions already set
+      const num = extractNumericIntervention(v);
+      if (num !== undefined) {
+        merged[facId] = num;
+        found = true;
+        log.info(
+          { event: 'analysis_ready.intervention_merged', source: 'slash_keyed', factor_id: facId, field_from: k },
+          `analysis_ready merged intervention from slash-keyed entry: ${k}`,
+        );
+      }
+    }
+  }
+
+  // Source 3 (lowest precedence): top-level node.interventions — fallback
+  if (nodeAny.interventions && typeof nodeAny.interventions === 'object') {
+    for (const [k, v] of Object.entries(nodeAny.interventions as Record<string, unknown>)) {
+      if (k in merged) continue; // higher-precedence source already set
+      const num = extractNumericIntervention(v);
+      if (num !== undefined) {
+        merged[k] = num;
+        found = true;
+      }
+    }
+  }
+
+  return found ? merged : undefined;
+}
 
 // ============================================================================
 // Readiness Computation
@@ -56,9 +151,8 @@ export function computeStructuralReadiness(
   const options: AnalysisReadyPayload['options'] = [];
 
   for (const opt of optionNodes) {
-    // Check for interventions via passthrough fields on the node
     const nodeAny = opt as Record<string, unknown>;
-    const interventions = nodeAny.interventions as Record<string, number> | undefined;
+    const interventions = mergeInterventionSources(nodeAny);
     const connectedFactors = optionToFactors.get(opt.id) ?? new Set<string>();
 
     // Option is ready if it has numeric interventions or connected factors

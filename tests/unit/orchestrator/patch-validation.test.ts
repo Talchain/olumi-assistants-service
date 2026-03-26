@@ -69,17 +69,17 @@ describe("PatchOperationSchema", () => {
     const op = {
       op: "add_edge",
       path: "edges/new",
-      value: { from: "factor_1", to: "factor_2", strength_mean: 0.5, strength_std: 0.1, exists_probability: 0.9, effect_direction: "positive" },
+      value: { from: "factor_1", to: "factor_2", strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: "positive" },
     };
     const result = PatchOperationSchema.safeParse(op);
     expect(result.success).toBe(true);
   });
 
-  it("rejects add_edge missing strength_std (canonical fields required)", () => {
+  it("rejects add_edge missing strength.std (canonical fields required)", () => {
     const op = {
       op: "add_edge",
       path: "edges/new",
-      value: { from: "factor_1", to: "factor_2", strength_mean: 0.5 },
+      value: { from: "factor_1", to: "factor_2", strength: { mean: 0.5 } },
     };
     const result = PatchOperationSchema.safeParse(op);
     expect(result.success).toBe(false);
