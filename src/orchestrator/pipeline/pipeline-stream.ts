@@ -38,6 +38,7 @@ import { config } from "../../config/index.js";
 import { tryAnalysisLookup, buildLookupEnvelope } from "../lookup/analysis-lookup.js";
 import type { OrchestratorStreamEvent } from "./stream-events.js";
 import { STREAM_ERROR_CODES } from "./stream-events.js";
+import { StreamingEnvelopeStripper } from "./streaming-xml-stripper.js";
 import { UpstreamTimeoutError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { DailyBudgetExceededError } from "../../adapters/llm/errors.js";
 import { normalizeAnalysisEnvelope } from "../analysis-state.js";
@@ -188,16 +189,39 @@ export async function* executePipelineStream(
       const streamOpts = { ...prep.callOpts, signal };
       let messageResult: import("../../adapters/llm/types.js").ChatWithToolsResult | undefined;
 
-      for await (const event of deps.llmClient.streamChatWithTools(prep.callArgs, streamOpts)) {
-        if (signal?.aborted) return;
+      // Strip XML envelope tags from text deltas before emitting to the client.
+      // The full XML parsing still happens on message_complete via prep.postProcess().
+      const xmlStripper = new StreamingEnvelopeStripper();
 
-        if (event.type === 'text_delta') {
-          yield { type: 'text_delta', seq: seq++, delta: event.delta };
-        } else if (event.type === 'message_complete') {
-          messageResult = event.result;
+      try {
+        for await (const event of deps.llmClient.streamChatWithTools(prep.callArgs, streamOpts)) {
+          if (signal?.aborted) return;
+
+          if (event.type === 'text_delta') {
+            const clean = xmlStripper.process(event.delta);
+            if (clean) {
+              yield { type: 'text_delta', seq: seq++, delta: clean };
+            }
+          } else if (event.type === 'message_complete') {
+            // Flush any remaining buffered text from the stripper
+            const remaining = xmlStripper.flush();
+            if (remaining) {
+              yield { type: 'text_delta', seq: seq++, delta: remaining };
+            }
+            messageResult = event.result;
+          }
+          // tool_input_start/tool_input_complete are adapter-level events,
+          // not surfaced to the client (client sees tool_start from phase4)
         }
-        // tool_input_start/tool_input_complete are adapter-level events,
-        // not surfaced to the client (client sees tool_start from phase4)
+      } finally {
+        // Ensure any buffered text is emitted even if the stream errors or aborts.
+        // This prevents partial suppression state from silently discarding user-visible text.
+        if (!messageResult) {
+          const remaining = xmlStripper.flush();
+          if (remaining) {
+            yield { type: 'text_delta', seq: seq++, delta: remaining };
+          }
+        }
       }
 
       if (!messageResult) {

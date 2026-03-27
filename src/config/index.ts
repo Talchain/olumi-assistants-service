@@ -292,6 +292,7 @@ const ConfigSchema = z.object({
     optionShortcutRepair: booleanString.default(true), // ENABLE_OPTION_SHORTCUT_REPAIR — deterministic option→risk and option→goal shortcut handlers
     deterministicRoutingV2: booleanString.default(false), // CEE_DETERMINISTIC_ROUTING_V2 — v2 deterministic routing patterns (parameter assignment hardening, chip passthrough, system event text)
     artefactAppendixEnabled: booleanString.default(false), // CEE_ARTEFACT_APPENDIX_ENABLED — inject artefact design appendix when artefact generation is likely
+    artefactRenderingEnabled: booleanString.default(false), // CEE_ARTEFACT_RENDERING_ENABLED — when false, artefact blocks are suppressed with fallback commentary
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
   }),
 
@@ -646,6 +647,7 @@ function parseConfig(): Config {
       optionShortcutRepair: env.ENABLE_OPTION_SHORTCUT_REPAIR,
       deterministicRoutingV2: env.CEE_DETERMINISTIC_ROUTING_V2,
       artefactAppendixEnabled: env.CEE_ARTEFACT_APPENDIX_ENABLED,
+      artefactRenderingEnabled: env.CEE_ARTEFACT_RENDERING_ENABLED,
       diagnosticTraceEnabled: env.CEE_DIAGNOSTIC_TRACE_ENABLED,
     },
     promptCache: {

@@ -1413,7 +1413,7 @@ export async function handleEditGraph(
         {
           system: effectiveInstruction,
           userMessage,
-          maxTokens: getMaxTokensFromConfig('edit_graph') ?? 16000,
+          maxTokens: getMaxTokensFromConfig('edit_graph') ?? 4000,
           ...(editGraphThinking ? { thinking: editGraphThinking } : {}),
           ...(editGraphOutputSchema ? { outputSchema: editGraphOutputSchema } : {}),
         },

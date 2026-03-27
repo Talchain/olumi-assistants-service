@@ -546,7 +546,11 @@ function handleDirectGraphEdit(
   }
 
   return {
-    assistantText: 'Changes applied.',
+    // Suppress the assistant text bubble — the UI already shows the visual update
+    // in the graph canvas. The system context entry records the change for the LLM.
+    // Previously emitted "Changes applied." which appeared as a duplicate bubble
+    // below auto-applied patch cards.
+    assistantText: null,
     blocks: [],
     guidanceItems,
     systemContextEntries: [contextEntry],

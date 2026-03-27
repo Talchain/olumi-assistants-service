@@ -187,12 +187,14 @@ export async function handleDraftGraph(
   // Build narration_hint from coaching data (for Phase 3 LLM context)
   const narrationHint = coachingSummary ?? undefined;
 
-  // Build assistantText: warnings take priority; then patch summary for narration
+  // Build assistantText: warnings take priority; then a short headline from the summary.
+  // The full coaching text lives in the block's coaching.summary field — the card interior.
+  // assistant_text should be a short headline to avoid duplicating the coaching content.
   let assistantText: string | null = null;
   if (warnings.length > 0) {
     assistantText = `The draft graph has ${warnings.length} validation warning${warnings.length > 1 ? 's' : ''}:\n${warnings.map((w) => `- ${w}`).join('\n')}`;
   } else if (patchData.summary) {
-    assistantText = patchData.summary;
+    assistantText = extractFirstSentence(patchData.summary);
   }
 
   const block = createGraphPatchBlock(patchData, turnId);
@@ -605,5 +607,22 @@ function extractToolLLMTelemetry(
   };
 }
 
+/**
+ * Extract the first sentence from text (up to 200 chars).
+ * Used for assistant_text headline to avoid duplicating full coaching.
+ */
+function extractFirstSentence(text: string): string {
+  // Match first sentence ending with period, exclamation, or question mark
+  const match = text.match(/^[^.!?]*[.!?]/);
+  if (match && match[0].length <= 200) {
+    return match[0].trim();
+  }
+  // Fallback: truncate at 200 chars with ellipsis
+  if (text.length > 200) {
+    return text.substring(0, 197).trim() + '...';
+  }
+  return text;
+}
+
 // Test-only exports for contract testing
-export const __test_only = { extractToolLLMTelemetry };
+export const __test_only = { extractToolLLMTelemetry, extractFirstSentence };
