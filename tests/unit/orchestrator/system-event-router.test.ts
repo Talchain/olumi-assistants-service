@@ -905,7 +905,7 @@ describe('Confirmation text (Task 2)', () => {
         plotClient: null,
       });
 
-      expect(result.assistantText).toBe('Changes applied.');
+      expect(result.assistantText).toBeNull();
     });
   });
 

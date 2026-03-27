@@ -1062,16 +1062,35 @@ async function dispatchTool(
  */
 export function convertExtractedBlocks(blocks: ExtractedBlock[] | undefined, turnId: string): TypedConversationBlock[] {
   if (!blocks || blocks.length === 0) return [];
-  return blocks.map((block) => {
+
+  let artefactSuppressed = false;
+
+  const result: TypedConversationBlock[] = [];
+  for (const block of blocks) {
     if (block.type === 'commentary') {
-      return createCommentaryBlock(
+      result.push(createCommentaryBlock(
         block.content,
         turnId,
         'llm:xml',
-      );
+      ));
+      continue;
     }
     if (block.type === 'artefact') {
-      return createArtefactBlock(
+      // Suppress artefact blocks when the UI doesn't have a renderer yet.
+      // Replaces raw HTML with a friendly commentary fallback.
+      // Deduplicates: only emit one fallback even if multiple artefacts are suppressed.
+      if (!config.features.artefactRenderingEnabled) {
+        if (!artefactSuppressed) {
+          artefactSuppressed = true;
+          result.push(createCommentaryBlock(
+            "I've prepared a decision toolkit, but interactive artefacts aren't available yet.",
+            turnId,
+            'llm:xml:artefact_suppressed',
+          ));
+        }
+        continue;
+      }
+      result.push(createArtefactBlock(
         {
           artefact_type: block.artefact_type!,
           title: block.title ?? '',
@@ -1080,18 +1099,25 @@ export function convertExtractedBlocks(blocks: ExtractedBlock[] | undefined, tur
           ...(block.actions && { actions: block.actions }),
         },
         turnId,
-      );
+      ));
+      continue;
     }
-    // review_card
-    return createReviewCardBlock(
-      {
-        tone: block.tone ?? 'facilitator',
-        title: block.title ?? '',
-        content: block.content,
-      },
-      turnId,
-    );
-  });
+    if (block.type === 'review_card') {
+      result.push(createReviewCardBlock(
+        {
+          tone: block.tone ?? 'facilitator',
+          title: block.title ?? '',
+          content: block.content,
+        },
+        turnId,
+      ));
+      continue;
+    }
+    // Unknown block type — log and skip rather than silently treating as review_card
+    log.warn({ block_type: block.type }, 'convertExtractedBlocks: unknown block type dropped');
+  }
+
+  return result;
 }
 
 // ============================================================================

@@ -298,3 +298,72 @@ describe("Artefact Block Parsing", () => {
     expect(parsed.parse_warnings).toContain('Block of type "artefact" missing <content> — dropped');
   });
 });
+
+// ============================================================================
+// Artefact Suppression (convertExtractedBlocks)
+// ============================================================================
+
+import { vi } from "vitest";
+import { convertExtractedBlocks } from "../../../src/orchestrator/turn-handler.js";
+import type { ExtractedBlock } from "../../../src/orchestrator/response-parser.js";
+
+describe("artefact suppression in convertExtractedBlocks", () => {
+  it("suppresses artefact when artefactRenderingEnabled=false and emits fallback", async () => {
+    const { config } = await import("../../../src/config/index.js");
+    const original = config.features.artefactRenderingEnabled;
+    try {
+      (config.features as Record<string, unknown>).artefactRenderingEnabled = false;
+
+      const blocks: ExtractedBlock[] = [
+        { type: 'artefact', artefact_type: 'decision_matrix', title: 'Matrix', content: '<table></table>' },
+      ];
+      const result = convertExtractedBlocks(blocks, 'turn-1');
+      expect(result).toHaveLength(1);
+      expect(result[0].block_type).toBe('commentary');
+      expect((result[0].data as { narrative: string }).narrative).toContain("artefacts aren't available yet");
+    } finally {
+      (config.features as Record<string, unknown>).artefactRenderingEnabled = original;
+    }
+  });
+
+  it("deduplicates fallback when multiple artefacts are suppressed", async () => {
+    const { config } = await import("../../../src/config/index.js");
+    const original = config.features.artefactRenderingEnabled;
+    try {
+      (config.features as Record<string, unknown>).artefactRenderingEnabled = false;
+
+      const blocks: ExtractedBlock[] = [
+        { type: 'artefact', artefact_type: 'decision_matrix', title: 'Matrix 1', content: '<table>1</table>' },
+        { type: 'artefact', artefact_type: 'comparison', title: 'Matrix 2', content: '<table>2</table>' },
+        { type: 'commentary', content: 'Some commentary' },
+      ];
+      const result = convertExtractedBlocks(blocks, 'turn-1');
+      // Should have 1 fallback + 1 commentary = 2, not 2 fallbacks + 1 commentary
+      expect(result).toHaveLength(2);
+      expect(result[0].block_type).toBe('commentary');
+      expect((result[0].data as { narrative: string }).narrative).toContain("artefacts aren't available yet");
+      expect(result[1].block_type).toBe('commentary');
+      expect((result[1].data as { narrative: string }).narrative).toBe('Some commentary');
+    } finally {
+      (config.features as Record<string, unknown>).artefactRenderingEnabled = original;
+    }
+  });
+
+  it("passes artefact through when artefactRenderingEnabled=true", async () => {
+    const { config } = await import("../../../src/config/index.js");
+    const original = config.features.artefactRenderingEnabled;
+    try {
+      (config.features as Record<string, unknown>).artefactRenderingEnabled = true;
+
+      const blocks: ExtractedBlock[] = [
+        { type: 'artefact', artefact_type: 'decision_matrix', title: 'Matrix', content: '<table></table>' },
+      ];
+      const result = convertExtractedBlocks(blocks, 'turn-1');
+      expect(result).toHaveLength(1);
+      expect(result[0].block_type).toBe('artefact');
+      expect((result[0].data as { content: string }).content).toBe('<table></table>');
+    } finally {
+      (config.features as Record<string, unknown>).artefactRenderingEnabled = original;
+    }
+  });
+});

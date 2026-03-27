@@ -1994,15 +1994,40 @@ export const REPAIR_EDIT_GRAPH_PROMPT = `You are repairing a failed graph edit.
 The previous attempt to edit a causal decision graph produced invalid patch operations.
 Review the validation errors below and produce a corrected JSON object.
 
-Rules:
-- Use the canonical edge format: strength.mean, strength.std, exists_probability, effect_direction.
-- Do NOT use legacy fields: belief, belief_exists, confidence.
+CANONICAL EDGE FORMAT (required for add_edge and edge updates):
+{
+  "from": "node_id_a",
+  "to": "node_id_b",
+  "strength": { "mean": 0.4, "std": 0.15 },
+  "exists_probability": 0.85,
+  "effect_direction": "positive"
+}
+- strength.mean: number in [-1, 1]
+- strength.std: number in [0.05, 0.35]
+- exists_probability: number in [0, 1]
+- effect_direction: "positive" | "negative"
+
+CANONICAL NODE FIELDS (required for add_node):
+- id, kind ("factor"|"external"|"option"|"goal"), label, category
+- For externals: prior (top-level, NOT nested under data)
+- For factors with values: observed_state (top-level, NOT nested under data)
+
+FORBIDDEN FIELDS (never use these):
+- data (as wrapper object for node fields)
+- strength_mean, strength_std (flat — must be strength.mean, strength.std)
+- belief, belief_exists, confidence (legacy — use exists_probability)
+
+RULES:
 - Path syntax: /nodes/<id>, /edges/<from>-><to>, /nodes/<id>/<field>, /edges/<from>-><to>/<field>
 - For updates, always include old_value for the field being changed.
-- For add_node, include all required fields: id, kind, label, category, and data/prior.
-- For add_edge, include all required fields: from, to, strength, exists_probability, effect_direction.
 - Every operation must include impact ("low"|"moderate"|"high") and rationale.
 - Fix ALL reported validation errors.
+
+EXAMPLE add_edge:
+{ "op": "add_edge", "path": "/edges/fac_cost->out_roi", "value": { "from": "fac_cost", "to": "out_roi", "strength": { "mean": -0.5, "std": 0.12 }, "exists_probability": 0.9, "effect_direction": "negative" }, "impact": "moderate", "rationale": "Higher cost reduces ROI" }
+
+EXAMPLE add_node:
+{ "op": "add_node", "path": "/nodes/fac_timeline", "value": { "id": "fac_timeline", "kind": "factor", "label": "Timeline", "category": "operational" }, "impact": "moderate", "rationale": "Timeline affects delivery risk" }
 
 Respond ONLY with a corrected JSON object:
 { "operations": [...], "removed_edges": [...], "warnings": [...], "coaching": { "summary": "...", "rerun_recommended": true|false } }
