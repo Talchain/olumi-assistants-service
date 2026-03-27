@@ -453,14 +453,14 @@ describe("extractHeadline", () => {
     expect(extractHeadline(text)).toBe("Option A leads at 70%.");
   });
 
-  it("truncates to 120 chars with ellipsis when no sentence boundary", () => {
+  it("truncates to 150 chars with ellipsis when no sentence boundary", () => {
     const text = "A".repeat(200);
     const result = extractHeadline(text);
-    expect(result.length).toBe(120);
+    expect(result.length).toBe(150);
     expect(result.endsWith("...")).toBe(true);
   });
 
-  it("returns full text when under 120 chars with no sentence boundary", () => {
+  it("returns full text when under 150 chars with no sentence boundary", () => {
     const text = "No sentence boundary here";
     expect(extractHeadline(text)).toBe("No sentence boundary here");
   });
