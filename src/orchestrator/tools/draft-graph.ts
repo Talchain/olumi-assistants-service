@@ -612,8 +612,10 @@ function extractToolLLMTelemetry(
  * Used for assistant_text headline to avoid duplicating full coaching.
  */
 function extractFirstSentence(text: string): string {
-  // Match first sentence ending with period, exclamation, or question mark
-  const match = text.match(/^[^.!?]*[.!?]/);
+  // Match first sentence boundary: ! or ? anywhere, or . followed by
+  // (whitespace + uppercase letter) or end-of-string. This avoids splitting
+  // on decimal numbers ("3.5x", "0.7") or abbreviations mid-sentence.
+  const match = text.match(/^.+?(?:[!?]|\.(?=\s+[A-Z]|\s*$))/);
   if (match && match[0].length <= 200) {
     return match[0].trim();
   }

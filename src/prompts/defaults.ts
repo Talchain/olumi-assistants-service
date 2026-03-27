@@ -2008,14 +2008,15 @@ CANONICAL EDGE FORMAT (required for add_edge and edge updates):
 - effect_direction: "positive" | "negative"
 
 CANONICAL NODE FIELDS (required for add_node):
-- id, kind ("factor"|"external"|"option"|"goal"), label, category
-- For externals: prior (top-level, NOT nested under data)
+- id, kind ("goal"|"decision"|"option"|"outcome"|"risk"|"action"|"factor"|"constraint"), label, category
+- External factors use kind:"factor" with category:"external" and a top-level prior field
 - For factors with values: observed_state (top-level, NOT nested under data)
 
 FORBIDDEN FIELDS (never use these):
 - data (as wrapper object for node fields)
 - strength_mean, strength_std (flat — must be strength.mean, strength.std)
 - belief, belief_exists, confidence (legacy — use exists_probability)
+- weight (use strength.mean), source/target (use from/to)
 
 RULES:
 - Path syntax: /nodes/<id>, /edges/<from>-><to>, /nodes/<id>/<field>, /edges/<from>-><to>/<field>
