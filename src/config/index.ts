@@ -470,6 +470,7 @@ const ConfigSchema = z.object({
     // explain_results response enrichment
     explainHeadlineEnabled: booleanString.default(true), // CEE_EXPLAIN_HEADLINE_ENABLED — generate assistant_text headline from explanation narrative
     explainChipsEnabled: booleanString.default(true), // CEE_EXPLAIN_CHIPS_ENABLED — generate suggested_actions chips after explain_results
+    explainQualityEnabled: booleanString.default(true), // CEE_EXPLAIN_QUALITY_ENABLED — headline separation, driver guards, context-aware chips
     // Debug logging settings
     debugCategoryTrace: booleanString.default(false), // If true, emit V3-CAT diagnostic logs for category field tracing
     debugLoggingEnabled: booleanString.default(false), // If true, emit V3-CAT diagnostic logs
@@ -841,6 +842,7 @@ function parseConfig(): Config {
       // explain_results response enrichment
       explainHeadlineEnabled: env.CEE_EXPLAIN_HEADLINE_ENABLED,
       explainChipsEnabled: env.CEE_EXPLAIN_CHIPS_ENABLED,
+      explainQualityEnabled: env.CEE_EXPLAIN_QUALITY_ENABLED,
       // Debug logging settings
       debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,

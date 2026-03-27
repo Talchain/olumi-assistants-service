@@ -758,7 +758,9 @@ export async function handleExplainResults(
       goal: context.framing?.goal,
       constraints: Array.isArray(context.framing?.constraints) ? context.framing.constraints : undefined,
     };
-    const systemPrompt = buildExplanationPrompt(summary, tensionNote, focus, framingContext);
+    // Build driver guard — detect when driver/sensitivity data is absent
+    const driverGuard = config.cee.explainQualityEnabled ? buildDriverGuard(analysisResponse) : undefined;
+    const systemPrompt = buildExplanationPrompt(summary, tensionNote, focus, framingContext, driverGuard);
 
     const opts: CallOpts = {
       requestId,
@@ -782,7 +784,7 @@ export async function handleExplainResults(
     if (!briefText) {
       log.info({ request_id: requestId }, 'explain-results: brief_text not available, brief numbers will not be preserved');
     }
-    const { cleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse, briefText, context.graph);
+    const { cleaned: rawCleaned, strippedCount } = stripUngroundedNumerics(chatResult.content, analysisResponse, briefText, context.graph);
 
     if (strippedCount > 0) {
       log.info(
@@ -790,6 +792,9 @@ export async function handleExplainResults(
         "commentary.numeric_freehand_stripped",
       );
     }
+
+    // Strip leaked placeholder tokens (e.g. "[value]") from user-facing text
+    const cleaned = stripPlaceholderTokens(rawCleaned);
 
     // Build supporting refs from analysis elements
     const refs = buildSupportingRefs(analysisResponse);
@@ -842,17 +847,33 @@ export async function handleExplainResults(
 // ============================================================================
 
 /**
- * Extract a 1-2 sentence headline from explanation narrative text.
- * Returns the first sentence (up to the first `.`, `!`, or `?` followed by whitespace or end),
- * falling back to the first 120 characters with ellipsis if no sentence boundary is found.
+ * Extract a 1-2 sentence plain-text headline from explanation narrative text.
+ * Strips markdown headers, truncates at first sentence boundary or 150 chars.
+ * Result never exceeds 200 chars and never starts with '#'.
  * @internal Exported for testing.
  */
-export function extractHeadline(text: string): string {
-  const trimmed = text.trim();
+export function extractHeadline(text: string, fullNarrative?: string): string {
+  // Normalize leading whitespace before header stripping
+  let trimmed = text.trim();
+  // Strip leading markdown headers (e.g. "## Weakest Relationships\n")
+  trimmed = trimmed.replace(/^#+\s+[^\n]*\n?/, '').trim();
   if (!trimmed) return '';
+  // Take first sentence (up to first period, !, or ? followed by whitespace/end)
   const match = trimmed.match(/^(.+?[.!?])(?:\s|$)/);
-  if (match) return match[1];
-  return trimmed.length <= 120 ? trimmed : `${trimmed.slice(0, 117)}...`;
+  if (match) {
+    trimmed = match[1];
+  }
+  // Truncate at 150 chars (whichever came first: sentence end or 150 chars)
+  if (trimmed.length > 150) {
+    trimmed = `${trimmed.slice(0, 147)}...`;
+  }
+  // Guarantee headline is always shorter than the full narrative to prevent
+  // UI duplication when the LLM returns a single-sentence response.
+  const narrative = fullNarrative ?? text;
+  if (trimmed === narrative.trim() && trimmed.length > 80) {
+    trimmed = `${trimmed.slice(0, 77)}...`;
+  }
+  return trimmed;
 }
 
 // ============================================================================
@@ -860,18 +881,19 @@ export function extractHeadline(text: string): string {
 // ============================================================================
 
 /**
- * Build default suggested_actions chips for explain_results turns.
- * Uses analysis context (factor_sensitivity) to generate a contextual top-driver chip.
+ * Build context-aware suggested_actions chips for explain_results turns.
+ * Maximum 3 chips, selected based on analysis state.
  * @internal Exported for testing and dispatch wiring.
  */
 export function buildExplainChips(
   context: ConversationContext,
 ): Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }> {
+  const MAX_CHIPS = 3;
   const chips: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }> = [];
+  const analysisResponse = context.analysis_response;
 
-  // Contextual chip: top driver from factor_sensitivity
-  const r = context.analysis_response as Record<string, unknown> | undefined;
-  // Handle both top-level and nested (results[]) shapes
+  // Extract analysis state signals
+  const r = analysisResponse as Record<string, unknown> | undefined;
   const nestedResults = r?.results;
   const nestedObj = nestedResults && typeof nestedResults === 'object' && !Array.isArray(nestedResults)
     ? nestedResults as Record<string, unknown> : null;
@@ -880,27 +902,50 @@ export function buildExplainChips(
   const topDriver = factors[0];
   const driverLabel = topDriver ? String(topDriver.label ?? topDriver.factor_label ?? '') : '';
 
-  if (driverLabel) {
+  const robustnessLevel = (analysisResponse as Record<string, unknown> | undefined)?.robustness;
+  const robLevel = robustnessLevel && typeof robustnessLevel === 'object' ? (robustnessLevel as Record<string, unknown>).level as string | undefined : undefined;
+  const isFragile = robLevel === 'fragile' || robLevel === 'moderate';
+  const stale = !isAnalysisCurrent(context.framing?.stage ?? null, analysisResponse ?? null);
+
+  // Context-aware chip selection (priority order, max 3)
+
+  // 1. Fragile/moderate robustness → stress-test chip
+  if (isFragile && chips.length < MAX_CHIPS) {
     chips.push({
-      label: `What if ${driverLabel} changed?`,
-      prompt: `What would happen if ${driverLabel} changed significantly?`,
+      label: 'Stress-test the weakest assumption',
+      prompt: 'Which assumption is most fragile and what would happen if it changed?',
+      role: 'challenger',
+    });
+  }
+
+  // 2. Top drivers populated → dig into driver chip
+  if (driverLabel && chips.length < MAX_CHIPS) {
+    chips.push({
+      label: `Dig into ${driverLabel}`,
+      prompt: `Tell me more about how ${driverLabel} affects the result and what would change it.`,
       role: 'facilitator',
     });
   }
 
-  chips.push({
-    label: 'Re-run with different assumptions',
-    prompt: 'I want to re-run the analysis with different assumptions.',
-    role: 'facilitator',
-  });
+  // 3. Stale analysis → re-run chip
+  if (stale && chips.length < MAX_CHIPS) {
+    chips.push({
+      label: 'Re-run analysis',
+      prompt: 'Re-run the analysis with the updated graph.',
+      role: 'facilitator',
+    });
+  }
 
-  chips.push({
-    label: 'Challenge the weakest edge',
-    prompt: 'Which relationship in the model is weakest and how does it affect the result?',
-    role: 'challenger',
-  });
+  // 4. Fallback if none of the above conditions matched
+  if (chips.length === 0) {
+    chips.push({
+      label: 'What does this result mean for my decision?',
+      prompt: 'What does this result mean for my decision?',
+      role: 'facilitator',
+    });
+  }
 
-  return chips;
+  return chips.slice(0, MAX_CHIPS);
 }
 
 // ============================================================================
@@ -997,11 +1042,12 @@ function extractFallbackInsight(response: V2RunResponseEnvelope): string | null 
   return `Based on the analysis, ${winnerLabel} leads at ${winnerProb}%. I wasn't able to generate a full explanation — try asking a more specific question.`;
 }
 
-function buildExplanationPrompt(
+export function buildExplanationPrompt(
   summary: string,
   tensionNote: string | null,
   focus?: string,
   framing?: { goal?: string; constraints?: string[] },
+  driverGuard?: { topDriversEmpty: boolean; sensitivityZero: boolean },
 ): string {
   const sections = [
     'You are explaining analysis results from a Monte Carlo decision model.',
@@ -1029,6 +1075,14 @@ function buildExplanationPrompt(
 
   if (focus) {
     sections.push('', `## Focus Area`, `The user wants to focus on: ${focus}`);
+  }
+
+  // Guard against fabricated driver explanations when driver data is absent
+  if (driverGuard?.topDriversEmpty && driverGuard?.sensitivityZero) {
+    sections.push(
+      '',
+      'Driver and sensitivity data is not available for this analysis. Do not explain which factors drive the result or claim any factor is a main driver. Instead, describe what the overall result means and suggest running a deeper analysis.',
+    );
   }
 
   sections.push(
@@ -1079,6 +1133,39 @@ export function buildBriefTextForGrounding(context: ConversationContext): string
   }
 
   return parts.length > 0 ? parts.join(' ') : null;
+}
+
+/**
+ * Build driver guard flags from analysis response.
+ * Used to prevent LLM from fabricating driver explanations when data is absent.
+ * @internal Exported for testing.
+ */
+export function buildDriverGuard(response: V2RunResponseEnvelope): { topDriversEmpty: boolean; sensitivityZero: boolean } {
+  const r = response as Record<string, unknown>;
+  const nestedResults = r.results && typeof r.results === 'object' && !Array.isArray(r.results)
+    ? r.results as Record<string, unknown> : null;
+  const rawFactors = response.factor_sensitivity ?? nestedResults?.factor_sensitivity;
+  const factors = Array.isArray(rawFactors) ? rawFactors as Array<Record<string, unknown>> : [];
+
+  const topDriversEmpty = factors.length === 0;
+
+  // Check sensitivity_concentration — could be top-level or nested
+  const rawConc = (r.sensitivity_concentration ?? nestedResults?.sensitivity_concentration) as number | undefined;
+  const sensitivityZero = rawConc === 0 || rawConc === undefined || rawConc === null;
+
+  return { topDriversEmpty, sensitivityZero };
+}
+
+/** Regex matching common placeholder tokens that should never appear in user-facing text. */
+const PLACEHOLDER_PATTERN = /\[(?:value|number|X|placeholder|TBD|TODO)\]/gi;
+
+/**
+ * Strip leaked placeholder tokens from text.
+ * When a placeholder like "[value]" appears, replace it with "the relevant figure"
+ * to maintain sentence readability.
+ */
+export function stripPlaceholderTokens(text: string): string {
+  return text.replace(PLACEHOLDER_PATTERN, 'the relevant figure');
 }
 
 function buildSupportingRefs(response: V2RunResponseEnvelope): SupportingRef[] {
