@@ -84,7 +84,9 @@ describe('computeTurnContext', () => {
     expect(ctx.graph_summary.edge_count).toBe(4);
     expect(ctx.graph_summary.option_count).toBe(2);
     expect(ctx.graph_summary.goal_label).toBe('Maximise ROI');
-    expect(ctx.graph_summary.missing_structural).toBe(false);
+    // Structural checks: no constraints and no external factors are detected
+    expect(ctx.graph_summary.missing_structural).toBeInstanceOf(Array);
+    expect(ctx.graph_summary.missing_structural).not.toContain('no goal node');
     expect(ctx.analysis_summary).not.toBeNull();
     expect(ctx.analysis_summary!.winner).toBe('Option A');
     expect(ctx.analysis_summary!.winner_probability).toBeCloseTo(0.62);
@@ -100,7 +102,7 @@ describe('computeTurnContext', () => {
 
     expect(ctx.entities.nodes.size).toBe(0);
     expect(ctx.graph_summary.node_count).toBe(0);
-    expect(ctx.graph_summary.missing_structural).toBe(true);
+    expect(ctx.graph_summary.missing_structural).toContain('no goal node');
     expect(ctx.analysis_summary).toBeNull();
     expect(ctx.capabilities.can_run_analysis).toBe(false);
     expect(ctx.capabilities.can_explain_results).toBe(false);

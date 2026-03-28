@@ -6,7 +6,7 @@
  * Layer 2: Block data schemas for deterministic response assembly
  */
 
-import type { DecisionStage, V2RunResponseEnvelope, SuggestedAction, TypedConversationBlock, PatchOperation, ConversationalState } from "../types.js";
+import type { DecisionStage, V2RunResponseEnvelope, SuggestedAction, TypedConversationBlock, PatchOperation, ConversationalState, AnalysisInputs } from "../types.js";
 import type { GraphV3T, NodeKindV3T } from "../../schemas/cee-v3.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import type { ActionName } from "./actions/types.js";
@@ -57,8 +57,8 @@ export interface GraphSummary {
   option_count: number;
   option_labels: string[];
   goal_label: string | null;
-  /** True when structural edges (option→goal) are missing. */
-  missing_structural: boolean;
+  /** Specific structural issues found (empty array = no issues). */
+  missing_structural: string[];
 }
 
 /** Summary of the latest analysis results. */
@@ -143,26 +143,40 @@ export interface DeterministicTurnContext {
   conversational_state: ConversationalState | null;
   /** Scenario ID. */
   scenario_id: string;
+  /** Analysis inputs for run_analysis delegation. */
+  analysis_inputs: AnalysisInputs | null;
 }
 
 // ============================================================================
 // Layer 1 — LLM JSON Response Contract
 // ============================================================================
 
+export type Priority = 'high' | 'medium' | 'low';
+
 export interface LLMInsight {
-  type: 'observation' | 'suggestion' | 'warning' | 'question';
+  type: 'bias_detected' | 'missing_perspective' | 'assumption_risk' |
+        'opportunity' | 'calibration_concern' | 'structural_gap';
   description: string;
-  severity?: 'info' | 'medium' | 'high';
+  severity: 'info' | 'warning' | 'important';
   target_id?: string;
   science_concept?: string;
 }
 
-export interface LLMRecommendedAction {
-  action_type: string;
-  target_id?: string;
-  parameters?: Record<string, unknown>;
-  rationale?: string;
-}
+export type LLMRecommendedAction =
+  | { action_type: 'set_factor_value'; target_id: string; value: number; raw_value?: number; unit?: string; priority: Priority; rationale?: string }
+  | { action_type: 'add_constraint'; target_id: string; operator: '<=' | '>='; value: number; label: string; unit?: string; priority: Priority; rationale?: string }
+  | { action_type: 'add_factor'; label: string; category?: 'controllable' | 'observable' | 'external'; connect_to?: string[]; priority: Priority; rationale?: string }
+  | { action_type: 'adjust_edge_strength'; from_id: string; to_id: string; direction: 'strengthen' | 'weaken'; priority: Priority; rationale?: string }
+  | { action_type: 'add_option'; label: string; priority: Priority; rationale?: string }
+  | { action_type: 'remove_factor'; target_id: string; priority: Priority; rationale?: string }
+  | { action_type: 'set_goal_target'; value: number; raw_value?: number; unit?: string; cap?: number; priority: Priority; rationale?: string }
+  | { action_type: 'run_analysis'; priority: Priority; rationale?: string }
+  | { action_type: 'explain_result'; focus?: string; priority: Priority; rationale?: string }
+  | { action_type: 'compare_options'; priority: Priority; rationale?: string }
+  | { action_type: 'challenge_assumption'; target_id?: string; priority: Priority; rationale?: string }
+  | { action_type: 'run_premortem'; target_id: string; priority: Priority; rationale?: string }
+  | { action_type: 'what_would_flip'; priority: Priority; rationale?: string }
+  | { action_type: 'generate_artefact'; artefact_type: string; priority: Priority; rationale?: string };
 
 export interface LLMJsonResponse {
   text: string;
@@ -198,7 +212,7 @@ export interface ComparisonBlockData {
 }
 
 /** Premortem block — risk paths and failure narrative. */
-export interface PremortermBlockData {
+export interface PremortemBlockData {
   target_option: string;
   risk_paths: Array<{
     factor_id: string;

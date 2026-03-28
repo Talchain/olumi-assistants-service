@@ -4,11 +4,54 @@
  * Builds the system prompt for the JSON output contract.
  * The LLM receives TurnContext + user message and returns
  * { text, insights[], recommended_actions[] }.
+ *
+ * Static sections (identity, response contract, science triggers)
+ * are loaded from PMS when available; falls back to hardcoded defaults.
  */
 
 import type { DeterministicTurnContext } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
+import { loadPrompt } from "../../prompts/loader.js";
+import { log } from "../../utils/telemetry.js";
+
+// ============================================================================
+// PMS Cache
+// ============================================================================
+
+/** Cached PMS prompt (loaded once, refreshed on miss). */
+let cachedPmsPrompt: string | null = null;
+let pmsLoadAttempted = false;
+
+/**
+ * Attempt to load the static prompt sections from PMS.
+ * Returns null if PMS is unavailable or the prompt is not configured.
+ */
+async function loadStaticPromptFromPms(): Promise<string | null> {
+  try {
+    const result = await loadPrompt('orchestrator', { forceDefault: false });
+    if (result.source === 'store') {
+      return result.content;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Warm the PMS cache. Call during startup or first prompt build.
+ */
+export async function warmPromptCache(): Promise<void> {
+  pmsLoadAttempted = true;
+  const content = await loadStaticPromptFromPms();
+  if (content) {
+    cachedPmsPrompt = content;
+    log.info('deterministic.prompt.pms_loaded');
+  } else {
+    log.warn('deterministic.prompt.pms_unavailable_using_hardcoded');
+  }
+}
 
 // ============================================================================
 // Public API
@@ -16,24 +59,31 @@ import { ACTION_CATALOGUE } from "./actions/registry.js";
 
 /**
  * Build the system prompt for the deterministic orchestrator.
+ *
+ * Static sections come from PMS when available; dynamic sections
+ * (state + action vocabulary) are always code-generated from TurnContext.
  */
 export function buildDeterministicPrompt(ctx: DeterministicTurnContext): string {
   const sections: string[] = [];
 
-  // Identity
-  sections.push(IDENTITY_SECTION);
+  if (cachedPmsPrompt) {
+    // PMS provides the static prompt (identity + contract + science)
+    sections.push(cachedPmsPrompt);
+  } else {
+    // Trigger async load for next call if not yet attempted
+    if (!pmsLoadAttempted) {
+      pmsLoadAttempted = true;
+      warmPromptCache().catch(() => { /* non-fatal */ });
+    }
+    // Fallback to hardcoded static sections
+    sections.push(IDENTITY_SECTION);
+    sections.push(RESPONSE_CONTRACT);
+    sections.push(SCIENCE_TRIGGERS);
+  }
 
-  // Decision state
+  // Dynamic sections — always code-generated
   sections.push(buildStateSection(ctx));
-
-  // Action vocabulary
   sections.push(buildActionVocabulary(ctx.eligible_actions));
-
-  // Response contract
-  sections.push(RESPONSE_CONTRACT);
-
-  // Science coaching triggers
-  sections.push(SCIENCE_TRIGGERS);
 
   return sections.join('\n\n---\n\n');
 }
@@ -62,8 +112,9 @@ You MUST respond with valid JSON matching this schema:
   "text": "Your conversational response in plain language.",
   "insights": [
     {
-      "type": "observation|suggestion|warning|question",
+      "type": "bias_detected|missing_perspective|assumption_risk|opportunity|calibration_concern|structural_gap",
       "description": "A specific insight about the decision.",
+      "severity": "info|warning|important",
       "target_id": "optional — ID of the factor/edge this relates to",
       "science_concept": "optional — relevant behavioural science concept"
     }
@@ -71,9 +122,9 @@ You MUST respond with valid JSON matching this schema:
   "recommended_actions": [
     {
       "action_type": "one of the eligible actions listed above",
-      "target_id": "optional — entity to act on",
-      "parameters": {},
-      "rationale": "optional — why this action is useful now"
+      "priority": "high|medium|low",
+      "rationale": "optional — why this action is useful now",
+      "...action-specific fields (target_id, value, label, etc.)"
     }
   ]
 }
@@ -81,6 +132,8 @@ You MUST respond with valid JSON matching this schema:
 Rules:
 - "text" is REQUIRED and must be non-empty
 - 0-3 insights, each referencing specific decision elements
+- "severity" is REQUIRED on every insight: "info", "warning", or "important"
+- "priority" is REQUIRED on every recommended_action: "high", "medium", or "low"
 - 0-3 recommended_actions, ONLY from the eligible_actions list
 - Never output XML, HTML, or markdown headers
 - Never fabricate numbers — only reference data from the analysis
@@ -118,6 +171,26 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
     }
   } else {
     parts.push('Model: not yet created');
+  }
+
+  // Entity list for target_id references
+  if (ctx.entities.nodes.size > 0) {
+    const factorDescs: string[] = [];
+    const optionDescs: string[] = [];
+    for (const [id, entry] of ctx.entities.nodes) {
+      if (entry.kind === 'factor') {
+        const segs = [id, `(${entry.label}`];
+        if (entry.category) segs.push(`, ${entry.category}`);
+        if (entry.value != null) segs.push(`, value: ${entry.value}`);
+        if (entry.unit) segs.push(` ${entry.unit}`);
+        segs.push(')');
+        factorDescs.push(segs.join(''));
+      } else if (entry.kind === 'option') {
+        optionDescs.push(`${id} (${entry.label})`);
+      }
+    }
+    if (factorDescs.length > 0) parts.push(`Factors: ${factorDescs.join(', ')}`);
+    if (optionDescs.length > 0) parts.push(`Options: ${optionDescs.join(', ')}`);
   }
 
   // Analysis summary
@@ -173,20 +246,20 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
   return parts.join('\n');
 }
 
-/** Parameter schema hints per action type — injected into the prompt. */
+/** Parameter schema hints per action type — injected into the prompt. Must match Zod discriminated union. */
 const ACTION_PARAM_SCHEMAS: Partial<Record<ActionName, string>> = {
-  set_factor_value: '{ target_id: "factor label or ID", value: number }',
-  add_constraint: '{ target_id: "factor to constrain", constraint_type?: "threshold"|"budget"|"timeline", threshold?: number }',
-  add_factor: '{ label: "factor name", value?: number, unit?: string, category?: "controllable"|"observable" }',
-  adjust_edge_strength: '{ from: "source factor", to: "target factor", strength_mean: number }',
-  add_option: '{ label: "option name", interventions?: { factor_id: value } }',
-  remove_factor: '{ target_id: "factor label or ID" }',
-  set_goal_target: '{ threshold: number }',
+  set_factor_value: '{ target_id: "factor ID", value: number, unit?: string }',
+  add_constraint: '{ target_id: "factor ID", operator: "<="|">=", value: number, label: "constraint name", unit?: string }',
+  add_factor: '{ label: "factor name", category?: "controllable"|"observable"|"external", connect_to?: ["target_id"] }',
+  adjust_edge_strength: '{ from_id: "source factor ID", to_id: "target factor ID", direction: "strengthen"|"weaken" }',
+  add_option: '{ label: "option name" }',
+  remove_factor: '{ target_id: "factor ID" }',
+  set_goal_target: '{ value: number, unit?: string, cap?: number }',
   run_analysis: '{}',
-  explain_result: '{}',
+  explain_result: '{ focus?: "aspect to focus on" }',
   compare_options: '{}',
   challenge_assumption: '{ target_id?: "factor or edge to challenge" }',
-  run_premortem: '{ target_id?: "option to pre-mortem" }',
+  run_premortem: '{ target_id: "option ID to pre-mortem" }',
   what_would_flip: '{}',
   generate_artefact: '{ artefact_type: "decision_matrix"|"sensitivity_explorer"|"comparison_table"|"premortem_worksheet"|"assumption_map" }',
 };

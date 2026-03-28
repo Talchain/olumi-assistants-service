@@ -54,17 +54,23 @@ export function buildChipsFromRecommendations(
     const definition = ACTION_CATALOGUE.get(actionType as ActionName);
     if (!definition) continue;
 
+    // Extract typed fields from discriminated union into generic params
+    const { action_type: _at, priority: _p, rationale, ...rest } = rec;
+    const parameters: Record<string, unknown> = { ...rest };
+
     const actionRec: ActionRecommendation = {
       action_type: actionType as ActionName,
-      target_id: rec.target_id,
-      parameters: rec.parameters,
-      rationale: rec.rationale,
+      target_id: 'target_id' in rec ? (rec.target_id as string) : undefined,
+      parameters,
+      rationale,
     };
 
     chips.push({
       label: definition.chipLabel(actionRec),
       prompt: definition.chipPrompt(actionRec),
-      role: definition.role === 'scientist' ? 'facilitator' : definition.role,
+      role: definition.role,
+      action_type: actionRec.action_type,
+      parameters,
     });
   }
 
