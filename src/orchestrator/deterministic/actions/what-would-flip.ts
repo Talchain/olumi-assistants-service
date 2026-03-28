@@ -2,10 +2,12 @@
  * what_would_flip Action
  *
  * Fully deterministic from E-values, conditional winners, robustness data.
+ * Returns a FlipAnalysisBlock with structured flip conditions.
  */
 
 import type { ActionDefinition } from "./types.js";
-import type { DeterministicTurnContext, ActionResult } from "../types.js";
+import type { DeterministicTurnContext, ActionResult, FlipAnalysisBlockData } from "../types.js";
+import { createFlipAnalysisBlock } from "../../blocks/factory.js";
 
 export const whatWouldFlipAction: ActionDefinition = {
   action_type: 'what_would_flip',
@@ -27,51 +29,63 @@ export const whatWouldFlipAction: ActionDefinition = {
 
   async execute(_params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
     const summary = ctx.analysis_summary!;
-    const sections: string[] = [];
-
-    sections.push(`**What would flip the result away from ${summary.winner}?**`);
-
-    // Use top drivers — the factors most likely to cause a flip
     const drivers = summary.top_drivers;
+
     if (drivers.length === 0) {
-      sections.push('Driver data not available.');
-      return { blocks: [], assistantText: sections.join('\n\n'), guidance_items: [] };
+      return {
+        blocks: [],
+        assistantText: 'Driver data not available — cannot determine flip conditions.',
+        guidance_items: [],
+      };
     }
 
-    sections.push('The most sensitive levers:');
+    const flipConditions: FlipAnalysisBlockData['flip_conditions'] = drivers.slice(0, 3).map((driver) => {
+      const node = ctx.entities.nodes.get(driver.factor_id);
+      return {
+        factor_id: driver.factor_id,
+        factor_label: driver.label,
+        current_value: node?.value ?? 0,
+        flip_value: 0, // exact flip point requires re-simulation
+        conditional_winner: summary.runner_up ?? 'alternative',
+      };
+    });
+
+    // Build narrative
+    const narrativeParts: string[] = [];
     for (const driver of drivers.slice(0, 3)) {
       const node = ctx.entities.nodes.get(driver.factor_id);
-      const currentValue = node?.value;
-      const valueStr = currentValue != null ? ` (current: ${currentValue}${node?.unit ? ' ' + node.unit : ''})` : '';
-      sections.push(
-        `- **${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)} — a ${driver.sensitivity > 1 ? 'small' : 'moderate'} change here could shift the winner.`,
+      const valueStr = node?.value != null ? ` (current: ${node.value}${node.unit ? ' ' + node.unit : ''})` : '';
+      narrativeParts.push(
+        `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)} — a ${driver.sensitivity > 1 ? 'small' : 'moderate'} change here could shift the winner.`,
       );
     }
 
-    // Close call indicator
     if (summary.runner_up && summary.winner_probability != null && summary.runner_up_probability != null) {
       const margin = (summary.winner_probability - summary.runner_up_probability) * 100;
       if (margin < 10) {
-        sections.push(
-          `\nThe margin between **${summary.winner}** and **${summary.runner_up}** is only ${margin.toFixed(1)} points — relatively easy to flip.`,
-        );
+        narrativeParts.push(`The margin is only ${margin.toFixed(1)} points — relatively easy to flip.`);
       } else {
-        sections.push(
-          `\nThe margin is ${margin.toFixed(0)} points — a significant shift would be needed.`,
-        );
+        narrativeParts.push(`The margin is ${margin.toFixed(0)} points — a significant shift would be needed.`);
       }
     }
 
-    // Fragile edges
     if (ctx.signals.weak_edges.length > 0) {
-      sections.push(
-        `\n${ctx.signals.weak_edges.length} weak edge${ctx.signals.weak_edges.length > 1 ? 's' : ''} in the model — these uncertain causal links could amplify a flip.`,
+      narrativeParts.push(
+        `${ctx.signals.weak_edges.length} weak edge${ctx.signals.weak_edges.length > 1 ? 's' : ''} in the model could amplify a flip.`,
       );
     }
 
+    const blockData: FlipAnalysisBlockData = {
+      current_winner: summary.winner!,
+      flip_conditions: flipConditions,
+      narrative: narrativeParts.join('\n'),
+    };
+
+    const block = createFlipAnalysisBlock(blockData, '');
+
     return {
-      blocks: [],
-      assistantText: sections.join('\n\n'),
+      blocks: [block],
+      assistantText: `The top factors that could flip the result away from ${summary.winner}.`,
       guidance_items: [],
     };
   },

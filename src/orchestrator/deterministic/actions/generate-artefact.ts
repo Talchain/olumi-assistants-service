@@ -29,10 +29,8 @@ export const generateArtefactAction: ActionDefinition = {
   role: 'scientist',
   cooldown: 'suppress_same_turn',
 
-  prerequisite_checks(ctx: DeterministicTurnContext): string | null {
-    if (!ctx.graph) return 'No decision model available.';
-    if (!ctx.analysis_summary) return 'No analysis results available. Run analysis first.';
-    return null;
+  prerequisite_checks(_ctx: DeterministicTurnContext): string | null {
+    return 'Interactive artefact generation is not yet available. Use compare_options or what_would_flip for analysis visualisations.';
   },
 
   async execute(params: Record<string, unknown>, _ctx: DeterministicTurnContext): Promise<ActionResult> {

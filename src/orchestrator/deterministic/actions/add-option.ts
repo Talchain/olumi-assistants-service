@@ -44,25 +44,13 @@ export const addOptionAction: ActionDefinition = {
           id: nodeId,
           kind: 'option',
           label,
+          data: { interventions: interventions ?? {} },
         },
       },
     ];
 
-    // Structural edge to goal (mean=1.0, std=0.01, exists_probability=1.0)
-    const goalId = ctx.entities.goal_id;
-    if (goalId) {
-      operations.push({
-        op: 'add_edge',
-        path: `${nodeId}->${goalId}`,
-        value: {
-          from: nodeId,
-          to: goalId,
-          strength: { mean: 1.0, std: 0.01 },
-          exists_probability: 1.0,
-          effect_direction: 'positive',
-        },
-      });
-    }
+    // No option→goal edge — forbidden by platform STRUCTURAL_RULES.
+    // Options connect to factors only; factor→outcome→goal paths already exist.
 
     // Intervention edges to factors
     if (interventions) {

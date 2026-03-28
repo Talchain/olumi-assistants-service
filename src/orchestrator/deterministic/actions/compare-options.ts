@@ -1,12 +1,13 @@
 /**
  * compare_options Action
  *
- * Code templates comparison table from option probabilities.
- * LLM writes interpretive narrative.
+ * Code templates comparison from option probabilities.
+ * Returns a ComparisonBlock with structured option data.
  */
 
 import type { ActionDefinition } from "./types.js";
-import type { DeterministicTurnContext, ActionResult } from "../types.js";
+import type { DeterministicTurnContext, ActionResult, ComparisonBlockData } from "../types.js";
+import { createComparisonBlock } from "../../blocks/factory.js";
 
 export const compareOptionsAction: ActionDefinition = {
   action_type: 'compare_options',
@@ -40,27 +41,39 @@ export const compareOptionsAction: ActionDefinition = {
       };
     }
 
-    const lines: string[] = ['**Option Comparison**\n'];
+    const options: ComparisonBlockData['options'] = results.map((r) => ({
+      option_id: (r.option_id as string) ?? '',
+      label: r.option_label as string,
+      win_probability: r.win_probability as number,
+      strengths: [],
+      weaknesses: [],
+    }));
 
-    for (const result of results) {
-      const label = result.option_label as string;
-      const prob = ((result.win_probability as number) * 100).toFixed(0);
-      lines.push(`- **${label}**: ${prob}% win probability`);
+    // Build narrative for the comparison
+    const narrativeParts: string[] = [];
+    const margin = (results[0].win_probability as number - (results[1].win_probability as number)) * 100;
+    if (margin < 5) {
+      narrativeParts.push(`This is a close call — only ${margin.toFixed(1)} percentage points separate the top two options.`);
+    } else if (margin > 20) {
+      narrativeParts.push(`${results[0].option_label} has a clear lead of ${margin.toFixed(0)} percentage points.`);
     }
 
-    // Margin
-    if (results.length >= 2) {
-      const margin = ((results[0].win_probability as number) - (results[1].win_probability as number)) * 100;
-      if (margin < 5) {
-        lines.push(`\nThis is a **close call** — only ${margin.toFixed(1)} percentage points separate the top two options.`);
-      } else if (margin > 20) {
-        lines.push(`\n**${results[0].option_label}** has a clear lead of ${margin.toFixed(0)} percentage points.`);
-      }
+    const differentiators: string[] = [];
+    if (ctx.analysis_summary?.top_drivers && ctx.analysis_summary.top_drivers.length > 0) {
+      differentiators.push(...ctx.analysis_summary.top_drivers.slice(0, 3).map((d) => d.label));
     }
+
+    const blockData: ComparisonBlockData = {
+      options,
+      differentiators,
+      narrative: narrativeParts.join(' '),
+    };
+
+    const block = createComparisonBlock(blockData, '');
 
     return {
-      blocks: [],
-      assistantText: lines.join('\n'),
+      blocks: [block],
+      assistantText: `Comparing ${results.length} options — ${results[0].option_label} leads at ${((results[0].win_probability as number) * 100).toFixed(0)}%.`,
       guidance_items: [],
     };
   },

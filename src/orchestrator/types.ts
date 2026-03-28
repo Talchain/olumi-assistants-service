@@ -382,7 +382,12 @@ export type TypedConversationBlock =
   | (ConversationBlockBase & { block_type: 'review_card'; data: ReviewCardBlockData })
   | (ConversationBlockBase & { block_type: 'framing'; data: FramingBlockData })
   | (ConversationBlockBase & { block_type: 'evidence'; data: EvidenceBlockData })
-  | (ConversationBlockBase & { block_type: 'artefact'; data: ArtefactBlockData });
+  | (ConversationBlockBase & { block_type: 'artefact'; data: ArtefactBlockData })
+  | (ConversationBlockBase & { block_type: 'comparison'; data: import('./deterministic/types.js').ComparisonBlockData })
+  | (ConversationBlockBase & { block_type: 'premortem'; data: import('./deterministic/types.js').PremortemBlockData })
+  | (ConversationBlockBase & { block_type: 'flip_analysis'; data: import('./deterministic/types.js').FlipAnalysisBlockData })
+  | (ConversationBlockBase & { block_type: 'proposal'; data: import('./deterministic/types.js').ProposalBlockData })
+  | (ConversationBlockBase & { block_type: 'exercise'; data: import('./deterministic/types.js').ExerciseBlockData });
 
 // ---- Graph Patch Block ----
 
