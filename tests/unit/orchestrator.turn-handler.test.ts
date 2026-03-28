@@ -65,6 +65,8 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
             get(featTarget, featProp) {
               if (featProp === 'orchestrator') return true;
               if (featProp === 'briefDetectionEnabled') return testFlags.briefDetectionEnabled;
+              if (featProp === 'deterministicOrchestratorEnabled') return false;
+              if (featProp === 'legacyOrchestratorEnabled') return false;
               return Reflect.get(featTarget, featProp);
             },
           });

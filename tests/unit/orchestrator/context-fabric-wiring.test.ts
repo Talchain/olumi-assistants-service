@@ -67,6 +67,8 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
               if (featProp === 'orchestrator') return true;
+              if (featProp === 'deterministicOrchestratorEnabled') return false;
+              if (featProp === 'legacyOrchestratorEnabled') return false;
               return Reflect.get(featTarget, featProp);
             },
           });
