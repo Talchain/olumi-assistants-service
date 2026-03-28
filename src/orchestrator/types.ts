@@ -208,6 +208,11 @@ export interface OrchestratorResponseEnvelope {
   lineage: ResponseLineage;
   turn_plan?: TurnPlan;
   stage_indicator?: DecisionStage;
+  /** Response format version. 2 = deterministic pipeline. */
+  response_version?: number;
+  /** LLM-generated insights (deterministic pipeline only, max 3). */
+  insights?: Array<{ type: string; description: string; severity?: string; target_id?: string; science_concept?: string }>;
+
   /** Debug aid — not part of INT-3 contract */
   stage_label?: string;
   error?: OrchestratorError;

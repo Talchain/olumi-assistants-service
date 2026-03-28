@@ -49,7 +49,7 @@ export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
    * Response includes detailed status for each CEE task showing whether
    * the prompt came from the Supabase store or fell back to defaults.
    */
-  app.post('/v1/prompts/warm', async (request: FastifyRequest, reply: FastifyReply) => {
+  const handleWarmPrompts = async (request: FastifyRequest, reply: FastifyReply) => {
     const startTime = Date.now();
 
     emit(PromptWarmingEvents.WarmRequested, {
@@ -145,7 +145,9 @@ export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
         duration_ms: durationMs,
       });
     }
-  });
+  };
+
+  app.post('/v1/prompts/warm', handleWarmPrompts);
 
   /**
    * GET /v1/prompts/status - Get prompt cache status
@@ -158,7 +160,7 @@ export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
    * - Per-task prompt status (source, version, age)
    * - Whether staging prompts are enabled
    */
-  app.get('/v1/prompts/status', async (request: FastifyRequest, reply: FastifyReply) => {
+  const handlePromptStatus = async (request: FastifyRequest, reply: FastifyReply) => {
     emit(PromptWarmingEvents.StatusChecked, {
       client_ip: request.ip,
     });
@@ -202,5 +204,14 @@ export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
         tasks: taskStatus,
       },
     });
-  });
+  };
+
+  app.get('/v1/prompts/status', handlePromptStatus);
+
+  // ── Route aliases with /assist prefix ──────────────────────────────────────
+  // The frontend calls /assist/v1/prompts/warm but the canonical routes are
+  // /v1/prompts/warm and /v1/prompts/status. Register the same handlers on both.
+
+  app.post('/assist/v1/prompts/warm', handleWarmPrompts);
+  app.get('/assist/v1/prompts/status', handlePromptStatus);
 }

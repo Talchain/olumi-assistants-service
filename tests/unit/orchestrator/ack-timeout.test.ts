@@ -20,6 +20,16 @@ vi.mock("../../../src/config/index.js", async (importOriginal) => {
         if (prop === "plot") {
           return { baseUrl: undefined, authToken: undefined };
         }
+        if (prop === "features") {
+          const features = Reflect.get(target, prop);
+          return new Proxy(features, {
+            get(ft, fp) {
+              // Disable deterministic pipeline so legacy LLM path is tested
+              if (fp === "deterministicOrchestratorEnabled") return false;
+              return Reflect.get(ft, fp);
+            },
+          });
+        }
         return Reflect.get(target, prop);
       },
     }),
