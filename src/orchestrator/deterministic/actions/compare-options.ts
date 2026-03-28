@@ -41,35 +41,29 @@ export const compareOptionsAction: ActionDefinition = {
       };
     }
 
-    const options: ComparisonBlockData['options'] = results.map((r) => ({
-      option_id: (r.option_id as string) ?? '',
+    const drivers = ctx.analysis_summary?.top_drivers ?? [];
+    const driverLabels = drivers.slice(0, 3).map((d) => d.label);
+
+    const options: ComparisonBlockData['options'] = results.map((r, i) => ({
+      id: (r.option_id as string) ?? '',
       label: r.option_label as string,
-      win_probability: r.win_probability as number,
+      probability: r.win_probability as number,
+      rank: i + 1,
       strengths: [],
       weaknesses: [],
+      key_differentiators: driverLabels,
     }));
 
-    // Build narrative for the comparison
-    const narrativeParts: string[] = [];
     const margin = (results[0].win_probability as number - (results[1].win_probability as number)) * 100;
+    let narrative = '';
     if (margin < 5) {
-      narrativeParts.push(`This is a close call — only ${margin.toFixed(1)} percentage points separate the top two options.`);
+      narrative = `This is a close call — only ${margin.toFixed(1)} percentage points separate the top two options.`;
     } else if (margin > 20) {
-      narrativeParts.push(`${results[0].option_label} has a clear lead of ${margin.toFixed(0)} percentage points.`);
+      narrative = `${results[0].option_label} has a clear lead of ${margin.toFixed(0)} percentage points.`;
     }
 
-    const differentiators: string[] = [];
-    if (ctx.analysis_summary?.top_drivers && ctx.analysis_summary.top_drivers.length > 0) {
-      differentiators.push(...ctx.analysis_summary.top_drivers.slice(0, 3).map((d) => d.label));
-    }
-
-    const blockData: ComparisonBlockData = {
-      options,
-      differentiators,
-      narrative: narrativeParts.join(' '),
-    };
-
-    const block = createComparisonBlock(blockData, '');
+    const blockData: ComparisonBlockData = { options, narrative };
+    const block = createComparisonBlock(blockData, ctx.scenario_id);
 
     return {
       blocks: [block],

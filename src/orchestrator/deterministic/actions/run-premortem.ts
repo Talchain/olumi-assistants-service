@@ -29,25 +29,34 @@ export const runPremortemAction: ActionDefinition = {
 
   async execute(params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
     const targetRef = params.target_id as string | undefined;
+    let targetId: string;
     let targetLabel: string;
 
     if (targetRef) {
       const resolution = resolveEntity(targetRef, ctx.entities, 'none');
-      targetLabel = resolution.status === 'resolved' ? resolution.entity!.label : targetRef;
+      if (resolution.status === 'resolved') {
+        targetId = resolution.entity!.id;
+        targetLabel = resolution.entity!.label;
+      } else {
+        targetId = targetRef;
+        targetLabel = targetRef;
+      }
     } else {
+      // Default to the winner
+      const winnerNode = [...ctx.entities.nodes.values()].find((n) => n.label === ctx.analysis_summary?.winner);
+      targetId = winnerNode?.id ?? '';
       targetLabel = ctx.analysis_summary?.winner ?? 'the leading option';
     }
 
     const drivers = ctx.analysis_summary?.top_drivers ?? [];
-    const riskPaths: PremortemBlockData['risk_paths'] = drivers.slice(0, 3).map((driver, i) => {
+    const riskPaths: PremortemBlockData['risk_paths'] = drivers.slice(0, 3).map((driver) => {
       const uncertaintyNote = ctx.signals.high_uncertainty_factors.includes(driver.factor_id)
         ? ' (high uncertainty)'
         : '';
       return {
-        factor_id: driver.factor_id,
-        factor_label: driver.label,
-        influence_rank: i + 1,
-        failure_mode: `If ${driver.label} moves against ${targetLabel}, the outcome shifts significantly.${uncertaintyNote}`,
+        path: [driver.factor_id, targetId],
+        influence: driver.sensitivity,
+        description: `If ${driver.label} moves against ${targetLabel}, the outcome shifts significantly.${uncertaintyNote}`,
       };
     });
 
@@ -68,12 +77,12 @@ export const runPremortemAction: ActionDefinition = {
     );
 
     const blockData: PremortemBlockData = {
-      target_option: targetLabel,
+      target_option: { id: targetId, label: targetLabel },
       risk_paths: riskPaths,
       narrative: narrativeParts.join('\n'),
     };
 
-    const block = createPremortemBlock(blockData, '');
+    const block = createPremortemBlock(blockData, ctx.scenario_id);
 
     return {
       blocks: [block],

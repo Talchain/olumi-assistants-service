@@ -39,14 +39,16 @@ export const whatWouldFlipAction: ActionDefinition = {
       };
     }
 
+    const winnerNode = [...ctx.entities.nodes.values()].find((n) => n.label === summary.winner);
+
     const flipConditions: FlipAnalysisBlockData['flip_conditions'] = drivers.slice(0, 3).map((driver) => {
       const node = ctx.entities.nodes.get(driver.factor_id);
       return {
-        factor_id: driver.factor_id,
-        factor_label: driver.label,
+        assumption: driver.label,
         current_value: node?.value ?? 0,
-        flip_value: 0, // exact flip point requires re-simulation
-        conditional_winner: summary.runner_up ?? 'alternative',
+        flip_threshold: 0, // exact flip point requires re-simulation
+        direction: driver.sensitivity > 1 ? 'small change needed' : 'moderate change needed',
+        alternative_winner: summary.runner_up ?? 'alternative',
       };
     });
 
@@ -76,12 +78,16 @@ export const whatWouldFlipAction: ActionDefinition = {
     }
 
     const blockData: FlipAnalysisBlockData = {
-      current_winner: summary.winner!,
+      current_winner: {
+        id: winnerNode?.id ?? '',
+        label: summary.winner!,
+        probability: summary.winner_probability ?? 0,
+      },
       flip_conditions: flipConditions,
       narrative: narrativeParts.join('\n'),
     };
 
-    const block = createFlipAnalysisBlock(blockData, '');
+    const block = createFlipAnalysisBlock(blockData, ctx.scenario_id);
 
     return {
       blocks: [block],

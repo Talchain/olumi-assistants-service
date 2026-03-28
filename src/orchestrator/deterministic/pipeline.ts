@@ -162,7 +162,7 @@ export async function executeDeterministicPipeline(
               action_type: directAction,
               operations: actionResult.operations,
               description: actionResult.assistantText ?? directAction,
-              affected_elements: proposal.affected_elements,
+              affected_elements: actionResult.operations.map((o) => o.path),
             });
 
             const proposalBlock = createProposalBlock(proposal, turnId);

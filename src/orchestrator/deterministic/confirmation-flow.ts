@@ -123,9 +123,13 @@ export function handlePendingConfirmation(
         proposal_id: storedProposal.proposal_id,
         action_type: storedProposal.action_type,
         description: storedProposal.description,
-        operations: storedProposal.operations,
-        impact_summary: `Applied ${storedProposal.operations.length} operation(s)`,
-        affected_elements: storedProposal.affected_elements,
+        changes: storedProposal.operations.map((op) => ({
+          operation: op.op,
+          target: op.path,
+          detail: op.value ? JSON.stringify(op.value).slice(0, 100) : '',
+        })),
+        consequences: [],
+        confirmation_required: false, // already executed
       },
       actionResult: {
         blocks: [],
@@ -161,14 +165,18 @@ export function buildProposal(
   actionType: ActionName,
   operations: PatchOperation[],
   description: string,
-  affectedElements: string[],
+  _affectedElements: string[],
 ): ProposalBlockData {
   return {
     proposal_id: randomUUID(),
     action_type: actionType,
     description,
-    operations,
-    impact_summary: `${operations.length} operation${operations.length !== 1 ? 's' : ''}: ${operations.map((o) => o.op).join(', ')}`,
-    affected_elements: affectedElements,
+    changes: operations.map((op) => ({
+      operation: op.op,
+      target: op.path,
+      detail: op.value ? JSON.stringify(op.value).slice(0, 100) : '',
+    })),
+    consequences: [],
+    confirmation_required: true,
   };
 }
