@@ -188,10 +188,15 @@ export interface LLMJsonResponse {
 // Layer 2 — Block Data Schemas
 // ============================================================================
 
-/** Commentary block — narrative text with optional supporting references. */
+/** Commentary block — narrative text with structured sections for explain_result. */
 export interface DeterministicCommentaryBlockData {
   narrative: string;
-  supporting_refs: Array<{
+  sections?: Array<{
+    heading: string;
+    content?: string;
+    items?: string[];
+  }>;
+  supporting_refs?: Array<{
     ref_type: 'fact' | 'review_card' | 'evidence';
     ref_id: string;
     claim: string;
@@ -201,51 +206,53 @@ export interface DeterministicCommentaryBlockData {
 /** Comparison block — tabular option comparison + narrative. */
 export interface ComparisonBlockData {
   options: Array<{
-    option_id: string;
+    id: string;
     label: string;
-    win_probability: number;
+    probability: number;
+    rank: number;
     strengths: string[];
     weaknesses: string[];
+    key_differentiators: string[];
   }>;
-  differentiators: string[];
   narrative: string;
 }
 
 /** Premortem block — risk paths and failure narrative. */
 export interface PremortemBlockData {
-  target_option: string;
+  target_option: { id: string; label: string };
   risk_paths: Array<{
-    factor_id: string;
-    factor_label: string;
-    influence_rank: number;
-    failure_mode: string;
+    path: string[];
+    influence: number;
+    description: string;
   }>;
   narrative: string;
 }
 
 /** Flip analysis block — what would change the winner. */
 export interface FlipAnalysisBlockData {
-  current_winner: string;
+  current_winner: { id: string; label: string; probability: number };
   flip_conditions: Array<{
-    factor_id: string;
-    factor_label: string;
+    assumption: string;
     current_value: number;
-    flip_value: number;
-    conditional_winner: string;
+    flip_threshold: number;
+    direction: string;
+    alternative_winner: string;
   }>;
   narrative: string;
 }
 
 /** Proposal block — proposed change awaiting confirmation. */
 export interface ProposalBlockData {
-  /** Unique ID for matching confirmations to proposals. */
   proposal_id: string;
   action_type: ActionName;
   description: string;
-  operations: PatchOperation[];
-  impact_summary: string;
-  /** Labels of affected elements. */
-  affected_elements: string[];
+  changes: Array<{
+    operation: string;
+    target: string;
+    detail: string;
+  }>;
+  consequences: string[];
+  confirmation_required: boolean;
 }
 
 /** Artefact block data — extends existing ArtefactBlockData. */

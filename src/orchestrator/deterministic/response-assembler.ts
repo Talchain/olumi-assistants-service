@@ -24,6 +24,8 @@ import { buildChipsFromRecommendations } from "./chip-assembler.js";
 import { normaliseDeterministicResponse } from "./response-normaliser.js";
 import { computeContextHash } from "../context/context-hash.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
+import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
+import type { GuidanceItem } from "../types/guidance-item.js";
 
 // ============================================================================
 // Public API
@@ -120,8 +122,24 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
   // Cap insights at 3 and include in envelope
   const insights = llmResponse?.insights?.slice(0, 3) ?? [];
 
-  // Collect guidance_items from action result
-  const guidanceItems = actionResult?.guidance_items ?? [];
+  // Collect guidance_items from action result + post-analysis guidance
+  let guidanceItems: GuidanceItem[] = [...(actionResult?.guidance_items ?? [])];
+
+  // Generate post-analysis guidance when analysis-related actions executed
+  if (
+    (executedActions.includes('run_analysis') || executedActions.includes('explain_result')) &&
+    turnContext.analysis &&
+    guidanceItems.length === 0
+  ) {
+    try {
+      const postAnalysis = generatePostAnalysisGuidance(turnContext.analysis, turnContext.graph);
+      if (postAnalysis.length > 0) {
+        guidanceItems = [...guidanceItems, ...postAnalysis];
+      }
+    } catch {
+      // Non-fatal — guidance is supplementary
+    }
+  }
 
   // Assemble envelope
   const envelope: OrchestratorResponseEnvelope & { response_version: 2; guidance_items?: unknown[] } = {

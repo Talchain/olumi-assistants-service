@@ -21,7 +21,7 @@ import { runAnalysisAction } from "../../../../src/orchestrator/deterministic/ac
 import { addOptionAction } from "../../../../src/orchestrator/deterministic/actions/add-option.js";
 import { generateArtefactAction } from "../../../../src/orchestrator/deterministic/actions/generate-artefact.js";
 import { assembleDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-assembler.js";
-import type { DeterministicTurnContext } from "../../../../src/orchestrator/deterministic/types.js";
+import type { DeterministicTurnContext, DeterministicCommentaryBlockData } from "../../../../src/orchestrator/deterministic/types.js";
 import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 import type { ComparisonBlockData, PremortemBlockData, FlipAnalysisBlockData, ProposalBlockData, ExerciseBlockData } from "../../../../src/orchestrator/deterministic/types.js";
@@ -31,9 +31,14 @@ import type { ComparisonBlockData, PremortemBlockData, FlipAnalysisBlockData, Pr
 // ============================================================================
 
 function makeCtx(overrides: Partial<DeterministicTurnContext> = {}): DeterministicTurnContext {
+  const nodes = new Map();
+  nodes.set('fac_price', { id: 'fac_price', label: 'Price Sensitivity', kind: 'factor', aliases: [], value: 0.6, unit: '%', is_action_target: true });
+  nodes.set('fac_market', { id: 'fac_market', label: 'Market Size', kind: 'factor', aliases: [], value: 1000, is_action_target: true });
+  nodes.set('opt_aggressive', { id: 'opt_aggressive', label: 'Aggressive Pricing', kind: 'option', aliases: [], is_action_target: true });
+
   return {
     stage: 'evaluate',
-    entities: { nodes: new Map(), edges: [], option_ids: [], goal_id: 'goal_1' },
+    entities: { nodes, edges: [], option_ids: ['opt_aggressive'], goal_id: 'goal_1' },
     graph_summary: { node_count: 5, edge_count: 4, option_count: 2, option_labels: ['A', 'B'], goal_label: 'Maximise ROI', missing_structural: [] },
     analysis_summary: {
       winner: 'Aggressive Pricing',
@@ -58,8 +63,8 @@ function makeCtx(overrides: Partial<DeterministicTurnContext> = {}): Determinist
     analysis: {
       meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },
       results: [
-        { option_id: 'opt_a', option_label: 'Aggressive Pricing', win_probability: 0.65 },
-        { option_id: 'opt_b', option_label: 'Conservative Pricing', win_probability: 0.35 },
+        { option_id: 'opt_aggressive', option_label: 'Aggressive Pricing', win_probability: 0.65 },
+        { option_id: 'opt_conservative', option_label: 'Conservative Pricing', win_probability: 0.35 },
       ],
     } as unknown as V2RunResponseEnvelope,
     conversational_state: null,
@@ -70,56 +75,72 @@ function makeCtx(overrides: Partial<DeterministicTurnContext> = {}): Determinist
 }
 
 // ============================================================================
-// Task 1: Block factory functions
+// Task 1: Block factory functions — brief fixture shapes
 // ============================================================================
 
-describe('Block factory — 5 new types', () => {
-  it('createComparisonBlock produces correct shape', () => {
+describe('Block factory — brief fixture shapes', () => {
+  it('createComparisonBlock matches Brief 2 fixture', () => {
     const data: ComparisonBlockData = {
-      options: [{ option_id: 'opt_a', label: 'Option A', win_probability: 0.65, strengths: ['Fast'], weaknesses: ['Expensive'] }],
-      differentiators: ['Speed'],
+      options: [{
+        id: 'opt_a',
+        label: 'Option A',
+        probability: 0.65,
+        rank: 1,
+        strengths: ['Fast'],
+        weaknesses: ['Expensive'],
+        key_differentiators: ['Speed'],
+      }],
       narrative: 'Option A leads.',
     };
     const block = createComparisonBlock(data, 'turn-123');
     expect(block.block_type).toBe('comparison');
     expect(block.block_id).toMatch(/^blk_comparison_/);
     expect(block.data).toEqual(data);
-    expect(block.provenance.trigger).toBe('deterministic:compare_options');
+    expect(block.provenance.turn_id).toBe('turn-123');
   });
 
-  it('createPremortemBlock produces correct shape', () => {
+  it('createPremortemBlock matches Brief 2 fixture', () => {
     const data: PremortemBlockData = {
-      target_option: 'Option A',
-      risk_paths: [{ factor_id: 'fac_1', factor_label: 'Cost', influence_rank: 1, failure_mode: 'Cost overrun' }],
+      target_option: { id: 'opt_a', label: 'Option A' },
+      risk_paths: [{ path: ['fac_1', 'opt_a'], influence: 0.8, description: 'Cost overrun risk' }],
       narrative: 'Key risk identified.',
     };
     const block = createPremortemBlock(data, 'turn-123');
     expect(block.block_type).toBe('premortem');
-    expect(block.block_id).toMatch(/^blk_premortem_/);
+    expect((block.data as PremortemBlockData).target_option.id).toBe('opt_a');
+    expect((block.data as PremortemBlockData).risk_paths[0].influence).toBe(0.8);
   });
 
-  it('createFlipAnalysisBlock produces correct shape', () => {
+  it('createFlipAnalysisBlock matches Brief 2 fixture', () => {
     const data: FlipAnalysisBlockData = {
-      current_winner: 'Option A',
-      flip_conditions: [{ factor_id: 'fac_1', factor_label: 'Cost', current_value: 0.5, flip_value: 0.8, conditional_winner: 'Option B' }],
+      current_winner: { id: 'opt_a', label: 'Option A', probability: 0.65 },
+      flip_conditions: [{
+        assumption: 'Cost',
+        current_value: 0.5,
+        flip_threshold: 0.8,
+        direction: 'increase',
+        alternative_winner: 'Option B',
+      }],
       narrative: 'Cost increase flips result.',
     };
     const block = createFlipAnalysisBlock(data, 'turn-123');
     expect(block.block_type).toBe('flip_analysis');
+    expect((block.data as FlipAnalysisBlockData).current_winner.probability).toBe(0.65);
   });
 
-  it('createProposalBlock produces correct shape', () => {
+  it('createProposalBlock matches Brief 2 fixture', () => {
     const data: ProposalBlockData = {
       proposal_id: 'test-id',
       action_type: 'add_factor',
       description: 'Add cost factor',
-      operations: [{ op: 'add_node', path: 'fac_cost' }],
-      impact_summary: '1 operation: add_node',
-      affected_elements: ['fac_cost'],
+      changes: [{ operation: 'add_node', target: 'fac_cost', detail: '{"kind":"factor"}' }],
+      consequences: [],
+      confirmation_required: true,
     };
     const block = createProposalBlock(data, 'turn-123');
     expect(block.block_type).toBe('proposal');
-    expect(block.data).toEqual(data);
+    expect((block.data as ProposalBlockData).confirmation_required).toBe(true);
+    expect((block.data as ProposalBlockData).changes).toHaveLength(1);
   });
 
   it('createExerciseBlock produces correct shape', () => {
@@ -135,60 +156,79 @@ describe('Block factory — 5 new types', () => {
 });
 
 // ============================================================================
-// Task 2: Action handlers return blocks
+// Task 2: Action handlers return correct block types with brief shapes
 // ============================================================================
 
-describe('explain_result returns CommentaryBlock', () => {
-  it('returns block with sections', async () => {
+describe('explain_result returns CommentaryBlock with sections', () => {
+  it('has sections array matching brief fixture', async () => {
     const ctx = makeCtx();
     const result = await explainResultAction.execute({}, ctx);
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].block_type).toBe('commentary');
-    const narrative = (result.blocks[0].data as { narrative: string }).narrative;
-    expect(narrative).toContain('Aggressive Pricing');
-    expect(narrative).toContain('65%');
-    expect(narrative).toContain('Price Sensitivity');
-    // assistantText is a short summary, not the full explanation
-    expect(result.assistantText).toBeTruthy();
-    expect(result.assistantText!.length).toBeLessThan(narrative.length);
+    const data = result.blocks[0].data as DeterministicCommentaryBlockData;
+    expect(data.sections).toBeDefined();
+    expect(data.sections!.length).toBeGreaterThanOrEqual(2);
+    // Verify section headings
+    const headings = data.sections!.map((s) => s.heading);
+    expect(headings).toContain('Recommendation');
+    // Key drivers section should have items
+    const driverSection = data.sections!.find((s) => s.heading === 'Key drivers');
+    expect(driverSection?.items).toBeDefined();
+    expect(driverSection!.items![0]).toContain('Price Sensitivity');
+    expect(driverSection!.items![0]).toContain('0.42');
+    // assistantText is a 1-sentence summary
+    expect(result.assistantText).toContain('Aggressive Pricing leads');
+    expect(result.assistantText!.length).toBeLessThan(data.narrative.length);
   });
 });
 
-describe('compare_options returns ComparisonBlock', () => {
-  it('returns block with options data', async () => {
+describe('compare_options returns ComparisonBlock with brief shape', () => {
+  it('has typed option data with id/probability/rank/key_differentiators', async () => {
     const ctx = makeCtx();
     const result = await compareOptionsAction.execute({}, ctx);
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].block_type).toBe('comparison');
     const data = result.blocks[0].data as ComparisonBlockData;
     expect(data.options).toHaveLength(2);
-    expect(data.options[0].label).toBe('Aggressive Pricing');
-    expect(data.options[0].win_probability).toBe(0.65);
+    expect(data.options[0].id).toBe('opt_aggressive');
+    expect(data.options[0].probability).toBe(0.65);
+    expect(data.options[0].rank).toBe(1);
+    expect(data.options[0].key_differentiators).toBeInstanceOf(Array);
+    expect(data.options[1].rank).toBe(2);
   });
 });
 
-describe('what_would_flip returns FlipAnalysisBlock', () => {
-  it('returns block with flip conditions', async () => {
+describe('what_would_flip returns FlipAnalysisBlock with brief shape', () => {
+  it('has object current_winner and flip_conditions', async () => {
     const ctx = makeCtx();
     const result = await whatWouldFlipAction.execute({}, ctx);
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].block_type).toBe('flip_analysis');
     const data = result.blocks[0].data as FlipAnalysisBlockData;
-    expect(data.current_winner).toBe('Aggressive Pricing');
+    // current_winner is an object with id, label, probability
+    expect(data.current_winner.label).toBe('Aggressive Pricing');
+    expect(data.current_winner.probability).toBe(0.65);
+    // flip_conditions have assumption, direction, alternative_winner
     expect(data.flip_conditions.length).toBeGreaterThan(0);
+    expect(data.flip_conditions[0].assumption).toBe('Price Sensitivity');
+    expect(data.flip_conditions[0].alternative_winner).toBe('Conservative Pricing');
   });
 });
 
-describe('run_premortem returns PremortemBlock', () => {
-  it('returns block with risk paths', async () => {
+describe('run_premortem returns PremortemBlock with brief shape', () => {
+  it('has object target_option and risk_paths with path/influence/description', async () => {
     const ctx = makeCtx();
     const result = await runPremortemAction.execute({}, ctx);
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].block_type).toBe('premortem');
     const data = result.blocks[0].data as PremortemBlockData;
-    expect(data.target_option).toBe('Aggressive Pricing');
+    // target_option is an object
+    expect(data.target_option.label).toBe('Aggressive Pricing');
+    // risk_paths have path, influence, description
     expect(data.risk_paths.length).toBeGreaterThan(0);
-    expect(data.risk_paths[0].influence_rank).toBe(1);
+    expect(data.risk_paths[0].path).toBeInstanceOf(Array);
+    expect(data.risk_paths[0].influence).toBe(0.42);
+    expect(data.risk_paths[0].description).toContain('Price Sensitivity');
   });
 });
 
@@ -244,7 +284,6 @@ describe('add_option topology', () => {
     const result = await addOptionAction.execute({ label: 'Strategy B' }, ctx);
     expect(result.operations).toBeDefined();
     const ops = result.operations!;
-    // Should have add_node but no edge to goal
     expect(ops.some((o) => o.op === 'add_node')).toBe(true);
     const goalEdge = ops.find((o) => o.op === 'add_edge' && o.path.includes('goal_1'));
     expect(goalEdge).toBeUndefined();
