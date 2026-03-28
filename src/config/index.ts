@@ -294,6 +294,8 @@ const ConfigSchema = z.object({
     artefactAppendixEnabled: booleanString.default(false), // CEE_ARTEFACT_APPENDIX_ENABLED — inject artefact design appendix when artefact generation is likely
     artefactRenderingEnabled: booleanString.default(false), // CEE_ARTEFACT_RENDERING_ENABLED — when false, artefact blocks are suppressed with fallback commentary
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
+    deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
+    legacyOrchestratorEnabled: booleanString.default(false), // CEE_LEGACY_ORCHESTRATOR_ENABLED — preserve old XML envelope path as rollback (overrides deterministic when true)
   }),
 
   // Prompt Cache Configuration
@@ -649,6 +651,8 @@ function parseConfig(): Config {
       artefactAppendixEnabled: env.CEE_ARTEFACT_APPENDIX_ENABLED,
       artefactRenderingEnabled: env.CEE_ARTEFACT_RENDERING_ENABLED,
       diagnosticTraceEnabled: env.CEE_DIAGNOSTIC_TRACE_ENABLED,
+      deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
+      legacyOrchestratorEnabled: env.CEE_LEGACY_ORCHESTRATOR_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

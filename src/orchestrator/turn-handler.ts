@@ -244,7 +244,18 @@ export async function handleTurn(
       return result;
     }
 
-    // 3b. Compute authoritative stage — override UI-provided stage when state disagrees.
+    // 3b. Deterministic intelligence pipeline (feature-flagged)
+    //     CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED enables the new three-layer pipeline.
+    //     CEE_LEGACY_ORCHESTRATOR_ENABLED forces the old XML path as rollback (takes priority).
+    if (config.features.deterministicOrchestratorEnabled && !config.features.legacyOrchestratorEnabled) {
+      const { executeDeterministicPipeline } = await import('./deterministic/pipeline.js');
+      const deterministicResult = await executeDeterministicPipeline(turnRequest, requestId);
+      setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, deterministicResult.envelope);
+      resolveInflight(deterministicResult.envelope);
+      return { envelope: deterministicResult.envelope, httpStatus: deterministicResult.httpStatus };
+    }
+
+    // 3c. Compute authoritative stage — override UI-provided stage when state disagrees.
     //     Key invariant: no graph → FRAME, regardless of what the UI sends.
     const inferredStage = inferStage(turnRequest.context, turnRequest.system_event);
     const currentStage: DecisionStage = inferredStage.stage;
