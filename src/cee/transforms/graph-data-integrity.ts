@@ -59,9 +59,19 @@ export interface EdgeFieldRepair {
   reason: string;
 }
 
+export interface InterceptPopulationRepair {
+  node_id: string;
+  field: 'intercept';
+  before: number | undefined;
+  after: number;
+  source: 'observed_state.value';
+  reason: string;
+}
+
 export interface IntegrityRepairSummary {
   scale_consistency_repairs: ScaleConsistencyRepair[];
   edge_field_repairs: EdgeFieldRepair[];
+  intercept_population_repairs: InterceptPopulationRepair[];
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +401,86 @@ function repairEdgeFields(v3Body: any, requestId?: string): EdgeFieldRepair[] {
 }
 
 // ---------------------------------------------------------------------------
+// Task 3: Intercept auto-population (root nodes only)
+// ---------------------------------------------------------------------------
+
+/** Node kinds eligible for intercept population (participate in inference). */
+const INTERCEPT_ELIGIBLE_KINDS = new Set(['factor', 'outcome', 'risk', 'goal']);
+
+/**
+ * Auto-populate `intercept` on root V3 nodes from `observed_state.value`.
+ *
+ * Root-only: non-root nodes (with incoming directed edges) must NOT be
+ * auto-populated because their observed value includes parent contributions.
+ * Uses the same root detection logic as gap-detection.ts.
+ *
+ * Rules:
+ * - Only for inference-participating kinds: factor, outcome, risk, goal
+ * - Skip decision, option, action nodes
+ * - If `intercept` is already defined (including 0): keep it (LLM value or explicit zero)
+ * - If `observed_state.value` is a number: set `intercept = observed_state.value`
+ *
+ * Mutates v3Body.nodes in place.
+ *
+ * PROMPT CHANGE NEEDED: Add to draft_graph prompt:
+ * "When the brief mentions a current rate, frequency, or baseline value for a factor,
+ *  extract it as the node's `intercept` field (0.0-1.0 normalised probability).
+ *  Example: 'current churn is 3.2%' → intercept: 0.032"
+ */
+function populateNodeIntercepts(v3Body: any, requestId?: string): InterceptPopulationRepair[] {
+  const repairs: InterceptPopulationRepair[] = [];
+
+  const nodes: any[] = Array.isArray(v3Body?.nodes) ? v3Body.nodes : [];
+  const edges: any[] = Array.isArray(v3Body?.edges) ? v3Body.edges : [];
+
+  // Build set of nodes with at least one incoming directed edge (same as gap-detection.ts)
+  const hasIncomingDirected = new Set<string>();
+  for (const edge of edges) {
+    if (!edge) continue;
+    if (edge.edge_type === 'bidirected') continue;
+    if (edge.to) hasIncomingDirected.add(edge.to);
+  }
+
+  for (const node of nodes) {
+    if (!node?.id || !node?.kind) continue;
+
+    // 1. Kind filter — only inference-participating nodes
+    if (!INTERCEPT_ELIGIBLE_KINDS.has(node.kind)) continue;
+
+    // 2. Root-only — skip nodes with incoming directed edges
+    if (hasIncomingDirected.has(node.id)) continue;
+
+    // 3. If intercept is already defined (including 0), keep it
+    if (node.intercept !== undefined && node.intercept !== null) continue;
+
+    // 4. Auto-populate from observed_state.value (guard NaN — typeof NaN === 'number')
+    const observedValue = node.observed_state?.value;
+    if (typeof observedValue !== 'number' || Number.isNaN(observedValue)) continue;
+
+    const before = node.intercept;
+    node.intercept = observedValue;
+    repairs.push({
+      node_id: node.id,
+      field: 'intercept',
+      before,
+      after: observedValue,
+      source: 'observed_state.value',
+      reason: `root ${node.kind} intercept auto-populated from observed_state.value=${observedValue}`,
+    });
+
+    log.info({
+      event: "cee.graph_integrity.intercept_populated",
+      request_id: requestId,
+      node_id: node.id,
+      kind: node.kind,
+      value: observedValue,
+    }, `[graph-data-integrity] Intercept populated: ${node.id} = ${observedValue}`);
+  }
+
+  return repairs;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -410,6 +500,7 @@ export function runGraphDataIntegrityChecks(
   const summary: IntegrityRepairSummary = {
     scale_consistency_repairs: [],
     edge_field_repairs: [],
+    intercept_population_repairs: [],
   };
 
   try {
@@ -430,13 +521,23 @@ export function runGraphDataIntegrityChecks(
     );
   }
 
-  const totalRepairs = summary.scale_consistency_repairs.length + summary.edge_field_repairs.length;
+  try {
+    summary.intercept_population_repairs = populateNodeIntercepts(v3Body, requestId);
+  } catch (err) {
+    log.warn(
+      { error: err, request_id: requestId },
+      "[graph-data-integrity] Intercept population failed (non-blocking)",
+    );
+  }
+
+  const totalRepairs = summary.scale_consistency_repairs.length + summary.edge_field_repairs.length + summary.intercept_population_repairs.length;
   if (totalRepairs > 0) {
     log.info({
       event: "cee.graph_integrity.summary",
       request_id: requestId,
       scale_consistency_repairs: summary.scale_consistency_repairs.length,
       edge_field_repairs: summary.edge_field_repairs.length,
+      intercept_population_repairs: summary.intercept_population_repairs.length,
       total_repairs: totalRepairs,
     }, `[graph-data-integrity] Applied ${totalRepairs} correction(s)`);
   }

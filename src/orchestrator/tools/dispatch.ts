@@ -31,7 +31,7 @@ import { isAnalysisExplainable } from "../analysis-state.js";
 import { config } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
 import type { LLMAdapter } from "../../adapters/llm/types.js";
-import { detectValueMissingFactors, buildGapGuidanceItems, buildGapCoachingText } from "./gap-detection.js";
+import { detectValueMissingFactors, buildGapGuidanceItems, buildGapCoachingText, detectBaseRateMissing, buildBaseRateGuidanceItems, buildBaseRateCoachingText } from "./gap-detection.js";
 
 // ============================================================================
 // Default route metadata for tools that don't produce their own
@@ -156,6 +156,26 @@ export async function dispatchToolHandler(
             blocks: [],
             assistantText: buildGapCoachingText(gaps, briefText),
             guidanceItems: buildGapGuidanceItems(gaps),
+            routeMetadata: buildToolRouteMetadata('run_analysis', 'gap_coaching'),
+          };
+        }
+      }
+
+      // Base rate gap detection: coach on factors missing intercept (after value-missing check).
+      // Value-missing gaps (no observed_state at all) take priority over base rate gaps.
+      if (!skipGapCheck && context.graph) {
+        const baseRateGaps = detectBaseRateMissing(context.graph);
+        if (baseRateGaps.length > 0) {
+          const framingAny = context.framing as Record<string, unknown> | null;
+          const briefText = (framingAny?.brief_text as string | undefined) ?? null;
+          log.info(
+            { gap_count: baseRateGaps.length, turn_id: turnId, factor_ids: baseRateGaps.map(g => g.node_id) },
+            'run_analysis: base-rate-missing factors detected — returning base rate coaching',
+          );
+          return {
+            blocks: [],
+            assistantText: buildBaseRateCoachingText(baseRateGaps, briefText),
+            guidanceItems: buildBaseRateGuidanceItems(baseRateGaps),
             routeMetadata: buildToolRouteMetadata('run_analysis', 'gap_coaching'),
           };
         }

@@ -526,6 +526,7 @@ describe("Task 2: Edge field boundary safety net", () => {
       expect(runGraphDataIntegrityChecks(null)).toEqual({
         scale_consistency_repairs: [],
         edge_field_repairs: [],
+        intercept_population_repairs: [],
       });
     });
 
@@ -533,6 +534,234 @@ describe("Task 2: Edge field boundary safety net", () => {
       const result = runGraphDataIntegrityChecks({});
       expect(result.scale_consistency_repairs).toHaveLength(0);
       expect(result.edge_field_repairs).toHaveLength(0);
+      expect(result.intercept_population_repairs).toHaveLength(0);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3: Intercept auto-population (root nodes only)
+// ---------------------------------------------------------------------------
+
+describe("Task 3: Intercept auto-population", () => {
+  it("sets intercept from observed_state.value for root factor (golden fixture 1)", () => {
+    const node = makeNode({
+      id: "fac_churn_rate",
+      kind: "factor",
+      observed_state: { value: 0.032 },
+      // intercept absent → should be auto-populated
+    });
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect(node.intercept).toBe(0.032);
+    expect(result.intercept_population_repairs).toHaveLength(1);
+    expect(result.intercept_population_repairs[0]).toMatchObject({
+      node_id: "fac_churn_rate",
+      field: "intercept",
+      before: undefined,
+      after: 0.032,
+      source: "observed_state.value",
+    });
+  });
+
+  it("preserves LLM-extracted non-zero intercept (golden fixture 2)", () => {
+    const node = makeNode({
+      id: "fac_churn_rate",
+      kind: "factor",
+      observed_state: { value: 0.032 },
+      intercept: 0.05,
+    });
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect(node.intercept).toBe(0.05);
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("preserves explicit zero intercept (zero is legitimate)", () => {
+    const node = makeNode({
+      id: "fac_churn_rate",
+      kind: "factor",
+      observed_state: { value: 0.032 },
+      intercept: 0,
+    });
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect(node.intercept).toBe(0);
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("does NOT auto-populate intercept on decision node (golden fixture 3)", () => {
+    const node = {
+      id: "dec_pricing",
+      kind: "decision",
+      label: "Pricing Decision",
+    };
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("does NOT auto-populate intercept on option node", () => {
+    const node = {
+      id: "opt_expand",
+      kind: "option",
+      label: "Expand",
+      observed_state: { value: 0.5 },
+    };
+    const v3 = makeV3Body({ nodes: [node] });
+    runGraphDataIntegrityChecks(v3);
+    expect((node as any).intercept).toBeUndefined();
+  });
+
+  it("auto-populates intercept on root goal node with observed_state", () => {
+    const node = {
+      id: "goal_revenue",
+      kind: "goal",
+      label: "Maximise Revenue",
+      observed_state: { value: 0.7 },
+    };
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBe(0.7);
+    expect(result.intercept_population_repairs).toHaveLength(1);
+  });
+
+  it("auto-populates intercept on root outcome node", () => {
+    const node = {
+      id: "out_nrr",
+      kind: "outcome",
+      label: "Net Revenue Retention",
+      observed_state: { value: 0.85 },
+    };
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBe(0.85);
+    expect(result.intercept_population_repairs).toHaveLength(1);
+  });
+
+  it("auto-populates intercept on root risk node", () => {
+    const node = {
+      id: "risk_churn",
+      kind: "risk",
+      label: "Churn Risk",
+      observed_state: { value: 0.15 },
+    };
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBe(0.15);
+    expect(result.intercept_population_repairs).toHaveLength(1);
+  });
+
+  it("does NOT auto-populate intercept on node without observed_state", () => {
+    const node = makeNode({
+      id: "fac_ext",
+      kind: "factor",
+      // No observed_state
+    });
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("does NOT auto-populate intercept on non-root node with parents (negative test)", () => {
+    const parentNode = makeNode({
+      id: "fac_parent",
+      kind: "factor",
+      observed_state: { value: 0.3 },
+    });
+    const childNode = makeNode({
+      id: "fac_child",
+      kind: "factor",
+      label: "Child Factor",
+      observed_state: { value: 0.5 },
+    });
+    const edge = makeEdge({
+      from: "fac_parent",
+      to: "fac_child",
+    });
+    const v3 = makeV3Body({ nodes: [parentNode, childNode], edges: [edge] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    // Parent is root → gets intercept
+    expect((parentNode as any).intercept).toBe(0.3);
+    // Child has incoming edge → must NOT get intercept
+    expect((childNode as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(1);
+    expect(result.intercept_population_repairs[0].node_id).toBe("fac_parent");
+  });
+
+  it("excludes bidirected edges from root detection (still root for directed)", () => {
+    const node = makeNode({
+      id: "fac_bi",
+      kind: "factor",
+      observed_state: { value: 0.4 },
+    });
+    const edge = makeEdge({
+      from: "fac_other",
+      to: "fac_bi",
+      edge_type: "bidirected",
+    });
+    const v3 = makeV3Body({ nodes: [node], edges: [edge] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBe(0.4);
+    expect(result.intercept_population_repairs).toHaveLength(1);
+  });
+
+  it("does NOT auto-populate intercept when observed_state.value is NaN", () => {
+    const node = makeNode({
+      id: "fac_nan",
+      kind: "factor",
+      observed_state: { value: NaN },
+    });
+    const v3 = makeV3Body({ nodes: [node] });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    expect((node as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(0);
+  });
+
+  it("handles mixed graph with root and non-root nodes correctly", () => {
+    const rootFactor = makeNode({
+      id: "fac_root",
+      kind: "factor",
+      label: "Root Factor",
+      observed_state: { value: 0.2 },
+    });
+    const midFactor = makeNode({
+      id: "fac_mid",
+      kind: "factor",
+      label: "Mid Factor",
+      observed_state: { value: 0.6 },
+    });
+    const goal = {
+      id: "goal_1",
+      kind: "goal",
+      label: "Goal",
+    };
+    const edges = [
+      makeEdge({ from: "fac_root", to: "fac_mid" }),
+      makeEdge({ from: "fac_mid", to: "goal_1" }),
+    ];
+    const v3 = makeV3Body({ nodes: [rootFactor, midFactor, goal], edges });
+    const result = runGraphDataIntegrityChecks(v3);
+
+    // Root factor → intercept populated
+    expect((rootFactor as any).intercept).toBe(0.2);
+    // Mid factor (has incoming) → NOT populated
+    expect((midFactor as any).intercept).toBeUndefined();
+    // Goal (has incoming) → NOT populated
+    expect((goal as any).intercept).toBeUndefined();
+    expect(result.intercept_population_repairs).toHaveLength(1);
   });
 });

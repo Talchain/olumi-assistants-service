@@ -18,6 +18,7 @@
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import { SIGNAL_CODES, computeGuidanceItemId } from "../types/guidance-item.js";
+import { LIKERT_FREQUENCY_SCALE, isProbabilityLikeFactor } from "./likert-scale.js";
 
 // ============================================================================
 // Types
@@ -28,6 +29,15 @@ export interface ValueMissingFactor {
   label: string;
   kind: string;
   category: string | undefined;
+}
+
+export interface BaseRateMissingFactor {
+  node_id: string;
+  label: string;
+  kind: string;
+  category: string | undefined;
+  /** Factor type from observed_state or node passthrough, used to branch coaching. */
+  factor_type: string | undefined;
 }
 
 // Kinds that participate in inference and can cause ISL defaults
@@ -218,7 +228,7 @@ export function buildGapCoachingText(gaps: ValueMissingFactor[], briefText?: str
  *
  * @returns Anchored elicitation prompt, or null if no match found
  */
-function findBriefAnchor(label: string, briefLower: string, briefOriginal: string): string | null {
+export function findBriefAnchor(label: string, briefLower: string, briefOriginal: string): string | null {
   // Try matching the full label first, then significant words (>4 chars, word-boundary)
   const labelLower = label.toLowerCase();
   let matchIdx = briefLower.indexOf(labelLower);
@@ -261,4 +271,191 @@ function findBriefAnchor(label: string, briefLower: string, briefOriginal: strin
   }
 
   return null;
+}
+
+// ============================================================================
+// Base Rate Gap Detection
+// ============================================================================
+
+/**
+ * Detect graph nodes that need base rate elicitation.
+ *
+ * A node needs a base rate when it:
+ * - Has a kind that participates in inference (factor, outcome, risk)
+ * - `intercept` is undefined or null (NOT 0 — zero is a legitimate value)
+ * - Has no `observed_state.value` or value is 0
+ * - Is NOT an external node with a well-formed prior (range_min AND range_max)
+ *
+ * This runs after intercept auto-population (boundary stage), so nodes that
+ * still lack an intercept genuinely have no base rate information.
+ *
+ * @param graph - Current graph state, or null/undefined if no graph exists
+ * @returns Array of base-rate-missing factor descriptors
+ */
+export function detectBaseRateMissing(graph: GraphV3T | null | undefined): BaseRateMissingFactor[] {
+  if (!graph || !graph.nodes || graph.nodes.length === 0) return [];
+
+  const gaps: BaseRateMissingFactor[] = [];
+
+  for (const node of graph.nodes) {
+    // 1. Kind filter
+    if (!INFERENCE_KINDS.has(node.kind)) continue;
+
+    // 2. Intercept check — undefined/null means missing; 0 is legitimate
+    const nodeAny = node as Record<string, unknown>;
+    const intercept = nodeAny.intercept;
+    if (intercept !== undefined && intercept !== null) continue;
+
+    // 3. No observed_state.value or value is 0
+    const observedValue = node.observed_state?.value;
+    if (typeof observedValue === 'number' && observedValue !== 0) continue;
+
+    // 4. External factor with valid prior → skip (internal nodes with priors still need prompting)
+    const category = (nodeAny.category as string | undefined) ?? undefined;
+    const isExternal = category === 'external';
+    const prior = nodeAny.prior as Record<string, unknown> | undefined;
+    if (isExternal && prior != null && prior.range_min != null && prior.range_max != null) continue;
+
+    // Resolve factor_type from observed_state or node-level passthrough
+    const factorType = (node.observed_state as any)?.factor_type
+      ?? (nodeAny.factor_type as string | undefined)
+      ?? undefined;
+
+    gaps.push({
+      node_id: node.id,
+      label: node.label,
+      kind: node.kind,
+      category,
+      factor_type: factorType,
+    });
+  }
+
+  return gaps;
+}
+
+// ============================================================================
+// Base Rate Guidance Items
+// ============================================================================
+
+/**
+ * Build GuidanceItems for base-rate-missing factors.
+ *
+ * Produces one `should_fix` item per gap (capped at MAX_GAP_ITEMS) plus
+ * one `could_fix` "Run anyway" item that lets the user proceed with defaults.
+ */
+export function buildBaseRateGuidanceItems(gaps: BaseRateMissingFactor[]): GuidanceItem[] {
+  if (gaps.length === 0) return [];
+
+  const items: GuidanceItem[] = [];
+
+  const capped = gaps.slice(0, MAX_GAP_ITEMS);
+  for (const gap of capped) {
+    items.push({
+      item_id: computeGuidanceItemId(SIGNAL_CODES.MISSING_BASE_RATE, gap.node_id, 'structural'),
+      signal_code: SIGNAL_CODES.MISSING_BASE_RATE,
+      category: 'should_fix',
+      source: 'structural',
+      priority: 60,
+      title: `No baseline estimate for ${gap.label}`,
+      detail: isProbabilityLikeFactor(gap.factor_type)
+        ? 'This factor has no base rate. Setting how common it is improves analysis accuracy.'
+        : 'This factor has no baseline value. Providing a typical value improves analysis accuracy.',
+      primary_action: { type: 'navigate', target: `set ${gap.label} base rate` },
+      target_object: { type: 'node', id: gap.node_id, label: gap.label },
+    });
+  }
+
+  // "Run anyway" item
+  items.push({
+    item_id: computeGuidanceItemId(SIGNAL_CODES.MISSING_BASE_RATE, 'run_anyway', 'structural'),
+    signal_code: SIGNAL_CODES.MISSING_BASE_RATE,
+    category: 'could_fix',
+    source: 'structural',
+    priority: 30,
+    title: 'Run analysis with defaults',
+    detail: `Proceed using default values for ${gaps.length === 1 ? 'the factor' : `${gaps.length} factors`} without baseline estimates. Results may be less accurate.`,
+    primary_action: { type: 'navigate', target: 'run anyway' },
+  });
+
+  return items;
+}
+
+// ============================================================================
+// Base Rate Coaching Text
+// ============================================================================
+
+/**
+ * Build coaching text for base-rate-missing factors.
+ *
+ * Branches on factor_type:
+ * - Probability-like factors: frequency framing with Likert scale options
+ * - Cost/revenue/quantity factors: prompt for a number with unit context
+ */
+export function buildBaseRateCoachingText(gaps: BaseRateMissingFactor[], briefText?: string | null): string {
+  if (gaps.length === 0) return '';
+
+  const briefLower = briefText?.toLowerCase() ?? '';
+  const lines: string[] = [];
+
+  if (gaps.length === 1) {
+    const gap = gaps[0];
+    const anchor = briefLower && findBriefAnchor(gap.label, briefLower, briefText ?? '');
+    const isProbability = isProbabilityLikeFactor(gap.factor_type);
+
+    if (anchor) {
+      lines.push(`Before running the analysis, **${gap.label}** has no baseline estimate. ${anchor}`);
+    } else if (isProbability) {
+      lines.push(`Before running the analysis, **${gap.label}** has no baseline estimate. In your experience, how common is this?`);
+    } else {
+      lines.push(`Before running the analysis, **${gap.label}** has no baseline estimate. What's the typical baseline?`);
+    }
+
+    lines.push('');
+
+    if (isProbability) {
+      // Render Likert scale options
+      for (const entry of LIKERT_FREQUENCY_SCALE) {
+        lines.push(`- **${entry.label[0].toUpperCase() + entry.label.slice(1)}** (${entry.frequency})`);
+      }
+      lines.push('');
+      lines.push('You can pick one of these, provide a percentage, or say "run anyway" to proceed with defaults.');
+    } else {
+      lines.push(`What's the current or typical value for ${gap.label}? Include the unit if applicable (e.g. "£50k", "12 months", "3.2%").`);
+    }
+  } else {
+    // Separate probability-like and non-probability factors
+    const probGaps = gaps.filter(g => isProbabilityLikeFactor(g.factor_type));
+    const numericGaps = gaps.filter(g => !isProbabilityLikeFactor(g.factor_type));
+
+    lines.push(`${gaps.length} factors have no baseline estimates. Setting these improves accuracy.`);
+    lines.push('');
+    const allLabels = gaps.slice(0, MAX_GAP_ITEMS).map(g => `**${g.label}**`);
+    lines.push(`Factors: ${allLabels.join(', ')}${gaps.length > MAX_GAP_ITEMS ? ` (and ${gaps.length - MAX_GAP_ITEMS} more)` : ''}.`);
+
+    // Brief-anchored prompts for each factor
+    for (const gap of gaps.slice(0, MAX_GAP_ITEMS)) {
+      const anchor = briefLower && findBriefAnchor(gap.label, briefLower, briefText ?? '');
+      if (anchor) {
+        lines.push(`- **${gap.label}**: ${anchor}`);
+      }
+    }
+
+    if (probGaps.length > 0) {
+      lines.push('');
+      lines.push('For rate/probability factors, you can use frequency terms:');
+      for (const entry of LIKERT_FREQUENCY_SCALE) {
+        lines.push(`- **${entry.label[0].toUpperCase() + entry.label.slice(1)}** (${entry.frequency})`);
+      }
+    }
+
+    if (numericGaps.length > 0) {
+      lines.push('');
+      lines.push('For cost/revenue/quantity factors, provide a number with units (e.g. "£50k", "12 months").');
+    }
+  }
+
+  lines.push('');
+  lines.push('You can set estimates for each factor, or say "run anyway" to proceed with defaults.');
+
+  return lines.join('\n');
 }

@@ -4,6 +4,9 @@ import {
   buildGapGuidanceItems,
   buildGapCoachingText,
   GAP_COACHING_FINGERPRINT,
+  detectBaseRateMissing,
+  buildBaseRateGuidanceItems,
+  buildBaseRateCoachingText,
 } from "../../../../src/orchestrator/tools/gap-detection.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 import { SIGNAL_CODES } from "../../../../src/orchestrator/types/guidance-item.js";
@@ -324,5 +327,242 @@ describe("buildGapCoachingText", () => {
     const text = buildGapCoachingText(gaps, null);
     expect(text).toContain("**X**");
     expect(text).toContain(GAP_COACHING_FINGERPRINT);
+  });
+});
+
+// ============================================================================
+// detectBaseRateMissing
+// ============================================================================
+
+describe("detectBaseRateMissing", () => {
+  it("returns empty for null graph", () => {
+    expect(detectBaseRateMissing(null)).toEqual([]);
+  });
+
+  it("returns empty for undefined graph", () => {
+    expect(detectBaseRateMissing(undefined)).toEqual([]);
+  });
+
+  it("returns empty for graph with no nodes", () => {
+    expect(detectBaseRateMissing(makeGraph([]))).toEqual([]);
+  });
+
+  it("returns empty when all inference nodes have intercept", () => {
+    const graph = makeGraph([
+      makeFactorNode({ intercept: 0.5 }),
+    ]);
+    expect(detectBaseRateMissing(graph)).toEqual([]);
+  });
+
+  it("returns empty when factor has intercept of 0 (zero is legitimate)", () => {
+    const graph = makeGraph([
+      makeFactorNode({ intercept: 0 }),
+    ]);
+    expect(detectBaseRateMissing(graph)).toEqual([]);
+  });
+
+  it("detects factor with no intercept and no observed_state (golden fixture 4)", () => {
+    const graph = makeGraph([
+      makeFactorNode({ id: "fac_brand", label: "Brand Awareness", observed_state: undefined }),
+    ]);
+    const gaps = detectBaseRateMissing(graph);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({
+      node_id: "fac_brand",
+      label: "Brand Awareness",
+      kind: "factor",
+    });
+  });
+
+  it("detects factor with no intercept and observed_state.value === 0", () => {
+    const graph = makeGraph([
+      makeFactorNode({ observed_state: { value: 0 } }),
+    ]);
+    const gaps = detectBaseRateMissing(graph);
+    expect(gaps).toHaveLength(1);
+  });
+
+  it("does NOT detect factor with non-zero intercept (golden fixture 5)", () => {
+    const graph = makeGraph([
+      makeFactorNode({ id: "fac_price", intercept: 0.5 }),
+    ]);
+    expect(detectBaseRateMissing(graph)).toEqual([]);
+  });
+
+  it("does NOT detect factor with observed_state.value > 0 and no intercept", () => {
+    // This factor has a non-zero observed value — it doesn't need base rate prompting
+    const graph = makeGraph([
+      makeFactorNode({ observed_state: { value: 0.3 } }),
+    ]);
+    expect(detectBaseRateMissing(graph)).toEqual([]);
+  });
+
+  it("skips external factor with valid prior (golden fixture 6)", () => {
+    const graph = makeGraph([
+      makeFactorNode({
+        id: "fac_competition",
+        label: "Competition",
+        category: "external",
+        prior: { range_min: 0.2, range_max: 0.7 },
+      }),
+    ]);
+    expect(detectBaseRateMissing(graph)).toEqual([]);
+  });
+
+  it("does NOT skip internal factor with valid prior (prior exemption is external-only)", () => {
+    const graph = makeGraph([
+      makeFactorNode({
+        id: "fac_internal",
+        label: "Internal Factor",
+        category: "controllable",
+        prior: { range_min: 0.1, range_max: 0.9 },
+      }),
+    ]);
+    const gaps = detectBaseRateMissing(graph);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].node_id).toBe("fac_internal");
+  });
+
+  it("does NOT detect goal node (goal is not in INFERENCE_KINDS)", () => {
+    const graph = makeGraph([
+      { id: "goal_1", kind: "goal", label: "Revenue" },
+    ]);
+    expect(detectBaseRateMissing(graph)).toEqual([]);
+  });
+
+  it("does NOT detect decision, option, action nodes", () => {
+    const graph = makeGraph([
+      { id: "dec_1", kind: "decision", label: "Decision" },
+      { id: "opt_1", kind: "option", label: "Option" },
+      { id: "act_1", kind: "action", label: "Action" },
+    ]);
+    expect(detectBaseRateMissing(graph)).toEqual([]);
+  });
+
+  it("detects outcome and risk nodes without intercept", () => {
+    const graph = makeGraph([
+      { id: "out_nrr", kind: "outcome", label: "NRR" },
+      { id: "risk_churn", kind: "risk", label: "Churn Risk" },
+    ]);
+    const gaps = detectBaseRateMissing(graph);
+    expect(gaps).toHaveLength(2);
+    expect(gaps.map(g => g.kind).sort()).toEqual(["outcome", "risk"]);
+  });
+
+  it("includes factor_type from observed_state when available", () => {
+    const graph = makeGraph([
+      makeFactorNode({
+        observed_state: { value: 0, factor_type: "cost" },
+      }),
+    ]);
+    const gaps = detectBaseRateMissing(graph);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].factor_type).toBe("cost");
+  });
+
+  it("includes factor_type from node-level passthrough when not in observed_state", () => {
+    const graph = makeGraph([
+      makeFactorNode({
+        factor_type: "revenue",
+      }),
+    ]);
+    const gaps = detectBaseRateMissing(graph);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].factor_type).toBe("revenue");
+  });
+});
+
+// ============================================================================
+// buildBaseRateGuidanceItems
+// ============================================================================
+
+describe("buildBaseRateGuidanceItems", () => {
+  it("returns empty for no gaps", () => {
+    expect(buildBaseRateGuidanceItems([])).toEqual([]);
+  });
+
+  it("returns one factor item + one run-anyway item for single gap", () => {
+    const gaps = [{ node_id: "fac_x", label: "Factor X", kind: "factor", category: undefined, factor_type: undefined }];
+    const items = buildBaseRateGuidanceItems(gaps);
+    expect(items).toHaveLength(2);
+
+    expect(items[0].signal_code).toBe(SIGNAL_CODES.MISSING_BASE_RATE);
+    expect(items[0].category).toBe("should_fix");
+    expect(items[0].priority).toBe(60);
+    expect(items[0].target_object?.id).toBe("fac_x");
+
+    expect(items[1].signal_code).toBe(SIGNAL_CODES.MISSING_BASE_RATE);
+    expect(items[1].category).toBe("could_fix");
+    expect(items[1].priority).toBe(30);
+    expect(items[1].title).toBe("Run analysis with defaults");
+  });
+
+  it("uses probability detail text for probability-like factors", () => {
+    const gaps = [{ node_id: "fac_x", label: "X", kind: "factor", category: undefined, factor_type: undefined }];
+    const items = buildBaseRateGuidanceItems(gaps);
+    expect(items[0].detail).toContain("how common");
+  });
+
+  it("uses baseline detail text for cost/revenue factors", () => {
+    const gaps = [{ node_id: "fac_x", label: "X", kind: "factor", category: undefined, factor_type: "cost" }];
+    const items = buildBaseRateGuidanceItems(gaps);
+    expect(items[0].detail).toContain("baseline value");
+  });
+});
+
+// ============================================================================
+// buildBaseRateCoachingText
+// ============================================================================
+
+describe("buildBaseRateCoachingText", () => {
+  it("returns empty string for no gaps", () => {
+    expect(buildBaseRateCoachingText([])).toBe("");
+  });
+
+  it("uses frequency framing with Likert scale for probability factors (singular)", () => {
+    const gaps = [{ node_id: "fac_x", label: "Customer Churn", kind: "factor", category: undefined, factor_type: undefined }];
+    const text = buildBaseRateCoachingText(gaps);
+    expect(text).toContain("**Customer Churn**");
+    expect(text).toContain("how common is this");
+    expect(text).toContain("Hardly ever");
+    expect(text).toContain("Almost always");
+    expect(text).toContain(GAP_COACHING_FINGERPRINT);
+  });
+
+  it("uses numeric baseline prompt for cost factors (singular)", () => {
+    const gaps = [{ node_id: "fac_x", label: "Acquisition Cost", kind: "factor", category: undefined, factor_type: "cost" }];
+    const text = buildBaseRateCoachingText(gaps);
+    expect(text).toContain("**Acquisition Cost**");
+    expect(text).toContain("typical baseline");
+    // Should NOT contain Likert options
+    expect(text).not.toContain("Hardly ever");
+    expect(text).toContain(GAP_COACHING_FINGERPRINT);
+  });
+
+  it("handles mixed factor types in plural mode", () => {
+    const gaps = [
+      { node_id: "fac_a", label: "Churn Rate", kind: "factor", category: undefined, factor_type: undefined },
+      { node_id: "fac_b", label: "Customer Cost", kind: "factor", category: undefined, factor_type: "cost" },
+    ];
+    const text = buildBaseRateCoachingText(gaps);
+    expect(text).toContain("2 factors have no baseline estimates. Setting these improves accuracy.");
+    // Should contain both Likert and numeric sections
+    expect(text).toContain("frequency terms");
+    expect(text).toContain("Hardly ever");
+    expect(text).toContain("number with units");
+  });
+
+  it("always contains the gap coaching fingerprint", () => {
+    const gaps = [{ node_id: "fac_x", label: "X", kind: "factor", category: undefined, factor_type: undefined }];
+    const text = buildBaseRateCoachingText(gaps);
+    expect(text).toContain(GAP_COACHING_FINGERPRINT);
+  });
+
+  it("includes brief anchor when label matches brief text", () => {
+    const gaps = [{ node_id: "fac_churn", label: "Churn Rate", kind: "factor", category: undefined, factor_type: undefined }];
+    const briefText = "Our current churn rate is 3.2% per month.";
+    const text = buildBaseRateCoachingText(gaps, briefText);
+    expect(text).toContain("3.2%");
+    expect(text).toContain("brief");
   });
 });

@@ -46,7 +46,8 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     const integrityRepairs = runGraphDataIntegrityChecks(v3Body, ctx.requestId);
     if (
       integrityRepairs.scale_consistency_repairs.length > 0 ||
-      integrityRepairs.edge_field_repairs.length > 0
+      integrityRepairs.edge_field_repairs.length > 0 ||
+      integrityRepairs.intercept_population_repairs.length > 0
     ) {
       // Attach to pipeline trace so debug bundles capture the corrections.
       const pipelineTrace = (v3Body as any)?.trace?.pipeline;
