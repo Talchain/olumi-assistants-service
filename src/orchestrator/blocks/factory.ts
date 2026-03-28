@@ -35,6 +35,13 @@ import type {
   ArtefactBlockData,
   DecisionStage,
 } from "../types.js";
+import type {
+  ComparisonBlockData,
+  PremortemBlockData,
+  FlipAnalysisBlockData,
+  ProposalBlockData,
+  ExerciseBlockData,
+} from "../deterministic/types.js";
 
 // ============================================================================
 // ID Generation
@@ -278,5 +285,69 @@ export function createArtefactBlock(
     block_type: 'artefact',
     data,
     provenance: makeProvenance('llm:xml', turnId),
+  };
+}
+
+// ============================================================================
+// Deterministic Pipeline Blocks
+// ============================================================================
+
+export function createComparisonBlock(
+  data: ComparisonBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('comparison'),
+    block_type: 'comparison',
+    data,
+    provenance: makeProvenance('deterministic:compare_options', turnId),
+  };
+}
+
+export function createPremortemBlock(
+  data: PremortemBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('premortem'),
+    block_type: 'premortem',
+    data,
+    provenance: makeProvenance('deterministic:run_premortem', turnId),
+  };
+}
+
+export function createFlipAnalysisBlock(
+  data: FlipAnalysisBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('flip_analysis'),
+    block_type: 'flip_analysis',
+    data,
+    provenance: makeProvenance('deterministic:what_would_flip', turnId),
+  };
+}
+
+export function createProposalBlock(
+  data: ProposalBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('proposal'),
+    block_type: 'proposal',
+    data,
+    provenance: makeProvenance('deterministic:confirmation', turnId),
+  };
+}
+
+export function createExerciseBlock(
+  data: ExerciseBlockData,
+  turnId: string,
+): TypedConversationBlock {
+  return {
+    block_id: ephemeralId('exercise'),
+    block_type: 'exercise',
+    data,
+    provenance: makeProvenance('deterministic:exercise', turnId),
   };
 }

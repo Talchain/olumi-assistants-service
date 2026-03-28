@@ -56,14 +56,14 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     llmLatencyMs,
   } = input;
 
-  // Build assistant text
+  // Build assistant text — action confirmation first, LLM coaching second
   let assistantText: string | null = null;
   if (actionResult?.assistantText) {
     assistantText = actionResult.assistantText;
   }
   if (llmResponse?.text) {
     assistantText = assistantText
-      ? `${llmResponse.text}\n\n${assistantText}`
+      ? `${assistantText}\n\n${llmResponse.text}`
       : llmResponse.text;
   }
 
@@ -120,8 +120,11 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
   // Cap insights at 3 and include in envelope
   const insights = llmResponse?.insights?.slice(0, 3) ?? [];
 
+  // Collect guidance_items from action result
+  const guidanceItems = actionResult?.guidance_items ?? [];
+
   // Assemble envelope
-  const envelope: OrchestratorResponseEnvelope & { response_version: 2 } = {
+  const envelope: OrchestratorResponseEnvelope & { response_version: 2; guidance_items?: unknown[] } = {
     turn_id: turnId,
     assistant_text: assistantText,
     blocks,
@@ -132,6 +135,7 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     stage_indicator: turnContext.stage,
     response_version: 2,
     ...(insights.length > 0 ? { insights } : {}),
+    guidance_items: guidanceItems,
   };
 
   // Apply normaliser

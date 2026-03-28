@@ -1,11 +1,13 @@
 /**
  * run_analysis Action
  *
- * Delegates to existing handleRunAnalysis. Check prerequisites.
+ * Delegates to existing handleRunAnalysis with proper ConversationContext.
+ * Uses ctx.analysis_inputs from TurnContext (populated by Brief 1 Task 6c).
  */
 
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
+import type { ConversationContext } from "../../types.js";
 import { log } from "../../../utils/telemetry.js";
 
 export const runAnalysisAction: ActionDefinition = {
@@ -27,7 +29,14 @@ export const runAnalysisAction: ActionDefinition = {
   },
 
   async execute(_params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
-    // Delegate to existing handleRunAnalysis — dynamic import to avoid circular deps
+    if (!ctx.analysis_inputs) {
+      return {
+        blocks: [],
+        assistantText: "Analysis can't run yet: the graph needs option interventions encoded. Check the analysis panel for specific requirements.",
+        guidance_items: [],
+      };
+    }
+
     try {
       const { handleRunAnalysis } = await import("../../tools/run-analysis.js");
       const { createPLoTClient } = await import("../../plot-client.js");
@@ -41,17 +50,17 @@ export const runAnalysisAction: ActionDefinition = {
         };
       }
 
-      const context = {
+      const context: ConversationContext = {
         graph: ctx.graph,
         analysis_response: ctx.analysis,
-        framing: null,
+        framing: ctx.stage ? { stage: ctx.stage } : null,
         messages: [],
         scenario_id: ctx.scenario_id,
-        analysis_inputs: null,
+        analysis_inputs: ctx.analysis_inputs,
       };
 
       const result = await handleRunAnalysis(
-        context as any,
+        context,
         plotClient,
         'deterministic-pipeline',
         `det-${ctx.scenario_id}`,

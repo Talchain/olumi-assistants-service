@@ -2,14 +2,15 @@
  * run_premortem Action
  *
  * Code extracts risk paths from target option through graph.
- * LLM narrates failure scenario.
+ * Returns a PremortemBlock with structured risk data.
  */
 
 import type { ActionDefinition } from "./types.js";
-import type { DeterministicTurnContext, ActionResult } from "../types.js";
+import type { DeterministicTurnContext, ActionResult, PremortemBlockData } from "../types.js";
 import { resolveEntity } from "../entity-resolver.js";
+import { createPremortemBlock } from "../../blocks/factory.js";
 
-export const runPremortermAction: ActionDefinition = {
+export const runPremortemAction: ActionDefinition = {
   action_type: 'run_premortem',
   description: 'Run a pre-mortem analysis for an option — imagine it failed and explore why.',
   stage_eligibility: new Set(['evaluate', 'decide', 'optimise']),
@@ -34,49 +35,49 @@ export const runPremortermAction: ActionDefinition = {
       const resolution = resolveEntity(targetRef, ctx.entities, 'none');
       targetLabel = resolution.status === 'resolved' ? resolution.entity!.label : targetRef;
     } else {
-      // Default to the winner
       targetLabel = ctx.analysis_summary?.winner ?? 'the leading option';
     }
 
-    const sections: string[] = [];
-    sections.push(`**Pre-mortem: What if ${targetLabel} fails?**`);
-
-    // Extract risk paths — factors with high sensitivity that could go wrong
     const drivers = ctx.analysis_summary?.top_drivers ?? [];
-    if (drivers.length > 0) {
-      sections.push('Key vulnerabilities:');
-      for (const driver of drivers.slice(0, 3)) {
-        const node = ctx.entities.nodes.get(driver.factor_id);
-        const uncertaintyNote = ctx.signals.high_uncertainty_factors.includes(driver.factor_id)
-          ? ' (high uncertainty)'
-          : '';
-        sections.push(
-          `- **${driver.label}** (sensitivity: ${driver.sensitivity.toFixed(2)})${uncertaintyNote}: If this factor moves against ${targetLabel}, the outcome shifts significantly.`,
-        );
-      }
-    }
+    const riskPaths: PremortemBlockData['risk_paths'] = drivers.slice(0, 3).map((driver, i) => {
+      const uncertaintyNote = ctx.signals.high_uncertainty_factors.includes(driver.factor_id)
+        ? ' (high uncertainty)'
+        : '';
+      return {
+        factor_id: driver.factor_id,
+        factor_label: driver.label,
+        influence_rank: i + 1,
+        failure_mode: `If ${driver.label} moves against ${targetLabel}, the outcome shifts significantly.${uncertaintyNote}`,
+      };
+    });
 
-    // Fragile edges
+    // Build narrative
+    const narrativeParts: string[] = [];
     if (ctx.analysis_summary && ctx.analysis_summary.fragile_edge_count > 0) {
-      sections.push(
-        `\nThe model has ${ctx.analysis_summary.fragile_edge_count} fragile edge${ctx.analysis_summary.fragile_edge_count > 1 ? 's' : ''} — causal links where small changes in strength could change the result.`,
+      narrativeParts.push(
+        `The model has ${ctx.analysis_summary.fragile_edge_count} fragile edge${ctx.analysis_summary.fragile_edge_count > 1 ? 's' : ''} — causal links where small changes in strength could change the result.`,
       );
     }
-
-    // Close call warning
     if (ctx.signals.close_call) {
-      sections.push(
-        '\nThe race is tight — a small shift in any key driver could flip the recommendation.',
+      narrativeParts.push(
+        'The race is tight — a small shift in any key driver could flip the recommendation.',
       );
     }
-
-    sections.push(
-      '\n*Pre-mortem technique* — imagining failure in advance helps identify risks that optimism bias would otherwise hide.',
+    narrativeParts.push(
+      'Pre-mortem technique — imagining failure in advance helps identify risks that optimism bias would otherwise hide.',
     );
 
+    const blockData: PremortemBlockData = {
+      target_option: targetLabel,
+      risk_paths: riskPaths,
+      narrative: narrativeParts.join('\n'),
+    };
+
+    const block = createPremortemBlock(blockData, '');
+
     return {
-      blocks: [],
-      assistantText: sections.join('\n\n'),
+      blocks: [block],
+      assistantText: `Pre-mortem for ${targetLabel}: ${riskPaths.length} key vulnerabilities identified.`,
       guidance_items: [],
     };
   },

@@ -17,7 +17,7 @@ import { runAnalysisAction } from "./run-analysis.js";
 import { explainResultAction } from "./explain-result.js";
 import { compareOptionsAction } from "./compare-options.js";
 import { challengeAssumptionAction } from "./challenge-assumption.js";
-import { runPremortermAction } from "./run-premortem.js";
+import { runPremortemAction } from "./run-premortem.js";
 import { whatWouldFlipAction } from "./what-would-flip.js";
 import { generateArtefactAction } from "./generate-artefact.js";
 
@@ -37,7 +37,7 @@ export const ACTION_CATALOGUE: ReadonlyMap<ActionName, ActionDefinition> = new M
   ['explain_result', explainResultAction],
   ['compare_options', compareOptionsAction],
   ['challenge_assumption', challengeAssumptionAction],
-  ['run_premortem', runPremortermAction],
+  ['run_premortem', runPremortemAction],
   ['what_would_flip', whatWouldFlipAction],
   ['generate_artefact', generateArtefactAction],
 ]);

@@ -26,6 +26,7 @@ import { classifyIntent } from "../intent-gate.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { log, emit } from "../../utils/telemetry.js";
+import { createProposalBlock } from "../blocks/factory.js";
 
 // ============================================================================
 // Intent → Action Mapping
@@ -148,7 +149,7 @@ export async function executeDeterministicPipeline(
             turnContext,
           );
 
-          // For confirmable actions, store proposal instead of emitting ops
+          // For confirmable actions, store proposal and emit ProposalBlock
           if (actionDef.requires_confirmation && actionResult.operations && actionResult.operations.length > 0) {
             const proposal = buildProposal(
               directAction,
@@ -163,11 +164,19 @@ export async function executeDeterministicPipeline(
               description: actionResult.assistantText ?? directAction,
               affected_elements: proposal.affected_elements,
             });
-            // Return without operations — proposal is pending
+
+            const proposalBlock = createProposalBlock(proposal, turnId);
+
+            // Return with ProposalBlock but without operations (stored only)
             return assembleDeterministicResponse({
               turnContext,
               llmResponse: null,
-              actionResult: { ...actionResult, operations: undefined },
+              actionResult: {
+                blocks: [proposalBlock],
+                assistantText: actionResult.assistantText,
+                guidance_items: actionResult.guidance_items,
+                operations: undefined,
+              },
               turnId,
               routing: 'deterministic',
               selectedAction: directAction,

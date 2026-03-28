@@ -2,11 +2,12 @@
  * explain_result Action
  *
  * Code templates structured sections from analysis data.
- * LLM writes narrative paragraph only (via explanation templater).
+ * Returns a CommentaryBlock with sections, not just inline text.
  */
 
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
+import { createCommentaryBlock } from "../../blocks/factory.js";
 
 export const explainResultAction: ActionDefinition = {
   action_type: 'explain_result',
@@ -26,18 +27,17 @@ export const explainResultAction: ActionDefinition = {
   },
 
   async execute(_params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
-    // Execution delegated to pipeline — uses explanation templater
-    // See explanation-templater.ts for the code-templated sections
     const summary = ctx.analysis_summary!;
-
     const sections: string[] = [];
 
     // Winner
     if (summary.winner) {
       const prob = summary.winner_probability != null
-        ? ` with a ${(summary.winner_probability * 100).toFixed(0)}% win probability`
-        : '';
-      sections.push(`**${summary.winner}** leads${prob}.`);
+        ? (summary.winner_probability * 100).toFixed(0)
+        : null;
+      sections.push(prob
+        ? `**${summary.winner}** leads at ${prob}%.`
+        : `**${summary.winner}** leads.`);
     }
 
     // Runner up
@@ -68,9 +68,17 @@ export const explainResultAction: ActionDefinition = {
       sections.push(`Constraint tensions: ${summary.constraint_tensions.join('; ')}.`);
     }
 
+    const narrative = sections.join('\n\n');
+    const block = createCommentaryBlock(narrative, '', 'deterministic:explain_result');
+
+    // Short summary for assistantText; detail is in the block
+    const summaryText = summary.winner
+      ? `${summary.winner} leads the analysis${summary.winner_probability != null ? ` at ${(summary.winner_probability * 100).toFixed(0)}%` : ''}.`
+      : 'Analysis results are ready.';
+
     return {
-      blocks: [],
-      assistantText: sections.join('\n\n'),
+      blocks: [block],
+      assistantText: summaryText,
       guidance_items: [],
     };
   },
