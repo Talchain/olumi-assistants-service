@@ -13,7 +13,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { FastifyRequest } from "fastify";
 import type { OrchestratorTurnRequest } from "../types.js";
 import type { DeterministicPipelineResult, LLMJsonResponse, ActionResult } from "./types.js";
 import type { ActionName } from "./actions/types.js";
@@ -38,8 +37,6 @@ import { log, emit } from "../../utils/telemetry.js";
 const TOOL_TO_ACTION: Record<string, ActionName> = {
   run_analysis: 'run_analysis',
   explain_results: 'explain_result',
-  edit_graph: 'set_factor_value', // default — resolved by entity/intent analysis
-  run_exercise: 'run_premortem', // default exercise
 };
 
 // ============================================================================
@@ -87,14 +84,32 @@ export async function executeDeterministicPipeline(
     });
   }
 
-  // ── Intent classification ────────────────────────────────────────────────
-  const intentResult = classifyIntent(turnRequest.message);
+  // ── Chip metadata: bypass intent classification ──────────────────────────
   let directAction: ActionName | null = null;
+  let chipParams: Record<string, unknown> | null = null;
 
-  if (intentResult.routing === 'deterministic' && intentResult.tool) {
-    const mapped = TOOL_TO_ACTION[intentResult.tool];
-    if (mapped && turnContext.eligible_actions.includes(mapped)) {
-      directAction = mapped;
+  if (turnRequest.chip_metadata) {
+    const chipAction = turnRequest.chip_metadata.action_type;
+    if (isValidAction(chipAction)) {
+      // Trust chip metadata — skip classifyIntent entirely.
+      // Eligibility is handled downstream via prerequisite checks.
+      directAction = chipAction as ActionName;
+      chipParams = turnRequest.chip_metadata.parameters ?? {};
+      emit('deterministic.chip_metadata.matched', {
+        request_id: requestId,
+        action: directAction,
+      });
+    }
+  }
+
+  // ── Intent classification (skipped when chip_metadata resolved) ─────────
+  if (!directAction) {
+    const intentResult = classifyIntent(turnRequest.message);
+    if (intentResult.routing === 'deterministic' && intentResult.tool) {
+      const mapped = TOOL_TO_ACTION[intentResult.tool];
+      if (mapped && turnContext.eligible_actions.includes(mapped)) {
+        directAction = mapped;
+      }
     }
   }
 
@@ -103,10 +118,33 @@ export async function executeDeterministicPipeline(
     const actionDef = ACTION_CATALOGUE.get(directAction);
     if (actionDef) {
       const prereqError = actionDef.prerequisite_checks(turnContext);
-      if (!prereqError) {
+      if (prereqError) {
+        // For chip clicks, return the prereq error instead of falling through
+        if (chipParams) {
+          emit('deterministic.chip_prereq_failed', {
+            request_id: requestId,
+            action: directAction,
+            reason: prereqError,
+          });
+          return assembleDeterministicResponse({
+            turnContext,
+            llmResponse: null,
+            actionResult: {
+              blocks: [],
+              assistantText: prereqError,
+              guidance_items: [],
+            },
+            turnId,
+            routing: 'deterministic',
+            selectedAction: directAction,
+            executedActions: [],
+          });
+        }
+        // For intent-classified matches, fall through to LLM path
+      } else {
         try {
           const actionResult = await actionDef.execute(
-            extractParams(turnRequest.message, directAction),
+            chipParams ?? {},
             turnContext,
           );
 
@@ -160,6 +198,22 @@ export async function executeDeterministicPipeline(
           });
         } catch (err) {
           log.error({ request_id: requestId, action: directAction, err }, 'deterministic.action.failed');
+          // For chip clicks, return error instead of silently falling through to LLM
+          if (chipParams) {
+            return assembleDeterministicResponse({
+              turnContext,
+              llmResponse: null,
+              actionResult: {
+                blocks: [],
+                assistantText: 'Something went wrong executing that action. Please try again.',
+                guidance_items: [],
+              },
+              turnId,
+              routing: 'deterministic',
+              selectedAction: directAction,
+              executedActions: [],
+            });
+          }
         }
       }
     }
@@ -185,13 +239,10 @@ export async function executeDeterministicPipeline(
         const prereqError = actionDef.prerequisite_checks(turnContext);
         if (!prereqError) {
           try {
-            // Merge target_id into parameters so action handlers can access it
-            const mergedParams = {
-              ...(firstRec.parameters ?? {}),
-              ...(firstRec.target_id ? { target_id: firstRec.target_id } : {}),
-            };
+            // Extract typed fields from discriminated union into generic params
+            const { action_type: _at, priority: _p, rationale: _r, ...recParams } = firstRec;
             actionResult = await actionDef.execute(
-              mergedParams,
+              recParams,
               turnContext,
             );
             executedActions.push(actionName);
@@ -262,37 +313,10 @@ async function callLLM(
   } catch (err) {
     log.error({ request_id: requestId, err }, 'deterministic.llm_call.failed');
     return {
-      text: "I'm processing your request. Could you tell me more about what you'd like to do?",
+      text: "I couldn't process that request. Try rephrasing or use one of the suggested actions.",
       insights: [],
       recommended_actions: [],
     };
   }
 }
 
-// ============================================================================
-// Parameter Extraction
-// ============================================================================
-
-/**
- * Extract action parameters from user message for deterministic dispatch.
- * Lightweight — complex extraction happens in action handlers via entity resolution.
- */
-function extractParams(message: string, action: ActionName): Record<string, unknown> {
-  const params: Record<string, unknown> = {};
-
-  // Extract numeric values
-  const numberMatch = message.match(/\b(\d+(?:\.\d+)?)\b/);
-  if (numberMatch) {
-    if (action === 'set_factor_value') params.value = parseFloat(numberMatch[1]);
-    if (action === 'set_goal_target') params.threshold = parseFloat(numberMatch[1]);
-    if (action === 'adjust_edge_strength') params.strength_mean = parseFloat(numberMatch[1]);
-  }
-
-  // Extract target references — everything after key prepositions
-  const targetMatch = message.match(/(?:for|on|of|to|about|called)\s+['"]?([^'",.!?]+)/i);
-  if (targetMatch) {
-    params.target_id = targetMatch[1].trim();
-  }
-
-  return params;
-}

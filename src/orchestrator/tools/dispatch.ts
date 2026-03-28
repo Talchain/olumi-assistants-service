@@ -70,7 +70,7 @@ export interface ToolDispatchResult {
   toolLatencyMs?: number;
   guidanceItems: GuidanceItem[];
   /** Suggested follow-up actions from tool handler (e.g. "Re-run analysis" after edit_graph). */
-  suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }>;
+  suggestedActions?: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' | 'scientist' }>;
   /** edit_graph-only diagnostics for orchestrator turn trace. */
   editGraphDiagnostics?: EditGraphTraceDiagnostics;
   pendingClarification?: PendingClarificationState;

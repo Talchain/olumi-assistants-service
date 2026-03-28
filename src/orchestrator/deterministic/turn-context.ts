@@ -64,6 +64,7 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
   const ctx = turnRequest.context;
   const graph = ctx.graph ?? turnRequest.graph_state ?? null;
   const analysis = ctx.analysis_response ?? turnRequest.analysis_state ?? null;
+  const analysisInputs = ctx.analysis_inputs ?? null;
 
   // Stage inference
   const stageResult = inferStage(ctx, turnRequest.system_event);
@@ -105,6 +106,7 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
     analysis,
     conversational_state: ctx.conversational_state ?? null,
     scenario_id: ctx.scenario_id,
+    analysis_inputs: analysisInputs,
   };
 }
 
@@ -130,7 +132,7 @@ export function buildEntityRegistry(graph: GraphV3T | null): EntityRegistry {
       kind: node.kind,
       aliases: buildAliases(node),
       category: (node as Record<string, unknown>).category as string | undefined,
-      is_action_target: node.kind === 'option' || node.kind === 'decision',
+      is_action_target: node.kind !== 'decision',
     };
 
     // Factor-specific fields
@@ -178,25 +180,47 @@ function computeGraphSummary(graph: GraphV3T | null, entities: EntityRegistry): 
       option_count: 0,
       option_labels: [],
       goal_label: null,
-      missing_structural: true,
+      missing_structural: ['no goal node'],
     };
   }
 
   const optionLabels = entities.option_ids
     .map((id) => entities.nodes.get(id)?.label ?? id);
 
-  // Check for missing structural edges (option→goal)
+  // Check for structural issues
+  const issues: string[] = [];
   const goalId = entities.goal_id;
-  let missingStructural = goalId == null;
+
+  if (!goalId) {
+    issues.push('no goal node');
+  }
+
+  // Check constraints on goal
+  if (goalId) {
+    const goalNode = graph.nodes?.find((n) => n.id === goalId);
+    const constraints = (goalNode as Record<string, unknown> | undefined)?.goal_constraints;
+    if (!constraints || (Array.isArray(constraints) && constraints.length === 0)) {
+      issues.push('no constraints');
+    }
+  }
+
+  // Check for external factors
+  const hasExternal = [...entities.nodes.values()].some(
+    (n) => n.kind === 'factor' && n.category === 'external',
+  );
+  if (!hasExternal) {
+    issues.push('no external factors');
+  }
+
+  // Check each option has a path to goal
   if (goalId && entities.option_ids.length > 0) {
-    // Check each option has a path to goal (at least one structural edge)
     for (const optId of entities.option_ids) {
       const hasEdgeToGoal = entities.edges.some(
         (e) => (e.from === optId && e.to === goalId) || (e.to === optId && e.from === goalId),
       );
       if (!hasEdgeToGoal) {
-        missingStructural = true;
-        break;
+        const label = entities.nodes.get(optId)?.label ?? optId;
+        issues.push(`option ${label} has no path to goal`);
       }
     }
   }
@@ -207,7 +231,7 @@ function computeGraphSummary(graph: GraphV3T | null, entities: EntityRegistry): 
     option_count: entities.option_ids.length,
     option_labels: optionLabels,
     goal_label: goalId ? (entities.nodes.get(goalId)?.label ?? null) : null,
-    missing_structural: missingStructural,
+    missing_structural: issues,
   };
 }
 

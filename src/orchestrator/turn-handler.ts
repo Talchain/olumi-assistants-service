@@ -914,7 +914,7 @@ async function dispatchTool(
     let assistantText: string | null = null;
     let analysisResponse = undefined;
     let toolLatencyMs: number | undefined;
-    let editGraphSuggestedActions: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' }> | undefined;
+    let editGraphSuggestedActions: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' | 'scientist' }> | undefined;
     let toolLLMTelemetry: import("./tools/draft-graph.js").DraftGraphResult['toolLLMTelemetry'];
 
     switch (toolName) {

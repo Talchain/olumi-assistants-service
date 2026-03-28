@@ -9,8 +9,8 @@ describe('parseLLMJsonResponse', () => {
   it('parses valid JSON directly', () => {
     const input = JSON.stringify({
       text: 'Here is my analysis.',
-      insights: [{ type: 'observation', description: 'Close call detected' }],
-      recommended_actions: [{ action_type: 'explain_result' }],
+      insights: [{ type: 'assumption_risk', description: 'Close call detected', severity: 'info' }],
+      recommended_actions: [{ action_type: 'explain_result', priority: 'high' }],
     });
 
     const result = parseLLMJsonResponse(input);
@@ -90,17 +90,18 @@ describe('parseLLMJsonResponse', () => {
     expect(result.response.text).toContain('broken json');
   });
 
-  it('caps insights at 5', () => {
+  it('caps insights at 3', () => {
     const input = JSON.stringify({
       text: 'Response.',
-      insights: Array.from({ length: 8 }, (_, i) => ({
-        type: 'observation',
+      insights: Array.from({ length: 5 }, (_, i) => ({
+        type: 'assumption_risk',
         description: `Insight ${i}`,
+        severity: 'info',
       })),
       recommended_actions: [],
     });
 
-    // Zod max(5) should cause this to fail validation
+    // Zod max(3) should cause this to fail validation
     const result = parseLLMJsonResponse(input);
     // It either parses with truncation or falls back
     expect(result.response.text).toBeDefined();

@@ -10,7 +10,7 @@ function makeContext(overrides: Partial<DeterministicTurnContext> = {}): Determi
   return {
     stage: 'evaluate',
     entities: { nodes: new Map(), edges: [], option_ids: [], goal_id: null },
-    graph_summary: { node_count: 5, edge_count: 4, option_count: 2, option_labels: [], goal_label: null, missing_structural: false },
+    graph_summary: { node_count: 5, edge_count: 4, option_count: 2, option_labels: [], goal_label: null, missing_structural: [] },
     analysis_summary: null,
     capabilities: { can_run_analysis: true, can_explain_results: true, can_edit_graph: true, can_compare_options: true, can_challenge: true, can_generate_artefact: true },
     blockers: [],
@@ -21,6 +21,7 @@ function makeContext(overrides: Partial<DeterministicTurnContext> = {}): Determi
     analysis: null,
     conversational_state: null,
     scenario_id: 'test',
+    analysis_inputs: null,
     ...overrides,
   };
 }
@@ -28,8 +29,8 @@ function makeContext(overrides: Partial<DeterministicTurnContext> = {}): Determi
 describe('buildChipsFromRecommendations', () => {
   it('builds chips from valid recommendations', () => {
     const recs: LLMRecommendedAction[] = [
-      { action_type: 'explain_result', rationale: 'Show the results' },
-      { action_type: 'compare_options', rationale: 'Compare side by side' },
+      { action_type: 'explain_result', priority: 'high', rationale: 'Show the results' },
+      { action_type: 'compare_options', priority: 'medium', rationale: 'Compare side by side' },
     ];
     const ctx = makeContext();
     const chips = buildChipsFromRecommendations(recs, ctx);
@@ -41,10 +42,10 @@ describe('buildChipsFromRecommendations', () => {
   });
 
   it('filters out invalid action types', () => {
-    const recs: LLMRecommendedAction[] = [
-      { action_type: 'not_a_real_action' },
-      { action_type: 'explain_result' },
-    ];
+    const recs = [
+      { action_type: 'not_a_real_action', priority: 'high' },
+      { action_type: 'explain_result', priority: 'high' },
+    ] as unknown as LLMRecommendedAction[];
     const ctx = makeContext();
     const chips = buildChipsFromRecommendations(recs, ctx);
 
@@ -54,8 +55,8 @@ describe('buildChipsFromRecommendations', () => {
 
   it('filters out actions not in eligible_actions', () => {
     const recs: LLMRecommendedAction[] = [
-      { action_type: 'generate_artefact' }, // not in eligible_actions
-      { action_type: 'explain_result' },
+      { action_type: 'generate_artefact', artefact_type: 'decision_matrix', priority: 'high' }, // not in eligible_actions
+      { action_type: 'explain_result', priority: 'high' },
     ];
     const ctx = makeContext({ eligible_actions: ['explain_result'] });
     const chips = buildChipsFromRecommendations(recs, ctx);
@@ -65,7 +66,7 @@ describe('buildChipsFromRecommendations', () => {
 
   it('suppresses recently taken actions', () => {
     const recs: LLMRecommendedAction[] = [
-      { action_type: 'explain_result' },
+      { action_type: 'explain_result', priority: 'high' },
     ];
     const ctx = makeContext({
       conversation: {
@@ -83,10 +84,10 @@ describe('buildChipsFromRecommendations', () => {
 
   it('caps at 3 chips', () => {
     const recs: LLMRecommendedAction[] = [
-      { action_type: 'explain_result' },
-      { action_type: 'compare_options' },
-      { action_type: 'run_analysis' },
-      { action_type: 'challenge_assumption' },
+      { action_type: 'explain_result', priority: 'high' },
+      { action_type: 'compare_options', priority: 'medium' },
+      { action_type: 'run_analysis', priority: 'low' },
+      { action_type: 'challenge_assumption', priority: 'low' },
     ];
     const ctx = makeContext();
     const chips = buildChipsFromRecommendations(recs, ctx);

@@ -95,6 +95,11 @@ export interface OrchestratorTurnRequest {
   analysis_state?: V2RunResponseEnvelope | null;
   /** When true, the UI explicitly requested model generation (Generate Model button). */
   generate_model?: boolean;
+  /** Chip click metadata — when present, bypass intent classification. */
+  chip_metadata?: {
+    action_type: string;
+    parameters?: Record<string, unknown>;
+  };
 }
 
 // ============================================================================
@@ -104,7 +109,11 @@ export interface OrchestratorTurnRequest {
 export interface SuggestedAction {
   label: string;
   prompt: string;
-  role: 'facilitator' | 'challenger';
+  role: 'facilitator' | 'challenger' | 'scientist';
+  /** Deterministic chip transport — action type from the catalogue. */
+  action_type?: string;
+  /** Deterministic chip transport — typed parameters for the action. */
+  parameters?: Record<string, unknown>;
 }
 
 export type ConversationalTopic =
