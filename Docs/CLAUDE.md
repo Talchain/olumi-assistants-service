@@ -30,6 +30,37 @@ git status && git diff --staged
 
 ---
 
+## Pre-push validation
+
+A pre-push hook runs six automated checks before allowing `git push`:
+
+1. **Branch guard** — blocks direct push to `main`
+2. **TypeScript type check** — `tsc -p tsconfig.build.json --noEmit` (source only; test files have pre-existing type errors tracked separately)
+3. **Lint changed files** — ESLint on changed `src/**/*.ts` only (test files have pre-existing lint issues tracked separately)
+4. **Smoke tests** — 8 critical orchestrator pipeline tests (~60s)
+5. **Stale .js detection** — tracked `.js` files with co-located `.ts` in `src/`
+6. **Dependency audit** — checks for `file:` references in `package.json`
+
+All checks run even if earlier ones fail (no early abort). Push is blocked if any fail.
+
+### Setup
+
+Run once after cloning:
+
+```bash
+bash scripts/install-hooks.sh
+```
+
+### Bypass
+
+When necessary (e.g., WIP branch with known issues):
+
+```bash
+git push --no-verify
+```
+
+---
+
 ## Deployment
 
 - Always push to `staging`. Never push to `main` without explicit user confirmation.
@@ -90,10 +121,12 @@ pnpm lint
 ### Tier 3: Full gate (before pushing to staging only)
 
 Run **only** when the user explicitly says to push to staging.
+The pre-push hook (`scripts/validate-prepush.sh`) runs automatically on `git push`
+and covers typecheck, lint, smoke tests, and safety checks.
 
 ```bash
 pnpm test                  # full suite
-git push origin staging
+git push origin staging    # triggers pre-push hook automatically
 ```
 
 ### Important rules

@@ -68,6 +68,7 @@ vi.mock("../../../../src/orchestrator/tools/explain-results.js", () => ({
     assistantText: "explanation",
     latencyMs: 100,
   }),
+  buildExplainChips: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock("../../../../src/orchestrator/tools/run-exercise.js", () => ({

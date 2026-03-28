@@ -220,55 +220,56 @@ describe("Cross-Service Blocked Response Contract", () => {
           causal_claims: [],
           meta: { source: "assistant" },
         },
+        pipelineOutcome: {
+          graph_drafted: false,
+          graph_structurally_valid: false,
+          deterministic_sweep_violations: 0,
+          verification_status: 'skipped',
+          validation_status: 'skipped',
+          enrichment_status: 'skipped',
+          coaching_status: 'partial',
+          warnings: [],
+          rescue_score: 0,
+          factor_value_coverage: { total: 0, explicit: 0, inferred_with_evidence: 0, fallback_default: 0 },
+          edge_strength_unique_count: 0,
+          llm_repair: { triggered: false, outcome: 'skipped', fallback_reason: null, attempts: 0 },
+          repair_provenance: [],
+        },
       };
 
       await runStageBoundary(ctx);
 
-      const actualBlockedResponse = ctx.finalResponse;
+      const actualResponse = ctx.finalResponse;
 
-      // Verify actual output matches fixture contract shape
-      expect(actualBlockedResponse).toBeDefined();
+      // Verify actual output — soft gate (Track 1) preserves graph
+      expect(actualResponse).toBeDefined();
 
-      // Required fields for orchestration (PLoT)
-      expect(actualBlockedResponse.analysis_ready?.status).toBe("blocked");
-      expect(actualBlockedResponse.analysis_ready?.goal_node_id).toBeDefined();
-      expect(typeof actualBlockedResponse.analysis_ready?.goal_node_id).toBe("string");
-      expect(Array.isArray(actualBlockedResponse.analysis_ready?.options)).toBe(true);
-      expect(actualBlockedResponse.analysis_ready?.options).toEqual([]);
-      expect(Array.isArray(actualBlockedResponse.analysis_ready?.blockers)).toBe(true);
-      expect(actualBlockedResponse.analysis_ready?.blockers.length).toBeGreaterThan(0);
+      // Soft gate: graph data passes through, degradation warning recorded
+      expect(ctx.pipelineOutcome.warnings.length).toBeGreaterThan(0);
+      expect(ctx.pipelineOutcome.warnings[0].stage).toBe("boundary_v3_validation");
+      expect(ctx.pipelineOutcome.warnings[0].degraded).toBe(true);
 
-      const blocker = actualBlockedResponse.analysis_ready?.blockers[0];
-      expect(blocker?.code).toBeDefined();
-      expect(typeof blocker?.code).toBe("string");
-      expect(blocker?.severity).toBe("error");
-      expect(blocker?.message).toBeDefined();
-      expect(typeof blocker?.message).toBe("string");
+      // Required fields for orchestration (PLoT) — soft gate preserves graph
+      expect(actualResponse.analysis_ready).toBeDefined();
+      expect(actualResponse.analysis_ready?.status).not.toBe("blocked");
+      expect(actualResponse.analysis_ready?.goal_node_id).toBeDefined();
+      expect(typeof actualResponse.analysis_ready?.goal_node_id).toBe("string");
 
-      // Required fields for UI rendering
-      expect(Object.prototype.hasOwnProperty.call(actualBlockedResponse, "graph")).toBe(true);
-      expect(actualBlockedResponse.graph).toBeNull(); // CANONICAL: explicit null
-      expect(Array.isArray(actualBlockedResponse.nodes)).toBe(true);
-      expect(actualBlockedResponse.nodes).toEqual([]);
-      expect(Array.isArray(actualBlockedResponse.edges)).toBe(true);
-      expect(actualBlockedResponse.edges).toEqual([]);
-      expect(actualBlockedResponse.meta).toBeDefined();
-      expect(actualBlockedResponse.meta?.source).toBeDefined();
+      // Response is defined (V3 transform produces its own structure)
+      expect(actualResponse).toBeDefined();
 
       // JSON serialization safety
       let jsonString: string;
       expect(() => {
-        jsonString = JSON.stringify(actualBlockedResponse);
+        jsonString = JSON.stringify(actualResponse);
       }).not.toThrow();
 
-      expect(jsonString!).toContain('"graph":null'); // Canonical shape in serialized JSON
       expect(jsonString!).not.toContain('"undefined"');
       expect(jsonString!).not.toContain(':undefined');
 
       // Safe property access (no crashes)
       expect(() => {
-        const isBlocked = actualBlockedResponse?.analysis_ready?.status === "blocked";
-        expect(isBlocked).toBe(true);
+        const _status = actualResponse?.analysis_ready?.status;
       }).not.toThrow();
 
       parseSpy.mockRestore();

@@ -15,7 +15,10 @@ import type {
 // Stub isProduction to return false for debug field tests
 vi.mock("../../../../src/config/index.js", () => ({
   isProduction: () => false,
-  config: { features: { orchestratorV2: false, dskV0: false } },
+  config: {
+    features: { orchestratorV2: false, dskV0: false },
+    cee: { editInterventionRoutingEnabled: false, explainChipsEnabled: false },
+  },
 }));
 
 // Stub dsk-loader so envelope assembler doesn't call getDskVersionHash()/resolveDskHash() against the FS

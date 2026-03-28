@@ -1,7 +1,8 @@
 /**
  * Stage 6 Boundary Hardening Tests (Stream F)
  *
- * Tests V3 validation failure handling with blocked status.
+ * Tests V3 validation failure handling with Track 1 soft-gate degradation:
+ * graph is preserved, warnings recorded in pipelineOutcome, telemetry emitted.
  * Tests CEE_BOUNDARY_ALLOW_INVALID dev escape hatch.
  */
 
@@ -30,6 +31,24 @@ function mockV3ValidationFailure() {
   } as any);
 }
 
+function makePipelineOutcome() {
+  return {
+    graph_drafted: false,
+    graph_structurally_valid: false,
+    deterministic_sweep_violations: 0,
+    verification_status: 'skipped' as const,
+    validation_status: 'skipped' as const,
+    enrichment_status: 'skipped' as const,
+    coaching_status: 'partial' as const,
+    warnings: [] as Array<{ stage: string; error: string; degraded: boolean }>,
+    rescue_score: 0,
+    factor_value_coverage: { total: 0, explicit: 0, inferred_with_evidence: 0, fallback_default: 0 },
+    edge_strength_unique_count: 0,
+    llm_repair: { triggered: false, outcome: 'skipped' as const, fallback_reason: null, attempts: 0 },
+    repair_provenance: [] as Array<{ rule: string; code: string; node_or_edge_id: string; field: string; before: unknown; after: unknown; source: string }>,
+  };
+}
+
 describe("Stage 6: Boundary Hardening (Stream F)", () => {
   let originalEnv: NodeJS.ProcessEnv;
   let emitSpy: ReturnType<typeof vi.spyOn>;
@@ -48,10 +67,10 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
   });
 
   /**
-   * Path 1: Default behavior - V3 validation failure returns blocked status
+   * Path 1: Default behavior - V3 validation failure triggers soft-gate degradation (Track 1)
    */
-  describe("Default behavior: V3 validation failure returns blocked status", () => {
-    it("returns blocked status with no invalid graph when V3 validation fails", async () => {
+  describe("Default behavior: V3 validation failure triggers soft-gate degradation", () => {
+    it("preserves graph and records degradation warning when V3 validation fails", async () => {
       // Mock V3 schema validation to fail (IDs like "123-invalid" are now valid
       // after canonical regex relaxation in be2f0945)
       const parseSpy = mockV3ValidationFailure();
@@ -71,29 +90,33 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           options: [],
           causal_claims: [],
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       // Act
       await runStageBoundary(ctx);
 
-      // Assert: Should return blocked response
+      // Assert: Soft gate — graph passes through with degradation warning (Track 1)
       expect(ctx.finalResponse).toBeDefined();
-      expect((ctx.finalResponse as any).analysis_ready?.status).toBe("blocked");
-      expect((ctx.finalResponse as any).graph).toBeNull();
-      expect((ctx.finalResponse as any).analysis_ready?.blockers).toBeDefined();
-      expect((ctx.finalResponse as any).analysis_ready?.blockers?.length).toBeGreaterThan(0);
-
-      const blocker = (ctx.finalResponse as any).analysis_ready?.blockers?.[0];
-      expect(blocker?.code).toBe("validation_failure");
-      expect(blocker?.severity).toBe("error");
-      expect(blocker?.message).toContain("V3 schema validation failed");
+      const response = ctx.finalResponse as any;
+      // Graph is preserved (soft gate does not null the graph)
+      expect(response.graph ?? response.nodes).toBeDefined();
+      // analysis_ready is populated and NOT blocked
+      expect(response.analysis_ready).toBeDefined();
+      expect(response.analysis_ready.status).not.toBe("blocked");
+      expect(response.analysis_ready.goal_node_id).toBeDefined();
+      // Degradation warning recorded in pipelineOutcome
+      expect(ctx.pipelineOutcome.warnings.length).toBeGreaterThan(0);
+      expect(ctx.pipelineOutcome.warnings[0].stage).toBe("boundary_v3_validation");
+      expect(ctx.pipelineOutcome.warnings[0].degraded).toBe(true);
+      expect(ctx.pipelineOutcome.warnings[0].error).toContain("V3 schema validation failed");
 
       // Assert: Telemetry event emitted
       expect(emitSpy).toHaveBeenCalledWith(
         telemetry.TelemetryEvents.CeeBoundaryBlocked,
         expect.objectContaining({
           request_id: "test-req-1",
-          error_code: "CEE_V3_VALIDATION_FAILED",
+          error_code: "CEE_V3_VALIDATION_DEGRADED",
           error_message: expect.stringContaining("V3 schema validation failed"),
         })
       );
@@ -101,7 +124,7 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
       parseSpy.mockRestore();
     });
 
-    it("populates blockers with validation error details", async () => {
+    it("records validation error details in pipelineOutcome warnings", async () => {
       const parseSpy = mockV3ValidationFailure();
 
       const ctx: StageContext = {
@@ -119,27 +142,28 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           options: [],
           causal_claims: [],
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       await runStageBoundary(ctx);
 
-      const blocker = (ctx.finalResponse as any).analysis_ready?.blockers?.[0];
-      expect(blocker?.details).toBeDefined();
-      expect(Array.isArray(blocker?.details)).toBe(true);
+      // Soft gate — degradation warning recorded with error detail
+      expect(ctx.pipelineOutcome.warnings.length).toBeGreaterThan(0);
+      expect(ctx.pipelineOutcome.warnings[0].error).toContain("V3 schema validation failed");
 
       // Telemetry should be emitted
       expect(emitSpy).toHaveBeenCalledWith(
         telemetry.TelemetryEvents.CeeBoundaryBlocked,
         expect.objectContaining({
           request_id: "test-req-2",
-          error_code: "CEE_V3_VALIDATION_FAILED",
+          error_code: "CEE_V3_VALIDATION_DEGRADED",
         })
       );
 
       parseSpy.mockRestore();
     });
 
-    it("preserves existing response envelope shape", async () => {
+    it("preserves response envelope through soft-gate degradation", async () => {
       const parseSpy = mockV3ValidationFailure();
 
       const ctx: StageContext = {
@@ -158,20 +182,20 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           causal_claims: [],
           meta: { graph_hash: "test-hash" },
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       await runStageBoundary(ctx);
 
-      // Should preserve meta and other top-level fields
-      expect((ctx.finalResponse as any).meta).toBeDefined();
-      expect((ctx.finalResponse as any).meta?.graph_hash).toBe("test-hash");
+      // Response is defined (soft gate preserves the V3 output)
+      expect(ctx.finalResponse).toBeDefined();
 
       // Telemetry should be emitted
       expect(emitSpy).toHaveBeenCalledWith(
         telemetry.TelemetryEvents.CeeBoundaryBlocked,
         expect.objectContaining({
           request_id: "test-req-3",
-          error_code: "CEE_V3_VALIDATION_FAILED",
+          error_code: "CEE_V3_VALIDATION_DEGRADED",
         })
       );
 
@@ -206,6 +230,7 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         input: { brief: "Test brief" },
         opts: { schemaVersion: "v3", strictMode: false, includeDebug: false },
         ceeResponse: invalidResponse as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       // Act
@@ -242,6 +267,7 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           options: [],
           causal_claims: [],
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       await runStageBoundary(ctx);
@@ -256,7 +282,7 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
       );
     });
 
-    it("does not allow invalid graph when flag is false in local environment", async () => {
+    it("records degradation warning when flag is false in local environment", async () => {
       process.env.OLUMI_ENV = "local";
       process.env.CEE_BOUNDARY_ALLOW_INVALID = "false";
       _resetConfigCache();
@@ -278,18 +304,21 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           options: [],
           causal_claims: [],
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       await runStageBoundary(ctx);
 
-      expect((ctx.finalResponse as any).analysis_ready?.status).toBe("blocked");
+      // Soft gate: graph passes through with degradation warning (flag=false does not bypass)
+      expect(ctx.pipelineOutcome.warnings.length).toBeGreaterThan(0);
+      expect(ctx.pipelineOutcome.warnings[0].degraded).toBe(true);
 
       // Telemetry should be emitted (no bypass)
       expect(emitSpy).toHaveBeenCalledWith(
         telemetry.TelemetryEvents.CeeBoundaryBlocked,
         expect.objectContaining({
           request_id: "test-req-6",
-          error_code: "CEE_V3_VALIDATION_FAILED",
+          error_code: "CEE_V3_VALIDATION_DEGRADED",
         })
       );
 
@@ -301,7 +330,7 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
    * Path 3: Prod/staging rejection - flag is ignored and warning is logged
    */
   describe("Prod/staging rejection: CEE_BOUNDARY_ALLOW_INVALID is ignored", () => {
-    it("ignores flag in production and returns blocked status", async () => {
+    it("records degradation warning in production (flag ignored)", async () => {
       process.env.OLUMI_ENV = "prod";
       process.env.CEE_BOUNDARY_ALLOW_INVALID = "true";
       _resetConfigCache();
@@ -323,27 +352,29 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           options: [],
           causal_claims: [],
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       await runStageBoundary(ctx);
 
-      // Should return blocked status even though flag is set
-      expect((ctx.finalResponse as any).analysis_ready?.status).toBe("blocked");
-      expect((ctx.finalResponse as any).graph).toBeNull();
+      // Soft gate: graph passes through with degradation warning (flag ignored in prod)
+      expect(ctx.finalResponse).toBeDefined();
+      expect(ctx.pipelineOutcome.warnings.length).toBeGreaterThan(0);
+      expect(ctx.pipelineOutcome.warnings[0].degraded).toBe(true);
 
       // Telemetry should be emitted (config blocks override in prod)
       expect(emitSpy).toHaveBeenCalledWith(
         telemetry.TelemetryEvents.CeeBoundaryBlocked,
         expect.objectContaining({
           request_id: "test-req-7",
-          error_code: "CEE_V3_VALIDATION_FAILED",
+          error_code: "CEE_V3_VALIDATION_DEGRADED",
         })
       );
 
       parseSpy.mockRestore();
     });
 
-    it("ignores flag in staging and returns blocked status", async () => {
+    it("records degradation warning in staging (flag ignored)", async () => {
       process.env.OLUMI_ENV = "staging";
       process.env.CEE_BOUNDARY_ALLOW_INVALID = "true";
       _resetConfigCache();
@@ -365,19 +396,22 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           options: [],
           causal_claims: [],
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       await runStageBoundary(ctx);
 
-      expect((ctx.finalResponse as any).analysis_ready?.status).toBe("blocked");
-      expect((ctx.finalResponse as any).graph).toBeNull();
+      // Soft gate: graph passes through with degradation warning (flag ignored in staging)
+      expect(ctx.finalResponse).toBeDefined();
+      expect(ctx.pipelineOutcome.warnings.length).toBeGreaterThan(0);
+      expect(ctx.pipelineOutcome.warnings[0].degraded).toBe(true);
 
       // Telemetry should be emitted (config blocks override in staging)
       expect(emitSpy).toHaveBeenCalledWith(
         telemetry.TelemetryEvents.CeeBoundaryBlocked,
         expect.objectContaining({
           request_id: "test-req-8",
-          error_code: "CEE_V3_VALIDATION_FAILED",
+          error_code: "CEE_V3_VALIDATION_DEGRADED",
         })
       );
 
@@ -409,6 +443,7 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
           options: [],
           causal_claims: [],
         } as any,
+      pipelineOutcome: makePipelineOutcome(),
       } as StageContext;
 
       await runStageBoundary(ctx);

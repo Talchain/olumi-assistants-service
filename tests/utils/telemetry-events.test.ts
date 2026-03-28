@@ -225,6 +225,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PromptExperimentAssigned: "prompt.experiment.assigned",
         PromptStagingUsed: "prompt.staging.used",
 
+        // Prompt Activation Guard events (v2.2)
+        PromptActivationBlocked: "prompt.activation.blocked",
+        PromptStagingActivated: "prompt.staging.activated",
+
         // Decision Review events (v2.0)
         DecisionReviewGenerated: "cee.decision_review.generated",
         DecisionReviewIslFallback: "cee.decision_review.isl_fallback",
@@ -428,7 +432,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -658,6 +662,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Prompt Experiment events (v2.0)
         "prompt.experiment.assigned": [TelemetryEvents.PromptExperimentAssigned],
         "prompt.staging.used": [TelemetryEvents.PromptStagingUsed],
+
+        // Prompt Activation Guard events (v2.2)
+        "prompt.activation.blocked": [TelemetryEvents.PromptActivationBlocked],
+        "prompt.staging.activated": [TelemetryEvents.PromptStagingActivated],
 
         // Decision Review events (v2.0)
         "cee.decision_review.requested": [TelemetryEvents.DecisionReviewRequested],
@@ -1070,6 +1078,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Prompt Experiment events (v2.0)
         "prompt.experiment.assigned",
         "prompt.staging.used",
+
+        // Prompt Activation Guard events (v2.2)
+        "prompt.activation.blocked",
+        "prompt.staging.activated",
 
         // Decision Review events (v2.0)
         "cee.decision_review.generated",
