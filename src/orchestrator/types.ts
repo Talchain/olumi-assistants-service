@@ -521,6 +521,8 @@ export interface SupportingRef {
 export interface CommentaryBlockData {
   narrative: string;
   supporting_refs: SupportingRef[];
+  /** Structured sections for deterministic explain_result blocks. */
+  sections?: Array<{ heading: string; content?: string; items?: string[] }>;
 }
 
 // ---- Brief Block ----

@@ -5,9 +5,10 @@
  * Returns a CommentaryBlock with sections, not just inline text.
  */
 
+import { randomUUID } from "node:crypto";
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult, DeterministicCommentaryBlockData } from "../types.js";
-import { createCommentaryBlock } from "../../blocks/factory.js";
+import type { TypedConversationBlock } from "../../types.js";
 
 export const explainResultAction: ActionDefinition = {
   action_type: 'explain_result',
@@ -82,10 +83,13 @@ export const explainResultAction: ActionDefinition = {
     }
     const narrative = narrativeParts.join('\n\n');
 
-    // Commentary block uses standard factory but carries sections in data
-    const block = createCommentaryBlock(narrative, ctx.scenario_id, 'deterministic:explain_result');
-    // Attach sections to the block data for structured rendering
-    (block.data as DeterministicCommentaryBlockData).sections = sections;
+    // Build commentary block directly to include sections without post-hoc mutation
+    const block: TypedConversationBlock = {
+      block_id: `blk_commentary_${randomUUID().replace(/-/g, '').substring(0, 16)}`,
+      block_type: 'commentary',
+      data: { narrative, sections, supporting_refs: [] },
+      provenance: { trigger: 'deterministic:explain_result', turn_id: ctx.scenario_id, timestamp: new Date().toISOString() },
+    };
 
     // Short summary for assistantText
     const summaryText = summary.winner
