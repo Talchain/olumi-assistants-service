@@ -705,7 +705,7 @@ describe("ensureControllableFactorBaselines", () => {
     const fac1 = nodes.find((n: any) => n.id === "fac_1");
 
     expect(defaultedFactors).toEqual(["fac_1"]);
-    expect(fac1.data.value).toBe(0.5);
+    expect(fac1.data.value).toBe(1.0);
     expect(fac1.data.extractionType).toBe("inferred");
   });
 
@@ -792,10 +792,10 @@ describe("ensureControllableFactorBaselines", () => {
     const facB = nodes.find((n: any) => n.id === "fac_b");
     const facC = nodes.find((n: any) => n.id === "fac_c");
 
-    expect(facA.data.value).toBe(0.5);
+    expect(facA.data.value).toBe(1.0);
     expect(facA.data.extractionType).toBe("inferred");
     expect(facB.data.value).toBe(100);
-    expect(facC.data.value).toBe(0.5);
+    expect(facC.data.value).toBe(1.0);
   });
 
   it("returns unchanged response when no nodes or edges", () => {
