@@ -1,16 +1,13 @@
 /**
- * Orchestrator evaluator adapter.
+ * Orchestrator evaluator adapter — v30.3 (JSON output contract).
  *
  * Loads JSON fixtures from fixtures/orchestrator/, builds requests
- * with stage context and canonical_state, scores the XML envelope
- * response with orchestrator-scorer.
+ * with TurnContext + eligible_actions, scores the JSON response
+ * with orchestrator-scorer.
  *
- * Unlike other adapters, the orchestrator response is XML-based (not JSON).
- * The parseResponse method returns the raw text as a single-key object
- * since scoring operates on the raw XML string directly.
- *
- * Supports multi-turn fixtures: `turns` array with assistant null content
- * that gets auto-filled by the model during evaluation.
+ * The v30.3 prompt expects:
+ *   system = prompt text + "\n\n<TURN_CONTEXT>\n" + JSON.stringify(turnContext) + "\n</TURN_CONTEXT>\n\n<ELIGIBLE_ACTIONS>\n" + JSON.stringify(eligible_actions) + "\n</ELIGIBLE_ACTIONS>"
+ *   user   = user message + "\n\nRespond with valid JSON only."
  */
 
 import { readdir, readFile } from "node:fs/promises";
@@ -23,6 +20,8 @@ import type {
   LLMResponse,
   GenericScoreResult,
 } from "../types.js";
+
+const JSON_FORCING_SUFFIX = "\n\nRespond with valid JSON only.";
 
 export class OrchestratorAdapter
   implements EvaluatorAdapter<OrchestratorFixture>
@@ -41,54 +40,43 @@ export class OrchestratorAdapter
   }
 
   /**
-   * Build the context prefix (canonical_state, graph, stage) for user messages.
+   * Build the system prompt: prompt text + TURN_CONTEXT + ELIGIBLE_ACTIONS.
    */
-  buildContextPrefix(fixture: OrchestratorFixture): string {
-    const parts: string[] = [];
-
-    if (fixture.canonical_state) {
-      parts.push(
-        "BEGIN_UNTRUSTED_CONTEXT",
-        JSON.stringify(fixture.canonical_state, null, 2),
-        "END_UNTRUSTED_CONTEXT",
-        ""
-      );
-    }
-
-    if (fixture.graph_context) {
-      parts.push(
-        "<GRAPH_CONTEXT>",
-        JSON.stringify(fixture.graph_context, null, 2),
-        "</GRAPH_CONTEXT>",
-        ""
-      );
-    }
-
-    parts.push(`[Stage: ${fixture.stage.toUpperCase()}]`);
+  buildSystemPrompt(fixture: OrchestratorFixture, prompt: string): string {
+    const ctx = fixture.turn_context;
+    const parts: string[] = [
+      prompt,
+      "",
+      "<TURN_CONTEXT>",
+      JSON.stringify(ctx, null, 2),
+      "</TURN_CONTEXT>",
+      "",
+      "<ELIGIBLE_ACTIONS>",
+      JSON.stringify(ctx.eligible_actions),
+      "</ELIGIBLE_ACTIONS>",
+    ];
     return parts.join("\n");
+  }
+
+  /**
+   * Build the user message with JSON-forcing suffix.
+   */
+  buildUserMessage(fixture: OrchestratorFixture): string {
+    const userMsg = fixture.turns
+      ? fixture.turns.find((t) => t.role === "user")?.content ?? ""
+      : fixture.user_message ?? "";
+
+    return userMsg + JSON_FORCING_SUFFIX;
   }
 
   buildRequest(
     fixture: OrchestratorFixture,
     prompt: string
   ): { system: string; user: string } {
-    const contextPrefix = this.buildContextPrefix(fixture);
-
-    // For multi-turn fixtures, buildRequest returns the first user message.
-    // Subsequent turns are handled by buildMultiTurnMessages().
-    const userMsg = fixture.turns
-      ? fixture.turns.find((t) => t.role === "user")?.content ?? ""
-      : fixture.user_message ?? "";
-
-    const user = [
-      contextPrefix,
-      "",
-      "BEGIN_UNTRUSTED_CONTEXT",
-      userMsg,
-      "END_UNTRUSTED_CONTEXT",
-    ].join("\n");
-
-    return { system: prompt, user };
+    return {
+      system: this.buildSystemPrompt(fixture, prompt),
+      user: this.buildUserMessage(fixture),
+    };
   }
 
   /**
@@ -113,7 +101,6 @@ export class OrchestratorAdapter
   /**
    * Get all turn segments for a multi-turn fixture.
    * Returns pairs of (conversation history so far, next user message).
-   * Each segment represents one LLM call needed.
    */
   getMultiTurnSegments(
     fixture: OrchestratorFixture
@@ -121,29 +108,18 @@ export class OrchestratorAdapter
     if (!fixture.turns) return [];
 
     const segments: Array<{ history: OrchestratorTurn[]; userMessage: string }> = [];
-    const contextPrefix = this.buildContextPrefix(fixture);
 
-    // Walk through turns. Every time we hit an assistant null, the preceding
-    // user message is the prompt. Everything before is history.
     for (let i = 0; i < fixture.turns.length; i++) {
       const turn = fixture.turns[i];
       if (turn.role === "assistant" && turn.content === null) {
-        // The user message is the turn just before this
         const prevUser = i > 0 && fixture.turns[i - 1].role === "user"
           ? fixture.turns[i - 1].content ?? ""
           : "";
-        // History is everything before the user message
         const history = fixture.turns.slice(0, Math.max(0, i - 1));
 
         segments.push({
           history,
-          userMessage: [
-            contextPrefix,
-            "",
-            "BEGIN_UNTRUSTED_CONTEXT",
-            prevUser,
-            "END_UNTRUSTED_CONTEXT",
-          ].join("\n"),
+          userMessage: prevUser + JSON_FORCING_SUFFIX,
         });
       }
     }
@@ -154,13 +130,7 @@ export class OrchestratorAdapter
       const history = fixture.turns.slice(0, fixture.turns.length - 1);
       segments.push({
         history,
-        userMessage: [
-          contextPrefix,
-          "",
-          "BEGIN_UNTRUSTED_CONTEXT",
-          lastTurn.content ?? "",
-          "END_UNTRUSTED_CONTEXT",
-        ].join("\n"),
+        userMessage: (lastTurn.content ?? "") + JSON_FORCING_SUFFIX,
       });
     }
 
@@ -171,21 +141,31 @@ export class OrchestratorAdapter
     parsed: Record<string, unknown> | null;
     error?: string;
   } {
-    // The orchestrator response is XML, not JSON.
-    // We wrap the raw text so the generic pipeline can handle it.
     if (!raw || raw.trim().length === 0) {
       return { parsed: null, error: "Empty response" };
     }
 
-    // Basic check: does it look like it has the envelope?
-    const hasDiagnostics = raw.includes("<diagnostics>");
-    const hasResponse = raw.includes("<response>");
+    // Try to parse as JSON (strip markdown fences if present)
+    try {
+      let cleaned = raw.trim();
+      if (cleaned.startsWith("```json")) {
+        cleaned = cleaned.slice(7);
+      } else if (cleaned.startsWith("```")) {
+        cleaned = cleaned.slice(3);
+      }
+      if (cleaned.endsWith("```")) {
+        cleaned = cleaned.slice(0, -3);
+      }
+      cleaned = cleaned.trim();
 
-    if (!hasDiagnostics && !hasResponse) {
-      return { parsed: null, error: "Response does not contain XML envelope" };
+      const parsed = JSON.parse(cleaned);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return { parsed };
+      }
+      return { parsed: null, error: "Response is not a JSON object" };
+    } catch (err) {
+      return { parsed: null, error: `JSON parse failed: ${(err as Error).message}` };
     }
-
-    return { parsed: { _raw_xml: raw } };
   }
 
   score(
@@ -193,27 +173,20 @@ export class OrchestratorAdapter
     parsed: Record<string, unknown> | null,
     response: LLMResponse
   ): GenericScoreResult {
-    // Score using the raw text, not the parsed wrapper
-    const rawText = response.raw_text ?? (parsed as Record<string, unknown> | null)?._raw_xml as string ?? null;
+    const rawText = response.raw_text ?? null;
     const result = scoreOrchestrator(fixture, rawText);
 
     return {
       overall: result.overall,
       dimensions: {
-        valid_envelope: result.valid_envelope,
-        diagnostics_present: result.diagnostics_present,
-        assistant_text_present: result.assistant_text_present,
-        blocks_tag_present: result.blocks_tag_present,
-        actions_tag_present: result.actions_tag_present,
-        tool_selection_correct: result.tool_selection_correct,
-        no_banned_terms: result.no_banned_terms,
-        uncertainty_language: result.uncertainty_language,
-        block_types_valid: result.block_types_valid,
-        suggested_actions_valid: result.suggested_actions_valid,
-        coaching_correct: result.coaching_correct,
-        no_forbidden_phrases: result.no_forbidden_phrases,
-        must_contain_met: result.must_contain_met,
-        xml_well_formed: result.xml_well_formed,
+        valid_json: result.valid_json,
+        text_quality: result.text_quality,
+        insight_compliance: result.insight_compliance,
+        action_eligibility: result.action_eligibility,
+        parameter_validity: result.parameter_validity,
+        fabrication_check: result.fabrication_check,
+        banned_terms: result.banned_terms,
+        scenario_specific: result.scenario_specific,
       },
     };
   }

@@ -4,26 +4,115 @@
   "description": "Post-analysis turn where the model must avoid using banned internal terms (headline_type, readiness, canonical_state, elasticity, voi, etc.) in user-facing text.",
   "stage": "evaluate",
   "user_message": "Give me a summary of where things stand.",
-  "canonical_state": {
-    "winner": { "id": "opt_a", "label": "Option A", "win_probability": 0.55 },
-    "runner_up": { "id": "opt_b", "label": "Option B", "win_probability": 0.45 },
-    "margin": 0.05,
-    "robustness": "fragile",
-    "top_drivers": [
-      { "factor_id": "fac_cost", "factor_label": "Implementation Cost", "sensitivity_pct": 35 },
-      { "factor_id": "fac_adoption", "factor_label": "User Adoption Rate", "sensitivity_pct": 30 }
-    ],
-    "evidence_priorities": [
-      { "factor_id": "fac_cost", "factor_label": "Implementation Cost", "voi": 0.12 }
-    ]
+  "turn_context": {
+    "scenario_id": "orch-05-banned-terms",
+    "turn_id": "t1",
+    "stage": "evaluate",
+    "entities": {
+      "decisions": [
+        { "id": "dec_impl", "label": "Implementation Decision" }
+      ],
+      "options": [
+        { "id": "opt_a", "label": "Option A" },
+        { "id": "opt_b", "label": "Option B" }
+      ],
+      "factors": [
+        { "id": "fac_cost", "label": "Implementation Cost", "category": "observable" },
+        { "id": "fac_adoption", "label": "User Adoption Rate", "category": "uncertain" }
+      ],
+      "outcomes": [],
+      "risks": [],
+      "goals": [
+        { "id": "goal_success", "label": "Project Success" }
+      ],
+      "edges": [
+        { "from": "fac_cost", "to": "goal_success", "strength_mean": -0.5, "exists_probability": 0.9 },
+        { "from": "fac_adoption", "to": "goal_success", "strength_mean": 0.6, "exists_probability": 0.85 }
+      ],
+      "constraints": []
+    },
+    "graph": {
+      "node_count": 5,
+      "edge_count": 2,
+      "option_count": 2,
+      "missing_structural": []
+    },
+    "analysis": {
+      "status": "completed",
+      "staleness_reason": null,
+      "winner": { "id": "opt_a", "label": "Option A", "probability": 0.55 },
+      "runner_up": { "id": "opt_b", "label": "Option B", "probability": 0.45 },
+      "robustness_band": "fragile",
+      "top_drivers": [
+        { "id": "fac_cost", "label": "Implementation Cost", "sensitivity": 35 },
+        { "id": "fac_adoption", "label": "User Adoption Rate", "sensitivity": 30 }
+      ],
+      "fragile_edges": [],
+      "constraints_met": null
+    },
+    "capabilities": {
+      "can_run_analysis": true,
+      "can_explain_results": true,
+      "can_edit_graph": true,
+      "can_compare_options": true,
+      "can_generate_artefact": true,
+      "disabled_reasons": {}
+    },
+    "blockers": [],
+    "signals": {
+      "high_uncertainty_factors": [],
+      "dominant_factor": null,
+      "close_call": true,
+      "missing_option_families": [],
+      "default_value_count": 0,
+      "weak_edges": []
+    },
+    "conversation": {
+      "turn_count": 1,
+      "last_user_intent": null,
+      "last_tool_used": null,
+      "recent_actions_taken": [],
+      "recent_actions_declined": [],
+      "pending_confirmation": null,
+      "last_failed_action": null
+    },
+    "eligible_actions": ["explain_result", "compare_options", "what_would_flip", "set_factor_value", "adjust_edge_strength", "run_analysis", "add_constraint"]
   },
   "expected": {
-    "expected_tool": null,
-    "expects_coaching": true,
-    "min_actions": 1,
-    "max_actions": 2,
-    "banned_terms_checked": true,
     "expects_uncertainty_language": true,
-    "forbidden_phrases": ["headline_type", "readiness", "canonical_state", "exists_probability", "voi", "attribution_stability", "rank_flip_rate", "model_critiques", "elasticity", "factor_sensitivity", "recommendation_stability"]
+    "must_contain": [],
+    "forbidden_phrases": ["headline_type", "readiness", "canonical_state", "exists_probability", "voi", "attribution_stability", "rank_flip_rate", "model_critiques", "elasticity", "factor_sensitivity", "recommendation_stability"],
+    "scenario_assertions": [
+      {
+        "description": "Should produce at least 1 action",
+        "check": "min_actions",
+        "value": 1
+      },
+      {
+        "description": "Should not produce more than 2 actions",
+        "check": "max_actions",
+        "value": 2
+      },
+      {
+        "description": "Must not leak internal term headline_type",
+        "check": "text_not_contains",
+        "value": "headline_type"
+      },
+      {
+        "description": "Must not leak internal term canonical_state",
+        "check": "text_not_contains",
+        "value": "canonical_state"
+      },
+      {
+        "description": "Must not leak internal term exists_probability",
+        "check": "text_not_contains",
+        "value": "exists_probability"
+      },
+      {
+        "description": "Must not leak internal term voi",
+        "check": "text_not_contains",
+        "value": "voi"
+      }
+    ]
   }
 }

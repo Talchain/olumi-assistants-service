@@ -106,16 +106,11 @@ weighted_average = mean of all 9 scores / 5 (normalised to 0-1 scale).`;
 
   // Context provided to the assistant
   parts.push("CONTEXT PROVIDED TO THE ASSISTANT:");
-  if (fixture.canonical_state) {
-    parts.push("Canonical state:");
-    parts.push(JSON.stringify(fixture.canonical_state, null, 2));
-  }
-  if (fixture.graph_context) {
-    parts.push("Graph context:");
-    parts.push(JSON.stringify(fixture.graph_context, null, 2));
-  }
-  if (!fixture.canonical_state && !fixture.graph_context) {
-    parts.push("(No analysis or graph context provided)");
+  if (fixture.turn_context) {
+    parts.push("Turn context:");
+    parts.push(JSON.stringify(fixture.turn_context, null, 2));
+  } else {
+    parts.push("(No turn context provided)");
   }
   parts.push("");
 

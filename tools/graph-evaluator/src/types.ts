@@ -397,55 +397,148 @@ export interface OrchestratorTurn {
   content: string | null;
 }
 
-export interface OrchestratorFixture extends BaseFixture {
-  /** The stage context to provide as the user message */
+// ── TurnContext schema (v30.3) ──────────────────────────────────────────────
+
+export interface EntityRef {
+  id: string;
+  label: string;
+}
+
+export interface FactorEntityRef extends EntityRef {
+  category: "controllable" | "observable" | "external";
+  value?: number | null;
+  has_prior?: boolean;
+}
+
+export interface GoalEntityRef extends EntityRef {
+  threshold?: number | null;
+  unit?: string;
+}
+
+export interface EdgeRef {
+  from: string;
+  to: string;
+  strength_mean: number;
+  exists_probability: number;
+}
+
+export interface ConstraintRef {
+  id: string;
+  node_id: string;
+  label: string;
+  operator: string;
+  value: number;
+}
+
+export interface TurnContext {
+  scenario_id: string;
+  turn_id: string;
   stage: "frame" | "ideate" | "evaluate" | "decide";
-  /** Single-turn user message (legacy). Ignored if turns is present. */
+  entities: {
+    decisions: EntityRef[];
+    options: EntityRef[];
+    factors: FactorEntityRef[];
+    outcomes: EntityRef[];
+    risks: EntityRef[];
+    goals: GoalEntityRef[];
+    edges: EdgeRef[];
+    constraints: ConstraintRef[];
+  };
+  graph: {
+    node_count: number;
+    edge_count: number;
+    option_count: number;
+    missing_structural: string[];
+  };
+  analysis: {
+    status: "not_run" | "ready" | "running" | "completed" | "stale";
+    staleness_reason: string | null;
+    winner: { id: string; label: string; probability: number } | null;
+    runner_up: { id: string; label: string; probability: number } | null;
+    robustness_band: "fragile" | "moderate" | "stable" | "highly_stable" | null;
+    top_drivers: Array<{ id: string; label: string; sensitivity: number }>;
+    fragile_edges: Array<{ from_label: string; to_label: string }>;
+    constraints_met: boolean | null;
+  };
+  capabilities: {
+    can_run_analysis: boolean;
+    can_explain_results: boolean;
+    can_edit_graph: boolean;
+    can_compare_options: boolean;
+    can_generate_artefact: boolean;
+    disabled_reasons: Record<string, string>;
+  };
+  blockers: Array<{
+    type: string;
+    target_id: string | null;
+    target_label: string | null;
+    message: string;
+    suggested_action_type: string;
+  }>;
+  signals: {
+    high_uncertainty_factors: Array<{ id: string; label: string; reason: string }>;
+    dominant_factor: { id: string; label: string; sensitivity: number } | null;
+    close_call: boolean;
+    missing_option_families: string[];
+    default_value_count: number;
+    weak_edges: Array<{ from_label: string; to_label: string; exists_probability: number }>;
+  };
+  conversation: {
+    turn_count: number;
+    last_user_intent: string | null;
+    last_tool_used: string | null;
+    recent_actions_taken: string[];
+    recent_actions_declined: string[];
+    pending_confirmation: { action_type: string; description: string; proposal: unknown } | null;
+    last_failed_action: { action_type: string; reason: string } | null;
+  };
+  eligible_actions: string[];
+}
+
+// ── Fixture (v30.3 TurnContext-based) ───────────────────────────────────────
+
+export interface OrchestratorFixture extends BaseFixture {
+  /** The stage context for the fixture */
+  stage: "frame" | "ideate" | "evaluate" | "decide";
+  /** Single-turn user message */
   user_message?: string;
   /** Multi-turn conversation. assistant turns with null content are filled by the model. */
   turns?: OrchestratorTurn[];
-  /** Optional canonical_state JSON to include in context */
-  canonical_state?: Record<string, unknown>;
-  /** Optional graph context to include */
-  graph_context?: { nodes: GraphNode[]; edges: GraphEdge[] };
+  /** Full TurnContext for v30.3 prompt format */
+  turn_context: TurnContext;
   /** Expected behaviour assertions */
   expected: {
-    /** Expected tool to be selected (null = no tool) */
-    expected_tool: string | null;
-    /** Whether the response should contain coaching (review_card blocks) */
-    expects_coaching: boolean;
-    /** Required coaching play name if applicable */
-    coaching_play?: string;
-    /** Minimum expected suggested_actions count */
-    min_actions: number;
-    /** Maximum expected suggested_actions count */
-    max_actions: number;
-    /** Banned terms that must NOT appear in user-facing text */
-    banned_terms_checked: boolean;
     /** Whether response should use uncertainty language (not absolutes) */
     expects_uncertainty_language: boolean;
     /** Forbidden phrases that must not appear */
     forbidden_phrases?: string[];
-    /** Required substrings in assistant_text */
+    /** Required substrings in text */
     must_contain?: string[];
+    /** Scenario-specific assertion function name (scored in scenario_specific dimension) */
+    scenario_assertions?: ScenarioAssertion[];
   };
 }
 
+export interface ScenarioAssertion {
+  /** Human-readable description of the assertion */
+  description: string;
+  /** Check type */
+  check: "action_type_absent" | "action_type_present" | "target_id_omitted" | "text_contains" | "text_not_contains" | "max_actions" | "min_actions" | "asks_question" | "no_rubber_stamp" | "proposes_structural_fix";
+  /** Value for the check (e.g., action_type name, substring) */
+  value?: string | number;
+}
+
+// ── Score (v30.3 dimensions) ────────────────────────────────────────────────
+
 export interface OrchestratorScore {
-  valid_envelope: boolean;
-  diagnostics_present: boolean;
-  assistant_text_present: boolean;
-  blocks_tag_present: boolean;
-  actions_tag_present: boolean;
-  tool_selection_correct: boolean;
-  no_banned_terms: boolean;
-  uncertainty_language: boolean;
-  block_types_valid: boolean;
-  suggested_actions_valid: boolean;
-  coaching_correct: boolean;
-  no_forbidden_phrases: boolean;
-  must_contain_met: boolean;
-  xml_well_formed: boolean;
+  valid_json: boolean;
+  text_quality: boolean;
+  insight_compliance: boolean;
+  action_eligibility: boolean;
+  parameter_validity: boolean;
+  fabrication_check: boolean;
+  banned_terms: boolean;
+  scenario_specific: boolean;
   overall: number;
 }
 

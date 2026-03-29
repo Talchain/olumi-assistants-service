@@ -1526,16 +1526,12 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
           const historyParts = filledTurns.slice(0, -1).map(
             (t) => `[${t.role.toUpperCase()}]: ${t.content ?? ""}`
           );
-          const contextPrefix = adapter.buildContextPrefix(fixture);
           const finalUserMsg = [
-            contextPrefix,
-            "",
             "CONVERSATION HISTORY:",
             ...historyParts,
             "",
-            "BEGIN_UNTRUSTED_CONTEXT",
             lastTurn.content ?? "",
-            "END_UNTRUSTED_CONTEXT",
+            "\n\nRespond with valid JSON only.",
           ].join("\n");
 
           const result = await provider.chat(effectivePrompt, finalUserMsg, model);

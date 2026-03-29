@@ -1,11 +1,11 @@
 {
-  "id": "orch-09-soft-proceed-draft",
-  "name": "Soft-Proceed — First Turn with Goal, Options, Constraints",
-  "description": "User provides a well-specified decision brief with goal, options, and constraints on the first turn. The orchestrator should soft-proceed directly to draft_graph without asking clarifying questions.",
+  "id": "orch-18-framing-elicit-ambiguous",
+  "name": "Framing — Ambiguous Strategy (No Decision)",
+  "description": "User mentions a topic without stating a decision or naming options. The orchestrator should elicit goal and options, not invoke a tool.",
   "stage": "frame",
-  "user_message": "Should we raise prices from £49 to £59? Our goal is £20k MRR within 12 months. We need to keep churn under 4%. The other option is to keep pricing at £49 and focus on volume growth.",
+  "user_message": "I've been thinking about our international strategy.",
   "turn_context": {
-    "scenario_id": "orch-09-soft-proceed-draft",
+    "scenario_id": "orch-18-framing-elicit-ambiguous",
     "turn_id": "t1",
     "stage": "frame",
     "entities": {
@@ -64,18 +64,22 @@
   },
   "expected": {
     "expects_uncertainty_language": false,
-    "must_contain": [],
-    "forbidden_phrases": ["What is your goal", "Could you clarify", "What options are you considering", "Can you tell me more"],
+    "must_contain": ["decid"],
+    "forbidden_phrases": [],
     "scenario_assertions": [
       {
-        "description": "Should soft-proceed to draft_graph when user provides goal, options, and constraints",
-        "check": "action_type_present",
+        "description": "Should ask a question to elicit the decision, goal, or options",
+        "check": "asks_question"
+      },
+      {
+        "description": "Should not invoke draft_graph without knowing the decision",
+        "check": "action_type_absent",
         "value": "draft_graph"
       },
       {
-        "description": "Should not propose more than 2 actions",
+        "description": "Should not produce more than 3 actions",
         "check": "max_actions",
-        "value": 2
+        "value": 3
       }
     ]
   }

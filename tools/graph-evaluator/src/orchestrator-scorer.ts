@@ -1,102 +1,272 @@
 /**
- * Orchestrator prompt scorer.
+ * Orchestrator prompt scorer — v30.3 (JSON output contract).
  *
- * Scores LLM responses against the orchestrator system prompt (cf-v7) spec.
- * The response format is XML (not JSON), so scoring is regex/string-based.
+ * Scores LLM responses against the orchestrator v30.3 prompt spec.
+ * The response format is JSON: { text, insights[], recommended_actions[] }.
  *
- * Dimensions:
- * - Envelope structure: diagnostics, response, assistant_text, blocks, suggested_actions
- * - Tool selection accuracy
- * - Banned terms compliance
- * - Uncertainty language
- * - Block type validity (commentary, review_card only)
- * - Suggested actions validity (max 2, proper structure)
- * - Coaching correctness
- * - Forbidden phrases
- * - Must-contain substrings
- * - XML well-formedness
+ * Dimensions (8, weighted):
+ * 1. valid_json          (0.15) — parses as JSON with exactly 3 root keys
+ * 2. text_quality        (0.15) — non-empty, >=1 sentence, <200 words, no markdown/HTML/dashes
+ * 3. insight_compliance   (0.10) — 0-3 insights with valid type/severity/target_id
+ * 4. action_eligibility   (0.20) — 0-3 actions, action_type from eligible_actions, valid fields
+ * 5. parameter_validity   (0.05) — parameters match user-stated values, no fabrication
+ * 6. fabrication_check    (0.15) — no invented numbers/drivers/mechanisms/target_ids
+ * 7. banned_terms         (0.10) — no internal terms in user-facing text
+ * 8. scenario_specific    (0.10) — per-fixture assertions
  */
 
-import type { OrchestratorFixture, OrchestratorScore } from "./types.js";
+import type { OrchestratorFixture, OrchestratorScore, TurnContext, ScenarioAssertion } from "./types.js";
 
 // =============================================================================
-// Banned internal terms (from prompt CORE_RULES)
+// Banned terms (from v30.3 prompt VOICE anti-patterns)
 // =============================================================================
 
 const BANNED_TERMS = [
-  "headline_type",
-  "readiness",
-  "canonical_state",
+  "TurnContext",
+  "pipeline",
+  "blocks",
+  "chips",
+  "zones",
+  "CEE",
+  "PLoT",
+  "ISL",
+  "Layer 0",
+  "Layer 1",
+  "Layer 2",
+  "action_type",
+  "chip_metadata",
+  "response_version",
+  "eligible_actions",
+  "target_id",
   "exists_probability",
   "voi",
+  "factor_sensitivity",
+  "recommendation_stability",
   "attribution_stability",
   "rank_flip_rate",
   "model_critiques",
-  "elasticity",
-  "factor_sensitivity",
-  "recommendation_stability",
+  "canonical_state",
+  "headline_type",
+  "edge_e_values",
+  "dsk_claim_id",
+  "evidence_strength",
+  "E-value",
+  "e_value",
+  "EVPI",
+  "evpi_percentage_points",
+  "conditional_winners",
+  "inference_warnings",
 ];
 
-// Terms short enough to be substrings of common English words.
-// Use word-boundary regex rather than includes() to avoid false positives:
-// "voi" must not match inside "avoids", "invoice", "devoid", etc.
-const BANNED_TERMS_WORD_BOUNDARY = new Set(["voi"]);
-
-// =============================================================================
-// Tool names the prompt defines
-// =============================================================================
-
-const VALID_TOOLS = [
-  "draft_graph",
-  "edit_graph",
-  "run_analysis",
-  "explain_results",
-  "generate_brief",
-  "research_topic",
+const BANNED_FILLER = [
+  "Great question!",
+  "That's a great",
 ];
 
+// Short terms that need word-boundary matching to avoid false positives.
+// "voi" must not match "avoids", "invoice", "devoid".
+// "ISL" must not match "island".
+// "CEE" must not match "proceed".
+const WORD_BOUNDARY_TERMS = new Set([
+  "voi",
+  "ISL",
+  "CEE",
+  "PLoT",
+  "chips",
+  "blocks",
+  "zones",
+  "EVPI",
+]);
+
 // =============================================================================
-// Valid block types
+// Valid enums from the output contract
 // =============================================================================
 
-const VALID_BLOCK_TYPES = ["commentary", "review_card", "artefact"];
+const VALID_INSIGHT_TYPES = [
+  "bias_detected",
+  "missing_perspective",
+  "assumption_risk",
+  "opportunity",
+  "calibration_concern",
+  "structural_gap",
+];
+
+const VALID_SEVERITIES = ["info", "warning", "important"];
+
+const VALID_PRIORITIES = ["high", "medium", "low"];
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-/** Extract content between two XML-like tags (non-greedy, first match). */
-function extractTag(text: string, tag: string): string | null {
-  const re = new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "i");
-  const match = text.match(re);
-  return match ? match[0] : null;
-}
+/** Try to parse the response as JSON. Returns null on failure. */
+function tryParseJson(raw: string): Record<string, unknown> | null {
+  try {
+    // Strip markdown fences if present
+    let cleaned = raw.trim();
+    if (cleaned.startsWith("```json")) {
+      cleaned = cleaned.slice(7);
+    } else if (cleaned.startsWith("```")) {
+      cleaned = cleaned.slice(3);
+    }
+    if (cleaned.endsWith("```")) {
+      cleaned = cleaned.slice(0, -3);
+    }
+    cleaned = cleaned.trim();
 
-/** Extract inner content of a tag. */
-function extractTagContent(text: string, tag: string): string | null {
-  const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "i");
-  const match = text.match(re);
-  return match ? match[1] : null;
-}
-
-/** Extract all occurrences of a tag's inner content. */
-function extractAllTagContents(text: string, tag: string): string[] {
-  const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "gi");
-  const results: string[] = [];
-  let match;
-  while ((match = re.exec(text)) !== null) {
-    results.push(match[1]);
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
   }
-  return results;
 }
 
-/**
- * Get user-facing text: assistant_text + blocks content + action labels/messages.
- * Excludes diagnostics.
- */
-function getUserFacingText(raw: string): string {
-  const responseBlock = extractTagContent(raw, "response") ?? "";
-  return responseBlock;
+/** Count words in text. */
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Check if text contains at least one sentence (has a period, exclamation, or question mark). */
+function hasSentence(text: string): boolean {
+  return /[.!?]/.test(text);
+}
+
+/** Get all entity IDs from the TurnContext. */
+function getAllEntityIds(ctx: TurnContext): Set<string> {
+  const ids = new Set<string>();
+  for (const d of ctx.entities.decisions) ids.add(d.id);
+  for (const o of ctx.entities.options) ids.add(o.id);
+  for (const f of ctx.entities.factors) ids.add(f.id);
+  for (const o of ctx.entities.outcomes) ids.add(o.id);
+  for (const r of ctx.entities.risks) ids.add(r.id);
+  for (const g of ctx.entities.goals) ids.add(g.id);
+  return ids;
+}
+
+/** Get all numbers present in the analysis context + entity labels. */
+function getContextNumbers(ctx: TurnContext): Set<number> {
+  const nums = new Set<number>();
+
+  // Analysis results
+  if (ctx.analysis.winner) {
+    nums.add(ctx.analysis.winner.probability);
+    nums.add(Math.round(ctx.analysis.winner.probability * 100));
+  }
+  if (ctx.analysis.runner_up) {
+    nums.add(ctx.analysis.runner_up.probability);
+    nums.add(Math.round(ctx.analysis.runner_up.probability * 100));
+  }
+  for (const d of ctx.analysis.top_drivers) {
+    nums.add(d.sensitivity);
+    nums.add(Math.round(d.sensitivity * 100));
+  }
+
+  // Edge strengths + exists_probability (both raw and percentage forms)
+  for (const e of ctx.entities.edges) {
+    nums.add(e.strength_mean);
+    nums.add(Math.abs(e.strength_mean));
+    nums.add(Math.round(Math.abs(e.strength_mean) * 100));
+    nums.add(e.exists_probability);
+    nums.add(Math.round(e.exists_probability * 100));
+  }
+
+  // Factor values (both raw and percentage forms)
+  for (const f of ctx.entities.factors) {
+    if (f.value != null) {
+      nums.add(f.value);
+      if (f.value > 0 && f.value < 1) nums.add(Math.round(f.value * 100));
+    }
+  }
+
+  // Goal thresholds (in all common formats: raw, /1000 for "Xk")
+  for (const g of ctx.entities.goals) {
+    if (g.threshold != null) {
+      nums.add(g.threshold);
+      if (g.threshold >= 1000) nums.add(g.threshold / 1000);
+    }
+  }
+
+  // Constraints
+  for (const c of ctx.entities.constraints) {
+    nums.add(c.value);
+    if (c.value > 0 && c.value < 1) nums.add(Math.round(c.value * 100));
+  }
+
+  // Numbers embedded in entity labels (e.g. "£20k MRR", "Raise Prices to £59")
+  const allLabels: string[] = [];
+  for (const list of [ctx.entities.decisions, ctx.entities.options, ctx.entities.factors,
+                       ctx.entities.outcomes, ctx.entities.risks, ctx.entities.goals]) {
+    for (const ent of list) {
+      if ("label" in ent && typeof ent.label === "string") allLabels.push(ent.label);
+    }
+  }
+  for (const label of allLabels) {
+    const labelNums = label.match(/\d+\.?\d*/g) ?? [];
+    for (const ln of labelNums) {
+      const v = parseFloat(ln);
+      if (!isNaN(v)) nums.add(v);
+    }
+  }
+
+  return nums;
+}
+
+// =============================================================================
+// Scenario-specific assertion evaluator
+// =============================================================================
+
+function evaluateScenarioAssertion(
+  assertion: ScenarioAssertion,
+  parsed: Record<string, unknown>
+): boolean {
+  const text = (parsed.text as string ?? "").toLowerCase();
+  const actions = parsed.recommended_actions as Array<Record<string, unknown>> ?? [];
+
+  switch (assertion.check) {
+    case "action_type_absent":
+      return !actions.some((a) => a.action_type === assertion.value);
+
+    case "action_type_present":
+      return actions.some((a) => a.action_type === assertion.value);
+
+    case "target_id_omitted":
+      // All actions should omit target_id (or it should be null/undefined)
+      return actions.every((a) => a.target_id == null);
+
+    case "text_contains":
+      return text.includes((assertion.value as string).toLowerCase());
+
+    case "text_not_contains":
+      return !text.includes((assertion.value as string).toLowerCase());
+
+    case "max_actions":
+      return actions.length <= (assertion.value as number);
+
+    case "min_actions":
+      return actions.length >= (assertion.value as number);
+
+    case "asks_question":
+      return text.includes("?");
+
+    case "no_rubber_stamp": {
+      // Should not just say "go ahead" without probing readiness/reversibility
+      const rubberStampPhrases = ["go ahead", "you're ready", "proceed with confidence", "nothing to worry about"];
+      return !rubberStampPhrases.some((p) => text.includes(p));
+    }
+
+    case "proposes_structural_fix":
+      // Should recommend a structural action (add_factor, add_constraint, adjust_edge_strength, set_factor_value, edit_graph)
+      return actions.some((a) => {
+        const at = a.action_type as string;
+        return ["add_factor", "add_constraint", "adjust_edge_strength", "set_factor_value", "add_option", "edit_graph"].includes(at);
+      });
+
+    default:
+      return true;
+  }
 }
 
 // =============================================================================
@@ -109,323 +279,349 @@ export function scoreOrchestrator(
 ): OrchestratorScore {
   if (!raw || raw.trim().length === 0) {
     return {
-      valid_envelope: false,
-      diagnostics_present: false,
-      assistant_text_present: false,
-      blocks_tag_present: false,
-      actions_tag_present: false,
-      tool_selection_correct: false,
-      no_banned_terms: false,
-      uncertainty_language: false,
-      block_types_valid: false,
-      suggested_actions_valid: false,
-      coaching_correct: false,
-      no_forbidden_phrases: false,
-      must_contain_met: false,
-      xml_well_formed: false,
+      valid_json: false,
+      text_quality: false,
+      insight_compliance: false,
+      action_eligibility: false,
+      parameter_validity: false,
+      fabrication_check: false,
+      banned_terms: false,
+      scenario_specific: false,
       overall: 0,
     };
   }
 
-  // ── Bare tool-call detection ─────────────────────────────────────────────
-  // The prompt says "Tool-call-only turns: emit only the tool call, no
-  // narration."  When expected_tool is set and the response is a bare
-  // function-call (no <response> envelope), that is *correct* behaviour.
-  // We detect this and auto-pass envelope dimensions so the scorer does
-  // not penalise prompt-compliant responses.
-  const expectedTool = fixture.expected.expected_tool;
-  const hasResponseTag = /<response>/i.test(raw);
-  const isBareToolCall =
-    expectedTool !== null &&
-    !hasResponseTag &&
-    (raw.includes(`${expectedTool}(`) || raw.includes(`"name": "${expectedTool}"`));
+  const ctx = fixture.turn_context;
+  const entityIds = getAllEntityIds(ctx);
+  const eligibleActions = new Set(ctx.eligible_actions);
 
-  // ── Envelope structure ────────────────────────────────────────────────────
-  const diagnosticsBlock = extractTag(raw, "diagnostics");
-  const responseBlock = extractTag(raw, "response");
-  const assistantText = extractTagContent(raw, "assistant_text");
-  const blocksTag = extractTag(raw, "blocks");
-  const actionsTag = extractTag(raw, "suggested_actions");
+  // ── 1. valid_json ──────────────────────────────────────────────────────────
+  const parsed = tryParseJson(raw);
+  let valid_json = false;
+  if (parsed) {
+    const keys = Object.keys(parsed).sort();
+    valid_json =
+      keys.length === 3 &&
+      keys.includes("text") &&
+      keys.includes("insights") &&
+      keys.includes("recommended_actions");
+  }
 
-  const diagnostics_present = isBareToolCall ? true : diagnosticsBlock !== null;
-  const assistant_text_present = isBareToolCall ? true : assistantText !== null && assistantText.trim().length > 0;
-  const blocks_tag_present = isBareToolCall ? true : blocksTag !== null;
-  const actions_tag_present = isBareToolCall ? true : actionsTag !== null;
+  // If JSON doesn't parse, remaining dimensions get conservative scores
+  if (!parsed || !valid_json) {
+    return {
+      valid_json: false,
+      text_quality: false,
+      insight_compliance: false,
+      action_eligibility: false,
+      parameter_validity: false,
+      fabrication_check: false,
+      banned_terms: false,
+      scenario_specific: false,
+      overall: 0,
+    };
+  }
 
-  // Valid envelope: diagnostics + response with all three child tags
-  // Auto-pass for bare tool-call responses
-  const valid_envelope = isBareToolCall ? true :
-    diagnostics_present &&
-    responseBlock !== null &&
-    assistant_text_present &&
-    blocks_tag_present &&
-    actions_tag_present;
+  // ── 2. text_quality ────────────────────────────────────────────────────────
+  const textVal = parsed.text;
+  let text_quality = false;
+  if (typeof textVal === "string" && textVal.trim().length > 0) {
+    const text = textVal.trim();
+    const wc = wordCount(text);
+    const oneSentence = hasSentence(text);
+    const under200 = wc <= 200;
+    // No markdown headers (# ##), fences (```), HTML tags
+    const noMarkdownHeaders = !/^#{1,6}\s/m.test(text);
+    const noFences = !text.includes("```");
+    const noHtml = !/<\/?[a-z][^>]*>/i.test(text);
+    // No em dashes, en dashes, double hyphens
+    const noEmDash = !text.includes("\u2014"); // —
+    const noEnDash = !text.includes("\u2013"); // –
+    const noDoubleHyphen = !/ -- /.test(text) && !/--/.test(text.replace(/<!--[\s\S]*?-->/g, ""));
 
-  // Check diagnostics comes before response
-  const diagnosticsFirst = isBareToolCall ? true :
-    diagnostics_present &&
-    responseBlock !== null &&
-    raw.indexOf("<diagnostics>") < raw.indexOf("<response>");
+    text_quality = oneSentence && under200 && noMarkdownHeaders && noFences && noHtml && noEmDash && noEnDash && noDoubleHyphen;
+  }
 
-  // ── Tool selection ────────────────────────────────────────────────────────
-  let tool_selection_correct = true;
-
-  if (expectedTool !== null) {
-    // Bare tool-call: the call itself proves correct selection
-    if (isBareToolCall) {
-      tool_selection_correct = true;
-    } else {
-      // Check if the diagnostics or response mentions the tool
-      const diagnosticsContent = extractTagContent(raw, "diagnostics") ?? "";
-      const fullText = diagnosticsContent + " " + (assistantText ?? "");
-      const mentionsTool = fullText.toLowerCase().includes(expectedTool.toLowerCase());
-
-      // Also check for tool_call patterns or "Tool: <name>" in diagnostics
-      const toolCallPattern = new RegExp(
-        `tool[:\\s]+${expectedTool}|invoke[s]?\\s+${expectedTool}|select[s]?[:\\s]+${expectedTool}`,
-        "i"
-      );
-      const hasToolRef = mentionsTool || toolCallPattern.test(diagnosticsContent);
-
-      tool_selection_correct = hasToolRef;
-    }
+  // ── 3. insight_compliance ──────────────────────────────────────────────────
+  const insights = parsed.insights;
+  let insight_compliance = true;
+  if (!Array.isArray(insights)) {
+    insight_compliance = false;
+  } else if (insights.length > 3) {
+    insight_compliance = false;
   } else {
-    // No tool expected — check that no tool is invoked
-    // (Allow mentioning tools in diagnostics as "no tool needed")
-    const diagnosticsContent = extractTagContent(raw, "diagnostics") ?? "";
-    const noToolPhrases = ["no tool", "no tool needed", "conversational", "not invok"];
-    const mentionsNoTool = noToolPhrases.some((p) =>
-      diagnosticsContent.toLowerCase().includes(p)
+    for (const insight of insights) {
+      if (typeof insight !== "object" || insight === null) {
+        insight_compliance = false;
+        break;
+      }
+      const i = insight as Record<string, unknown>;
+      if (!VALID_INSIGHT_TYPES.includes(i.type as string)) {
+        insight_compliance = false;
+        break;
+      }
+      if (!VALID_SEVERITIES.includes(i.severity as string)) {
+        insight_compliance = false;
+        break;
+      }
+      if (typeof i.description !== "string" || (i.description as string).trim().length === 0) {
+        insight_compliance = false;
+        break;
+      }
+      // target_id must be from entity list or omitted
+      if (i.target_id != null && !entityIds.has(i.target_id as string)) {
+        insight_compliance = false;
+        break;
+      }
+    }
+  }
+
+  // ── 4. action_eligibility ──────────────────────────────────────────────────
+  const actions = parsed.recommended_actions;
+  let action_eligibility = true;
+  if (!Array.isArray(actions)) {
+    action_eligibility = false;
+  } else if (actions.length > 3) {
+    action_eligibility = false;
+  } else {
+    for (const action of actions) {
+      if (typeof action !== "object" || action === null) {
+        action_eligibility = false;
+        break;
+      }
+      const a = action as Record<string, unknown>;
+      // action_type must be from eligible_actions
+      if (!eligibleActions.has(a.action_type as string)) {
+        action_eligibility = false;
+        break;
+      }
+      // target_id must be from entity list or omitted
+      if (a.target_id != null && !entityIds.has(a.target_id as string)) {
+        action_eligibility = false;
+        break;
+      }
+      // priority must be valid
+      if (!VALID_PRIORITIES.includes(a.priority as string)) {
+        action_eligibility = false;
+        break;
+      }
+      // rationale must be non-empty string
+      if (typeof a.rationale !== "string" || (a.rationale as string).trim().length === 0) {
+        action_eligibility = false;
+        break;
+      }
+    }
+  }
+
+  // ── 5. parameter_validity ──────────────────────────────────────────────────
+  // When parameters are present, they should not contain fabricated values.
+  // Since we can't know what the user "stated" from fixture alone, we check
+  // that parameters is either absent, empty, or contains only known values.
+  let parameter_validity = true;
+  if (Array.isArray(actions)) {
+    for (const action of actions) {
+      const a = action as Record<string, unknown>;
+      if (a.parameters != null && typeof a.parameters === "object") {
+        const params = a.parameters as Record<string, unknown>;
+        // Null values are acceptable (means "please provide")
+        // But if a numeric value is present, it should be traceable to context
+        for (const [, v] of Object.entries(params)) {
+          if (typeof v === "number") {
+            // Check against known numbers in the analysis context
+            const knownNums = getContextNumbers(ctx);
+            // Allow null and common round numbers (0, 1, 100)
+            if (!knownNums.has(v) && v !== 0 && v !== 1 && v !== 100) {
+              // Only fail if the number is suspiciously specific
+              // (fabricated parameters like 0.35 when no such value exists)
+              // Allow integers that could be user-referenced (from the brief text)
+              if (!Number.isInteger(v) || v > 1000) {
+                parameter_validity = false;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── 6. fabrication_check ───────────────────────────────────────────────────
+  let fabrication_check = true;
+  const textStr = (parsed.text as string).toLowerCase();
+
+  // Check for fabricated numbers: extract all percentages and decimals from text
+  const numberMatches = textStr.match(/\d+\.?\d*%?/g) ?? [];
+  const knownNums = getContextNumbers(ctx);
+  // Also include numbers from user messages (single-turn + multi-turn)
+  const userMsgs: string[] = [];
+  if (fixture.user_message) userMsgs.push(fixture.user_message);
+  if (fixture.turns) {
+    for (const turn of fixture.turns) {
+      if (turn.content) userMsgs.push(turn.content);
+    }
+  }
+  for (const msg of userMsgs) {
+    const msgNums = msg.match(/\d+\.?\d*/g) ?? [];
+    for (const un of msgNums) {
+      const v = parseFloat(un);
+      if (!isNaN(v)) knownNums.add(v);
+    }
+  }
+  for (const numStr of numberMatches) {
+    const numVal = parseFloat(numStr.replace("%", ""));
+    if (isNaN(numVal)) continue;
+    // Allow common non-data numbers (ordinals, small counts)
+    if (numVal <= 5 || numVal === 10 || numVal === 100) continue;
+    // Allow the number if it's in our known set (or close)
+    const isKnown = [...knownNums].some(
+      (k) => Math.abs(k - numVal) < 0.5
     );
-    // Also acceptable: just doesn't mention any tool action
-    const mentionsToolAction = VALID_TOOLS.some((t) => {
-      const pattern = new RegExp(`tool[:\\s]+${t}|invoke[s]?\\s+${t}`, "i");
-      return pattern.test(diagnosticsContent);
-    });
-    tool_selection_correct = mentionsNoTool || !mentionsToolAction;
+    if (!isKnown) {
+      fabrication_check = false;
+      break;
+    }
   }
 
-  // ── Banned terms ──────────────────────────────────────────────────────────
-  // For bare tool calls, check the raw text (there is no <response> envelope)
-  let no_banned_terms = true;
-  if (fixture.expected.banned_terms_checked) {
-    const userFacing = (isBareToolCall ? raw : getUserFacingText(raw)).toLowerCase();
-    for (const term of BANNED_TERMS) {
-      const termLower = term.toLowerCase();
-      let found: boolean;
-      if (BANNED_TERMS_WORD_BOUNDARY.has(termLower)) {
-        // Short tokens that appear as substrings in common words need word-boundary matching.
-        // "voi" (Value of Information) must not match inside "avoids", "invoice", "devoid".
-        found = new RegExp(`\\b${termLower}\\b`).test(userFacing);
-      } else {
-        found = userFacing.includes(termLower);
+  // Check for drivers mentioned when top_drivers is empty
+  if (ctx.analysis.top_drivers.length === 0) {
+    // Quantified driver claims ("drives 42%") are always fabrication
+    if (/drives?\s+\d+%/.test(textStr)) {
+      fabrication_check = false;
+    }
+    // Unquantified but specific driver claims ("the primary driver is X")
+    const namedDriverPattern = /(?:primary|biggest|main|top|key|most influential)\s+(?:driver|factor)\s+(?:is|being|remains)/i;
+    if (namedDriverPattern.test(textStr)) {
+      fabrication_check = false;
+    }
+  }
+
+  // Check for invented target_ids in insights and actions
+  const allInsights = (parsed.insights as Array<Record<string, unknown>>) ?? [];
+  const allActions = (parsed.recommended_actions as Array<Record<string, unknown>>) ?? [];
+  for (const item of [...allInsights, ...allActions]) {
+    if (item.target_id != null && !entityIds.has(item.target_id as string)) {
+      fabrication_check = false;
+      break;
+    }
+  }
+
+  // ── 7. banned_terms ────────────────────────────────────────────────────────
+  let banned_terms = true;
+  // Check all user-facing text: text + insight descriptions + action rationales
+  const userFacingParts: string[] = [parsed.text as string];
+  for (const insight of allInsights) {
+    if (typeof insight.description === "string") userFacingParts.push(insight.description);
+  }
+  for (const action of allActions) {
+    if (typeof action.rationale === "string") userFacingParts.push(action.rationale);
+  }
+  const userFacingText = userFacingParts.join(" ");
+
+  for (const term of BANNED_TERMS) {
+    if (WORD_BOUNDARY_TERMS.has(term)) {
+      const re = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+      if (re.test(userFacingText)) {
+        banned_terms = false;
+        break;
       }
-      if (found) {
-        no_banned_terms = false;
+    } else {
+      if (userFacingText.toLowerCase().includes(term.toLowerCase())) {
+        banned_terms = false;
         break;
       }
     }
   }
 
-  // ── Uncertainty language ──────────────────────────────────────────────────
-  // Bare tool calls have no conversational text — auto-pass
-  let uncertainty_language = true;
-  if (isBareToolCall) {
-    uncertainty_language = true;
-  } else if (fixture.expected.expects_uncertainty_language) {
-    const text = (assistantText ?? "").toLowerCase();
-    const blocksContent = (extractTagContent(raw, "blocks") ?? "").toLowerCase();
-    const combined = text + " " + blocksContent;
+  // Check filler phrases
+  if (banned_terms) {
+    for (const filler of BANNED_FILLER) {
+      if (userFacingText.includes(filler)) {
+        banned_terms = false;
+        break;
+      }
+    }
+  }
 
-    // Must have hedging phrases
-    const hedgePhrases = [
-      "suggests", "based on", "under this model", "current assumptions",
-      "the analysis", "indicates", "appears", "likely", "may",
-    ];
-    const hasHedging = hedgePhrases.some((p) => combined.includes(p));
-
-    // Must not have absolute phrases
+  // Also check uncertainty language compliance via forbidden phrases
+  if (fixture.expected.expects_uncertainty_language) {
     const absolutePhrases = ["definitely", "guaranteed", "it's impossible", "certainly will"];
-    const hasAbsolute = absolutePhrases.some((p) => combined.includes(p));
-
-    uncertainty_language = hasHedging && !hasAbsolute;
-  }
-
-  // ── Block types ───────────────────────────────────────────────────────────
-  let block_types_valid = true;
-  const blockTypeMatches = extractAllTagContents(raw, "type");
-  // Only check types within <blocks> context
-  const blocksContent = extractTagContent(raw, "blocks") ?? "";
-  const blockTypesInBlocks = extractAllTagContents(blocksContent, "type");
-  for (const bt of blockTypesInBlocks) {
-    if (!VALID_BLOCK_TYPES.includes(bt.trim())) {
-      block_types_valid = false;
-      break;
+    for (const phrase of absolutePhrases) {
+      if (userFacingText.toLowerCase().includes(phrase)) {
+        banned_terms = false;
+        break;
+      }
     }
   }
 
-  // ── Suggested actions ─────────────────────────────────────────────────────
-  // cf-v20 contract: 0-5 actions per turn, roles: facilitator|challenger|scientist
-  // 0 actions acceptable when min_actions === 0 (self-contained responses)
-  const ACTIONS_MAX = 5;
-  const VALID_ACTION_ROLES = ["facilitator", "challenger", "scientist"];
-
-  let suggested_actions_valid = true;
-  const actionsContent = extractTagContent(raw, "suggested_actions") ?? "";
-  const actionBlocks = extractAllTagContents(actionsContent, "action");
-  const actionCount = actionBlocks.length;
-
-  if (isBareToolCall) {
-    suggested_actions_valid = fixture.expected.min_actions === 0;
-  } else {
-    if (actionCount > ACTIONS_MAX) {
-      suggested_actions_valid = false;
-    }
-    if (actionCount < fixture.expected.min_actions) {
-      suggested_actions_valid = false;
-    }
-  }
-
-  // Each action should have role (valid value), label, message
-  for (const action of actionBlocks) {
-    const roleMatch = action.match(/<role>\s*(.*?)\s*<\/role>/);
-    const hasLabel = /<label>/.test(action);
-    const hasMessage = /<message>/.test(action);
-    if (!roleMatch || !hasLabel || !hasMessage) {
-      suggested_actions_valid = false;
-      break;
-    }
-    if (!VALID_ACTION_ROLES.includes(roleMatch[1].trim())) {
-      suggested_actions_valid = false;
-      break;
-    }
-  }
-
-  // ── Coaching correctness ──────────────────────────────────────────────────
-  let coaching_correct = true;
-  if (fixture.expected.expects_coaching) {
-    // Must have at least one review_card block
-    const hasReviewCard = blocksContent.includes("<type>review_card</type>");
-    coaching_correct = hasReviewCard;
-  } else {
-    // Not expecting coaching — review_card blocks are fine but not required
-    coaching_correct = true;
-  }
-
-  // ── Forbidden phrases ─────────────────────────────────────────────────────
-  let no_forbidden_phrases = true;
+  // Check fixture-specific forbidden phrases
   if (fixture.expected.forbidden_phrases && fixture.expected.forbidden_phrases.length > 0) {
-    const userFacing = getUserFacingText(raw).toLowerCase();
     for (const phrase of fixture.expected.forbidden_phrases) {
-      if (userFacing.includes(phrase.toLowerCase())) {
-        no_forbidden_phrases = false;
+      if (userFacingText.toLowerCase().includes(phrase.toLowerCase())) {
+        banned_terms = false;
         break;
       }
     }
   }
 
-  // ── Must-contain substrings ───────────────────────────────────────────────
-  let must_contain_met = true;
+  // ── 8. scenario_specific ───────────────────────────────────────────────────
+  let scenario_specific = true;
+
+  // Check must_contain
   if (fixture.expected.must_contain && fixture.expected.must_contain.length > 0) {
-    const userFacing = (isBareToolCall ? raw : getUserFacingText(raw)).toLowerCase();
     for (const substr of fixture.expected.must_contain) {
-      if (!userFacing.includes(substr.toLowerCase())) {
-        must_contain_met = false;
+      if (!userFacingText.toLowerCase().includes(substr.toLowerCase())) {
+        scenario_specific = false;
         break;
       }
     }
   }
 
-  // ── XML well-formedness ───────────────────────────────────────────────────
-  // Basic check: every opened tag has a matching close tag for the main envelope
-  // Bare tool-call responses auto-pass (no envelope expected)
-  let xml_well_formed = true;
-  if (isBareToolCall) {
-    xml_well_formed = true;
-  } else {
-    const requiredPairs = [
-      ["<diagnostics>", "</diagnostics>"],
-      ["<response>", "</response>"],
-      ["<assistant_text>", "</assistant_text>"],
-      ["<blocks>", "</blocks>"],
-      ["<suggested_actions>", "</suggested_actions>"],
-    ];
-    for (const [open, close] of requiredPairs) {
-      const openCount = raw.split(open).length - 1;
-      const closeCount = raw.split(close).length - 1;
-      if (openCount !== closeCount) {
-        xml_well_formed = false;
+  // Check scenario_assertions
+  if (scenario_specific && fixture.expected.scenario_assertions) {
+    for (const assertion of fixture.expected.scenario_assertions) {
+      if (!evaluateScenarioAssertion(assertion, parsed)) {
+        scenario_specific = false;
         break;
       }
     }
-    // Also check diagnostics comes first
-    if (!diagnosticsFirst) {
-      xml_well_formed = false;
-    }
   }
 
-  // ── Overall score ─────────────────────────────────────────────────────────
-  const dimensions = [
-    valid_envelope,
-    diagnostics_present,
-    assistant_text_present,
-    blocks_tag_present,
-    actions_tag_present,
-    tool_selection_correct,
-    no_banned_terms,
-    uncertainty_language,
-    block_types_valid,
-    suggested_actions_valid,
-    coaching_correct,
-    no_forbidden_phrases,
-    must_contain_met,
-    xml_well_formed,
-  ];
-
-  // Weighted scoring — envelope and tool selection are worth more
+  // ── Overall weighted score ─────────────────────────────────────────────────
   const weights: Record<string, number> = {
-    valid_envelope: 2.0,
-    diagnostics_present: 1.0,
-    assistant_text_present: 1.0,
-    blocks_tag_present: 1.0,
-    actions_tag_present: 1.0,
-    tool_selection_correct: 2.0,
-    no_banned_terms: 1.5,
-    uncertainty_language: 1.0,
-    block_types_valid: 1.0,
-    suggested_actions_valid: 1.0,
-    coaching_correct: 1.5,
-    no_forbidden_phrases: 1.0,
-    must_contain_met: 1.0,
-    xml_well_formed: 1.5,
+    valid_json: 0.15,
+    text_quality: 0.15,
+    insight_compliance: 0.10,
+    action_eligibility: 0.20,
+    parameter_validity: 0.05,
+    fabrication_check: 0.15,
+    banned_terms: 0.10,
+    scenario_specific: 0.10,
   };
 
-  const names = Object.keys(weights);
-  let totalWeight = 0;
-  let weightedScore = 0;
-  for (let i = 0; i < names.length; i++) {
-    const w = weights[names[i]];
-    totalWeight += w;
-    if (dimensions[i]) weightedScore += w;
+  const dims: Record<string, boolean> = {
+    valid_json,
+    text_quality,
+    insight_compliance,
+    action_eligibility,
+    parameter_validity,
+    fabrication_check,
+    banned_terms,
+    scenario_specific,
+  };
+
+  let overall = 0;
+  for (const [key, weight] of Object.entries(weights)) {
+    if (dims[key]) overall += weight;
   }
 
-  const overall = totalWeight > 0 ? weightedScore / totalWeight : 0;
-
   return {
-    valid_envelope,
-    diagnostics_present,
-    assistant_text_present,
-    blocks_tag_present,
-    actions_tag_present,
-    tool_selection_correct,
-    no_banned_terms,
-    uncertainty_language,
-    block_types_valid,
-    suggested_actions_valid,
-    coaching_correct,
-    no_forbidden_phrases,
-    must_contain_met,
-    xml_well_formed,
+    valid_json,
+    text_quality,
+    insight_compliance,
+    action_eligibility,
+    parameter_validity,
+    fabrication_check,
+    banned_terms,
+    scenario_specific,
     overall,
   };
 }

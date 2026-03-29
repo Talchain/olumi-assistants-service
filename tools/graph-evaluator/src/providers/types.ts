@@ -15,6 +15,8 @@ export interface ModelConfig {
   max_tokens?: number;
   /** Request timeout in ms. Default: 60000. Applied identically across providers. */
   timeout_ms?: number;
+  /** Arbitrary model params (e.g. temperature). */
+  params?: Record<string, unknown>;
   /**
    * OpenAI reasoning effort: none | low | medium | high | xhigh.
    * null means do not pass the reasoning parameter.

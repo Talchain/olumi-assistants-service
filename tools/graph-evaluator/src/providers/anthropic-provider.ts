@@ -37,11 +37,13 @@ export class AnthropicProvider implements LLMProvider {
     const timeoutMs = config.timeout_ms ?? DEFAULT_TIMEOUT_MS;
     const maxTokens = config.max_tokens ?? DEFAULT_MAX_TOKENS;
 
+    const temperature = config.params?.temperature as number | undefined;
     const params: Anthropic.MessageCreateParamsNonStreaming = {
       model: config.model,
       system,
       messages: [{ role: "user", content: user }],
       max_tokens: maxTokens,
+      ...(temperature != null ? { temperature } : {}),
     };
 
     // Only pass thinking config for Claude models

@@ -1,0 +1,104 @@
+{
+  "id": "orch-19-blocked-action-no-options",
+  "name": "Blocked Action — Run Analysis With No Options",
+  "description": "User asks to run analysis but the graph has no options. The orchestrator must not recommend run_analysis (ineligible), must state the blocker clearly, and suggest the fastest fix.",
+  "stage": "ideate",
+  "user_message": "Run the analysis now.",
+  "turn_context": {
+    "scenario_id": "orch-19-blocked-action-no-options",
+    "turn_id": "t1",
+    "stage": "ideate",
+    "entities": {
+      "decisions": [],
+      "options": [],
+      "factors": [
+        { "id": "fac_market_size", "label": "Market Size", "category": "external", "has_prior": true },
+        { "id": "fac_team_capacity", "label": "Team Capacity", "category": "controllable", "value": 0.6 }
+      ],
+      "outcomes": [],
+      "risks": [],
+      "goals": [
+        { "id": "goal_revenue", "label": "Revenue Growth", "threshold": 500000, "unit": "GBP" }
+      ],
+      "edges": [
+        { "from": "fac_market_size", "to": "goal_revenue", "strength_mean": 0.5, "exists_probability": 0.85 },
+        { "from": "fac_team_capacity", "to": "goal_revenue", "strength_mean": 0.35, "exists_probability": 0.9 }
+      ],
+      "constraints": []
+    },
+    "graph": {
+      "node_count": 3,
+      "edge_count": 2,
+      "option_count": 0,
+      "missing_structural": ["option"]
+    },
+    "analysis": {
+      "status": "not_run",
+      "staleness_reason": null,
+      "winner": null,
+      "runner_up": null,
+      "robustness_band": null,
+      "top_drivers": [],
+      "fragile_edges": [],
+      "constraints_met": null
+    },
+    "capabilities": {
+      "can_run_analysis": false,
+      "can_explain_results": false,
+      "can_edit_graph": true,
+      "can_compare_options": false,
+      "can_generate_artefact": false,
+      "disabled_reasons": {
+        "run_analysis": "At least two options are required before analysis can run"
+      }
+    },
+    "blockers": [
+      {
+        "type": "missing_options",
+        "target_id": null,
+        "target_label": null,
+        "message": "The model has no options. At least two options are required before analysis can run.",
+        "suggested_action_type": "add_option"
+      }
+    ],
+    "signals": {
+      "high_uncertainty_factors": [],
+      "dominant_factor": null,
+      "close_call": false,
+      "missing_option_families": [],
+      "default_value_count": 0,
+      "weak_edges": []
+    },
+    "conversation": {
+      "turn_count": 3,
+      "last_user_intent": "run_analysis",
+      "last_tool_used": "edit_graph",
+      "recent_actions_taken": ["edit_graph"],
+      "recent_actions_declined": [],
+      "pending_confirmation": null,
+      "last_failed_action": null
+    },
+    "eligible_actions": ["edit_graph", "add_factor", "add_option", "add_constraint", "set_factor_value", "adjust_edge_strength", "research_topic"]
+  },
+  "expected": {
+    "expects_uncertainty_language": false,
+    "must_contain": ["option"],
+    "scenario_assertions": [
+      {
+        "description": "Must not recommend run_analysis (ineligible)",
+        "check": "action_type_absent",
+        "value": "run_analysis"
+      },
+      {
+        "description": "Should recommend adding options",
+        "check": "action_type_present",
+        "value": "add_option"
+      },
+      {
+        "description": "Should have at least one action",
+        "check": "min_actions",
+        "value": 1
+      }
+    ]
+  }
+}
