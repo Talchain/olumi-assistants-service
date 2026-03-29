@@ -173,6 +173,7 @@ describe('Chip assembler — deterministic transport', () => {
       signals: { high_uncertainty_factors: [], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },
       conversation: { turn_count: 0, last_user_intent: null, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null },
       eligible_actions: eligibleActions,
+      disambiguation_hints: [],
       graph: null,
       analysis: null,
       conversational_state: null,
@@ -190,7 +191,7 @@ describe('Chip assembler — deterministic transport', () => {
       rationale: 'Churn is inferred.',
     }];
 
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips } = buildChipsFromRecommendations(recs, ctx);
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBe('challenge_assumption');
     expect(chips[0].parameters).toEqual({ target_id: 'fac_churn' });
@@ -204,7 +205,7 @@ describe('Chip assembler — deterministic transport', () => {
       priority: 'medium',
     }];
 
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips } = buildChipsFromRecommendations(recs, ctx);
     expect(chips).toHaveLength(1);
     expect(chips[0].role).toBe('scientist');
   });
@@ -218,7 +219,7 @@ describe('Chip assembler — deterministic transport', () => {
       priority: 'high',
     }];
 
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips } = buildChipsFromRecommendations(recs, ctx);
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBe('set_factor_value');
     expect(chips[0].parameters).toEqual({ target_id: 'fac_churn', value: 0.04 });

@@ -19,9 +19,10 @@ import type {
   LLMInsight,
   ActionResult,
   DeterministicPipelineResult,
+  TurnQualityMeta,
 } from "./types.js";
 import { buildChipsFromRecommendations } from "./chip-assembler.js";
-import { normaliseDeterministicResponse } from "./response-normaliser.js";
+import { normaliseDeterministicResponse, scanBannedTerms } from "./response-normaliser.js";
 import { computeContextHash } from "../context/context-hash.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
@@ -41,6 +42,12 @@ export interface AssemblerInput {
   executedActions: string[];
   /** LLM call latency in ms (if any). */
   llmLatencyMs?: number;
+  /** How the LLM response was extracted. */
+  extractionMethod?: 'native' | 'fence' | 'regex' | 'fallback';
+  /** Whether TurnContext used the fallback path. */
+  contextFallbackUsed?: boolean;
+  /** Character count of the full system prompt. */
+  promptCharCount?: number;
 }
 
 /**
@@ -56,6 +63,9 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     selectedAction,
     executedActions,
     llmLatencyMs,
+    extractionMethod,
+    contextFallbackUsed,
+    promptCharCount,
   } = input;
 
   // Build assistant text — action confirmation first, LLM coaching second
@@ -92,11 +102,14 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
 
   // Build chips from LLM recommendations
   let suggestedActions: SuggestedAction[] = [];
+  let strippedActions: string[] = [];
   if (llmResponse?.recommended_actions && llmResponse.recommended_actions.length > 0) {
-    suggestedActions = buildChipsFromRecommendations(
+    const chipResult = buildChipsFromRecommendations(
       llmResponse.recommended_actions,
       turnContext,
     );
+    suggestedActions = chipResult.chips;
+    strippedActions = chipResult.strippedActions;
   }
 
   // Build lineage
@@ -156,11 +169,39 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     guidance_items: guidanceItems,
   };
 
+  // Check if text was empty before normalisation
+  const emptyAfterNormalisation = !envelope.assistant_text || envelope.assistant_text.trim().length === 0;
+
   // Apply normaliser
   const normalised = normaliseDeterministicResponse(envelope);
+
+  // Scan banned terms on user-visible surfaces
+  const bannedTermsFound = scanBannedTerms(
+    llmResponse,
+    normalised,
+    turnContext.scenario_id,
+    turnId,
+  );
+
+  // Build quality metadata for telemetry
+  const quality: TurnQualityMeta = {
+    parse_method: extractionMethod ?? 'native',
+    banned_terms_found: bannedTermsFound,
+    ineligible_actions_stripped: strippedActions,
+    insights_count: llmResponse?.insights?.length ?? 0,
+    actions_count: llmResponse?.recommended_actions?.length ?? 0,
+    text_word_count: (normalised.assistant_text ?? '').split(/\s+/).filter(Boolean).length,
+    has_science_concept: llmResponse?.insights?.some((i) => !!i.science_concept) ?? false,
+    disambiguation_triggered: turnContext.disambiguation_hints.length > 0,
+    empty_after_normalisation: emptyAfterNormalisation,
+    llm_action_count_pre_filter: llmResponse?.recommended_actions?.length ?? 0,
+    context_fallback_used: contextFallbackUsed ?? false,
+    prompt_char_count: promptCharCount ?? 0,
+  };
 
   return {
     envelope: normalised as OrchestratorResponseEnvelope & { response_version: 2 },
     httpStatus: 200,
+    _quality: quality,
   };
 }

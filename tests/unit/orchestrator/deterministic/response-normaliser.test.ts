@@ -2,9 +2,15 @@
  * Response Normaliser Tests
  */
 
-import { describe, it, expect } from "vitest";
-import { normaliseDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-normaliser.js";
+import { describe, it, expect, vi } from "vitest";
+import { normaliseDeterministicResponse, scanBannedTerms } from "../../../../src/orchestrator/deterministic/response-normaliser.js";
 import type { OrchestratorResponseEnvelope } from "../../../../src/orchestrator/types.js";
+import type { LLMJsonResponse } from "../../../../src/orchestrator/deterministic/types.js";
+
+vi.mock("../../../../src/utils/telemetry.js", () => ({
+  emit: vi.fn(),
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 function makeEnvelope(overrides: Partial<OrchestratorResponseEnvelope> = {}): OrchestratorResponseEnvelope {
   return {
@@ -83,5 +89,63 @@ describe('normaliseDeterministicResponse', () => {
     const result = normaliseDeterministicResponse(envelope);
     expect(result.blocks.length).toBe(1);
     expect((result.blocks[0].data as any).narrative).toBe('Valid');
+  });
+});
+
+describe('scanBannedTerms', () => {
+  it('detects banned terms in assistant text', () => {
+    const envelope = makeEnvelope({ assistant_text: 'The TurnContext shows your factors' });
+    const found = scanBannedTerms(null, envelope, 'sc-1', 't-1');
+    expect(found).toContain('TurnContext');
+  });
+
+  it('detects banned terms in insight descriptions', () => {
+    const llm: LLMJsonResponse = {
+      text: 'Normal text',
+      insights: [{ type: 'observation', description: 'The ISL module flagged this', severity: 'info' }],
+      recommended_actions: [],
+    };
+    const envelope = makeEnvelope({ assistant_text: 'Normal text' });
+    const found = scanBannedTerms(llm, envelope, 'sc-1', 't-1');
+    expect(found).toContain('ISL');
+  });
+
+  it('detects banned terms in action rationale', () => {
+    const llm: LLMJsonResponse = {
+      text: 'Normal text',
+      insights: [],
+      recommended_actions: [
+        { action_type: 'explain_result', priority: 'high', rationale: 'Check the factor_sensitivity data' },
+      ],
+    };
+    const envelope = makeEnvelope({ assistant_text: 'Normal text' });
+    const found = scanBannedTerms(llm, envelope, 'sc-1', 't-1');
+    expect(found).toContain('factor_sensitivity');
+  });
+
+  it('uses word boundaries to avoid false positives', () => {
+    const envelope = makeEnvelope({ assistant_text: 'She avoids the invoice problem' });
+    const found = scanBannedTerms(null, envelope, 'sc-1', 't-1');
+    // "voi" should NOT match inside "avoids" or "invoice"
+    expect(found).not.toContain('voi');
+  });
+
+  it('returns empty array when no banned terms found', () => {
+    const envelope = makeEnvelope({ assistant_text: 'A perfectly normal response about your decision.' });
+    const found = scanBannedTerms(null, envelope, 'sc-1', 't-1');
+    expect(found).toHaveLength(0);
+  });
+
+  it('does not scan science_concept or target_id', () => {
+    const llm: LLMJsonResponse = {
+      text: 'Normal text',
+      insights: [{ type: 'observation', description: 'Clean', severity: 'info', science_concept: 'CEE analysis', target_id: 'ISL_node' }],
+      recommended_actions: [],
+    };
+    const envelope = makeEnvelope({ assistant_text: 'Normal text' });
+    const found = scanBannedTerms(llm, envelope, 'sc-1', 't-1');
+    // CEE and ISL are only in science_concept/target_id — not scanned
+    expect(found).not.toContain('CEE');
+    expect(found).not.toContain('ISL');
   });
 });

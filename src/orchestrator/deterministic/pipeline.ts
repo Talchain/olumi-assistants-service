@@ -14,7 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { OrchestratorTurnRequest } from "../types.js";
-import type { DeterministicPipelineResult, LLMJsonResponse, ActionResult } from "./types.js";
+import type { DeterministicPipelineResult, DeterministicTurnContext, LLMJsonResponse, ActionResult } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import { computeTurnContext } from "./turn-context.js";
 import { handlePendingConfirmation, storePendingProposal, buildProposal } from "./confirmation-flow.js";
@@ -57,7 +57,34 @@ export async function executeDeterministicPipeline(
   emit('deterministic.pipeline.started', { request_id: requestId, turn_id: turnId });
 
   // ── Layer 0: Compute TurnContext ──────────────────────────────────────────
-  const turnContext = computeTurnContext(turnRequest);
+  let turnContext: DeterministicTurnContext;
+  let contextFallbackUsed = false;
+
+  try {
+    turnContext = computeTurnContext(turnRequest);
+  } catch (err) {
+    log.warn({ request_id: requestId, err }, 'deterministic.turn_context_fallback');
+    contextFallbackUsed = true;
+    // Minimal fallback context — preserves scenario_id and stage if extractable
+    const ctx = turnRequest.context;
+    turnContext = {
+      stage: 'frame',
+      entities: { nodes: new Map(), edges: [], option_ids: [], goal_id: null },
+      graph_summary: { node_count: 0, edge_count: 0, option_count: 0, option_labels: [], goal_label: null, missing_structural: ['context computation failed'] },
+      analysis_summary: null,
+      capabilities: { can_run_analysis: false, can_explain_results: false, can_compare_options: false, can_edit_graph: false, can_challenge: false, can_generate_artefact: false },
+      blockers: [],
+      signals: { high_uncertainty_factors: [], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },
+      conversation: { turn_count: 0, last_user_intent: null, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null },
+      eligible_actions: [],
+      disambiguation_hints: [],
+      graph: ctx.graph ?? turnRequest.graph_state ?? null,
+      analysis: ctx.analysis_response ?? turnRequest.analysis_state ?? null,
+      conversational_state: ctx.conversational_state ?? null,
+      scenario_id: ctx.scenario_id,
+      analysis_inputs: ctx.analysis_inputs ?? null,
+    };
+  }
 
   log.info({
     request_id: requestId,
@@ -65,6 +92,7 @@ export async function executeDeterministicPipeline(
     eligible_actions: turnContext.eligible_actions,
     node_count: turnContext.graph_summary.node_count,
     has_analysis: turnContext.analysis_summary != null,
+    context_fallback_used: contextFallbackUsed,
   }, 'deterministic.turn_context_computed');
 
   // ── Check pending confirmation ────────────────────────────────────────────
@@ -74,7 +102,7 @@ export async function executeDeterministicPipeline(
       request_id: requestId,
       confirmed: !confirmResult.cleared,
     });
-    return assembleDeterministicResponse({
+    const confResult = assembleDeterministicResponse({
       turnContext,
       llmResponse: null,
       actionResult: confirmResult.actionResult ?? null,
@@ -82,7 +110,10 @@ export async function executeDeterministicPipeline(
       routing: 'deterministic',
       selectedAction: null,
       executedActions: [],
+      contextFallbackUsed,
     });
+    emitQualityTelemetry(confResult, turnRequest.context.scenario_id, turnId);
+    return confResult;
   }
 
   // ── Chip metadata: bypass intent classification ──────────────────────────
@@ -127,7 +158,7 @@ export async function executeDeterministicPipeline(
             action: directAction,
             reason: prereqError,
           });
-          return assembleDeterministicResponse({
+          const prereqResult = assembleDeterministicResponse({
             turnContext,
             llmResponse: null,
             actionResult: {
@@ -139,7 +170,10 @@ export async function executeDeterministicPipeline(
             routing: 'deterministic',
             selectedAction: directAction,
             executedActions: [],
+            contextFallbackUsed,
           });
+          emitQualityTelemetry(prereqResult, turnRequest.context.scenario_id, turnId);
+          return prereqResult;
         }
         // For intent-classified matches, fall through to LLM path
       } else {
@@ -168,7 +202,7 @@ export async function executeDeterministicPipeline(
             const proposalBlock = createProposalBlock(proposal, turnId);
 
             // Return with ProposalBlock but without operations (stored only)
-            return assembleDeterministicResponse({
+            const proposalResult = assembleDeterministicResponse({
               turnContext,
               llmResponse: null,
               actionResult: {
@@ -181,7 +215,10 @@ export async function executeDeterministicPipeline(
               routing: 'deterministic',
               selectedAction: directAction,
               executedActions: [],
+              contextFallbackUsed,
             });
+            emitQualityTelemetry(proposalResult, turnRequest.context.scenario_id, turnId);
+            return proposalResult;
           }
 
           emit('deterministic.action.executed', {
@@ -192,11 +229,13 @@ export async function executeDeterministicPipeline(
 
           // For actions needing LLM narrative, do a quick LLM call
           let llmResponse: LLMJsonResponse | null = null;
+          let llmCallMeta: LLMCallResult | null = null;
           if (!actionResult.assistantText) {
-            llmResponse = await callLLM(turnContext, turnRequest.message, requestId);
+            llmCallMeta = await callLLM(turnContext, turnRequest.message, requestId);
+            llmResponse = llmCallMeta?.response ?? null;
           }
 
-          return assembleDeterministicResponse({
+          const result = assembleDeterministicResponse({
             turnContext,
             llmResponse,
             actionResult,
@@ -204,12 +243,17 @@ export async function executeDeterministicPipeline(
             routing: 'deterministic',
             selectedAction: directAction,
             executedActions: [directAction],
+            extractionMethod: llmCallMeta?.extraction_method,
+            contextFallbackUsed,
+            promptCharCount: llmCallMeta?.prompt_char_count,
           });
+          emitQualityTelemetry(result, turnRequest.context.scenario_id, turnId);
+          return result;
         } catch (err) {
           log.error({ request_id: requestId, action: directAction, err }, 'deterministic.action.failed');
           // For chip clicks, return error instead of silently falling through to LLM
           if (chipParams) {
-            return assembleDeterministicResponse({
+            const errResult = assembleDeterministicResponse({
               turnContext,
               llmResponse: null,
               actionResult: {
@@ -221,7 +265,10 @@ export async function executeDeterministicPipeline(
               routing: 'deterministic',
               selectedAction: directAction,
               executedActions: [],
+              contextFallbackUsed,
             });
+            emitQualityTelemetry(errResult, turnRequest.context.scenario_id, turnId);
+            return errResult;
           }
         }
       }
@@ -230,8 +277,9 @@ export async function executeDeterministicPipeline(
 
   // ── Full LLM call (free text) ────────────────────────────────────────────
   const llmStart = Date.now();
-  const llmResponse = await callLLM(turnContext, turnRequest.message, requestId);
+  const llmCallResult = await callLLM(turnContext, turnRequest.message, requestId);
   const llmLatencyMs = Date.now() - llmStart;
+  const llmResponse = llmCallResult?.response ?? null;
 
   // Execute recommended actions that are read-only or have clear intent
   let actionResult: ActionResult | null = null;
@@ -271,7 +319,7 @@ export async function executeDeterministicPipeline(
     actions_executed: executedActions,
   });
 
-  return assembleDeterministicResponse({
+  const result = assembleDeterministicResponse({
     turnContext,
     llmResponse,
     actionResult,
@@ -280,26 +328,70 @@ export async function executeDeterministicPipeline(
     selectedAction: executedActions[0] ?? null,
     executedActions,
     llmLatencyMs,
+    extractionMethod: llmCallResult?.extraction_method,
+    contextFallbackUsed,
+    promptCharCount: llmCallResult?.prompt_char_count,
   });
+  emitQualityTelemetry(result, turnRequest.context.scenario_id, turnId);
+  return result;
+}
+
+// ============================================================================
+// Quality Telemetry
+// ============================================================================
+
+const PROMPT_SIZE_WARN_THRESHOLD = 25_000;
+
+function emitQualityTelemetry(
+  result: DeterministicPipelineResult,
+  scenarioId: string,
+  turnId: string,
+): void {
+  const q = result._quality;
+  if (!q) return;
+
+  emit('deterministic.turn_quality', {
+    scenario_id: scenarioId,
+    turn_id: turnId,
+    ...q,
+  });
+
+  if (q.prompt_char_count > PROMPT_SIZE_WARN_THRESHOLD) {
+    log.warn({
+      scenario_id: scenarioId,
+      turn_id: turnId,
+      prompt_char_count: q.prompt_char_count,
+    }, 'deterministic.prompt_size_exceeded');
+  }
 }
 
 // ============================================================================
 // LLM Call
 // ============================================================================
 
+interface LLMCallResult {
+  response: LLMJsonResponse;
+  extraction_method: 'native' | 'fence' | 'regex' | 'fallback';
+  prompt_char_count: number;
+}
+
 async function callLLM(
-  turnContext: import("./types.js").DeterministicTurnContext,
+  turnContext: DeterministicTurnContext,
   userMessage: string,
   requestId: string,
-): Promise<LLMJsonResponse | null> {
+): Promise<LLMCallResult | null> {
   try {
     const adapter = getAdapter('orchestrator');
     const systemPrompt = buildDeterministicPrompt(turnContext);
 
+    // JSON-forcing suffix: aligns with v30.5 prompt evaluation.
+    // Redundant when responseFormat: 'json_object' is honoured, but harmless.
+    const effectiveMessage = userMessage + '\n\nRespond with valid JSON only.';
+
     const response = await adapter.chat(
       {
         system: systemPrompt,
-        userMessage,
+        userMessage: effectiveMessage,
         maxTokens: 2048,
         temperature: 0.3,
         responseFormat: 'json_object',
@@ -318,14 +410,14 @@ async function callLLM(
       log.warn({ request_id: requestId, warnings: parseResult.warnings }, 'deterministic.llm_parse_warnings');
     }
 
-    return parseResult.response;
+    return {
+      response: parseResult.response,
+      extraction_method: parseResult.extraction_method,
+      prompt_char_count: systemPrompt.length,
+    };
   } catch (err) {
     log.error({ request_id: requestId, err }, 'deterministic.llm_call.failed');
-    return {
-      text: "I couldn't process that request. Try rephrasing or use one of the suggested actions.",
-      insights: [],
-      recommended_actions: [],
-    };
+    return null;
   }
 }
 

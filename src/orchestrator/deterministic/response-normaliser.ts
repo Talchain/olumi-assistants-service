@@ -5,7 +5,9 @@
  */
 
 import type { OrchestratorResponseEnvelope, SuggestedAction, TypedConversationBlock } from "../types.js";
+import type { LLMJsonResponse } from "./types.js";
 import { isValidAction } from "./actions/registry.js";
+import { emit } from "../../utils/telemetry.js";
 
 // ============================================================================
 // Constants
@@ -92,4 +94,71 @@ function isEmptyBlock(block: TypedConversationBlock): boolean {
     default:
       return false;
   }
+}
+
+// ============================================================================
+// Banned Term Scanner
+// ============================================================================
+
+const BANNED_TERMS: readonly string[] = Object.freeze([
+  'TurnContext', 'blocks', 'chips', 'zones', 'CEE', 'PLoT', 'ISL',
+  'Layer 0', 'Layer 1', 'Layer 2',
+  'action_type', 'chip_metadata', 'response_version', 'eligible_actions', 'target_id',
+  'exists_probability', 'voi', 'factor_sensitivity', 'recommendation_stability',
+  'attribution_stability', 'rank_flip_rate', 'model_critiques', 'canonical_state',
+  'headline_type', 'edge_e_values', 'dsk_claim_id', 'evidence_strength', 'E-value',
+  'e_value', 'EVPI', 'evpi_percentage_points', 'conditional_winners', 'inference_warnings',
+]);
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Pre-compiled word-boundary regexes for each banned term. */
+const BANNED_REGEXES: Array<{ term: string; re: RegExp }> = BANNED_TERMS.map((term) => ({
+  term,
+  re: new RegExp('\\b' + escapeRegex(term) + '\\b', 'i'),
+}));
+
+/**
+ * Scan user-visible surfaces of the LLM response for banned internal terms.
+ * Scans: text, insights[].description, recommended_actions[].rationale.
+ * Does NOT scan: science_concept, target_id (internal references).
+ * Does NOT mutate any text.
+ *
+ * Returns array of matched term strings (empty if none).
+ */
+export function scanBannedTerms(
+  llmResponse: LLMJsonResponse | null,
+  envelope: OrchestratorResponseEnvelope,
+  scenarioId: string,
+  turnId: string,
+): string[] {
+  if (!llmResponse && !envelope.assistant_text) return [];
+
+  // Collect all user-visible text surfaces
+  const surfaces: string[] = [];
+  if (envelope.assistant_text) surfaces.push(envelope.assistant_text);
+  if (llmResponse?.insights) {
+    for (const insight of llmResponse.insights) {
+      if (insight.description) surfaces.push(insight.description);
+    }
+  }
+  if (llmResponse?.recommended_actions) {
+    for (const action of llmResponse.recommended_actions) {
+      if (action.rationale) surfaces.push(action.rationale);
+    }
+  }
+
+  const combined = surfaces.join(' ');
+  const found: string[] = [];
+
+  for (const { term, re } of BANNED_REGEXES) {
+    if (re.test(combined)) {
+      found.push(term);
+      emit('deterministic.banned_term_detected', { term, scenario_id: scenarioId, turn_id: turnId });
+    }
+  }
+
+  return found;
 }

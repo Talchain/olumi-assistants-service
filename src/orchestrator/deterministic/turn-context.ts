@@ -11,6 +11,7 @@ import type { OrchestratorTurnRequest, V2RunResponseEnvelope, DecisionStage } fr
 import type { GraphV3T, NodeV3T } from "../../schemas/cee-v3.js";
 import type {
   DeterministicTurnContext,
+  DisambiguationHint,
   EntityRegistry,
   EntityEntry,
   EdgeEntry,
@@ -93,6 +94,9 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
   // Eligible actions
   const eligibleActions = computeEligibleActions(stage, capabilities, blockers, conversation.recent_actions_taken);
 
+  // Disambiguation hints
+  const disambiguationHints = computeDisambiguationHints(turnRequest.message, entities);
+
   return {
     stage,
     entities,
@@ -103,6 +107,7 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
     signals,
     conversation,
     eligible_actions: eligibleActions,
+    disambiguation_hints: disambiguationHints,
     graph,
     analysis,
     conversational_state: ctx.conversational_state ?? null,
@@ -572,4 +577,73 @@ function buildAliases(node: NodeV3T): string[] {
   }
 
   return aliases;
+}
+
+// ============================================================================
+// Disambiguation
+// ============================================================================
+
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'my', 'this', 'that', 'it', 'to', 'for',
+  'of', 'in', 'and', 'or', 'but', 'with', 'on', 'at', 'by', 'from', 'i',
+  'me', 'we', 'you', 'can', 'do', 'what', 'how', 'why', 'if', 'not', 'no',
+  'yes', 'so', 'up', 'all', 'would', 'could', 'should', 'will', 'be', 'been',
+  'has', 'have', 'had', 'was', 'were', 'about', 'more', 'set', 'add', 'run',
+  'change', 'update', 'remove', 'get', 'let', 'make', 'try', 'use', 'new',
+]);
+
+const MAX_DISAMBIGUATION_HINTS = 2;
+
+/**
+ * Proactive disambiguation: detect tokens in the user message that match
+ * 2+ actionable entities. Only emits hints for ambiguous matches, not exact
+ * single-entity matches.
+ */
+export function computeDisambiguationHints(
+  message: string,
+  entities: EntityRegistry,
+): DisambiguationHint[] {
+  if (entities.nodes.size === 0) return [];
+
+  // Collect actionable entity labels (is_action_target: true)
+  const actionableEntries: Array<{ id: string; label: string; labelLower: string }> = [];
+  for (const [id, entry] of entities.nodes) {
+    if (!entry.is_action_target) continue;
+    actionableEntries.push({ id, label: entry.label, labelLower: entry.label.toLowerCase() });
+  }
+  if (actionableEntries.length < 2) return [];
+
+  // Build set of exact labels for exclusion
+  const exactLabels = new Set(actionableEntries.map((e) => e.labelLower));
+
+  // Tokenise message
+  const tokens = message
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.replace(/[^a-z0-9]/g, ''))
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t));
+
+  // Dedupe tokens
+  const uniqueTokens = [...new Set(tokens)];
+
+  const hints: DisambiguationHint[] = [];
+
+  for (const token of uniqueTokens) {
+    // Skip if token exactly matches a single entity label (unambiguous)
+    if (exactLabels.has(token)) continue;
+
+    // Find actionable entities whose label contains this token
+    const matches = actionableEntries.filter((e) => e.labelLower.includes(token));
+
+    if (matches.length >= 2) {
+      hints.push({
+        term: token,
+        candidates: matches.map((m) => ({ id: m.id, label: m.label })),
+      });
+    }
+  }
+
+  // Sort by number of candidates descending, cap at MAX
+  hints.sort((a, b) => b.candidates.length - a.candidates.length);
+  return hints.slice(0, MAX_DISAMBIGUATION_HINTS);
 }

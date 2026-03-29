@@ -17,6 +17,7 @@ function makeContext(overrides: Partial<DeterministicTurnContext> = {}): Determi
     signals: { high_uncertainty_factors: [], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },
     conversation: { turn_count: 0, last_user_intent: null, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null },
     eligible_actions: ['explain_result', 'compare_options', 'run_analysis', 'challenge_assumption'],
+    disambiguation_hints: [],
     graph: null,
     analysis: null,
     conversational_state: null,
@@ -33,7 +34,7 @@ describe('buildChipsFromRecommendations', () => {
       { action_type: 'compare_options', priority: 'medium', rationale: 'Compare side by side' },
     ];
     const ctx = makeContext();
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips } = buildChipsFromRecommendations(recs, ctx);
 
     expect(chips).toHaveLength(2);
     expect(chips[0].label).toBeDefined();
@@ -41,27 +42,40 @@ describe('buildChipsFromRecommendations', () => {
     expect(chips[0].role).toBeDefined();
   });
 
-  it('filters out invalid action types', () => {
+  it('filters out invalid action types and reports them as stripped', () => {
     const recs = [
       { action_type: 'not_a_real_action', priority: 'high' },
       { action_type: 'explain_result', priority: 'high' },
     ] as unknown as LLMRecommendedAction[];
     const ctx = makeContext();
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips, strippedActions } = buildChipsFromRecommendations(recs, ctx);
 
     expect(chips).toHaveLength(1);
     expect(chips[0].label).toContain('Explain');
+    expect(strippedActions).toContain('not_a_real_action');
   });
 
-  it('filters out actions not in eligible_actions', () => {
+  it('filters out actions not in eligible_actions and reports them as stripped', () => {
     const recs: LLMRecommendedAction[] = [
       { action_type: 'generate_artefact', artefact_type: 'decision_matrix', priority: 'high' }, // not in eligible_actions
       { action_type: 'explain_result', priority: 'high' },
     ];
     const ctx = makeContext({ eligible_actions: ['explain_result'] });
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips, strippedActions } = buildChipsFromRecommendations(recs, ctx);
 
     expect(chips).toHaveLength(1);
+    expect(strippedActions).toContain('generate_artefact');
+  });
+
+  it('dedupes stripped actions', () => {
+    const recs = [
+      { action_type: 'bogus', priority: 'high' },
+      { action_type: 'bogus', priority: 'low' },
+    ] as unknown as LLMRecommendedAction[];
+    const ctx = makeContext();
+    const { strippedActions } = buildChipsFromRecommendations(recs, ctx);
+
+    expect(strippedActions).toEqual(['bogus']);
   });
 
   it('suppresses recently taken actions', () => {
@@ -77,7 +91,7 @@ describe('buildChipsFromRecommendations', () => {
         pending_confirmation: null,
       },
     });
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips } = buildChipsFromRecommendations(recs, ctx);
 
     expect(chips).toHaveLength(0);
   });
@@ -90,7 +104,7 @@ describe('buildChipsFromRecommendations', () => {
       { action_type: 'challenge_assumption', priority: 'low' },
     ];
     const ctx = makeContext();
-    const chips = buildChipsFromRecommendations(recs, ctx);
+    const { chips } = buildChipsFromRecommendations(recs, ctx);
 
     expect(chips).toHaveLength(3);
   });

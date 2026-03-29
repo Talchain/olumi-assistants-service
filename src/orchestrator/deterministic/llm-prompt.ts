@@ -9,7 +9,7 @@
  * are loaded from PMS when available; falls back to hardcoded defaults.
  */
 
-import type { DeterministicTurnContext } from "./types.js";
+import type { DeterministicTurnContext, DisambiguationHint } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
 import { loadPrompt } from "../../prompts/loader.js";
@@ -84,6 +84,11 @@ export function buildDeterministicPrompt(ctx: DeterministicTurnContext): string 
   // Dynamic sections — always code-generated
   sections.push(buildStateSection(ctx));
   sections.push(buildActionVocabulary(ctx.eligible_actions));
+
+  // Disambiguation section — only when hints are non-empty
+  if (ctx.disambiguation_hints.length > 0) {
+    sections.push(buildDisambiguationSection(ctx.disambiguation_hints));
+  }
 
   return sections.join('\n\n---\n\n');
 }
@@ -266,7 +271,7 @@ const ACTION_PARAM_SCHEMAS: Partial<Record<ActionName, string>> = {
 
 function buildActionVocabulary(eligibleActions: ActionName[]): string {
   if (eligibleActions.length === 0) {
-    return '## Eligible Actions\n\nNo actions available at this stage.';
+    return '## Eligible Actions\n\nNo actions available at this stage. Suggest what the user should do to unblock actions (e.g., add factors to the model, draft a new model, provide more detail about their decision).';
   }
 
   const lines: string[] = ['## Eligible Actions\n\nYou may recommend these actions (0-3). Include target_id and parameters as shown:'];
@@ -278,6 +283,17 @@ function buildActionVocabulary(eligibleActions: ActionName[]): string {
     const schema = ACTION_PARAM_SCHEMAS[name];
     const schemaStr = schema ? ` — params: ${schema}` : '';
     lines.push(`- \`${name}\`: ${def.description}${confirm}${schemaStr}`);
+  }
+
+  return lines.join('\n');
+}
+
+function buildDisambiguationSection(hints: DisambiguationHint[]): string {
+  const lines: string[] = ['## Disambiguation\n\nThe user\'s message may reference these similar elements. Ask the user to clarify which they mean before acting:'];
+
+  for (const hint of hints) {
+    const candidates = hint.candidates.map((c) => `${c.id} (${c.label})`).join(' or ');
+    lines.push(`- "${hint.term}" could mean: ${candidates}`);
   }
 
   return lines.join('\n');

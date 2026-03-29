@@ -59,6 +59,7 @@ function makeCtx(overrides: Partial<DeterministicTurnContext> = {}): Determinist
     signals: { high_uncertainty_factors: ['fac_price'], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },
     conversation: { turn_count: 0, last_user_intent: null, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null },
     eligible_actions: [],
+    disambiguation_hints: [],
     graph: { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Maximise ROI' }], edges: [] } as unknown as GraphV3T,
     analysis: {
       meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },

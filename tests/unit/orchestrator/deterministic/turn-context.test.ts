@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeTurnContext, buildEntityRegistry } from "../../../../src/orchestrator/deterministic/turn-context.js";
+import { computeTurnContext, buildEntityRegistry, computeDisambiguationHints } from "../../../../src/orchestrator/deterministic/turn-context.js";
 import type { OrchestratorTurnRequest, V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 
@@ -185,5 +185,73 @@ describe('buildEntityRegistry', () => {
     expect(registry.edges.length).toBe(0);
     expect(registry.option_ids.length).toBe(0);
     expect(registry.goal_id).toBeNull();
+  });
+});
+
+describe('computeDisambiguationHints', () => {
+  function makeEntityRegistry() {
+    const nodes = new Map<string, import("../../../../src/orchestrator/deterministic/types.js").EntityEntry>();
+    nodes.set('fac_churn_rate', { id: 'fac_churn_rate', label: 'Churn Rate', kind: 'factor', aliases: ['churn', 'rate'], is_action_target: true });
+    nodes.set('fac_churn_risk', { id: 'fac_churn_risk', label: 'Churn Risk', kind: 'factor', aliases: ['churn', 'risk'], is_action_target: true });
+    nodes.set('fac_revenue', { id: 'fac_revenue', label: 'Revenue', kind: 'factor', aliases: ['rev'], is_action_target: true });
+    nodes.set('goal_mrr', { id: 'goal_mrr', label: 'MRR Goal', kind: 'goal', aliases: [], is_action_target: false });
+    return { nodes, edges: [], option_ids: [], goal_id: 'goal_mrr' } as import("../../../../src/orchestrator/deterministic/types.js").EntityRegistry;
+  }
+
+  it('detects ambiguous token matching 2+ actionable entities', () => {
+    const registry = makeEntityRegistry();
+    const hints = computeDisambiguationHints('set churn to 5%', registry);
+
+    expect(hints).toHaveLength(1);
+    expect(hints[0].term).toBe('churn');
+    expect(hints[0].candidates).toHaveLength(2);
+    expect(hints[0].candidates.map((c) => c.id)).toContain('fac_churn_rate');
+    expect(hints[0].candidates.map((c) => c.id)).toContain('fac_churn_risk');
+  });
+
+  it('ignores non-actionable entities (is_action_target: false)', () => {
+    const registry = makeEntityRegistry();
+    // "goal" only matches goal_mrr which is not an action target
+    const hints = computeDisambiguationHints('tell me about the goal', registry);
+    expect(hints).toHaveLength(0);
+  });
+
+  it('ignores tokens that exactly match a single entity label', () => {
+    const registry = makeEntityRegistry();
+    const hints = computeDisambiguationHints('set revenue to 100', registry);
+    // "revenue" exactly matches "Revenue" (case-insensitive) — unambiguous
+    expect(hints).toHaveLength(0);
+  });
+
+  it('returns empty for short/stop-word messages', () => {
+    const registry = makeEntityRegistry();
+    const hints = computeDisambiguationHints('do it now', registry);
+    expect(hints).toHaveLength(0);
+  });
+
+  it('caps at 2 hints sorted by candidate count desc', () => {
+    const nodes = new Map<string, import("../../../../src/orchestrator/deterministic/types.js").EntityEntry>();
+    // 3 entities matching "rate"
+    nodes.set('f1', { id: 'f1', label: 'Rate A', kind: 'factor', aliases: [], is_action_target: true });
+    nodes.set('f2', { id: 'f2', label: 'Rate B', kind: 'factor', aliases: [], is_action_target: true });
+    nodes.set('f3', { id: 'f3', label: 'Rate C', kind: 'factor', aliases: [], is_action_target: true });
+    // 2 entities matching "cost"
+    nodes.set('f4', { id: 'f4', label: 'Cost X', kind: 'factor', aliases: [], is_action_target: true });
+    nodes.set('f5', { id: 'f5', label: 'Cost Y', kind: 'factor', aliases: [], is_action_target: true });
+    // 2 entities matching "score"
+    nodes.set('f6', { id: 'f6', label: 'Score High', kind: 'factor', aliases: [], is_action_target: true });
+    nodes.set('f7', { id: 'f7', label: 'Score Low', kind: 'factor', aliases: [], is_action_target: true });
+    const registry = { nodes, edges: [], option_ids: [], goal_id: null } as import("../../../../src/orchestrator/deterministic/types.js").EntityRegistry;
+
+    const hints = computeDisambiguationHints('adjust rate and cost and score', registry);
+    expect(hints).toHaveLength(2);
+    // First hint should be "rate" (3 candidates), second should be "cost" or "score" (2 each)
+    expect(hints[0].candidates.length).toBeGreaterThanOrEqual(hints[1].candidates.length);
+  });
+
+  it('returns empty for empty entity registry', () => {
+    const registry = { nodes: new Map(), edges: [], option_ids: [], goal_id: null } as import("../../../../src/orchestrator/deterministic/types.js").EntityRegistry;
+    const hints = computeDisambiguationHints('anything here', registry);
+    expect(hints).toHaveLength(0);
   });
 });

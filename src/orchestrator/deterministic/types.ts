@@ -135,6 +135,8 @@ export interface DeterministicTurnContext {
   signals: TurnSignals;
   conversation: ConversationSummary;
   eligible_actions: ActionName[];
+  /** Proactive disambiguation hints for entity near-collisions. Max 2. */
+  disambiguation_hints: DisambiguationHint[];
   /** Raw graph reference for action handlers that need full graph state. */
   graph: GraphV3T | null;
   /** Raw analysis reference for action handlers that need full analysis. */
@@ -145,6 +147,15 @@ export interface DeterministicTurnContext {
   scenario_id: string;
   /** Analysis inputs for run_analysis delegation. */
   analysis_inputs: AnalysisInputs | null;
+}
+
+/**
+ * Proactive disambiguation hint — emitted when the user message
+ * contains a token that matches 2+ actionable entities.
+ */
+export interface DisambiguationHint {
+  term: string;
+  candidates: Array<{ id: string; label: string }>;
 }
 
 // ============================================================================
@@ -298,4 +309,22 @@ export interface DeterministicPipelineResult {
     response_version: 2;
   };
   httpStatus: number;
+  /** Quality metadata for telemetry (populated by assembler, emitted by pipeline). */
+  _quality?: TurnQualityMeta;
+}
+
+/** Structured quality metadata emitted as telemetry after every deterministic turn. */
+export interface TurnQualityMeta {
+  parse_method: 'native' | 'fence' | 'regex' | 'fallback';
+  banned_terms_found: string[];
+  ineligible_actions_stripped: string[];
+  insights_count: number;
+  actions_count: number;
+  text_word_count: number;
+  has_science_concept: boolean;
+  disambiguation_triggered: boolean;
+  empty_after_normalisation: boolean;
+  llm_action_count_pre_filter: number;
+  context_fallback_used: boolean;
+  prompt_char_count: number;
 }
