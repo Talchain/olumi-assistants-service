@@ -1487,6 +1487,8 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
         const segments = adapter.getMultiTurnSegments(fixture);
         const filledTurns = [...(fixture.turns ?? [])];
         const provider = getProvider(model);
+        // Build system prompt with TurnContext (same as single-turn path)
+        const multiTurnSystem = adapter.buildSystemPrompt(fixture, effectivePrompt);
 
         let totalLatency = 0;
         let totalInputTokens = 0;
@@ -1496,7 +1498,7 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
         let lastError: string | undefined;
 
         for (const segment of segments) {
-          const result = await provider.chat(effectivePrompt, segment.userMessage, model);
+          const result = await provider.chat(multiTurnSystem, segment.userMessage, model);
           totalLatency += result.latency_ms;
           totalInputTokens += result.input_tokens ?? 0;
           totalOutputTokens += result.output_tokens ?? 0;
@@ -1534,7 +1536,7 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
             "\n\nRespond with valid JSON only.",
           ].join("\n");
 
-          const result = await provider.chat(effectivePrompt, finalUserMsg, model);
+          const result = await provider.chat(multiTurnSystem, finalUserMsg, model);
           totalLatency += result.latency_ms;
           totalInputTokens += result.input_tokens ?? 0;
           totalOutputTokens += result.output_tokens ?? 0;
