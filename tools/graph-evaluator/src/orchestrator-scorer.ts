@@ -1,18 +1,18 @@
 /**
- * Orchestrator prompt scorer — v30.3 (JSON output contract).
+ * Orchestrator prompt scorer — v30.5 (JSON output contract).
  *
- * Scores LLM responses against the orchestrator v30.3 prompt spec.
+ * Scores LLM responses against the orchestrator v30.5 prompt spec.
  * The response format is JSON: { text, insights[], recommended_actions[] }.
+ * Actions have no parameters field (removed in v30.5).
  *
- * Dimensions (8, weighted):
+ * Dimensions (7, weighted):
  * 1. valid_json          (0.15) — parses as JSON with exactly 3 root keys
  * 2. text_quality        (0.15) — non-empty, >=1 sentence, <200 words, no markdown/HTML/dashes
  * 3. insight_compliance   (0.10) — 0-3 insights with valid type/severity/target_id
- * 4. action_eligibility   (0.20) — 0-3 actions, action_type from eligible_actions, valid fields
- * 5. parameter_validity   (0.05) — parameters match user-stated values, no fabrication
- * 6. fabrication_check    (0.15) — no invented numbers/drivers/mechanisms/target_ids
- * 7. banned_terms         (0.10) — no internal terms in user-facing text
- * 8. scenario_specific    (0.10) — per-fixture assertions
+ * 4. action_eligibility   (0.25) — 0-3 actions, action_type from eligible_actions, valid fields
+ * 5. fabrication_check    (0.15) — no invented numbers/drivers/mechanisms/target_ids
+ * 6. banned_terms         (0.10) — no internal terms in user-facing text
+ * 7. scenario_specific    (0.10) — per-fixture assertions
  */
 
 import type { OrchestratorFixture, OrchestratorScore, TurnContext, ScenarioAssertion } from "./types.js";
@@ -286,7 +286,6 @@ export function scoreOrchestrator(
       text_quality: false,
       insight_compliance: false,
       action_eligibility: false,
-      parameter_validity: false,
       fabrication_check: false,
       banned_terms: false,
       scenario_specific: false,
@@ -317,7 +316,6 @@ export function scoreOrchestrator(
       text_quality: false,
       insight_compliance: false,
       action_eligibility: false,
-      parameter_validity: false,
       fabrication_check: false,
       banned_terms: false,
       scenario_specific: false,
@@ -416,37 +414,7 @@ export function scoreOrchestrator(
     }
   }
 
-  // ── 5. parameter_validity ──────────────────────────────────────────────────
-  // When parameters are present, they should not contain fabricated values.
-  // Since we can't know what the user "stated" from fixture alone, we check
-  // that parameters is either absent, empty, or contains only known values.
-  let parameter_validity = true;
-  if (Array.isArray(actions)) {
-    for (const action of actions) {
-      const a = action as Record<string, unknown>;
-      if (a.parameters != null && typeof a.parameters === "object") {
-        const params = a.parameters as Record<string, unknown>;
-        // Null values are acceptable (means "please provide")
-        // But if a numeric value is present, it should be traceable to context
-        const paramKnownNums = getContextNumbers(ctx);
-        for (const [, v] of Object.entries(params)) {
-          if (typeof v === "number") {
-            // Allow null and common round numbers (0, 1, 100)
-            if (!paramKnownNums.has(v) && v !== 0 && v !== 1 && v !== 100) {
-              // Only fail if the number is suspiciously specific
-              // (fabricated parameters like 0.35 when no such value exists)
-              // Allow integers that could be user-referenced (from the brief text)
-              if (!Number.isInteger(v) || v > 1000) {
-                parameter_validity = false;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // ── 6. fabrication_check ───────────────────────────────────────────────────
+  // ── 5. fabrication_check ───────────────────────────────────────────────────
   let fabrication_check = true;
   const textStr = (parsed.text as string).toLowerCase();
 
@@ -506,7 +474,7 @@ export function scoreOrchestrator(
     }
   }
 
-  // ── 7. banned_terms ────────────────────────────────────────────────────────
+  // ── 6. banned_terms ────────────────────────────────────────────────────────
   let banned_terms = true;
   // Check all user-facing text: text + insight descriptions + action rationales
   const userFacingParts: string[] = [parsed.text as string];
@@ -564,7 +532,7 @@ export function scoreOrchestrator(
     }
   }
 
-  // ── 8. scenario_specific ───────────────────────────────────────────────────
+  // ── 7. scenario_specific ───────────────────────────────────────────────────
   let scenario_specific = true;
 
   // Check must_contain
@@ -592,8 +560,7 @@ export function scoreOrchestrator(
     valid_json: 0.15,
     text_quality: 0.15,
     insight_compliance: 0.10,
-    action_eligibility: 0.20,
-    parameter_validity: 0.05,
+    action_eligibility: 0.25,
     fabrication_check: 0.15,
     banned_terms: 0.10,
     scenario_specific: 0.10,
@@ -604,7 +571,6 @@ export function scoreOrchestrator(
     text_quality,
     insight_compliance,
     action_eligibility,
-    parameter_validity,
     fabrication_check,
     banned_terms,
     scenario_specific,
@@ -620,7 +586,6 @@ export function scoreOrchestrator(
     text_quality,
     insight_compliance,
     action_eligibility,
-    parameter_validity,
     fabrication_check,
     banned_terms,
     scenario_specific,

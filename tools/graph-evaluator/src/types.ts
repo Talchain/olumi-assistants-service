@@ -535,7 +535,6 @@ export interface OrchestratorScore {
   text_quality: boolean;
   insight_compliance: boolean;
   action_eligibility: boolean;
-  parameter_validity: boolean;
   fabrication_check: boolean;
   banned_terms: boolean;
   scenario_specific: boolean;

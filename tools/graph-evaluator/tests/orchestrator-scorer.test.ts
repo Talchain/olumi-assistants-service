@@ -105,7 +105,6 @@ const PERFECT_RESPONSE = JSON.stringify({
     {
       action_type: "set_factor_value",
       target_id: "fac_cost",
-      parameters: {},
       priority: "high",
       rationale: "Top driver uses a potentially uncalibrated value",
     },

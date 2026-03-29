@@ -183,7 +183,6 @@ export class OrchestratorAdapter
         text_quality: result.text_quality,
         insight_compliance: result.insight_compliance,
         action_eligibility: result.action_eligibility,
-        parameter_validity: result.parameter_validity,
         fabrication_check: result.fabrication_check,
         banned_terms: result.banned_terms,
         scenario_specific: result.scenario_specific,
