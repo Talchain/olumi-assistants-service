@@ -169,11 +169,11 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     guidance_items: guidanceItems,
   };
 
-  // Check if text was empty before normalisation
-  const emptyAfterNormalisation = !envelope.assistant_text || envelope.assistant_text.trim().length === 0;
-
   // Apply normaliser
   const normalised = normaliseDeterministicResponse(envelope);
+
+  // Check if normaliser had to inject default text (was empty before normaliser fixed it)
+  const emptyBeforeNormalisation = !envelope.assistant_text || envelope.assistant_text.trim().length === 0;
 
   // Scan banned terms on user-visible surfaces
   const bannedTermsFound = scanBannedTerms(
@@ -184,8 +184,9 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
   );
 
   // Build quality metadata for telemetry
+  // When LLM call failed (extractionMethod undefined), report as 'error' not 'native'
   const quality: TurnQualityMeta = {
-    parse_method: extractionMethod ?? 'native',
+    parse_method: extractionMethod ?? (llmResponse ? 'native' : 'error'),
     banned_terms_found: bannedTermsFound,
     ineligible_actions_stripped: strippedActions,
     insights_count: llmResponse?.insights?.length ?? 0,
@@ -193,7 +194,7 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     text_word_count: (normalised.assistant_text ?? '').split(/\s+/).filter(Boolean).length,
     has_science_concept: llmResponse?.insights?.some((i) => !!i.science_concept) ?? false,
     disambiguation_triggered: turnContext.disambiguation_hints.length > 0,
-    empty_after_normalisation: emptyAfterNormalisation,
+    empty_after_normalisation: emptyBeforeNormalisation,
     llm_action_count_pre_filter: llmResponse?.recommended_actions?.length ?? 0,
     context_fallback_used: contextFallbackUsed ?? false,
     prompt_char_count: promptCharCount ?? 0,

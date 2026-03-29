@@ -315,7 +315,7 @@ export interface DeterministicPipelineResult {
 
 /** Structured quality metadata emitted as telemetry after every deterministic turn. */
 export interface TurnQualityMeta {
-  parse_method: 'native' | 'fence' | 'regex' | 'fallback';
+  parse_method: 'native' | 'fence' | 'regex' | 'fallback' | 'error';
   banned_terms_found: string[];
   ineligible_actions_stripped: string[];
   insights_count: number;

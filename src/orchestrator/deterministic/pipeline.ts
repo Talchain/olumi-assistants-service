@@ -410,6 +410,15 @@ async function callLLM(
       log.warn({ request_id: requestId, warnings: parseResult.warnings }, 'deterministic.llm_parse_warnings');
     }
 
+    // Emit structured json_fallback event when non-native extraction used
+    if (parseResult.extraction_method !== 'native') {
+      emit('deterministic.json_fallback', {
+        method: parseResult.extraction_method,
+        scenario_id: turnContext.scenario_id,
+        turn_id: requestId,
+      });
+    }
+
     return {
       response: parseResult.response,
       extraction_method: parseResult.extraction_method,

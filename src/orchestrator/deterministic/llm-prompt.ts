@@ -254,12 +254,12 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
 /** Parameter schema hints per action type — injected into the prompt. Must match Zod discriminated union. */
 const ACTION_PARAM_SCHEMAS: Partial<Record<ActionName, string>> = {
   set_factor_value: '{ target_id: "factor ID", value: number, unit?: string }',
-  add_constraint: '{ target_id: "factor ID", operator: "<="|">=", value: number, label: "constraint name", unit?: string }',
+  add_constraint: '{ target_id: "factor ID", constraint_type?: "threshold"|"range", threshold: number, label: "constraint name", unit?: string }',
   add_factor: '{ label: "factor name", category?: "controllable"|"observable"|"external", connect_to?: ["target_id"] }',
-  adjust_edge_strength: '{ from_id: "source factor ID", to_id: "target factor ID", direction: "strengthen"|"weaken" }',
+  adjust_edge_strength: '{ from: "source factor ID", to: "target factor ID", strength_mean?: number }',
   add_option: '{ label: "option name" }',
   remove_factor: '{ target_id: "factor ID" }',
-  set_goal_target: '{ value: number, unit?: string, cap?: number }',
+  set_goal_target: '{ threshold: number, unit?: string, cap?: number }',
   run_analysis: '{}',
   explain_result: '{ focus?: "aspect to focus on" }',
   compare_options: '{}',
