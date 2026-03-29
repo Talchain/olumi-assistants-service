@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
 import type { PatchOperation } from "../../types.js";
+import { DEFAULT_EXISTS_PROBABILITY } from "../../context/constants.js";
 
 export const addFactorAction: ActionDefinition = {
   action_type: 'add_factor',
@@ -70,7 +71,7 @@ export const addFactorAction: ActionDefinition = {
           from: nodeId,
           to: targetId,
           strength: { mean: 0.5, std: 0.15 },
-          exists_probability: 0.8,
+          exists_probability: DEFAULT_EXISTS_PROBABILITY,
           effect_direction: 'positive',
         },
       });

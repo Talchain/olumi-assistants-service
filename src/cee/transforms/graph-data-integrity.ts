@@ -12,7 +12,7 @@
  *
  * 2. Edge field safety net (post-V3-transform):
  *    The primary fix for edge field defaults is in transformEdgeToV3() which now
- *    applies class-aware defaults (1.0 structural, 0.8 causal) when the LLM does
+ *    applies class-aware defaults (1.0 structural, DEFAULT_EXISTS_PROBABILITY causal) when the LLM does
  *    not emit belief_exists or belief. This module is a safety net that catches:
  *    - Edges from the legacy pipeline or other sources that bypassed the transform.
  *    - Structural edges where the LLM explicitly emitted a value < 1.0 (wrong).
@@ -34,6 +34,7 @@
  */
 
 import { log } from "../../utils/telemetry.js";
+import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,7 +86,7 @@ const SCALE_TOLERANCE = 0.05;
 const STRUCTURAL_EXISTS_PROBABILITY = 1.0;
 
 /** Default exists_probability for causal (factor→factor, factor→goal) edges. */
-const CAUSAL_EXISTS_PROBABILITY = 0.8;
+const CAUSAL_EXISTS_PROBABILITY = DEFAULT_EXISTS_PROBABILITY;
 
 // ---------------------------------------------------------------------------
 // Helpers

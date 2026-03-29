@@ -25,6 +25,7 @@ import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 import { log } from "../../../../utils/telemetry.js";
 import { config } from "../../../../config/index.js";
+import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
 
 // ---------------------------------------------------------------------------
@@ -109,8 +110,8 @@ export function fixNanValues(
     }
     if (edge.belief_exists !== undefined && (Number.isNaN(edge.belief_exists) || !Number.isFinite(edge.belief_exists))) {
       const old = edge.belief_exists;
-      edge.belief_exists = 0.8;
-      repairs.push({ code: "NAN_VALUE", path: `edges[${edge.from}→${edge.to}].belief_exists`, action: `Replaced ${old} with 0.8` });
+      edge.belief_exists = DEFAULT_EXISTS_PROBABILITY;
+      repairs.push({ code: "NAN_VALUE", path: `edges[${edge.from}→${edge.to}].belief_exists`, action: `Replaced ${old} with ${DEFAULT_EXISTS_PROBABILITY}` });
     }
   }
 

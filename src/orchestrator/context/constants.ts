@@ -6,6 +6,6 @@
 
 /**
  * Default value for exists_probability when the field is absent from a graph edge.
- * Matches the PLoT server default.
+ * Canonical source: @talchain/schemas limits.ts (matches PLoT server default).
  */
-export const DEFAULT_EXISTS_PROBABILITY = 0.8;
+export { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";

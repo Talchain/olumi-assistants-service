@@ -26,6 +26,7 @@ import type { ActionName } from "./actions/types.js";
 import { ACTION_NAMES } from "./actions/types.js";
 import { inferStage } from "../pipeline/phase1-enrichment/stage-inference.js";
 import { STAGE_TOOL_POLICY } from "../tools/stage-policy.js";
+import { DEFAULT_EXISTS_PROBABILITY } from "../context/constants.js";
 
 // ============================================================================
 // Constants
@@ -160,7 +161,7 @@ export function buildEntityRegistry(graph: GraphV3T | null): EntityRegistry {
       to_label: toEntry?.label ?? edge.to,
       strength_mean: edge.strength?.mean ?? 0,
       strength_std: edge.strength?.std ?? 0,
-      exists_probability: edge.exists_probability ?? 0.8,
+      exists_probability: edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
       effect_direction: edge.effect_direction as 'positive' | 'negative' | undefined,
     });
   }

@@ -20,6 +20,7 @@ import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { config } from "../../config/index.js";
 import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
+import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -426,8 +427,8 @@ export function enrichGraphWithFactors(
       const newEdge: EdgeT = {
         from: nodeId,
         to: targetId,
-        belief: factor.confidence ?? 0.8,
-        belief_exists: factor.confidence ?? 0.8,
+        belief: factor.confidence ?? DEFAULT_EXISTS_PROBABILITY,
+        belief_exists: factor.confidence ?? DEFAULT_EXISTS_PROBABILITY,
         strength_mean: 0.5,
         strength_std: 0.2,
         effect_direction: "positive",

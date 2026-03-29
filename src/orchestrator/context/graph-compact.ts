@@ -40,7 +40,7 @@ export interface CompactEdge {
   from: string;
   to: string;
   strength: number;   // mean only
-  exists: number;     // exists_probability (defaulted to 0.8 if absent)
+  exists: number;     // exists_probability (defaulted to DEFAULT_EXISTS_PROBABILITY if absent)
   /** Human-readable causal interpretation (causal edges only, omitted for structural/bidirected). */
   plain_interpretation?: string;
 }
@@ -193,7 +193,7 @@ function buildPlainInterpretation(
  * Dropped per node: body, state_space, goal_threshold, observed_state.std,
  * observed_state.baseline, observed_state.extractionType (projected to source).
  *
- * Kept per edge: from, to, strength.mean, exists_probability (defaulted to 0.8),
+ * Kept per edge: from, to, strength.mean, exists_probability (defaulted to DEFAULT_EXISTS_PROBABILITY),
  * plain_interpretation (causal edges only).
  * Dropped per edge: strength.std, effect_direction, label.
  *
