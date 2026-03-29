@@ -80,11 +80,9 @@ export function buildDeterministicPrompt(ctx: DeterministicTurnContext): string 
     sections.push(RESPONSE_CONTRACT);
     sections.push(SCIENCE_TRIGGERS);
 
-    emit('deterministic.pms_fallback_used', {
-      task: 'orchestrator',
-      env: process.env.NODE_ENV ?? 'unknown',
-    });
-    log.warn('deterministic.pms_fallback_used');
+    const fallbackMeta = { task: 'orchestrator', env: process.env.NODE_ENV ?? 'unknown' };
+    emit('deterministic.pms_fallback_used', fallbackMeta);
+    log.warn(fallbackMeta, 'deterministic.pms_fallback_used');
   }
 
   // Dynamic sections — always code-generated
