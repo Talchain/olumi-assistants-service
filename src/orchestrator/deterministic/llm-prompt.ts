@@ -13,7 +13,7 @@ import type { DeterministicTurnContext, DisambiguationHint } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
 import { loadPrompt } from "../../prompts/loader.js";
-import { log } from "../../utils/telemetry.js";
+import { log, emit } from "../../utils/telemetry.js";
 
 // ============================================================================
 // PMS Cache
@@ -79,6 +79,12 @@ export function buildDeterministicPrompt(ctx: DeterministicTurnContext): string 
     sections.push(IDENTITY_SECTION);
     sections.push(RESPONSE_CONTRACT);
     sections.push(SCIENCE_TRIGGERS);
+
+    emit('deterministic.pms_fallback_used', {
+      task: 'orchestrator',
+      env: process.env.NODE_ENV ?? 'unknown',
+    });
+    log.warn('deterministic.pms_fallback_used');
   }
 
   // Dynamic sections — always code-generated

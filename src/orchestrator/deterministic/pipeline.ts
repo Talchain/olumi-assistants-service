@@ -423,6 +423,8 @@ async function callLLM(
     return {
       response: parseResult.response,
       extraction_method: parseResult.extraction_method,
+      // Full compiled system prompt: PMS (or hardcoded fallback) + TurnContext state
+      // + eligible_actions vocabulary + disambiguation section (if any).
       prompt_char_count: systemPrompt.length,
     };
   } catch (err) {

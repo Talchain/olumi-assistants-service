@@ -27,7 +27,8 @@ export const explainResultAction: ActionDefinition = {
     return null;
   },
 
-  async execute(_params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
+  async execute(params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
+    const focus = params.focus as string | undefined;
     const summary = ctx.analysis_summary!;
     const sections: DeterministicCommentaryBlockData['sections'] = [];
 

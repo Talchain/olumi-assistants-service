@@ -27,6 +27,8 @@ export const setGoalTargetAction: ActionDefinition = {
 
   async execute(params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
     const threshold = params.threshold as number | undefined;
+    const unit = params.unit as string | undefined;
+    const cap = params.cap as number | undefined;
 
     if (threshold == null || typeof threshold !== 'number') {
       return { blocks: [], assistantText: 'What target threshold should the goal have?', guidance_items: [] };
@@ -40,6 +42,8 @@ export const setGoalTargetAction: ActionDefinition = {
       path: goalId,
       value: {
         goal_threshold: threshold,
+        ...(unit ? { unit } : {}),
+        ...(cap != null ? { cap } : {}),
       },
     }];
 

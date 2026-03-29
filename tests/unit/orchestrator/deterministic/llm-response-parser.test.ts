@@ -82,6 +82,19 @@ describe('parseLLMJsonResponse', () => {
     expect(result.extraction_method).toBe('fallback');
   });
 
+  it('handles braces inside quoted strings via balanced extraction', () => {
+    const json = JSON.stringify({
+      text: 'The range {0.3-0.5} is moderate and the set {A, B} covers it.',
+      insights: [],
+      recommended_actions: [],
+    });
+    const input = `Sure, here you go:\n${json}`;
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.response.text).toBe('The range {0.3-0.5} is moderate and the set {A, B} covers it.');
+    expect(result.extraction_method).toBe('regex');
+  });
+
   it('handles malformed JSON gracefully', () => {
     const input = '{ "text": "broken json", insights: }';
 
