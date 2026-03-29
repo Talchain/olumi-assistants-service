@@ -30,6 +30,7 @@ export const addConstraintAction: ActionDefinition = {
     const targetRef = params.target_id as string | undefined;
     const constraintType = (params.constraint_type as string) ?? 'threshold';
     const threshold = params.threshold as number | undefined;
+    const label = params.label as string | undefined;
 
     if (!targetRef) {
       return { blocks: [], assistantText: 'Which factor should the constraint apply to?', guidance_items: [] };
@@ -62,6 +63,7 @@ export const addConstraintAction: ActionDefinition = {
       node_id: entity.id,
       type: constraintType,
       ...(threshold != null ? { threshold } : {}),
+      ...(label ? { label } : {}),
     };
 
     // Read existing constraints from graph to append
