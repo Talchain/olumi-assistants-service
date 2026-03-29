@@ -194,7 +194,7 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     text_word_count: (normalised.assistant_text ?? '').split(/\s+/).filter(Boolean).length,
     has_science_concept: llmResponse?.insights?.some((i) => !!i.science_concept) ?? false,
     disambiguation_triggered: turnContext.disambiguation_hints.length > 0,
-    empty_after_normalisation: emptyBeforeNormalisation,
+    empty_before_normalisation: emptyBeforeNormalisation,
     llm_action_count_pre_filter: llmResponse?.recommended_actions?.length ?? 0,
     context_fallback_used: contextFallbackUsed ?? false,
     prompt_char_count: promptCharCount ?? 0,

@@ -643,7 +643,7 @@ export function computeDisambiguationHints(
     }
   }
 
-  // Sort by number of candidates descending, cap at MAX
-  hints.sort((a, b) => b.candidates.length - a.candidates.length);
+  // Sort by number of candidates descending, then term ascending for deterministic ordering
+  hints.sort((a, b) => b.candidates.length - a.candidates.length || a.term.localeCompare(b.term));
   return hints.slice(0, MAX_DISAMBIGUATION_HINTS);
 }

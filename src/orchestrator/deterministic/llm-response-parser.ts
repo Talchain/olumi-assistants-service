@@ -99,16 +99,28 @@ function tryFenceParse(content: string): LLMJsonResponse | null {
 }
 
 function tryRegexParse(content: string): LLMJsonResponse | null {
-  // Find the outermost { ... } containing "text"
-  const jsonMatch = content.match(/\{[\s\S]*"text"\s*:\s*"[\s\S]*\}/);
-  if (!jsonMatch) return null;
+  // Find each '{' and try to parse from it to each subsequent '}'
+  // This handles nested objects and braces inside string values correctly
+  // because JSON.parse is the authority on validity, not brace counting.
+  const firstBrace = content.indexOf('{');
+  if (firstBrace === -1) return null;
 
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    const result = LLMResponseSchema.safeParse(parsed);
-    if (result.success) return result.data;
-  } catch {
-    // Invalid JSON
+  for (let start = firstBrace; start < content.length; start++) {
+    if (content[start] !== '{') continue;
+
+    // Try each '}' from the end backwards — largest valid block first
+    for (let end = content.lastIndexOf('}'); end > start; end = content.lastIndexOf('}', end - 1)) {
+      const candidate = content.slice(start, end + 1);
+      if (!candidate.includes('"text"')) break; // no point trying shorter spans
+
+      try {
+        const parsed = JSON.parse(candidate);
+        const result = LLMResponseSchema.safeParse(parsed);
+        if (result.success) return result.data;
+      } catch {
+        // Try shorter span
+      }
+    }
   }
   return null;
 }

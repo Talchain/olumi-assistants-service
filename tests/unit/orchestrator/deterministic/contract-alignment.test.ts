@@ -135,12 +135,11 @@ describe('LLM Zod schema — canonical enums', () => {
     });
     expect(valid.success).toBe(true);
 
-    // add_constraint requires operator, value, label
+    // add_constraint requires threshold, label
     const constraint = RecommendedActionSchema.safeParse({
       action_type: 'add_constraint',
       target_id: 'fac_budget',
-      operator: '<=',
-      value: 100000,
+      threshold: 100000,
       label: 'Budget cap',
       priority: 'medium',
     });

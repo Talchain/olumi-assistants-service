@@ -231,7 +231,7 @@ export async function executeDeterministicPipeline(
           let llmResponse: LLMJsonResponse | null = null;
           let llmCallMeta: LLMCallResult | null = null;
           if (!actionResult.assistantText) {
-            llmCallMeta = await callLLM(turnContext, turnRequest.message, requestId);
+            llmCallMeta = await callLLM(turnContext, turnRequest.message, requestId, turnId);
             llmResponse = llmCallMeta?.response ?? null;
           }
 
@@ -277,7 +277,7 @@ export async function executeDeterministicPipeline(
 
   // ── Full LLM call (free text) ────────────────────────────────────────────
   const llmStart = Date.now();
-  const llmCallResult = await callLLM(turnContext, turnRequest.message, requestId);
+  const llmCallResult = await callLLM(turnContext, turnRequest.message, requestId, turnId);
   const llmLatencyMs = Date.now() - llmStart;
   const llmResponse = llmCallResult?.response ?? null;
 
@@ -379,6 +379,7 @@ async function callLLM(
   turnContext: DeterministicTurnContext,
   userMessage: string,
   requestId: string,
+  turnId: string,
 ): Promise<LLMCallResult | null> {
   try {
     const adapter = getAdapter('orchestrator');
@@ -415,7 +416,7 @@ async function callLLM(
       emit('deterministic.json_fallback', {
         method: parseResult.extraction_method,
         scenario_id: turnContext.scenario_id,
-        turn_id: requestId,
+        turn_id: turnId,
       });
     }
 

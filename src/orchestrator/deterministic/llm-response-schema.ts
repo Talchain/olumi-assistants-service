@@ -57,8 +57,8 @@ const SetFactorValueSchema = z.object({
 const AddConstraintSchema = z.object({
   action_type: z.literal('add_constraint'),
   target_id: z.string(),
-  operator: z.enum(['<=', '>=']),
-  value: z.number(),
+  constraint_type: z.enum(['threshold', 'range']).optional(),
+  threshold: z.number(),
   label: z.string(),
   unit: z.string().optional(),
   priority: PrioritySchema,
@@ -76,9 +76,9 @@ const AddFactorSchema = z.object({
 
 const AdjustEdgeStrengthSchema = z.object({
   action_type: z.literal('adjust_edge_strength'),
-  from_id: z.string(),
-  to_id: z.string(),
-  direction: z.enum(['strengthen', 'weaken']),
+  from: z.string(),
+  to: z.string(),
+  strength_mean: z.number().optional(),
   priority: PrioritySchema,
   rationale: z.string().optional(),
 });
@@ -99,8 +99,7 @@ const RemoveFactorSchema = z.object({
 
 const SetGoalTargetSchema = z.object({
   action_type: z.literal('set_goal_target'),
-  value: z.number(),
-  raw_value: z.number().optional(),
+  threshold: z.number(),
   unit: z.string().optional(),
   cap: z.number().optional(),
   priority: PrioritySchema,

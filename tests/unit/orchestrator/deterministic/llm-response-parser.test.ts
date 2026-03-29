@@ -90,6 +90,28 @@ describe('parseLLMJsonResponse', () => {
     expect(result.response.text).toContain('broken json');
   });
 
+  it('extracts balanced JSON from surrounding text via regex', () => {
+    const json = JSON.stringify({ text: 'Found it.', insights: [], recommended_actions: [] });
+    const input = `Here is my response:\n${json}\n\nSome trailing notes.`;
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.extraction_method).toBe('regex');
+    expect(result.response.text).toBe('Found it.');
+  });
+
+  it('handles nested objects in regex extraction', () => {
+    const json = JSON.stringify({
+      text: 'Nested test.',
+      insights: [{ type: 'assumption_risk', description: 'A nested insight', severity: 'info' }],
+      recommended_actions: [{ action_type: 'explain_result', priority: 'high' }],
+    });
+    const input = `Here is the output:\n${json}\n\nEnd of response.`;
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.response.text).toBe('Nested test.');
+    expect(['native', 'regex']).toContain(result.extraction_method);
+  });
+
   it('caps insights at 3', () => {
     const input = JSON.stringify({
       text: 'Response.',

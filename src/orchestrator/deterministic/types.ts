@@ -175,12 +175,12 @@ export interface LLMInsight {
 
 export type LLMRecommendedAction =
   | { action_type: 'set_factor_value'; target_id: string; value: number; raw_value?: number; unit?: string; priority: Priority; rationale?: string }
-  | { action_type: 'add_constraint'; target_id: string; operator: '<=' | '>='; value: number; label: string; unit?: string; priority: Priority; rationale?: string }
+  | { action_type: 'add_constraint'; target_id: string; constraint_type?: 'threshold' | 'range'; threshold: number; label: string; unit?: string; priority: Priority; rationale?: string }
   | { action_type: 'add_factor'; label: string; category?: 'controllable' | 'observable' | 'external'; connect_to?: string[]; priority: Priority; rationale?: string }
-  | { action_type: 'adjust_edge_strength'; from_id: string; to_id: string; direction: 'strengthen' | 'weaken'; priority: Priority; rationale?: string }
+  | { action_type: 'adjust_edge_strength'; from: string; to: string; strength_mean?: number; priority: Priority; rationale?: string }
   | { action_type: 'add_option'; label: string; priority: Priority; rationale?: string }
   | { action_type: 'remove_factor'; target_id: string; priority: Priority; rationale?: string }
-  | { action_type: 'set_goal_target'; value: number; raw_value?: number; unit?: string; cap?: number; priority: Priority; rationale?: string }
+  | { action_type: 'set_goal_target'; threshold: number; unit?: string; cap?: number; priority: Priority; rationale?: string }
   | { action_type: 'run_analysis'; priority: Priority; rationale?: string }
   | { action_type: 'explain_result'; focus?: string; priority: Priority; rationale?: string }
   | { action_type: 'compare_options'; priority: Priority; rationale?: string }
@@ -323,7 +323,7 @@ export interface TurnQualityMeta {
   text_word_count: number;
   has_science_concept: boolean;
   disambiguation_triggered: boolean;
-  empty_after_normalisation: boolean;
+  empty_before_normalisation: boolean;
   llm_action_count_pre_filter: number;
   context_fallback_used: boolean;
   prompt_char_count: number;
