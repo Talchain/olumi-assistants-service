@@ -161,7 +161,10 @@ function getContextNumbers(ctx: TurnContext): Set<number> {
   }
   for (const d of ctx.analysis.top_drivers) {
     nums.add(d.sensitivity);
-    nums.add(Math.round(d.sensitivity * 100));
+    // Only derive percentage form if sensitivity is a 0-1 decimal
+    if (d.sensitivity > 0 && d.sensitivity < 1) {
+      nums.add(Math.round(d.sensitivity * 100));
+    }
   }
 
   // Edge strengths + exists_probability (both raw and percentage forms)
@@ -425,12 +428,11 @@ export function scoreOrchestrator(
         const params = a.parameters as Record<string, unknown>;
         // Null values are acceptable (means "please provide")
         // But if a numeric value is present, it should be traceable to context
+        const paramKnownNums = getContextNumbers(ctx);
         for (const [, v] of Object.entries(params)) {
           if (typeof v === "number") {
-            // Check against known numbers in the analysis context
-            const knownNums = getContextNumbers(ctx);
             // Allow null and common round numbers (0, 1, 100)
-            if (!knownNums.has(v) && v !== 0 && v !== 1 && v !== 100) {
+            if (!paramKnownNums.has(v) && v !== 0 && v !== 1 && v !== 100) {
               // Only fail if the number is suspiciously specific
               // (fabricated parameters like 0.35 when no such value exists)
               // Allow integers that could be user-referenced (from the brief text)

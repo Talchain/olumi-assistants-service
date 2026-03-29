@@ -17,7 +17,7 @@
         { "id": "opt_hold", "label": "Stay Domestic" }
       ],
       "factors": [
-        { "id": "fac_market_size", "label": "European Market Size", "category": "uncertain" },
+        { "id": "fac_market_size", "label": "European Market Size", "category": "external" },
         { "id": "fac_fx_risk", "label": "Currency Risk", "category": "observable" }
       ],
       "outcomes": [],

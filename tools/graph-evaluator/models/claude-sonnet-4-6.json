@@ -3,7 +3,7 @@
   "display_name": "Claude Sonnet 4.6",
   "provider": "anthropic",
   "model": "claude-sonnet-4-6",
-  "max_tokens": 2048,
+  "max_tokens": 16384,
   "timeout_ms": 120000,
   "params": {
     "temperature": 0

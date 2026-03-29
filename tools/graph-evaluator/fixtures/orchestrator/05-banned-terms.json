@@ -18,7 +18,7 @@
       ],
       "factors": [
         { "id": "fac_cost", "label": "Implementation Cost", "category": "observable" },
-        { "id": "fac_adoption", "label": "User Adoption Rate", "category": "uncertain" }
+        { "id": "fac_adoption", "label": "User Adoption Rate", "category": "external" }
       ],
       "outcomes": [],
       "risks": [],
