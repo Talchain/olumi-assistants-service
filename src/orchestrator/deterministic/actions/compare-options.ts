@@ -29,8 +29,12 @@ export const compareOptionsAction: ActionDefinition = {
 
   async execute(_params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
     const analysis = ctx.analysis!;
-    const results = (analysis.results as Array<Record<string, unknown>>)
-      .filter((r) => typeof r.win_probability === 'number')
+    const rawResults = analysis.results;
+    if (!Array.isArray(rawResults) || rawResults.length === 0) {
+      return { blocks: [], assistantText: 'No analysis results available to compare.', guidance_items: [] };
+    }
+    const results = (rawResults as Array<Record<string, unknown>>)
+      .filter((r) => r != null && typeof r === 'object' && typeof r.win_probability === 'number')
       .sort((a, b) => (b.win_probability as number) - (a.win_probability as number));
 
     if (results.length < 2) {
@@ -63,7 +67,7 @@ export const compareOptionsAction: ActionDefinition = {
     }
 
     const blockData: ComparisonBlockData = { options, narrative };
-    const block = createComparisonBlock(blockData, ctx.scenario_id);
+    const block = createComparisonBlock(blockData, ctx.turn_id);
 
     return {
       blocks: [block],

@@ -268,7 +268,7 @@ const ACTION_PARAM_SCHEMAS: Partial<Record<ActionName, string>> = {
   explain_result: '{ focus?: "aspect to focus on" }',
   compare_options: '{}',
   challenge_assumption: '{ target_id?: "factor or edge to challenge" }',
-  run_premortem: '{ target_id: "option ID to pre-mortem" }',
+  run_premortem: '{ target_id?: "option ID to pre-mortem (omit to target winner)" }',
   what_would_flip: '{}',
   generate_artefact: '{ artefact_type: "decision_matrix"|"sensitivity_explorer"|"comparison_table"|"premortem_worksheet"|"assumption_map" }',
 };

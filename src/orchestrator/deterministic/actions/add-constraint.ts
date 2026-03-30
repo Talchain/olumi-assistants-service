@@ -28,7 +28,8 @@ export const addConstraintAction: ActionDefinition = {
 
   async execute(params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
     const targetRef = params.target_id as string | undefined;
-    const constraintType = (params.constraint_type as string) ?? 'threshold';
+    const rawType = (params.constraint_type as string) ?? 'threshold';
+    const constraintType = rawType === 'threshold' || rawType === 'range' ? rawType : 'threshold';
     const threshold = params.threshold as number | undefined;
     const label = params.label as string | undefined;
 
@@ -68,7 +69,8 @@ export const addConstraintAction: ActionDefinition = {
 
     // Read existing constraints from graph to append
     const goalNode = ctx.graph?.nodes?.find((n: { id: string }) => n.id === goalId);
-    const existingConstraints = (goalNode as Record<string, unknown>)?.goal_constraints as unknown[] ?? [];
+    const rawConstraints = (goalNode as Record<string, unknown>)?.goal_constraints;
+    const existingConstraints = Array.isArray(rawConstraints) ? rawConstraints : [];
 
     const operations = [{
       op: 'update_node' as const,

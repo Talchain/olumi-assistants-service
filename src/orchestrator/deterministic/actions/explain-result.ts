@@ -89,7 +89,7 @@ export const explainResultAction: ActionDefinition = {
       block_id: `blk_commentary_${randomUUID().replace(/-/g, '').substring(0, 16)}`,
       block_type: 'commentary',
       data: { narrative, sections, supporting_refs: [] },
-      provenance: { trigger: 'deterministic:explain_result', turn_id: ctx.scenario_id, timestamp: new Date().toISOString() },
+      provenance: { trigger: 'deterministic:explain_result', turn_id: ctx.turn_id, timestamp: new Date().toISOString() },
     };
 
     // Short summary for assistantText

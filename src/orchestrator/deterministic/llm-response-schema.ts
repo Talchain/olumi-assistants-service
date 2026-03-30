@@ -134,7 +134,7 @@ const ChallengeAssumptionSchema = z.object({
 
 const RunPremortermSchema = z.object({
   action_type: z.literal('run_premortem'),
-  target_id: z.string(),
+  target_id: z.string().optional(),
   priority: PrioritySchema,
   rationale: z.string().optional(),
 });

@@ -112,6 +112,7 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
     analysis,
     conversational_state: ctx.conversational_state ?? null,
     scenario_id: ctx.scenario_id,
+    turn_id: '', // Set by pipeline after context computation
     analysis_inputs: analysisInputs,
   };
 }

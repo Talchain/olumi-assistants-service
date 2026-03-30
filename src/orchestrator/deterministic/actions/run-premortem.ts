@@ -44,8 +44,11 @@ export const runPremortemAction: ActionDefinition = {
     } else {
       // Default to the winner
       const winnerNode = [...ctx.entities.nodes.values()].find((n) => n.label === ctx.analysis_summary?.winner);
-      targetId = winnerNode?.id ?? '';
-      targetLabel = ctx.analysis_summary?.winner ?? 'the leading option';
+      if (!winnerNode) {
+        return { blocks: [], assistantText: 'No option identified for the pre-mortem. Which option should I analyse?', guidance_items: [] };
+      }
+      targetId = winnerNode.id;
+      targetLabel = ctx.analysis_summary?.winner ?? winnerNode.label;
     }
 
     const drivers = ctx.analysis_summary?.top_drivers ?? [];
@@ -82,7 +85,7 @@ export const runPremortemAction: ActionDefinition = {
       narrative: narrativeParts.join('\n'),
     };
 
-    const block = createPremortemBlock(blockData, ctx.scenario_id);
+    const block = createPremortemBlock(blockData, ctx.turn_id);
 
     return {
       blocks: [block],

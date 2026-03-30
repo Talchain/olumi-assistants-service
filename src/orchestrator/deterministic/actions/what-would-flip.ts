@@ -87,7 +87,7 @@ export const whatWouldFlipAction: ActionDefinition = {
       narrative: narrativeParts.join('\n'),
     };
 
-    const block = createFlipAnalysisBlock(blockData, ctx.scenario_id);
+    const block = createFlipAnalysisBlock(blockData, ctx.turn_id);
 
     return {
       blocks: [block],

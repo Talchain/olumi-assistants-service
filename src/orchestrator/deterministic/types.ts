@@ -145,6 +145,8 @@ export interface DeterministicTurnContext {
   conversational_state: ConversationalState | null;
   /** Scenario ID. */
   scenario_id: string;
+  /** Turn ID — unique per pipeline invocation; used for block provenance. */
+  turn_id: string;
   /** Analysis inputs for run_analysis delegation. */
   analysis_inputs: AnalysisInputs | null;
 }
@@ -185,7 +187,7 @@ export type LLMRecommendedAction =
   | { action_type: 'explain_result'; focus?: string; priority: Priority; rationale?: string }
   | { action_type: 'compare_options'; priority: Priority; rationale?: string }
   | { action_type: 'challenge_assumption'; target_id?: string; priority: Priority; rationale?: string }
-  | { action_type: 'run_premortem'; target_id: string; priority: Priority; rationale?: string }
+  | { action_type: 'run_premortem'; target_id?: string; priority: Priority; rationale?: string }
   | { action_type: 'what_would_flip'; priority: Priority; rationale?: string }
   | { action_type: 'generate_artefact'; artefact_type: string; priority: Priority; rationale?: string };
 

@@ -62,6 +62,7 @@ export async function executeDeterministicPipeline(
 
   try {
     turnContext = computeTurnContext(turnRequest);
+    turnContext.turn_id = turnId;
   } catch (err) {
     log.warn({ request_id: requestId, err }, 'deterministic.turn_context_fallback');
     contextFallbackUsed = true;
@@ -82,6 +83,7 @@ export async function executeDeterministicPipeline(
       analysis: ctx.analysis_response ?? turnRequest.analysis_state ?? null,
       conversational_state: ctx.conversational_state ?? null,
       scenario_id: ctx.scenario_id,
+      turn_id: turnId,
       analysis_inputs: ctx.analysis_inputs ?? null,
     };
   }
