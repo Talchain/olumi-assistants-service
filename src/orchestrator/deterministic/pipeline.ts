@@ -293,8 +293,13 @@ export async function executeDeterministicPipeline(
       const actionName = firstRec.action_type as ActionName;
       const actionDef = ACTION_CATALOGUE.get(actionName);
 
-      // Only auto-execute read-only actions (none risk)
-      if (actionDef && actionDef.execution_risk === 'none' && turnContext.eligible_actions.includes(actionName)) {
+      // Auto-execute read-only (none) and low-risk non-confirmable actions.
+      // Low-risk actions (add_constraint, set_factor_value, adjust_edge_strength, set_goal_target)
+      // are safe graph modifications that don't require confirmation.
+      const autoExecutable = actionDef
+        && (actionDef.execution_risk === 'none' || (actionDef.execution_risk === 'low' && !actionDef.requires_confirmation))
+        && turnContext.eligible_actions.includes(actionName);
+      if (autoExecutable) {
         const prereqError = actionDef.prerequisite_checks(turnContext);
         if (!prereqError) {
           try {

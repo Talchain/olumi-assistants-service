@@ -187,6 +187,8 @@ export interface TurnResult {
   httpStatus: number;
 }
 
+// DEPRECATED: Legacy XML envelope orchestrator. Retained behind CEE_LEGACY_ORCHESTRATOR_ENABLED
+// for rollback only. Do not add features. Remove after v30.5 stable for 4+ weeks.
 /**
  * Process a single orchestrator turn.
  */
@@ -1194,6 +1196,15 @@ function resolveResultsArray(response: V2RunResponseEnvelope): Array<Record<stri
 }
 
 /** Get the nested results object when UI sends V2 fields inside results. */
+const V1_ROBUSTNESS_MAP: Record<string, string> = {
+  low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
+  fragile: 'fragile', moderate: 'moderate', stable: 'stable', highly_stable: 'highly_stable',
+};
+
+function mapRobustnessBandV1(raw: string): string {
+  return V1_ROBUSTNESS_MAP[raw.toLowerCase().trim()] ?? 'moderate';
+}
+
 function resolveNestedResults(response: V2RunResponseEnvelope): Record<string, unknown> | null {
   const r = response as Record<string, unknown>;
   if (r.results && typeof r.results === 'object' && !Array.isArray(r.results)) {
@@ -1220,9 +1231,10 @@ function extractAnalysisSummary(response: V2RunResponseEnvelope): AnalysisSummar
   const runnerUpProb = sorted.length > 1 ? (sorted[1].win_probability as number) : 0;
 
   const nested = resolveNestedResults(response);
-  const robustnessLevel = response.robustness?.level
+  const rawRobustnessLevel = response.robustness?.level
     ?? (nested?.robustness as Record<string, unknown> | undefined)?.level as string | undefined
     ?? 'unknown';
+  const robustnessLevel = mapRobustnessBandV1(rawRobustnessLevel as string);
 
   const robustnessSource = response.robustness ?? nested?.robustness as Record<string, unknown> | undefined;
   const fragileEdges = ((robustnessSource as Record<string, unknown> | undefined)?.fragile_edges ?? []) as Array<Record<string, unknown>>;

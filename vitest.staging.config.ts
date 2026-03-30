@@ -14,6 +14,8 @@ export default defineConfig({
       "tests/staging/**/*.test.ts",
       // Golden-path e2e (real LLM + PLoT + ISL — gated by RUN_E2E_GOLDEN=1)
       "tests/integration/golden-path-e2e.test.ts",
+      // Golden-path v2: 12-step SaaS pricing lifecycle (gated by RUN_E2E_GOLDEN_V2=1)
+      "tests/integration/golden-path-v2-e2e.test.ts",
     ],
     exclude: [
       "**/node_modules/**",

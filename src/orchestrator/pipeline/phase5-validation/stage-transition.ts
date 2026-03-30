@@ -36,15 +36,10 @@ export function evaluateStageTransition(
     }
   }
 
-  if (toolResult.side_effects.brief_generated) {
-    if (stage === 'evaluate') {
-      return {
-        from: 'evaluate',
-        to: 'decide',
-        trigger: 'brief_generated',
-      };
-    }
-  }
+  // brief_generated does NOT auto-promote to 'decide'.
+  // Stage should only transition to 'decide' on explicit user commitment language,
+  // not because an artefact was generated. Generating a brief is an informational
+  // action that doesn't imply the user has committed to a decision.
 
   return null;
 }

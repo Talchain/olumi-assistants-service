@@ -138,6 +138,15 @@ function deriveWinner(options: OptionSummary[]): AnalysisResponseSummary['winner
  * Priority: robustness_synthesis.overall_assessment → robustness.overall_robustness
  * on first option → 'unknown'.
  */
+const ROBUSTNESS_MAP: Record<string, string> = {
+  low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
+  fragile: 'fragile', moderate: 'moderate', stable: 'stable', highly_stable: 'highly_stable',
+};
+
+function mapRobustnessToCanonical(raw: string): string {
+  return ROBUSTNESS_MAP[raw.toLowerCase().trim()] ?? 'moderate';
+}
+
 function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
   // Check robustness_synthesis at top level
   const synthLevel = (response as Record<string, unknown>).robustness_synthesis;
@@ -501,7 +510,8 @@ export function compactAnalysis(
       log.warn({ result_count: results.length }, 'compactAnalysis: no valid options found');
     }
 
-    const robustnessLevel = deriveRobustnessLevel(response);
+    const rawRobustnessLevel = deriveRobustnessLevel(response);
+    const robustnessLevel = mapRobustnessToCanonical(rawRobustnessLevel);
     const fragileEdgeCount = deriveFragileEdgeCount(response);
     const topDrivers = deriveTopDrivers(response, graphNodeLabels);
     const constraintTensions = deriveConstraintTensions(response);

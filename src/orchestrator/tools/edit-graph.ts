@@ -227,6 +227,124 @@ export function classifyEditIntent(editDescription: string): EditIntentCategory 
   return 'structural';
 }
 
+// ============================================================================
+// Constraint Detection
+// ============================================================================
+
+interface ConstraintDetectionResult {
+  goalId: string;
+  factorLabel: string;
+  existingConstraints: unknown[];
+  newConstraint: {
+    node_id: string;
+    type: 'threshold';
+    threshold?: number;
+    direction?: 'below' | 'above';
+    label?: string;
+  };
+}
+
+/**
+ * Detect constraint-intent in user messages and extract structured data.
+ * Returns null if the message is not a constraint request.
+ *
+ * Patterns:
+ * - "keep X under/below/above Y%"
+ * - "X must/should be under/below/above Y%"
+ * - "X is a hard requirement"
+ * - "constraint on X"
+ */
+function detectConstraintIntent(
+  editDescription: string,
+  graph: GraphV3T,
+): ConstraintDetectionResult | null {
+  const msg = editDescription.toLowerCase();
+
+  // Must contain constraint-related language
+  const hasConstraintLanguage =
+    /\b(keep\b.*\b(?:under|below|above|over))\b/.test(msg) ||
+    /\b(must|should|need to)\b.*\b(under|below|above|over|less than|more than|at least|at most)\b/.test(msg) ||
+    /\bhard requirement\b/.test(msg) ||
+    /\bconstraint\b/.test(msg) ||
+    /\bcap\b.*\bat\b/.test(msg) ||
+    /\bceiling\b/.test(msg) ||
+    /\bfloor\b/.test(msg);
+
+  if (!hasConstraintLanguage) return null;
+
+  // Find goal node
+  const nodes = graph.nodes ?? [];
+  const goalNode = nodes.find((n) => (n as Record<string, unknown>).kind === 'goal');
+  if (!goalNode) return null;
+  const goalId = (goalNode as Record<string, unknown>).id as string;
+
+  // Extract threshold number from message
+  const thresholdMatch = msg.match(/(\d+(?:\.\d+)?)\s*%/);
+  const threshold = thresholdMatch ? parseFloat(thresholdMatch[1]) / 100 : undefined;
+
+  // Determine direction
+  const belowPattern = /\b(under|below|less than|at most|cap|ceiling)\b/;
+  const abovePattern = /\b(above|over|more than|at least|floor)\b/;
+  const direction = belowPattern.test(msg) ? 'below' as const : abovePattern.test(msg) ? 'above' as const : 'below' as const;
+
+  // Match a factor from the graph by checking if any factor label words appear in the message
+  const factors = nodes.filter((n) => (n as Record<string, unknown>).kind === 'factor');
+  let matchedFactor: { id: string; label: string } | null = null;
+
+  for (const factor of factors) {
+    const factorRec = factor as Record<string, unknown>;
+    const label = (factorRec.label as string ?? '').toLowerCase();
+    // Check if any significant word from the factor label appears in the message
+    const labelWords = label.split(/[\s_-]+/).filter((w) => w.length >= 3);
+    const matched = labelWords.some((word) => msg.includes(word));
+    if (matched) {
+      matchedFactor = { id: factorRec.id as string, label: factorRec.label as string };
+      break;
+    }
+  }
+
+  // Also check risks and outcomes as constraint targets
+  if (!matchedFactor) {
+    const riskOutcome = nodes.filter((n) => {
+      const kind = (n as Record<string, unknown>).kind as string;
+      return kind === 'risk' || kind === 'outcome';
+    });
+    for (const node of riskOutcome) {
+      const nodeRec = node as Record<string, unknown>;
+      const label = (nodeRec.label as string ?? '').toLowerCase();
+      const labelWords = label.split(/[\s_-]+/).filter((w) => w.length >= 3);
+      if (labelWords.some((word) => msg.includes(word))) {
+        matchedFactor = { id: nodeRec.id as string, label: nodeRec.label as string };
+        break;
+      }
+    }
+  }
+
+  if (!matchedFactor) return null;
+
+  // Build constraint label from the message
+  const constraintLabel = threshold != null
+    ? `${matchedFactor.label} ${direction === 'below' ? '<' : '>'} ${(threshold * 100).toFixed(0)}%`
+    : `${matchedFactor.label} (${direction} limit)`;
+
+  // Read existing goal_constraints
+  const rawConstraints = (goalNode as Record<string, unknown>).goal_constraints;
+  const existingConstraints = Array.isArray(rawConstraints) ? rawConstraints : [];
+
+  return {
+    goalId,
+    factorLabel: matchedFactor.label,
+    existingConstraints,
+    newConstraint: {
+      node_id: matchedFactor.id,
+      type: 'threshold',
+      ...(threshold != null ? { threshold } : {}),
+      direction,
+      label: constraintLabel,
+    },
+  };
+}
+
 function buildIntentInstruction(intentCategory: EditIntentCategory): string | null {
   if (intentCategory === 'parameter_update') {
     return [
@@ -1263,6 +1381,45 @@ export async function handleEditGraph(
     failure_code: failureCode,
     failure_message: failureMessage,
   });
+
+  // ── Constraint shortcut ────────────────────────────────────────────────
+  // Constraints (keep X under/below Y, hard requirement) can't be expressed
+  // as standard patch operations. Detect and construct goal_constraints update
+  // deterministically instead of falling through to the edit_graph LLM.
+  const constraintMatch = detectConstraintIntent(editDescription, context.graph);
+  if (constraintMatch) {
+    branchTaken = 'apply';
+    branchReason = 'constraint_shortcut';
+    const ops: PatchOperation[] = [{
+      op: 'update_node',
+      path: constraintMatch.goalId,
+      value: {
+        goal_constraints: [...constraintMatch.existingConstraints, constraintMatch.newConstraint],
+      },
+    }];
+    setOpsTelemetry(ops);
+    validationOutcome = 'constraint_shortcut';
+
+    // Skip PLoT validation for constraint-only updates (no structural change)
+    const constraintLabel = constraintMatch.newConstraint.label ?? constraintMatch.factorLabel;
+    return {
+      blocks: [createGraphPatchBlock(
+        {
+          patch_type: 'edit',
+          operations: ops,
+          status: 'proposed',
+          auto_apply: false,
+          applied_graph_hash: baseGraphHash,
+        },
+        turnId,
+      )],
+      assistantText: `I'd like to add a constraint: **${constraintLabel}**${constraintMatch.newConstraint.threshold != null ? ` (threshold: ${constraintMatch.newConstraint.threshold})` : ''}. Please confirm to apply.`,
+      latencyMs: Date.now() - startTime,
+      appliedGraph: null,
+      wasRejected: false,
+      diagnostics: diagnostics(),
+    };
+  }
 
   if (resolutionMode === 'clarify') {
     branchTaken = 'clarify';

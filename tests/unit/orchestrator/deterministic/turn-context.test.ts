@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeTurnContext, buildEntityRegistry, computeDisambiguationHints } from "../../../../src/orchestrator/deterministic/turn-context.js";
+import { computeTurnContext, buildEntityRegistry, computeDisambiguationHints, mapRobustnessBand } from "../../../../src/orchestrator/deterministic/turn-context.js";
 import type { OrchestratorTurnRequest, V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 
@@ -253,5 +253,47 @@ describe('computeDisambiguationHints', () => {
     const registry = { nodes: new Map(), edges: [], option_ids: [], goal_id: null } as import("../../../../src/orchestrator/deterministic/types.js").EntityRegistry;
     const hints = computeDisambiguationHints('anything here', registry);
     expect(hints).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// mapRobustnessBand
+// ============================================================================
+
+describe('mapRobustnessBand', () => {
+  it('maps ISL "low" to "fragile"', () => {
+    expect(mapRobustnessBand('low')).toBe('fragile');
+  });
+
+  it('maps ISL "medium" to "moderate"', () => {
+    expect(mapRobustnessBand('medium')).toBe('moderate');
+  });
+
+  it('maps ISL "high" to "stable"', () => {
+    expect(mapRobustnessBand('high')).toBe('stable');
+  });
+
+  it('maps ISL "very_high" to "highly_stable"', () => {
+    expect(mapRobustnessBand('very_high')).toBe('highly_stable');
+  });
+
+  it('passes through canonical values unchanged', () => {
+    expect(mapRobustnessBand('fragile')).toBe('fragile');
+    expect(mapRobustnessBand('moderate')).toBe('moderate');
+    expect(mapRobustnessBand('stable')).toBe('stable');
+    expect(mapRobustnessBand('highly_stable')).toBe('highly_stable');
+  });
+
+  it('handles case-insensitive input', () => {
+    expect(mapRobustnessBand('LOW')).toBe('fragile');
+    expect(mapRobustnessBand('Medium')).toBe('moderate');
+  });
+
+  it('defaults unknown values to "moderate"', () => {
+    expect(mapRobustnessBand('banana')).toBe('moderate');
+  });
+
+  it('returns null for null input', () => {
+    expect(mapRobustnessBand(null)).toBeNull();
   });
 });

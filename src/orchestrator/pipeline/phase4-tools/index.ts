@@ -189,6 +189,15 @@ export async function phase4Execute(
     if (invocation.name === 'edit_graph' && result.edit_graph_diagnostics) {
       editGraphDiagnostics = result.edit_graph_diagnostics;
     }
+    // Telemetry: edit_graph selected but produced no operations
+    if (invocation.name === 'edit_graph' && !result.side_effects.graph_updated && result.blocks.length === 0) {
+      emit('edit_graph.no_operations', {
+        scenario_id: enrichedContext.scenario_id,
+        turn_id: enrichedContext.turn_id,
+        user_message: (invocation.input?.edit_description as string ?? '').slice(0, 200),
+        tool_selected: 'edit_graph',
+      });
+    }
     if (result.pending_clarification) {
       pendingClarification = result.pending_clarification;
     }

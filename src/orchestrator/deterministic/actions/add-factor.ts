@@ -33,7 +33,13 @@ export const addFactorAction: ActionDefinition = {
     const value = params.value as number | undefined;
     const unit = params.unit as string | undefined;
     const category = (params.category as string) ?? 'observable';
-    const connectTo = params.connect_to as string | undefined;
+    const rawConnectTo = params.connect_to;
+    // connect_to may arrive as a single string or an array of target IDs
+    const connectToTargets: string[] = Array.isArray(rawConnectTo)
+      ? rawConnectTo.filter((t): t is string => typeof t === 'string')
+      : typeof rawConnectTo === 'string'
+        ? [rawConnectTo]
+        : [];
 
     if (!label) {
       return { blocks: [], assistantText: 'What should the new factor be called?', guidance_items: [] };
@@ -61,9 +67,9 @@ export const addFactorAction: ActionDefinition = {
       },
     ];
 
-    // Add edge to goal or specified target
-    const targetId = connectTo ?? ctx.entities.goal_id;
-    if (targetId) {
+    // Add edges to specified targets or default to goal
+    const targets = connectToTargets.length > 0 ? connectToTargets : (ctx.entities.goal_id ? [ctx.entities.goal_id] : []);
+    for (const targetId of targets) {
       operations.push({
         op: 'add_edge',
         path: `${nodeId}->${targetId}`,

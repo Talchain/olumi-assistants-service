@@ -191,8 +191,17 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
     suggestedActions.push(...enrichedContext.stuck.rescue_routes);
   }
 
-  // Resolve assistant text: tool result text takes priority, then LLM text
-  const assistantText = toolResult.assistant_text ?? llmResult.assistant_text;
+  // Cap suggested_actions at 3 (contract limit)
+  if (suggestedActions.length > 3) {
+    suggestedActions.length = 3;
+  }
+
+  // Resolve assistant text: tool result text takes priority, then LLM text.
+  // Guard: assistant_text must never be null/empty in the final envelope.
+  const rawAssistantText = toolResult.assistant_text ?? llmResult.assistant_text;
+  const assistantText = rawAssistantText && rawAssistantText.trim().length > 0
+    ? rawAssistantText
+    : "I'm here to help with your decision. What would you like to explore?";
   const editGraphCarryForwardInvocation = toolName === 'edit_graph'
     ? {
         name: 'edit_graph',

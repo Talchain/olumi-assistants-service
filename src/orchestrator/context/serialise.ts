@@ -10,6 +10,20 @@ import type { V2RunResponseEnvelope, ConversationContext } from "../types.js";
 import type { GraphV3Compact, CompactNode, CompactEdge, EditCompactGraph, EditCompactNode, EditCompactEdge, AnalysisResponseSummary, OptionSummary, DriverSummary } from "./types.js";
 
 // ============================================================================
+// Robustness Band Mapping
+// ============================================================================
+
+const ISL_ROBUSTNESS_MAP: Record<string, string> = {
+  low: 'fragile', medium: 'moderate', high: 'stable', very_high: 'highly_stable',
+  fragile: 'fragile', moderate: 'moderate', stable: 'stable', highly_stable: 'highly_stable',
+};
+
+function mapRobustnessBandV2(raw: string | null): string | null {
+  if (raw == null) return null;
+  return ISL_ROBUSTNESS_MAP[raw.toLowerCase().trim()] ?? 'moderate';
+}
+
+// ============================================================================
 // Compact Graph
 // ============================================================================
 
@@ -212,10 +226,11 @@ export function summariseAnalysisResponse(response: V2RunResponseEnvelope): Anal
       direction: (f.direction as string) ?? 'unknown',
     }));
 
-  // Robustness
-  const robustnessLevel = response.robustness?.level
+  // Robustness — map ISL vocabulary to canonical set
+  const rawRobustnessLevel = response.robustness?.level
     ?? (nested?.robustness as Record<string, unknown> | undefined)?.level as string | undefined
     ?? null;
+  const robustnessLevel = mapRobustnessBandV2(rawRobustnessLevel as string | null);
 
   // Constraint joint probability
   const ca = response.constraint_analysis ?? nested?.constraint_analysis as Record<string, unknown> | undefined;

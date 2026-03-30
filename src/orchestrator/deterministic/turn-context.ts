@@ -28,6 +28,7 @@ import { ACTION_NAMES } from "./actions/types.js";
 import { inferStage } from "../pipeline/phase1-enrichment/stage-inference.js";
 import { STAGE_TOOL_POLICY } from "../tools/stage-policy.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "../context/constants.js";
+import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
 // Constants
@@ -46,12 +47,13 @@ const WEAK_EDGE_THRESHOLD = 0.3;
 // Stage → ActionName mapping (extends tool-based stage policy)
 // ============================================================================
 
+// generate_artefact excluded: permanently blocked by prerequisite. Re-add when artefact pipeline is implemented.
 const STAGE_ACTION_POLICY: Record<DecisionStage, ReadonlySet<ActionName>> = {
   frame: new Set<ActionName>(['set_factor_value', 'add_factor', 'set_goal_target', 'add_constraint']),
   ideate: new Set<ActionName>(['set_factor_value', 'add_constraint', 'add_factor', 'adjust_edge_strength', 'add_option', 'remove_factor', 'set_goal_target']),
-  evaluate: new Set<ActionName>(['run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip', 'generate_artefact', 'set_factor_value', 'adjust_edge_strength', 'add_constraint']),
-  decide: new Set<ActionName>(['explain_result', 'compare_options', 'what_would_flip', 'generate_artefact', 'challenge_assumption', 'run_premortem']),
-  optimise: new Set<ActionName>(['set_factor_value', 'adjust_edge_strength', 'add_constraint', 'run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip', 'generate_artefact']),
+  evaluate: new Set<ActionName>(['run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip', 'set_factor_value', 'adjust_edge_strength', 'add_constraint']),
+  decide: new Set<ActionName>(['explain_result', 'compare_options', 'what_would_flip', 'challenge_assumption', 'run_premortem']),
+  optimise: new Set<ActionName>(['set_factor_value', 'adjust_edge_strength', 'add_constraint', 'run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip']),
 };
 
 // ============================================================================
@@ -246,6 +248,42 @@ function computeGraphSummary(graph: GraphV3T | null, entities: EntityRegistry): 
 // Analysis Summary
 // ============================================================================
 
+// ============================================================================
+// Robustness Band Mapping
+// ============================================================================
+
+/** Canonical robustness band vocabulary. */
+export type CanonicalRobustnessBand = 'fragile' | 'moderate' | 'stable' | 'highly_stable';
+
+const ISL_ROBUSTNESS_MAP: Record<string, CanonicalRobustnessBand> = {
+  low: 'fragile',
+  medium: 'moderate',
+  high: 'stable',
+  very_high: 'highly_stable',
+  // Already canonical — pass through
+  fragile: 'fragile',
+  moderate: 'moderate',
+  stable: 'stable',
+  highly_stable: 'highly_stable',
+};
+
+/**
+ * Map an ISL robustness band value to the canonical vocabulary.
+ * Logs a warning for unmapped values and defaults to 'moderate'.
+ */
+export function mapRobustnessBand(raw: string | null): CanonicalRobustnessBand | null {
+  if (raw == null) return null;
+  const normalised = raw.toLowerCase().trim();
+  const mapped = ISL_ROBUSTNESS_MAP[normalised];
+  if (mapped) return mapped;
+  log.warn({ raw_robustness_band: raw }, 'deterministic.unknown_robustness_band');
+  return 'moderate';
+}
+
+// ============================================================================
+// Analysis Summary
+// ============================================================================
+
 function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): AnalysisSummary | null {
   if (!analysis || !analysis.results || !Array.isArray(analysis.results) || analysis.results.length === 0) {
     return null;
@@ -314,7 +352,7 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
     winner_probability: winner ? (winner.win_probability as number) ?? null : null,
     runner_up: runnerUp ? (runnerUp.option_label as string) ?? null : null,
     runner_up_probability: runnerUp ? (runnerUp.win_probability as number) ?? null : null,
-    robustness_band: analysis.robustness?.level ?? null,
+    robustness_band: mapRobustnessBand(analysis.robustness?.level ?? null),
     top_drivers: topDrivers.slice(0, 5),
     fragile_edge_count: fragileEdgeCount,
     constraints_met: constraintsMet,

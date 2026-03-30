@@ -880,3 +880,74 @@ describe("buildErrorEnvelope", () => {
     `);
   });
 });
+
+// ============================================================================
+// P3-2: Null assistant_text guard
+// ============================================================================
+
+describe("assembleV2Envelope — null assistant_text guard", () => {
+  it("returns non-empty default when both tool and LLM text are null", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({ assistant_text: null }),
+      toolResult: makeToolResult({ assistant_text: null }),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.assistant_text).not.toBeNull();
+    expect(typeof envelope.assistant_text).toBe("string");
+    expect(envelope.assistant_text!.trim().length).toBeGreaterThan(0);
+  });
+
+  it("returns non-empty default when text is empty string", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext(),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({ assistant_text: "" }),
+      toolResult: makeToolResult({ assistant_text: null }),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.assistant_text).not.toBeNull();
+    expect(envelope.assistant_text!.trim().length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// P2-2: Chip cap at 3
+// ============================================================================
+
+describe("assembleV2Envelope — suggested_actions cap", () => {
+  it("caps suggested_actions at 3 when LLM + tool + rescue exceed limit", () => {
+    const envelope = assembleV2Envelope({
+      enrichedContext: makeEnrichedContext({
+        stuck: {
+          detected: true,
+          rescue_routes: [
+            { label: "Rescue 1", prompt: "r1", role: "facilitator" },
+            { label: "Rescue 2", prompt: "r2", role: "facilitator" },
+          ],
+        },
+      }),
+      specialistResult: makeSpecialistResult(),
+      llmResult: makeLLMResult({
+        suggested_actions: [
+          { label: "LLM 1", prompt: "l1", role: "facilitator" },
+          { label: "LLM 2", prompt: "l2", role: "facilitator" },
+          { label: "LLM 3", prompt: "l3", role: "facilitator" },
+        ],
+      }),
+      toolResult: makeToolResult(),
+      progressKind: "none",
+      stageTransition: null,
+      scienceLedger: makeScienceLedger(),
+    });
+
+    expect(envelope.suggested_actions.length).toBeLessThanOrEqual(3);
+  });
+});
