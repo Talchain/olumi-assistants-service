@@ -471,10 +471,15 @@ function assertCrossBoundary(body: unknown, label: string): void {
     }
   }
 
-  // 3. Non-empty assistant_text (should always have content) — allow null/undefined
-  //    for system_event turns and pre-deployment edit_graph turns
-  if (b.assistant_text != null && strippedText.length === 0) {
-    console.warn(`[${label}] assistant_text is empty after stripping (pre-deployment)`);
+  // 3. Non-empty assistant_text — allow null only for system_event turns (Step 5)
+  //    Post-deployment: null text guard ensures all other turns get default text
+  if (b.assistant_text == null || strippedText.length === 0) {
+    // System event turns (direct_analysis_run) may have null text — that's OK
+    const tp = b.turn_plan as Record<string, unknown> | undefined;
+    const sysEvent = tp?.system_event as Record<string, unknown> | undefined;
+    if (!sysEvent) {
+      throw new Error(`[${label}] assistant_text is null/empty (post-deployment guard should prevent this)`);
+    }
   }
 
   // 4. blocks is always an array
@@ -488,17 +493,38 @@ function assertCrossBoundary(body: unknown, label: string): void {
     if (!Array.isArray(sa)) {
       throw new Error(`[${label}] suggested_actions is not an array`);
     }
-    // Contract: max 3 chips. Pre-deployment staging may return up to 5.
-    // Log warning for >3 but only fail on >5 until chip cap is deployed.
+    // Post-deployment: chip cap at 3 is enforced
     if ((sa as unknown[]).length > 3) {
-      console.warn(`[${label}] suggested_actions has ${(sa as unknown[]).length} entries (contract limit: 3)`);
-    }
-    if ((sa as unknown[]).length > 5) {
-      throw new Error(`[${label}] suggested_actions has >5 entries (${(sa as unknown[]).length})`);
+      throw new Error(`[${label}] suggested_actions has ${(sa as unknown[]).length} entries (contract limit: 3)`);
     }
   }
 
-  // 6. No banned terms in block narratives
+  // 6. Proposed patches must not use past-tense applied language
+  const blocks2 = b.blocks as Array<Record<string, unknown>>;
+  const hasProposedPatch = blocks2.some((blk) => {
+    const data = blk.data as Record<string, unknown> | undefined;
+    return data?.status === 'proposed' || data?.auto_apply === false;
+  });
+  if (hasProposedPatch && strippedText.length > 0) {
+    // Check for past-tense applied language at sentence starts
+    const appliedPatterns = /(?:^|[.!?]\s+)(Added|Updated|Set|Removed|Applied|Changed)\b/;
+    if (appliedPatterns.test(strippedText)) {
+      throw new Error(`[${label}] proposed patch uses past-tense applied language in assistant_text. Text: "${strippedText.slice(0, 200)}"`);
+    }
+  }
+
+  // 7. Tool selected but empty blocks + no specific blocker → silent fallback
+  const tp2 = b.turn_plan as Record<string, unknown> | undefined;
+  if (tp2?.selected_tool && Array.isArray(b.blocks) && (b.blocks as unknown[]).length === 0) {
+    // Check if assistant_text contains a specific blocker explanation
+    // Clarification questions ("Which one?") are valid tool responses, not silent fallbacks
+    const blockerPatterns = /\b(wasn't able|couldn't|not possible|not available|not yet|blocked|cannot|unable|which)\b/i;
+    if (!blockerPatterns.test(strippedText)) {
+      throw new Error(`[${label}] tool "${tp2.selected_tool}" selected but blocks empty and no blocker explanation in text. Text: "${strippedText.slice(0, 200)}"`);
+    }
+  }
+
+  // 8. No banned terms in block narratives
   const blocks = b.blocks as Array<Record<string, unknown>>;
   for (const block of blocks) {
     const data = block.data as Record<string, unknown> | undefined;
@@ -901,39 +927,30 @@ describe(
         const b = result.body as Record<string, unknown>;
         const text = stripDiagnostics((b.assistant_text as string) ?? "");
 
-        // If text is present, it should mention churn and/or 3.2%
-        // Pre-deployment: edit_graph may return no assistant_text (null/undefined)
-        // when the edit was applied via graph_patch. Log but don't fail.
-        if (text.length > 0) {
-          const mentionsChurn =
-            text.toLowerCase().includes("churn") || text.includes("3.2");
-          if (!mentionsChurn) {
-            console.warn(
-              `[Step 3] assistant_text doesn't mention churn/3.2%. Text: "${text.slice(0, 200)}"`,
-            );
-          }
+        // Post-deployment: assistant_text must be non-empty (null text guard active)
+        expect(
+          text.length > 0,
+          `Step 3: assistant_text must be non-empty post-deployment. Raw: "${String(b.assistant_text).slice(0, 200)}"`,
+        ).toBe(true);
 
-          // Should NOT say "I've updated" (recommendation framing)
-          expect(
-            text.toLowerCase().includes("i've updated"),
-            "Step 3: should not use 'I've updated' framing",
-          ).toBe(false);
-
-          // No banned terms
-          for (const term of BANNED_TERMS) {
-            expect(text.includes(term), `Step 3: banned term "${term}"`).toBe(false);
-          }
-        } else {
-          // No text — must have graph_patch block at minimum
-          const blocks = b.blocks as Array<Record<string, unknown>>;
-          const hasGraphPatch = findBlock(blocks, "graph_patch") != null;
+        // Should mention churn and/or 3.2%
+        const mentionsChurn =
+          text.toLowerCase().includes("churn") || text.includes("3.2");
+        if (!mentionsChurn) {
           console.warn(
-            `[Step 3] assistant_text is empty (pre-deployment). graph_patch present: ${hasGraphPatch}`,
+            `[Step 3] assistant_text doesn't mention churn/3.2%. Text: "${text.slice(0, 200)}"`,
           );
-          expect(
-            hasGraphPatch,
-            "Step 3: if no assistant_text, must have graph_patch block",
-          ).toBe(true);
+        }
+
+        // Should NOT say "I've updated" (recommendation framing)
+        expect(
+          text.toLowerCase().includes("i've updated"),
+          "Step 3: should not use 'I've updated' framing",
+        ).toBe(false);
+
+        // No banned terms
+        for (const term of BANNED_TERMS) {
+          expect(text.includes(term), `Step 3: banned term "${term}"`).toBe(false);
         }
 
         // If graph_patch: apply it
@@ -1000,41 +1017,51 @@ describe(
         const b = result.body as Record<string, unknown>;
         const text = stripDiagnostics((b.assistant_text as string) ?? "");
 
-        // Should mention 5%/constraint/churn OR explain why the edit couldn't be applied
-        // (rejection is a valid LLM outcome — "inconsistency in model structure" etc.)
+        // Post-deployment: constraint shortcut should produce a graph_patch with goal_constraints
+        const blocks = b.blocks as Array<Record<string, unknown>>;
+        const gpBlock = findBlock(blocks, "graph_patch");
+        const tp = b.turn_plan as Record<string, unknown>;
+
+        // Must produce a graph_patch block (constraint shortcut or LLM edit)
+        expect(
+          gpBlock,
+          `Step 4: expected graph_patch block (constraint shortcut). tool=${tp.selected_tool}, blocks=[${blocks.map((bl) => (bl as Record<string, unknown>).block_type).join(",")}]`,
+        ).toBeDefined();
+
+        if (gpBlock) {
+          const gpData = gpBlock.data as Record<string, unknown>;
+          const ops = (gpData.operations ?? []) as Array<Record<string, unknown>>;
+
+          // Should have at least one operation (update_node with goal_constraints)
+          expect(
+            ops.length,
+            `Step 4: expected operations in graph_patch. Got ${ops.length}. Data: ${JSON.stringify(gpData).slice(0, 300)}`,
+          ).toBeGreaterThan(0);
+
+          // Check for goal_constraints in the operations
+          const hasConstraintOp = ops.some((op) => {
+            const value = op.value as Record<string, unknown> | undefined;
+            return value?.goal_constraints != null;
+          });
+          if (hasConstraintOp) {
+            console.log("[Step 4] Constraint shortcut fired: goal_constraints update detected");
+          }
+
+          currentGraph = resolveGraphFromPatch(currentGraph!, gpBlock);
+        }
+
+        // Should mention constraint/churn/5%
         const mentionsConstraint =
           text.includes("5%") ||
           text.toLowerCase().includes("constraint") ||
           text.toLowerCase().includes("churn") ||
-          text.toLowerCase().includes("requirement") ||
-          text.toLowerCase().includes("inconsisten") ||
-          text.toLowerCase().includes("wasn't able") ||
-          text.toLowerCase().includes("couldn't");
+          text.toLowerCase().includes("requirement");
         expect(
           mentionsConstraint,
-          `Step 4: expected mention of constraint or rejection reason. Text: "${text.slice(0, 300)}"`,
+          `Step 4: expected mention of constraint. Text: "${text.slice(0, 300)}"`,
         ).toBe(true);
 
-        // Track outcome: edit_success vs edit_no_operations
-        const blocks = b.blocks as Array<Record<string, unknown>>;
-        const gpBlock = findBlock(blocks, "graph_patch");
-        const tp = b.turn_plan as Record<string, unknown>;
-        let step4Outcome: "edit_success" | "edit_no_operations" | "conversational";
-        if (gpBlock) {
-          const gpData = gpBlock.data as Record<string, unknown>;
-          if (gpData.status === "rejected") {
-            step4Outcome = "edit_no_operations";
-          } else {
-            step4Outcome = "edit_success";
-            currentGraph = resolveGraphFromPatch(currentGraph!, gpBlock);
-          }
-        } else if (tp.selected_tool === "edit_graph") {
-          step4Outcome = "edit_no_operations";
-        } else {
-          step4Outcome = "conversational";
-        }
-
-        console.log(`[Step 4] Outcome: ${step4Outcome}`);
+        console.log(`[Step 4] Outcome: edit_success`);
 
         conversationHistory.push(
           historyTurn("user", msg),
@@ -1043,7 +1070,7 @@ describe(
 
         stepResults.push({
           step: 4,
-          label: `Chat edit — add constraint (${step4Outcome})`,
+          label: "Chat edit — add constraint",
           verdict: "PASS",
           elapsed_ms: result.elapsed_ms,
           crossBoundaryPass: true,
