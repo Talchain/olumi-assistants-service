@@ -517,9 +517,9 @@ function assertCrossBoundary(body: unknown, label: string): void {
   const tp2 = b.turn_plan as Record<string, unknown> | undefined;
   if (tp2?.selected_tool && Array.isArray(b.blocks) && (b.blocks as unknown[]).length === 0) {
     // Check if assistant_text contains a specific blocker explanation
-    // Clarification questions ("Which one?") and no-op explanations ("No changes needed") are valid
-    const blockerPatterns = /\b(wasn't able|couldn't|not possible|not available|not yet|blocked|cannot|unable|which|no changes)\b/i;
-    if (!blockerPatterns.test(strippedText)) {
+    // Valid tool-selected-but-no-blocks responses: clarification, no-op, proposal pending confirmation
+    const validResponsePatterns = /\b(wasn't able|couldn't|not possible|not available|not yet|blocked|cannot|unable|which|no changes|propose|confirm|apply it)\b/i;
+    if (!validResponsePatterns.test(strippedText)) {
       throw new Error(`[${label}] tool "${tp2.selected_tool}" selected but blocks empty and no blocker explanation in text. Text: "${strippedText.slice(0, 200)}"`);
     }
   }
