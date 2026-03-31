@@ -127,7 +127,11 @@ export async function* executePipelineStream(
     // When enabled, the three-layer deterministic pipeline replaces the V2 XML
     // pipeline. Text streams progressively via StreamingTextExtractor; blocks
     // and turn_complete are emitted after the full response is assembled.
-    if (config.features.deterministicOrchestratorEnabled && !config.features.legacyOrchestratorEnabled) {
+    //
+    // generate_model: true bypasses the deterministic pipeline — it needs the
+    // V2 pipeline's draft_graph handler which runs PLoT graph construction.
+    // The deterministic pipeline has no draft_graph action.
+    if (config.features.deterministicOrchestratorEnabled && !config.features.legacyOrchestratorEnabled && !request.generate_model) {
       const { executeDeterministicPipelineStreaming } = await import("../deterministic/pipeline.js");
 
       for await (const event of executeDeterministicPipelineStreaming(request, requestId, signal)) {
