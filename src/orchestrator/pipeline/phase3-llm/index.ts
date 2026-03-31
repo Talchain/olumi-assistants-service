@@ -1105,7 +1105,11 @@ function buildExplicitGenerateRoute(
   context: ConversationContext,
 ): ExplicitGenerateRoute {
   if (!isExplicitGenerateRequest(userMessage, intentGate)) return { kind: 'none' };
-  if (hasStableModel(enrichedContext) && !isClearRegenerateRequest(userMessage)) {
+  // generate_model: true is an explicit UI button click — always generate, even if
+  // a graph exists. The stable-model guard only applies to natural language requests
+  // like "build the model" where the user may not realize they already have one.
+  const isExplicitButtonClick = intentGate.matched_pattern === 'generate_model';
+  if (!isExplicitButtonClick && hasStableModel(enrichedContext) && !isClearRegenerateRequest(userMessage)) {
     return { kind: 'none' };
   }
 
