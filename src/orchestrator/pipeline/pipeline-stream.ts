@@ -123,6 +123,37 @@ export async function* executePipelineStream(
       return;
     }
 
+    // ── Deterministic intelligence pipeline (feature-flagged) ───────────────
+    // When enabled, the three-layer deterministic pipeline replaces the V2 XML
+    // pipeline for all non-system-event turns. The response is computed in one
+    // shot (not streamed token-by-token), then emitted as SSE events.
+    if (config.features.deterministicOrchestratorEnabled && !config.features.legacyOrchestratorEnabled) {
+      yield { type: 'turn_start', seq: seq++, turn_id: enrichedContext.turn_id, routing: 'deterministic', stage };
+      if (signal?.aborted) return;
+
+      const { executeDeterministicPipeline } = await import("../deterministic/pipeline.js");
+      const deterministicResult = await executeDeterministicPipeline(request, requestId);
+      const envelope = deterministicResult.envelope;
+
+      // Emit text as a single delta (not token-by-token, since the LLM call is non-streaming)
+      if (envelope.assistant_text) {
+        yield { type: 'text_delta', seq: seq++, delta: envelope.assistant_text };
+      }
+
+      // Emit blocks individually for progressive UI rendering
+      if (envelope.blocks) {
+        for (const block of envelope.blocks) {
+          yield { type: 'block', seq: seq++, block };
+        }
+      }
+
+      // The deterministic envelope is OrchestratorResponseEnvelope & { response_version: 2 }.
+      // OrchestratorResponseEnvelopeV2 extends it with optional fields (science_ledger, etc.)
+      // that the deterministic pipeline doesn't populate. Cast is safe — missing fields are optional.
+      yield { type: 'turn_complete', seq: seq++, envelope: envelope as unknown as OrchestratorResponseEnvelopeV2 };
+      return;
+    }
+
     // Phase 2: Specialist Routing (stub)
     const specialistResult = phase2Route();
 
