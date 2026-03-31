@@ -13,7 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { OrchestratorTurnRequest } from "../types.js";
+import type { OrchestratorTurnRequest, ConversationContext } from "../types.js";
 import type { DeterministicPipelineResult, DeterministicTurnContext, LLMJsonResponse, ActionResult } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import { computeTurnContext } from "./turn-context.js";
@@ -30,6 +30,7 @@ import { createProposalBlock } from "../blocks/factory.js";
 import { StreamingTextExtractor } from "./streaming-text-extractor.js";
 import type { OrchestratorStreamEvent } from "../pipeline/stream-events.js";
 import type { OrchestratorResponseEnvelopeV2 } from "../pipeline/types.js";
+import { assembleMessages } from "../prompt-assembly.js";
 
 // ============================================================================
 // Intent → Action Mapping
@@ -98,6 +99,9 @@ export async function executeDeterministicPipeline(
     node_count: turnContext.graph_summary.node_count,
     has_analysis: turnContext.analysis_summary != null,
     context_fallback_used: contextFallbackUsed,
+    turn_count: turnContext.conversation.turn_count,
+    messages_in_history: turnRequest.context?.messages?.length ?? 0,
+    entity_count: turnContext.entities.nodes.size,
   }, 'deterministic.turn_context_computed');
 
   // ── Check pending confirmation ────────────────────────────────────────────
@@ -236,7 +240,7 @@ export async function executeDeterministicPipeline(
           let llmResponse: LLMJsonResponse | null = null;
           let llmCallMeta: LLMCallResult | null = null;
           if (!actionResult.assistantText) {
-            llmCallMeta = await callLLM(turnContext, turnRequest.message, requestId, turnId);
+            llmCallMeta = await callLLM(turnContext, turnRequest.message, turnRequest.context, requestId, turnId);
             llmResponse = llmCallMeta?.response ?? null;
           }
 
@@ -282,7 +286,7 @@ export async function executeDeterministicPipeline(
 
   // ── Full LLM call (free text) ────────────────────────────────────────────
   const llmStart = Date.now();
-  const llmCallResult = await callLLM(turnContext, turnRequest.message, requestId, turnId);
+  const llmCallResult = await callLLM(turnContext, turnRequest.message, turnRequest.context, requestId, turnId);
   const llmLatencyMs = Date.now() - llmStart;
   const llmResponse = llmCallResult?.response ?? null;
 
@@ -390,6 +394,7 @@ interface LLMCallResult {
 async function callLLM(
   turnContext: DeterministicTurnContext,
   userMessage: string,
+  conversationContext: ConversationContext,
   requestId: string,
   turnId: string,
 ): Promise<LLMCallResult | null> {
@@ -398,24 +403,54 @@ async function callLLM(
     const systemPrompt = buildDeterministicPrompt(turnContext);
 
     // JSON-forcing suffix: aligns with v30.5 prompt evaluation.
-    // Redundant when responseFormat: 'json_object' is honoured, but harmless.
+    // The prompt + suffix enforce JSON since chatWithTools() has no responseFormat param.
     const effectiveMessage = userMessage + '\n\nRespond with valid JSON only.';
 
-    const response = await adapter.chat(
-      {
-        system: systemPrompt,
-        userMessage: effectiveMessage,
-        maxTokens: 2048,
-        temperature: 0.3,
-        responseFormat: 'json_object',
-      },
-      {
-        requestId,
-        timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
-      },
-    );
+    // Build multi-turn messages from conversation history + current user message.
+    // assembleMessages() maps ConversationMessage[] → { role, content }[] pairs.
+    const messages = assembleMessages(conversationContext, effectiveMessage);
 
-    const content = response.content;
+    let content: string;
+
+    if (adapter.chatWithTools) {
+      // Multi-turn path: sends full conversation history to the LLM
+      const response = await adapter.chatWithTools(
+        {
+          system: systemPrompt,
+          messages,
+          tools: [],
+          temperature: 0.3,
+          maxTokens: 2048,
+        },
+        {
+          requestId,
+          timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
+        },
+      );
+
+      // Extract text from ToolResponseBlock[] content (chatWithTools response format)
+      content = response.content
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+    } else {
+      // Fallback for adapters without chatWithTools — loses conversation history
+      log.warn({ request_id: requestId }, 'deterministic.llm_call.no_chatWithTools_fallback');
+      const response = await adapter.chat(
+        {
+          system: systemPrompt,
+          userMessage: effectiveMessage,
+          maxTokens: 2048,
+          temperature: 0.3,
+          responseFormat: 'json_object',
+        },
+        {
+          requestId,
+          timeoutMs: ORCHESTRATOR_TIMEOUT_MS,
+        },
+      );
+      content = response.content;
+    }
 
     const parseResult = parseLLMJsonResponse(content);
 
@@ -431,6 +466,16 @@ async function callLLM(
         turn_id: turnId,
       });
     }
+
+    log.info({
+      request_id: requestId,
+      messages_sent: messages.length,
+      system_prompt_chars: systemPrompt.length,
+      response_chars: content.length,
+      extraction_method: parseResult.extraction_method,
+      has_insights: (parseResult.response.insights?.length ?? 0) > 0,
+      has_actions: parseResult.response.recommended_actions.length > 0,
+    }, 'deterministic.llm_call.completed');
 
     return {
       response: parseResult.response,
@@ -466,6 +511,7 @@ export type StreamingLLMEvent =
 async function* callLLMStreaming(
   turnContext: DeterministicTurnContext,
   userMessage: string,
+  conversationContext: ConversationContext,
   requestId: string,
   turnId: string,
   signal?: AbortSignal,
@@ -475,9 +521,12 @@ async function* callLLMStreaming(
   const effectiveMessage = userMessage + '\n\nRespond with valid JSON only.';
   const promptCharCount = systemPrompt.length;
 
+  // Build multi-turn messages from conversation history + current user message
+  const messages = assembleMessages(conversationContext, effectiveMessage);
+
   // If the adapter doesn't support streaming, fall back to non-streaming
   if (!adapter.streamChatWithTools) {
-    const result = await callLLM(turnContext, userMessage, requestId, turnId);
+    const result = await callLLM(turnContext, userMessage, conversationContext, requestId, turnId);
     if (result) {
       if (result.response.text) {
         yield { type: 'text_delta', delta: result.response.text };
@@ -499,7 +548,7 @@ async function* callLLMStreaming(
   try {
     const streamArgs = {
       system: systemPrompt,
-      messages: [{ role: 'user' as const, content: effectiveMessage }],
+      messages,
       tools: [],
       temperature: 0.3,
       maxTokens: 2048,
@@ -546,6 +595,17 @@ async function* callLLMStreaming(
       turn_id: turnId,
     });
   }
+
+  log.info({
+    request_id: requestId,
+    messages_sent: messages.length,
+    system_prompt_chars: promptCharCount,
+    response_chars: fullContent.length,
+    extraction_method: parseResult.extraction_method,
+    has_insights: (parseResult.response.insights?.length ?? 0) > 0,
+    has_actions: parseResult.response.recommended_actions.length > 0,
+    streaming_fallback: extractorFallback,
+  }, 'deterministic.llm_call_streaming.completed');
 
   // If extractor fell back (text wasn't first field), emit parsed text as single delta
   if (extractorFallback) {
@@ -624,6 +684,15 @@ export async function* executeDeterministicPipelineStreaming(
       analysis_inputs: ctx.analysis_inputs ?? null,
     };
   }
+
+  log.info({
+    request_id: requestId,
+    stage: turnContext.stage,
+    turn_count: turnContext.conversation.turn_count,
+    messages_in_history: turnRequest.context?.messages?.length ?? 0,
+    entity_count: turnContext.entities.nodes.size,
+    context_fallback_used: contextFallbackUsed,
+  }, 'deterministic.streaming.turn_context_computed');
 
   let seq = 0;
   const stage = turnContext.stage;
@@ -726,7 +795,7 @@ export async function* executeDeterministicPipelineStreaming(
           let llmCallMeta: LLMCallResult | null = null;
           if (!actionResult.assistantText) {
             yield { type: 'progress', seq: seq++, tool_name: 'orchestrator', elapsed_ms: 0, message: 'Olumi is thinking\u2026' };
-            for await (const llmEvent of callLLMStreaming(turnContext, turnRequest.message, requestId, turnId, signal)) {
+            for await (const llmEvent of callLLMStreaming(turnContext, turnRequest.message, turnRequest.context, requestId, turnId, signal)) {
               if (llmEvent.type === 'text_delta') {
                 yield { type: 'text_delta', seq: seq++, delta: llmEvent.delta };
               } else if (llmEvent.type === 'complete') {
@@ -777,7 +846,7 @@ export async function* executeDeterministicPipelineStreaming(
   const llmStart = Date.now();
   let llmCallResult: LLMCallResult | null = null;
 
-  for await (const event of callLLMStreaming(turnContext, turnRequest.message, requestId, turnId, signal)) {
+  for await (const event of callLLMStreaming(turnContext, turnRequest.message, turnRequest.context, requestId, turnId, signal)) {
     if (event.type === 'text_delta') {
       yield { type: 'text_delta', seq: seq++, delta: event.delta };
     } else if (event.type === 'complete') {

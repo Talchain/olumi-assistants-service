@@ -20,6 +20,7 @@ import type {
   ActionResult,
   DeterministicPipelineResult,
   TurnQualityMeta,
+  EntityRegistry,
 } from "./types.js";
 import { buildChipsFromRecommendations } from "./chip-assembler.js";
 import { normaliseDeterministicResponse, scanBannedTerms } from "./response-normaliser.js";
@@ -135,8 +136,9 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     deferred_tools: [],
   };
 
-  // Cap insights at 3 and include in envelope
-  const insights = llmResponse?.insights?.slice(0, 3) ?? [];
+  // Cap insights at 3, resolve entity IDs → labels, and include in envelope
+  const rawInsights = llmResponse?.insights?.slice(0, 3) ?? [];
+  const insights = rawInsights.map((ins) => resolveInsightEntities(ins, turnContext.entities));
 
   // Collect guidance_items from action result + post-analysis guidance
   let guidanceItems: GuidanceItem[] = [...(actionResult?.guidance_items ?? [])];
@@ -209,4 +211,36 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     httpStatus: 200,
     _quality: quality,
   };
+}
+
+// ============================================================================
+// Entity Resolution for Insights
+// ============================================================================
+
+/**
+ * Regex matching all known entity ID prefixes.
+ * Covers: fac_, opt_, goal_, dec_, out_, risk_, edge_, con_
+ */
+const ENTITY_ID_RE = /\b(?:fac|opt|goal|dec|out|risk|edge|con)_\w+\b/g;
+
+/**
+ * Replace raw entity IDs with human-readable labels in insight fields.
+ * - Resolves inline IDs in `description` text via regex
+ * - Leaves `target_id` unchanged (programmatic reference)
+ */
+function resolveInsightEntities(
+  insight: LLMInsight,
+  entities: EntityRegistry,
+): LLMInsight {
+  const resolved = { ...insight };
+
+  // Replace inline entity IDs in description
+  if (resolved.description) {
+    resolved.description = resolved.description.replace(
+      ENTITY_ID_RE,
+      (match) => entities.nodes.get(match)?.label ?? match,
+    );
+  }
+
+  return resolved;
 }

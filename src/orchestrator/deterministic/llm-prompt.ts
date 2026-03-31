@@ -188,14 +188,14 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
     const optionDescs: string[] = [];
     for (const [id, entry] of ctx.entities.nodes) {
       if (entry.kind === 'factor') {
-        const segs = [id, `(${entry.label}`];
+        const segs = [`${entry.label} (${id}`];
         if (entry.category) segs.push(`, ${entry.category}`);
         if (entry.value != null) segs.push(`, value: ${entry.value}`);
         if (entry.unit) segs.push(` ${entry.unit}`);
         segs.push(')');
         factorDescs.push(segs.join(''));
       } else if (entry.kind === 'option') {
-        optionDescs.push(`${id} (${entry.label})`);
+        optionDescs.push(`${entry.label} (${id})`);
       }
     }
     if (factorDescs.length > 0) parts.push(`Factors: ${factorDescs.join(', ')}`);
