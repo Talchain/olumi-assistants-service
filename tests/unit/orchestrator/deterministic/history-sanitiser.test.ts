@@ -4,13 +4,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { sanitiseAssistantHistory } from "../../../../src/orchestrator/deterministic/pipeline.js";
 
-// Suppress log.debug output in tests
 vi.mock("../../../../src/utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
 }));
+
+// Import after mock is set up
+import { sanitiseAssistantHistory } from "../../../../src/orchestrator/deterministic/pipeline.js";
+import { log } from "../../../../src/utils/telemetry.js";
 
 describe("sanitiseAssistantHistory", () => {
   beforeEach(() => {
@@ -59,6 +61,15 @@ describe("sanitiseAssistantHistory", () => {
     expect(result[0].content).toBe(original);
   });
 
+  it("passes through JSON with whitespace-only text field unchanged", () => {
+    const original = '{"text": "   ", "insights": []}';
+    const messages = [
+      { role: "assistant" as const, content: original },
+    ];
+    const result = sanitiseAssistantHistory(messages);
+    expect(result[0].content).toBe(original);
+  });
+
   it("sanitises only polluted assistant turns in mixed history", () => {
     const polluted = '{"text": "Extracted", "insights": [], "recommended_actions": []}';
     const messages = [
@@ -97,5 +108,27 @@ describe("sanitiseAssistantHistory", () => {
     ];
     const result = sanitiseAssistantHistory(messages);
     expect(result[0].content).toBe("Trimmed");
+  });
+
+  it("logs deterministic.history_json_extracted with correct fields on extraction", () => {
+    const json = '{"text": "Hello world", "insights": [], "recommended_actions": []}';
+    const messages = [
+      { role: "user" as const, content: "Hi" },
+      { role: "assistant" as const, content: json },
+    ];
+    sanitiseAssistantHistory(messages);
+    expect(log.debug).toHaveBeenCalledTimes(1);
+    expect(log.debug).toHaveBeenCalledWith(
+      { turn_index: 1, original_length: json.length, extracted_length: 11 },
+      "deterministic.history_json_extracted",
+    );
+  });
+
+  it("does not log when no extraction occurs", () => {
+    const messages = [
+      { role: "assistant" as const, content: "Plain text" },
+    ];
+    sanitiseAssistantHistory(messages);
+    expect(log.debug).not.toHaveBeenCalled();
   });
 });

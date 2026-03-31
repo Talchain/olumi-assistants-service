@@ -942,7 +942,7 @@ export function sanitiseAssistantHistory(
         parsed !== null &&
         typeof parsed === 'object' &&
         typeof parsed.text === 'string' &&
-        parsed.text.length > 0
+        parsed.text.trim().length > 0
       ) {
         log.debug({
           turn_index: idx,

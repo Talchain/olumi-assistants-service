@@ -218,17 +218,21 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
 // ============================================================================
 
 /**
- * Regex matching all known entity ID prefixes.
- * Covers: fac_, opt_, goal_, dec_, out_, risk_, edge_, con_
+ * Regex matching all known node entity ID prefixes.
+ * Covers: fac, opt, goal, dec, out, risk, con — followed by _, :, or -
+ * then the ID body (lowercase alphanumeric, underscores, colons, hyphens)
+ * matching CANONICAL_ID_REGEX from src/cee/utils/id-normalizer.ts.
+ *
+ * edge_ is excluded — edges use from→to format, not the nodes map.
  */
-const ENTITY_ID_RE = /\b(?:fac|opt|goal|dec|out|risk|edge|con)_\w+\b/g;
+const ENTITY_ID_RE = /\b(?:fac|opt|goal|dec|out|risk|con)[_:-][a-z0-9_:-]+\b/g;
 
 /**
  * Replace raw entity IDs with human-readable labels in insight fields.
  * - Resolves inline IDs in `description` text via regex
  * - Leaves `target_id` unchanged (programmatic reference)
  */
-function resolveInsightEntities(
+export function resolveInsightEntities(
   insight: LLMInsight,
   entities: EntityRegistry,
 ): LLMInsight {
