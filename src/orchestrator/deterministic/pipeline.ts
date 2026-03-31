@@ -408,7 +408,8 @@ async function callLLM(
 
     // Build multi-turn messages from conversation history + current user message.
     // assembleMessages() maps ConversationMessage[] → { role, content }[] pairs.
-    const messages = assembleMessages(conversationContext, effectiveMessage);
+    // sanitiseAssistantHistory() extracts .text from JSON-polluted assistant turns.
+    const messages = sanitiseAssistantHistory(assembleMessages(conversationContext, effectiveMessage));
 
     let content: string;
 
@@ -521,8 +522,9 @@ async function* callLLMStreaming(
   const effectiveMessage = userMessage + '\n\nRespond with valid JSON only.';
   const promptCharCount = systemPrompt.length;
 
-  // Build multi-turn messages from conversation history + current user message
-  const messages = assembleMessages(conversationContext, effectiveMessage);
+  // Build multi-turn messages from conversation history + current user message.
+  // sanitiseAssistantHistory() extracts .text from JSON-polluted assistant turns.
+  const messages = sanitiseAssistantHistory(assembleMessages(conversationContext, effectiveMessage));
 
   // If the adapter doesn't support streaming, fall back to non-streaming
   if (!adapter.streamChatWithTools) {
@@ -904,5 +906,56 @@ export async function* executeDeterministicPipelineStreaming(
   }
 
   yield { type: 'turn_complete', seq: seq++, envelope: result.envelope as unknown as OrchestratorResponseEnvelopeV2 };
+}
+
+// ============================================================================
+// Conversation History Sanitisation
+// ============================================================================
+
+type AssembledMessage = { role: 'user' | 'assistant'; content: string | import("../../adapters/llm/types.js").ToolResponseBlock[] };
+
+/**
+ * Sanitise assistant turns whose content is a JSON envelope from the
+ * deterministic pipeline (e.g. `{"text":"…","insights":[…]}`).
+ *
+ * The UI may store the full JSON string as the assistant turn. On
+ * subsequent turns this polluted history is sent back to CEE. Without
+ * sanitisation the LLM sees raw JSON instead of natural language.
+ *
+ * For each assistant message with string content that parses as JSON
+ * with a non-empty `.text` field, we replace the content with `.text`.
+ * User messages and non-JSON assistant messages are passed through unchanged.
+ */
+export function sanitiseAssistantHistory(
+  messages: AssembledMessage[],
+): AssembledMessage[] {
+  return messages.map((msg, idx) => {
+    if (msg.role !== 'assistant') return msg;
+    if (typeof msg.content !== 'string') return msg;
+
+    const trimmed = msg.content.trimStart();
+    if (!trimmed.startsWith('{')) return msg;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        typeof parsed.text === 'string' &&
+        parsed.text.length > 0
+      ) {
+        log.debug({
+          turn_index: idx,
+          original_length: msg.content.length,
+          extracted_length: parsed.text.length,
+        }, 'deterministic.history_json_extracted');
+        return { ...msg, content: parsed.text };
+      }
+    } catch {
+      // Malformed JSON — pass through unchanged
+    }
+
+    return msg;
+  });
 }
 
