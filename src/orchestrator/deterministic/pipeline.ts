@@ -522,11 +522,8 @@ async function* callLLMStreaming(
   const effectiveMessage = userMessage + '\n\nRespond with valid JSON only.';
   const promptCharCount = systemPrompt.length;
 
-  // Build multi-turn messages from conversation history + current user message.
-  // sanitiseAssistantHistory() extracts .text from JSON-polluted assistant turns.
-  const messages = sanitiseAssistantHistory(assembleMessages(conversationContext, effectiveMessage));
-
-  // If the adapter doesn't support streaming, fall back to non-streaming
+  // If the adapter doesn't support streaming, fall back to non-streaming.
+  // callLLM handles its own message assembly + sanitisation.
   if (!adapter.streamChatWithTools) {
     const result = await callLLM(turnContext, userMessage, conversationContext, requestId, turnId);
     if (result) {
@@ -537,6 +534,11 @@ async function* callLLMStreaming(
     }
     return;
   }
+
+  // Build multi-turn messages from conversation history + current user message.
+  // sanitiseAssistantHistory() extracts .text from JSON-polluted assistant turns.
+  // Placed after the fallback check to avoid double assembly (callLLM does its own).
+  const messages = sanitiseAssistantHistory(assembleMessages(conversationContext, effectiveMessage));
 
   // Stream the LLM response, extracting text progressively
   const pendingDeltas: string[] = [];
