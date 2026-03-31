@@ -131,6 +131,11 @@ export async function* executePipelineStream(
       yield { type: 'turn_start', seq: seq++, turn_id: enrichedContext.turn_id, routing: 'deterministic', stage };
       if (signal?.aborted) return;
 
+      // Emit progress immediately so the UI shows activity during the LLM call.
+      // The deterministic pipeline is non-streaming (JSON response parsed in one shot),
+      // so the user would otherwise see a blank bubble for the full LLM latency.
+      yield { type: 'progress', seq: seq++, tool_name: 'orchestrator', elapsed_ms: 0, message: 'Olumi is thinking\u2026' };
+
       const { executeDeterministicPipeline } = await import("../deterministic/pipeline.js");
       const deterministicResult = await executeDeterministicPipeline(request, requestId);
       const envelope = deterministicResult.envelope;
