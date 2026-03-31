@@ -193,7 +193,7 @@ export function assembleV2Envelope(input: AssembleEnvelopeInput): OrchestratorRe
 
   // Cap suggested_actions at 3 (contract limit)
   if (suggestedActions.length > 3) {
-    suggestedActions.length = 3;
+    suggestedActions.splice(3);
   }
 
   // Resolve assistant text: tool result text takes priority, then LLM text.

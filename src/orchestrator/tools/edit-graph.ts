@@ -248,11 +248,12 @@ interface ConstraintDetectionResult {
  * Detect constraint-intent in user messages and extract structured data.
  * Returns null if the message is not a constraint request.
  *
- * Patterns:
- * - "keep X under/below/above Y%"
- * - "X must/should be under/below/above Y%"
- * - "X is a hard requirement"
- * - "constraint on X"
+ * Requires BOTH:
+ * 1. Constraint language with a direction word (under/below/above/over)
+ * 2. A threshold value (N% or N) in the message
+ *
+ * This combination avoids false positives on messages like "The constraint
+ * of our budget is tight" (no threshold) or "Cost is 50%" (no direction).
  */
 function detectConstraintIntent(
   editDescription: string,
@@ -260,17 +261,20 @@ function detectConstraintIntent(
 ): ConstraintDetectionResult | null {
   const msg = editDescription.toLowerCase();
 
-  // Must contain constraint-related language
-  const hasConstraintLanguage =
-    /\b(keep\b.*\b(?:under|below|above|over))\b/.test(msg) ||
-    /\b(must|should|need to)\b.*\b(under|below|above|over|less than|more than|at least|at most)\b/.test(msg) ||
-    /\bhard requirement\b/.test(msg) ||
-    /\bconstraint\b/.test(msg) ||
-    /\bcap\b.*\bat\b/.test(msg) ||
-    /\bceiling\b/.test(msg) ||
-    /\bfloor\b/.test(msg);
+  // Must contain a direction word paired with constraint language.
+  // Bare "constraint" or "ceiling" without a direction + threshold is too ambiguous.
+  const constraintWithDirection =
+    /\b(?:keep|must|should|need to|needs to|has to|have to)\b.*\b(?:under|below|above|over|less than|more than|at least|at most)\b/.test(msg) ||
+    /\b(?:under|below|above|over|less than|more than|at least|at most)\b.*\b(?:hard requirement|requirement|constraint|limit)\b/.test(msg);
 
-  if (!hasConstraintLanguage) return null;
+  if (!constraintWithDirection) return null;
+
+  // Must contain a threshold value (N% or standalone number near a direction word)
+  const thresholdMatch = msg.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!thresholdMatch) return null;
+
+  const threshold = parseFloat(thresholdMatch[1]) / 100;
+  const thresholdPosition = thresholdMatch.index!;
 
   // Find goal node
   const nodes = graph.nodes ?? [];
@@ -278,54 +282,39 @@ function detectConstraintIntent(
   if (!goalNode) return null;
   const goalId = (goalNode as Record<string, unknown>).id as string;
 
-  // Extract threshold number from message
-  const thresholdMatch = msg.match(/(\d+(?:\.\d+)?)\s*%/);
-  const threshold = thresholdMatch ? parseFloat(thresholdMatch[1]) / 100 : undefined;
-
   // Determine direction
-  const belowPattern = /\b(under|below|less than|at most|cap|ceiling)\b/;
-  const abovePattern = /\b(above|over|more than|at least|floor)\b/;
+  const belowPattern = /\b(under|below|less than|at most)\b/;
+  const abovePattern = /\b(above|over|more than|at least)\b/;
   const direction = belowPattern.test(msg) ? 'below' as const : abovePattern.test(msg) ? 'above' as const : 'below' as const;
 
-  // Match a factor from the graph by checking if any factor label words appear in the message
-  const factors = nodes.filter((n) => (n as Record<string, unknown>).kind === 'factor');
-  let matchedFactor: { id: string; label: string } | null = null;
+  // Match a factor/risk/outcome from the graph.
+  // Score candidates by number of matching label words to pick the best match.
+  const constraintTargetKinds = new Set(['factor', 'risk', 'outcome']);
+  const candidates: Array<{ id: string; label: string; score: number }> = [];
 
-  for (const factor of factors) {
-    const factorRec = factor as Record<string, unknown>;
-    const label = (factorRec.label as string ?? '').toLowerCase();
-    // Check if any significant word from the factor label appears in the message
+  for (const node of nodes) {
+    const nodeRec = node as Record<string, unknown>;
+    if (!constraintTargetKinds.has(nodeRec.kind as string)) continue;
+
+    const label = (nodeRec.label as string ?? '').toLowerCase();
     const labelWords = label.split(/[\s_-]+/).filter((w) => w.length >= 3);
-    const matched = labelWords.some((word) => msg.includes(word));
-    if (matched) {
-      matchedFactor = { id: factorRec.id as string, label: factorRec.label as string };
-      break;
+    // Count how many label words appear in the message (excluding the threshold itself)
+    const msgWithoutThreshold = msg.slice(0, thresholdPosition) + msg.slice(thresholdPosition + thresholdMatch[0].length);
+    const matchCount = labelWords.filter((word) => msgWithoutThreshold.includes(word)).length;
+
+    if (matchCount > 0) {
+      candidates.push({ id: nodeRec.id as string, label: nodeRec.label as string, score: matchCount });
     }
   }
 
-  // Also check risks and outcomes as constraint targets
-  if (!matchedFactor) {
-    const riskOutcome = nodes.filter((n) => {
-      const kind = (n as Record<string, unknown>).kind as string;
-      return kind === 'risk' || kind === 'outcome';
-    });
-    for (const node of riskOutcome) {
-      const nodeRec = node as Record<string, unknown>;
-      const label = (nodeRec.label as string ?? '').toLowerCase();
-      const labelWords = label.split(/[\s_-]+/).filter((w) => w.length >= 3);
-      if (labelWords.some((word) => msg.includes(word))) {
-        matchedFactor = { id: nodeRec.id as string, label: nodeRec.label as string };
-        break;
-      }
-    }
-  }
+  if (candidates.length === 0) return null;
 
-  if (!matchedFactor) return null;
+  // Pick best match (most label words matched)
+  candidates.sort((a, b) => b.score - a.score);
+  const matchedFactor = candidates[0];
 
-  // Build constraint label from the message
-  const constraintLabel = threshold != null
-    ? `${matchedFactor.label} ${direction === 'below' ? '<' : '>'} ${(threshold * 100).toFixed(0)}%`
-    : `${matchedFactor.label} (${direction} limit)`;
+  // Build constraint label
+  const constraintLabel = `${matchedFactor.label} ${direction === 'below' ? '<' : '>'} ${(threshold * 100).toFixed(0)}%`;
 
   // Read existing goal_constraints
   const rawConstraints = (goalNode as Record<string, unknown>).goal_constraints;
@@ -338,7 +327,7 @@ function detectConstraintIntent(
     newConstraint: {
       node_id: matchedFactor.id,
       type: 'threshold',
-      ...(threshold != null ? { threshold } : {}),
+      threshold,
       direction,
       label: constraintLabel,
     },
