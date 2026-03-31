@@ -182,7 +182,9 @@ describe('parseLLMJsonResponse', () => {
     expect(result.response.text).toBe('Markdown-heavy response with **bold** and\n\nnewlines.');
   });
 
-  it('caps insights at 3', () => {
+  it('caps insights at 3 via lenient parse', () => {
+    // Zod max(3) rejects 5 insights in strict mode; the lenient path should
+    // truncate to 3 and return extraction_method:'native', not fallback.
     const input = JSON.stringify({
       text: 'Response.',
       insights: Array.from({ length: 5 }, (_, i) => ({
@@ -193,9 +195,65 @@ describe('parseLLMJsonResponse', () => {
       recommended_actions: [],
     });
 
-    // Zod max(3) should cause this to fail validation
     const result = parseLLMJsonResponse(input);
-    // It either parses with truncation or falls back
-    expect(result.response.text).toBeDefined();
+    expect(result.extraction_method).toBe('native');
+    expect(result.response.text).toBe('Response.');
+    expect(result.response.insights).toHaveLength(3);
+    // Must NOT expose raw JSON as text
+    expect(result.response.text).not.toContain('"insights"');
+  });
+
+  it('strips unknown insight type via lenient parse', () => {
+    const input = JSON.stringify({
+      text: 'Analysis complete.',
+      insights: [
+        { type: 'assumption_risk', description: 'Real insight', severity: 'info' },
+        { type: 'hallucinated_type', description: 'Bad insight', severity: 'info' },
+      ],
+      recommended_actions: [],
+    });
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.extraction_method).toBe('native');
+    expect(result.response.text).toBe('Analysis complete.');
+    expect(result.response.insights).toHaveLength(1);
+    expect(result.response.insights[0].type).toBe('assumption_risk');
+  });
+
+  it('handles both invalid insight type and invalid action_type together', () => {
+    const input = JSON.stringify({
+      text: 'Combined lenient test.',
+      insights: [
+        { type: 'bias_detected', description: 'Valid insight', severity: 'warning' },
+        { type: 'unknown_insight_type', description: 'Bad insight', severity: 'info' },
+      ],
+      recommended_actions: [
+        { action_type: 'explain_result', priority: 'high' },
+        { action_type: 'hallucinated_action', priority: 'medium' },
+      ],
+    });
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.extraction_method).toBe('native');
+    expect(result.response.text).toBe('Combined lenient test.');
+    expect(result.response.insights).toHaveLength(1);
+    expect(result.response.recommended_actions).toHaveLength(1);
+    expect(result.response.recommended_actions[0].action_type).toBe('explain_result');
+  });
+
+  it('applies lenient parse when JSON arrives in a markdown fence', () => {
+    // fence/regex strategies now go through the same strictOrLenient helper
+    const inner = JSON.stringify({
+      text: 'Fenced with bad action.',
+      insights: [],
+      recommended_actions: [{ action_type: 'hallucinated_action', priority: 'high' }],
+    });
+    const input = `Here is my analysis:\n\`\`\`json\n${inner}\n\`\`\``;
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.extraction_method).toBe('fence');
+    expect(result.response.text).toBe('Fenced with bad action.');
+    expect(result.response.recommended_actions).toHaveLength(0);
+    expect(result.response.text).not.toContain('"text":');
   });
 });
