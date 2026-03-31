@@ -48,6 +48,8 @@ export interface AssemblerInput {
   contextFallbackUsed?: boolean;
   /** Character count of the full system prompt. */
   promptCharCount?: number;
+  /** Streaming text extractor state (only for streaming calls). */
+  streamingExtractorState?: 'streaming' | 'fallback';
 }
 
 /**
@@ -66,6 +68,7 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     extractionMethod,
     contextFallbackUsed,
     promptCharCount,
+    streamingExtractorState,
   } = input;
 
   // Build assistant text — action confirmation first, LLM coaching second
@@ -198,6 +201,7 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     llm_action_count_pre_filter: llmResponse?.recommended_actions?.length ?? 0,
     context_fallback_used: contextFallbackUsed ?? false,
     prompt_char_count: promptCharCount ?? 0,
+    ...(streamingExtractorState ? { streaming_extractor_state: streamingExtractorState } : {}),
   };
 
   return {

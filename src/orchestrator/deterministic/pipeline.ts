@@ -383,6 +383,8 @@ interface LLMCallResult {
   response: LLMJsonResponse;
   extraction_method: 'native' | 'fence' | 'regex' | 'fallback';
   prompt_char_count: number;
+  /** Streaming extractor state — only populated for streaming calls. */
+  streaming_extractor_state?: 'streaming' | 'fallback';
 }
 
 async function callLLM(
@@ -516,8 +518,9 @@ async function* callLLMStreaming(
       }
     }
 
-    extractor.finish();
+    // Capture fallback state BEFORE finish() — finish() transitions fallback → complete
     extractorFallback = extractor.getState() === 'fallback';
+    extractor.finish();
 
     // Flush any remaining deltas
     while (pendingDeltas.length > 0) {
@@ -545,9 +548,19 @@ async function* callLLMStreaming(
   }
 
   // If extractor fell back (text wasn't first field), emit parsed text as single delta
-  if (extractorFallback && parseResult.response.text) {
-    yield { type: 'text_delta', delta: parseResult.response.text };
+  if (extractorFallback) {
+    log.warn({
+      buffer_preview: extractor.getFullBuffer().slice(0, 50),
+      scenario_id: turnContext.scenario_id,
+      turn_id: turnId,
+    }, 'deterministic.streaming_extractor_fallback');
+
+    if (parseResult.response.text) {
+      yield { type: 'text_delta', delta: parseResult.response.text };
+    }
   }
+
+  const extractorState: 'streaming' | 'fallback' = extractorFallback ? 'fallback' : 'streaming';
 
   yield {
     type: 'complete',
@@ -555,6 +568,7 @@ async function* callLLMStreaming(
       response: parseResult.response,
       extraction_method: parseResult.extraction_method,
       prompt_char_count: promptCharCount,
+      streaming_extractor_state: extractorState,
     },
   };
 }
@@ -726,6 +740,7 @@ export async function* executeDeterministicPipelineStreaming(
             turnContext, llmResponse, actionResult, turnId,
             routing: 'deterministic', selectedAction: directAction, executedActions: [directAction],
             extractionMethod: llmCallMeta?.extraction_method, contextFallbackUsed, promptCharCount: llmCallMeta?.prompt_char_count,
+            streamingExtractorState: llmCallMeta?.streaming_extractor_state,
           });
           emitQualityTelemetry(result, turnRequest.context.scenario_id, turnId);
 
@@ -810,6 +825,7 @@ export async function* executeDeterministicPipelineStreaming(
     turnContext, llmResponse, actionResult, turnId,
     routing: 'llm', selectedAction: executedActions[0] ?? null, executedActions, llmLatencyMs,
     extractionMethod: llmCallResult?.extraction_method, contextFallbackUsed, promptCharCount: llmCallResult?.prompt_char_count,
+    streamingExtractorState: llmCallResult?.streaming_extractor_state,
   });
   emitQualityTelemetry(result, turnRequest.context.scenario_id, turnId);
 

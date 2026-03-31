@@ -329,4 +329,6 @@ export interface TurnQualityMeta {
   llm_action_count_pre_filter: number;
   context_fallback_used: boolean;
   prompt_char_count: number;
+  /** Streaming text extractor state: 'streaming' (progressive deltas) or 'fallback' (single delta). */
+  streaming_extractor_state?: 'streaming' | 'fallback';
 }

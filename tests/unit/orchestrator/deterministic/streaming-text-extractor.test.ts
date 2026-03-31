@@ -278,4 +278,21 @@ describe('StreamingTextExtractor', () => {
     expect(isComplete()).toBe(true);
     expect(deltas.join('')).toBe('Found it.');
   });
+
+  it('fallback state is detectable before finish() for telemetry', () => {
+    const { extractor } = createExtractor();
+
+    extractor.push('{"insights":[],"text":"Late"}');
+    // Fallback triggered because text is not first field
+    expect(extractor.getState()).toBe('fallback');
+
+    // Capture state BEFORE finish (this is how pipeline.ts detects it)
+    const wasFallback = extractor.getState() === 'fallback';
+
+    extractor.finish();
+    // After finish, state transitions to 'complete'
+    expect(extractor.getState()).toBe('complete');
+    // But the pre-finish capture is what matters for telemetry
+    expect(wasFallback).toBe(true);
+  });
 });
