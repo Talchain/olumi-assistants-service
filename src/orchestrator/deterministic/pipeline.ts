@@ -31,6 +31,7 @@ import { StreamingTextExtractor } from "./streaming-text-extractor.js";
 import type { OrchestratorStreamEvent } from "../pipeline/stream-events.js";
 import type { OrchestratorResponseEnvelopeV2 } from "../pipeline/types.js";
 import { assembleMessages } from "../prompt-assembly.js";
+import { handleSystemEvent } from "./system-event-handler.js";
 
 // ============================================================================
 // Intent → Action Mapping
@@ -59,6 +60,12 @@ export async function executeDeterministicPipeline(
   const startTime = Date.now();
 
   emit('deterministic.pipeline.started', { request_id: requestId, turn_id: turnId });
+
+  // ── System event guard (defense-in-depth) ────────────────────────────────
+  // Upstream routing normally handles system events before this pipeline runs,
+  // but if one leaks through, handle it deterministically without an LLM call.
+  const systemEventResult = handleSystemEvent(turnRequest, turnId, requestId);
+  if (systemEventResult) return systemEventResult;
 
   // ── Layer 0: Compute TurnContext ──────────────────────────────────────────
   let turnContext: DeterministicTurnContext;
@@ -420,7 +427,7 @@ async function callLLM(
           system: systemPrompt,
           messages,
           tools: [],
-          temperature: 0.3,
+          temperature: 0,
           maxTokens: 2048,
         },
         {
@@ -442,7 +449,7 @@ async function callLLM(
           system: systemPrompt,
           userMessage: effectiveMessage,
           maxTokens: 2048,
-          temperature: 0.3,
+          temperature: 0,
           responseFormat: 'json_object',
         },
         {
@@ -554,7 +561,7 @@ async function* callLLMStreaming(
       system: systemPrompt,
       messages,
       tools: [],
-      temperature: 0.3,
+      temperature: 0,
       maxTokens: 2048,
     };
 
@@ -657,6 +664,17 @@ export async function* executeDeterministicPipelineStreaming(
   const startTime = Date.now();
 
   emit('deterministic.pipeline.started', { request_id: requestId, turn_id: turnId });
+
+  // ── System event guard (defense-in-depth) ────────────────────────────────
+  const systemEventResult = handleSystemEvent(turnRequest, turnId, requestId);
+  if (systemEventResult) {
+    yield { type: 'turn_start', seq: 0, turn_id: turnId, routing: 'deterministic', stage: 'frame' };
+    if (systemEventResult.envelope.assistant_text) {
+      yield { type: 'text_delta', seq: 1, delta: systemEventResult.envelope.assistant_text };
+    }
+    yield { type: 'turn_complete', seq: 2, envelope: systemEventResult.envelope as unknown as OrchestratorResponseEnvelopeV2 };
+    return;
+  }
 
   // ── Layer 0: Compute TurnContext ──────────────────────────────────────────
   let turnContext: DeterministicTurnContext;
