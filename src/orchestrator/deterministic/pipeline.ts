@@ -617,10 +617,6 @@ export async function* executeDeterministicPipelineStreaming(
   yield { type: 'turn_start', seq: seq++, turn_id: turnId, routing: 'deterministic', stage };
   if (signal?.aborted) return;
 
-  // Emit progress immediately so UI shows activity during LLM wait.
-  // Uses var(--color-text-secondary), disappears when first text_delta arrives.
-  yield { type: 'progress', seq: seq++, tool_name: 'orchestrator', elapsed_ms: 0, message: 'Olumi is thinking\u2026' };
-
   // ── Check pending confirmation ────────────────────────────────────────────
   const confirmResult = handlePendingConfirmation(turnRequest.message, turnContext);
   if (confirmResult.handled) {
@@ -715,6 +711,7 @@ export async function* executeDeterministicPipelineStreaming(
           let llmResponse: LLMJsonResponse | null = null;
           let llmCallMeta: LLMCallResult | null = null;
           if (!actionResult.assistantText) {
+            yield { type: 'progress', seq: seq++, tool_name: 'orchestrator', elapsed_ms: 0, message: 'Olumi is thinking\u2026' };
             for await (const llmEvent of callLLMStreaming(turnContext, turnRequest.message, requestId, turnId, signal)) {
               if (llmEvent.type === 'text_delta') {
                 yield { type: 'text_delta', seq: seq++, delta: llmEvent.delta };
@@ -758,6 +755,10 @@ export async function* executeDeterministicPipelineStreaming(
   }
 
   // ── Full LLM call with streaming text ─────────────────────────────────────
+  // Emit progress only for the LLM path — fast paths (confirmation, direct action
+  // with immediate text) skip this to avoid a flicker of "Olumi is thinking..."
+  yield { type: 'progress', seq: seq++, tool_name: 'orchestrator', elapsed_ms: 0, message: 'Olumi is thinking\u2026' };
+
   const llmStart = Date.now();
   let llmCallResult: LLMCallResult | null = null;
 

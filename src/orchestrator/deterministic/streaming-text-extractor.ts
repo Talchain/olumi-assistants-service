@@ -46,8 +46,29 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 // Streaming Text Extractor
 // ============================================================================
 
-// Matches the opening of a JSON object with "text" as the first string field.
+// Matches the full opening of a JSON object with "text" as the first string field.
 const TEXT_FIELD_OPENING = /^\s*\{\s*"text"\s*:\s*"/;
+
+/**
+ * Check if `buf` is a valid prefix that could still become a TEXT_FIELD_OPENING match
+ * with more data. Uses the canonical sequence: optional whitespace, {, optional whitespace,
+ * "text", optional whitespace, :, optional whitespace, opening ".
+ */
+function couldStillMatch(buf: string): boolean {
+  // The canonical prefix sequence (allowing flexible whitespace)
+  const canonical = '{"text":"';
+  let ci = 0; // index into canonical
+  for (let i = 0; i < buf.length && ci < canonical.length; i++) {
+    const ch = buf[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue; // skip whitespace
+    if (ch === canonical[ci]) {
+      ci++;
+    } else {
+      return false; // definite mismatch
+    }
+  }
+  return true; // buffer is a valid prefix so far
+}
 
 export class StreamingTextExtractor {
   private state: ExtractorState = 'seeking';
@@ -75,9 +96,12 @@ export class StreamingTextExtractor {
    * May trigger onTextDelta callbacks.
    */
   push(chunk: string): void {
-    if (this.state === 'complete' || this.state === 'fallback') return;
+    if (this.state === 'complete') return;
 
     this.buffer += chunk;
+
+    // In fallback mode, keep buffering for post-stream parsing but don't process
+    if (this.state === 'fallback') return;
 
     if (this.state === 'seeking') {
       this.handleSeeking();
@@ -106,9 +130,7 @@ export class StreamingTextExtractor {
   // ── Seeking State ─────────────────────────────────────────────────────────
 
   private handleSeeking(): void {
-    // Need enough buffer to test the opening pattern
-    if (this.buffer.length < 9) return;
-
+    // Try the full match first
     const match = this.buffer.match(TEXT_FIELD_OPENING);
     if (match) {
       const textValueStart = match[0].length;
@@ -118,9 +140,16 @@ export class StreamingTextExtractor {
       if (textValueStart < this.buffer.length) {
         this.processStreamingChunk(this.buffer.slice(textValueStart));
       }
-    } else {
-      this.state = 'fallback';
+      return;
     }
+
+    // Not a full match — could still become one with more data?
+    if (couldStillMatch(this.buffer)) {
+      return; // keep seeking
+    }
+
+    // Definitively not a JSON-with-text-first opening
+    this.state = 'fallback';
   }
 
   // ── Streaming State ───────────────────────────────────────────────────────

@@ -237,4 +237,45 @@ describe('StreamingTextExtractor', () => {
     expect(isComplete()).toBe(true);
     expect(deltas.join('')).toBe('spaced');
   });
+
+  it('keeps seeking when chunk ends after colon-space (before opening quote)', () => {
+    const { extractor, deltas, isComplete } = createExtractor();
+
+    extractor.push('{"text": ');  // Valid prefix but no opening quote yet
+    expect(extractor.getState()).toBe('seeking');  // Must NOT be fallback
+
+    extractor.push('"Hello world.","insights":[]}');
+    expect(extractor.getState()).toBe('buffering');
+    expect(isComplete()).toBe(true);
+    expect(deltas.join('')).toBe('Hello world.');
+  });
+
+  it('preserves full buffer in fallback mode across multiple chunks', () => {
+    const { extractor, deltas } = createExtractor();
+
+    extractor.push('{"insights":[],');
+    expect(extractor.getState()).toBe('fallback');
+    expect(deltas).toHaveLength(0);
+
+    // Continue pushing — buffer must accumulate even in fallback
+    extractor.push('"text":"Late text",');
+    extractor.push('"recommended_actions":[]}');
+
+    extractor.finish();
+
+    // Full buffer should contain ALL chunks for post-stream parsing
+    expect(extractor.getFullBuffer()).toBe('{"insights":[],"text":"Late text","recommended_actions":[]}');
+    expect(extractor.getState()).toBe('complete');
+  });
+
+  it('keeps seeking when chunk ends mid-field-name', () => {
+    const { extractor, deltas, isComplete } = createExtractor();
+
+    extractor.push('{"tex');
+    expect(extractor.getState()).toBe('seeking');
+
+    extractor.push('t":"Found it.","insights":[]}');
+    expect(isComplete()).toBe(true);
+    expect(deltas.join('')).toBe('Found it.');
+  });
 });
