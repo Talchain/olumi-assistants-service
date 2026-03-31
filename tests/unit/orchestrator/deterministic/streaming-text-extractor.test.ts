@@ -279,6 +279,74 @@ describe('StreamingTextExtractor', () => {
     expect(deltas.join('')).toBe('Found it.');
   });
 
+  it('handles markdown bold markers inside text field', () => {
+    const { extractor, deltas, isComplete } = createExtractor();
+
+    // Reproduces the P0 scenario: text containing \n\n and **bold** markdown
+    const text = 'Three directions worth considering, each structurally different:\n\n1. **Partnership or co-marketing** — lower acquisition risk.\n2. **Self-serve trial** — reduces sales cycle length.\n3. **Usage-based pricing** — aligns cost with customer value.';
+    const json = JSON.stringify({ text, insights: [], recommended_actions: [] });
+
+    extractor.push(json);
+    extractor.finish();
+
+    expect(isComplete()).toBe(true);
+    expect(extractor.getState()).toBe('complete');
+    expect(deltas.join('')).toBe(text);
+  });
+
+  it('handles markdown bold split across chunk boundary', () => {
+    const { extractor, deltas, isComplete } = createExtractor();
+
+    const text = 'Start.\n\n1. **Bold heading** and more text.';
+    const json = JSON.stringify({ text, insights: [], recommended_actions: [] });
+
+    // Split mid-bold-marker: "**B" in one chunk, "old..." in next
+    const splitAt = json.indexOf('**B') + 2;
+    extractor.push(json.slice(0, splitAt));
+    extractor.push(json.slice(splitAt));
+    extractor.finish();
+
+    expect(isComplete()).toBe(true);
+    expect(deltas.join('')).toBe(text);
+  });
+
+  it('handles \\n escape split across chunk boundary', () => {
+    const { extractor, deltas, isComplete } = createExtractor();
+
+    // Simulate the exact pattern from the P0 report: \n\n before markdown
+    const text = 'Consider these options:\n\n1. Option A.\n2. Option B.';
+    const json = JSON.stringify({ text, insights: [], recommended_actions: [] });
+
+    // Find a \n escape in the JSON and split mid-escape
+    const firstEscape = json.indexOf('\\n');
+    expect(firstEscape).toBeGreaterThan(-1);
+
+    // Split so the backslash is at the end of one chunk, 'n' starts the next
+    extractor.push(json.slice(0, firstEscape + 1)); // ends with '\'
+    extractor.push(json.slice(firstEscape + 1));     // starts with 'n...'
+    extractor.finish();
+
+    expect(isComplete()).toBe(true);
+    expect(deltas.join('')).toBe(text);
+  });
+
+  it('handles full buffer parseable after streaming markdown content', () => {
+    const { extractor } = createExtractor();
+
+    const text = 'Response with **bold** and\n\ncontent.';
+    const json = JSON.stringify({ text, insights: [], recommended_actions: [] });
+
+    // Push in small chunks (5 chars at a time)
+    for (let i = 0; i < json.length; i += 5) {
+      extractor.push(json.slice(i, i + 5));
+    }
+    extractor.finish();
+
+    // Full buffer must be the original JSON for post-stream parsing
+    expect(extractor.getFullBuffer()).toBe(json);
+    expect(extractor.getState()).toBe('complete');
+  });
+
   it('fallback state is detectable before finish() for telemetry', () => {
     const { extractor } = createExtractor();
 

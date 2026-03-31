@@ -125,6 +125,63 @@ describe('parseLLMJsonResponse', () => {
     expect(['native', 'regex']).toContain(result.extraction_method);
   });
 
+  it('strips unknown action_type entries and still parses as native', () => {
+    // LLM occasionally hallucinates action types not in the schema.
+    // The lenient path should strip those and return extraction_method: 'native'
+    // rather than falling through to fallback (which would corrupt response.text).
+    const input = JSON.stringify({
+      text: 'Three directions worth considering:\n\n1. **Partnership** — lower risk.',
+      insights: [],
+      recommended_actions: [
+        { action_type: 'explain_result', priority: 'high' },
+        { action_type: 'generate_brief', priority: 'medium' }, // not in schema
+        { action_type: 'run_analysis', priority: 'low' },
+      ],
+    });
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.extraction_method).toBe('native');
+    expect(result.response.text).toBe('Three directions worth considering:\n\n1. **Partnership** — lower risk.');
+    // Unknown action stripped; valid ones kept
+    expect(result.response.recommended_actions).toHaveLength(2);
+    expect(result.response.recommended_actions.map((a) => a.action_type)).toEqual([
+      'explain_result',
+      'run_analysis',
+    ]);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('strips all invalid actions when every entry has unknown action_type', () => {
+    const input = JSON.stringify({
+      text: 'Here is my response.',
+      insights: [],
+      recommended_actions: [
+        { action_type: 'generate_brief', priority: 'high' },
+        { action_type: 'summarise_decision', priority: 'medium' },
+      ],
+    });
+
+    const result = parseLLMJsonResponse(input);
+    expect(result.extraction_method).toBe('native');
+    expect(result.response.text).toBe('Here is my response.');
+    expect(result.response.recommended_actions).toHaveLength(0);
+  });
+
+  it('does not corrupt response.text with raw JSON when action_type is invalid', () => {
+    // This is the P0 regression: fallback path would set text = entire JSON buffer
+    const input = JSON.stringify({
+      text: 'Markdown-heavy response with **bold** and\n\nnewlines.',
+      insights: [],
+      recommended_actions: [{ action_type: 'hallucinated_action', priority: 'high' }],
+    });
+
+    const result = parseLLMJsonResponse(input);
+    // Must NOT contain raw JSON syntax in the text field
+    expect(result.response.text).not.toContain('"text":');
+    expect(result.response.text).not.toContain('recommended_actions');
+    expect(result.response.text).toBe('Markdown-heavy response with **bold** and\n\nnewlines.');
+  });
+
   it('caps insights at 3', () => {
     const input = JSON.stringify({
       text: 'Response.',

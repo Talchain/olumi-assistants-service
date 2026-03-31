@@ -5,7 +5,7 @@
  * Fallback chain: native JSON → markdown fence → regex → text-only.
  */
 
-import { LLMResponseSchema } from "./llm-response-schema.js";
+import { LLMResponseSchema, RecommendedActionSchema } from "./llm-response-schema.js";
 import type { LLMJsonResponse } from "./types.js";
 import { log } from "../../utils/telemetry.js";
 
@@ -73,13 +73,42 @@ function tryDirectParse(content: string): LLMJsonResponse | null {
   const trimmed = content.trim();
   if (!trimmed.startsWith('{')) return null;
 
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(trimmed);
-    const result = LLMResponseSchema.safeParse(parsed);
-    if (result.success) return result.data;
+    parsed = JSON.parse(trimmed);
   } catch {
     // Not valid JSON
+    return null;
   }
+
+  // Strict parse — all fields valid
+  const strict = LLMResponseSchema.safeParse(parsed);
+  if (strict.success) return strict.data;
+
+  // Lenient parse — JSON is valid but some recommended_actions entries have
+  // unknown action_type values (e.g. LLM hallucinated a type not in the schema).
+  // Strip invalid actions and retry rather than falling through to full fallback,
+  // which would corrupt response.text with raw JSON.
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    const rawText = typeof obj.text === 'string' ? obj.text : null;
+    if (rawText && rawText.length > 0) {
+      // Filter out any recommended_actions entries that fail the element schema
+      const filtered = {
+        ...obj,
+        recommended_actions: Array.isArray(obj.recommended_actions)
+          ? obj.recommended_actions.filter((a) => RecommendedActionSchema.safeParse(a).success)
+          : [],
+      };
+      const lenient = LLMResponseSchema.safeParse(filtered);
+      if (lenient.success) return lenient.data;
+
+      // Last resort: preserve text + insights, drop all actions
+      const minimal = LLMResponseSchema.safeParse({ ...obj, recommended_actions: [] });
+      if (minimal.success) return minimal.data;
+    }
+  }
+
   return null;
 }
 
