@@ -125,37 +125,15 @@ export async function* executePipelineStream(
 
     // ── Deterministic intelligence pipeline (feature-flagged) ───────────────
     // When enabled, the three-layer deterministic pipeline replaces the V2 XML
-    // pipeline for all non-system-event turns. The response is computed in one
-    // shot (not streamed token-by-token), then emitted as SSE events.
+    // pipeline. Text streams progressively via StreamingTextExtractor; blocks
+    // and turn_complete are emitted after the full response is assembled.
     if (config.features.deterministicOrchestratorEnabled && !config.features.legacyOrchestratorEnabled) {
-      yield { type: 'turn_start', seq: seq++, turn_id: enrichedContext.turn_id, routing: 'deterministic', stage };
-      if (signal?.aborted) return;
+      const { executeDeterministicPipelineStreaming } = await import("../deterministic/pipeline.js");
 
-      // Emit progress immediately so the UI shows activity during the LLM call.
-      // The deterministic pipeline is non-streaming (JSON response parsed in one shot),
-      // so the user would otherwise see a blank bubble for the full LLM latency.
-      yield { type: 'progress', seq: seq++, tool_name: 'orchestrator', elapsed_ms: 0, message: 'Olumi is thinking\u2026' };
-
-      const { executeDeterministicPipeline } = await import("../deterministic/pipeline.js");
-      const deterministicResult = await executeDeterministicPipeline(request, requestId);
-      const envelope = deterministicResult.envelope;
-
-      // Emit text as a single delta (not token-by-token, since the LLM call is non-streaming)
-      if (envelope.assistant_text) {
-        yield { type: 'text_delta', seq: seq++, delta: envelope.assistant_text };
+      for await (const event of executeDeterministicPipelineStreaming(request, requestId, signal)) {
+        yield { ...event, seq: seq++ };
+        if (signal?.aborted) return;
       }
-
-      // Emit blocks individually for progressive UI rendering
-      if (envelope.blocks) {
-        for (const block of envelope.blocks) {
-          yield { type: 'block', seq: seq++, block };
-        }
-      }
-
-      // The deterministic envelope is OrchestratorResponseEnvelope & { response_version: 2 }.
-      // OrchestratorResponseEnvelopeV2 extends it with optional fields (science_ledger, etc.)
-      // that the deterministic pipeline doesn't populate. Cast is safe — missing fields are optional.
-      yield { type: 'turn_complete', seq: seq++, envelope: envelope as unknown as OrchestratorResponseEnvelopeV2 };
       return;
     }
 

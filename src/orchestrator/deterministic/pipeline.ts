@@ -27,6 +27,9 @@ import { getAdapter } from "../../adapters/llm/router.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { log, emit } from "../../utils/telemetry.js";
 import { createProposalBlock } from "../blocks/factory.js";
+import { StreamingTextExtractor } from "./streaming-text-extractor.js";
+import type { OrchestratorStreamEvent } from "../pipeline/stream-events.js";
+import type { OrchestratorResponseEnvelopeV2 } from "../pipeline/types.js";
 
 // ============================================================================
 // Intent → Action Mapping
@@ -438,5 +441,382 @@ async function callLLM(
     log.error({ request_id: requestId, err }, 'deterministic.llm_call.failed');
     return null;
   }
+}
+
+// ============================================================================
+// Streaming LLM Call
+// ============================================================================
+
+/** Event yielded by the streaming LLM call. */
+export type StreamingLLMEvent =
+  | { type: 'text_delta'; delta: string }
+  | { type: 'complete'; result: LLMCallResult };
+
+/**
+ * Call the LLM with streaming, yielding progressive text deltas.
+ *
+ * Yields `text_delta` events as the "text" field streams from the API,
+ * then yields a final `complete` event with the full parsed response.
+ *
+ * Falls back to single-delta if the adapter doesn't support streaming
+ * or the JSON structure doesn't have "text" as the first field.
+ */
+async function* callLLMStreaming(
+  turnContext: DeterministicTurnContext,
+  userMessage: string,
+  requestId: string,
+  turnId: string,
+  signal?: AbortSignal,
+): AsyncGenerator<StreamingLLMEvent> {
+  const adapter = getAdapter('orchestrator');
+  const systemPrompt = buildDeterministicPrompt(turnContext);
+  const effectiveMessage = userMessage + '\n\nRespond with valid JSON only.';
+  const promptCharCount = systemPrompt.length;
+
+  // If the adapter doesn't support streaming, fall back to non-streaming
+  if (!adapter.streamChatWithTools) {
+    const result = await callLLM(turnContext, userMessage, requestId, turnId);
+    if (result) {
+      if (result.response.text) {
+        yield { type: 'text_delta', delta: result.response.text };
+      }
+      yield { type: 'complete', result };
+    }
+    return;
+  }
+
+  // Stream the LLM response, extracting text progressively
+  const pendingDeltas: string[] = [];
+  let extractorFallback = false;
+
+  const extractor = new StreamingTextExtractor({
+    onTextDelta: (delta) => { pendingDeltas.push(delta); },
+    onTextComplete: () => {},
+  });
+
+  try {
+    const streamArgs = {
+      system: systemPrompt,
+      messages: [{ role: 'user' as const, content: effectiveMessage }],
+      tools: [],
+      temperature: 0.3,
+      maxTokens: 2048,
+    };
+
+    for await (const event of adapter.streamChatWithTools(streamArgs, { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS, signal })) {
+      if (signal?.aborted) break;
+
+      if (event.type === 'text_delta') {
+        extractor.push(event.delta);
+
+        // Yield any text deltas the extractor produced from this chunk
+        while (pendingDeltas.length > 0) {
+          yield { type: 'text_delta', delta: pendingDeltas.shift()! };
+        }
+      }
+    }
+
+    extractor.finish();
+    extractorFallback = extractor.getState() === 'fallback';
+
+    // Flush any remaining deltas
+    while (pendingDeltas.length > 0) {
+      yield { type: 'text_delta', delta: pendingDeltas.shift()! };
+    }
+  } catch (err) {
+    log.error({ request_id: requestId, err }, 'deterministic.llm_call_streaming.failed');
+    return;
+  }
+
+  // Parse the full buffer for validation and action extraction
+  const fullContent = extractor.getFullBuffer();
+  const parseResult = parseLLMJsonResponse(fullContent);
+
+  if (parseResult.warnings.length > 0) {
+    log.warn({ request_id: requestId, warnings: parseResult.warnings }, 'deterministic.llm_parse_warnings');
+  }
+
+  if (parseResult.extraction_method !== 'native') {
+    emit('deterministic.json_fallback', {
+      method: parseResult.extraction_method,
+      scenario_id: turnContext.scenario_id,
+      turn_id: turnId,
+    });
+  }
+
+  // If extractor fell back (text wasn't first field), emit parsed text as single delta
+  if (extractorFallback && parseResult.response.text) {
+    yield { type: 'text_delta', delta: parseResult.response.text };
+  }
+
+  yield {
+    type: 'complete',
+    result: {
+      response: parseResult.response,
+      extraction_method: parseResult.extraction_method,
+      prompt_char_count: promptCharCount,
+    },
+  };
+}
+
+// ============================================================================
+// Streaming Pipeline Generator
+// ============================================================================
+
+/**
+ * Execute the deterministic pipeline as a streaming async generator.
+ *
+ * Yields OrchestratorStreamEvent events for SSE delivery.
+ * Text from the LLM streams progressively via the text extractor.
+ * Blocks and turn_complete are emitted after the full response is assembled.
+ */
+export async function* executeDeterministicPipelineStreaming(
+  turnRequest: OrchestratorTurnRequest,
+  requestId: string,
+  signal?: AbortSignal,
+): AsyncGenerator<OrchestratorStreamEvent> {
+  const turnId = randomUUID();
+  const startTime = Date.now();
+
+  emit('deterministic.pipeline.started', { request_id: requestId, turn_id: turnId });
+
+  // ── Layer 0: Compute TurnContext ──────────────────────────────────────────
+  let turnContext: DeterministicTurnContext;
+  let contextFallbackUsed = false;
+
+  try {
+    turnContext = computeTurnContext(turnRequest);
+    turnContext.turn_id = turnId;
+  } catch (err) {
+    log.warn({ request_id: requestId, err }, 'deterministic.turn_context_fallback');
+    contextFallbackUsed = true;
+    const ctx = turnRequest.context;
+    turnContext = {
+      stage: 'frame',
+      entities: { nodes: new Map(), edges: [], option_ids: [], goal_id: null },
+      graph_summary: { node_count: 0, edge_count: 0, option_count: 0, option_labels: [], goal_label: null, missing_structural: ['context computation failed'] },
+      analysis_summary: null,
+      capabilities: { can_run_analysis: false, can_explain_results: false, can_compare_options: false, can_edit_graph: false, can_challenge: false, can_generate_artefact: false },
+      blockers: [],
+      signals: { high_uncertainty_factors: [], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },
+      conversation: { turn_count: 0, last_user_intent: null, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null },
+      eligible_actions: [],
+      disambiguation_hints: [],
+      graph: ctx.graph ?? turnRequest.graph_state ?? null,
+      analysis: ctx.analysis_response ?? turnRequest.analysis_state ?? null,
+      conversational_state: ctx.conversational_state ?? null,
+      scenario_id: ctx.scenario_id,
+      turn_id: turnId,
+      analysis_inputs: ctx.analysis_inputs ?? null,
+    };
+  }
+
+  let seq = 0;
+  const stage = turnContext.stage;
+
+  yield { type: 'turn_start', seq: seq++, turn_id: turnId, routing: 'deterministic', stage };
+  if (signal?.aborted) return;
+
+  // Emit progress immediately so UI shows activity during LLM wait.
+  // Uses var(--color-text-secondary), disappears when first text_delta arrives.
+  yield { type: 'progress', seq: seq++, tool_name: 'orchestrator', elapsed_ms: 0, message: 'Olumi is thinking\u2026' };
+
+  // ── Check pending confirmation ────────────────────────────────────────────
+  const confirmResult = handlePendingConfirmation(turnRequest.message, turnContext);
+  if (confirmResult.handled) {
+    emit('deterministic.confirmation.handled', {
+      request_id: requestId,
+      confirmed: !confirmResult.cleared,
+    });
+    const confResult = assembleDeterministicResponse({
+      turnContext,
+      llmResponse: null,
+      actionResult: confirmResult.actionResult ?? null,
+      turnId,
+      routing: 'deterministic',
+      selectedAction: null,
+      executedActions: [],
+      contextFallbackUsed,
+    });
+    emitQualityTelemetry(confResult, turnRequest.context.scenario_id, turnId);
+
+    if (confResult.envelope.assistant_text) {
+      yield { type: 'text_delta', seq: seq++, delta: confResult.envelope.assistant_text };
+    }
+    for (const block of confResult.envelope.blocks) {
+      yield { type: 'block', seq: seq++, block };
+    }
+    yield { type: 'turn_complete', seq: seq++, envelope: confResult.envelope as unknown as OrchestratorResponseEnvelopeV2 };
+    return;
+  }
+
+  // ── Chip metadata / intent classification ─────────────────────────────────
+  let directAction: ActionName | null = null;
+  let chipParams: Record<string, unknown> | null = null;
+
+  if (turnRequest.chip_metadata) {
+    const chipAction = turnRequest.chip_metadata.action_type;
+    if (isValidAction(chipAction)) {
+      directAction = chipAction as ActionName;
+      chipParams = turnRequest.chip_metadata.parameters ?? {};
+    }
+  }
+
+  if (!directAction) {
+    const intentResult = classifyIntent(turnRequest.message);
+    if (intentResult.routing === 'deterministic' && intentResult.tool) {
+      const mapped = TOOL_TO_ACTION[intentResult.tool];
+      if (mapped && turnContext.eligible_actions.includes(mapped)) {
+        directAction = mapped;
+      }
+    }
+  }
+
+  // ── Direct action dispatch ────────────────────────────────────────────────
+  if (directAction) {
+    const actionDef = ACTION_CATALOGUE.get(directAction);
+    if (actionDef) {
+      const prereqError = actionDef.prerequisite_checks(turnContext);
+      if (!prereqError) {
+        try {
+          const actionResult = await actionDef.execute(chipParams ?? {}, turnContext);
+
+          // Confirmable actions
+          if (actionDef.requires_confirmation && actionResult.operations?.length) {
+            const proposal = buildProposal(
+              directAction,
+              actionResult.operations,
+              actionResult.assistantText ?? directAction,
+              actionResult.operations.map((o) => o.path),
+            );
+            storePendingProposal(turnContext.scenario_id, {
+              proposal_id: proposal.proposal_id,
+              action_type: directAction,
+              operations: actionResult.operations,
+              description: actionResult.assistantText ?? directAction,
+              affected_elements: actionResult.operations.map((o) => o.path),
+            });
+            const proposalBlock = createProposalBlock(proposal, turnId);
+            const proposalResult = assembleDeterministicResponse({
+              turnContext, llmResponse: null,
+              actionResult: { blocks: [proposalBlock], assistantText: actionResult.assistantText, guidance_items: actionResult.guidance_items, operations: undefined },
+              turnId, routing: 'deterministic', selectedAction: directAction, executedActions: [], contextFallbackUsed,
+            });
+            emitQualityTelemetry(proposalResult, turnRequest.context.scenario_id, turnId);
+            if (proposalResult.envelope.assistant_text) yield { type: 'text_delta', seq: seq++, delta: proposalResult.envelope.assistant_text };
+            for (const block of proposalResult.envelope.blocks) yield { type: 'block', seq: seq++, block };
+            yield { type: 'turn_complete', seq: seq++, envelope: proposalResult.envelope as unknown as OrchestratorResponseEnvelopeV2 };
+            return;
+          }
+
+          emit('deterministic.action.executed', { request_id: requestId, action: directAction, routing: 'deterministic' });
+
+          // For actions needing LLM narrative, stream the LLM call
+          let llmResponse: LLMJsonResponse | null = null;
+          let llmCallMeta: LLMCallResult | null = null;
+          if (!actionResult.assistantText) {
+            for await (const llmEvent of callLLMStreaming(turnContext, turnRequest.message, requestId, turnId, signal)) {
+              if (llmEvent.type === 'text_delta') {
+                yield { type: 'text_delta', seq: seq++, delta: llmEvent.delta };
+              } else if (llmEvent.type === 'complete') {
+                llmCallMeta = llmEvent.result;
+              }
+            }
+            llmResponse = llmCallMeta?.response ?? null;
+          }
+
+          const result = assembleDeterministicResponse({
+            turnContext, llmResponse, actionResult, turnId,
+            routing: 'deterministic', selectedAction: directAction, executedActions: [directAction],
+            extractionMethod: llmCallMeta?.extraction_method, contextFallbackUsed, promptCharCount: llmCallMeta?.prompt_char_count,
+          });
+          emitQualityTelemetry(result, turnRequest.context.scenario_id, turnId);
+
+          // If action provided its own text (not LLM), emit it as a single delta
+          if (!llmResponse && result.envelope.assistant_text) {
+            yield { type: 'text_delta', seq: seq++, delta: result.envelope.assistant_text };
+          }
+          for (const block of result.envelope.blocks) yield { type: 'block', seq: seq++, block };
+          yield { type: 'turn_complete', seq: seq++, envelope: result.envelope as unknown as OrchestratorResponseEnvelopeV2 };
+          return;
+        } catch (err) {
+          log.error({ request_id: requestId, action: directAction, err }, 'deterministic.action.failed');
+          if (chipParams) {
+            const errResult = assembleDeterministicResponse({
+              turnContext, llmResponse: null,
+              actionResult: { blocks: [], assistantText: 'Something went wrong executing that action. Please try again.', guidance_items: [] },
+              turnId, routing: 'deterministic', selectedAction: directAction, executedActions: [], contextFallbackUsed,
+            });
+            emitQualityTelemetry(errResult, turnRequest.context.scenario_id, turnId);
+            if (errResult.envelope.assistant_text) yield { type: 'text_delta', seq: seq++, delta: errResult.envelope.assistant_text };
+            yield { type: 'turn_complete', seq: seq++, envelope: errResult.envelope as unknown as OrchestratorResponseEnvelopeV2 };
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  // ── Full LLM call with streaming text ─────────────────────────────────────
+  const llmStart = Date.now();
+  let llmCallResult: LLMCallResult | null = null;
+
+  for await (const event of callLLMStreaming(turnContext, turnRequest.message, requestId, turnId, signal)) {
+    if (event.type === 'text_delta') {
+      yield { type: 'text_delta', seq: seq++, delta: event.delta };
+    } else if (event.type === 'complete') {
+      llmCallResult = event.result;
+    }
+  }
+
+  const llmLatencyMs = Date.now() - llmStart;
+  const llmResponse = llmCallResult?.response ?? null;
+
+  // Auto-execute recommended actions
+  let actionResult: ActionResult | null = null;
+  const executedActions: string[] = [];
+
+  if (llmResponse && llmResponse.recommended_actions.length > 0) {
+    const firstRec = llmResponse.recommended_actions[0];
+    if (isValidAction(firstRec.action_type)) {
+      const actionName = firstRec.action_type as ActionName;
+      const actionDef = ACTION_CATALOGUE.get(actionName);
+      const autoExecutable = actionDef
+        && (actionDef.execution_risk === 'none' || (actionDef.execution_risk === 'low' && !actionDef.requires_confirmation))
+        && turnContext.eligible_actions.includes(actionName);
+      if (autoExecutable) {
+        const prereqError = actionDef.prerequisite_checks(turnContext);
+        if (!prereqError) {
+          try {
+            const { action_type: _at, priority: _p, rationale: _r, ...recParams } = firstRec;
+            actionResult = await actionDef.execute(recParams, turnContext);
+            executedActions.push(actionName);
+          } catch (err) {
+            log.error({ request_id: requestId, action: actionName, err }, 'deterministic.auto_execute.failed');
+          }
+        }
+      }
+    }
+  }
+
+  emit('deterministic.pipeline.completed', {
+    request_id: requestId, turn_id: turnId,
+    duration_ms: Date.now() - startTime, llm_latency_ms: llmLatencyMs,
+    actions_executed: executedActions,
+  });
+
+  const result = assembleDeterministicResponse({
+    turnContext, llmResponse, actionResult, turnId,
+    routing: 'llm', selectedAction: executedActions[0] ?? null, executedActions, llmLatencyMs,
+    extractionMethod: llmCallResult?.extraction_method, contextFallbackUsed, promptCharCount: llmCallResult?.prompt_char_count,
+  });
+  emitQualityTelemetry(result, turnRequest.context.scenario_id, turnId);
+
+  // Emit blocks
+  for (const block of result.envelope.blocks) {
+    yield { type: 'block', seq: seq++, block };
+  }
+
+  yield { type: 'turn_complete', seq: seq++, envelope: result.envelope as unknown as OrchestratorResponseEnvelopeV2 };
 }
 
