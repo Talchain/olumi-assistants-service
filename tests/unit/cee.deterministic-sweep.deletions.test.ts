@@ -57,7 +57,7 @@ describe("deterministic-sweep field deletion: EXTERNAL_HAS_DATA", () => {
     vi.clearAllMocks();
   });
 
-  it("produces deletion events for value, factor_type, uncertainty_drivers on external factor", async () => {
+  it("produces deletion events only for value on external factor (metadata preserved at node level)", async () => {
     const nodes = [
       { id: "dec_1", kind: "decision", label: "D" },
       { id: "opt_a", kind: "option", label: "A" },
@@ -100,9 +100,12 @@ describe("deterministic-sweep field deletion: EXTERNAL_HAS_DATA", () => {
     expect(extDeletions.length).toBeGreaterThan(0);
 
     const fields = extDeletions.map((d: any) => d.field);
+    // Only data.value is the invariant violation for external factors.
+    // factor_type, extractionType, and uncertainty_drivers are promoted to node level
+    // and no longer deleted (CEE-4 fix).
     expect(fields).toContain("data.value");
-    expect(fields).toContain("data.factor_type");
-    expect(fields).toContain("data.uncertainty_drivers");
+    expect(fields).not.toContain("data.factor_type");
+    expect(fields).not.toContain("data.uncertainty_drivers");
 
     for (const d of extDeletions) {
       expect(d.stage).toBe("deterministic-sweep");

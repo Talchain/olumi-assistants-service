@@ -245,6 +245,34 @@ export function transformNodeToV3(
     (v3Node as any).prior = nodePrior;
   }
 
+  // Preserve node-level factor metadata for external factors.
+  // The repair stages (deterministic-sweep, unreachable-factors) promote factor_type,
+  // extractionType, and uncertainty_drivers from data to node level when stripping
+  // data.value from external factors. Pick them up here so they reach the V3 output.
+  const anyNode = node as any;
+  if (anyNode.factor_type !== undefined && (v3Node as any).factor_type === undefined) {
+    (v3Node as any).factor_type = anyNode.factor_type;
+  }
+  if (anyNode.extractionType !== undefined && (v3Node as any).extractionType === undefined) {
+    (v3Node as any).extractionType = anyNode.extractionType;
+  }
+  if (anyNode.uncertainty_drivers !== undefined && (v3Node as any).uncertainty_drivers === undefined) {
+    (v3Node as any).uncertainty_drivers = anyNode.uncertainty_drivers;
+  }
+
+  // Preserve encoding_map as a top-level node field (v191+).
+  // encoding_map describes label encoding (e.g. "0=Developers, 1=Tech Lead"), not
+  // observed state, so it lives at node level rather than inside observed_state.
+  // Two sources: node.data (controllable/observable factors that still have their data
+  // object) or node-level (external factors whose data was deleted by repair stages,
+  // which promoted encoding_map alongside factor_type/extractionType/uncertainty_drivers).
+  const dataEncodingMap = isFactorData(node.data) ? (node.data as any).encoding_map : undefined;
+  const nodeEncodingMap = anyNode.encoding_map;
+  const resolvedEncodingMap = dataEncodingMap ?? nodeEncodingMap;
+  if (resolvedEncodingMap !== undefined) {
+    (v3Node as any).encoding_map = resolvedEncodingMap;
+  }
+
   return v3Node;
 }
 
@@ -717,6 +745,8 @@ export function transformResponseToV3(
       description: n.body,
       // V4 prompt outputs interventions directly on option nodes - use them if present
       v4Interventions: isOptionData(n.data) ? n.data.interventions : undefined,
+      // v191+: is_baseline marks the status-quo option
+      is_baseline: isOptionData(n.data) ? (n.data as any).is_baseline : undefined,
     })),
     v3NodesTyped,
     v3EdgesTyped,
@@ -725,6 +755,22 @@ export function transformResponseToV3(
   );
 
   const v3Options = toOptionsV3(extractedOptions);
+
+  // Display-only enrichment: copy interventions and is_baseline from options[] onto
+  // the matching option nodes in nodes[]. options[] remains the canonical intervention
+  // source for analysis; graph nodes carry the data for canvas display (ConnRow,
+  // intervention labels).
+  // NodeV3 uses .passthrough() so these extra fields survive Zod validation.
+  const optionById = new Map(v3Options.map((o) => [o.id, o]));
+  for (const node of v3NodesTyped) {
+    if (node.kind !== "option") continue;
+    const opt = optionById.get(node.id);
+    if (!opt) continue;
+    (node as any).interventions = opt.interventions;
+    if (opt.is_baseline !== undefined) {
+      (node as any).is_baseline = opt.is_baseline;
+    }
+  }
 
   const optionIdSummary = getOptionIdMismatchSummary(v3Graph, v3Options);
   if (optionIdSummary.missingOptionIds.length > 0) {

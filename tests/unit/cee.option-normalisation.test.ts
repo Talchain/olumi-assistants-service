@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   normaliseOptionInterventions,
   toOptionV3,
+  extractOptionsFromNodes,
   type ExtractedOption,
 } from "../../src/cee/extraction/intervention-extractor.js";
 import * as telemetry from "../../src/utils/telemetry.js";
@@ -134,6 +135,96 @@ describe("Option Interventions Normalisation", () => {
       normaliseOptionInterventions(option);
 
       expect(emitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("toOptionV3 — is_baseline field", () => {
+    it("carries is_baseline:true through toOptionV3", () => {
+      const extracted: ExtractedOption = {
+        id: "opt_status_quo",
+        label: "Keep current",
+        status: "ready",
+        interventions: {},
+        is_baseline: true,
+      };
+
+      const result = toOptionV3(extracted);
+      expect((result as any).is_baseline).toBe(true);
+    });
+
+    it("carries is_baseline:false through toOptionV3", () => {
+      const extracted: ExtractedOption = {
+        id: "opt_new",
+        label: "New approach",
+        status: "ready",
+        interventions: {},
+        is_baseline: false,
+      };
+
+      const result = toOptionV3(extracted);
+      expect((result as any).is_baseline).toBe(false);
+    });
+
+    it("does not add is_baseline when absent — pipeline does not crash", () => {
+      const extracted: ExtractedOption = {
+        id: "opt_no_baseline",
+        label: "Option A",
+        status: "ready",
+        interventions: {},
+        // is_baseline intentionally absent (v190 LLM / pre-v191 data)
+      };
+
+      const result = toOptionV3(extracted);
+      expect((result as any).is_baseline).toBeUndefined();
+    });
+  });
+
+  describe("extractOptionsFromNodes — is_baseline field", () => {
+    const emptyNodes: any[] = [];
+    const emptyEdges: any[] = [];
+    const goalNodeId = "goal_1";
+
+    it("carries is_baseline:true from source node through to ExtractedOption", () => {
+      const optionNodes = [
+        { id: "opt_sq", label: "Status Quo", is_baseline: true, v4Interventions: {} },
+        { id: "opt_a", label: "Option A", is_baseline: false, v4Interventions: {} },
+      ];
+
+      const results = extractOptionsFromNodes(optionNodes, emptyNodes, emptyEdges, goalNodeId);
+
+      const sq = results.find((o) => o.id === "opt_sq");
+      const a = results.find((o) => o.id === "opt_a");
+      expect(sq?.is_baseline).toBe(true);
+      expect(a?.is_baseline).toBe(false);
+    });
+
+    it("does not set is_baseline when not provided — no crash", () => {
+      const optionNodes = [
+        { id: "opt_a", label: "Option A", v4Interventions: {} },
+        { id: "opt_b", label: "Option B", v4Interventions: {} },
+      ];
+
+      // Should not throw even with no is_baseline on any option
+      const results = extractOptionsFromNodes(optionNodes, emptyNodes, emptyEdges, goalNodeId);
+      expect(results).toHaveLength(2);
+      expect(results[0].is_baseline).toBeUndefined();
+      expect(results[1].is_baseline).toBeUndefined();
+    });
+
+    it("preserves is_baseline on all options when multiple are flagged (PLoT deduplicates downstream)", () => {
+      // Multiple baselines are technically invalid but the pipeline must not crash or drop data.
+      // PLoT handles deduplication.
+      const optionNodes = [
+        { id: "opt_sq1", label: "Status Quo A", is_baseline: true, v4Interventions: {} },
+        { id: "opt_sq2", label: "Status Quo B", is_baseline: true, v4Interventions: {} },
+        { id: "opt_new", label: "New Option", is_baseline: false, v4Interventions: {} },
+      ];
+
+      const results = extractOptionsFromNodes(optionNodes, emptyNodes, emptyEdges, goalNodeId);
+
+      const baselines = results.filter((o) => o.is_baseline === true);
+      expect(baselines).toHaveLength(2); // All preserved — PLoT handles deduplication
+      expect(results.find((o) => o.id === "opt_new")?.is_baseline).toBe(false);
     });
   });
 

@@ -32,7 +32,7 @@ describe("fieldDeletion helper", () => {
 // =============================================================================
 
 describe("unreachable-factors field deletion audit", () => {
-  it("produces deletion events for value, factor_type, uncertainty_drivers on reclassification", () => {
+  it("produces deletion events only for value on reclassification (metadata promoted to node level)", () => {
     const graph = {
       nodes: [
         { id: "decision_1", kind: "decision", label: "D" },
@@ -59,11 +59,18 @@ describe("unreachable-factors field deletion audit", () => {
     expect(result.reclassified).toContain("fac_no_option");
     expect(result.fieldDeletions.length).toBeGreaterThan(0);
 
-    // Should have deletions for the three controllable-only fields
+    // Only data.value is deleted — it is the invariant violation.
+    // factor_type, extractionType, and uncertainty_drivers are promoted to node level
+    // and no longer deleted (CEE-4 fix).
     const deletionFields = result.fieldDeletions.map((d) => d.field);
     expect(deletionFields).toContain("data.value");
-    expect(deletionFields).toContain("data.factor_type");
-    expect(deletionFields).toContain("data.uncertainty_drivers");
+    expect(deletionFields).not.toContain("data.factor_type");
+    expect(deletionFields).not.toContain("data.uncertainty_drivers");
+
+    // Metadata should be promoted to node level
+    const reclassifiedNode = graph.nodes.find((n: any) => n.id === "fac_no_option") as any;
+    expect(reclassifiedNode.factor_type).toBe("cost");
+    expect(reclassifiedNode.uncertainty_drivers).toEqual(["market"]);
 
     // All deletions should reference the correct stage, node, and reason
     for (const d of result.fieldDeletions) {

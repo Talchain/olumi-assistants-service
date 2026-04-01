@@ -508,18 +508,27 @@ function fixExternalHasData(
       delete data.value;
       changed = true;
     }
+    // factor_type, uncertainty_drivers, and extractionType are metadata fields that
+    // describe the factor's classification and remain useful for downstream enrichment.
+    // Only data.value is the actual invariant violation for external factors.
+    // Promote metadata to node-level (NodeV3 passthrough preserves them) before
+    // potentially removing data, so they survive even if data is deleted.
     if (data.factor_type !== undefined) {
-      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data.factor_type', 'EXTERNAL_HAS_DATA'));
-      delete data.factor_type;
-      changed = true;
+      (node as any).factor_type = data.factor_type;
+    }
+    if (data.extractionType !== undefined) {
+      (node as any).extractionType = data.extractionType;
     }
     if (data.uncertainty_drivers !== undefined) {
-      deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data.uncertainty_drivers', 'EXTERNAL_HAS_DATA'));
-      delete data.uncertainty_drivers;
-      changed = true;
+      (node as any).uncertainty_drivers = data.uncertainty_drivers;
     }
-    // After stripping, if `data` can't satisfy any NodeData union branch,
-    // remove it entirely — Node.data is optional in the schema.
+    if (data.encoding_map !== undefined) {
+      (node as any).encoding_map = data.encoding_map;
+    }
+    // After stripping value, remove data if it can't satisfy any NodeData union branch.
+    // This is only reachable when changed=true (value was just deleted), because the
+    // validator only flags EXTERNAL_HAS_DATA when data.value is present. A metadata-only
+    // data object without value would not trigger this sweep at all.
     if (changed && !("interventions" in data) && !("operator" in data) && !("value" in data)) {
       deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data', 'EXTERNAL_HAS_DATA'));
       delete (node as any).data;
@@ -529,7 +538,7 @@ function fixExternalHasData(
       repairs.push({
         code: "EXTERNAL_HAS_DATA",
         path: `nodes[${node.id}].data`,
-        action: `Removed value, factor_type, uncertainty_drivers (prohibited for external). Preserved extractionType.`,
+        action: `Removed value (prohibited for external). Promoted factor_type, extractionType, uncertainty_drivers, encoding_map to node level.`,
       });
     }
   }

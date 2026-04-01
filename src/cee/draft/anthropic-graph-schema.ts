@@ -17,7 +17,7 @@
  * the LLM always emits them (or emits null), so they don't count as
  * optional. The normaliser coerces null → undefined post-parse.
  *
- * Current optional count: 16 / 24.
+ * Current optional count: 16 / 24. (is_baseline, intercept, display_value are required-nullable — no slots used)
  */
 
 // Helpers for nullable types (required field that can be null)
@@ -78,8 +78,21 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               raw_value: nullable("number"),
               unit: nullable("string"),
               cap: nullable("number"),
+              // Encoding map for categorical factor labels (v191+).
+              // JSON-stringified Record<string, string> — e.g. '{"0":"Developers","1":"Tech Lead"}'.
+              // Anthropic structured outputs requires additionalProperties:false on all objects,
+              // which is incompatible with dynamic keys, so we use a JSON string here.
+              // The normalisation layer parses this back to Record<string,string>.
+              encoding_map: nullable("string"),
+              // Marks the status-quo / baseline option (v191+). Exactly one option should be true.
+              // Set on option nodes only; null for all other node kinds.
+              is_baseline: nullable("boolean"),
+              // Human-readable factor value for UI rendering (v191+).
+              // e.g. "£40,000", "No tech lead in place", "18 months".
+              // Eliminates UI heuristics in formatFactorDisplayValue.ts.
+              display_value: nullable("string"),
             },
-            ["value", "extractionType", "factor_type", "uncertainty_drivers", "interventions", "raw_value", "unit", "cap"],
+            ["value", "extractionType", "factor_type", "uncertainty_drivers", "interventions", "raw_value", "unit", "cap", "encoding_map", "is_baseline", "display_value"],
           ),
           // ── Prior (external factors) ───────────────────────────────────
           prior: nullableObject(
@@ -90,6 +103,10 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             },
             ["distribution", "range_min", "range_max"],
           ),
+          // ── Baseline flag (option nodes) ──────────────────────────────
+          is_baseline: nullable("boolean"),
+          // ── Intercept (root factor nodes) ─────────────────────────────
+          intercept: nullable("number"),
           // ── Goal threshold fields ──────────────────────────────────────
           goal_threshold: nullable("number"),
           goal_threshold_raw: nullable("number"),
@@ -101,6 +118,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           "id", "kind", "label",
           // Required-nullable fields (don't count against optional limit)
           "category", "data", "prior",
+          "is_baseline", "intercept",
           "goal_threshold", "goal_threshold_raw", "goal_threshold_unit",
         ],
         additionalProperties: false,

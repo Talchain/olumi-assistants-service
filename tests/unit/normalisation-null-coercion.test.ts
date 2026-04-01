@@ -291,6 +291,98 @@ describe("normaliseDraftResponse — null coercion", () => {
     });
   });
 
+  describe("encoding_map JSON-string parsing (v191+)", () => {
+    it("parses valid JSON object string to Record<string,string> on factor node", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_team",
+          kind: "factor",
+          label: "Team Structure",
+          category: "controllable",
+          data: { value: 1, encoding_map: '{"0":"Developers","1":"Tech Lead"}' },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.encoding_map).toEqual({ "0": "Developers", "1": "Tech Lead" });
+    });
+
+    it("preserves encoding_map when factor has no data.value (regression: CEE-9 P1-1)", () => {
+      // A factor with only encoding_map (no value/interventions/operator) must not be
+      // stripped during the metadata-preservation check in Step 3.
+      const raw = {
+        nodes: [{
+          id: "fac_segment",
+          kind: "factor",
+          label: "Customer Segment",
+          category: "external",
+          data: { encoding_map: '{"0":"B2B","1":"B2C"}' },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      // encoding_map should survive on the data object (not stripped)
+      expect(result.nodes[0].data).toBeDefined();
+      expect(result.nodes[0].data.encoding_map).toEqual({ "0": "B2B", "1": "B2C" });
+    });
+
+    it("drops encoding_map when JSON parses to a non-object (array)", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_bad",
+          kind: "factor",
+          label: "Bad Map",
+          data: { value: 1, encoding_map: '["not","a","map"]' },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.encoding_map).toBeUndefined();
+    });
+
+    it("drops encoding_map when JSON parses to a primitive", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_prim",
+          kind: "factor",
+          label: "Primitive",
+          data: { value: 1, encoding_map: '"just a string"' },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.encoding_map).toBeUndefined();
+    });
+
+    it("drops encoding_map when JSON is malformed", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_malformed",
+          kind: "factor",
+          label: "Malformed",
+          data: { value: 1, encoding_map: '{not valid json' },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.encoding_map).toBeUndefined();
+    });
+
+    it("does not touch encoding_map that is already an object (not a string)", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_preparse",
+          kind: "factor",
+          label: "Pre-parsed",
+          data: { value: 1, encoding_map: { "0": "Low", "1": "High" } },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.encoding_map).toEqual({ "0": "Low", "1": "High" });
+    });
+  });
+
   describe("coaching nullable fields", () => {
     it("coerces null label and detail to undefined on strengthen_items", () => {
       const raw = {

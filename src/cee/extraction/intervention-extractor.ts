@@ -86,6 +86,8 @@ export interface ExtractedOption {
     source: "brief_extraction" | "cee_hypothesis" | "user_specified";
     brief_quote?: string;
   };
+  /** Marks the status-quo / baseline option (v191+). Exactly one option should be true. */
+  is_baseline?: boolean;
 }
 
 /**
@@ -874,6 +876,7 @@ export function extractOptionsFromNodes(
     description?: string;
     body?: string;
     v4Interventions?: Record<string, number>;
+    is_baseline?: boolean;
   }>,
   allNodes: NodeV3T[],
   edges: EdgeV3T[],
@@ -901,6 +904,10 @@ export function extractOptionsFromNodes(
       node.v4Interventions,
       node.id
     );
+    // Carry is_baseline from the source node (v191+)
+    if (node.is_baseline !== undefined) {
+      option.is_baseline = node.is_baseline;
+    }
     usedIds.add(option.id);
     results.push(option);
   }
@@ -973,6 +980,11 @@ export function toOptionV3(extracted: ExtractedOption): OptionV3T {
   // Add raw_interventions if present (Raw+Encoded pattern)
   if (extracted.raw_interventions && Object.keys(extracted.raw_interventions).length > 0) {
     result.raw_interventions = extracted.raw_interventions;
+  }
+
+  // Carry is_baseline through if set (v191+)
+  if (extracted.is_baseline !== undefined) {
+    result.is_baseline = extracted.is_baseline;
   }
 
   return result;

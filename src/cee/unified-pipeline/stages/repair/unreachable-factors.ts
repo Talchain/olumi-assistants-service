@@ -235,17 +235,25 @@ export function handleUnreachableFactors(
     const originalValue: number | undefined =
       data && typeof data.value === "number" ? data.value : undefined;
 
-    // Strip controllable-only fields when reclassifying to external.
-    // After stripping, if `data` can't satisfy any NodeData union branch
-    // (OptionData needs `interventions`, ConstraintNodeData needs `operator`,
-    // FactorData needs `value`), remove `data` entirely — Node.data is optional.
+    // Strip data.value when reclassifying to external — that is the only invariant
+    // violation. factor_type, uncertainty_drivers, and extractionType are metadata
+    // fields that remain useful for downstream enrichment. Promote them to node level
+    // (NodeV3 passthrough preserves them) before potentially removing data.
     if (data) {
       if (data.value !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.value', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
       delete data.value;
-      if (data.factor_type !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.factor_type', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
-      delete data.factor_type;
-      if (data.uncertainty_drivers !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.uncertainty_drivers', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
-      delete data.uncertainty_drivers;
+      if (data.factor_type !== undefined) {
+        (node as any).factor_type = data.factor_type;
+      }
+      if (data.extractionType !== undefined) {
+        (node as any).extractionType = data.extractionType;
+      }
+      if (data.uncertainty_drivers !== undefined) {
+        (node as any).uncertainty_drivers = data.uncertainty_drivers;
+      }
+      if (data.encoding_map !== undefined) {
+        (node as any).encoding_map = data.encoding_map;
+      }
       // If remaining data has no union-required key, remove the property
       // so DraftGraphOutput.parse() doesn't fail on a partial object.
       if (!("interventions" in data) && !("operator" in data) && !("value" in data)) {

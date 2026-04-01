@@ -48,6 +48,9 @@ export interface V1FactorData {
   factor_type?: "cost" | "price" | "time" | "probability" | "revenue" | "demand" | "quality" | "other";
   /** 1-2 short phrases explaining sources of epistemic uncertainty */
   uncertainty_drivers?: string[];
+  /** Encoding map for categorical factor labels (v191+). Maps encoded integers to display strings.
+   * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)" */
+  encoding_map?: Record<string, string>;
 }
 
 /**
@@ -56,6 +59,8 @@ export interface V1FactorData {
  */
 export interface V1OptionData {
   interventions: Record<string, number>;
+  /** Marks the status-quo / baseline option (v191+). Exactly one option should have true. */
+  is_baseline?: boolean;
 }
 
 /**

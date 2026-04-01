@@ -111,6 +111,10 @@ export const NodeV3 = z.object({
   goal_threshold_unit: z.string().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().optional(),
+  /** Encoding map for categorical factor labels (v191+). Maps encoded integer keys to display strings.
+   * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)".
+   * Node-level field (not in observed_state) — describes label encoding, not observed state. */
+  encoding_map: z.record(z.string(), z.string()).optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type NodeV3T = z.infer<typeof NodeV3>;
 
@@ -299,6 +303,9 @@ export const OptionV3 = z.object({
   user_questions: z.array(z.string()).optional(),
   /** Provenance */
   provenance: OptionProvenanceV3.optional(),
+  /** Marks the status-quo / baseline option (v191+). Exactly one option should be true.
+   * Set by the LLM; preserved through extraction and assembly. PLoT handles deduplication. */
+  is_baseline: z.boolean().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type OptionV3T = z.infer<typeof OptionV3>;
 

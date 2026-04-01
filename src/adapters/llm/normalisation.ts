@@ -481,14 +481,34 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         }
       }
 
-      // Step 2: Strip data objects that lack a union-discriminating key.
+      // Step 2: Parse JSON-string encoding_map on factor nodes back to Record<string,string>.
+      // The Anthropic structured outputs schema emits encoding_map as a JSON string
+      // (additionalProperties:false makes dynamic-key objects impossible in structured outputs).
+      if (node.data && typeof node.data === 'object' && typeof node.data.encoding_map === 'string') {
+        try {
+          const parsed = JSON.parse(node.data.encoding_map);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            node = { ...node, data: { ...node.data, encoding_map: parsed } };
+          } else {
+            // Valid JSON but wrong shape (array, primitive, null) — drop the field
+            const { encoding_map: _dropped, ...restData } = node.data;
+            node = { ...node, data: restData };
+          }
+        } catch {
+          // Malformed JSON — drop the field rather than propagating bad data
+          const { encoding_map: _dropped, ...restData } = node.data;
+          node = { ...node, data: restData };
+        }
+      }
+
+      // Step 3: Strip data objects that lack a union-discriminating key.
       // Preserve data if it contains factor metadata (factor_type, extractionType,
-      // uncertainty_drivers) even when value is absent — the deterministic sweep
-      // fills value defaults and these metadata fields must survive.
+      // uncertainty_drivers, encoding_map) even when value is absent — the deterministic
+      // sweep fills value defaults and these metadata fields must survive.
       const data = node.data;
       if (data && typeof data === 'object') {
         const hasUnionKey = typeof data.value === 'number' || data.interventions || data.operator;
-        const hasFactorMetadata = data.factor_type || data.extractionType || data.uncertainty_drivers;
+        const hasFactorMetadata = data.factor_type || data.extractionType || data.uncertainty_drivers || data.encoding_map;
         if (!hasUnionKey && !hasFactorMetadata) {
           const { data: _stripped, ...rest } = node;
           log.debug({
