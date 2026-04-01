@@ -6,6 +6,7 @@
  * Layer 2: Block data schemas for deterministic response assembly
  */
 
+import type { FastifyRequest } from "fastify";
 import type { DecisionStage, V2RunResponseEnvelope, SuggestedAction, TypedConversationBlock, PatchOperation, ConversationalState, AnalysisInputs } from "../types.js";
 import type { GraphV3T, NodeKindV3T } from "../../schemas/cee-v3.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
@@ -149,6 +150,8 @@ export interface DeterministicTurnContext {
   turn_id: string;
   /** Analysis inputs for run_analysis delegation. */
   analysis_inputs: AnalysisInputs | null;
+  /** Fastify request — required by draft_graph action handler (calls unified pipeline). */
+  request?: FastifyRequest;
 }
 
 /**

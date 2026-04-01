@@ -28,6 +28,18 @@ export const generateArtefactAction: ActionDefinition = {
   surface: 'artefact',
   role: 'scientist',
   cooldown: 'suppress_same_turn',
+  input_schema: {
+    type: 'object',
+    properties: {
+      artefact_type: {
+        type: 'string',
+        enum: ['decision_matrix', 'sensitivity_explorer', 'comparison_table', 'premortem_worksheet', 'assumption_map'],
+        description: 'Type of artefact to generate',
+      },
+    },
+    required: ['artefact_type'],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(_ctx: DeterministicTurnContext): string | null {
     return 'Interactive artefact generation is not yet available. Use compare_options or what_would_flip for analysis visualisations.';

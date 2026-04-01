@@ -123,6 +123,22 @@ export async function* executePipelineStream(
       return;
     }
 
+    // ── Pipeline v4: native tool-use (feature-flagged) ──────────────────────
+    // When enabled, ALL turns (system events, normal messages, chip clicks,
+    // generate_model) route to the v4 pipeline. No fall-through to V2 or
+    // deterministic pipeline.
+    if (config.features.pipelineV4Enabled) {
+      const { executePipelineV4 } = await import("../deterministic/pipeline-v4.js");
+      // Extract FastifyRequest from deps.toolDispatcher (passed through by route-stream.ts)
+      const fastifyReq = (deps as { _fastifyRequest?: import("fastify").FastifyRequest })._fastifyRequest;
+
+      for await (const event of executePipelineV4(request, requestId, signal, fastifyReq)) {
+        yield { ...event, seq: seq++ };
+        if (signal?.aborted) return;
+      }
+      return;
+    }
+
     // ── Deterministic intelligence pipeline (feature-flagged) ───────────────
     // When enabled, the three-layer deterministic pipeline replaces the V2 XML
     // pipeline. Text streams progressively via StreamingTextExtractor; blocks

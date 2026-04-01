@@ -296,6 +296,7 @@ const ConfigSchema = z.object({
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
     legacyOrchestratorEnabled: booleanString.default(false), // CEE_LEGACY_ORCHESTRATOR_ENABLED — preserve old XML envelope path as rollback (overrides deterministic when true)
+    pipelineV4Enabled: booleanString.default(false), // CEE_PIPELINE_V4_ENABLED — native tool-use pipeline (v4), replaces JSON-contract pipeline
   }),
 
   // Prompt Cache Configuration
@@ -653,6 +654,7 @@ function parseConfig(): Config {
       diagnosticTraceEnabled: env.CEE_DIAGNOSTIC_TRACE_ENABLED,
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
       legacyOrchestratorEnabled: env.CEE_LEGACY_ORCHESTRATOR_ENABLED,
+      pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

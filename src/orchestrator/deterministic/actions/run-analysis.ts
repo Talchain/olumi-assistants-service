@@ -21,6 +21,12 @@ export const runAnalysisAction: ActionDefinition = {
   surface: 'inline',
   role: 'scientist',
   cooldown: 'suppress_until_state_change',
+  input_schema: {
+    type: 'object',
+    properties: {},
+    required: [],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.graph) return 'No decision model available.';

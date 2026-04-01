@@ -22,6 +22,18 @@ export const addFactorAction: ActionDefinition = {
   surface: 'proposal_card',
   role: 'facilitator',
   cooldown: 'suppress_same_turn',
+  input_schema: {
+    type: 'object',
+    properties: {
+      label: { type: 'string', description: 'Name for the new factor' },
+      category: { type: 'string', enum: ['controllable', 'observable', 'external'], description: 'Factor category' },
+      value: { type: 'number', description: 'Initial observed value' },
+      unit: { type: 'string', description: 'Unit label for the value' },
+      connect_to: { type: 'array', items: { type: 'string' }, description: 'IDs of factors to connect to' },
+    },
+    required: ['label'],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.graph) return 'No decision model available.';

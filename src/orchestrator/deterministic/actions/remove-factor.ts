@@ -20,6 +20,14 @@ export const removeFactorAction: ActionDefinition = {
   surface: 'proposal_card',
   role: 'challenger',
   cooldown: 'suppress_same_turn',
+  input_schema: {
+    type: 'object',
+    properties: {
+      target_id: { type: 'string', description: 'ID of the factor to remove' },
+    },
+    required: ['target_id'],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.graph) return 'No decision model available.';

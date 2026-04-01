@@ -19,6 +19,16 @@ export const adjustEdgeStrengthAction: ActionDefinition = {
   surface: 'inline',
   role: 'facilitator',
   cooldown: 'none',
+  input_schema: {
+    type: 'object',
+    properties: {
+      from: { type: 'string', description: 'Source factor ID' },
+      to: { type: 'string', description: 'Target factor ID' },
+      strength_mean: { type: 'number', description: 'New edge strength mean (0 to 1)' },
+    },
+    required: ['from', 'to'],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.graph) return 'No decision model available.';

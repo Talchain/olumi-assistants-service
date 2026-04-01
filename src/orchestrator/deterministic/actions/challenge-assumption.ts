@@ -20,6 +20,14 @@ export const challengeAssumptionAction: ActionDefinition = {
   surface: 'inline',
   role: 'challenger',
   cooldown: 'suppress_same_turn',
+  input_schema: {
+    type: 'object',
+    properties: {
+      target_id: { type: 'string', description: 'ID of the factor or edge to challenge' },
+    },
+    required: [],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.analysis_summary) return 'No analysis results to challenge. Run analysis first.';

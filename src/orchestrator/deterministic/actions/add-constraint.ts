@@ -19,6 +19,18 @@ export const addConstraintAction: ActionDefinition = {
   surface: 'inline',
   role: 'facilitator',
   cooldown: 'none',
+  input_schema: {
+    type: 'object',
+    properties: {
+      target_id: { type: 'string', description: 'ID of the factor to constrain' },
+      constraint_type: { type: 'string', enum: ['threshold', 'range'], description: 'Type of constraint' },
+      threshold: { type: 'number', description: 'Threshold value for the constraint' },
+      label: { type: 'string', description: 'Human-readable constraint name' },
+      unit: { type: 'string', description: 'Optional unit label' },
+    },
+    required: ['target_id', 'threshold', 'label'],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.graph) return 'No decision model available.';

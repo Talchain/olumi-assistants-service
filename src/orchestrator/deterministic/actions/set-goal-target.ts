@@ -18,6 +18,16 @@ export const setGoalTargetAction: ActionDefinition = {
   surface: 'inline',
   role: 'facilitator',
   cooldown: 'none',
+  input_schema: {
+    type: 'object',
+    properties: {
+      threshold: { type: 'number', description: 'Target threshold value' },
+      unit: { type: 'string', description: 'Optional unit label' },
+      cap: { type: 'number', description: 'Optional upper cap' },
+    },
+    required: ['threshold'],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.graph) return 'No decision model available.';

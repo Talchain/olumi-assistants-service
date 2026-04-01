@@ -20,6 +20,7 @@ import { challengeAssumptionAction } from "./challenge-assumption.js";
 import { runPremortemAction } from "./run-premortem.js";
 import { whatWouldFlipAction } from "./what-would-flip.js";
 import { generateArtefactAction } from "./generate-artefact.js";
+import { draftGraphAction } from "./draft-graph.js";
 
 // ============================================================================
 // Catalogue
@@ -40,6 +41,7 @@ export const ACTION_CATALOGUE: ReadonlyMap<ActionName, ActionDefinition> = new M
   ['run_premortem', runPremortemAction],
   ['what_would_flip', whatWouldFlipAction],
   ['generate_artefact', generateArtefactAction],
+  ['draft_graph', draftGraphAction],
 ]);
 
 // ============================================================================

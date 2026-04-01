@@ -189,6 +189,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
           toolDispatcher: createProductionToolDispatcher(requestId, plotOpts, req),
           plotClient: createPLoTClient(),
           plotOpts,
+          _fastifyRequest: req, // v4 pipeline needs this for draft_graph action
         };
 
         for await (const event of executePipelineStream(turnRequest, requestId, deps, budgetController.signal)) {

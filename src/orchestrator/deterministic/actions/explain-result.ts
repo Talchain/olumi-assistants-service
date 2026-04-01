@@ -21,6 +21,14 @@ export const explainResultAction: ActionDefinition = {
   surface: 'inline',
   role: 'scientist',
   cooldown: 'suppress_same_turn',
+  input_schema: {
+    type: 'object',
+    properties: {
+      focus: { type: 'string', description: 'Aspect of the results to focus on' },
+    },
+    required: [],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.analysis_summary) return 'No analysis results available. Run analysis first.';

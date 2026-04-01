@@ -19,6 +19,16 @@ export const setFactorValueAction: ActionDefinition = {
   surface: 'inline',
   role: 'facilitator',
   cooldown: 'none',
+  input_schema: {
+    type: 'object',
+    properties: {
+      target_id: { type: 'string', description: 'ID of the factor to update' },
+      value: { type: 'number', description: 'New observed value' },
+      unit: { type: 'string', description: 'Optional unit label' },
+    },
+    required: ['target_id', 'value'],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.graph) return 'No decision model available.';

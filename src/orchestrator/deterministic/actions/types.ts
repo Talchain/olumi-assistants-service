@@ -26,6 +26,7 @@ export const ACTION_NAMES = [
   'run_premortem',
   'what_would_flip',
   'generate_artefact',
+  'draft_graph',
 ] as const;
 
 export type ActionName = (typeof ACTION_NAMES)[number];
@@ -86,6 +87,13 @@ export interface ActionDefinition {
   surface: ActionSurface;
   role: ActionRole;
   cooldown: ActionCooldown;
+
+  /**
+   * JSON Schema for the action's input parameters.
+   * Single source of truth — drives Anthropic tool schema, handler input contract,
+   * and (eventually) runtime validation. Must be a valid JSON Schema object.
+   */
+  input_schema: Record<string, unknown>;
 
   /**
    * Check prerequisites. Returns null if ok, or an error message string.

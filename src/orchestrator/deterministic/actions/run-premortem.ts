@@ -21,6 +21,14 @@ export const runPremortemAction: ActionDefinition = {
   surface: 'panel',
   role: 'challenger',
   cooldown: 'suppress_same_turn',
+  input_schema: {
+    type: 'object',
+    properties: {
+      target_id: { type: 'string', description: 'Option ID to analyse (omit to target winner)' },
+    },
+    required: [],
+    additionalProperties: false,
+  },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.analysis_summary) return 'No analysis results available. Run analysis first.';

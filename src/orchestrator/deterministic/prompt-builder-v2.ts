@@ -1,0 +1,231 @@
+/**
+ * Prompt Builder v2 — Static/Dynamic Split for Prompt Caching
+ *
+ * Returns two blocks: a cacheable static block (identity + response rules)
+ * and a per-turn dynamic block (TurnContext state + signals).
+ *
+ * No action vocabulary — tool definitions carry action descriptions natively.
+ * No JSON contract — the model uses tools for structural actions and responds
+ * with conversational text otherwise.
+ *
+ * FLAG FOR PAUL (v31 prompt): The PMS prompt must be updated to:
+ * 1. Remove the JSON response contract ({ text, insights[], recommended_actions[] })
+ * 2. Remove action vocabulary section
+ * 3. Add tool-use instruction: use tools for structural actions, respond with
+ *    conversational text for questions/analysis
+ * 4. Remove "Respond with valid JSON only" suffix
+ */
+
+import type { DeterministicTurnContext, DisambiguationHint } from "./types.js";
+import { loadPrompt } from "../../prompts/loader.js";
+import { log, emit } from "../../utils/telemetry.js";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface DeterministicPromptV2 {
+  /** Identity + response rules. Cacheable — identical across turns in a session. */
+  static_block: string;
+  /** TurnContext state, signals, blockers, disambiguation. Varies per turn. */
+  dynamic_block: string;
+}
+
+// ============================================================================
+// PMS Cache
+// ============================================================================
+
+let cachedPmsPrompt: string | null = null;
+let pmsLoadAttempted = false;
+
+async function loadStaticPromptFromPms(): Promise<string | null> {
+  try {
+    const result = await loadPrompt('orchestrator', { forceDefault: false });
+    if (result.source === 'store') {
+      return result.content;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function warmPromptCacheV2(): Promise<void> {
+  pmsLoadAttempted = true;
+  const content = await loadStaticPromptFromPms();
+  if (content) {
+    cachedPmsPrompt = content;
+    log.info('v4.prompt.pms_loaded');
+  } else {
+    log.warn('v4.prompt.pms_unavailable_using_hardcoded');
+  }
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+/**
+ * Build the system prompt in two blocks for the v4 native tool-use pipeline.
+ *
+ * The static block is identical across turns and marked with cache_control
+ * by the caller. The dynamic block varies per turn.
+ */
+export function buildDeterministicPromptV2(ctx: DeterministicTurnContext): DeterministicPromptV2 {
+  let staticBlock: string;
+
+  if (cachedPmsPrompt) {
+    staticBlock = cachedPmsPrompt;
+  } else {
+    if (!pmsLoadAttempted) {
+      pmsLoadAttempted = true;
+      warmPromptCacheV2().catch(() => { /* non-fatal */ });
+    }
+    staticBlock = STATIC_PROMPT_FALLBACK;
+
+    const fallbackMeta = { task: 'orchestrator', env: process.env.NODE_ENV ?? 'unknown' };
+    emit('v4.pms_fallback_used', fallbackMeta);
+    log.warn(fallbackMeta, 'v4.pms_fallback_used');
+  }
+
+  const dynamicSections: string[] = [];
+  dynamicSections.push(buildStateSection(ctx));
+
+  if (ctx.disambiguation_hints.length > 0) {
+    dynamicSections.push(buildDisambiguationSection(ctx.disambiguation_hints));
+  }
+
+  return {
+    static_block: staticBlock,
+    dynamic_block: dynamicSections.join('\n\n---\n\n'),
+  };
+}
+
+// ============================================================================
+// Static Prompt Fallback
+// ============================================================================
+
+const STATIC_PROMPT_FALLBACK = `You are Olumi, a science-powered decision coach. You help people make better decisions using causal modelling, Monte Carlo simulation, and behavioural science.
+
+Your role is conversational partner, not tool operator. You provide insight, ask clarifying questions, challenge assumptions, and recommend next steps.
+
+When a structural change to the model is needed (adding factors, running analysis, editing edges, etc.), use the appropriate tool. Do not describe the change in text — call the tool.
+
+When the user asks a question, wants an explanation, or needs coaching, respond with conversational text. Keep responses under 200 words unless more detail is requested.
+
+Communication style:
+- Plain language, bold-lead paragraphs
+- No markdown headers (##, ###)
+- No XML tags
+- Reference specific elements by name (factors, options, edges)
+- Ground all numeric claims in the analysis data provided
+
+Apply behavioural science concepts when genuinely relevant:
+- Confirmation bias: when the user ignores disconfirming evidence
+- Anchoring: when a single number dominates reasoning
+- Overconfidence: when many values are inferred but results treated as certain
+- Sunk cost: when the user resists removing something they invested in
+- Status quo bias: when the user avoids analysis or alternatives
+- Base rate neglect: when focusing on specific scenarios over population data
+
+Only mention a concept when it is genuinely relevant — don't force science into every response.`;
+
+// ============================================================================
+// Dynamic Sections (shared with llm-prompt.ts — same TurnContext structure)
+// ============================================================================
+
+function buildStateSection(ctx: DeterministicTurnContext): string {
+  const parts: string[] = ['## Current Decision State'];
+
+  parts.push(`Stage: **${ctx.stage}**`);
+
+  if (ctx.graph_summary.node_count > 0) {
+    parts.push(`Model: ${ctx.graph_summary.node_count} nodes, ${ctx.graph_summary.edge_count} edges, ${ctx.graph_summary.option_count} options`);
+    if (ctx.graph_summary.goal_label) {
+      parts.push(`Goal: ${ctx.graph_summary.goal_label}`);
+    }
+    if (ctx.graph_summary.option_labels.length > 0) {
+      parts.push(`Options: ${ctx.graph_summary.option_labels.join(', ')}`);
+    }
+  } else {
+    parts.push('Model: not yet created');
+  }
+
+  if (ctx.entities.nodes.size > 0) {
+    const factorDescs: string[] = [];
+    const optionDescs: string[] = [];
+    for (const [id, entry] of ctx.entities.nodes) {
+      if (entry.kind === 'factor') {
+        const segs = [`${entry.label} (${id}`];
+        if (entry.category) segs.push(`, ${entry.category}`);
+        if (entry.value != null) segs.push(`, value: ${entry.value}`);
+        if (entry.unit) segs.push(` ${entry.unit}`);
+        segs.push(')');
+        factorDescs.push(segs.join(''));
+      } else if (entry.kind === 'option') {
+        optionDescs.push(`${entry.label} (${id})`);
+      }
+    }
+    if (factorDescs.length > 0) parts.push(`Factors: ${factorDescs.join(', ')}`);
+    if (optionDescs.length > 0) parts.push(`Options: ${optionDescs.join(', ')}`);
+  }
+
+  if (ctx.analysis_summary) {
+    const a = ctx.analysis_summary;
+    parts.push('\n**Analysis Results:**');
+    if (a.winner) {
+      parts.push(`Winner: ${a.winner} (${a.winner_probability != null ? (a.winner_probability * 100).toFixed(0) + '%' : 'N/A'})`);
+    }
+    if (a.runner_up) {
+      parts.push(`Runner-up: ${a.runner_up} (${a.runner_up_probability != null ? (a.runner_up_probability * 100).toFixed(0) + '%' : 'N/A'})`);
+    }
+    if (a.robustness_band) {
+      parts.push(`Robustness: ${a.robustness_band}`);
+    }
+    if (a.top_drivers.length > 0) {
+      const drivers = a.top_drivers.slice(0, 3).map((d) => `${d.label} (${d.sensitivity.toFixed(2)})`).join(', ');
+      parts.push(`Top drivers: ${drivers}`);
+    }
+    if (a.constraint_tensions.length > 0) {
+      parts.push(`Constraint tensions: ${a.constraint_tensions.join('; ')}`);
+    }
+  }
+
+  const signalParts: string[] = [];
+  if (ctx.signals.close_call) signalParts.push('close call (tight margin)');
+  if (ctx.signals.dominant_factor) {
+    const label = ctx.entities.nodes.get(ctx.signals.dominant_factor)?.label ?? ctx.signals.dominant_factor;
+    signalParts.push(`dominant factor: ${label}`);
+  }
+  if (ctx.signals.default_value_count > 0) signalParts.push(`${ctx.signals.default_value_count} default values`);
+  if (ctx.signals.weak_edges.length > 0) signalParts.push(`${ctx.signals.weak_edges.length} weak edges`);
+  if (ctx.signals.high_uncertainty_factors.length > 0) signalParts.push(`${ctx.signals.high_uncertainty_factors.length} high-uncertainty factors`);
+
+  if (signalParts.length > 0) {
+    parts.push(`\nSignals: ${signalParts.join(', ')}`);
+  }
+
+  if (ctx.blockers.length > 0) {
+    parts.push(`\nBlockers: ${ctx.blockers.map((b) => b.reason).join('; ')}`);
+  }
+
+  if (ctx.conversation.turn_count > 0) {
+    parts.push(`\nConversation: ${ctx.conversation.turn_count} messages`);
+  }
+  if (ctx.conversation.pending_confirmation) {
+    parts.push(`Pending confirmation: ${ctx.conversation.pending_confirmation}`);
+  }
+
+  return parts.join('\n');
+}
+
+function buildDisambiguationSection(hints: DisambiguationHint[]): string {
+  const lines: string[] = ['## Disambiguation\n\nThe user\'s message may reference these similar elements. Ask the user to clarify which they mean before acting:'];
+
+  for (const hint of hints) {
+    const candidates = hint.candidates.map((c) => `${c.id} (${c.label})`).join(' or ');
+    lines.push(`- "${hint.term}" could mean: ${candidates}`);
+  }
+
+  return lines.join('\n');
+}
