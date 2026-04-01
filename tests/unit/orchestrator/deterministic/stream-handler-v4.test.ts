@@ -169,6 +169,53 @@ describe("processAdapterStream", () => {
     expect(result!.assistantText).toBe('Just a conversation.');
     expect(result!.toolExecution).toBeNull();
     expect(result!.failedToolCall).toBeNull();
+    expect(result!.pendingLongRunningTool).toBeNull();
     expect(result!.discardedToolCalls).toEqual([]);
+  });
+
+  it("defers long-running tools to pipeline (returns pendingLongRunningTool)", async () => {
+    // Mock a long-running tool in the catalogue
+    const { ACTION_CATALOGUE } = await import("../../../../src/orchestrator/deterministic/actions/registry.js");
+    const originalHas = ACTION_CATALOGUE.has.bind(ACTION_CATALOGUE);
+    const originalGet = ACTION_CATALOGUE.get.bind(ACTION_CATALOGUE);
+
+    // run_analysis is in LONG_RUNNING_ACTIONS
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'run_analysis' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'run_analysis', input: {} },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    // Need run_analysis in the catalogue for the unknown check
+    (ACTION_CATALOGUE as Map<string, unknown>).set('run_analysis', {
+      action_type: 'run_analysis',
+      execute: vi.fn(),
+    });
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events = [];
+    let result;
+
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) {
+        result = value;
+        break;
+      }
+      events.push(value);
+    }
+
+    // Should yield tool_start but NOT execute (no block/tool_result events)
+    expect(events[0].type).toBe('tool_start');
+    expect((events[0] as { long_running: boolean }).long_running).toBe(true);
+    expect(events.filter(e => e.type === 'block').length).toBe(0);
+    expect(events.filter(e => e.type === 'tool_result').length).toBe(0);
+
+    // Tool is deferred
+    expect(result!.toolExecution).toBeNull();
+    expect(result!.pendingLongRunningTool).toEqual({ name: 'run_analysis', input: {} });
+
+    // Clean up
+    (ACTION_CATALOGUE as Map<string, unknown>).delete('run_analysis');
   });
 });

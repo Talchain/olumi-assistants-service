@@ -25,8 +25,8 @@ import { handlePendingConfirmation } from "./confirmation-flow.js";
 import { buildDeterministicPromptV2 } from "./prompt-builder-v2.js";
 import { buildToolDefinitions } from "./tool-builder.js";
 import { buildDeterministicChips } from "./chip-builder-v4.js";
-import { processAdapterStream } from "./stream-handler-v4.js";
-import type { StreamHandlerResult } from "./stream-handler-v4.js";
+import { processAdapterStream, PROGRESS_MESSAGES, PROGRESS_INTERVAL_MS } from "./stream-handler-v4.js";
+import type { StreamHandlerResult, ToolExecution } from "./stream-handler-v4.js";
 import { normaliseDeterministicResponse, scanBannedTerms } from "./response-normaliser.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
 import { assembleMessages } from "../prompt-assembly.js";
@@ -201,7 +201,8 @@ export async function* executePipelineV4(
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS, signal },
     );
 
-    // Process stream — yields text_delta, tool_start, block, tool_result events
+    // Process stream — yields text_delta, tool_start, block, tool_result events.
+    // Long-running tools are deferred to the pipeline level (below) for real-time progress.
     const streamGen = processAdapterStream(stream, turnContext, requestId);
     let streamResult: StreamHandlerResult | undefined;
 
@@ -223,26 +224,125 @@ export async function* executePipelineV4(
       throw new Error('Stream handler returned no result');
     }
 
+    // ── Execute deferred long-running tool with real-time progress ────
+    // The stream handler defers long-running tools so the pipeline can
+    // yield progress events between Promise.race ticks.
+    let toolExecution: ToolExecution | null = streamResult.toolExecution;
+    let failedToolCall = streamResult.failedToolCall;
+
+    if (streamResult.pendingLongRunningTool) {
+      const pending = streamResult.pendingLongRunningTool;
+      const actionDef = ACTION_CATALOGUE.get(pending.name as ActionName);
+
+      if (actionDef) {
+        const toolStartTime = Date.now();
+        const progressMessage = PROGRESS_MESSAGES[pending.name as ActionName] ?? 'Processing\u2026';
+
+        try {
+          // Race execution against progress ticks — yield real-time progress events
+          const execPromise = actionDef.execute(pending.input, turnContext);
+          let execDone = false;
+          let execResult: import("./types.js").ActionResult | undefined;
+          let execError: unknown;
+
+          const wrappedExec = execPromise.then(
+            (r) => { execDone = true; execResult = r; },
+            (e) => { execDone = true; execError = e; },
+          );
+
+          while (!execDone) {
+            const tick = new Promise<void>((resolve) => setTimeout(resolve, PROGRESS_INTERVAL_MS));
+            await Promise.race([wrappedExec, tick]);
+
+            if (!execDone) {
+              yield {
+                type: 'progress',
+                seq: seq++,
+                tool_name: pending.name,
+                elapsed_ms: Date.now() - toolStartTime,
+                message: progressMessage,
+              };
+            }
+
+            if (signal?.aborted) break;
+          }
+
+          // Await once more to ensure promise is settled
+          await wrappedExec;
+
+          if (execError) throw execError;
+
+          const durationMs = Date.now() - toolStartTime;
+          toolExecution = {
+            toolName: pending.name,
+            input: pending.input,
+            result: execResult!,
+            durationMs,
+          };
+
+          for (const block of execResult!.blocks) {
+            yield { type: 'block', seq: seq++, block };
+          }
+
+          yield {
+            type: 'tool_result',
+            seq: seq++,
+            tool_name: pending.name,
+            success: true,
+            duration_ms: durationMs,
+          };
+
+          log.info({
+            request_id: requestId,
+            tool_name: pending.name,
+            success: true,
+            duration_ms: durationMs,
+            blocks_produced: execResult!.blocks.length,
+          }, 'v4.tool_executed');
+
+        } catch (error) {
+          const durationMs = Date.now() - toolStartTime;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          failedToolCall = { name: pending.name, error: errorMessage };
+
+          yield {
+            type: 'tool_result',
+            seq: seq++,
+            tool_name: pending.name,
+            success: false,
+            duration_ms: durationMs,
+          };
+
+          log.error({
+            request_id: requestId,
+            tool_name: pending.name,
+            duration_ms: durationMs,
+            error: errorMessage,
+          }, 'v4.tool_execution_failed');
+        }
+      }
+    }
+
     const llmDurationMs = Date.now() - startTime;
 
     log.info({
       request_id: requestId,
       response_text_chars: streamResult.assistantText.length,
-      tool_calls_count: streamResult.toolExecution ? 1 : 0,
+      tool_calls_count: toolExecution ? 1 : 0,
       discarded_tool_calls: streamResult.discardedToolCalls.length,
       extraction_method: 'native_tool_use',
       duration_ms: llmDurationMs,
     }, 'v4.llm_call');
 
     // ── Assemble response ─────────────────────────────────────────────
-    const executedAction = streamResult.toolExecution?.toolName as ActionName ?? null;
-    const actionResult = streamResult.toolExecution?.result ?? null;
+    const executedAction = toolExecution?.toolName as ActionName ?? null;
+    const actionResult = toolExecution?.result ?? null;
 
     // Surface tool failure in the envelope when no text was produced.
     // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
     // so failed tool turns are excluded from conversation history.
     let assistantText = streamResult.assistantText || null;
-    if (!assistantText && streamResult.failedToolCall) {
+    if (!assistantText && failedToolCall) {
       assistantText = 'Something went wrong while processing your request. Please try again.';
     }
 

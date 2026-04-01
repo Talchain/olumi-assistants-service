@@ -2,11 +2,10 @@
  * Stream Handler v4 — Adapter Events → SSE Events
  *
  * Maps Anthropic ChatWithToolsStreamEvent to OrchestratorStreamEvent
- * for SSE delivery. Executes tools immediately at tool_input_complete
- * so the UI receives block events while the model may still be streaming.
- *
- * Long-running tools (run_analysis, draft_graph) emit periodic progress
- * events during execution via a Promise.race polling pattern.
+ * for SSE delivery. Executes short-running tools immediately at
+ * tool_input_complete. Long-running tools (run_analysis, draft_graph)
+ * are deferred to the pipeline level which can yield real-time progress
+ * events during execution.
  */
 
 import type { ChatWithToolsStreamEvent } from "../../adapters/llm/types.js";
@@ -20,20 +19,20 @@ import { log } from "../../utils/telemetry.js";
 // Constants
 // ============================================================================
 
-/** Long-running actions that should show progress indicators. */
-const LONG_RUNNING_ACTIONS: ReadonlySet<ActionName> = new Set([
+/** Long-running actions — deferred to pipeline level for real-time progress. */
+export const LONG_RUNNING_ACTIONS: ReadonlySet<ActionName> = new Set([
   'run_analysis',
   'draft_graph',
 ]);
 
 /** Progress messages per tool. */
-const PROGRESS_MESSAGES: Partial<Record<ActionName, string>> = {
+export const PROGRESS_MESSAGES: Partial<Record<ActionName, string>> = {
   draft_graph: 'Building decision model\u2026',
   run_analysis: 'Running analysis\u2026',
 };
 
 /** Interval between progress events (ms). */
-const PROGRESS_INTERVAL_MS = 5000;
+export const PROGRESS_INTERVAL_MS = 5000;
 
 // ============================================================================
 // Types
@@ -46,11 +45,19 @@ export interface ToolExecution {
   durationMs: number;
 }
 
+/** A tool call collected from the stream but not yet executed. */
+export interface PendingToolCall {
+  name: string;
+  input: Record<string, unknown>;
+}
+
 export interface StreamHandlerResult {
   assistantText: string;
   toolExecution: ToolExecution | null;
   /** Tool call that was attempted but failed. */
   failedToolCall: { name: string; error: string } | null;
+  /** Long-running tool call deferred to pipeline for execution with progress. */
+  pendingLongRunningTool: PendingToolCall | null;
   /** Additional tool calls that were discarded (at most one state-changing action per turn). */
   discardedToolCalls: Array<{ name: string; input: Record<string, unknown> }>;
 }
@@ -63,8 +70,9 @@ export interface StreamHandlerResult {
  * Process the adapter stream and yield SSE events.
  *
  * Yields text_delta and tool_start events as they arrive.
- * On tool_input_complete, executes the first tool immediately and yields
- * block/tool_result events. Long-running tools get periodic progress events.
+ * On tool_input_complete:
+ * - Short-running tools: executed immediately, block/tool_result events yielded
+ * - Long-running tools: deferred to pipeline (returned in pendingLongRunningTool)
  * Subsequent tool calls are discarded.
  * Returns the accumulated result for envelope assembly.
  */
@@ -72,11 +80,12 @@ export async function* processAdapterStream(
   stream: AsyncIterable<ChatWithToolsStreamEvent>,
   turnContext: DeterministicTurnContext,
   requestId: string,
-): AsyncGenerator<OrchestratorStreamEvent & { type: 'text_delta' | 'tool_start' | 'block' | 'tool_result' | 'progress' }, StreamHandlerResult> {
+): AsyncGenerator<OrchestratorStreamEvent & { type: 'text_delta' | 'tool_start' | 'block' | 'tool_result' }, StreamHandlerResult> {
   let seq = 0;
   const textChunks: string[] = [];
   let toolExecution: ToolExecution | null = null;
   let failedToolCall: { name: string; error: string } | null = null;
+  let pendingLongRunningTool: PendingToolCall | null = null;
   const discardedToolCalls: Array<{ name: string; input: Record<string, unknown> }> = [];
 
   for await (const event of stream) {
@@ -94,13 +103,13 @@ export async function* processAdapterStream(
       }
 
       case 'tool_input_complete': {
-        // Execute first tool immediately; discard subsequent calls
-        if (toolExecution || failedToolCall) {
+        // Only one tool per turn — discard subsequent calls
+        if (toolExecution || failedToolCall || pendingLongRunningTool) {
           discardedToolCalls.push({ name: event.tool_name, input: event.input });
           log.warn({
             request_id: requestId,
             discarded_tool: event.tool_name,
-            kept_tool: toolExecution?.toolName ?? failedToolCall?.name,
+            kept_tool: toolExecution?.toolName ?? failedToolCall?.name ?? pendingLongRunningTool?.name,
           }, 'v4.tool_call_discarded');
           break;
         }
@@ -112,28 +121,17 @@ export async function* processAdapterStream(
         }
 
         const isLongRunning = LONG_RUNNING_ACTIONS.has(event.tool_name as ActionName);
+
+        if (isLongRunning) {
+          // Defer to pipeline level for execution with real-time progress events
+          pendingLongRunningTool = { name: event.tool_name, input: event.input };
+          break;
+        }
+
+        // Short-running tool — execute immediately
         const startTime = Date.now();
-
         try {
-          let result: ActionResult;
-
-          if (isLongRunning) {
-            // Long-running tool: race execution against progress timer
-            const progressEvents: Array<OrchestratorStreamEvent & { type: 'progress' }> = [];
-            result = await executeWithProgress(
-              () => actionDef.execute(event.input, turnContext),
-              event.tool_name as ActionName,
-              startTime,
-              progressEvents,
-            );
-            // Yield buffered progress events
-            for (const pe of progressEvents) {
-              yield { ...pe, seq: seq++ };
-            }
-          } else {
-            result = await actionDef.execute(event.input, turnContext);
-          }
-
+          const result = await actionDef.execute(event.input, turnContext);
           const durationMs = Date.now() - startTime;
 
           toolExecution = {
@@ -143,7 +141,6 @@ export async function* processAdapterStream(
             durationMs,
           };
 
-          // Yield block events immediately so UI sees them while stream continues
           for (const block of result.blocks) {
             yield { type: 'block', seq: seq++, block };
           }
@@ -199,52 +196,7 @@ export async function* processAdapterStream(
     assistantText: textChunks.join(''),
     toolExecution,
     failedToolCall,
+    pendingLongRunningTool,
     discardedToolCalls,
   };
-}
-
-// ============================================================================
-// Progress Helper
-// ============================================================================
-
-/**
- * Execute a long-running tool with periodic progress events.
- *
- * Uses Promise.race to interleave progress ticks with the execution promise.
- * Progress events are collected into the buffer (can't yield from a non-generator).
- * The caller yields them after execution completes.
- *
- * Note: progress events are buffered, not streamed in real-time. This is a
- * limitation of the generator pattern — the caller yields them in a burst
- * after execution. For the UI, this means progress events arrive late but
- * still provide context in the SSE log. The tool_start event (with
- * long_running: true) is the real-time signal for the UI spinner.
- */
-async function executeWithProgress<T>(
-  executeFn: () => Promise<T>,
-  toolName: ActionName,
-  startTime: number,
-  progressBuffer: Array<OrchestratorStreamEvent & { type: 'progress' }>,
-): Promise<T> {
-  const message = PROGRESS_MESSAGES[toolName] ?? 'Processing\u2026';
-
-  let done = false;
-  const execPromise = executeFn().finally(() => { done = true; });
-
-  const progressTimer = setInterval(() => {
-    if (done) return;
-    progressBuffer.push({
-      type: 'progress',
-      seq: 0, // seq assigned by caller
-      tool_name: toolName,
-      elapsed_ms: Date.now() - startTime,
-      message,
-    });
-  }, PROGRESS_INTERVAL_MS);
-
-  try {
-    return await execPromise;
-  } finally {
-    clearInterval(progressTimer);
-  }
 }
