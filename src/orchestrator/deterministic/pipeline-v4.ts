@@ -19,7 +19,6 @@ import type { DeterministicTurnContext, ActionResult } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import type { OrchestratorStreamEvent } from "../pipeline/stream-events.js";
 import type { OrchestratorResponseEnvelopeV2 } from "../pipeline/types.js";
-import type { ChatWithToolsStreamEvent } from "../../adapters/llm/types.js";
 import { computeTurnContext } from "./turn-context.js";
 import { handleSystemEvent } from "./system-event-handler.js";
 import { handlePendingConfirmation } from "./confirmation-flow.js";
@@ -38,7 +37,7 @@ import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
-import { log, emit } from "../../utils/telemetry.js";
+import { log } from "../../utils/telemetry.js";
 import { STREAM_ERROR_CODES } from "../pipeline/stream-events.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 
@@ -188,7 +187,7 @@ export async function* executePipelineV4(
     const hasTools = toolDefs.length > 0;
     const stream = adapter.streamChatWithTools!(
       {
-        system: prompt.static_block, // fallback if adapter ignores cache blocks
+        system: '', // unused when system_cache_blocks present; adapter prefers cache blocks
         system_cache_blocks: [
           { type: 'text', text: prompt.static_block, cache_control: { type: 'ephemeral' } },
           { type: 'text', text: prompt.dynamic_block },
@@ -239,7 +238,9 @@ export async function* executePipelineV4(
     const executedAction = streamResult.toolExecution?.toolName as ActionName ?? null;
     const actionResult = streamResult.toolExecution?.result ?? null;
 
-    // Surface tool failure in the envelope when no text was produced
+    // Surface tool failure in the envelope when no text was produced.
+    // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
+    // so failed tool turns are excluded from conversation history.
     let assistantText = streamResult.assistantText || null;
     if (!assistantText && streamResult.failedToolCall) {
       assistantText = 'Something went wrong while processing your request. Please try again.';
@@ -328,7 +329,7 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
     actionResult,
     routing,
     executedAction,
-    contextFallbackUsed,
+    contextFallbackUsed: _contextFallbackUsed,
     llmLatencyMs,
   } = input;
 

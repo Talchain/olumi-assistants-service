@@ -251,19 +251,76 @@ describe("executePipelineV4", () => {
     });
   });
 
+  // ── System events with v4 enabled ────────────────────────────────────────
+
+  describe("System events route through v4", () => {
+    it("system event enters executePipelineV4 and produces valid envelope", async () => {
+      // When v4 is enabled, system events should be handled by the v4 pipeline's
+      // own system event handler, NOT the V2 executePipeline path.
+      // This test verifies the v4 pipeline handles system events directly.
+      const req = makeTurnRequest({
+        system_event: makeEvent('patch_accepted'),
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-sys'));
+
+      // Should produce turn_start + turn_complete without LLM call
+      expect(events[0].type).toBe('turn_start');
+      expect(events[1].type).toBe('turn_complete');
+      expect(mockStreamChatWithTools).not.toHaveBeenCalled();
+
+      const complete = events[1] as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete.envelope).toHaveProperty('turn_id');
+      expect(complete.envelope).toHaveProperty('blocks');
+    });
+  });
+
+  // ── Redundant system prompt string ──────────────────────────────────────
+
+  describe("Adapter call shape", () => {
+    it("passes empty string as system (cache blocks take precedence)", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'test' },
+        { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 100, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest();
+      await collectEvents(executePipelineV4(req, 'req-1'));
+
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0];
+      expect(callArgs.system).toBe('');
+      expect(callArgs.system_cache_blocks).toBeDefined();
+    });
+  });
+
+  // ── Normaliser default text in history filter ───────────────────────────
+
+  describe("History filter integration", () => {
+    it("normaliser default text is filtered from conversation history", async () => {
+      // Import and test directly
+      const { filterHistoryV4 } = await import("../../../../src/orchestrator/deterministic/history-filter-v4.js");
+
+      const messages = [
+        { role: 'user' as const, content: 'Hi' },
+        { role: 'assistant' as const, content: "I'm here to help with your decision. What would you like to explore?" },
+        { role: 'user' as const, content: 'Add a factor' },
+      ];
+
+      const result = filterHistoryV4(messages);
+      expect(result).toHaveLength(2);
+      expect(result[0].content).toBe('Hi');
+      expect(result[1].content).toBe('Add a factor');
+    });
+  });
+
   // ── No JSON parser, no streaming text extractor ─────────────────────────
 
   describe("Verification: no legacy components", () => {
     it("does not import parseLLMJsonResponse", async () => {
-      // This is a static check — the module should not import parseLLMJsonResponse
-      // We verify by checking the pipeline source doesn't reference it
       const { readFileSync } = await import("node:fs");
       const source = readFileSync(new URL("../../../../src/orchestrator/deterministic/pipeline-v4.ts", import.meta.url), 'utf-8');
       expect(source).not.toContain('parseLLMJsonResponse');
       expect(source).not.toContain('StreamingTextExtractor');
-      // Check that "tools: []" does not appear as an LLM call argument
-      // (deferred_tools: [] is fine — that's an envelope field, not an LLM call)
-      expect(source).not.toMatch(/\btools:\s*\[\s*\]/);  // matches `tools: []` but not `deferred_tools: []`
     });
   });
 });

@@ -101,6 +101,22 @@ export async function* executePipelineStream(
       request.context.graph = request.graph_state;
     }
 
+    // ── Pipeline v4: native tool-use (feature-flagged) ──────────────────────
+    // When enabled, ALL turns (system events, normal messages, chip clicks,
+    // generate_model) route to the v4 pipeline. No fall-through to V2 or
+    // deterministic pipeline. Must be checked before phase1Enrich and the
+    // system event handler — v4 computes its own TurnContext.
+    if (config.features.pipelineV4Enabled) {
+      const { executePipelineV4 } = await import("../deterministic/pipeline-v4.js");
+      const fastifyReq = (deps as { _fastifyRequest?: import("fastify").FastifyRequest })._fastifyRequest;
+
+      for await (const event of executePipelineV4(request, requestId, signal, fastifyReq)) {
+        yield { ...event, seq: seq++ };
+        if (signal?.aborted) return;
+      }
+      return;
+    }
+
     // Phase 1: Enrichment (deterministic, <50ms)
     enrichedContext = phase1Enrich(
       request.message,
@@ -120,22 +136,6 @@ export async function* executePipelineStream(
       const { executePipeline } = await import("./pipeline.js");
       const envelope = await executePipeline(request, requestId, deps);
       yield { type: 'turn_complete', seq: seq++, envelope };
-      return;
-    }
-
-    // ── Pipeline v4: native tool-use (feature-flagged) ──────────────────────
-    // When enabled, ALL turns (system events, normal messages, chip clicks,
-    // generate_model) route to the v4 pipeline. No fall-through to V2 or
-    // deterministic pipeline.
-    if (config.features.pipelineV4Enabled) {
-      const { executePipelineV4 } = await import("../deterministic/pipeline-v4.js");
-      // Extract FastifyRequest from deps.toolDispatcher (passed through by route-stream.ts)
-      const fastifyReq = (deps as { _fastifyRequest?: import("fastify").FastifyRequest })._fastifyRequest;
-
-      for await (const event of executePipelineV4(request, requestId, signal, fastifyReq)) {
-        yield { ...event, seq: seq++ };
-        if (signal?.aborted) return;
-      }
       return;
     }
 

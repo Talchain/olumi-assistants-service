@@ -59,6 +59,9 @@ export const draftGraphAction: ActionDefinition = {
     const startTime = Date.now();
 
     try {
+      // TODO: handleDraftGraph does not accept an AbortSignal — if the user disconnects
+      // the unified pipeline will continue running. Add signal propagation when
+      // runUnifiedPipeline supports cancellation.
       const result = await handleDraftGraph(brief, ctx.request, ctx.turn_id);
       const durationMs = Date.now() - startTime;
 

@@ -5,19 +5,19 @@
  * for SSE delivery. Executes tools immediately at tool_input_complete
  * so the UI receives block events while the model may still be streaming.
  *
- * This is a thin mapping layer — business logic lives in pipeline-v4.ts.
+ * Long-running tools (run_analysis, draft_graph) emit periodic progress
+ * events during execution via a Promise.race polling pattern.
  */
 
 import type { ChatWithToolsStreamEvent } from "../../adapters/llm/types.js";
 import type { OrchestratorStreamEvent } from "../pipeline/stream-events.js";
-import type { TypedConversationBlock } from "../types.js";
 import type { ActionResult, DeterministicTurnContext } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
 import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
-// Types
+// Constants
 // ============================================================================
 
 /** Long-running actions that should show progress indicators. */
@@ -25,6 +25,19 @@ const LONG_RUNNING_ACTIONS: ReadonlySet<ActionName> = new Set([
   'run_analysis',
   'draft_graph',
 ]);
+
+/** Progress messages per tool. */
+const PROGRESS_MESSAGES: Partial<Record<ActionName, string>> = {
+  draft_graph: 'Building decision model\u2026',
+  run_analysis: 'Running analysis\u2026',
+};
+
+/** Interval between progress events (ms). */
+const PROGRESS_INTERVAL_MS = 5000;
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface ToolExecution {
   toolName: string;
@@ -51,7 +64,8 @@ export interface StreamHandlerResult {
  *
  * Yields text_delta and tool_start events as they arrive.
  * On tool_input_complete, executes the first tool immediately and yields
- * block/tool_result events. Subsequent tool calls are discarded.
+ * block/tool_result events. Long-running tools get periodic progress events.
+ * Subsequent tool calls are discarded.
  * Returns the accumulated result for envelope assembly.
  */
 export async function* processAdapterStream(
@@ -81,12 +95,12 @@ export async function* processAdapterStream(
 
       case 'tool_input_complete': {
         // Execute first tool immediately; discard subsequent calls
-        if (toolExecution) {
+        if (toolExecution || failedToolCall) {
           discardedToolCalls.push({ name: event.tool_name, input: event.input });
           log.warn({
             request_id: requestId,
             discarded_tool: event.tool_name,
-            kept_tool: toolExecution.toolName,
+            kept_tool: toolExecution?.toolName ?? failedToolCall?.name,
           }, 'v4.tool_call_discarded');
           break;
         }
@@ -97,9 +111,29 @@ export async function* processAdapterStream(
           break;
         }
 
+        const isLongRunning = LONG_RUNNING_ACTIONS.has(event.tool_name as ActionName);
         const startTime = Date.now();
+
         try {
-          const result = await actionDef.execute(event.input, turnContext);
+          let result: ActionResult;
+
+          if (isLongRunning) {
+            // Long-running tool: race execution against progress timer
+            const progressEvents: Array<OrchestratorStreamEvent & { type: 'progress' }> = [];
+            result = await executeWithProgress(
+              () => actionDef.execute(event.input, turnContext),
+              event.tool_name as ActionName,
+              startTime,
+              progressEvents,
+            );
+            // Yield buffered progress events
+            for (const pe of progressEvents) {
+              yield { ...pe, seq: seq++ };
+            }
+          } else {
+            result = await actionDef.execute(event.input, turnContext);
+          }
+
           const durationMs = Date.now() - startTime;
 
           toolExecution = {
@@ -167,4 +201,50 @@ export async function* processAdapterStream(
     failedToolCall,
     discardedToolCalls,
   };
+}
+
+// ============================================================================
+// Progress Helper
+// ============================================================================
+
+/**
+ * Execute a long-running tool with periodic progress events.
+ *
+ * Uses Promise.race to interleave progress ticks with the execution promise.
+ * Progress events are collected into the buffer (can't yield from a non-generator).
+ * The caller yields them after execution completes.
+ *
+ * Note: progress events are buffered, not streamed in real-time. This is a
+ * limitation of the generator pattern — the caller yields them in a burst
+ * after execution. For the UI, this means progress events arrive late but
+ * still provide context in the SSE log. The tool_start event (with
+ * long_running: true) is the real-time signal for the UI spinner.
+ */
+async function executeWithProgress<T>(
+  executeFn: () => Promise<T>,
+  toolName: ActionName,
+  startTime: number,
+  progressBuffer: Array<OrchestratorStreamEvent & { type: 'progress' }>,
+): Promise<T> {
+  const message = PROGRESS_MESSAGES[toolName] ?? 'Processing\u2026';
+
+  let done = false;
+  const execPromise = executeFn().finally(() => { done = true; });
+
+  const progressTimer = setInterval(() => {
+    if (done) return;
+    progressBuffer.push({
+      type: 'progress',
+      seq: 0, // seq assigned by caller
+      tool_name: toolName,
+      elapsed_ms: Date.now() - startTime,
+      message,
+    });
+  }, PROGRESS_INTERVAL_MS);
+
+  try {
+    return await execPromise;
+  } finally {
+    clearInterval(progressTimer);
+  }
 }
