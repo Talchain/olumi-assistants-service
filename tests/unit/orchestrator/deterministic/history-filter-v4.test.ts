@@ -35,10 +35,26 @@ describe("filterHistoryV4", () => {
     expect((result[9].content as string)).toBe('Message 13');
   });
 
-  it("drops messages with tool_use content blocks", () => {
+  it("extracts text from tool_call turns, dropping tool_use blocks", () => {
     const messages: Msg[] = [
       { role: 'user', content: 'Run analysis' },
-      { role: 'assistant', content: [{ type: 'text', text: 'Running...' }, { type: 'tool_use', id: 'toolu_1', name: 'run_analysis', input: {} }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Running the analysis now.' }, { type: 'tool_use', id: 'toolu_1', name: 'run_analysis', input: {} }] },
+      { role: 'user', content: 'What happened?' },
+    ];
+
+    const result = filterHistoryV4(messages);
+    expect(result).toHaveLength(3);
+    expect(result[0].content).toBe('Run analysis');
+    expect(result[1].content).toBe('Running the analysis now.');
+    expect(result[1].role).toBe('assistant');
+    expect(typeof result[1].content).toBe('string');
+    expect(result[2].content).toBe('What happened?');
+  });
+
+  it("drops tool_call turns with no text blocks", () => {
+    const messages: Msg[] = [
+      { role: 'user', content: 'Run analysis' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'run_analysis', input: {} }] },
       { role: 'user', content: 'What happened?' },
     ];
 
@@ -128,15 +144,16 @@ describe("filterHistoryV4", () => {
       { role: 'user', content: '[system] patch applied' },
       { role: 'assistant', content: '' },
       { role: 'user', content: 'Set cost to 50' },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: {} }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Updated cost.' }, { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: {} }] },
       { role: 'assistant', content: 'Cost updated to 50.' },
       { role: 'user', content: 'Run analysis' },
     ];
 
     const result = filterHistoryV4(messages);
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(4);
     expect(result[0].content).toBe('Set cost to 50');
-    expect(result[1].content).toBe('Cost updated to 50.');
-    expect(result[2].content).toBe('Run analysis');
+    expect(result[1].content).toBe('Updated cost.');
+    expect(result[2].content).toBe('Cost updated to 50.');
+    expect(result[3].content).toBe('Run analysis');
   });
 });

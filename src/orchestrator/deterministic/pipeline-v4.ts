@@ -183,7 +183,8 @@ export async function* executePipelineV4(
 
     if (signal?.aborted) return;
 
-    // Stream the LLM call — omit tools/tool_choice when no tools available
+    // Stream the LLM call — empty tool list is valid (Anthropic accepts it; model won't call tools)
+    // tool_choice only meaningful when tools are present
     const hasTools = toolDefs.length > 0;
     const stream = adapter.streamChatWithTools!(
       {
@@ -193,7 +194,7 @@ export async function* executePipelineV4(
           { type: 'text', text: prompt.dynamic_block },
         ],
         messages,
-        tools: hasTools ? toolDefs : [],
+        tools: toolDefs,
         ...(hasTools ? { tool_choice: toolChoice } : {}),
         temperature: 0,
         maxTokens: 2048,
