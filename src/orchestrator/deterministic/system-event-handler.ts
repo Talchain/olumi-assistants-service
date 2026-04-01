@@ -59,9 +59,11 @@ export function handleSystemEvent(
     }, 'deterministic.system_event.unknown_type');
   }
 
-  // Known events with non-empty templates always produce acknowledgement text.
-  // feedback_submitted (empty template), unknown events → silent.
-  const assistantText = (isKnown && template) ? template : null;
+  // Events without a user message → always silent (the UI already shows the
+  // visual update; adding text here would duplicate it or pollute history).
+  // Events with a user message → brief acknowledgement from template.
+  // feedback_submitted (empty template), unknown events → always silent.
+  const assistantText = (hasUserMessage && isKnown && template) ? template : null;
   const isSilent = assistantText === null;
 
   log.info({

@@ -668,7 +668,10 @@ export async function* executeDeterministicPipelineStreaming(
   // ── System event guard (defense-in-depth) ────────────────────────────────
   const systemEventResult = handleSystemEvent(turnRequest, turnId, requestId);
   if (systemEventResult) {
-    yield { type: 'turn_start', seq: 0, turn_id: turnId, routing: 'deterministic', stage: 'frame' };
+    const sysStage = (typeof systemEventResult.envelope.stage_indicator === 'string'
+      ? systemEventResult.envelope.stage_indicator
+      : 'frame') as import("../types.js").DecisionStage;
+    yield { type: 'turn_start', seq: 0, turn_id: turnId, routing: 'deterministic', stage: sysStage };
     if (systemEventResult.envelope.assistant_text) {
       yield { type: 'text_delta', seq: 1, delta: systemEventResult.envelope.assistant_text };
     }

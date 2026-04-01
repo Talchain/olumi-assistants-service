@@ -21,7 +21,7 @@ const ERROR_PATTERNS = [
   "I encountered an issue",
 ];
 
-const RAW_ENTITY_ID_RE = /\b(?:fac|opt|goal|dec|out|risk)_\w+/;
+const RAW_ENTITY_ID_RE = /\b(?:fac|opt|goal|dec|out|risk|con)_\w+/;
 const LEAKED_JSON_RE = /\{"text"\s*:/;
 
 // ============================================================================
