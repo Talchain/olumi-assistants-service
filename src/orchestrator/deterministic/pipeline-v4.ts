@@ -32,6 +32,7 @@ import { normaliseDeterministicResponse, scanBannedTerms } from "./response-norm
 import { ACTION_CATALOGUE } from "./actions/registry.js";
 import { assembleMessages } from "../prompt-assembly.js";
 import { sanitiseAssistantHistory } from "./pipeline.js";
+import { filterHistoryV4 } from "./history-filter-v4.js";
 import { computeContextHash } from "../context/context-hash.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
@@ -40,18 +41,6 @@ import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { log, emit } from "../../utils/telemetry.js";
 import { STREAM_ERROR_CODES } from "../pipeline/stream-events.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/** Actions where extended thinking improves quality. */
-const THINKING_ELIGIBLE_ACTIONS: ReadonlySet<ActionName> = new Set([
-  'explain_result',
-  'compare_options',
-  'what_would_flip',
-  'run_premortem',
-]);
 
 // ============================================================================
 // Public API
@@ -173,21 +162,12 @@ export async function* executePipelineV4(
       ? { type: 'tool' as const, name: chipAction }
       : { type: 'auto' as const };
 
-    // Determine thinking — enable when forced to a thinking-eligible tool,
-    // or when auto tool_choice and any thinking-eligible action is available
-    const thinkingEnabled = chipAction
-      ? THINKING_ELIGIBLE_ACTIONS.has(chipAction)
-      : eligibleActions.some((a) => THINKING_ELIGIBLE_ACTIONS.has(a as ActionName));
-    const thinkingConfig = thinkingEnabled
-      ? { type: 'enabled' as const, budget_tokens: 4096 }
-      : { type: 'disabled' as const };
-
     // Build messages
     const conversationContext: ConversationContext = turnRequest.context ?? {
       messages: [],
       framing: { stage: 'frame' },
     };
-    const messages = sanitiseAssistantHistory(assembleMessages(conversationContext, effectiveMessage));
+    const messages = filterHistoryV4(sanitiseAssistantHistory(assembleMessages(conversationContext, effectiveMessage)));
 
     // Get adapter
     const adapter = getAdapter('anthropic');
@@ -199,7 +179,6 @@ export async function* executePipelineV4(
       has_cache_blocks: true,
       tool_count: toolDefs.length,
       tool_choice: toolChoice.type === 'tool' ? `forced:${toolChoice.name}` : toolChoice.type,
-      thinking_enabled: thinkingEnabled,
     }, 'v4.llm_call');
 
     if (signal?.aborted) return;
@@ -218,7 +197,6 @@ export async function* executePipelineV4(
         ...(hasTools ? { tool_choice: toolChoice } : {}),
         temperature: 0,
         maxTokens: 2048,
-        thinking: thinkingConfig,
       },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS, signal },
     );
