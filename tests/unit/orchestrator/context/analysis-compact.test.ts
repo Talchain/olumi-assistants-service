@@ -137,7 +137,8 @@ describe("compactAnalysis", () => {
       robustness_synthesis: { overall_assessment: "high" },
     } as Record<string, unknown>);
     const summary = compactAnalysis(response);
-    expect(summary!.robustness_level).toBe("high");
+    // "high" is mapped to canonical "stable" by mapRobustnessToCanonical
+    expect(summary!.robustness_level).toBe("stable");
   });
 
   it("falls back to robustness.overall_robustness on first option", () => {
@@ -149,6 +150,7 @@ describe("compactAnalysis", () => {
     ];
     const response = makeResponse({ results });
     const summary = compactAnalysis(response);
+    // "moderate" maps to canonical "moderate"
     expect(summary!.robustness_level).toBe("moderate");
   });
 
@@ -157,13 +159,15 @@ describe("compactAnalysis", () => {
       robustness: { level: "low" },
     });
     const summary = compactAnalysis(response);
-    expect(summary!.robustness_level).toBe("low");
+    // "low" is mapped to canonical "fragile" by mapRobustnessToCanonical
+    expect(summary!.robustness_level).toBe("fragile");
   });
 
-  it("returns 'unknown' robustness_level when nothing available", () => {
+  it("returns 'moderate' robustness_level when nothing available (canonical default)", () => {
     const response = makeResponse();
     const summary = compactAnalysis(response);
-    expect(summary!.robustness_level).toBe("unknown");
+    // deriveRobustnessLevel returns "unknown", mapRobustnessToCanonical maps unknown → "moderate"
+    expect(summary!.robustness_level).toBe("moderate");
   });
 
   it("counts fragile edges deduplicated by edge_id", () => {
