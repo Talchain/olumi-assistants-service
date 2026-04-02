@@ -369,6 +369,108 @@ describe("V3 field preservation contract", () => {
     });
   });
 
+  describe("v191+ is_baseline field propagation", () => {
+    it("copies data.is_baseline: true from option node to V3 options", () => {
+      const v1 = makeComprehensiveV1();
+      // Inject is_baseline on option nodes' data
+      const raiseNode = v1.graph.nodes.find((n: any) => n.id === "opt_raise") as any;
+      raiseNode.data.is_baseline = true;
+      const keepNode = v1.graph.nodes.find((n: any) => n.id === "opt_keep") as any;
+      keepNode.data.is_baseline = false;
+      const v3 = transformResponseToV3(v1, { requestId: "t-bl1" });
+      const options = (v3 as any).options;
+      const raiseOpt = options.find((o: any) => o.label === "Raise Price");
+      const keepOpt = options.find((o: any) => o.label === "Keep Price");
+      expect(raiseOpt.is_baseline).toBe(true);
+      expect(keepOpt.is_baseline).toBe(false);
+    });
+
+    it("copies is_baseline to V3 option graph nodes", () => {
+      const v1 = makeComprehensiveV1();
+      const raiseNode = v1.graph.nodes.find((n: any) => n.id === "opt_raise") as any;
+      raiseNode.data.is_baseline = true;
+      const keepNode = v1.graph.nodes.find((n: any) => n.id === "opt_keep") as any;
+      keepNode.data.is_baseline = false;
+      const v3 = transformResponseToV3(v1, { requestId: "t-bl2" });
+      const nodes = (v3 as any).nodes;
+      const raiseV3 = nodes.find((n: any) => n.label === "Raise Price");
+      const keepV3 = nodes.find((n: any) => n.label === "Keep Price");
+      expect(raiseV3.is_baseline).toBe(true);
+      expect(keepV3.is_baseline).toBe(false);
+    });
+
+    it("falls back to node-level is_baseline when data.is_baseline is undefined", () => {
+      const v1 = makeComprehensiveV1();
+      // Set node-level is_baseline but NOT data-level (simulates null coercion clearing data)
+      const raiseNode = v1.graph.nodes.find((n: any) => n.id === "opt_raise") as any;
+      (raiseNode as any).is_baseline = true;
+      // data.is_baseline stays undefined (not set)
+      const v3 = transformResponseToV3(v1, { requestId: "t-bl3" });
+      const options = (v3 as any).options;
+      const raiseOpt = options.find((o: any) => o.label === "Raise Price");
+      expect(raiseOpt.is_baseline).toBe(true);
+    });
+
+    it("preserves is_baseline: false (not undefined) on non-SQ options", () => {
+      const v1 = makeComprehensiveV1();
+      const raiseNode = v1.graph.nodes.find((n: any) => n.id === "opt_raise") as any;
+      raiseNode.data.is_baseline = true;
+      const keepNode = v1.graph.nodes.find((n: any) => n.id === "opt_keep") as any;
+      keepNode.data.is_baseline = false;
+      const v3 = transformResponseToV3(v1, { requestId: "t-bl4" });
+      const options = (v3 as any).options;
+      const keepOpt = options.find((o: any) => o.label === "Keep Price");
+      // Must be exactly false, not undefined
+      expect(keepOpt.is_baseline).toBe(false);
+    });
+  });
+
+  describe("v191+ intercept field preservation", () => {
+    it("forwards node-level intercept to V3 output", () => {
+      const v1 = makeComprehensiveV1();
+      // Inject intercept on an observable factor
+      const qualityNode = v1.graph.nodes.find((n: any) => n.id === "fac_quality") as any;
+      (qualityNode as any).intercept = 0.45;
+      const v3 = transformResponseToV3(v1, { requestId: "t-int1" });
+      const qualityV3 = (v3 as any).nodes.find((n: any) => n.id === "fac_quality");
+      expect(qualityV3.intercept).toBe(0.45);
+    });
+
+    it("preserves intercept: 0 (falsy but valid)", () => {
+      const v1 = makeComprehensiveV1();
+      const priceNode = v1.graph.nodes.find((n: any) => n.id === "fac_price") as any;
+      (priceNode as any).intercept = 0;
+      const v3 = transformResponseToV3(v1, { requestId: "t-int2" });
+      const priceV3 = (v3 as any).nodes.find((n: any) => n.id === "fac_price");
+      // intercept: 0 must survive (not be treated as falsy)
+      expect(priceV3.intercept).toBe(0);
+    });
+
+    it("does not set intercept when absent on source node", () => {
+      const v3 = transformResponseToV3(makeComprehensiveV1(), { requestId: "t-int3" });
+      const priceV3 = (v3 as any).nodes.find((n: any) => n.id === "fac_price");
+      // Base fixture has no intercept
+      expect(priceV3.intercept).toBeUndefined();
+    });
+
+    it("intercept survives when data is cleared (reclassification scenario)", () => {
+      const v1 = makeComprehensiveV1();
+      // Simulate post-reclassification state: observable→external, data deleted,
+      // but node-level intercept preserved by sweep
+      const qualityNode = v1.graph.nodes.find((n: any) => n.id === "fac_quality") as any;
+      qualityNode.category = "external";
+      delete qualityNode.data;
+      (qualityNode as any).intercept = 0.7;
+      (qualityNode as any).prior = { distribution: "uniform", range_min: 0.4, range_max: 1.0 };
+      const v3 = transformResponseToV3(v1, { requestId: "t-int4" });
+      const qualityV3 = (v3 as any).nodes.find((n: any) => n.id === "fac_quality");
+      expect(qualityV3.intercept).toBe(0.7);
+      expect(qualityV3.category).toBe("external");
+      // observed_state should NOT exist (data was deleted)
+      expect(qualityV3.observed_state).toBeUndefined();
+    });
+  });
+
   describe("edge structural fields", () => {
     it("preserves edge_type when present", () => {
       const v1 = makeComprehensiveV1();

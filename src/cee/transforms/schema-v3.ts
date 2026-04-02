@@ -260,6 +260,18 @@ export function transformNodeToV3(
     (v3Node as any).uncertainty_drivers = anyNode.uncertainty_drivers;
   }
 
+  // Preserve intercept as a top-level node field (v191+).
+  // intercept is the prior mean for root nodes in ISL inference. It's set by
+  // the LLM on node-level (not inside data), so it survives data deletion
+  // during reclassification. Must be explicitly forwarded since transformNodeToV3
+  // constructs a fresh object (passthrough only preserves fields already on it).
+  // graph-data-integrity.ts auto-populates from observed_state.value if absent,
+  // but only for root nodes — explicit forwarding ensures LLM-provided intercepts
+  // on non-root nodes also survive.
+  if (anyNode.intercept != null && typeof anyNode.intercept === 'number') {
+    (v3Node as any).intercept = anyNode.intercept;
+  }
+
   // Preserve encoding_map as a top-level node field (v191+).
   // encoding_map describes label encoding (e.g. "0=Developers, 1=Tech Lead"), not
   // observed state, so it lives at node level rather than inside observed_state.
@@ -754,8 +766,11 @@ export function transformResponseToV3(
       description: n.body,
       // V4 prompt outputs interventions directly on option nodes - use them if present
       v4Interventions: isOptionData(n.data) ? n.data.interventions : undefined,
-      // v191+: is_baseline marks the status-quo option
-      is_baseline: isOptionData(n.data) ? (n.data as any).is_baseline : undefined,
+      // v191+: is_baseline marks the status-quo option.
+      // Read from data-level first (canonical), fall back to node-level
+      // (Anthropic structured outputs emit at both locations; null coercion
+      // may clear data-level while node-level retains the value).
+      is_baseline: (isOptionData(n.data) ? (n.data as any).is_baseline : undefined) ?? (n as any).is_baseline,
     })),
     v3NodesTyped,
     v3EdgesTyped,

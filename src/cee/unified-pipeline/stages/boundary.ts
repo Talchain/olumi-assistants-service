@@ -16,6 +16,7 @@ import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import { config } from "../../../config/index.js";
 import { getRuntimeEnv } from "../../../config/env-resolver.js";
 import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
+import { computeDiagnosticChecks } from "../../observability/diagnostic-checks.js";
 
 export async function runStageBoundary(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "boundary" }, "Unified pipeline: Stage 6 (Boundary) started");
@@ -210,6 +211,15 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
         error: errMsg,
         degraded: true,
       });
+    }
+
+    // ── Diagnostic checks — debug bundle integrity verification ────────────
+    // Compute after all transforms and integrity checks so the checks reflect
+    // the actual final data state. Attached to trace.pipeline for debug bundles.
+    const diagnosticTrace = (v3Body as any)?.trace?.pipeline;
+    if (diagnosticTrace && typeof diagnosticTrace === 'object') {
+      (diagnosticTrace as Record<string, unknown>).diagnostic_checks =
+        computeDiagnosticChecks(v3Body as Record<string, unknown>, diagnosticTrace as Record<string, unknown>);
     }
 
     ctx.finalResponse = v3Body;
