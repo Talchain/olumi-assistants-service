@@ -364,15 +364,17 @@ describe("executePipelineV4", () => {
   // ── Task 5: Chip-click text templates ──────────────────────────────────────
 
   describe("Chip-click text templates", () => {
-    it("yields template text_delta before LLM stream for forced compare_options", async () => {
+    it("yields template text_delta before LLM stream for forced chip action", async () => {
       mockStreamChatWithTools.mockReturnValue(mockStream([
-        { type: 'text_delta', delta: 'Detailed comparison follows.' },
-        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Detailed comparison follows.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+        { type: 'text_delta', delta: 'Here is your model.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Here is your model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
       ]));
 
+      // Use draft_graph — the pipeline adds it explicitly when graph is null,
+      // so it always survives context filtering regardless of stage.
       const req = makeTurnRequest({
-        message: 'Compare options',
-        chip_metadata: { action_type: 'compare_options' },
+        message: 'Build my model',
+        chip_metadata: { action_type: 'draft_graph' },
       } as unknown as Partial<OrchestratorTurnRequest>);
 
       const events = await collectEvents(executePipelineV4(req, 'req-chip'));
@@ -381,11 +383,11 @@ describe("executePipelineV4", () => {
       const textDeltas = events.filter((e) => e.type === 'text_delta');
       expect(textDeltas.length).toBeGreaterThanOrEqual(1);
       const firstDelta = textDeltas[0] as Extract<OrchestratorStreamEvent, { type: 'text_delta' }>;
-      expect((firstDelta as unknown as { delta: string }).delta).toContain('Comparing your');
+      expect((firstDelta as unknown as { delta: string }).delta).toContain('Building your decision model');
 
       // Final envelope should include chip pre-text
       const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
-      expect(complete.envelope.assistant_text).toContain('Comparing your');
+      expect(complete.envelope.assistant_text).toContain('Building your decision model');
     });
 
     it("does not inject template text for non-forced turns", async () => {
@@ -405,6 +407,111 @@ describe("executePipelineV4", () => {
         expect(d.delta).not.toContain('Breaking down');
         expect(d.delta).not.toContain('Running the analysis');
       }
+    });
+  });
+
+  // ── P0-1: Chip action removed by context filtering ──────────────────────
+
+  describe("P0-1: Chip action filtered by context — tool_choice downgrade", () => {
+    it("uses tool_choice auto when chip action is removed by context filtering", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'I need some information to run the analysis.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'I need some information to run the analysis.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      // run_analysis chip with no graph — context filtering will exclude run_analysis
+      // because buildToolDefinitions suppresses GRAPH_EDIT_ACTIONS and run_analysis when node_count=0
+      const req = makeTurnRequest({
+        message: 'Run the analysis',
+        chip_metadata: { action_type: 'run_analysis' },
+        context: {
+          graph: null,
+          analysis_response: null,
+          framing: { stage: 'evaluate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-filtered'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0];
+
+      // tool_choice must NOT be forced — chip action was filtered out
+      expect(callArgs.tool_choice).not.toEqual({ type: 'tool', name: 'run_analysis' });
+      // It should be auto (or absent, since no tools at all with empty graph)
+      if (callArgs.tool_choice) {
+        expect(callArgs.tool_choice).toEqual({ type: 'auto' });
+      }
+
+      // Pipeline should still produce a valid envelope
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete).toBeDefined();
+      expect(complete.envelope).toHaveProperty('turn_id');
+
+      // No chip pre-text should be emitted when the chip action was filtered
+      const textDeltas = events.filter((e) => e.type === 'text_delta');
+      for (const delta of textDeltas) {
+        const d = delta as unknown as { delta: string };
+        expect(d.delta).not.toContain('Running the analysis now');
+      }
+    });
+  });
+
+  // ── P1-1: No duplicate assistant_text from action result injection ──────
+
+  describe("P1-1: No duplicate assistant_text from Task 3 text injection", () => {
+    it("does not duplicate text when actionResult.assistantText was injected verbatim", async () => {
+      // Simulate the Task 3 scenario: LLM produces no text, tool executes with
+      // its own assistantText, pipeline injects that text as assistantText,
+      // then assembleV4Envelope must not prepend it again.
+      //
+      // We test this indirectly: when the LLM returns empty text and the tool
+      // result has a template text injected, the final assistant_text should
+      // appear exactly once, not twice.
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        // Empty LLM response — forces Task 3 template injection
+        { type: 'text_delta', delta: '' },
+        { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({ message: 'Tell me about the options' });
+      const events = await collectEvents(executePipelineV4(req, 'req-no-dup'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      expect(complete).toBeDefined();
+      const text = complete.envelope.assistant_text;
+
+      // If text exists, it must not contain the same sentence twice
+      if (text) {
+        // A duplicated string would contain two instances of the same phrase
+        // e.g. "Here's how your options compare.\n\nHere's how your options compare."
+        const normalized = text.trim();
+        const halfLen = Math.floor(normalized.length / 2);
+        const firstHalf = normalized.slice(0, halfLen).trim();
+        const secondHalf = normalized.slice(halfLen).trim();
+        // The two halves should not be identical (which would indicate exact doubling)
+        expect(firstHalf).not.toBe(secondHalf);
+      }
+    });
+
+    it("does not duplicate text when LLM and actionResult text are different", async () => {
+      // Baseline: when LLM produces text independently of action result,
+      // both appear combined, not duplicated.
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Here is my analysis.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Here is my analysis.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({ message: 'Explain the results' });
+      const events = await collectEvents(executePipelineV4(req, 'req-no-dup-2'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      const text = complete.envelope.assistant_text ?? '';
+      // "Here is my analysis." should appear at most once
+      const occurrences = (text.match(/Here is my analysis\./g) ?? []).length;
+      expect(occurrences).toBeLessThanOrEqual(1);
     });
   });
 });

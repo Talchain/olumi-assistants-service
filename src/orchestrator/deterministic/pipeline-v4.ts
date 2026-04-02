@@ -53,6 +53,7 @@ const CHIP_TEXT_TEMPLATES: Record<string, (ctx: DeterministicTurnContext) => str
   explain_result: () => 'Breaking down what is driving the result.',
   run_analysis: () => 'Running the analysis now.',
   challenge_assumption: () => 'Examining that assumption more closely.',
+  draft_graph: () => 'Building your decision model.',
 };
 
 /** Fallback text templates for empty LLM responses after successful tool execution (Task 3). */
@@ -245,9 +246,12 @@ export async function* executePipelineV4(
     // ── Chip-click pre-text (Task 5) ─────────────────────────────────
     // Yield deterministic text immediately for forced tool calls so the
     // user sees something while the tool executes.
+    // Only emit when the chip action survived context filtering (chipActionInTools).
+    // Otherwise the pre-text would be misleading — e.g. "Running the analysis now."
+    // when run_analysis was filtered out and tool_choice downgraded to auto.
     let chipPreText: string | null = null;
-    if (chipAction && CHIP_TEXT_TEMPLATES[chipAction]) {
-      chipPreText = CHIP_TEXT_TEMPLATES[chipAction](turnContext);
+    if (chipActionInTools && CHIP_TEXT_TEMPLATES[chipAction!]) {
+      chipPreText = CHIP_TEXT_TEMPLATES[chipAction!](turnContext);
       yield { type: 'text_delta', seq: seq++, delta: chipPreText };
     }
 
