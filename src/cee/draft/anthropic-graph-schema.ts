@@ -27,7 +27,7 @@
  * handles them being absent (all are optional or safely defaulted).
  *
  * Current union count: 9 / 16.
- * Current optional count: 12 / 24.
+ * Current optional count: 7 / 24.
  */
 
 // Helpers for nullable types (required field that can be null)

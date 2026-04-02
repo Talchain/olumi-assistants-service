@@ -291,10 +291,13 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — prompt contract", () => {
     const required = schema.required as string[];
     expect(required).toContain("nodes");
     expect(required).toContain("edges");
-    expect(required).toContain("causal_claims");
-    expect(required).toContain("topology_plan");
-    expect(required).toContain("coaching");
-    expect(required).not.toContain("goal_constraints");
+    expect(required).toContain("goal_constraints");
+    // These fields are omitted from the strict schema to stay under the
+    // Anthropic grammar size limit. The LLM still produces them via prompt
+    // instructions; the pipeline handles their absence with safe defaults.
+    expect(required).not.toContain("topology_plan");
+    expect(required).not.toContain("coaching");
+    expect(required).not.toContain("causal_claims");
     expect(required).not.toContain("rationales");
   });
 

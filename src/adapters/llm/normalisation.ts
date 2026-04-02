@@ -190,15 +190,17 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       if (node.prior === null) node.prior = undefined;
 
       // ── Node-kind-aware stripping ────────────────────────────────
-      // goal_threshold* only meaningful on goal nodes
+      // goal_threshold* / goal_threshold_cap only meaningful on goal nodes
       if (kind !== 'goal') {
         node.goal_threshold = undefined;
         node.goal_threshold_raw = undefined;
         node.goal_threshold_unit = undefined;
+        node.goal_threshold_cap = undefined;
       } else {
         if (node.goal_threshold === null) node.goal_threshold = undefined;
         if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
         if (node.goal_threshold_unit === null || node.goal_threshold_unit === '') node.goal_threshold_unit = undefined;
+        if (node.goal_threshold_cap === null) node.goal_threshold_cap = undefined;
       }
 
       // is_baseline only meaningful on option nodes
@@ -274,6 +276,11 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       if (c.operator === null || c.operator === '') c.operator = undefined;
       if (c.value === null) c.value = undefined;
       if (c.label === null || c.label === '') c.label = undefined;
+      // Optional string fields: sentinel coercion
+      if (c.unit === null || c.unit === '') c.unit = undefined;
+      if (c.source_quote === null || c.source_quote === '') c.source_quote = undefined;
+      if (c.provenance === null || c.provenance === '') c.provenance = undefined;
+      if (c.confidence === null) c.confidence = undefined;
       return typeof c.node_id === 'string'; // drop items without valid node_id
     });
   }
@@ -301,6 +308,9 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       // Coerce required-nullable edge fields (null → undefined)
       if (e.exists_probability === null) e.exists_probability = undefined;
       if (e.effect_direction === null) e.effect_direction = undefined;
+      // Optional string fields: sentinel coercion
+      if (e.edge_type === null || e.edge_type === '') e.edge_type = undefined;
+      if (e.provenance_source === null || e.provenance_source === '') e.provenance_source = undefined;
 
       // ========================================================================
       // V4 FORMAT HANDLING: strength.mean/std and exists_probability
