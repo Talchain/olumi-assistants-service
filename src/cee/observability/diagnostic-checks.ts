@@ -23,11 +23,13 @@ export interface DiagnosticChecks {
 
   /**
    * Whether causal edges have differentiated exists_probability values.
-   * True when ≥2 distinct non-1.0 values exist on causal edges.
+   * True when ≥2 distinct values exist on causal (non-structural) edges.
+   * Structural edges (decision→option, option→factor/outcome/risk) are excluded
+   * by topology — they are definitional, not probabilistic.
    */
   confidence_differentiated: boolean;
 
-  /** Sorted unique exists_probability values from causal edges (excludes structural 1.0). */
+  /** Sorted unique exists_probability values from causal edges (structural edges excluded by topology). */
   confidence_unique_values: number[];
 
   /**
@@ -47,8 +49,17 @@ export interface DiagnosticChecks {
 // Constants
 // ============================================================================
 
-/** Edge types considered structural (exists_probability is always 1.0 by design). */
-const STRUCTURAL_EDGE_TYPES = new Set(['structural', 'decision_option', 'option_factor']);
+/**
+ * Node kinds whose outbound edges to option/factor/outcome/risk are structural
+ * (decision→option, option→factor/outcome/risk). Used for topological exclusion
+ * in the confidence differentiation check.
+ *
+ * V3 edges do NOT carry a structural marker — edge_type is only present on
+ * bidirected (confounding) edges. Structural classification must be derived
+ * from node kinds on both endpoints.
+ */
+const STRUCTURAL_FROM_KINDS = new Set(['decision', 'option']);
+const STRUCTURAL_TO_KINDS = new Set(['option', 'factor', 'outcome', 'risk']);
 
 // ============================================================================
 // Public API
@@ -98,18 +109,30 @@ function checkCeeTracePresent(pipelineTrace: Record<string, unknown>): boolean {
  * Check edge confidence differentiation from `edges[]`.
  *
  * Returns true when ≥2 distinct exists_probability values exist among
- * causal (non-structural) edges. Structural edges are excluded by
- * edge_type, not by value — a causal edge at 1.0 is valid evidence
- * of a high-confidence relationship and must be counted.
+ * causal (non-structural) edges. Structural edges are identified by
+ * topology (from/to node kinds), not by edge_type — V3 edges only carry
+ * edge_type for bidirected (confounding) edges; decision→option and
+ * option→factor/outcome/risk edges never have an edge_type marker.
  */
 function checkConfidenceDifferentiation(
   v3Body: Record<string, unknown>,
 ): { confidence_differentiated: boolean; confidence_unique_values: number[] } {
   const graph = v3Body.graph as Record<string, unknown> | undefined;
+  const nodes = (graph?.nodes ?? v3Body.nodes) as Array<Record<string, unknown>> | undefined;
   const edges = (graph?.edges ?? v3Body.edges) as Array<Record<string, unknown>> | undefined;
 
   if (!Array.isArray(edges) || edges.length === 0) {
     return { confidence_differentiated: false, confidence_unique_values: [] };
+  }
+
+  // Build node kind lookup — O(n) once, used for all edges below
+  const kindById = new Map<string, string>();
+  if (Array.isArray(nodes)) {
+    for (const node of nodes) {
+      if (node?.id && node?.kind) {
+        kindById.set(node.id as string, node.kind as string);
+      }
+    }
   }
 
   const uniqueValues = new Set<number>();
@@ -117,9 +140,16 @@ function checkConfidenceDifferentiation(
   for (const edge of edges) {
     if (!edge) continue;
 
-    // Skip structural edges — their exists_probability is always 1.0 by design
-    const edgeType = edge.edge_type as string | undefined;
-    if (edgeType && STRUCTURAL_EDGE_TYPES.has(edgeType)) continue;
+    // Exclude structural edges by topology:
+    // decision→option, option→factor/outcome/risk are definitional links,
+    // not probabilistic causal estimates.
+    const fromKind = kindById.get(edge.from as string);
+    const toKind = kindById.get(edge.to as string);
+    if (
+      fromKind && toKind &&
+      STRUCTURAL_FROM_KINDS.has(fromKind) &&
+      STRUCTURAL_TO_KINDS.has(toKind)
+    ) continue;
 
     const prob = edge.exists_probability;
     if (typeof prob === 'number') {

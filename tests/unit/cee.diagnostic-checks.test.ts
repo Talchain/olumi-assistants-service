@@ -26,8 +26,10 @@ function makePopulatedV3Body(): Record<string, unknown> {
       { id: "goal_1", kind: "goal", label: "Maximize Revenue" },
     ],
     edges: [
-      { from: "dec_1", to: "opt_a", edge_type: "structural", exists_probability: 1.0, effect_direction: "positive" },
-      { from: "dec_1", to: "opt_b", edge_type: "structural", exists_probability: 1.0, effect_direction: "positive" },
+      // Structural edges — no edge_type in V3 output, classified by topology
+      { from: "dec_1", to: "opt_a", exists_probability: 1.0, effect_direction: "positive" },
+      { from: "dec_1", to: "opt_b", exists_probability: 1.0, effect_direction: "positive" },
+      // Causal edges
       { from: "fac_price", to: "goal_1", exists_probability: 0.92, effect_direction: "positive" },
       { from: "fac_churn", to: "goal_1", exists_probability: 0.78, effect_direction: "negative" },
       { from: "fac_ext", to: "goal_1", exists_probability: 0.65, effect_direction: "positive" },
@@ -122,11 +124,18 @@ describe("computeDiagnosticChecks", () => {
   });
 
   describe("confidence_differentiated", () => {
-    it("returns false when only structural edges exist (all 1.0)", () => {
+    it("excludes decision→option structural edges by topology (no edge_type)", () => {
+      // V3 structural edges never carry edge_type — must be excluded by topology.
+      // Only two decision→option edges at 1.0 — all structural, no causal values.
       const v3 = {
+        nodes: [
+          { id: "dec_1", kind: "decision" },
+          { id: "opt_a", kind: "option" },
+          { id: "opt_b", kind: "option" },
+        ],
         edges: [
-          { from: "a", to: "b", edge_type: "structural", exists_probability: 1.0 },
-          { from: "a", to: "c", edge_type: "structural", exists_probability: 1.0 },
+          { from: "dec_1", to: "opt_a", exists_probability: 1.0 },
+          { from: "dec_1", to: "opt_b", exists_probability: 1.0 },
         ],
       };
       const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
@@ -134,11 +143,56 @@ describe("computeDiagnosticChecks", () => {
       expect(checks.confidence_unique_values).toEqual([]);
     });
 
+    it("excludes option→factor structural edges by topology (no edge_type)", () => {
+      const v3 = {
+        nodes: [
+          { id: "opt_a", kind: "option" },
+          { id: "fac_1", kind: "factor" },
+          { id: "fac_2", kind: "factor" },
+        ],
+        edges: [
+          { from: "opt_a", to: "fac_1", exists_probability: 1.0 },
+          { from: "opt_a", to: "fac_2", exists_probability: 1.0 },
+        ],
+      };
+      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
+      expect(checks.confidence_differentiated).toBe(false);
+      expect(checks.confidence_unique_values).toEqual([]);
+    });
+
+    it("counts causal edges and excludes structural, both without edge_type", () => {
+      // Real V3 output: neither structural nor causal edges carry edge_type.
+      // Structural excluded by topology; causal counted normally.
+      const v3 = {
+        nodes: [
+          { id: "dec_1", kind: "decision" },
+          { id: "opt_a", kind: "option" },
+          { id: "fac_1", kind: "factor" },
+          { id: "fac_2", kind: "factor" },
+          { id: "goal_1", kind: "goal" },
+        ],
+        edges: [
+          { from: "dec_1", to: "opt_a", exists_probability: 1.0 }, // structural
+          { from: "opt_a", to: "fac_1", exists_probability: 1.0 }, // structural
+          { from: "fac_1", to: "goal_1", exists_probability: 0.85 }, // causal
+          { from: "fac_2", to: "goal_1", exists_probability: 0.65 }, // causal
+        ],
+      };
+      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
+      expect(checks.confidence_differentiated).toBe(true);
+      expect(checks.confidence_unique_values).toEqual([0.65, 0.85]);
+    });
+
     it("returns false when all causal edges have the same probability", () => {
       const v3 = {
+        nodes: [
+          { id: "fac_1", kind: "factor" },
+          { id: "fac_2", kind: "factor" },
+          { id: "goal_1", kind: "goal" },
+        ],
         edges: [
-          { from: "a", to: "b", exists_probability: 0.8 },
-          { from: "c", to: "d", exists_probability: 0.8 },
+          { from: "fac_1", to: "goal_1", exists_probability: 0.8 },
+          { from: "fac_2", to: "goal_1", exists_probability: 0.8 },
         ],
       };
       const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
@@ -146,25 +200,16 @@ describe("computeDiagnosticChecks", () => {
       expect(checks.confidence_unique_values).toEqual([0.8]);
     });
 
-    it("returns true with 2+ distinct values on causal edges", () => {
+    it("includes causal edges at 1.0 (high-confidence causal edges are valid)", () => {
       const v3 = {
-        edges: [
-          { from: "a", to: "b", exists_probability: 0.85 },
-          { from: "c", to: "d", exists_probability: 0.65 },
-          { from: "e", to: "f", exists_probability: 1.0 }, // causal 1.0 is valid — included
+        nodes: [
+          { id: "fac_1", kind: "factor" },
+          { id: "fac_2", kind: "factor" },
+          { id: "goal_1", kind: "goal" },
         ],
-      };
-      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
-      expect(checks.confidence_differentiated).toBe(true);
-      expect(checks.confidence_unique_values).toEqual([0.65, 0.85, 1.0]);
-    });
-
-    it("includes causal edges at 1.0 in unique values (not excluded by value)", () => {
-      const v3 = {
         edges: [
-          { from: "a", to: "b", exists_probability: 1.0 }, // causal 1.0 — valid high-confidence
-          { from: "c", to: "d", exists_probability: 0.7 },
-          { from: "e", to: "f", edge_type: "structural", exists_probability: 1.0 }, // structural — excluded
+          { from: "fac_1", to: "goal_1", exists_probability: 1.0 }, // causal 1.0 — included
+          { from: "fac_2", to: "goal_1", exists_probability: 0.7 },
         ],
       };
       const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
@@ -172,17 +217,23 @@ describe("computeDiagnosticChecks", () => {
       expect(checks.confidence_unique_values).toEqual([0.7, 1.0]);
     });
 
-    it("handles graph.edges path (nested under graph)", () => {
+    it("handles graph.edges and graph.nodes paths (nested under graph)", () => {
       const v3 = {
         graph: {
+          nodes: [
+            { id: "fac_1", kind: "factor" },
+            { id: "fac_2", kind: "factor" },
+            { id: "goal_1", kind: "goal" },
+          ],
           edges: [
-            { from: "a", to: "b", exists_probability: 0.7 },
-            { from: "c", to: "d", exists_probability: 0.9 },
+            { from: "fac_1", to: "goal_1", exists_probability: 0.7 },
+            { from: "fac_2", to: "goal_1", exists_probability: 0.9 },
           ],
         },
       };
       const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
       expect(checks.confidence_differentiated).toBe(true);
+      expect(checks.confidence_unique_values).toEqual([0.7, 0.9]);
     });
   });
 
