@@ -383,8 +383,122 @@ describe("normaliseDraftResponse — null coercion", () => {
     });
   });
 
+  describe("v191+ node-level nullable fields (is_baseline, intercept)", () => {
+    it("coerces null is_baseline to undefined at node top-level", () => {
+      const raw = {
+        nodes: [{ id: "opt_1", kind: "option", label: "O", is_baseline: null }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].is_baseline).toBeUndefined();
+    });
+
+    it("preserves boolean is_baseline at node top-level", () => {
+      const raw = {
+        nodes: [
+          { id: "opt_sq", kind: "option", label: "Status quo", is_baseline: true },
+          { id: "opt_alt", kind: "option", label: "Alternative", is_baseline: false },
+        ],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].is_baseline).toBe(true);
+      expect(result.nodes[1].is_baseline).toBe(false);
+    });
+
+    it("coerces null intercept to undefined at node top-level", () => {
+      const raw = {
+        nodes: [{ id: "fac_1", kind: "factor", label: "F", intercept: null }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].intercept).toBeUndefined();
+    });
+
+    it("preserves numeric intercept at node top-level", () => {
+      const raw = {
+        nodes: [{ id: "fac_1", kind: "factor", label: "F", intercept: 40000 }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].intercept).toBe(40000);
+    });
+  });
+
+  describe("v191+ data-level nullable fields (is_baseline, display_value)", () => {
+    it("coerces null data.is_baseline to undefined", () => {
+      const raw = {
+        nodes: [{
+          id: "opt_1",
+          kind: "option",
+          label: "O",
+          data: { interventions: [], is_baseline: null },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.is_baseline).toBeUndefined();
+    });
+
+    it("preserves boolean data.is_baseline", () => {
+      const raw = {
+        nodes: [{
+          id: "opt_sq",
+          kind: "option",
+          label: "Status quo",
+          data: { interventions: [], is_baseline: true },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.is_baseline).toBe(true);
+    });
+
+    it("coerces null data.display_value to undefined", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1",
+          kind: "factor",
+          label: "F",
+          data: { value: 40000, display_value: null },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.display_value).toBeUndefined();
+    });
+
+    it("preserves string data.display_value", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1",
+          kind: "factor",
+          label: "Salary",
+          data: { value: 40000, display_value: "£40,000" },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.display_value).toBe("£40,000");
+    });
+
+    it("coerces null data.encoding_map to undefined", () => {
+      const raw = {
+        nodes: [{
+          id: "fac_1",
+          kind: "factor",
+          label: "F",
+          data: { value: 1, encoding_map: null },
+        }],
+        edges: [],
+      };
+      const result = normaliseDraftResponse(raw) as any;
+      expect(result.nodes[0].data.encoding_map).toBeUndefined();
+    });
+  });
+
   describe("coaching nullable fields", () => {
-    it("coerces null label and detail to undefined on strengthen_items", () => {
+    it("coerces null label and detail to undefined on strengthen_items (regression)", () => {
       const raw = {
         nodes: [],
         edges: [],

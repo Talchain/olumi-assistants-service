@@ -592,6 +592,27 @@ export async function draftGraphWithAnthropic(
 
   log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, model, idempotency_key: idempotencyKey, prompt_id: promptMeta.taskId, prompt_hash: promptMeta.prompt_hash, prompt_source: promptMeta.source }, "calling Anthropic for draft");
 
+  // CEE_PROMPT_DEBUG_ENABLED: log prompt hash, source metadata, and system prompt preview
+  if (config.cee.promptDebugEnabled) {
+    const systemText = prompt.system.map((b: any) => (typeof b === 'string' ? b : b.text ?? '')).join('');
+    log.info({
+      event: "cee.prompt_debug",
+      task: "draft_graph",
+      prompt_hash: promptMeta.prompt_hash,
+      prompt_source: promptMeta.source,
+      prompt_id: promptMeta.promptId,
+      prompt_version: promptMeta.version,
+      is_staging: promptMeta.isStaging,
+      use_staging_mode: promptMeta.use_staging_mode,
+      cache_status: promptMeta.cache_status,
+      cache_age_ms: promptMeta.cache_age_ms,
+      instance_id: promptMeta.instance_id,
+      structured_outputs_enabled: structuredOutputsEnabled,
+      system_prompt_preview: systemText.slice(0, 200),
+      system_prompt_chars: systemText.length,
+    }, "[CEE_PROMPT_DEBUG] draft_graph prompt delivery");
+  }
+
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
@@ -807,6 +828,52 @@ export async function draftGraphWithAnthropic(
     }
 
     const parsed = parseResult.data;
+
+    // CEE_FIELD_SURVIVAL_TRACE: field-presence snapshot at the LLM output boundary,
+    // before any pipeline stage can strip or transform fields.
+    if (config.cee.fieldSurvivalTrace) {
+      const nodes = (parsed as any).nodes ?? [];
+      const optionNodes = nodes.filter((n: any) => n?.kind === 'option');
+      const factorNodes = nodes.filter((n: any) => n?.kind === 'factor');
+      log.info({
+        event: "cee.llm_output.field_presence",
+        task: "draft_graph",
+        structured_outputs_used: useStructuredOutputs,
+        node_count: nodes.length,
+        option_count: optionNodes.length,
+        factor_count: factorNodes.length,
+        fields: {
+          // is_baseline: check both data.is_baseline (canonical read path) and node-level
+          is_baseline_in_data: optionNodes.map((n: any) => {
+            const v = n?.data?.is_baseline;
+            return v === null ? 'null' : v === undefined ? 'missing' : v;
+          }),
+          is_baseline_node_level: optionNodes.map((n: any) => {
+            const v = n?.is_baseline;
+            return v === null ? 'null' : v === undefined ? 'missing' : v;
+          }),
+          // display_value: check data.display_value
+          display_value_on_factors: factorNodes.map((n: any) => {
+            const v = n?.data?.display_value;
+            return v === null ? 'null' : v === undefined ? 'missing' : typeof v;
+          }),
+          // intercept: check node-level intercept
+          intercept_on_nodes: nodes.map((n: any) => {
+            const v = n?.intercept;
+            return v === null ? 'null' : v === undefined ? 'missing' : typeof v;
+          }),
+          // encoding_map: check data.encoding_map
+          encoding_map_on_factors: factorNodes.map((n: any) => {
+            const v = n?.data?.encoding_map;
+            return v === null ? 'null' : v === undefined ? 'missing' : typeof v;
+          }),
+          // goal_constraints
+          goal_constraints_count: Array.isArray((parsed as any).goal_constraints)
+            ? (parsed as any).goal_constraints.length
+            : 'missing',
+        },
+      }, "[CEE_FIELD_SURVIVAL_TRACE] LLM output field presence at adapter boundary");
+    }
 
     // Validate and cap node/edge counts
     if (parsed.nodes.length > GRAPH_MAX_NODES) {

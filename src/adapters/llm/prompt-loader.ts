@@ -55,7 +55,7 @@ import { registerAllDefaultPrompts, DECISION_REVIEW_PROMPT_VERSION } from '../..
 import { isPromptManagementEnabled } from '../../prompts/loader.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash, randomBytes } from 'node:crypto';
-import { shouldUseStagingPrompts } from '../../config/index.js';
+import { shouldUseStagingPrompts, config } from '../../config/index.js';
 import { PROMPT_STORE_FETCH_TIMEOUT_MS } from '../../config/timeouts.js';
 
 // Unique identifier for this server instance (helps diagnose multi-instance issues)
@@ -296,6 +296,18 @@ export async function getSystemPrompt(
       );
       isTransientFailure = true;
     }
+  }
+
+  // CEE_PROMPT_STORE_REQUIRED: error instead of falling back to defaults
+  // Useful on staging to immediately surface store connectivity issues rather than
+  // silently serving the wrong (default) prompt and producing confusing results.
+  if (config.cee.promptStoreRequired && isPromptManagementEnabled()) {
+    const reason = isTransientFailure ? 'transient_store_failure' : missReason;
+    log.error(
+      { taskId, reason, isTransientFailure },
+      '[CEE_PROMPT_STORE_REQUIRED] Store prompt unavailable — refusing fallback to defaults'
+    );
+    throw new Error(`[CEE_PROMPT_STORE_REQUIRED] Store prompt unavailable for task "${taskId}" (reason: ${reason}). Set CEE_PROMPT_STORE_REQUIRED=false to allow defaults fallback.`);
   }
 
   // Log at warn level for visibility in production - this should be rare after cache warming

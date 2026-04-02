@@ -333,6 +333,42 @@ describe("V3 field preservation contract", () => {
     });
   });
 
+  describe("v191+ display_value field preservation", () => {
+    it("copies data.display_value to top-level node field in V3 output", () => {
+      const v1 = makeComprehensiveV1();
+      // Inject display_value on a controllable factor's data
+      const priceNode = v1.graph.nodes.find((n: any) => n.id === "fac_price") as any;
+      priceNode.data.display_value = "£49";
+      const v3 = transformResponseToV3(v1, { requestId: "t-dv1" });
+      const priceV3 = (v3 as any).nodes.find((n: any) => n.id === "fac_price");
+      expect(priceV3.display_value).toBe("£49");
+    });
+
+    it("does not set display_value on option nodes (option data has no display_value)", () => {
+      const v3 = transformResponseToV3(makeComprehensiveV1(), { requestId: "t-dv2" });
+      const optNode = (v3 as any).nodes.find((n: any) => n.id === "opt_raise");
+      expect(optNode.display_value).toBeUndefined();
+    });
+
+    it("does not set display_value when data.display_value is absent", () => {
+      const v3 = transformResponseToV3(makeComprehensiveV1(), { requestId: "t-dv3" });
+      const priceNode = (v3 as any).nodes.find((n: any) => n.id === "fac_price");
+      // Base fixture has no display_value
+      expect(priceNode.display_value).toBeUndefined();
+    });
+  });
+
+  describe("v191+ encoding_map field preservation", () => {
+    it("copies data.encoding_map to top-level node field in V3 output", () => {
+      const v1 = makeComprehensiveV1();
+      const priceNode = v1.graph.nodes.find((n: any) => n.id === "fac_price") as any;
+      priceNode.data.encoding_map = { "0": "Low", "1": "High" };
+      const v3 = transformResponseToV3(v1, { requestId: "t-em1" });
+      const priceV3 = (v3 as any).nodes.find((n: any) => n.id === "fac_price");
+      expect(priceV3.encoding_map).toEqual({ "0": "Low", "1": "High" });
+    });
+  });
+
   describe("edge structural fields", () => {
     it("preserves edge_type when present", () => {
       const v1 = makeComprehensiveV1();

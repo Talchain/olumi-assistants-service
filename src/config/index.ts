@@ -480,6 +480,12 @@ const ConfigSchema = z.object({
     debugLoggingEnabled: booleanString.default(false), // If true, emit V3-CAT diagnostic logs
     // Pipeline checkpoint settings
     pipelineCheckpointsEnabled: booleanString.default(false), // If true, capture edge field presence snapshots at 5 pipeline stages
+    // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
+    promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
+    // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
+    promptStoreRequired: booleanString.default(false), // If true, error instead of falling back to defaults when store prompt fails
+    // Field survival trace (CEE_FIELD_SURVIVAL_TRACE)
+    fieldSurvivalTrace: booleanString.default(false), // If true, log field-presence checkpoints after LLM output parse
     // Unified pipeline is always-on (legacy Pipeline A+B removed; CEE_UNIFIED_PIPELINE_ENABLED retired)
     // Boundary security (Stream F)
     boundaryAllowInvalid: createEnvEnforcedBoolean(false, "CEE_BOUNDARY_ALLOW_INVALID", false), // Dev-only (local/test): if true, allow invalid V3 graphs through boundary (locked in staging/prod)
@@ -855,6 +861,9 @@ function parseConfig(): Config {
       debugCategoryTrace: env.CEE_DEBUG_CATEGORY_TRACE,
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
+      promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
+      promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
+      fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,
       // CEE_UNIFIED_PIPELINE_ENABLED removed — unified pipeline is always-on
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
       draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,

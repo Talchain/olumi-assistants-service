@@ -186,6 +186,9 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       if (node.goal_threshold === null) node.goal_threshold = undefined;
       if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
       if (node.goal_threshold_unit === null) node.goal_threshold_unit = undefined;
+      // v191+: required-nullable node-level fields
+      if (node.is_baseline === null) node.is_baseline = undefined;
+      if (node.intercept === null) node.intercept = undefined;
       // Nullable fields inside data object
       if (node.data && typeof node.data === 'object') {
         const d = node.data;
@@ -197,6 +200,10 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         if (d.raw_value === null) d.raw_value = undefined;
         if (d.unit === null) d.unit = undefined;
         if (d.cap === null) d.cap = undefined;
+        // v191+: required-nullable data fields
+        if (d.encoding_map === null) d.encoding_map = undefined;
+        if (d.is_baseline === null) d.is_baseline = undefined;
+        if (d.display_value === null) d.display_value = undefined;
 
         // Numeric coercion: LLMs may emit data.value / data.raw_value / data.cap
         // as strings (e.g. "0.6", "180000"). Coerce to number so the downstream

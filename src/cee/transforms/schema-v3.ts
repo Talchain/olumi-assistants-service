@@ -273,6 +273,15 @@ export function transformNodeToV3(
     (v3Node as any).encoding_map = resolvedEncodingMap;
   }
 
+  // Preserve display_value as a top-level node field (v191+).
+  // Human-readable value string (e.g. "£40,000", "18 months") for UI rendering.
+  // Source: node.data.display_value (all factor kinds that still carry a data object).
+  // Only defined when the LLM produced a non-null value.
+  const dataDisplayValue = isFactorData(node.data) ? (node.data as any).display_value : undefined;
+  if (dataDisplayValue !== undefined) {
+    (v3Node as any).display_value = dataDisplayValue;
+  }
+
   return v3Node;
 }
 
