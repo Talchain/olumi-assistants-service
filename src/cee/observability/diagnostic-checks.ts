@@ -95,10 +95,12 @@ function checkCeeTracePresent(pipelineTrace: Record<string, unknown>): boolean {
 }
 
 /**
- * Check edge confidence differentiation from `graph.edges[]`.
+ * Check edge confidence differentiation from `edges[]`.
  *
  * Returns true when ≥2 distinct exists_probability values exist among
- * causal (non-structural) edges, excluding exactly 1.0.
+ * causal (non-structural) edges. Structural edges are excluded by
+ * edge_type, not by value — a causal edge at 1.0 is valid evidence
+ * of a high-confidence relationship and must be counted.
  */
 function checkConfidenceDifferentiation(
   v3Body: Record<string, unknown>,
@@ -120,7 +122,7 @@ function checkConfidenceDifferentiation(
     if (edgeType && STRUCTURAL_EDGE_TYPES.has(edgeType)) continue;
 
     const prob = edge.exists_probability;
-    if (typeof prob === 'number' && prob !== 1.0) {
+    if (typeof prob === 'number') {
       // Round to 3 decimal places to avoid float noise
       uniqueValues.add(Math.round(prob * 1000) / 1000);
     }

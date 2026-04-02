@@ -453,6 +453,20 @@ describe("V3 field preservation contract", () => {
       expect(priceV3.intercept).toBeUndefined();
     });
 
+    it("does not forward intercept onto decision or option nodes", () => {
+      const v1 = makeComprehensiveV1();
+      // Inject intercept on a decision and an option node (should be ignored)
+      const decNode = v1.graph.nodes.find((n: any) => n.id === "dec_1") as any;
+      (decNode as any).intercept = 0.5;
+      const optNode = v1.graph.nodes.find((n: any) => n.id === "opt_raise") as any;
+      (optNode as any).intercept = 0.3;
+      const v3 = transformResponseToV3(v1, { requestId: "t-int5" });
+      const decV3 = (v3 as any).nodes.find((n: any) => n.id === "dec_1");
+      const optV3 = (v3 as any).nodes.find((n: any) => n.label === "Raise Price");
+      expect(decV3.intercept).toBeUndefined();
+      expect(optV3.intercept).toBeUndefined();
+    });
+
     it("intercept survives when data is cleared (reclassification scenario)", () => {
       const v1 = makeComprehensiveV1();
       // Simulate post-reclassification state: observable→external, data deleted,

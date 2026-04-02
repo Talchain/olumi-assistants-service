@@ -146,17 +146,30 @@ describe("computeDiagnosticChecks", () => {
       expect(checks.confidence_unique_values).toEqual([0.8]);
     });
 
-    it("returns true with 2+ distinct non-1.0 values", () => {
+    it("returns true with 2+ distinct values on causal edges", () => {
       const v3 = {
         edges: [
           { from: "a", to: "b", exists_probability: 0.85 },
           { from: "c", to: "d", exists_probability: 0.65 },
-          { from: "e", to: "f", exists_probability: 1.0 }, // causal 1.0 excluded
+          { from: "e", to: "f", exists_probability: 1.0 }, // causal 1.0 is valid — included
         ],
       };
       const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
       expect(checks.confidence_differentiated).toBe(true);
-      expect(checks.confidence_unique_values).toEqual([0.65, 0.85]);
+      expect(checks.confidence_unique_values).toEqual([0.65, 0.85, 1.0]);
+    });
+
+    it("includes causal edges at 1.0 in unique values (not excluded by value)", () => {
+      const v3 = {
+        edges: [
+          { from: "a", to: "b", exists_probability: 1.0 }, // causal 1.0 — valid high-confidence
+          { from: "c", to: "d", exists_probability: 0.7 },
+          { from: "e", to: "f", edge_type: "structural", exists_probability: 1.0 }, // structural — excluded
+        ],
+      };
+      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
+      expect(checks.confidence_differentiated).toBe(true);
+      expect(checks.confidence_unique_values).toEqual([0.7, 1.0]);
     });
 
     it("handles graph.edges path (nested under graph)", () => {

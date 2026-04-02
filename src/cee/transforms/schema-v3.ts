@@ -268,8 +268,12 @@ export function transformNodeToV3(
   // graph-data-integrity.ts auto-populates from observed_state.value if absent,
   // but only for root nodes — explicit forwarding ensures LLM-provided intercepts
   // on non-root nodes also survive.
-  if (anyNode.intercept != null && typeof anyNode.intercept === 'number') {
+  // Kind-constrained to match INTERCEPT_ELIGIBLE_KINDS in graph-data-integrity.ts.
+  const interceptEligible = v3Node.kind === 'factor' || v3Node.kind === 'outcome'
+    || v3Node.kind === 'risk' || v3Node.kind === 'goal';
+  if (interceptEligible && anyNode.intercept != null && typeof anyNode.intercept === 'number') {
     (v3Node as any).intercept = anyNode.intercept;
+    log.debug({ event: 'cee.v3_transform.intercept_forwarded', node_id: id, value: anyNode.intercept }, 'cee.v3_transform.intercept_forwarded');
   }
 
   // Preserve encoding_map as a top-level node field (v191+).
@@ -760,18 +764,22 @@ export function transformResponseToV3(
   const v3EdgesTyped = v3Graph.edges as EdgeV3T[];
 
   const extractedOptions = extractOptionsFromNodes(
-    optionNodes.map((n) => ({
-      id: v3NodeIdByV1Id.get(n.id) ?? n.id,
-      label: n.label ?? n.id,
-      description: n.body,
-      // V4 prompt outputs interventions directly on option nodes - use them if present
-      v4Interventions: isOptionData(n.data) ? n.data.interventions : undefined,
-      // v191+: is_baseline marks the status-quo option.
-      // Read from data-level first (canonical), fall back to node-level
-      // (Anthropic structured outputs emit at both locations; null coercion
-      // may clear data-level while node-level retains the value).
-      is_baseline: (isOptionData(n.data) ? (n.data as any).is_baseline : undefined) ?? (n as any).is_baseline,
-    })),
+    optionNodes.map((n) => {
+      const dataBaseline = isOptionData(n.data) ? (n.data as any).is_baseline : undefined;
+      const nodeBaseline = (n as any).is_baseline;
+      const resolved = dataBaseline ?? nodeBaseline;
+      // Log when node-level fallback is used (data-level was undefined but node-level had a value)
+      if (dataBaseline === undefined && nodeBaseline !== undefined) {
+        log.debug({ event: 'cee.v3_transform.is_baseline_fallback', node_id: n.id, value: nodeBaseline }, 'cee.v3_transform.is_baseline_fallback');
+      }
+      return {
+        id: v3NodeIdByV1Id.get(n.id) ?? n.id,
+        label: n.label ?? n.id,
+        description: n.body,
+        v4Interventions: isOptionData(n.data) ? n.data.interventions : undefined,
+        is_baseline: resolved,
+      };
+    }),
     v3NodesTyped,
     v3EdgesTyped,
     goalNodeId,
