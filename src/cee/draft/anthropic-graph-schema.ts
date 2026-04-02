@@ -18,8 +18,16 @@
  * use anyOf. All inner fields use plain types; the normaliser coerces
  * sentinels (0, "", [], false) → undefined by node kind post-parse.
  *
- * Current union count: 9 / 16.  (category, data, prior, intercept, goal_threshold ×3, exists_probability, effect_direction)
- * Current optional count: 16 / 24.
+ * GRAMMAR BUDGET (v5 — 2026-04-02):
+ * Anthropic's grammar compiler has a total complexity limit. To stay
+ * under it, only the canonical graph (nodes, edges, goal_constraints)
+ * is schema-enforced. Non-structural fields (coaching, causal_claims,
+ * rationales, topology_plan) are omitted from the strict schema — the
+ * LLM still produces them via prompt instructions, and the pipeline
+ * handles them being absent (all are optional or safely defaulted).
+ *
+ * Current union count: 9 / 16.
+ * Current optional count: 12 / 24.
  */
 
 // Helpers for nullable types (required field that can be null)
@@ -39,10 +47,7 @@ const nullableObject = (props: Record<string, unknown>, req: string[]) => ({
 export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
   type: "object" as const,
   properties: {
-    topology_plan: {
-      type: "array",
-      items: { type: "string" },
-    },
+    // topology_plan omitted — planning scaffolding, not consumed downstream.
     nodes: {
       type: "array",
       items: {
@@ -157,34 +162,8 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
         additionalProperties: false,
       },
     },
-    rationales: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          target: { type: "string" },
-          why: { type: "string" },
-        },
-        required: ["target", "why"],
-        additionalProperties: false,
-      },
-    },
-    causal_claims: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          type: { type: "string" },
-          from: { type: "string" },
-          to: { type: "string" },
-          via: { type: "string" },
-          between: { type: "array", items: { type: "string" } },
-          stated_strength: { type: "string" },
-        },
-        required: ["type"],
-        additionalProperties: false,
-      },
-    },
+    // rationales, causal_claims omitted — non-structural, pipeline-optional.
+    // LLM still produces them via prompt; normaliser + Zod handle downstream.
     goal_constraints: {
       type: "array",
       items: {
@@ -206,39 +185,10 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
         additionalProperties: false,
       },
     },
-    coaching: {
-      type: "object",
-      properties: {
-        summary: { type: "string" },
-        strengthen_items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              // Plain types; normaliser coerces "" → undefined
-              label: { type: "string" },
-              detail: { type: "string" },
-              // Optional: sometimes produced
-              action_type: {
-                type: "string",
-                enum: ["add_option", "add_constraint", "add_risk", "reframe_goal"],
-              },
-              bias_category: {
-                type: "string",
-                enum: ["anchoring", "framing", "confidence", "blindspots"],
-              },
-            },
-            required: ["id", "label", "detail"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["summary", "strengthen_items"],
-      additionalProperties: false,
-    },
+    // coaching omitted — meta-commentary, not core graph. Pipeline defaults
+    // to { summary: "", strengthen_items: [] } when absent.
   },
-  required: ["nodes", "edges", "causal_claims", "topology_plan", "coaching"],
+  required: ["nodes", "edges", "goal_constraints"],
   additionalProperties: false,
 };
 
