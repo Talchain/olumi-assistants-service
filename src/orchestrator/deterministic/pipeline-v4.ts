@@ -431,27 +431,32 @@ export async function* executePipelineV4(
       }
     }
 
-    // Prepend chip pre-text to assistantText so it enters the envelope
+    // Prepend chip pre-text to assistantText so it enters the envelope.
+    // Skip if LLM text already contains the pre-text (e.g. LLM echoed the template).
     if (chipPreText) {
-      assistantText = assistantText
-        ? `${chipPreText}\n\n${assistantText}`
-        : chipPreText;
+      if (!assistantText || !assistantText.includes(chipPreText)) {
+        assistantText = assistantText
+          ? `${chipPreText}\n\n${assistantText}`
+          : chipPreText;
+      }
     }
 
     if (failedToolCall) {
       const errorText = 'Something went wrong while processing your request. Please try again.';
-      // Always set error text — chip pre-text was already prepended above, so
-      // assistantText now leads with the pre-text. If it's still absent (no pre-text,
-      // no other text), set it outright.
       if (!assistantText || !assistantText.trim()) {
+        // No text at all — set outright.
         assistantText = errorText;
-      }
-      // When chip pre-text was streamed as a delta, the stream is already underway.
-      // Emit the error as a follow-up delta so the streaming client sees the failure
-      // rather than only the optimistic pre-text. History-filter-v4 will drop this
-      // turn via ERROR_PATTERNS regardless of the combined text.
-      if (chipPreText) {
-        yield { type: 'text_delta', seq: seq++, delta: `\n\n${errorText}` };
+      } else {
+        // Text is present (from LLM or chip pre-text) — always append the error sentinel
+        // so history-filter-v4 can match ERROR_PATTERNS and drop this turn from history.
+        // Without this, a failed turn with non-empty LLM text would appear to be a
+        // success message in the next LLM call's conversation context.
+        assistantText = `${assistantText}\n\n${errorText}`;
+        if (chipPreText) {
+          // Chip pre-text was already streamed as a delta — emit the error as a
+          // follow-up delta so the streaming client also sees the failure.
+          yield { type: 'text_delta', seq: seq++, delta: `\n\n${errorText}` };
+        }
       }
     }
 
@@ -544,13 +549,13 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
 
   // Combine assistant text: action confirmation + LLM text.
   // Guard: when the pipeline injected actionResult.assistantText as rawAssistantText
-  // (Task 3 empty-LLM-text injection), skip the prefix to avoid duplication.
+  // (Task 3 empty-LLM-text injection) or prepended chip pre-text, skip the prefix
+  // to avoid duplication.
   let assistantText = rawAssistantText;
   if (actionResult?.assistantText && rawAssistantText) {
-    if (rawAssistantText === actionResult.assistantText) {
-      // Already injected verbatim — don't prepend again
-      assistantText = rawAssistantText;
-    } else {
+    const alreadyContains = rawAssistantText === actionResult.assistantText
+      || rawAssistantText.includes(actionResult.assistantText);
+    if (!alreadyContains) {
       assistantText = `${actionResult.assistantText}\n\n${rawAssistantText}`;
     }
   } else if (actionResult?.assistantText) {
