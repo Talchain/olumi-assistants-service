@@ -282,8 +282,7 @@ const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - Output valid JSON only (no comments, no text outside the JSON object)
 - Every outcome and risk needs an inbound path from a controllable factor
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal
-- 2–6 options maximum
-- topology_plan is required — plan before you build`;
+- 2–6 options maximum`;
 
 // Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
 const MAX_DOC_CONTEXT_CHARS = 60_000;
