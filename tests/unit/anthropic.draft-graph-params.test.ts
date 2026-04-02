@@ -46,11 +46,14 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA", () => {
     expect(kindEnum).toContain("action");
   });
 
-  it("coaching, topology_plan, and causal_claims are required; goal_constraints is optional", () => {
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("coaching");
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("topology_plan");
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("causal_claims");
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("goal_constraints");
+  it("goal_constraints is required; coaching, topology_plan, causal_claims omitted from strict schema", () => {
+    // goal_constraints is schema-enforced (LLM produces [] when none)
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("goal_constraints");
+    // Non-structural fields omitted to stay under Anthropic grammar size limit.
+    // Pipeline handles absence with safe defaults.
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("coaching");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("topology_plan");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("causal_claims");
   });
 
   it("top-level type is object with closed envelope (additionalProperties: false)", () => {
@@ -66,8 +69,9 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA", () => {
     expect(parsed.required).toContain("edges");
   });
 
-  it("causal_claims items require type field", () => {
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties.causal_claims.items.required).toContain("type");
+  it("goal_constraints items require node_id and operator", () => {
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties.goal_constraints.items.required).toContain("node_id");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties.goal_constraints.items.required).toContain("operator");
   });
 });
 

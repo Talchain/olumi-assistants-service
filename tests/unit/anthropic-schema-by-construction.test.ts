@@ -19,7 +19,7 @@
 
 import { describe, it, expect } from "vitest";
 import { enforceAnthropicSchemaCompliance } from "../../src/adapters/llm/anthropic-schema-compliance.js";
-import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
+import { ANTHROPIC_DRAFT_GRAPH_SCHEMA, countUnionParams } from "../../src/cee/draft/anthropic-graph-schema.js";
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../src/orchestrator/tools/anthropic-edit-graph-schema.js";
 import { NodeKind, FactorCategory } from "../../src/schemas/graph.js";
 
@@ -271,6 +271,13 @@ function assertFullCompliance(schema: SchemaNode, label: string) {
       const optionals = countOptionalParams(schema);
       console.log(`  ${label} optional params: ${optionals}/24`);
       expect(optionals).toBeLessThanOrEqual(24);
+    });
+
+    // 9. Union parameter count (hard Anthropic limit: 16)
+    it("union parameter count ≤ 16 (Anthropic hard limit)", () => {
+      const unions = countUnionParams(schema);
+      console.log(`  ${label} union params: ${unions}/16`);
+      expect(unions).toBeLessThanOrEqual(16);
     });
   });
 }

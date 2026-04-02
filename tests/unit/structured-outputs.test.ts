@@ -339,6 +339,18 @@ describe("isStructuredOutputsRejection", () => {
     const err = { status: 400, message: "Invalid max_tokens value" };
     expect(isStructuredOutputsRejection(err)).toBe(false);
   });
+
+  // --- Grammar/compilation capacity errors → should return true (allow fallback) ---
+
+  it("returns true for 'compiled grammar is too large' error", () => {
+    const err = { status: 400, message: "The compiled grammar is too large for this model" };
+    expect(isStructuredOutputsRejection(err)).toBe(true);
+  });
+
+  it("returns true for 'too many parameters with union types' error", () => {
+    const err = { status: 400, message: "Schemas contains too many parameters with union types (30 > 16 limit)" };
+    expect(isStructuredOutputsRejection(err)).toBe(true);
+  });
 });
 
 // =============================================================================
