@@ -490,6 +490,13 @@ function isStructuredOutputsRejection(err: unknown): boolean {
   if (apiErr.status !== 400) return false;
   const msg = (apiErr.message ?? '').toLowerCase();
 
+  // Grammar/compilation capacity limits are safe to fall back from —
+  // the schema is valid but too complex for the structured output compiler.
+  if (msg.includes('compiled grammar is too large') ||
+      msg.includes('too many parameters with union types')) {
+    return true;
+  }
+
   // Schema validation errors should NOT trigger fallback — fail loudly.
   const isSchemaError =
     (msg.includes('invalid') && msg.includes('schema')) ||
