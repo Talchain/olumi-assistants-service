@@ -5,8 +5,12 @@ set -euo pipefail
 # Called by .git/hooks/pre-push — receives remote name + URL as $1/$2,
 # and ref info on stdin per the git pre-push protocol.
 
-FAILURES=0
+# Git hooks run with a minimal PATH that may exclude node/pnpm.
+# Ensure /usr/local/bin (node) and repo-local binaries are reachable.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+export PATH="/usr/local/bin:${REPO_ROOT}/node_modules/.bin:$PATH"
+
+FAILURES=0
 cd "$REPO_ROOT"
 
 # Capture stdin before any function can consume it
@@ -58,7 +62,7 @@ check_branch_guard() {
 check_typecheck() {
   local output
   # Use build config (source only, excludes test files with pre-existing type errors)
-  if output=$(pnpm exec tsc -p tsconfig.build.json --noEmit 2>&1); then
+  if output=$(tsc -p tsconfig.build.json --noEmit 2>&1); then
     print_check "typecheck" "OK"
   else
     print_check "typecheck" "FAIL"
@@ -79,7 +83,7 @@ check_lint_changed() {
     return 0
   fi
   local output
-  if output=$(echo "$files" | xargs pnpm exec eslint --no-error-on-unmatched-pattern 2>&1); then
+  if output=$(echo "$files" | xargs eslint --no-error-on-unmatched-pattern 2>&1); then
     print_check "lint-changed" "OK"
   else
     print_check "lint-changed" "FAIL"
@@ -93,7 +97,7 @@ check_lint_changed() {
 # ---------------------------------------------------------------------------
 check_smoke_tests() {
   local output
-  if output=$(pnpm exec vitest run "${SMOKE_TESTS[@]}" 2>&1); then
+  if output=$(vitest run "${SMOKE_TESTS[@]}" 2>&1); then
     print_check "smoke-tests" "OK"
   else
     print_check "smoke-tests" "FAIL"
