@@ -42,6 +42,38 @@ import { STREAM_ERROR_CODES } from "../pipeline/stream-events.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 
 // ============================================================================
+// Chip-Click Text Templates (Task 5)
+// ============================================================================
+
+/** Pre-generated text for forced tool calls (chip clicks). */
+const CHIP_TEXT_TEMPLATES: Record<string, (ctx: DeterministicTurnContext) => string> = {
+  compare_options: (ctx) => `Comparing your ${ctx.graph_summary.option_count} options.`,
+  what_would_flip: () => 'Looking at what would need to change to flip the recommendation.',
+  run_premortem: () => 'Running a pre-mortem analysis.',
+  explain_result: () => 'Breaking down what is driving the result.',
+  run_analysis: () => 'Running the analysis now.',
+  challenge_assumption: () => 'Examining that assumption more closely.',
+};
+
+/** Fallback text templates for empty LLM responses after successful tool execution (Task 3). */
+const TOOL_RESULT_TEXT_TEMPLATES: Record<string, string> = {
+  compare_options: "Here's how your options compare.",
+  what_would_flip: "Here's what would need to change to flip the winner.",
+  run_premortem: 'Running a pre-mortem on your leading option.',
+  explain_result: "Here's what's driving the result.",
+  run_analysis: 'Running the analysis now.',
+  draft_graph: 'Building your decision model.',
+  set_factor_value: 'Updated the factor value.',
+  add_factor: 'Added the factor to your model.',
+  add_option: 'Added the option to your model.',
+  add_constraint: 'Added the constraint.',
+  adjust_edge_strength: 'Adjusted the edge strength.',
+  remove_factor: 'Removed the factor from your model.',
+  set_goal_target: 'Updated the goal target.',
+  challenge_assumption: 'Examining that assumption.',
+};
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -153,13 +185,41 @@ export async function* executePipelineV4(
         eligibleActions.push('draft_graph');
       }
     }
-    const toolDefs = buildToolDefinitions(eligibleActions as ActionName[]);
+    const toolDefs = buildToolDefinitions(eligibleActions as ActionName[], turnContext);
+
+    // Log filtering impact when tools were removed
+    const filteredCount = eligibleActions.length - toolDefs.length;
+    if (filteredCount > 0) {
+      const toolNames = new Set(toolDefs.map(t => t.name));
+      const removed = eligibleActions.filter(a => !toolNames.has(a) && a !== 'generate_artefact');
+      log.info({
+        request_id: requestId,
+        eligible_count: eligibleActions.length,
+        tool_count: toolDefs.length,
+        removed_tools: removed,
+        has_analysis: !!turnContext.analysis_summary,
+        has_graph: !!turnContext.graph && turnContext.graph_summary.node_count > 0,
+        disambiguation_hints: turnContext.disambiguation_hints.length,
+      }, 'v4.tool_filtering');
+    }
 
     // Determine tool_choice
     const chipAction = turnRequest.chip_metadata?.action_type as ActionName | undefined;
-    const toolChoice = chipAction && ACTION_CATALOGUE.has(chipAction)
-      ? { type: 'tool' as const, name: chipAction }
+    // Guard: only force tool_choice when the chip action survived context filtering
+    // and is present in toolDefs. If context filtering removed it (e.g. run_analysis
+    // suppressed because no graph, or target_id tool suppressed due to ambiguity),
+    // forcing the name would produce an invalid API call → downgrade to auto.
+    const chipActionInTools = chipAction && toolDefs.some(t => t.name === chipAction);
+    const toolChoice = chipActionInTools
+      ? { type: 'tool' as const, name: chipAction! }
       : { type: 'auto' as const };
+    if (chipAction && !chipActionInTools) {
+      log.warn({
+        request_id: requestId,
+        chip_action: chipAction,
+        tool_count: toolDefs.length,
+      }, 'v4.chip_action_filtered_downgrade: chip action was removed by context filtering, downgrading tool_choice to auto');
+    }
 
     // Build messages
     const conversationContext: ConversationContext = turnRequest.context ?? {
@@ -181,6 +241,15 @@ export async function* executePipelineV4(
     }, 'v4.llm_call');
 
     if (signal?.aborted) return;
+
+    // ── Chip-click pre-text (Task 5) ─────────────────────────────────
+    // Yield deterministic text immediately for forced tool calls so the
+    // user sees something while the tool executes.
+    let chipPreText: string | null = null;
+    if (chipAction && CHIP_TEXT_TEMPLATES[chipAction]) {
+      chipPreText = CHIP_TEXT_TEMPLATES[chipAction](turnContext);
+      yield { type: 'text_delta', seq: seq++, delta: chipPreText };
+    }
 
     // Stream the LLM call — empty tool list is valid (Anthropic accepts it; model won't call tools)
     // tool_choice only meaningful when tools are present
@@ -342,8 +411,44 @@ export async function* executePipelineV4(
     // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
     // so failed tool turns are excluded from conversation history.
     let assistantText = streamResult.assistantText || null;
-    if (!assistantText && failedToolCall) {
-      assistantText = 'Something went wrong while processing your request. Please try again.';
+
+    // ── Text injection for empty LLM responses (Task 3) ──────────────
+    // When a tool executed successfully but the LLM produced no text,
+    // inject text from the action result or a template so no turn
+    // reaches the UI with a tool execution but no assistant text.
+    if ((!assistantText || !assistantText.trim()) && toolExecution && !failedToolCall) {
+      if (toolExecution.result.assistantText) {
+        assistantText = toolExecution.result.assistantText;
+      } else {
+        const templateText = TOOL_RESULT_TEXT_TEMPLATES[toolExecution.toolName];
+        if (templateText) {
+          assistantText = templateText;
+        }
+      }
+    }
+
+    // Prepend chip pre-text to assistantText so it enters the envelope
+    if (chipPreText) {
+      assistantText = assistantText
+        ? `${chipPreText}\n\n${assistantText}`
+        : chipPreText;
+    }
+
+    if (failedToolCall) {
+      const errorText = 'Something went wrong while processing your request. Please try again.';
+      // Always set error text — chip pre-text was already prepended above, so
+      // assistantText now leads with the pre-text. If it's still absent (no pre-text,
+      // no other text), set it outright.
+      if (!assistantText || !assistantText.trim()) {
+        assistantText = errorText;
+      }
+      // When chip pre-text was streamed as a delta, the stream is already underway.
+      // Emit the error as a follow-up delta so the streaming client sees the failure
+      // rather than only the optimistic pre-text. History-filter-v4 will drop this
+      // turn via ERROR_PATTERNS regardless of the combined text.
+      if (chipPreText) {
+        yield { type: 'text_delta', seq: seq++, delta: `\n\n${errorText}` };
+      }
     }
 
     const envelope = assembleV4Envelope({
@@ -433,10 +538,17 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
     llmLatencyMs,
   } = input;
 
-  // Combine assistant text: action confirmation + LLM text
+  // Combine assistant text: action confirmation + LLM text.
+  // Guard: when the pipeline injected actionResult.assistantText as rawAssistantText
+  // (Task 3 empty-LLM-text injection), skip the prefix to avoid duplication.
   let assistantText = rawAssistantText;
   if (actionResult?.assistantText && rawAssistantText) {
-    assistantText = `${actionResult.assistantText}\n\n${rawAssistantText}`;
+    if (rawAssistantText === actionResult.assistantText) {
+      // Already injected verbatim — don't prepend again
+      assistantText = rawAssistantText;
+    } else {
+      assistantText = `${actionResult.assistantText}\n\n${rawAssistantText}`;
+    }
   } else if (actionResult?.assistantText) {
     assistantText = actionResult.assistantText;
   }

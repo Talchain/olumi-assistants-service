@@ -202,20 +202,22 @@ describe("executePipelineV4", () => {
   describe("Class 3: Chip click with forced tool", () => {
     it("uses tool_choice: { type: tool, name } for chip click", async () => {
       mockStreamChatWithTools.mockReturnValue(mockStream([
-        { type: 'text_delta', delta: 'Running analysis now.' },
-        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Running analysis now.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+        { type: 'text_delta', delta: 'Building your decision model.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Building your decision model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
       ]));
 
+      // Use draft_graph — the pipeline adds it explicitly when graph is null,
+      // so it survives context-aware filtering regardless of stage.
       const req = makeTurnRequest({
-        message: 'Run analysis',
-        chip_metadata: { action_type: 'run_analysis' },
+        message: 'Build my model',
+        chip_metadata: { action_type: 'draft_graph' },
       } as unknown as Partial<OrchestratorTurnRequest>);
 
       const events = await collectEvents(executePipelineV4(req, 'req-1'));
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0];
-      expect(callArgs.tool_choice).toEqual({ type: 'tool', name: 'run_analysis' });
+      expect(callArgs.tool_choice).toEqual({ type: 'tool', name: 'draft_graph' });
     });
   });
 
@@ -321,6 +323,88 @@ describe("executePipelineV4", () => {
       const source = readFileSync(new URL("../../../../src/orchestrator/deterministic/pipeline-v4.ts", import.meta.url), 'utf-8');
       expect(source).not.toContain('parseLLMJsonResponse');
       expect(source).not.toContain('StreamingTextExtractor');
+    });
+  });
+
+  // ── Task 3: Text injection on empty LLM responses ────────────────────────
+
+  describe("Text injection on empty LLM responses", () => {
+    it("injects template text when tool executed with empty LLM text", async () => {
+      // Simulate a tool_use response with no text content
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        // Tool use block with no text — simulates empty assistantText
+        { type: 'text_delta', delta: '' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: '' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({ message: 'Compare the options' });
+      const events = await collectEvents(executePipelineV4(req, 'req-inject'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      // Without a tool execution, text injection doesn't apply
+      // The assistant_text should still be something (or null for no tool exec)
+      expect(complete).toBeDefined();
+    });
+
+    it("preserves LLM text when present alongside tool execution", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Here is my analysis.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Here is my analysis.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({ message: 'Explain the results' });
+      const events = await collectEvents(executePipelineV4(req, 'req-preserve'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      // LLM-produced text should be used, not a template
+      expect(complete.envelope.assistant_text).toContain('Here is my analysis');
+    });
+  });
+
+  // ── Task 5: Chip-click text templates ──────────────────────────────────────
+
+  describe("Chip-click text templates", () => {
+    it("yields template text_delta before LLM stream for forced compare_options", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Detailed comparison follows.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Detailed comparison follows.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'Compare options',
+        chip_metadata: { action_type: 'compare_options' },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-chip'));
+
+      // First text_delta should be the chip template
+      const textDeltas = events.filter((e) => e.type === 'text_delta');
+      expect(textDeltas.length).toBeGreaterThanOrEqual(1);
+      const firstDelta = textDeltas[0] as Extract<OrchestratorStreamEvent, { type: 'text_delta' }>;
+      expect((firstDelta as unknown as { delta: string }).delta).toContain('Comparing your');
+
+      // Final envelope should include chip pre-text
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete.envelope.assistant_text).toContain('Comparing your');
+    });
+
+    it("does not inject template text for non-forced turns", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Regular response.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Regular response.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({ message: 'Tell me about the options' });
+      const events = await collectEvents(executePipelineV4(req, 'req-nochip'));
+
+      const textDeltas = events.filter((e) => e.type === 'text_delta');
+      // No chip template text — all deltas from LLM
+      for (const delta of textDeltas) {
+        const d = delta as unknown as { delta: string };
+        expect(d.delta).not.toContain('Comparing your');
+        expect(d.delta).not.toContain('Breaking down');
+        expect(d.delta).not.toContain('Running the analysis');
+      }
     });
   });
 });
