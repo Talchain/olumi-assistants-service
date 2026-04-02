@@ -172,38 +172,65 @@ export function normaliseDraftResponse(raw: unknown): unknown {
   }
 
   // ========================================================================
-  // NULL COERCION: Anthropic required-nullable fields produce null for
-  // fields the LLM can't fill. Coerce null → undefined so downstream
-  // code treats them as absent (deterministic sweep fills defaults).
+  // SENTINEL & NULL COERCION (v4 — 2026-04-02):
+  // The Anthropic schema uses plain (non-nullable) types for most fields
+  // to stay under the 16 union-param limit. The LLM emits sentinels
+  // (0, "", [], false) for inapplicable fields. We strip them here by
+  // node kind so downstream code sees undefined for absent fields.
+  // Null coercion is retained as a safety net for non-Anthropic providers.
   // ========================================================================
   if (Array.isArray(obj.nodes)) {
     obj.nodes = (obj.nodes as any[]).map((node: any) => {
       if (!node || typeof node !== 'object') return node;
-      // Top-level nullable fields
+      const kind: string = node.kind ?? '';
+
+      // Top-level fields still using anyOf (category, data, prior)
       if (node.category === null) node.category = undefined;
       if (node.data === null) node.data = undefined;
       if (node.prior === null) node.prior = undefined;
-      if (node.goal_threshold === null) node.goal_threshold = undefined;
-      if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
-      if (node.goal_threshold_unit === null) node.goal_threshold_unit = undefined;
-      // v191+: required-nullable node-level fields
-      if (node.is_baseline === null) node.is_baseline = undefined;
-      if (node.intercept === null) node.intercept = undefined;
-      // Nullable fields inside data object
+
+      // ── Node-kind-aware stripping ────────────────────────────────
+      // goal_threshold* only meaningful on goal nodes
+      if (kind !== 'goal') {
+        node.goal_threshold = undefined;
+        node.goal_threshold_raw = undefined;
+        node.goal_threshold_unit = undefined;
+      } else {
+        if (node.goal_threshold === null) node.goal_threshold = undefined;
+        if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
+        if (node.goal_threshold_unit === null || node.goal_threshold_unit === '') node.goal_threshold_unit = undefined;
+      }
+
+      // is_baseline only meaningful on option nodes
+      if (kind !== 'option') {
+        node.is_baseline = undefined;
+      } else {
+        if (node.is_baseline === null) node.is_baseline = undefined;
+      }
+
+      // intercept only meaningful on factor nodes
+      if (kind !== 'factor') {
+        node.intercept = undefined;
+      } else {
+        if (node.intercept === null) node.intercept = undefined;
+      }
+
+      // ── Inner data fields: sentinel + null coercion ──────────────
       if (node.data && typeof node.data === 'object') {
         const d = node.data;
+        // Null safety net (non-Anthropic providers may still emit null)
         if (d.value === null) d.value = undefined;
-        if (d.extractionType === null) d.extractionType = undefined;
-        if (d.factor_type === null) d.factor_type = undefined;
+        if (d.raw_value === null) d.raw_value = undefined;
+        if (d.cap === null) d.cap = undefined;
         if (d.uncertainty_drivers === null) d.uncertainty_drivers = undefined;
         if (d.interventions === null) d.interventions = undefined;
-        if (d.raw_value === null) d.raw_value = undefined;
-        if (d.unit === null) d.unit = undefined;
-        if (d.cap === null) d.cap = undefined;
-        // v191+: required-nullable data fields
-        if (d.encoding_map === null) d.encoding_map = undefined;
         if (d.is_baseline === null) d.is_baseline = undefined;
-        if (d.display_value === null) d.display_value = undefined;
+        // String sentinel coercion: "" → undefined
+        if (d.extractionType === null || d.extractionType === '') d.extractionType = undefined;
+        if (d.factor_type === null || d.factor_type === '') d.factor_type = undefined;
+        if (d.unit === null || d.unit === '') d.unit = undefined;
+        if (d.encoding_map === null || d.encoding_map === '') d.encoding_map = undefined;
+        if (d.display_value === null || d.display_value === '') d.display_value = undefined;
 
         // Numeric coercion: LLMs may emit data.value / data.raw_value / data.cap
         // as strings (e.g. "0.6", "180000"). Coerce to number so the downstream
@@ -228,10 +255,10 @@ export function normaliseDraftResponse(raw: unknown): unknown {
           }
         }
       }
-      // Nullable fields inside prior object
+      // Inner prior fields: sentinel + null coercion
       if (node.prior && typeof node.prior === 'object') {
         const p = node.prior;
-        if (p.distribution === null) p.distribution = undefined;
+        if (p.distribution === null || p.distribution === '') p.distribution = undefined;
         if (p.range_min === null) p.range_min = undefined;
         if (p.range_max === null) p.range_max = undefined;
       }
@@ -239,26 +266,26 @@ export function normaliseDraftResponse(raw: unknown): unknown {
     });
   }
 
-  // Coerce nulls in goal_constraints items (required-nullable: constraint_id, operator, value, label)
+  // Coerce sentinels/nulls in goal_constraints items
   if (Array.isArray(obj.goal_constraints)) {
     obj.goal_constraints = (obj.goal_constraints as any[]).filter((c: any) => {
       if (!c || typeof c !== 'object') return false;
-      if (c.constraint_id === null) c.constraint_id = undefined;
-      if (c.operator === null) c.operator = undefined;
+      if (c.constraint_id === null || c.constraint_id === '') c.constraint_id = undefined;
+      if (c.operator === null || c.operator === '') c.operator = undefined;
       if (c.value === null) c.value = undefined;
-      if (c.label === null) c.label = undefined;
+      if (c.label === null || c.label === '') c.label = undefined;
       return typeof c.node_id === 'string'; // drop items without valid node_id
     });
   }
 
-  // Coerce nulls in coaching.strengthen_items (required-nullable: label, detail)
+  // Coerce sentinels/nulls in coaching.strengthen_items
   if (obj.coaching && typeof obj.coaching === 'object') {
     const coaching = obj.coaching as Record<string, unknown>;
     if (Array.isArray(coaching.strengthen_items)) {
       coaching.strengthen_items = (coaching.strengthen_items as any[]).map((item: any) => {
         if (!item || typeof item !== 'object') return item;
-        if (item.label === null) item.label = undefined;
-        if (item.detail === null) item.detail = undefined;
+        if (item.label === null || item.label === '') item.label = undefined;
+        if (item.detail === null || item.detail === '') item.detail = undefined;
         return item;
       });
     }

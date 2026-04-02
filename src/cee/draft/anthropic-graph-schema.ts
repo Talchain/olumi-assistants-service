@@ -9,15 +9,17 @@
  * - No `$ref`, no `oneOf`, no validation keywords (min/max/pattern/format)
  * - `required` lists only fields the LLM must always produce
  * - Max 24 optional parameters across the full schema tree
+ * - Max 16 parameters with union types (anyOf / type arrays)
  *
- * OPTIONAL BUDGET (v3 — 2026-03-24):
- * Anthropic counts fields in `properties` that are NOT in `required` as
- * "optional parameters", with a hard limit of 24. To stay under the limit
- * while keeping all fields, we make most fields required-but-nullable:
- * the LLM always emits them (or emits null), so they don't count as
- * optional. The normaliser coerces null → undefined post-parse.
+ * UNION BUDGET (v4 — 2026-04-02):
+ * Anthropic counts every field using `anyOf` or `type: [...]` as a
+ * "union-typed parameter", hard limit 16. To stay well under the limit,
+ * only outer wrappers (data, prior, category) and edge nullable fields
+ * use anyOf. All inner fields use plain types; the normaliser coerces
+ * sentinels (0, "", [], false) → undefined by node kind post-parse.
  *
- * Current optional count: 16 / 24. (is_baseline, intercept, display_value are required-nullable — no slots used)
+ * Current union count: 9 / 16.  (category, data, prior, intercept, goal_threshold ×3, exists_probability, effect_direction)
+ * Current optional count: 16 / 24.
  */
 
 // Helpers for nullable types (required field that can be null)
@@ -26,9 +28,6 @@ const nullable = (typeName: string) => ({
 });
 const nullableEnum = (values: string[]) => ({
   anyOf: [{ type: "string", enum: values }, { type: "null" }],
-});
-const nullableArray = (items: Record<string, unknown>) => ({
-  anyOf: [{ type: "array", items }, { type: "null" }],
 });
 const nullableObject = (props: Record<string, unknown>, req: string[]) => ({
   anyOf: [
@@ -58,56 +57,60 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           // ── Required-nullable: LLM always classifies (or null for non-factors) ──
           category: nullableEnum(["controllable", "observable", "external"]),
           // ── Factor data (controllable/observable) or option interventions ──
+          // Inner fields are plain (non-nullable) types to stay under the 16
+          // union-param limit. LLM emits sentinels (0, "", [], false) for
+          // inapplicable fields; normaliser strips them post-parse.
           data: nullableObject(
             {
-              // Required-nullable within data (LLM always decides)
-              value: nullable("number"),
-              extractionType: nullableEnum(["explicit", "inferred"]),
-              factor_type: nullableEnum(["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"]),
-              uncertainty_drivers: nullableArray({ type: "string" }),
-              interventions: nullableArray({
-                type: "object",
-                properties: {
-                  factor_id: { type: "string" },
-                  value: { type: "number" },
+              value: { type: "number" },
+              extractionType: { type: "string", enum: ["explicit", "inferred"] },
+              factor_type: { type: "string", enum: ["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"] },
+              uncertainty_drivers: { type: "array", items: { type: "string" } },
+              interventions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    factor_id: { type: "string" },
+                    value: { type: "number" },
+                  },
+                  required: ["factor_id", "value"],
+                  additionalProperties: false,
                 },
-                required: ["factor_id", "value"],
-                additionalProperties: false,
-              }),
-              // Required-nullable within data (high value for scale consistency checks)
-              raw_value: nullable("number"),
-              unit: nullable("string"),
-              cap: nullable("number"),
+              },
+              raw_value: { type: "number" },
+              unit: { type: "string" },
+              cap: { type: "number" },
               // Encoding map for categorical factor labels (v191+).
               // JSON-stringified Record<string, string> — e.g. '{"0":"Developers","1":"Tech Lead"}'.
               // Anthropic structured outputs requires additionalProperties:false on all objects,
               // which is incompatible with dynamic keys, so we use a JSON string here.
-              // The normalisation layer parses this back to Record<string,string>.
-              encoding_map: nullable("string"),
-              // Marks the status-quo / baseline option (v191+). Exactly one option should be true.
-              // Set on option nodes only; null for all other node kinds.
-              is_baseline: nullable("boolean"),
+              encoding_map: { type: "string" },
+              // Marks the status-quo / baseline option (v191+). false for non-option nodes.
+              is_baseline: { type: "boolean" },
               // Human-readable factor value for UI rendering (v191+).
-              // e.g. "£40,000", "No tech lead in place", "18 months".
-              // Eliminates UI heuristics in formatFactorDisplayValue.ts.
-              display_value: nullable("string"),
+              // Empty string for non-applicable nodes; normaliser strips.
+              display_value: { type: "string" },
             },
             ["value", "extractionType", "factor_type", "uncertainty_drivers", "interventions", "raw_value", "unit", "cap", "encoding_map", "is_baseline", "display_value"],
           ),
           // ── Prior (external factors) ───────────────────────────────────
           prior: nullableObject(
             {
-              distribution: nullable("string"),
-              range_min: nullable("number"),
-              range_max: nullable("number"),
+              distribution: { type: "string" },
+              range_min: { type: "number" },
+              range_max: { type: "number" },
             },
             ["distribution", "range_min", "range_max"],
           ),
           // ── Baseline flag (option nodes) ──────────────────────────────
-          is_baseline: nullable("boolean"),
+          // Plain boolean; false for non-option nodes. Normaliser strips by kind.
+          is_baseline: { type: "boolean" },
           // ── Intercept (root factor nodes) ─────────────────────────────
+          // Nullable: LLM emits null when not applicable or unspecified.
           intercept: nullable("number"),
           // ── Goal threshold fields ──────────────────────────────────────
+          // Nullable: 0 is a valid threshold so sentinels would be ambiguous.
           goal_threshold: nullable("number"),
           goal_threshold_raw: nullable("number"),
           goal_threshold_unit: nullable("string"),
@@ -187,12 +190,12 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          // Required-nullable: LLM always produces these for constraints
-          constraint_id: nullable("string"),
+          // Plain types; normaliser coerces "" → undefined for strings
+          constraint_id: { type: "string" },
           node_id: { type: "string" },
-          operator: nullable("string"),
-          value: nullable("number"),
-          label: nullable("string"),
+          operator: { type: "string", enum: [">=", "<="] },
+          value: { type: "number" },
+          label: { type: "string" },
           // Optional: lower-value metadata
           unit: { type: "string" },
           source_quote: { type: "string" },
@@ -213,9 +216,9 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             type: "object",
             properties: {
               id: { type: "string" },
-              // Required-nullable: LLM always produces label/detail
-              label: nullable("string"),
-              detail: nullable("string"),
+              // Plain types; normaliser coerces "" → undefined
+              label: { type: "string" },
+              detail: { type: "string" },
               // Optional: sometimes produced
               action_type: {
                 type: "string",
@@ -240,3 +243,25 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
 };
 
 export type AnthropicDraftGraphSchema = typeof ANTHROPIC_DRAFT_GRAPH_SCHEMA;
+
+// ── Union-count guardrail ──────────────────────────────────────────────
+// Anthropic limits schemas to 16 parameters with union types (anyOf / type arrays).
+// Exported for test assertions; logged at module load to catch regressions
+// without crashing the service when structured outputs may not even be in use.
+export function countUnionParams(obj: unknown): number {
+  if (!obj || typeof obj !== 'object') return 0;
+  if (Array.isArray(obj)) return obj.reduce((n, v) => n + countUnionParams(v), 0);
+  const rec = obj as Record<string, unknown>;
+  let count = ('anyOf' in rec || (Array.isArray(rec.type) && rec.type.length > 1)) ? 1 : 0;
+  for (const v of Object.values(rec)) count += countUnionParams(v);
+  return count;
+}
+
+const UNION_PARAM_COUNT = countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
+if (UNION_PARAM_COUNT > 16) {
+  // eslint-disable-next-line no-console
+  console.error(
+    `[anthropic-graph-schema] UNION BUDGET EXCEEDED: ${UNION_PARAM_COUNT}/16 union-typed params. ` +
+    `Anthropic structured outputs will fail. Reduce anyOf/nullable usage.`
+  );
+}
