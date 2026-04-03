@@ -254,9 +254,15 @@ export function handleUnreachableFactors(
       if (data.encoding_map !== undefined) {
         (node as any).encoding_map = data.encoding_map;
       }
-      // If remaining data has no union-required key, remove the property
+      // If remaining data has no semantically valid union key, remove the property
       // so DraftGraphOutput.parse() doesn't fail on a partial object.
-      if (!("interventions" in data) && !("operator" in data) && !("value" in data)) {
+      // Use type+content checks (not key-presence) to prevent sentinel artefacts
+      // like interventions: [] from keeping data alive.
+      const hasInterventions = data.interventions && typeof data.interventions === 'object'
+        && !Array.isArray(data.interventions) && Object.keys(data.interventions).length > 0;
+      const hasOperator = typeof data.operator === 'string';
+      const hasValue = typeof data.value === 'number';
+      if (!hasInterventions && !hasOperator && !hasValue) {
         deletions.push(fieldDeletion('unreachable-factors', node.id, 'data', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
         delete (node as any).data;
       }

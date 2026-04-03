@@ -333,7 +333,7 @@ class FixturesAdapter implements LLMAdapter {
     // For fixtures, just return the input graph unchanged
     return {
       graph: args.graph,
-      rationales: [{ target: "graph", why: "Fixture repair - no actual changes" }],
+      rationales: [{ violation_code: "FIXTURE", node_or_edge: "graph", action: "No actual changes", elements_changed: 0 }],
       usage: {
         input_tokens: 0,
         output_tokens: 0,

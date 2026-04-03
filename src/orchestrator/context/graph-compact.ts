@@ -13,6 +13,7 @@
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
+import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 
 // ============================================================================
 // Output Types
@@ -101,16 +102,16 @@ function buildInterventionSummary(
  * Structural edges connect decision→option or option→factor — they represent
  * graph connectivity, not causal influence.
  */
+/**
+ * Check if an edge is a legal structural edge using the shared classifier.
+ * Only decision→option and option→factor are structural; option→outcome etc.
+ * are forbidden patterns that should remain visible to diagnostics.
+ */
 function isStructuralEdge(
   edge: GraphV3T['edges'][number],
   kindMap: Map<string, string>,
 ): boolean {
-  const fromKind = kindMap.get(edge.from);
-  const toKind = kindMap.get(edge.to);
-  // decision→option or option→factor are structural
-  if (fromKind === 'decision' && toKind === 'option') return true;
-  if (fromKind === 'option') return true; // option→anything is structural
-  return false;
+  return isLegalStructuralEdge(kindMap.get(edge.from), kindMap.get(edge.to));
 }
 
 /**

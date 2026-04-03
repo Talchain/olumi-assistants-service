@@ -35,6 +35,7 @@
 
 import { log } from "../../utils/telemetry.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
+import { isLegalStructuralEdge } from "../utils/structural-edge-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,12 +103,11 @@ function buildNodeKindMap(nodes: any[]): Map<string, string> {
   return map;
 }
 
-function isStructuralEdge(fromKind: string | undefined, toKind: string | undefined): boolean {
-  // decision→option or option→factor are structural (hard structural constraints)
-  if (fromKind === "decision" && toKind === "option") return true;
-  if (fromKind === "option" && (toKind === "factor" || toKind === "outcome" || toKind === "risk")) return true;
-  return false;
-}
+/**
+ * @deprecated Use isLegalStructuralEdge from cee/utils/structural-edge-classifier instead.
+ * Retained as a local alias for minimal diff.
+ */
+const isStructuralEdge = isLegalStructuralEdge;
 
 function isWithinTolerance(a: number, b: number): boolean {
   if (b === 0) return Math.abs(a) < 1e-9;

@@ -21,6 +21,7 @@ import {
   LLMNode as AnthropicNode,
   LLMEdge as AnthropicEdge,
   LLMDraftResponse as AnthropicDraftResponse,
+  LLMRepairResponse as AnthropicRepairResponse,
   LLMOptionsResponse as AnthropicOptionsResponse,
   LLMClarifyResponse as AnthropicClarifyResponse,
   LLMCritiqueResponse as AnthropicCritiqueResponse,
@@ -1431,7 +1432,7 @@ ${graphJson}${currencyInstruction}`;
 export async function repairGraphWithAnthropic(
   args: RepairArgs,
   opts?: { signal?: AbortSignal; timeoutMs?: number }
-): Promise<{ graph: GraphT; rationales: { target: string; why: string }[]; usage: UsageMetrics }> {
+): Promise<RepairGraphResult> {
   const prompt = await buildRepairPrompt(args);
   const model = args.model || "claude-3-5-sonnet-20241022";
   const maxTokens = getMaxTokensFromConfig('repair_graph') ?? 4096;
@@ -1501,13 +1502,15 @@ export async function repairGraphWithAnthropic(
     }, "repair_graph", _elapsedMs, idempotencyKey);
     const rawJson = extractionResult.json as Record<string, unknown>;
 
-    // Normalise non-standard node kinds, ensure factor baselines, then validate with Zod
+    // Normalise non-standard node kinds, ensure factor baselines, then validate with Zod.
+    // Uses LLMRepairResponse (not LLMDraftResponse) — the repair prompt produces rationales
+    // with {violation_code, node_or_edge, action, elements_changed}, not {target, why}.
     const normalised = normaliseDraftResponse(rawJson);
     const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
     if (repairDefaultedFactors.length > 0) {
       log.info({ defaultedFactors: repairDefaultedFactors }, `Defaulted baseline values for ${repairDefaultedFactors.length} controllable factor(s) in repair`);
     }
-    const parseResult = AnthropicDraftResponse.safeParse(withBaselines);
+    const parseResult = AnthropicRepairResponse.safeParse(withBaselines);
 
     if (!parseResult.success) {
       const flatErrors = parseResult.error.flatten();

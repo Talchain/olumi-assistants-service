@@ -525,6 +525,16 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         }
       }
 
+      // Step 1b: Strip interventions sentinel from non-option nodes.
+      // Anthropic structured outputs produces interventions: [] on all nodes due
+      // to the flat schema; only option nodes should retain interventions.
+      // Without this, the empty array keeps data alive after handleUnreachableFactors
+      // deletes data.value, causing Zod NodeData union failures (invalid_union).
+      if (node.kind !== 'option' && node.data && typeof node.data === 'object' && node.data.interventions !== undefined) {
+        const { interventions: _sentinel, ...restData } = node.data;
+        node = { ...node, data: Object.keys(restData).length > 0 ? restData : undefined };
+      }
+
       // Step 2: Parse JSON-string encoding_map on factor nodes back to Record<string,string>.
       // The Anthropic structured outputs schema emits encoding_map as a JSON string
       // (additionalProperties:false makes dynamic-key objects impossible in structured outputs).

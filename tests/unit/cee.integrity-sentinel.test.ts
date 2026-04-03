@@ -727,8 +727,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
 
       const result = runIntegrityChecks(rawNodes, v3Nodes, [], [], v3Edges);
 
-      // Only 3 causal edges should be counted (all structural edges excluded)
-      expect(result.strength_defaults.total_edges).toBe(3);
+      // 5 legal structural edges excluded (decision→option ×2, option→factor ×3).
+      // option→outcome is NOT structural (forbidden pattern), so it stays visible.
+      // Total causal = 3 factor→outcome/goal edges + 1 option→outcome = 4.
+      expect(result.strength_defaults.total_edges).toBe(4);
       // Causal edges have varied strengths → no defaulting detected
       expect(result.strength_defaults.defaulted_count).toBe(0);
       expect(result.strength_defaults.detected).toBe(false);
@@ -1335,9 +1337,10 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
         { from: "f3", to: "g1", strength_mean: 0.5, strength_std: 0.125 },
       ];
       const result = detectStrengthDefaultsV1(nodesWithStructural, edges);
-      // decision→* and option→* excluded, only 3 causal edges remain
-      expect(result.structural_edges_excluded).toBe(2);
-      expect(result.total_edges).toBe(3);
+      // Only decision→option is structural (1 excluded).
+      // option→goal is forbidden, not structural — stays visible.
+      expect(result.structural_edges_excluded).toBe(1);
+      expect(result.total_edges).toBe(4);
       expect(result.detected).toBe(true);
     });
 

@@ -268,11 +268,12 @@ describe("Task 2: transformEdgeToV3 class-aware exists_probability defaults", ()
       expect(result.exists_probability).toBe(1.0);
     });
 
-    it("sets exists_probability:1.0 for option→outcome edge without belief_exists", () => {
+    it("sets exists_probability:0.8 for option→outcome edge (forbidden, not structural)", () => {
       const edge = { from: "from_node", to: "to_node", weight: 0.5 };
       const nodes = mockNodes("option", "outcome") as any;
       const { edge: result } = transformEdgeToV3(edge as any, 0, nodes);
-      expect(result.exists_probability).toBe(1.0);
+      // option→outcome is a forbidden pattern, not a legal structural edge
+      expect(result.exists_probability).toBe(0.8);
     });
   });
 

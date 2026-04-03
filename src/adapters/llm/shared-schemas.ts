@@ -139,6 +139,39 @@ export const LLMDraftResponse = z.object({
 export type LLMDraftResponseT = z.infer<typeof LLMDraftResponse>;
 
 // ============================================================================
+// Repair Response Schema
+// ============================================================================
+
+/**
+ * Rationale shape produced by the repair prompt (repair_graph_v8+).
+ *
+ * The repair prompt instructs the LLM to emit one rationale per violation
+ * with fields {violation_code, node_or_edge, action, elements_changed}.
+ * This is a different shape from the draft rationale ({target, why}).
+ */
+const LLMRepairRationale = z.object({
+  violation_code: z.string(),
+  node_or_edge: z.string(),
+  action: z.string(),
+  elements_changed: z.number(),
+}).passthrough();
+
+/**
+ * Schema for repair graph responses from LLM.
+ *
+ * Uses the same node/edge validation as draft responses but with the
+ * repair-specific rationale shape. This decouples the repair and draft
+ * validation contracts so rationale format mismatches don't break repairs.
+ */
+export const LLMRepairResponse = z.object({
+  nodes: z.array(LLMNode),
+  edges: z.array(LLMEdge),
+  rationales: z.array(LLMRepairRationale).optional().default([]),
+}).passthrough();
+
+export type LLMRepairResponseT = z.infer<typeof LLMRepairResponse>;
+
+// ============================================================================
 // Options Response Schema
 // ============================================================================
 

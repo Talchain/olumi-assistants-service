@@ -20,6 +20,7 @@ import {
   LLMNode as OpenAINode,
   LLMEdge as OpenAIEdge,
   LLMDraftResponse as OpenAIDraftResponse,
+  LLMRepairResponse as OpenAIRepairResponse,
   LLMOptionsResponse as OpenAIOptionsResponse,
   LLMClarifyResponse as OpenAIClarifyResponse,
 } from './shared-schemas.js';
@@ -1107,14 +1108,16 @@ ${brief}
         throw new Error("openai_empty_response");
       }
 
-      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
+      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod.
+      // Uses LLMRepairResponse (not LLMDraftResponse) — the repair prompt produces rationales
+      // with {violation_code, node_or_edge, action, elements_changed}, not {target, why}.
       const rawJson = safeParseJson(content, "repair_graph", _elapsedMs, idempotencyKey);
       const normalised = normaliseDraftResponse(rawJson);
       const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
       if (repairDefaultedFactors.length > 0) {
         log.info({ defaultedFactors: repairDefaultedFactors }, `Defaulted baseline values for ${repairDefaultedFactors.length} controllable factor(s) in repair`);
       }
-      const parseResult = OpenAIDraftResponse.safeParse(withBaselines);
+      const parseResult = OpenAIRepairResponse.safeParse(withBaselines);
 
       if (!parseResult.success) {
         const flatErrors = parseResult.error.flatten();

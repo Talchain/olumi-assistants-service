@@ -191,11 +191,23 @@ export interface RepairGraphArgs {
 }
 
 /**
+ * Rationale entry from the repair prompt (repair_graph_v8+).
+ * Different from draft rationales ({target, why}) — repair rationales
+ * describe which violation was fixed and how.
+ */
+export interface RepairRationale {
+  violation_code: string;
+  node_or_edge: string;
+  action: string;
+  elements_changed: number;
+}
+
+/**
  * Result from repairing a graph.
  */
 export interface RepairGraphResult {
   graph: GraphT;
-  rationales?: Array<{ target: string; why: string }>;
+  rationales?: RepairRationale[];
   usage: UsageMetrics;
 }
 

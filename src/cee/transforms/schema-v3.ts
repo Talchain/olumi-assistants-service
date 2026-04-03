@@ -39,6 +39,7 @@ import { buildAnalysisReadyPayload, validateAndLogAnalysisReady } from "./analys
 import { runIntegrityChecks, detectStrengthDefaults, detectStrengthMeanDominant } from "../validation/integrity-sentinel.js";
 import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD, EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD } from "../constants.js";
 import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
+import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 
 // ============================================================================
 // V3 Types
@@ -371,8 +372,13 @@ function boundStrengthStd(
 
 /**
  * Classify a V1 edge as structural or causal based on the from/to node kinds.
- * Structural edges (decision→option, option→factor/outcome/risk) have hard
+ * Structural edges (decision→option, option→factor) have hard
  * exists_probability = 1.0 because they are definitional, not probabilistic.
+ */
+/**
+ * Classify an edge as structural or causal by resolving endpoint kinds from nodes.
+ * Delegates to the shared classifier — only decision→option and option→factor
+ * are structural. Forbidden patterns (option→outcome, etc.) stay visible.
  */
 function classifyEdge(
   fromId: string,
@@ -386,9 +392,7 @@ function classifyEdge(
     if (n.id === toId) toKind = n.kind;
     if (fromKind && toKind) break;
   }
-  if (fromKind === "decision" && toKind === "option") return "structural";
-  if (fromKind === "option" && (toKind === "factor" || toKind === "outcome" || toKind === "risk")) return "structural";
-  return "causal";
+  return classifyEdgeByKind(fromKind, toKind, { edgeFrom: fromId, edgeTo: toId });
 }
 
 /**

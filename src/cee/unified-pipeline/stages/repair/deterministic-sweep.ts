@@ -471,12 +471,19 @@ function fixObservableExtraData(
       delete data.uncertainty_drivers;
       changed = true;
     }
+    // Strip empty-array interventions sentinel from Anthropic structured outputs.
+    // Non-option nodes should never have interventions; the empty array prevents
+    // data deletion in downstream handlers (e.g. unreachable-factors).
+    if (Array.isArray(data.interventions) && data.interventions.length === 0) {
+      delete data.interventions;
+      changed = true;
+    }
 
     if (changed) {
       repairs.push({
         code: "OBSERVABLE_EXTRA_DATA",
         path: `nodes[${node.id}].data`,
-        action: `Removed factor_type and uncertainty_drivers (extra for observable)`,
+        action: `Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)`,
       });
     }
   }

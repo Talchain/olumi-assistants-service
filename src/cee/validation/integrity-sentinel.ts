@@ -23,6 +23,7 @@
 
 import { log } from "../../utils/telemetry.js";
 import { normaliseIdBase } from "../utils/id-normalizer.js";
+import { isLegalStructuralEdge } from "../utils/structural-edge-classifier.js";
 import {
   DEFAULT_STRENGTH_MEAN,
   DEFAULT_STRENGTH_STD,
@@ -486,8 +487,9 @@ function detectStrengthDefaultsCore<
     const toKind = nodeKindMap.get(edge.to);
     if (!fromKind || !toKind) return false;
 
-    // Exclude structural edges: decision→* and option→*
-    if (fromKind === "decision" || fromKind === "option") {
+    // Exclude legal structural edges (decision→option, option→factor).
+    // Forbidden patterns (option→outcome, decision→factor, etc.) stay visible.
+    if (isLegalStructuralEdge(fromKind, toKind)) {
       structuralExcluded++;
       return false;
     }
@@ -692,8 +694,9 @@ export function detectStrengthMeanDominant(
     const toKind = nodeKindMap.get(edgeData.to);
     if (!fromKind || !toKind) return false;
 
-    // Exclude structural edges: decision→* and option→*
-    if (fromKind === "decision" || fromKind === "option") {
+    // Exclude legal structural edges (decision→option, option→factor).
+    // Forbidden patterns (option→outcome, decision→factor, etc.) stay visible.
+    if (isLegalStructuralEdge(fromKind, toKind)) {
       structuralExcluded++;
       return false;
     }
