@@ -55,7 +55,7 @@ describe("VerificationPipeline", () => {
     expect(typeof trace.verification.verification_latency_ms).toBe("number");
   });
 
-  it("surfaces branch_probabilities warnings in trace.verification when branches are unnormalised", async () => {
+  it("branch_probabilities validator is skipped — structural edges don't carry branch probabilities", async () => {
     const payload = buildMinimalDraftResponse();
 
     (payload.graph as any).nodes.push(
@@ -69,7 +69,7 @@ describe("VerificationPipeline", () => {
       { from: "dec_1", to: "opt_2", belief: 0.7 } as any,
     );
 
-    const { response, results } = await verificationPipeline.verify(
+    const { results } = await verificationPipeline.verify(
       payload,
       CEEDraftGraphResponseV1Schema,
       {
@@ -79,24 +79,12 @@ describe("VerificationPipeline", () => {
       },
     );
 
+    // Validator is now a no-op: decision→option edges are structural
+    // (belief_exists = existence certainty, not branch probability).
     const branchStage = results.find((r) => r.stage === "branch_probabilities");
     expect(branchStage).toBeDefined();
-    expect(branchStage?.severity).toBe("warn");
-    expect(branchStage?.code).toBe("BRANCH_PROBABILITIES_UNNORMALIZED");
-
-    const verification = (response as any).trace?.verification;
-    expect(verification).toBeDefined();
-    const issues = verification.issues_detected;
-    expect(Array.isArray(issues)).toBe(true);
-    expect(issues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          stage: "branch_probabilities",
-          code: "BRANCH_PROBABILITIES_UNNORMALIZED",
-          severity: "warn",
-        }),
-      ]),
-    );
+    expect(branchStage?.skipped).toBe(true);
+    expect(branchStage?.severity).toBeUndefined();
   });
   it("throws on schema violation for missing required fields", async () => {
     // Missing required trace/quality fields

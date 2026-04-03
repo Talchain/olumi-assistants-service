@@ -664,6 +664,18 @@ describe("Golden pipeline invariants (stages 2–6)", () => {
       expect(nodeIds.has(edge.to)).toBe(true);
     }
 
+    // Structural edges (decision→option) must retain exists_probability = 1.0
+    // after the full pipeline. Regression guard: normaliseDecisionBranchBeliefs
+    // previously corrupted these to 1/N.
+    const kindMap = new Map(response.nodes.map((n: any) => [n.id, n.kind]));
+    const structuralEdges = response.edges.filter(
+      (e: any) => kindMap.get(e.from) === "decision" && kindMap.get(e.to) === "option",
+    );
+    expect(structuralEdges.length).toBeGreaterThanOrEqual(2);
+    for (const edge of structuralEdges) {
+      expect(edge.exists_probability).toBe(1);
+    }
+
     // At least one option with non-empty interventions
     expect(Array.isArray(response.options)).toBe(true);
     const optionWithInterventions = response.options.find(

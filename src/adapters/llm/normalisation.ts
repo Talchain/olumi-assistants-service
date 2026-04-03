@@ -678,12 +678,15 @@ export function ensureControllableFactorBaselines(response: unknown): {
       extraction_type: 'inferred',
     }, `Controllable factor ${nodeId} missing data.value, defaulting to 0.5`);
 
+    const existingType = data?.extractionType;
     return {
       ...node,
       data: {
         ...(data || {}),
         value: 0.5,
-        extractionType: 'inferred',
+        // Preserve LLM-emitted extractionType if present; only default when
+        // truly absent — matches the guard in fixControllableMissingData().
+        extractionType: existingType ?? 'inferred',
       },
     };
   });
