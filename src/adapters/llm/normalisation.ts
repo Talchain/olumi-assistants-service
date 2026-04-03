@@ -593,7 +593,11 @@ export function normaliseDraftResponse(raw: unknown): unknown {
  *
  * Controllable factors are factors with incoming option→factor edges.
  * When LLM fails to output data.value for a controllable factor,
- * we add a default value of 0.5 with extractionType: "inferred".
+ * we add a default value of **0.5** with extractionType: "inferred".
+ * 0.5 is the neutral midpoint on the 0–1 scale per prompt instructions.
+ *
+ * Must agree with `fixControllableMissingData()` in deterministic-sweep.ts,
+ * which acts as a safety net with the same 0.5 default.
  *
  * This ensures ISL can compute sensitivity analysis.
  *
@@ -662,20 +666,23 @@ export function ensureControllableFactorBaselines(response: unknown): {
       return node; // Already has value
     }
 
-    // Add default baseline value
+    // Add default baseline value.
+    // 0.5 is the neutral midpoint on the 0–1 scale, matching prompt instructions
+    // ("Unknown baseline: 0.5 with extractionType: inferred") and the safety-net
+    // default in fixControllableMissingData() (deterministic-sweep.ts).
     defaultedFactors.push(nodeId);
     log.info({
       event: 'llm.normalisation.factor_baseline_defaulted',
       factor_id: nodeId,
-      default_value: 1.0,
+      default_value: 0.5,
       extraction_type: 'inferred',
-    }, `Controllable factor ${nodeId} missing data.value, defaulting to 1.0`);
+    }, `Controllable factor ${nodeId} missing data.value, defaulting to 0.5`);
 
     return {
       ...node,
       data: {
         ...(data || {}),
-        value: 1.0,
+        value: 0.5,
         extractionType: 'inferred',
       },
     };

@@ -144,7 +144,7 @@ describe("additive fields survive normalisation + validation pipeline", () => {
           id: "fac_no_value",
           kind: "factor",
           label: "Factor without value",
-          // no data.value — will be defaulted to 1.0
+          // no data.value — will be defaulted to 0.5
           _canary_node: "must_survive_baseline_patch",
         },
         { id: "out_1", kind: "outcome", label: "O" },
@@ -174,8 +174,8 @@ describe("additive fields survive normalisation + validation pipeline", () => {
 
     // Canary survived the baseline-defaulting spread
     expect(factor._canary_node).toBe("must_survive_baseline_patch");
-    // Baseline was applied
-    expect((factor.data as any).value).toBe(1.0);
+    // Baseline was applied (0.5 = neutral midpoint per prompt instructions)
+    expect((factor.data as any).value).toBe(0.5);
 
     // Envelope canary survived
     expect(output._canary_graph).toBe("envelope_test");

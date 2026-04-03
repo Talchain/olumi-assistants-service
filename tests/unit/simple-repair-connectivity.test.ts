@@ -1290,7 +1290,7 @@ describe("simpleRepair connectivity", () => {
       };
       const result = ensureControllableFactorBaselines(response);
       const factor = result.response.nodes.find((n: any) => n.id === "fac_1");
-      expect(factor?.data?.value).toBe(1.0);
+      expect(factor?.data?.value).toBe(0.5);
       expect(factor?.data?.extractionType).toBe("inferred");
     });
   });

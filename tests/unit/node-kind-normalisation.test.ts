@@ -705,7 +705,7 @@ describe("ensureControllableFactorBaselines", () => {
     const fac1 = nodes.find((n: any) => n.id === "fac_1");
 
     expect(defaultedFactors).toEqual(["fac_1"]);
-    expect(fac1.data.value).toBe(1.0);
+    expect(fac1.data.value).toBe(0.5);
     expect(fac1.data.extractionType).toBe("inferred");
   });
 
@@ -792,10 +792,10 @@ describe("ensureControllableFactorBaselines", () => {
     const facB = nodes.find((n: any) => n.id === "fac_b");
     const facC = nodes.find((n: any) => n.id === "fac_c");
 
-    expect(facA.data.value).toBe(1.0);
+    expect(facA.data.value).toBe(0.5);
     expect(facA.data.extractionType).toBe("inferred");
     expect(facB.data.value).toBe(100);
-    expect(facC.data.value).toBe(1.0);
+    expect(facC.data.value).toBe(0.5);
   });
 
   it("returns unchanged response when no nodes or edges", () => {
@@ -824,5 +824,32 @@ describe("ensureControllableFactorBaselines", () => {
     const { defaultedFactors } = ensureControllableFactorBaselines(response);
 
     expect(defaultedFactors).toEqual(["fac_1"]);
+  });
+
+  it("defaults to 0.5 — consistent with fixControllableMissingData safety net", () => {
+    // Both ensureControllableFactorBaselines (Stage 1) and
+    // fixControllableMissingData (deterministic-sweep) must agree on 0.5
+    // as the neutral midpoint for unknown controllable factor baselines.
+    const response = {
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "D" },
+        { id: "opt_1", kind: "option", label: "O" },
+        { id: "fac_cont", kind: "factor", label: "Continuous factor" },
+        { id: "out_1", kind: "outcome", label: "Out" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1" },
+        { from: "opt_1", to: "fac_cont" },
+        { from: "fac_cont", to: "out_1" },
+      ],
+    };
+
+    const { response: result, defaultedFactors } = ensureControllableFactorBaselines(response);
+    const nodes = (result as any).nodes;
+    const fac = nodes.find((n: any) => n.id === "fac_cont");
+
+    expect(defaultedFactors).toEqual(["fac_cont"]);
+    expect(fac.data.value).toBe(0.5);
+    expect(fac.data.extractionType).toBe("inferred");
   });
 });

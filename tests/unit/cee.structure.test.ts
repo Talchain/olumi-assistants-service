@@ -140,7 +140,10 @@ describe("detectStructuralWarnings", () => {
 });
 
 describe("normaliseDecisionBranchBeliefs", () => {
-  it("renormalises decision-to-option beliefs when their sum differs significantly from 1", () => {
+  it("is a no-op — structural edges must not have belief_exists redistributed", () => {
+    // Prior to the fix, this function divided belief_exists by the number of
+    // sibling options (1.0 → 0.333 for 3 options), corrupting structural edge
+    // existence probability.  It is now intentionally a no-op.
     const graph = makeGraph({
       nodes: [
         { id: "goal_1", kind: "goal" } as any,
@@ -155,40 +158,67 @@ describe("normaliseDecisionBranchBeliefs", () => {
       ],
     });
 
-    const normalised = normaliseDecisionBranchBeliefs(graph);
-    expect(normalised).toBeDefined();
-
-    const edges = (normalised as GraphV1).edges as any[];
-    const decisionEdges = edges.filter(
-      (e) => e.from === "dec_1" && (e.to === "opt_1" || e.to === "opt_2"),
-    );
-    const sum = decisionEdges.reduce((acc, e) => acc + (typeof e.belief === "number" ? e.belief : 0), 0);
-    expect(sum).toBeCloseTo(1, 4);
-    for (const edge of decisionEdges) {
-      expect(edge.belief).toBeGreaterThan(0);
-      expect(edge.belief).toBeLessThan(1);
-    }
+    const result = normaliseDecisionBranchBeliefs(graph);
+    // Returns the exact same reference (no-op)
+    expect(result).toBe(graph);
+    // Beliefs remain at their original values
+    const edges = (result as GraphV1).edges as any[];
+    expect(edges[1].belief).toBe(0.7);
+    expect(edges[2].belief).toBe(0.7);
   });
 
-  it("leaves beliefs unchanged when branches are already normalised", () => {
+  it("preserves structural edge ep=1.0 on 3-option graph (regression)", () => {
     const graph = makeGraph({
       nodes: [
-        { id: "goal_1", kind: "goal" } as any,
         { id: "dec_1", kind: "decision" } as any,
         { id: "opt_1", kind: "option" } as any,
         { id: "opt_2", kind: "option" } as any,
+        { id: "opt_3", kind: "option" } as any,
       ],
       edges: [
-        { from: "goal_1", to: "dec_1" } as any,
-        { from: "dec_1", to: "opt_1", belief: 0.6 } as any,
-        { from: "dec_1", to: "opt_2", belief: 0.4 } as any,
+        { from: "dec_1", to: "opt_1", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_2", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_3", belief_exists: 1.0, belief: 1.0 } as any,
       ],
     });
 
-    const originalBeliefs = (graph.edges as any[]).map((e) => e.belief);
-    const normalised = normaliseDecisionBranchBeliefs(graph) as GraphV1;
-    const newBeliefs = (normalised.edges as any[]).map((e) => e.belief);
-    expect(newBeliefs).toEqual(originalBeliefs);
+    const result = normaliseDecisionBranchBeliefs(graph);
+    expect(result).toBe(graph);
+    const edges = (result as GraphV1).edges as any[];
+    for (const edge of edges) {
+      expect(edge.belief_exists).toBe(1.0);
+      expect(edge.belief).toBe(1.0);
+    }
+  });
+
+  it("preserves structural edge ep=1.0 on 4-option graph (regression)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision" } as any,
+        { id: "opt_1", kind: "option" } as any,
+        { id: "opt_2", kind: "option" } as any,
+        { id: "opt_3", kind: "option" } as any,
+        { id: "opt_4", kind: "option" } as any,
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_1", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_2", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_3", belief_exists: 1.0, belief: 1.0 } as any,
+        { from: "dec_1", to: "opt_4", belief_exists: 1.0, belief: 1.0 } as any,
+      ],
+    });
+
+    const result = normaliseDecisionBranchBeliefs(graph);
+    expect(result).toBe(graph);
+    const edges = (result as GraphV1).edges as any[];
+    for (const edge of edges) {
+      expect(edge.belief_exists).toBe(1.0);
+      expect(edge.belief).toBe(1.0);
+    }
+  });
+
+  it("returns undefined graph unchanged", () => {
+    expect(normaliseDecisionBranchBeliefs(undefined)).toBeUndefined();
   });
 });
 
@@ -470,19 +500,23 @@ describe("validateAndFixGraph", () => {
     expect(result.valid).toBe(true);
     expect(result.fixes.singleGoalApplied).toBe(true);
     expect(result.fixes.outcomeBeliefsFilled).toBe(1);
-    expect(result.fixes.decisionBranchesNormalized).toBe(true);
+    // normaliseDecisionBranchBeliefs is now a no-op — structural edges
+    // (decision→option) must keep belief_exists/belief unchanged at whatever
+    // the LLM emitted. Normalisation to sum=1 was corrupting ep from 1.0 to 1/N.
+    expect(result.fixes.decisionBranchesNormalized).toBe(false);
 
     // Verify single goal
     const goalNodes = (result.graph!.nodes as any[]).filter((n) => n.kind === "goal");
     expect(goalNodes).toHaveLength(1);
     expect(goalNodes[0].label).toContain("Compound Goal");
 
-    // Verify decision branch normalization
+    // Verify decision→option beliefs are preserved (not normalised)
     const decisionEdges = (result.graph!.edges as any[]).filter(
       (e) => e.from === "dec1" && (e.to === "opt1" || e.to === "opt2")
     );
-    const sum = decisionEdges.reduce((acc, e) => acc + (e.belief || 0), 0);
-    expect(sum).toBeCloseTo(1, 2);
+    for (const edge of decisionEdges) {
+      expect(edge.belief).toBe(0.6);
+    }
 
     // Verify outcome belief filled
     const optToOut = (result.graph!.edges as any[]).find(

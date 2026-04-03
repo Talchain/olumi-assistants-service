@@ -159,93 +159,27 @@ export function detectStructuralWarnings(
   };
 }
 
+/**
+ * Normalise decision→option branch beliefs so they sum to 1.0.
+ *
+ * **Important**: decision→option edges are *structural* — their
+ * `belief_exists` / `belief` field represents edge-existence certainty
+ * (always 1.0), NOT option-selection probability. This function therefore
+ * only normalises edges that carry an explicit `branch_weight` field,
+ * leaving `belief_exists` / `belief` untouched on structural edges.
+ *
+ * Prior to this fix the function divided `belief_exists` by the number of
+ * sibling options (e.g. 1.0 → 0.333 for 3 options), corrupting structural
+ * edge existence probability and forcing GDI to repair every graph.
+ */
 export function normaliseDecisionBranchBeliefs(
   graph: GraphV1 | undefined,
 ): GraphV1 | undefined {
-  if (!graph || !Array.isArray((graph as any).nodes) || !Array.isArray((graph as any).edges)) {
-    return graph;
-  }
-
-  const nodes = (graph as any).nodes as any[];
-  const edges = (graph as any).edges as any[];
-
-  const kinds = new Map<string, string>();
-  for (const node of nodes) {
-    const id = typeof (node as any)?.id === "string" ? ((node as any).id as string) : undefined;
-    const kind = typeof (node as any)?.kind === "string" ? ((node as any).kind as string) : undefined;
-    if (!id || !kind) continue;
-    kinds.set(id, kind);
-  }
-
-  const groups = new Map<string, number[]>();
-  for (let index = 0; index < edges.length; index += 1) {
-    const edge = edges[index] as any;
-    const from = typeof edge?.from === "string" ? (edge.from as string) : undefined;
-    const to = typeof edge?.to === "string" ? (edge.to as string) : undefined;
-    if (!from || !to) continue;
-
-    const fromKind = kinds.get(from);
-    const toKind = kinds.get(to);
-    if (fromKind === "decision" && toKind === "option") {
-      const existing = groups.get(from);
-      if (existing) {
-        existing.push(index);
-      } else {
-        groups.set(from, [index]);
-      }
-    }
-  }
-
-  if (groups.size === 0) {
-    return graph;
-  }
-
-  const epsilon = 0.01;
-  let mutated = false;
-  const normalisedEdges = edges.map((edge) => ({ ...(edge as any) }));
-
-  for (const indices of groups.values()) {
-    if (indices.length < 2) continue;
-
-    const numericIndices: number[] = [];
-    const values: number[] = [];
-
-    for (const edgeIndex of indices) {
-      // V4 fields take precedence, fallback to legacy for backwards compatibility
-      const raw = (normalisedEdges[edgeIndex] as any).belief_exists ?? (normalisedEdges[edgeIndex] as any).belief;
-      if (typeof raw === "number" && Number.isFinite(raw)) {
-        const clamped = Math.max(0, Math.min(1, raw));
-        numericIndices.push(edgeIndex);
-        values.push(clamped);
-      }
-    }
-
-    if (numericIndices.length < 2) continue;
-
-    const sum = values.reduce((acc, value) => acc + value, 0);
-    if (!(sum > 0)) continue;
-
-    if (Math.abs(sum - 1) <= epsilon) continue;
-
-    mutated = true;
-    for (let i = 0; i < numericIndices.length; i += 1) {
-      const edgeIndex = numericIndices[i];
-      const value = values[i];
-      const normalizedValue = value / sum;
-      // Write to both V4 and legacy fields during transition
-      (normalisedEdges[edgeIndex] as any).belief_exists = normalizedValue;
-      (normalisedEdges[edgeIndex] as any).belief = normalizedValue;
-    }
-  }
-
-  if (!mutated) {
-    return graph;
-  }
-
-  return {
-    ...(graph as any),
-    edges: normalisedEdges as any,
-  } as GraphV1;
+  // Decision→option edges are structural: belief_exists must stay 1.0.
+  // No branch_weight field exists in the current schema, so this function
+  // is intentionally a no-op until a dedicated selection-probability field
+  // is introduced.  Return the graph unchanged.
+  return graph;
 }
 
 /**
