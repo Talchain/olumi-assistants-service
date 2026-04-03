@@ -186,7 +186,70 @@ export async function* processAdapterStream(
       }
 
       case 'message_complete': {
-        // Stream fully consumed — no action needed
+        // Non-streaming fallback: when the adapter fell back to chatWithTools,
+        // message_complete is the ONLY event. Extract text and first tool call
+        // from the result's content blocks.
+        if (textChunks.length === 0 && !toolExecution && !failedToolCall && !pendingLongRunningTool) {
+          for (const block of event.result.content) {
+            if (block.type === 'text' && block.text) {
+              textChunks.push(block.text);
+              yield { type: 'text_delta', seq: seq++, delta: block.text };
+            } else if (block.type === 'tool_use') {
+              // One tool per turn — skip if we already have one
+              if (toolExecution || failedToolCall || pendingLongRunningTool) {
+                discardedToolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
+                continue;
+              }
+
+              const actionDef = ACTION_CATALOGUE.get(block.name as ActionName);
+              if (!actionDef) {
+                log.warn({ request_id: requestId, tool_name: block.name }, 'v4.unknown_tool_call');
+                continue;
+              }
+
+              const toolInput = block.input as Record<string, unknown>;
+              const isLongRunning = LONG_RUNNING_ACTIONS.has(block.name as ActionName);
+
+              if (isLongRunning) {
+                pendingLongRunningTool = { name: block.name, input: toolInput };
+                continue;
+              }
+
+              const startTime = Date.now();
+              try {
+                const result = await actionDef.execute(toolInput, turnContext);
+                const durationMs = Date.now() - startTime;
+                toolExecution = { toolName: block.name, input: toolInput, result, durationMs };
+
+                for (const b of result.blocks) {
+                  yield { type: 'block', seq: seq++, block: b };
+                }
+                yield { type: 'tool_result', seq: seq++, tool_name: block.name, success: true, duration_ms: durationMs };
+
+                log.info({
+                  request_id: requestId,
+                  tool_name: block.name,
+                  success: true,
+                  duration_ms: durationMs,
+                  blocks_produced: result.blocks.length,
+                  fallback_path: true,
+                }, 'v4.tool_executed');
+              } catch (error) {
+                const durationMs = Date.now() - startTime;
+                failedToolCall = { name: block.name, error: error instanceof Error ? error.message : String(error) };
+                yield { type: 'tool_result', seq: seq++, tool_name: block.name, success: false, duration_ms: durationMs };
+
+                log.error({
+                  request_id: requestId,
+                  tool_name: block.name,
+                  duration_ms: durationMs,
+                  error: failedToolCall.error,
+                  fallback_path: true,
+                }, 'v4.tool_execution_failed');
+              }
+            }
+          }
+        }
         break;
       }
     }

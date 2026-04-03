@@ -32,34 +32,15 @@ export interface DeterministicPromptV2 {
 }
 
 // ============================================================================
-// PMS Cache
+// PMS Cache (TTL-gated, refreshed inline)
 // ============================================================================
 
-let cachedPmsPrompt: string | null = null;
-let pmsLoadAttempted = false;
+interface CachedPrompt { content: string; loadedAt: number; }
+let promptCache: CachedPrompt | null = null;
+const PROMPT_CACHE_TTL_MS = 300_000; // 5 minutes, matches prompt-loader.ts
 
-async function loadStaticPromptFromPms(): Promise<string | null> {
-  try {
-    const result = await loadPrompt('orchestrator', { forceDefault: false });
-    if (result.source === 'store') {
-      return result.content;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export async function warmPromptCacheV2(): Promise<void> {
-  pmsLoadAttempted = true;
-  const content = await loadStaticPromptFromPms();
-  if (content) {
-    cachedPmsPrompt = content;
-    log.info('v4.prompt.pms_loaded');
-  } else {
-    log.warn('v4.prompt.pms_unavailable_using_hardcoded');
-  }
-}
+/** @internal Test-only: reset the module-level cache. */
+export function _resetPromptCacheForTesting(): void { promptCache = null; }
 
 // ============================================================================
 // Public API
@@ -71,18 +52,26 @@ export async function warmPromptCacheV2(): Promise<void> {
  * The static block is identical across turns and marked with cache_control
  * by the caller. The dynamic block varies per turn.
  */
-export function buildDeterministicPromptV2(ctx: DeterministicTurnContext): DeterministicPromptV2 {
-  let staticBlock: string;
-
-  if (cachedPmsPrompt) {
-    staticBlock = cachedPmsPrompt;
-  } else {
-    if (!pmsLoadAttempted) {
-      pmsLoadAttempted = true;
-      warmPromptCacheV2().catch(() => { /* non-fatal */ });
+export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext): Promise<DeterministicPromptV2> {
+  // Refresh cache if missing or expired
+  const now = Date.now();
+  if (!promptCache || (now - promptCache.loadedAt) > PROMPT_CACHE_TTL_MS) {
+    try {
+      const result = await loadPrompt('orchestrator', { forceDefault: false });
+      if (result.source === 'store') {
+        promptCache = { content: result.content, loadedAt: now };
+        log.info('v4.prompt.pms_loaded');
+      }
+    } catch {
+      // non-fatal — fall through to fallback
     }
-    staticBlock = STATIC_PROMPT_FALLBACK;
+  }
 
+  let staticBlock: string;
+  if (promptCache) {
+    staticBlock = promptCache.content;
+  } else {
+    staticBlock = STATIC_PROMPT_FALLBACK;
     const fallbackMeta = { task: 'orchestrator', env: process.env.NODE_ENV ?? 'unknown' };
     emit('v4.pms_fallback_used', fallbackMeta);
     log.warn(fallbackMeta, 'v4.pms_fallback_used');

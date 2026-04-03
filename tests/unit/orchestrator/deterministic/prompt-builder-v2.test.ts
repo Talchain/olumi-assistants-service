@@ -40,9 +40,9 @@ function makeTurnContext(overrides: Partial<DeterministicTurnContext> = {}): Det
 }
 
 describe("buildDeterministicPromptV2", () => {
-  it("returns static and dynamic blocks", () => {
+  it("returns static and dynamic blocks", async () => {
     const ctx = makeTurnContext();
-    const result = buildDeterministicPromptV2(ctx);
+    const result = await buildDeterministicPromptV2(ctx);
 
     expect(result).toHaveProperty('static_block');
     expect(result).toHaveProperty('dynamic_block');
@@ -52,38 +52,38 @@ describe("buildDeterministicPromptV2", () => {
     expect(result.dynamic_block.length).toBeGreaterThan(10);
   });
 
-  it("static block is identical across turns with different contexts", () => {
+  it("static block is identical across turns with different contexts", async () => {
     const ctx1 = makeTurnContext({ stage: 'frame' });
     const ctx2 = makeTurnContext({ stage: 'evaluate' });
 
-    const result1 = buildDeterministicPromptV2(ctx1);
-    const result2 = buildDeterministicPromptV2(ctx2);
+    const result1 = await buildDeterministicPromptV2(ctx1);
+    const result2 = await buildDeterministicPromptV2(ctx2);
 
     expect(result1.static_block).toBe(result2.static_block);
   });
 
-  it("dynamic block varies with stage", () => {
+  it("dynamic block varies with stage", async () => {
     const ctx1 = makeTurnContext({ stage: 'frame' });
     const ctx2 = makeTurnContext({ stage: 'evaluate' });
 
-    const result1 = buildDeterministicPromptV2(ctx1);
-    const result2 = buildDeterministicPromptV2(ctx2);
+    const result1 = await buildDeterministicPromptV2(ctx1);
+    const result2 = await buildDeterministicPromptV2(ctx2);
 
     expect(result1.dynamic_block).not.toBe(result2.dynamic_block);
   });
 
-  it("static block does not contain action vocabulary", () => {
+  it("static block does not contain action vocabulary", async () => {
     const ctx = makeTurnContext();
-    const result = buildDeterministicPromptV2(ctx);
+    const result = await buildDeterministicPromptV2(ctx);
 
     expect(result.static_block).not.toContain('Eligible Actions');
     expect(result.static_block).not.toContain('set_factor_value');
     expect(result.static_block).not.toContain('run_analysis');
   });
 
-  it("static block does not contain JSON response contract", () => {
+  it("static block does not contain JSON response contract", async () => {
     const ctx = makeTurnContext();
-    const result = buildDeterministicPromptV2(ctx);
+    const result = await buildDeterministicPromptV2(ctx);
 
     expect(result.static_block).not.toContain('"text":');
     expect(result.static_block).not.toContain('"insights":');
@@ -91,30 +91,30 @@ describe("buildDeterministicPromptV2", () => {
     expect(result.static_block).not.toContain('valid JSON');
   });
 
-  it("dynamic block contains graph summary", () => {
+  it("dynamic block contains graph summary", async () => {
     const ctx = makeTurnContext();
-    const result = buildDeterministicPromptV2(ctx);
+    const result = await buildDeterministicPromptV2(ctx);
 
     expect(result.dynamic_block).toContain('3 nodes');
     expect(result.dynamic_block).toContain('2 edges');
   });
 
-  it("dynamic block includes disambiguation when hints present", () => {
+  it("dynamic block includes disambiguation when hints present", async () => {
     const ctx = makeTurnContext({
       disambiguation_hints: [
         { term: 'cost', candidates: [{ id: 'fac_cost_a', label: 'Cost A' }, { id: 'fac_cost_b', label: 'Cost B' }] },
       ],
     });
-    const result = buildDeterministicPromptV2(ctx);
+    const result = await buildDeterministicPromptV2(ctx);
 
     expect(result.dynamic_block).toContain('Disambiguation');
     expect(result.dynamic_block).toContain('cost');
     expect(result.dynamic_block).toContain('Cost A');
   });
 
-  it("static block instructs tool use for structural actions", () => {
+  it("static block instructs tool use for structural actions", async () => {
     const ctx = makeTurnContext();
-    const result = buildDeterministicPromptV2(ctx);
+    const result = await buildDeterministicPromptV2(ctx);
 
     expect(result.static_block).toContain('tool');
   });

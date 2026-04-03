@@ -37,12 +37,13 @@ vi.mock("../../../../src/prompts/loader.js", () => ({
 
 // Mock adapter router
 const mockStreamChatWithTools = vi.fn();
+const mockGetAdapter = vi.fn().mockReturnValue({
+  name: 'anthropic',
+  model: 'claude-sonnet-4-6',
+  streamChatWithTools: mockStreamChatWithTools,
+});
 vi.mock("../../../../src/adapters/llm/router.js", () => ({
-  getAdapter: () => ({
-    name: 'anthropic',
-    model: 'claude-sonnet-4-6',
-    streamChatWithTools: mockStreamChatWithTools,
-  }),
+  getAdapter: (...args: unknown[]) => mockGetAdapter(...args),
 }));
 
 // Mock timeouts
@@ -280,7 +281,7 @@ describe("executePipelineV4", () => {
   // ── Redundant system prompt string ──────────────────────────────────────
 
   describe("Adapter call shape", () => {
-    it("passes empty string as system (cache blocks take precedence)", async () => {
+    it("passes full system prompt string alongside cache blocks", async () => {
       mockStreamChatWithTools.mockReturnValue(mockStream([
         { type: 'text_delta', delta: 'test' },
         { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 100, usage: {} } },
@@ -290,8 +291,22 @@ describe("executePipelineV4", () => {
       await collectEvents(executePipelineV4(req, 'req-1'));
 
       const callArgs = mockStreamChatWithTools.mock.calls[0][0];
-      expect(callArgs.system).toBe('');
+      expect(callArgs.system).toBeDefined();
+      expect(typeof callArgs.system).toBe('string');
+      expect(callArgs.system.length).toBeGreaterThan(0);
       expect(callArgs.system_cache_blocks).toBeDefined();
+    });
+
+    it("uses task-based adapter routing with 'orchestrator'", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'test' },
+        { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 100, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest();
+      await collectEvents(executePipelineV4(req, 'req-1'));
+
+      expect(mockGetAdapter).toHaveBeenCalledWith('orchestrator');
     });
   });
 

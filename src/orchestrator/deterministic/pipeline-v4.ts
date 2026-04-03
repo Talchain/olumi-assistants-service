@@ -176,8 +176,8 @@ export async function* executePipelineV4(
     const routing: 'deterministic' | 'llm' = 'llm';
     yield { type: 'turn_start', seq: seq++, turn_id: turnId, routing, stage };
 
-    // Build prompt
-    const prompt = buildDeterministicPromptV2(turnContext);
+    // Build prompt (async — loads from PMS with TTL cache)
+    const prompt = await buildDeterministicPromptV2(turnContext);
 
     // Build tool definitions — add draft_graph when generate_model or no graph
     const eligibleActions = [...turnContext.eligible_actions];
@@ -229,8 +229,8 @@ export async function* executePipelineV4(
     };
     const messages = filterHistoryV4(sanitiseAssistantHistory(assembleMessages(conversationContext, effectiveMessage)));
 
-    // Get adapter
-    const adapter = getAdapter('anthropic');
+    // Get adapter — task-based routing reads CEE_MODEL_ORCHESTRATOR, auto-detects provider
+    const adapter = getAdapter('orchestrator');
 
     log.info({
       request_id: requestId,
@@ -255,12 +255,15 @@ export async function* executePipelineV4(
       yield { type: 'text_delta', seq: seq++, delta: chipPreText };
     }
 
-    // Stream the LLM call — empty tool list is valid (Anthropic accepts it; model won't call tools)
+    // Stream the LLM call — empty tool list is valid (model won't call tools)
     // tool_choice only meaningful when tools are present
     const hasTools = toolDefs.length > 0;
-    const stream = adapter.streamChatWithTools!(
+    if (!adapter.streamChatWithTools) {
+      throw new Error(`Adapter ${adapter.name} does not support streaming tool calls — task 'orchestrator' requires a streaming-capable adapter`);
+    }
+    const stream = adapter.streamChatWithTools(
       {
-        system: '', // unused when system_cache_blocks present; adapter prefers cache blocks
+        system: `${prompt.static_block}\n\n---\n\n${prompt.dynamic_block}`,
         system_cache_blocks: [
           { type: 'text', text: prompt.static_block, cache_control: { type: 'ephemeral' } },
           { type: 'text', text: prompt.dynamic_block },
