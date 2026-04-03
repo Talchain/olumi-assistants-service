@@ -8,15 +8,17 @@
 
 ## Executive Summary
 
-The CEE pipeline uses 13 registered LLM prompts. Of these, **11 are active at runtime** and **2 are dead code** (`explainer`, `bias_check`). Across all active prompts (including the actual consumers of the dead `explainer` prompt), we identified **101 distinct text-bearing fields**. Of these:
+The CEE pipeline uses 13 registered LLM prompts. Of these, **11 are active at runtime** and **2 are dead code** (`explainer`, `bias_check`). Across all prompts — including dead prompt registered schemas and actual consumers — we identified **110 distinct text-bearing fields**. Of these:
 
 | Classification | Count | % |
 |---|---|---|
-| PASSED THROUGH | 62 | 61% |
-| TRANSFORMED | 15 | 15% |
-| GATED | 8 | 8% |
-| CONSUMED INTERNALLY | 7 | 7% |
-| DROPPED | 9 | 9% |
+| PASSED THROUGH | 62 | 56% |
+| TRANSFORMED | 15 | 14% |
+| GATED | 8 | 7% |
+| CONSUMED INTERNALLY | 7 | 6% |
+| DROPPED | 18 | 16% |
+
+*Counts are derived from `cee-text-flow-data.json` and verified by `scripts/verify-text-flow-audit.cjs`.*
 
 The **decision_review** endpoint is the highest LLM-text-density path — nearly every field is user-facing prose passed through with minimal filtering (shape check + grounding check only).
 
@@ -26,7 +28,7 @@ The **decision_review** endpoint is the highest LLM-text-density path — nearly
 
 2. **Two registered prompts are dead code**: `explainer` and `bias_check` are registered in the prompt management system but never loaded or called at runtime.
 
-3. **8 undeclared fields leak to the API via `.passthrough()`**: Fields like `nodes[].prior`, `nodes[].factor_type`, `edges[].defaulted` are present on API responses but not declared in Zod egress schemas. All are intentional (ISL/PLoT needs) except `_retry_suggestion` which exposes internal retry metadata.
+3. **19 undeclared fields leak to the API via `.passthrough()`** across 13 passthrough locations: 8 on NodeV3, 2 on EdgeV3, 2 on EdgeProvenanceV3, 3 on GraphMetaV3, 3 on CEEGraphResponseV3, 1 on FactorData. Of these, 16 are intentional (ISL/PLoT/UI needs), and 3 are unintentional or questionable (`_retry_suggestion`, `quote`, `location`).
 
 4. **OpenAI path has uncontrolled passthrough risk**: The Anthropic structured-output schema uses `additionalProperties: false` (safe), but the OpenAI `json_object` path allows arbitrary fields that survive `.passthrough()` on coaching and goal_constraints sub-objects end-to-end.
 
@@ -212,11 +214,21 @@ The **decision_review** endpoint is the highest LLM-text-density path — nearly
 
 ### 2.4 explainer
 
-**Status: DEAD CODE**
+**Registered at:** `src/prompts/defaults.ts:1135`
+**Output schema:** `ExplainDiffOutput` (`src/schemas/assist.ts:299`)
+**Status: DEAD CODE** — registered but never loaded or called at runtime.
 
-The `explainer` prompt is registered in the prompt management system but **never loaded or called at runtime**. Two conceptual consumers both bypass it:
-- `/assist/explain-diff` route uses `adapter.explainDiff()` with an inline prompt (not the registered `explainer`)
+Two actual consumers bypass the registered prompt:
+- `/assist/explain-diff` route uses `adapter.explainDiff()` with an inline prompt
 - `explain_results` orchestrator tool uses `buildExplanationPrompt()` — a dynamically constructed prompt
+
+**Registered prompt output fields (all DROPPED — prompt never called):**
+
+| # | Field | Classification | Quality | Assessment |
+|---|-------|---------------|---------|------------|
+| 1 | `rationales[].target` | DROPPED | Medium | Node/edge ID for per-element explanations. Actual consumer produces equivalent. |
+| 2 | `rationales[].why` | DROPPED | High | Per-element causal explanations. Actual consumer already produces equivalent via its own prompt. |
+| 3 | `rationales[].provenance_source` | DROPPED | Low | Provenance tag. Actual consumer already produces this. |
 
 The actual `/assist/explain-diff` consumer:
 
@@ -235,9 +247,22 @@ The `explain_results` orchestrator tool:
 
 ### 2.5 bias_check
 
-**Status: DEAD CODE**
+**Registered at:** `src/prompts/defaults.ts:1156`
+**Output schema:** Inline JSON in prompt text only — no Zod schema was ever created
+**Status: DEAD CODE** — registered but never called. Comment: `(Placeholder - no LLM in current implementation)`.
 
-The `bias_check` prompt is registered but **never used**. The comment says `(Placeholder - no LLM in current implementation)`. The actual `/assist/v1/bias-check` route uses purely deterministic, heuristic-only detection:
+**Registered prompt output fields (all DROPPED — prompt never called):**
+
+| # | Field | Classification | Quality | Assessment |
+|---|-------|---------------|---------|------------|
+| 1 | `findings[].type` | DROPPED | Medium | Bias category name. Deterministic detector produces equivalent `bias_type`. |
+| 2 | `findings[].severity` | DROPPED | Low | Controlled vocabulary enum. Deterministic detector already produces equivalent. |
+| 3 | `findings[].target` | DROPPED | Low | Node/edge ID. Deterministic detector provides `affected_elements[]`. |
+| 4 | `findings[].explanation` | DROPPED | **High** | Free-text LLM explanation of why something appears biased. Deterministic detector produces templated descriptions — LLM prose would be richer and more contextual. |
+| 5 | `findings[].mitigation` | DROPPED | **High** | Free-text LLM corrective action suggestion. Deterministic detector produces generic patches — LLM mitigations would be tailored to the specific bias instance. |
+| 6 | `overall_bias_risk` | DROPPED | Low | Aggregate risk level. Deterministic detector computes equivalent quality score. |
+
+The actual `/assist/v1/bias-check` route uses purely deterministic, heuristic-only detection:
 - `detectBiases()` — structural graph analysis, no LLM
 - `enrichBiasFindings()` — ISL-based causal validation, no LLM
 - `buildBiasMitigationPatches()` — deterministic patch generation, no LLM
@@ -322,16 +347,30 @@ LLM text that is produced but never reaches the user:
 | orchestrator | Preamble lines | DROPPED | Low | Routing metadata (`Mode:`, `Stage:`). Correctly stripped. |
 | repair_edit_graph | `coaching.rerun_recommended` | DROPPED | Low | Same as edit_graph — deterministic replacement is more reliable. |
 | repair_edit_graph | `operations[].rationale` | CONSUMED | Medium | Per-repair rationales only in debug metadata. |
+| repair_edit_graph | `coaching.rerun_recommended` | DROPPED | Low | Same as edit_graph — deterministic replacement is more reliable. |
+| explainer | `rationales[].target` | DROPPED (dead) | Medium | Registered prompt never called. Actual consumer produces equivalent. |
+| explainer | `rationales[].why` | DROPPED (dead) | High | Registered prompt never called. Actual consumer produces equivalent. |
+| explainer | `rationales[].provenance_source` | DROPPED (dead) | Low | Registered prompt never called. Actual consumer produces equivalent. |
+| bias_check | `findings[].type` | DROPPED (dead) | Medium | Registered prompt never called. Deterministic detector produces equivalent. |
+| bias_check | `findings[].severity` | DROPPED (dead) | Low | Controlled vocabulary — deterministic detector produces equivalent. |
+| bias_check | `findings[].target` | DROPPED (dead) | Low | Deterministic detector provides affected_elements[]. |
+| bias_check | `findings[].explanation` | DROPPED (dead) | **High** | LLM prose would be richer and more contextual than templated descriptions from deterministic detector. |
+| bias_check | `findings[].mitigation` | DROPPED (dead) | **High** | LLM mitigations would be tailored to specific bias instance vs generic patches. |
+| bias_check | `overall_bias_risk` | DROPPED (dead) | Low | Aggregate risk level — deterministic detector computes equivalent. |
 
 ### High-Value Opportunities
 
-Three fields stand out as high-value drops that could meaningfully improve the user experience:
+Five fields stand out as high-value drops that could meaningfully improve the user experience:
 
-1. **`causal_claims[]`** — A complete causal reasoning layer that the LLM produces and a validation pipeline processes, but the adapter boundary silently drops. This appears to be a bug, not a design choice.
+1. **`causal_claims[]`** (draft_graph) — A complete causal reasoning layer that the LLM produces and a validation pipeline processes, but the adapter boundary silently drops. This appears to be a bug, not a design choice.
 
-2. **`rationales[].why`** — Per-node explanations present in V1 but lost at V3. Could be surfaced as node tooltips or an "explain this factor" feature.
+2. **`rationales[].why`** (draft_graph) — Per-node explanations present in V1 but lost at V3. Could be surfaced as node tooltips or an "explain this factor" feature.
 
-3. **`operations[].rationale`** — Per-operation edit explanations stripped at `stripOperationMeta()`. Could be surfaced in the edit confirmation UI or as expandable detail on each change.
+3. **`operations[].rationale`** (edit_graph) — Per-operation edit explanations stripped at `stripOperationMeta()`. Could be surfaced in the edit confirmation UI or as expandable detail on each change.
+
+4. **`findings[].explanation`** (bias_check, dead) — If the bias_check LLM prompt were wired, users would get contextual prose explaining why their model appears biased, instead of templated descriptions from the deterministic detector.
+
+5. **`findings[].mitigation`** (bias_check, dead) — If wired, users would get bias mitigations tailored to the specific instance, instead of generic structural patches.
 
 ---
 
@@ -339,41 +378,117 @@ Three fields stand out as high-value drops that could meaningfully improve the u
 
 ### Overview
 
-The codebase uses `.passthrough()` at 20+ schema locations across three tiers:
-1. **LLM adapter schemas** — prevents field loss during parsing
-2. **Internal pipeline schemas** — preserves pipeline-injected metadata between stages
-3. **V3 egress schemas** — allows undeclared fields to reach the API response
+The codebase uses `.passthrough()` at **13 schema locations** on the LLM-to-API critical path. For each location, we compared declared Zod fields against actual LLM output fields and traced which undeclared fields survive to the API response.
+
+**Totals:** 19 undeclared fields reach the API — 16 intentional (ISL/PLoT/UI needs), 3 unintentional or questionable.
 
 The Anthropic structured-output path is **safe** (`additionalProperties: false` constrains LLM output). The OpenAI `json_object` path is **at risk** — arbitrary LLM fields survive `.passthrough()`.
 
-### Fields That Leak to API Response (Undeclared in Zod Egress Schema)
+### Per-Location Inventory
 
-| Field | Source | Egress Schema | Intentional? | Risk |
-|-------|--------|--------------|-------------|------|
-| `nodes[].prior` | LLM / V3 transform (schema-v3.ts:246) | NodeV3 | Yes (ISL needs it) | Low — should be declared |
-| `nodes[].factor_type` | LLM / V3 transform (schema-v3.ts:234) | NodeV3 | Yes (PLoT needs it) | Low — should be declared |
-| `nodes[].extractionType` | LLM / V3 transform (schema-v3.ts:258) | NodeV3 | Yes (metadata) | Low — should be declared |
-| `nodes[].uncertainty_drivers` | LLM / V3 transform (schema-v3.ts:261) | NodeV3 | Yes (metadata) | Low — should be declared |
-| `nodes[].intercept` | LLM / V3 transform (schema-v3.ts:276) | NodeV3 | Yes (ISL needs it) | Low — should be declared |
-| `nodes[].display_value` | LLM / V3 transform (schema-v3.ts:299) | NodeV3 | Yes (UI rendering) | Low — should be declared |
-| `nodes[].interventions` | V3 transform (schema-v3.ts:805) | NodeV3 | Yes (canvas) | Low — option nodes only |
-| `nodes[].is_baseline` | V3 transform (schema-v3.ts:808) | NodeV3 | Yes (PLoT) | Low — option nodes only |
-| `edges[].defaulted` | Pipeline enrichment (schema-v3.ts:523) | EdgeV3 | Yes (trace) | Low — should be declared |
-| `analysis_ready` | Pipeline (schema-v3.ts:878) | CEEGraphResponseV3 | Yes (P0 feature) | Low — should be declared |
-| `draft_warnings` | Pipeline (schema-v3.ts:920) | CEEGraphResponseV3 | Yes (structural) | Low — should be declared |
-| `_retry_suggestion` | Pipeline (schema-v3.ts:1012) | CEEGraphResponseV3 | **Questionable** | **Medium** — exposes internal retry metadata to clients |
-| `trace.pipeline.*` | Pipeline stages | trace inner | Yes (observability) | Low |
+#### PT-1: LLMNode (`shared-schemas.ts:69`)
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `id`, `kind`, `label`, `body`, `category`, `data`, `goal_threshold`, `goal_threshold_raw`, `goal_threshold_unit`, `goal_threshold_cap` |
+| **LLM output** | Above + `prior`, `intercept`, `is_baseline`, `encoding_map`, `display_value` |
+| **Undeclared survivors** | `prior` (YES — schema-v3.ts:246), `intercept` (YES — schema-v3.ts:264), `is_baseline` (YES — option nodes), `display_value` (YES — schema-v3.ts:299) |
+
+Anthropic safe (`additionalProperties: false`). OpenAI: novel node fields blocked by V3 transform fresh-object construction, except the 4 explicitly forwarded fields.
+
+#### PT-2: LLMEdge (`shared-schemas.ts:119`)
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `from`, `to`, `strength`, `exists_probability`, `strength_mean`, `strength_std`, `belief_exists`, `effect_direction`, `edge_type`, `weight`, `belief`, `provenance`, `provenance_source` |
+| **LLM output** | `from`, `to`, `strength`, `exists_probability`, `effect_direction`, `edge_type`, `provenance_source` |
+| **Undeclared survivors** | None — LLM output fields are a subset of declared fields |
+
+Anthropic safe. OpenAI: novel edge fields blocked by V3 transform fresh-object construction.
+
+#### PT-3: LLMDraftResponse (`shared-schemas.ts:137`)
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `nodes`, `edges`, `rationales` |
+| **LLM output** | Above + `coaching`, `goal_constraints`, `causal_claims`, `topology_plan` |
+| **Undeclared survivors** | `coaching` (YES — forwarded by adapter), `goal_constraints` (YES — forwarded by adapter), `causal_claims` (NO — bug: not forwarded by adapter), `topology_plan` (NO — never forwarded) |
+
+Anthropic safe. OpenAI: novel top-level fields blocked by adapter return object (explicit field selection).
+
+#### PT-4: GoalConstraintSchema (`assist.ts:134`)
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `constraint_id`, `node_id`, `operator`, `value`, `label`, `unit`, `source_quote`, `confidence`, `provenance`, `deadline_metadata` |
+| **LLM output** | `constraint_id`, `node_id`, `operator`, `value`, `label`, `unit`, `source_quote`, `confidence`, `provenance` |
+| **Undeclared survivors** | None from current prompts. OpenAI risk: novel fields survive end-to-end. |
+
+#### PT-5: Coaching / strengthen_items (`assist.ts:176`)
+
+| Category | Fields |
+|----------|--------|
+| **Declared (coaching)** | `summary`, `strengthen_items` |
+| **Declared (items)** | `id`, `label`, `detail`, `action_type`, `bias_category` |
+| **LLM output** | Same as declared |
+| **Undeclared survivors** | None from current prompts. OpenAI risk: novel fields on coaching or items survive end-to-end. |
+
+#### PT-6: NodeV3 (`cee-v3.ts:118`) — **8 undeclared fields reach API**
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `id`, `kind`, `label`, `description`, `observed_state`, `category`, `goal_threshold*`, `encoding_map` |
+| **Undeclared on API** | `prior` (schema-v3.ts:246), `factor_type` (:234), `extractionType` (:258), `uncertainty_drivers` (:261), `intercept` (:276), `display_value` (:299), `interventions` (:805, option nodes), `is_baseline` (:808, option nodes) |
+
+All 8 are intentional (ISL/PLoT/UI needs) but should be promoted to declared schema fields.
+
+#### PT-7: EdgeV3 (`cee-v3.ts:172`) — **2 undeclared fields reach API**
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `from`, `to`, `strength`, `exists_probability`, `effect_direction`, `provenance`, `origin`, `edge_type`, `validation` |
+| **Undeclared on API** | `defaulted` (schema-v3.ts:523), `provenance_source` (LLM output) |
+
+Both intentional.
+
+#### PT-8: EdgeProvenanceV3 (`cee-v3.ts:133`) — **2 undeclared fields reach API**
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `source`, `reasoning` |
+| **Undeclared on API** | `quote` (from StructuredProvenance), `location` (from StructuredProvenance) |
+
+**Unintentional** — StructuredProvenance has fields not declared in EdgeProvenanceV3.
+
+#### PT-9: GraphMetaV3 (`cee-v3.ts:391`) — **3 undeclared fields reach API**
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `roots`, `leaves`, `source` |
+| **Undeclared on API** | `suggested_positions`, `graph_hash`, `response_hash` |
+
+All intentional (pipeline-computed).
+
+#### PT-10: CEEGraphResponseV3 (`cee-v3.ts:459`) — **3 undeclared fields reach API**
+
+| Category | Fields |
+|----------|--------|
+| **Declared** | `schema_version`, `nodes`, `edges`, `options`, `goal_node_id`, `validation_warnings`, `goal_constraints`, `coaching`, `causal_claims`, `meta`, `quality`, `trace` |
+| **Undeclared on API** | `analysis_ready` (intentional — P0 feature), `draft_warnings` (intentional), `_retry_suggestion` (**questionable** — exposes internal retry metadata) |
+
+#### PT-11 to PT-13: ObservedStateV3, FactorData, OptionData
+
+- **ObservedStateV3** (`cee-v3.ts:74`): No leak — V3 transform constructs with explicit field mapping.
+- **FactorData** (`graph.ts:96`): `display_value` survives through to API (forwarded explicitly).
+- **OptionData** (`graph.ts:105`): `is_baseline` and `encoding_map` survive (forwarded to option nodes).
 
 ### Uncontrolled Passthrough Paths (OpenAI Only)
 
-These paths allow arbitrary LLM-invented fields to reach the API when using the OpenAI adapter:
-
-| Path | Risk | Mitigation |
-|------|------|-----------|
-| `coaching.*` extra fields | Medium | Anthropic path safe (structured output). OpenAI path: LLM could add `internal_reasoning`, `model_confidence`, etc. |
-| `coaching.strengthen_items[].X` | Medium | Same. Per-item passthrough allows novel fields. |
-| `goal_constraints[].X` | Medium | GoalConstraintSchema uses `.passthrough()`. Novel constraint fields survive end-to-end. |
-| `decision_review.review.*` | **High** (by design) | Entire LLM JSON forwarded. No output Zod schema. Any field reaches client. |
+| Path | Risk | Passthrough Locations | Mitigation |
+|------|------|----------------------|-----------|
+| `coaching.*` extra fields | Medium | PT-3, PT-5, PT-10 | Anthropic path safe. OpenAI: consider Zod `.strip()` on egress. |
+| `goal_constraints[].X` novel fields | Medium | PT-4, PT-10 | Same as coaching. |
+| `decision_review.review.*` | **High** (by design) | N/A — no Zod output schema | Intentional — CEE acts as LLM worker only. |
 
 ### Passthrough Chain Analysis
 
@@ -402,19 +517,23 @@ LLMDraftResponse.passthrough()    -- LLM adapter parse
 
 | Prompt | Status | Text Fields | Passed | Transformed | Gated | Consumed | Dropped |
 |--------|--------|-------------|--------|-------------|-------|----------|---------|
-| draft_graph | Active | 24 | 12 | 6 | 2 | 0 | 4 |
+| draft_graph | Active | 24 | 13 | 6 | 2 | 0 | 3 |
 | edit_graph | Active | 7 | 2 | 1 | 3 | 0 | 1 |
 | repair_graph | Active | 3 | 1 | 0 | 0 | 2 | 0 |
 | validate_graph | Active | 6 | 3 | 2 | 0 | 1 | 0 |
 | decision_review | Active | 18 | 18 | 0 | 0 | 0 | 0 |
-| orchestrator | Active | 10 | 2 | 3 | 1 | 1 | 3 |
+| orchestrator | Active | 10 | 2 | 2 | 1 | 1 | 4 |
 | suggest_options | Active | 5 | 5 | 0 | 0 | 0 | 0 |
 | clarify_brief | Active | 6 | 4 | 1 | 1 | 0 | 0 |
 | critique_graph | Active | 5 | 5 | 0 | 0 | 0 | 0 |
-| explainer | **Dead** | — | — | — | — | — | — |
-| bias_check | **Dead** | — | — | — | — | — | — |
+| explainer | **Dead** | 3 + 5* | 3* | 2* | 0 | 0 | 3 |
+| bias_check | **Dead** | 6 | 0 | 0 | 0 | 0 | 6 |
 | enrich_factors | Active | 5 | 4 | 0 | 1 | 0 | 0 |
 | repair_edit_graph | Active | 7 | 2 | 1 | 0 | 3 | 1 |
+| **Total** | | **110** | **62** | **15** | **8** | **7** | **18** |
+
+*Counts derived from `cee-text-flow-data.json` and verified by `scripts/verify-text-flow-audit.cjs`.*
+*explainer: 3 registered fields (all DROPPED) + 5 fields from actual consumers (3 PASSED_THROUGH + 2 TRANSFORMED).*
 
 ---
 
