@@ -1,0 +1,845 @@
+{
+  "meta": {
+    "audit_date": "2026-04-03",
+    "scope": "All 13 LLM prompts (6 primary + 7 secondary)",
+    "type": "read-only audit",
+    "total_text_fields": 101,
+    "summary": {
+      "passed_through": 62,
+      "transformed": 15,
+      "gated": 8,
+      "consumed_internally": 7,
+      "dropped": 9
+    }
+  },
+  "prompts": {
+    "draft_graph": {
+      "status": "active",
+      "pipeline": "CEE unified pipeline (6-stage)",
+      "entry_point": "src/orchestrator/tools/draft-graph.ts",
+      "egress_schema": "CEEGraphResponseV3 (src/schemas/cee-v3.ts:459)",
+      "fields": [
+        {
+          "field": "topology_plan[]",
+          "type": "string[]",
+          "classification": "DROPPED",
+          "boundary_file": "src/adapters/llm/anthropic.ts",
+          "boundary_line": 984,
+          "boundary_description": "Not extracted by adapter return object",
+          "notes": "Omitted from Anthropic structured schema (anthropic-graph-schema.ts:50). Planning scaffolding.",
+          "dead_text_quality": "Medium",
+          "dead_text_assessment": "Planning scaffolding useful for debugging transparency but low direct user value. Would require UI design for step-by-step build visualization."
+        },
+        {
+          "field": "coaching.summary",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/schemas/cee-v3.ts",
+          "boundary_line": 422,
+          "boundary_description": "Declared in V3 coaching schema",
+          "notes": "Also consumed internally for narration hint via extractCoachingSummary(). May be initialized to empty string if absent."
+        },
+        {
+          "field": "coaching.strengthen_items[].id",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/schemas/cee-v3.ts",
+          "boundary_line": 424,
+          "boundary_description": "Declared in V3 strengthen_items schema"
+        },
+        {
+          "field": "coaching.strengthen_items[].label",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/schemas/cee-v3.ts",
+          "boundary_line": 424,
+          "boundary_description": "Declared in V3 strengthen_items schema"
+        },
+        {
+          "field": "coaching.strengthen_items[].detail",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/schemas/cee-v3.ts",
+          "boundary_line": 424,
+          "boundary_description": "Declared in V3 strengthen_items schema"
+        },
+        {
+          "field": "coaching.strengthen_items[].action_type",
+          "type": "string (enum)",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/unified-pipeline/stages/package.ts",
+          "boundary_line": 159,
+          "boundary_description": "Defaulted to 'improve' if missing"
+        },
+        {
+          "field": "coaching.strengthen_items[].bias_category",
+          "type": "string (optional)",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/schemas/cee-v3.ts",
+          "boundary_line": 424,
+          "boundary_description": "Optional field in V3 schema"
+        },
+        {
+          "field": "causal_claims[]",
+          "type": "discriminated union array",
+          "classification": "DROPPED",
+          "boundary_file": "src/adapters/llm/anthropic.ts",
+          "boundary_line": 984,
+          "boundary_description": "Neither adapter extracts causal_claims from parsed LLM response",
+          "notes": "BUG: Prompt requires it, Zod schema declares it, validation pipeline exists (causal-claims-validation.ts), V3 schema declares it — but adapter boundary drops it.",
+          "dead_text_quality": "High",
+          "dead_text_assessment": "Would let users see explicit causal reasoning (direct effects, mediations, confounders) — directly supports coaching-over-gates philosophy. Entire validation pipeline exists but is unreachable."
+        },
+        {
+          "field": "rationales[].target",
+          "type": "string",
+          "classification": "GATED",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_line": 872,
+          "boundary_description": "Present in V1 response; not carried into V3 transform fresh-object construction",
+          "notes": "Consumed internally for plan annotation."
+        },
+        {
+          "field": "rationales[].why",
+          "type": "string",
+          "classification": "GATED",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_line": 872,
+          "boundary_description": "Present in V1 response; not carried into V3 transform",
+          "dead_text_quality": "High",
+          "dead_text_assessment": "Per-node reasoning that could enhance user understanding of why each factor/outcome was included. Present in V1 but dropped at V3 boundary."
+        },
+        {
+          "field": "goal_constraints[].label",
+          "type": "string (optional)",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/unified-pipeline/stages/compound-goals.ts",
+          "boundary_description": "Merged with regex-extracted constraints; invalid node refs filtered"
+        },
+        {
+          "field": "goal_constraints[].source_quote",
+          "type": "string (optional)",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/unified-pipeline/stages/compound-goals.ts",
+          "boundary_description": "Same merge pipeline"
+        },
+        {
+          "field": "goal_constraints[].unit",
+          "type": "string (optional)",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/unified-pipeline/stages/compound-goals.ts",
+          "boundary_description": "Same merge pipeline"
+        },
+        {
+          "field": "goal_constraints[].provenance",
+          "type": "string (enum, optional)",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/unified-pipeline/stages/compound-goals.ts",
+          "boundary_description": "Same merge pipeline"
+        },
+        {
+          "field": "goal_constraints[].constraint_id",
+          "type": "string",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/unified-pipeline/stages/compound-goals.ts",
+          "boundary_description": "Same merge pipeline"
+        },
+        {
+          "field": "nodes[].label",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_line": 151,
+          "boundary_description": "May be cleaned via cleanNodeLabel() annotation stripping"
+        },
+        {
+          "field": "nodes[].id",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_description": "Direct assignment in V3 node construction"
+        },
+        {
+          "field": "nodes[].data.uncertainty_drivers[]",
+          "type": "string[]",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_line": 261,
+          "boundary_description": "Explicitly forwarded via (v3Node as any)"
+        },
+        {
+          "field": "nodes[].data.unit",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_description": "Mapped into observed_state.unit"
+        },
+        {
+          "field": "nodes[].data.display_value",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_line": 299,
+          "boundary_description": "Explicitly forwarded via (v3Node as any)"
+        },
+        {
+          "field": "nodes[].data.encoding_map",
+          "type": "string (JSON)",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_description": "JSON-stringified, declared in NodeV3 schema"
+        },
+        {
+          "field": "edges[].effect_direction",
+          "type": "string (enum, nullable)",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_description": "Included in V3 edge construction"
+        },
+        {
+          "field": "edges[].provenance_source",
+          "type": "string (optional)",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/transforms/schema-v3.ts",
+          "boundary_description": "Extracted into EdgeProvenanceV3.source"
+        },
+        {
+          "field": "confidence",
+          "type": "number",
+          "classification": "DROPPED",
+          "boundary_file": "src/cee/unified-pipeline/stages/parse.ts",
+          "boundary_line": 71,
+          "boundary_description": "Pipeline overwrites with deterministic calcConfidence(). LLM value never read.",
+          "dead_text_quality": "Low",
+          "dead_text_assessment": "Replaced by deterministic computation. LLM confidence would be unreliable anyway."
+        }
+      ]
+    },
+    "edit_graph": {
+      "status": "active",
+      "pipeline": "Direct LLM call + PLoT validation",
+      "entry_point": "src/orchestrator/tools/edit-graph.ts",
+      "egress_schema": "GraphPatchBlock on EditGraphResult",
+      "fields": [
+        {
+          "field": "operations[].rationale",
+          "type": "string",
+          "classification": "GATED",
+          "boundary_file": "src/orchestrator/tools/edit-graph.ts",
+          "boundary_line": 2630,
+          "boundary_description": "stripOperationMeta() strips rationale; stored in block.provenance._meta.operation_meta (debug only)",
+          "dead_text_quality": "High",
+          "dead_text_assessment": "Would let users understand why each change was proposed, not just what changed — directly supports coaching-over-gates philosophy."
+        },
+        {
+          "field": "operations[].impact",
+          "type": "string (enum)",
+          "classification": "GATED",
+          "boundary_file": "src/orchestrator/tools/edit-graph.ts",
+          "boundary_line": 2630,
+          "boundary_description": "stripOperationMeta() strips impact; stored in block.provenance._meta.operation_meta (debug only)",
+          "dead_text_quality": "Medium",
+          "dead_text_assessment": "Per-operation severity rating. Users could see 'This is a high-impact change' but the operation itself is usually self-explanatory."
+        },
+        {
+          "field": "coaching.summary",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/orchestrator/tools/edit-graph.ts",
+          "boundary_line": 2273,
+          "boundary_description": "Becomes assistantText + patchData.summary via buildPatchSummary()"
+        },
+        {
+          "field": "coaching.rerun_recommended",
+          "type": "boolean",
+          "classification": "DROPPED",
+          "boundary_file": "src/orchestrator/tools/edit-graph.ts",
+          "boundary_line": 2518,
+          "boundary_description": "Parsed but never read. Pipeline uses deterministic buildAppliedChanges() at line 2248.",
+          "dead_text_quality": "Low",
+          "dead_text_assessment": "Replaced by more reliable deterministic computation based on isSubstantiveOperation() + hasExistingAnalysis."
+        },
+        {
+          "field": "warnings[]",
+          "type": "string[]",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/orchestrator/tools/edit-graph.ts",
+          "boundary_line": 2186,
+          "boundary_description": "Merged with PLoT warnings in validation_warnings; LLM warnings also in assistantText as 'Note: ...'"
+        },
+        {
+          "field": "removed_edges[].reason",
+          "type": "string",
+          "classification": "GATED",
+          "boundary_file": "src/orchestrator/tools/edit-graph.ts",
+          "boundary_line": 2234,
+          "boundary_description": "Stored in block.provenance._meta.removed_edges (debug only)",
+          "dead_text_quality": "Medium",
+          "dead_text_assessment": "Tells users which edges were collaterally removed and why. Would help users understand side-effects of node removal."
+        },
+        {
+          "field": "operations[].op/path/value/old_value",
+          "type": "mixed",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/orchestrator/tools/edit-graph.ts",
+          "boundary_line": 1661,
+          "boundary_description": "Normalised, structural defaults enforced, then passed as patchData.operations"
+        }
+      ]
+    },
+    "repair_graph": {
+      "status": "active",
+      "pipeline": "CEE Stage 4 substep",
+      "entry_point": "src/cee/unified-pipeline/stages/repair/orchestrator-validation.ts",
+      "egress_schema": "Replaces ctx.graph (no separate text response)",
+      "fields": [
+        {
+          "field": "graph.nodes[]/edges[]",
+          "type": "GraphT",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/unified-pipeline/stages/repair/orchestrator-validation.ts",
+          "boundary_description": "Replaces ctx.graph after normalisation, baseline-fill, capping, dangling-edge filter, sort"
+        },
+        {
+          "field": "rationales[].violation_code/action",
+          "type": "string",
+          "classification": "CONSUMED_INTERNALLY",
+          "boundary_file": "src/adapters/llm/anthropic.ts",
+          "boundary_description": "Logged if missing; not surfaced to API response",
+          "dead_text_quality": "Medium",
+          "dead_text_assessment": "Per-violation repair explanations. Would help users understand what was auto-fixed and why."
+        },
+        {
+          "field": "usage",
+          "type": "object",
+          "classification": "CONSUMED_INTERNALLY",
+          "boundary_description": "Accumulated into ctx.repairCost for telemetry"
+        }
+      ]
+    },
+    "validate_graph": {
+      "status": "active",
+      "pipeline": "Validation pipeline (Pass 2)",
+      "entry_point": "src/cee/validation-pipeline/validate-graph.ts",
+      "egress_schema": "Edge validation metadata attached in-place",
+      "fields": [
+        {
+          "field": "edges[].reasoning",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/validation-pipeline/validate-graph.ts",
+          "boundary_line": 173,
+          "boundary_description": "Stored in edge.validation.pass2.reasoning. Displayed in calibration tray for contested edges."
+        },
+        {
+          "field": "edges[].basis",
+          "type": "string (enum)",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/validation-pipeline/validate-graph.ts",
+          "boundary_description": "Stored in edge.validation.pass2.basis. Displayed in UI."
+        },
+        {
+          "field": "edges[].needs_user_input",
+          "type": "boolean",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/cee/validation-pipeline/validate-graph.ts",
+          "boundary_description": "Drives UI prompting"
+        },
+        {
+          "field": "edges[].strength.mean",
+          "type": "number",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/validation-pipeline/validate-graph.ts",
+          "boundary_description": "Adjusted by enforcement lints (budget rescale, std clamping, domain_prior ceiling) + bias correction"
+        },
+        {
+          "field": "edges[].strength.std",
+          "type": "number",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/cee/validation-pipeline/validate-graph.ts",
+          "boundary_description": "Same lint + bias correction pipeline"
+        },
+        {
+          "field": "model_notes[]",
+          "type": "string[]",
+          "classification": "CONSUMED_INTERNALLY",
+          "boundary_file": "src/cee/validation-pipeline/types.ts",
+          "boundary_line": 217,
+          "boundary_description": "Stored in validation_summary.model_notes. Comment: 'Not acted on in v1.' Not rendered in UI.",
+          "dead_text_quality": "Low",
+          "dead_text_assessment": "Technical validation notes; not user-appropriate language."
+        }
+      ]
+    },
+    "decision_review": {
+      "status": "active",
+      "pipeline": "Standalone HTTP API",
+      "entry_point": "src/routes/assist.v1.decision-review.ts",
+      "egress_schema": "{ review: <entire LLM JSON>, trace, _meta }",
+      "notes": "Highest LLM-text-density path. Entire LLM JSON forwarded as response.review with shape check + grounding check only.",
+      "fields": [
+        {
+          "field": "narrative_summary",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/routes/assist.v1.decision-review.ts",
+          "boundary_line": 802,
+          "boundary_description": "Shape-checked (required string). Grounding-checked."
+        },
+        {
+          "field": "story_headlines",
+          "type": "Record<option_id, string>",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "Keys validated against option IDs"
+        },
+        {
+          "field": "robustness_explanation.summary",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "Grounding-checked"
+        },
+        {
+          "field": "robustness_explanation.primary_risk",
+          "type": "string",
+          "classification": "PASSED_THROUGH"
+        },
+        {
+          "field": "robustness_explanation.stability_factors[]",
+          "type": "string[]",
+          "classification": "PASSED_THROUGH"
+        },
+        {
+          "field": "robustness_explanation.fragility_factors[]",
+          "type": "string[]",
+          "classification": "PASSED_THROUGH"
+        },
+        {
+          "field": "readiness_rationale",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "Grounding-checked"
+        },
+        {
+          "field": "evidence_enhancements",
+          "type": "Record<factor_id, object>",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "Per-factor: specific_action, rationale, evidence_type, decision_hygiene"
+        },
+        {
+          "field": "scenario_contexts",
+          "type": "Record<edge_id, object> (optional)",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "Keys validated against fragile_edges. Grounding-checked."
+        },
+        {
+          "field": "flip_thresholds[]",
+          "type": "array (optional, max 2)",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "Grounding-checked"
+        },
+        {
+          "field": "bias_findings[].description",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "Grounding-checked. DSK claim IDs hard-validated when enabled."
+        },
+        {
+          "field": "bias_findings[].suggested_action",
+          "type": "string",
+          "classification": "PASSED_THROUGH"
+        },
+        {
+          "field": "key_assumptions[]",
+          "type": "string[] (max 5)",
+          "classification": "PASSED_THROUGH"
+        },
+        {
+          "field": "decision_quality_prompts[].question",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "DSK fields validated when enabled"
+        },
+        {
+          "field": "decision_quality_prompts[].principle",
+          "type": "string",
+          "classification": "PASSED_THROUGH"
+        },
+        {
+          "field": "decision_quality_prompts[].applies_because",
+          "type": "string",
+          "classification": "PASSED_THROUGH"
+        },
+        {
+          "field": "pre_mortem",
+          "type": "object (optional)",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "failure_scenario, warning_signs[], mitigation, grounded_in[]. Grounding-checked."
+        },
+        {
+          "field": "framing_check",
+          "type": "object (optional)",
+          "classification": "PASSED_THROUGH",
+          "boundary_description": "addresses_goal, concern?, suggested_reframe?"
+        }
+      ]
+    },
+    "orchestrator": {
+      "status": "active",
+      "pipeline": "XML envelope parsing -> Phase 4 tools -> Phase 5 envelope assembly",
+      "entry_point": "src/orchestrator/response-parser.ts",
+      "egress_schema": "OrchestratorResponseEnvelopeV2",
+      "fields": [
+        {
+          "field": "<assistant_text>",
+          "type": "string",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/orchestrator/pipeline/phase5-validation/envelope-assembler.ts",
+          "boundary_line": 201,
+          "boundary_description": "XML entity unescaped. Fallback chain: tool text > LLM text > hardcoded generic.",
+          "notes": "Guard at Phase 5 ensures assistant_text is never null/empty in final envelope."
+        },
+        {
+          "field": "<block type='commentary'>",
+          "type": "block",
+          "classification": "TRANSFORMED",
+          "boundary_file": "src/orchestrator/turn-handler.ts",
+          "boundary_line": 1076,
+          "boundary_description": "Parsed from XML, entity-unescaped, converted to TypedConversationBlock with source 'llm:xml'"
+        },
+        {
+          "field": "<block type='review_card'>",
+          "type": "block",
+          "classification": "TRANSFORMED",
+          "boundary_description": "Entity-unescaped. Tone validated (facilitator/challenger, defaults to facilitator)."
+        },
+        {
+          "field": "<block type='artefact'>",
+          "type": "block",
+          "classification": "GATED",
+          "boundary_description": "Content raw (no unescaping). Feature-gated by artefactRenderingEnabled; if disabled, replaced with fallback commentary."
+        },
+        {
+          "field": "<block type='fact'>",
+          "type": "block",
+          "classification": "DROPPED",
+          "boundary_file": "src/orchestrator/response-parser.ts",
+          "boundary_line": 126,
+          "boundary_description": "Safety rule: NEVER parsed from LLM text. ALLOWED_BLOCK_TYPES excludes 'fact'. Server-constructed only."
+        },
+        {
+          "field": "<block type='graph_patch'>",
+          "type": "block",
+          "classification": "DROPPED",
+          "boundary_file": "src/orchestrator/response-parser.ts",
+          "boundary_line": 126,
+          "boundary_description": "Safety rule: NEVER parsed from LLM text. Server-constructed only."
+        },
+        {
+          "field": "Unknown block types",
+          "type": "block",
+          "classification": "DROPPED",
+          "boundary_description": "Warning emitted; block discarded"
+        },
+        {
+          "field": "<suggested_actions>/<action>",
+          "type": "action",
+          "classification": "PASSED_THROUGH",
+          "boundary_file": "src/orchestrator/pipeline/phase5-validation/envelope-assembler.ts",
+          "boundary_line": 195,
+          "boundary_description": "Entity-unescaped. Role validated. Parser cap=4, assembler cap=3. Merged with tool + rescue actions.",
+          "notes": "Rescue path: if 0 actions parsed, rescueInlineActions() extracts from assistant_text."
+        },
+        {
+          "field": "<diagnostics>",
+          "type": "string",
+          "classification": "CONSUMED_INTERNALLY",
+          "boundary_file": "src/orchestrator/pipeline/phase5-validation/envelope-assembler.ts",
+          "boundary_line": 332,
+          "boundary_description": "Parsed for Mode: -> response_mode. Production-gated on envelope. Suppressed from streaming."
+        },
+        {
+          "field": "Preamble lines (Mode:, Stage:, etc.)",
+          "type": "string",
+          "classification": "DROPPED",
+          "boundary_file": "src/orchestrator/response-parser.ts",
+          "boundary_line": 198,
+          "boundary_description": "stripDiagnosticsPreamble() removes before first XML tag"
+        }
+      ]
+    },
+    "suggest_options": {
+      "status": "active",
+      "pipeline": "Standalone HTTP API",
+      "entry_point": "src/routes/assist.suggest-options.ts",
+      "egress_schema": "SuggestOptionsOutput",
+      "fields": [
+        { "field": "options[].id", "type": "string", "classification": "PASSED_THROUGH" },
+        { "field": "options[].title", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "Validated min 3 chars" },
+        { "field": "options[].pros", "type": "string[]", "classification": "PASSED_THROUGH", "boundary_description": "Validated 2-3 items" },
+        { "field": "options[].cons", "type": "string[]", "classification": "PASSED_THROUGH", "boundary_description": "Validated 2-3 items" },
+        { "field": "options[].evidence_to_gather", "type": "string[]", "classification": "PASSED_THROUGH", "boundary_description": "Validated 2-3 items" }
+      ]
+    },
+    "clarify_brief": {
+      "status": "active",
+      "pipeline": "Standalone HTTP API + orchestrator clarifier",
+      "entry_point": "src/routes/assist.clarify-brief.ts + src/cee/clarifier/question-generator.ts",
+      "fields": [
+        { "field": "questions[].question", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "MCQ-first sort order" },
+        { "field": "questions[].choices", "type": "string[] (optional)", "classification": "PASSED_THROUGH", "boundary_description": "Drives MCQ sort priority" },
+        { "field": "questions[].why_we_ask", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "Validated min 20 chars" },
+        { "field": "questions[].impacts_draft", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "Validated min 20 chars" },
+        { "field": "confidence", "type": "number", "classification": "GATED", "boundary_description": "Drives stop rule: >= 0.8 forces should_continue = false" },
+        { "field": "should_continue", "type": "boolean", "classification": "TRANSFORMED", "boundary_description": "Overridden when confidence >= 0.8" }
+      ],
+      "notes": "Orchestrator clarifier path only uses questions[0]; questions[1..n] are DROPPED (Medium value)."
+    },
+    "critique_graph": {
+      "status": "active",
+      "pipeline": "Standalone HTTP API",
+      "entry_point": "src/routes/assist.critique-graph.ts",
+      "fields": [
+        { "field": "issues[].level", "type": "string (enum)", "classification": "PASSED_THROUGH", "boundary_description": "Sorted: BLOCKER > IMPROVEMENT > OBSERVATION" },
+        { "field": "issues[].note", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "Validated 10-280 chars; sort tiebreaker" },
+        { "field": "issues[].target", "type": "string (optional)", "classification": "PASSED_THROUGH" },
+        { "field": "suggested_fixes", "type": "string[]", "classification": "PASSED_THROUGH", "boundary_description": "Max 5" },
+        { "field": "overall_quality", "type": "string (enum, optional)", "classification": "PASSED_THROUGH" }
+      ]
+    },
+    "explainer": {
+      "status": "DEAD_CODE",
+      "notes": "Registered prompt is never loaded or called at runtime. Two consumers bypass it: /assist/explain-diff uses adapter.explainDiff() with inline prompt; explain_results tool uses buildExplanationPrompt().",
+      "actual_consumers": {
+        "explain_diff_route": {
+          "fields": [
+            { "field": "rationales[].target", "type": "string", "classification": "PASSED_THROUGH" },
+            { "field": "rationales[].why", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "Validated max 280 chars" },
+            { "field": "rationales[].provenance_source", "type": "string (optional)", "classification": "PASSED_THROUGH" }
+          ]
+        },
+        "explain_results_tool": {
+          "fields": [
+            { "field": "free-text LLM response", "type": "string", "classification": "TRANSFORMED", "boundary_description": "Stripped of ungrounded numerics, cleaned, wrapped in CommentaryBlock" },
+            { "field": "first sentence (headline)", "type": "string", "classification": "TRANSFORMED", "boundary_description": "Extracted as assistantText (max 150 chars)" }
+          ]
+        }
+      }
+    },
+    "bias_check": {
+      "status": "DEAD_CODE",
+      "notes": "Registered prompt is never used. Comment says '(Placeholder - no LLM in current implementation)'. Route uses purely deterministic heuristics: detectBiases() + enrichBiasFindings() + buildBiasMitigationPatches(). No LLM call made.",
+      "fields": []
+    },
+    "enrich_factors": {
+      "status": "active",
+      "pipeline": "Review service -> HTTP API",
+      "entry_point": "src/services/review/enrichFactors.ts",
+      "notes": "Uses direct import ENRICH_FACTORS_PROMPT, not getSystemPrompt('enrich_factors')",
+      "fields": [
+        { "field": "enrichments[].factor_id", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "Matched against controllable factors" },
+        { "field": "enrichments[].sensitivity_rank", "type": "number", "classification": "PASSED_THROUGH", "boundary_description": "Used for filtering (rank > maxRank dropped)" },
+        { "field": "enrichments[].observations", "type": "string[]", "classification": "PASSED_THROUGH", "boundary_description": "Validated 1-2 items" },
+        { "field": "enrichments[].perspectives", "type": "string[]", "classification": "PASSED_THROUGH", "boundary_description": "Validated 1-2 items" },
+        { "field": "enrichments[].confidence_question", "type": "string (optional)", "classification": "GATED", "boundary_description": "Stripped if sensitivity_rank > 3 (defense-in-depth gate)" }
+      ]
+    },
+    "repair_edit_graph": {
+      "status": "active",
+      "pipeline": "Edit-graph repair substep",
+      "entry_point": "src/orchestrator/tools/edit-graph.ts:1547",
+      "fields": [
+        { "field": "operations[]", "type": "PatchOperation[]", "classification": "TRANSFORMED", "boundary_description": "Same pipeline as edit_graph: stripOperationMeta -> normalise -> structural defaults -> validate" },
+        {
+          "field": "operations[].rationale",
+          "type": "string",
+          "classification": "CONSUMED_INTERNALLY",
+          "boundary_description": "Stripped into debug metadata _meta.operation_meta",
+          "dead_text_quality": "Medium",
+          "dead_text_assessment": "Per-repair rationales explain why the LLM made each repair. Only visible in debug provenance."
+        },
+        {
+          "field": "operations[].impact",
+          "type": "string",
+          "classification": "CONSUMED_INTERNALLY",
+          "boundary_description": "Stripped into debug metadata _meta.operation_meta"
+        },
+        {
+          "field": "removed_edges[]",
+          "type": "array",
+          "classification": "CONSUMED_INTERNALLY",
+          "boundary_description": "Stored in _meta.removed_edges"
+        },
+        { "field": "warnings[]", "type": "string[]", "classification": "PASSED_THROUGH", "boundary_description": "In assistantText + validation_warnings" },
+        { "field": "coaching.summary", "type": "string", "classification": "PASSED_THROUGH", "boundary_description": "In assistantText + patchData.summary" },
+        {
+          "field": "coaching.rerun_recommended",
+          "type": "boolean",
+          "classification": "DROPPED",
+          "boundary_description": "Ignored; deterministic computation used instead",
+          "dead_text_quality": "Low",
+          "dead_text_assessment": "Replaced by deterministic computation. LLM may hallucinate rerun need."
+        }
+      ]
+    }
+  },
+  "passthrough_leaks": {
+    "description": "Fields that reach the API response via .passthrough() but are NOT declared in the Zod egress schema",
+    "intentional_leaks": [
+      {
+        "field": "nodes[].prior",
+        "source": "LLM / V3 transform",
+        "egress_schema": "NodeV3 (cee-v3.ts:118)",
+        "set_at": "schema-v3.ts:246",
+        "reason": "ISL needs prior distribution data",
+        "risk": "Low"
+      },
+      {
+        "field": "nodes[].factor_type",
+        "source": "LLM / V3 transform",
+        "egress_schema": "NodeV3",
+        "set_at": "schema-v3.ts:234",
+        "reason": "PLoT needs factor_type",
+        "risk": "Low"
+      },
+      {
+        "field": "nodes[].extractionType",
+        "source": "LLM / V3 transform",
+        "egress_schema": "NodeV3",
+        "set_at": "schema-v3.ts:258",
+        "reason": "Metadata for extraction provenance",
+        "risk": "Low"
+      },
+      {
+        "field": "nodes[].uncertainty_drivers",
+        "source": "LLM / V3 transform",
+        "egress_schema": "NodeV3",
+        "set_at": "schema-v3.ts:261",
+        "reason": "Factor uncertainty metadata",
+        "risk": "Low"
+      },
+      {
+        "field": "nodes[].intercept",
+        "source": "LLM / V3 transform",
+        "egress_schema": "NodeV3",
+        "set_at": "schema-v3.ts:276",
+        "reason": "ISL needs intercept",
+        "risk": "Low"
+      },
+      {
+        "field": "nodes[].display_value",
+        "source": "LLM / V3 transform",
+        "egress_schema": "NodeV3",
+        "set_at": "schema-v3.ts:299",
+        "reason": "UI rendering",
+        "risk": "Low"
+      },
+      {
+        "field": "nodes[].interventions",
+        "source": "V3 transform (option nodes)",
+        "egress_schema": "NodeV3",
+        "set_at": "schema-v3.ts:805",
+        "reason": "Canvas display for option nodes",
+        "risk": "Low"
+      },
+      {
+        "field": "nodes[].is_baseline",
+        "source": "V3 transform (option nodes)",
+        "egress_schema": "NodeV3",
+        "set_at": "schema-v3.ts:808",
+        "reason": "PLoT baseline identification",
+        "risk": "Low"
+      },
+      {
+        "field": "edges[].defaulted",
+        "source": "Pipeline enrichment",
+        "egress_schema": "EdgeV3 (cee-v3.ts:172)",
+        "set_at": "schema-v3.ts:523",
+        "reason": "F5 trace for enrichment-created edges",
+        "risk": "Low"
+      },
+      {
+        "field": "analysis_ready",
+        "source": "Pipeline",
+        "egress_schema": "CEEGraphResponseV3 (cee-v3.ts:459)",
+        "set_at": "schema-v3.ts:878",
+        "reason": "P0 feature",
+        "risk": "Low"
+      },
+      {
+        "field": "draft_warnings",
+        "source": "Pipeline",
+        "egress_schema": "CEEGraphResponseV3",
+        "set_at": "schema-v3.ts:920",
+        "reason": "Structural warnings array",
+        "risk": "Low"
+      }
+    ],
+    "questionable_leaks": [
+      {
+        "field": "_retry_suggestion",
+        "source": "Pipeline (schema-v3.ts:1012)",
+        "egress_schema": "CEEGraphResponseV3",
+        "shape": "{ should_retry: boolean, reason: string, missing_factor_terms: string[] }",
+        "reason": "Internal retry hint. Underscore prefix suggests internal use.",
+        "risk": "Medium",
+        "recommendation": "Either declare in Zod schema or strip before serialization"
+      }
+    ],
+    "uncontrolled_paths": [
+      {
+        "path": "coaching.* extra fields (OpenAI only)",
+        "risk": "Medium",
+        "description": "Anthropic structured output constrains fields. OpenAI json_object mode allows arbitrary fields that survive .passthrough() on coaching and strengthen_items objects end-to-end.",
+        "mitigation": "Anthropic path safe. OpenAI path: consider Zod .strip() on egress or structured output mode."
+      },
+      {
+        "path": "goal_constraints[].X novel fields (OpenAI only)",
+        "risk": "Medium",
+        "description": "GoalConstraintSchema uses .passthrough(). Novel constraint fields from OpenAI LLM survive end-to-end.",
+        "mitigation": "Same as coaching."
+      },
+      {
+        "path": "decision_review.review.* (all providers)",
+        "risk": "High (by design)",
+        "description": "Entire LLM JSON forwarded as response.review with no Zod output schema. Any field the LLM produces reaches the client.",
+        "mitigation": "Intentional design — CEE acts as LLM worker only for this endpoint."
+      }
+    ]
+  },
+  "transformation_points": [
+    { "id": "T1", "file": "src/cee/unified-pipeline/stages/package.ts", "lines": "119-153", "type": "inject", "description": "Status quo coaching injection" },
+    { "id": "T2", "file": "src/cee/unified-pipeline/stages/package.ts", "lines": "155-165", "type": "default", "description": "strengthen_item.action_type defaulted to 'improve'" },
+    { "id": "T3", "file": "src/cee/unified-pipeline/stages/package.ts", "lines": "167-190", "type": "gate", "description": "Causal claims validated (currently dead code)" },
+    { "id": "T4", "file": "src/cee/transforms/response-caps.ts", "type": "truncate", "description": "applyResponseCaps() truncates list fields" },
+    { "id": "T5", "file": "src/cee/unified-pipeline/stages/package.ts", "lines": "342-347", "type": "generate", "description": "Deterministic guidance text from buildCeeGuidance()" },
+    { "id": "T6", "file": "src/cee/unified-pipeline/stages/package.ts", "lines": "219-312", "type": "generate", "description": "Structural warnings (deterministic)" },
+    { "id": "T7", "file": "src/cee/transforms/schema-v3.ts", "lines": "151-168", "type": "clean", "description": "Node label annotation stripping via cleanNodeLabel()" },
+    { "id": "T8", "file": "src/cee/transforms/schema-v3.ts", "lines": "435-529", "type": "transform", "description": "Edge provenance extraction for V3" },
+    { "id": "T9", "file": "src/cee/unified-pipeline/stages/boundary.ts", "lines": "65-113", "type": "generate", "description": "Model adjustment mapping" },
+    { "id": "T10", "file": "src/orchestrator/response-parser.ts", "lines": "198-256", "type": "strip", "description": "Diagnostics preamble stripping" },
+    { "id": "T11", "file": "src/orchestrator/response-parser.ts", "lines": "427-464", "type": "rescue", "description": "Inline action extraction from assistant_text" },
+    { "id": "T12", "file": "src/orchestrator/pipeline/phase5-validation/envelope-assembler.ts", "lines": "195-197", "type": "truncate", "description": "Suggested actions capped at 3" },
+    { "id": "T13", "file": "src/orchestrator/pipeline/phase5-validation/envelope-assembler.ts", "lines": "201-204", "type": "fallback", "description": "assistant_text fallback to generic text" },
+    { "id": "T14", "file": "src/orchestrator/tools/draft-graph.ts", "lines": "424-446", "type": "compose", "description": "coaching.summary -> patch summary -> assistantText" },
+    { "id": "T15", "file": "src/orchestrator/tools/edit-graph.ts", "lines": "2268-2282", "type": "compose", "description": "coaching.summary -> assistantText" },
+    { "id": "T16", "file": "src/orchestrator/tools/edit-graph.ts", "lines": "2630", "type": "strip", "description": "stripOperationMeta() removes rationale/impact" },
+    { "id": "T17", "file": "src/cee/validation-pipeline/validate-graph.ts", "type": "adjust", "description": "Enforcement lints + bias correction on Pass 2 estimates" }
+  ],
+  "dead_prompts": [
+    {
+      "name": "explainer",
+      "reason": "Registered but never loaded. /assist/explain-diff uses inline prompt; explain_results uses buildExplanationPrompt()."
+    },
+    {
+      "name": "bias_check",
+      "reason": "Registered but never used. Route uses purely deterministic heuristics (no LLM)."
+    }
+  ],
+  "verification": {
+    "spot_checks_total": 9,
+    "spot_checks_verified": 8,
+    "spot_checks_failed": 0,
+    "spot_checks_clarified": 1,
+    "clarification": "Check 3 (coaching.rerun_recommended): The LLM's value is parsed but the DETERMINISTIC value from buildAppliedChanges() is what drives downstream logic. Comment at edit-graph.ts:2243-2244 is explicit."
+  }
+}
