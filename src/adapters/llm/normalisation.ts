@@ -530,7 +530,9 @@ export function normaliseDraftResponse(raw: unknown): unknown {
       // to the flat schema; only option nodes should retain interventions.
       // Without this, the empty array keeps data alive after handleUnreachableFactors
       // deletes data.value, causing Zod NodeData union failures (invalid_union).
-      if (node.kind !== 'option' && node.data && typeof node.data === 'object' && node.data.interventions !== undefined) {
+      // Uses key-presence ("in") rather than !== undefined so that null-coerced-
+      // to-undefined sentinels are also caught.
+      if (node.kind !== 'option' && node.data && typeof node.data === 'object' && "interventions" in node.data) {
         const { interventions: _sentinel, ...restData } = node.data;
         node = { ...node, data: Object.keys(restData).length > 0 ? restData : undefined };
       }

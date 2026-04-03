@@ -1140,6 +1140,17 @@ ${brief}
 
       const parsed = parseResult.data;
 
+      // Warn when repair rationales are missing — the repair prompt requests one
+      // rationale per violation, so an empty array may indicate the LLM dropped
+      // audit output. The graph is still usable, but repair quality is opaque.
+      if (!parsed.rationales || parsed.rationales.length === 0) {
+        log.warn({
+          event: 'llm.repair.rationales_missing',
+          adapter: 'openai',
+          request_id: opts.requestId,
+        }, "OpenAI repair response contained no rationales — repair audit trail unavailable");
+      }
+
       // Cap node/edge counts with structured telemetry
       const nodesBefore = parsed.nodes.length;
       const edgesBefore = parsed.edges.length;

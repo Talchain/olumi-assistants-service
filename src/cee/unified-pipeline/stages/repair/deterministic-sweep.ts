@@ -536,7 +536,13 @@ function fixExternalHasData(
     // This is only reachable when changed=true (value was just deleted), because the
     // validator only flags EXTERNAL_HAS_DATA when data.value is present. A metadata-only
     // data object without value would not trigger this sweep at all.
-    if (changed && !("interventions" in data) && !("operator" in data) && !("value" in data)) {
+    // Uses semantic checks (not key-presence) so that sentinel residue like
+    // interventions: undefined doesn't prevent data deletion.
+    const hasInterventions = data.interventions && typeof data.interventions === 'object'
+      && !Array.isArray(data.interventions) && Object.keys(data.interventions).length > 0;
+    const hasOperator = typeof data.operator === 'string';
+    const hasValue = typeof data.value === 'number';
+    if (changed && !hasInterventions && !hasOperator && !hasValue) {
       deletions.push(fieldDeletion('deterministic-sweep', node.id, 'data', 'EXTERNAL_HAS_DATA'));
       delete (node as any).data;
     }

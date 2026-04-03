@@ -10,6 +10,8 @@
  * a boolean plus supporting detail where applicable.
  */
 
+import { isLegalStructuralEdge } from "../utils/structural-edge-classifier.js";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -24,7 +26,7 @@ export interface DiagnosticChecks {
   /**
    * Whether causal edges have differentiated exists_probability values.
    * True when ≥2 distinct values exist on causal (non-structural) edges.
-   * Structural edges (decision→option, option→factor/outcome/risk) are excluded
+   * Structural edges (decision→option, option→factor) are excluded
    * by topology — they are definitional, not probabilistic.
    */
   confidence_differentiated: boolean;
@@ -44,22 +46,6 @@ export interface DiagnosticChecks {
    */
   is_baseline_present: boolean;
 }
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/**
- * Node kinds whose outbound edges to option/factor/outcome/risk are structural
- * (decision→option, option→factor/outcome/risk). Used for topological exclusion
- * in the confidence differentiation check.
- *
- * V3 edges do NOT carry a structural marker — edge_type is only present on
- * bidirected (confounding) edges. Structural classification must be derived
- * from node kinds on both endpoints.
- */
-const STRUCTURAL_FROM_KINDS = new Set(['decision', 'option']);
-const STRUCTURAL_TO_KINDS = new Set(['option', 'factor', 'outcome', 'risk']);
 
 // ============================================================================
 // Public API
@@ -110,9 +96,10 @@ function checkCeeTracePresent(pipelineTrace: Record<string, unknown>): boolean {
  *
  * Returns true when ≥2 distinct exists_probability values exist among
  * causal (non-structural) edges. Structural edges are identified by
- * topology (from/to node kinds), not by edge_type — V3 edges only carry
- * edge_type for bidirected (confounding) edges; decision→option and
- * option→factor/outcome/risk edges never have an edge_type marker.
+ * topology (from/to node kinds) via the shared classifier, not by
+ * edge_type — V3 edges only carry edge_type for bidirected (confounding)
+ * edges; decision→option and option→factor edges never have an edge_type
+ * marker.
  */
 function checkConfidenceDifferentiation(
   v3Body: Record<string, unknown>,
@@ -140,16 +127,11 @@ function checkConfidenceDifferentiation(
   for (const edge of edges) {
     if (!edge) continue;
 
-    // Exclude structural edges by topology:
-    // decision→option, option→factor/outcome/risk are definitional links,
-    // not probabilistic causal estimates.
+    // Exclude legal structural edges (decision→option, option→factor) by
+    // topology. Uses the shared classifier so all sites stay in sync.
     const fromKind = kindById.get(edge.from as string);
     const toKind = kindById.get(edge.to as string);
-    if (
-      fromKind && toKind &&
-      STRUCTURAL_FROM_KINDS.has(fromKind) &&
-      STRUCTURAL_TO_KINDS.has(toKind)
-    ) continue;
+    if (isLegalStructuralEdge(fromKind, toKind)) continue;
 
     const prob = edge.exists_probability;
     if (typeof prob === 'number') {

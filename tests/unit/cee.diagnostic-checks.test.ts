@@ -217,6 +217,77 @@ describe("computeDiagnosticChecks", () => {
       expect(checks.confidence_unique_values).toEqual([0.7, 1.0]);
     });
 
+    it("does NOT exclude option→outcome (forbidden topology — must be visible as causal)", () => {
+      const v3 = {
+        nodes: [
+          { id: "opt_a", kind: "option" },
+          { id: "out_1", kind: "outcome" },
+          { id: "fac_1", kind: "factor" },
+          { id: "goal_1", kind: "goal" },
+        ],
+        edges: [
+          { from: "opt_a", to: "out_1", exists_probability: 0.9 },  // forbidden — must NOT be excluded
+          { from: "fac_1", to: "goal_1", exists_probability: 0.6 }, // causal
+        ],
+      };
+      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
+      expect(checks.confidence_differentiated).toBe(true);
+      expect(checks.confidence_unique_values).toEqual([0.6, 0.9]);
+    });
+
+    it("does NOT exclude decision→factor (forbidden topology — must be visible as causal)", () => {
+      const v3 = {
+        nodes: [
+          { id: "dec_1", kind: "decision" },
+          { id: "fac_1", kind: "factor" },
+          { id: "fac_2", kind: "factor" },
+          { id: "goal_1", kind: "goal" },
+        ],
+        edges: [
+          { from: "dec_1", to: "fac_1", exists_probability: 0.7 },  // forbidden — must NOT be excluded
+          { from: "fac_2", to: "goal_1", exists_probability: 0.5 }, // causal
+        ],
+      };
+      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
+      expect(checks.confidence_differentiated).toBe(true);
+      expect(checks.confidence_unique_values).toEqual([0.5, 0.7]);
+    });
+
+    it("treats edges with unresolvable node kinds as causal (not excluded)", () => {
+      // Nodes not in the kindById map — fromKind/toKind are undefined
+      const v3 = {
+        nodes: [
+          { id: "x_1", kind: "factor" },
+          { id: "goal_1", kind: "goal" },
+        ],
+        edges: [
+          { from: "unknown_1", to: "unknown_2", exists_probability: 0.4 }, // unresolvable
+          { from: "x_1", to: "goal_1", exists_probability: 0.8 },         // causal
+        ],
+      };
+      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
+      expect(checks.confidence_differentiated).toBe(true);
+      expect(checks.confidence_unique_values).toEqual([0.4, 0.8]);
+    });
+
+    it("does NOT exclude option→risk (forbidden topology — must be visible as causal)", () => {
+      const v3 = {
+        nodes: [
+          { id: "opt_a", kind: "option" },
+          { id: "risk_1", kind: "risk" },
+          { id: "fac_1", kind: "factor" },
+          { id: "goal_1", kind: "goal" },
+        ],
+        edges: [
+          { from: "opt_a", to: "risk_1", exists_probability: 0.85 },  // forbidden — must NOT be excluded
+          { from: "fac_1", to: "goal_1", exists_probability: 0.55 },  // causal
+        ],
+      };
+      const checks = computeDiagnosticChecks(v3, makeEmptyTrace());
+      expect(checks.confidence_differentiated).toBe(true);
+      expect(checks.confidence_unique_values).toEqual([0.55, 0.85]);
+    });
+
     it("handles graph.edges and graph.nodes paths (nested under graph)", () => {
       const v3 = {
         graph: {
