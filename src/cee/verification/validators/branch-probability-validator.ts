@@ -1,4 +1,3 @@
-import type { GraphV1 } from "../../../contracts/plot/engine.js";
 import type { VerificationContext, VerificationResult, VerificationStage } from "../types.js";
 
 /**
