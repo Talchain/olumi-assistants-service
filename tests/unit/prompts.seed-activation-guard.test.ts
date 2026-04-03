@@ -90,8 +90,21 @@ describe('Prompt Activation Guard', () => {
     mockRepo.warmCache.mockResolvedValue(undefined);
   });
 
-  describe('guard enabled (default)', () => {
+  describe('auto-migrate disabled (default)', () => {
+    it('does not run migration at all when autoMigrateEnabled is false (default)', async () => {
+      // autoMigrateEnabled defaults to false — no config override needed
+      const result = await initializeAndSeedPrompts();
+
+      expect(result.success).toBe(true);
+      expect(mockRepo.get).not.toHaveBeenCalled();
+      expect(mockRepo.createVersion).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('guard enabled (default), auto-migrate on', () => {
     it('creates version but does NOT activate it', async () => {
+      state.promptsConfig = { autoMigrateEnabled: true };
+
       // Existing prompt in store with a different staging version hash
       mockRepo.get.mockResolvedValue({
         taskId: 'orchestrator',
@@ -148,9 +161,9 @@ describe('Prompt Activation Guard', () => {
     });
   });
 
-  describe('guard disabled', () => {
+  describe('guard disabled, auto-migrate on', () => {
     it('creates version AND activates it (old behavior)', async () => {
-      state.promptsConfig = { activationGuardEnabled: false };
+      state.promptsConfig = { activationGuardEnabled: false, autoMigrateEnabled: true };
 
       mockRepo.get.mockResolvedValue({
         taskId: 'orchestrator',
@@ -191,8 +204,10 @@ describe('Prompt Activation Guard', () => {
     });
   });
 
-  describe('hash match (early exit)', () => {
+  describe('hash match (early exit), auto-migrate on', () => {
     it('does not create version when staging hash matches default', async () => {
+      state.promptsConfig = { autoMigrateEnabled: true };
+
       mockRepo.get.mockResolvedValue({
         taskId: 'orchestrator',
         stagingVersion: 3,
@@ -222,6 +237,8 @@ describe('Prompt Activation Guard', () => {
     });
 
     it('does not create version when active hash matches default', async () => {
+      state.promptsConfig = { autoMigrateEnabled: true };
+
       mockRepo.get.mockResolvedValue({
         taskId: 'orchestrator',
         stagingVersion: undefined,

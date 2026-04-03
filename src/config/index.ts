@@ -589,6 +589,7 @@ const ConfigSchema = z.object({
     useStaging: booleanString.optional(), // Explicit override: true = use staging prompts, false = use production prompts
     environment: z.string().optional(), // Environment name for prompt selection (e.g., "staging", "production"). Falls back to DD_ENV.
     activationGuardEnabled: booleanString.default(true), // CEE_PROMPT_ACTIVATION_GUARD_ENABLED — prevents automated processes from setting stagingVersion/activeVersion
+    autoMigrateEnabled: booleanString.default(false), // CEE_PROMPT_AUTO_MIGRATE — enables auto-migration of orchestrator prompt from registered default on startup (default: off)
   }),
 });
 
@@ -938,6 +939,7 @@ function parseConfig(): Config {
       useStaging: env.PROMPTS_USE_STAGING,
       environment: env.PROMPTS_ENVIRONMENT ?? env.DD_ENV, // PROMPTS_ENVIRONMENT takes precedence over DD_ENV
       activationGuardEnabled: env.CEE_PROMPT_ACTIVATION_GUARD_ENABLED,
+      autoMigrateEnabled: env.CEE_PROMPT_AUTO_MIGRATE,
     },
   };
 

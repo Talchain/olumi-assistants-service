@@ -84,7 +84,10 @@ export async function initializeAndSeedPrompts(force = false): Promise<SeedResul
     const result = await repo.seedDefaults(force);
 
     // Step 3b: Ensure orchestrator staging version matches registered default
-    if (shouldUseStagingPrompts()) {
+    // Gated behind CEE_PROMPT_AUTO_MIGRATE (default: false) to prevent phantom
+    // version creation on every startup when admin-uploaded content differs from
+    // the registered default in defaults.ts.
+    if (shouldUseStagingPrompts() && config.prompts?.autoMigrateEnabled) {
       await ensureOrchestratorStagingVersion(repo);
     }
 
