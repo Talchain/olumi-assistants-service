@@ -181,13 +181,14 @@ export async function checkSeedStatus(): Promise<{
 // ============================================================================
 
 /**
- * Ensure the orchestrator prompt in the store has a staging version whose
+ * Ensure the orchestrator prompt in the store has a version whose
  * content matches the registered default (cf-v28).
  *
- * If the current staging version's content hash differs from the default,
- * creates a new version and sets it as the staging version. This allows
- * prompt updates to be deployed via code without manual admin API calls.
+ * Scans ALL existing versions for a hash match before creating a new one,
+ * preventing duplicate writes when a previous migration was blocked by
+ * the activation guard.
  *
+ * Only called when CEE_PROMPT_AUTO_MIGRATE=true (see caller gate).
  * Non-destructive: never modifies the active (production) version.
  */
 async function ensureOrchestratorStagingVersion(
@@ -209,24 +210,14 @@ async function ensureOrchestratorStagingVersion(
       return;
     }
 
-    // Check if staging version already matches
-    if (existing.stagingVersion) {
-      const stagingVer = existing.versions.find(v => v.version === existing.stagingVersion);
-      if (stagingVer?.contentHash === defaultHash) {
-        log.debug(
-          { prompt_id: PROMPT_ID, staging_version: existing.stagingVersion, hash: defaultHash.slice(0, 16) },
-          'Orchestrator staging version already matches default — no migration needed',
-        );
-        return;
-      }
-    }
-
-    // Also check if the active version already matches (no staging version needed)
-    const activeVer = existing.versions.find(v => v.version === existing.activeVersion);
-    if (activeVer?.contentHash === defaultHash) {
+    // Check if ANY existing version already matches the default hash.
+    // This prevents duplicate version creation when the activation guard
+    // blocked a previous migration (version exists but was never activated).
+    const matchingVer = existing.versions.find(v => v.contentHash === defaultHash);
+    if (matchingVer) {
       log.debug(
-        { prompt_id: PROMPT_ID, active_version: existing.activeVersion },
-        'Orchestrator active version already matches default — no staging migration needed',
+        { prompt_id: PROMPT_ID, matching_version: matchingVer.version, hash: defaultHash.slice(0, 16) },
+        'Existing version already matches default hash — no migration needed',
       );
       return;
     }

@@ -253,6 +253,32 @@ describe('Prompt Activation Guard', () => {
       expect(result.success).toBe(true);
       expect(mockRepo.createVersion).not.toHaveBeenCalled();
     });
+
+    it('does not create version when an unactivated version matches default hash', async () => {
+      state.promptsConfig = { autoMigrateEnabled: true };
+
+      // v4 was created by a previous auto-migration but never activated (guard blocked it).
+      // Staging (v3) and active (v2) have different hashes — but v4 already matches.
+      mockRepo.get.mockResolvedValue({
+        taskId: 'orchestrator',
+        stagingVersion: 3,
+        activeVersion: 2,
+        versions: [
+          { version: 2, contentHash: 'old_active_hash' },
+          { version: 3, contentHash: 'old_staging_hash' },
+          { version: 4, contentHash: MOCK_HASH_DEFAULT }, // unactivated, matches default
+        ],
+      });
+
+      const result = await initializeAndSeedPrompts();
+
+      expect(result.success).toBe(true);
+      expect(mockRepo.createVersion).not.toHaveBeenCalled();
+      expect(mockEmit).not.toHaveBeenCalledWith(
+        'prompt.activation.blocked',
+        expect.anything(),
+      );
+    });
   });
 
   describe('non-staging mode', () => {
