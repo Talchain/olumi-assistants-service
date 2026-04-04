@@ -4,8 +4,8 @@
  * context-aware filtering, entity disambiguation, and dynamic descriptions.
  */
 
-import { describe, it, expect } from "vitest";
-import { buildToolDefinitions } from "../../../../src/orchestrator/deterministic/tool-builder.js";
+import { describe, it, expect, vi } from "vitest";
+import { buildToolDefinitions, validateToolSchema, _resetSchemaCache } from "../../../../src/orchestrator/deterministic/tool-builder.js";
 import { ACTION_CATALOGUE } from "../../../../src/orchestrator/deterministic/actions/registry.js";
 import type { ActionName } from "../../../../src/orchestrator/deterministic/actions/types.js";
 import type { DeterministicTurnContext, AnalysisSummary, EntityEntry, GraphSummary } from "../../../../src/orchestrator/deterministic/types.js";
@@ -335,5 +335,213 @@ describe("buildToolDefinitions — dynamic descriptions", () => {
     expect(defs[0].description).toContain('Option B');
     expect(defs[0].description).toContain('72%');
     expect(defs[0].description).toContain('28%');
+  });
+});
+
+// ============================================================================
+// Schema Compliance (CI gate)
+// ============================================================================
+
+describe("ACTION_CATALOGUE — schema compliance", () => {
+  for (const [name, action] of ACTION_CATALOGUE) {
+    describe(name, () => {
+      it("passes validateToolSchema with zero violations", () => {
+        const violations = validateToolSchema(action.input_schema);
+        expect(violations, `${name} schema violations: ${JSON.stringify(violations)}`).toEqual([]);
+      });
+
+      it("root is type: 'object'", () => {
+        expect(action.input_schema.type).toBe('object');
+      });
+
+      it("root has additionalProperties", () => {
+        const ap = action.input_schema.additionalProperties;
+        expect(ap).toBeDefined();
+        expect(ap === false || typeof ap === 'object').toBe(true);
+      });
+
+      it("required keys exist in properties", () => {
+        const props = (action.input_schema.properties as Record<string, unknown>) ?? {};
+        const required = (action.input_schema.required as string[]) ?? [];
+        for (const key of required) {
+          expect(props, `required key "${key}" missing from properties`).toHaveProperty(key);
+        }
+      });
+    });
+  }
+});
+
+// ============================================================================
+// Schema Validation — runtime gate
+// ============================================================================
+
+vi.mock("../../../../src/utils/telemetry.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+}));
+
+describe("buildToolDefinitions — schema validation gate", () => {
+  it("excludes a tool with invalid nested schema and logs warning", async () => {
+    _resetSchemaCache(); // clear cache so the spy-injected schema is validated fresh
+    const { log } = await import("../../../../src/utils/telemetry.js");
+
+    // Spy on ACTION_CATALOGUE.get to inject a bad schema for a specific action
+    const originalGet = ACTION_CATALOGUE.get.bind(ACTION_CATALOGUE);
+    const getSpy = vi.spyOn(ACTION_CATALOGUE as Map<string, unknown>, 'get').mockImplementation((key) => {
+      if (key === 'challenge_assumption') {
+        return {
+          ...originalGet('challenge_assumption' as ActionName),
+          input_schema: {
+            type: 'object',
+            properties: {
+              target_id: { type: 'string' },
+              nested: { type: 'object', properties: { foo: { type: 'string' } } }, // missing additionalProperties
+            },
+            additionalProperties: false,
+          },
+        };
+      }
+      return originalGet(key as ActionName);
+    });
+
+    const defs = buildToolDefinitions(['challenge_assumption', 'run_analysis']);
+    const names = defs.map(d => d.name);
+
+    expect(names).not.toContain('challenge_assumption');
+    expect(names).toContain('run_analysis');
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'challenge_assumption' }),
+      'tool_builder.schema_validation_failed',
+    );
+
+    getSpy.mockRestore();
+  });
+
+  it("includes all tools when schemas are valid", () => {
+    const defs = buildToolDefinitions(['run_analysis', 'draft_graph']);
+    expect(defs.length).toBe(2);
+  });
+});
+
+// ============================================================================
+// validateToolSchema — unit tests
+// ============================================================================
+
+describe("validateToolSchema", () => {
+  it("returns empty for a valid flat schema", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+      additionalProperties: false,
+    });
+    expect(violations).toEqual([]);
+  });
+
+  it("flags missing additionalProperties on root", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: { name: { type: 'string' } },
+    });
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('additionalProperties');
+  });
+
+  it("flags non-object root type", () => {
+    const violations = validateToolSchema({ type: 'string' });
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('root schema');
+  });
+
+  it("flags missing additionalProperties on nested object", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: {
+        nested: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      additionalProperties: false,
+    });
+    expect(violations.length).toBe(1);
+    expect(violations[0].path).toContain('nested');
+  });
+
+  it("accepts additionalProperties as schema object (map type)", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: {
+        data: { type: 'object', additionalProperties: { type: 'number' } },
+      },
+      additionalProperties: false,
+    });
+    expect(violations).toEqual([]);
+  });
+
+  it("flags required key not in properties", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name', 'missing_key'],
+      additionalProperties: false,
+    });
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('missing_key');
+  });
+
+  it("recurses into array items", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          items: { type: 'object', properties: { id: { type: 'string' } } }, // missing additionalProperties
+        },
+      },
+      additionalProperties: false,
+    });
+    expect(violations.length).toBe(1);
+    expect(violations[0].path).toContain('items');
+  });
+
+  it("flags required array when properties is missing", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      required: ['name'],
+      additionalProperties: false,
+    });
+    expect(violations.length).toBe(1);
+    expect(violations[0].message).toContain('properties is missing');
+  });
+
+  it("recurses into additionalProperties schema objects", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: {
+        data: {
+          type: 'object',
+          additionalProperties: {
+            type: 'object',
+            properties: { nested: { type: 'string' } },
+            // missing additionalProperties on this inner object
+          },
+        },
+      },
+      additionalProperties: false,
+    });
+    expect(violations.length).toBe(1);
+    expect(violations[0].path).toContain('additionalProperties');
+  });
+
+  it("passes when additionalProperties schema object has no nested objects", () => {
+    const violations = validateToolSchema({
+      type: 'object',
+      properties: {
+        data: {
+          type: 'object',
+          additionalProperties: { type: 'number' },
+        },
+      },
+      additionalProperties: false,
+    });
+    expect(violations).toEqual([]);
   });
 });

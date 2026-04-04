@@ -642,6 +642,9 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
   // Apply normaliser
   const normalised = normaliseDeterministicResponse(envelope);
 
+  // Outbound contract validation (warn-only, never blocks response)
+  validateEnvelope(normalised as unknown as Record<string, unknown>, turnId);
+
   // Scan banned terms
   scanBannedTerms(
     null, // no LLM JSON response — text comes from native tool-use
@@ -651,6 +654,68 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
   );
 
   return normalised as unknown as OrchestratorResponseEnvelopeV2;
+}
+
+// ============================================================================
+// Outbound Envelope Validation
+// ============================================================================
+
+/**
+ * Lightweight contract validation for the v4 response envelope.
+ * Logs warnings but never blocks the response — observational only.
+ */
+
+/** Must match DecisionStage in ../types.ts */
+const VALID_STAGES = new Set(['frame', 'ideate', 'evaluate', 'decide', 'optimise']);
+
+export function validateEnvelope(envelope: Record<string, unknown>, turnId: string): void {
+  const warnings: string[] = [];
+
+  // assistant_text: null or non-empty string (never undefined or empty string)
+  const text = envelope.assistant_text;
+  if (text === undefined) {
+    warnings.push('assistant_text is undefined (should be null or non-empty string)');
+  } else if (text !== null && (typeof text !== 'string' || text.trim().length === 0)) {
+    warnings.push(`assistant_text is empty string (should be null or non-empty), got: ${JSON.stringify(text)}`);
+  }
+
+  // blocks: must be array
+  if (!Array.isArray(envelope.blocks)) {
+    warnings.push(`blocks is not an array, got: ${typeof envelope.blocks}`);
+  } else {
+    for (let i = 0; i < (envelope.blocks as unknown[]).length; i++) {
+      const block = (envelope.blocks as Record<string, unknown>[])[i];
+      if (!block.block_type) warnings.push(`blocks[${i}] missing block_type`);
+      if (!block.block_id) warnings.push(`blocks[${i}] missing block_id`);
+    }
+  }
+
+  // turn_plan.routing
+  const turnPlan = envelope.turn_plan as Record<string, unknown> | undefined;
+  if (turnPlan) {
+    if (turnPlan.routing !== 'llm' && turnPlan.routing !== 'deterministic') {
+      warnings.push(`turn_plan.routing is "${String(turnPlan.routing)}", expected "llm" or "deterministic"`);
+    }
+  }
+
+  // stage_indicator: must be a valid DecisionStage string
+  const stage = envelope.stage_indicator;
+  if (stage === undefined || stage === null) {
+    warnings.push('stage_indicator is missing');
+  } else if (typeof stage !== 'string') {
+    warnings.push(`stage_indicator is ${typeof stage}, expected a stage string`);
+  } else if (!VALID_STAGES.has(stage)) {
+    warnings.push(`stage_indicator is "${stage}", expected one of: ${[...VALID_STAGES].join(', ')}`);
+  }
+
+  // response_version is 2
+  if (envelope.response_version !== 2) {
+    warnings.push(`response_version is ${String(envelope.response_version)}, expected 2`);
+  }
+
+  if (warnings.length > 0) {
+    log.warn({ turn_id: turnId, violations: warnings }, 'v4.envelope_validation_warnings');
+  }
 }
 
 // ============================================================================

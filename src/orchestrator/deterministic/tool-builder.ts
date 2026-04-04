@@ -15,6 +15,7 @@ import type { ToolDefinition } from "../../adapters/llm/types.js";
 import type { ActionName } from "./actions/types.js";
 import type { DeterministicTurnContext } from "./types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
+import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
 // Constants
@@ -50,6 +51,127 @@ const AMBIGUITY_STOP_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 // ============================================================================
+// Schema Validation
+// ============================================================================
+
+export interface SchemaViolation {
+  path: string;
+  message: string;
+}
+
+/**
+ * Recursively validate a JSON Schema object for Anthropic tool compatibility.
+ * Returns an array of violations (empty = valid).
+ *
+ * Rules:
+ * - Root must be `type: 'object'`
+ * - Every `type: 'object'` node must have `additionalProperties` (false or schema object)
+ * - Every `required` entry must reference a key in `properties`
+ */
+export function validateToolSchema(schema: Record<string, unknown>): SchemaViolation[] {
+  const violations: SchemaViolation[] = [];
+
+  if (schema.type !== 'object') {
+    violations.push({ path: '(root)', message: 'root schema must have type: "object"' });
+    return violations;
+  }
+
+  walkSchema(schema, '', violations);
+  return violations;
+}
+
+function walkSchema(
+  node: Record<string, unknown>,
+  path: string,
+  violations: SchemaViolation[],
+): void {
+  // Validate object-type nodes
+  if (node.type === 'object') {
+    // Every object must declare additionalProperties (false or a schema object, never null/undefined)
+    const ap = node.additionalProperties;
+    if (ap === undefined || ap === null) {
+      violations.push({
+        path: path || '(root)',
+        message: 'object type missing additionalProperties',
+      });
+    } else if (ap !== false && (typeof ap !== 'object' || Array.isArray(ap))) {
+      violations.push({
+        path: path || '(root)',
+        message: 'additionalProperties must be false or a schema object',
+      });
+    }
+
+    // Required entries must exist in properties
+    const props = node.properties as Record<string, unknown> | undefined;
+    const required = node.required as string[] | undefined;
+    if (required && Array.isArray(required) && required.length > 0) {
+      if (!props) {
+        violations.push({
+          path: `${path || '(root)'}`,
+          message: `required array present but properties is missing`,
+        });
+      } else {
+        for (const key of required) {
+          if (!(key in props)) {
+            violations.push({
+              path: `${path || '(root)'}.required`,
+              message: `required key "${key}" not found in properties`,
+            });
+          }
+        }
+      }
+    }
+
+    // Recurse into properties
+    if (props && typeof props === 'object') {
+      for (const [key, value] of Object.entries(props)) {
+        if (value && typeof value === 'object') {
+          walkSchema(value as Record<string, unknown>, `${path}.properties.${key}`, violations);
+        }
+      }
+    }
+  }
+
+  // Recurse into additionalProperties when it's a schema object (not null/boolean)
+  if (node.additionalProperties && typeof node.additionalProperties === 'object' && !Array.isArray(node.additionalProperties)) {
+    walkSchema(
+      node.additionalProperties as Record<string, unknown>,
+      `${path}.additionalProperties`,
+      violations,
+    );
+  }
+
+  // Recurse into array items (regardless of current node type)
+  const items = node.items as Record<string, unknown> | undefined;
+  if (items && typeof items === 'object' && !Array.isArray(items)) {
+    walkSchema(items as Record<string, unknown>, `${path}.items`, violations);
+  }
+}
+
+/** Cache: once a schema is validated, skip re-validation on subsequent calls. */
+const schemaValidationCache = new Map<string, boolean>();
+
+/** @internal Reset cache — test-only. */
+export function _resetSchemaCache(): void {
+  schemaValidationCache.clear();
+}
+
+function isSchemaValid(name: string, schema: Record<string, unknown>): boolean {
+  const cached = schemaValidationCache.get(name);
+  if (cached !== undefined) return cached;
+
+  const violations = validateToolSchema(schema);
+  if (violations.length > 0) {
+    log.warn({ action: name, violations }, 'tool_builder.schema_validation_failed');
+    schemaValidationCache.set(name, false);
+    return false;
+  }
+
+  schemaValidationCache.set(name, true);
+  return true;
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -79,6 +201,9 @@ export function buildToolDefinitions(
 
     // Entity disambiguation: remove tools with target_id when ambiguous
     if (ambiguousTargetIds && hasTargetIdParam(action.input_schema)) continue;
+
+    // Schema validation gate: exclude tools with invalid schemas (cached after first check)
+    if (!isSchemaValid(name, action.input_schema)) continue;
 
     // Dynamic description enrichment
     const description = ctx

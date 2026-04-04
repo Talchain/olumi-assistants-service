@@ -24,7 +24,11 @@ export const addOptionAction: ActionDefinition = {
     type: 'object',
     properties: {
       label: { type: 'string', description: 'Name for the new option' },
-      interventions: { type: 'object', description: 'Factor-level intervention overrides (factor_id → numeric value)' },
+      interventions: {
+        type: 'object',
+        description: 'Factor-level intervention overrides (factor_id → numeric value)',
+        additionalProperties: { type: 'number' },
+      },
     },
     required: ['label'],
     additionalProperties: false,
