@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { filterHistoryV4 } from "../../../../src/orchestrator/deterministic/history-filter-v4.js";
+import { filterHistoryV4, sanitiseXmlHistory } from "../../../../src/orchestrator/deterministic/history-filter-v4.js";
 
 type Msg = { role: 'user' | 'assistant'; content: string | Array<{ type: string; [k: string]: unknown }> };
 
@@ -155,5 +155,113 @@ describe("filterHistoryV4", () => {
     expect(result[1].content).toBe('Updated cost.');
     expect(result[2].content).toBe('Cost updated to 50.');
     expect(result[3].content).toBe('Run analysis');
+  });
+});
+
+// ============================================================================
+// P1 #2: XML history sanitisation
+// ============================================================================
+
+describe("sanitiseXmlHistory", () => {
+  it("extracts <assistant_text> payload from XML-envelope content", () => {
+    const xml = `<diagnostics>\n<turn_analysis>some internal stuff</turn_analysis>\n</diagnostics>\n<response>\n<assistant_text>Your model looks good. The key factor to address first is Development Capacity.</assistant_text>\n<blocks/>\n<suggested_actions/>\n</response>`;
+    expect(sanitiseXmlHistory(xml)).toBe(
+      'Your model looks good. The key factor to address first is Development Capacity.',
+    );
+  });
+
+  it("passes through plain text unchanged", () => {
+    const text = 'Your model looks good. The key factor to address first is Development Capacity.';
+    expect(sanitiseXmlHistory(text)).toBe(text);
+  });
+
+  it("strips XML tags when no <assistant_text> but known envelope tags present", () => {
+    const xml = '<diagnostics>\nsome analysis\n</diagnostics>\n<response>\nSome text without assistant_text tags.\n</response>';
+    const result = sanitiseXmlHistory(xml);
+    expect(result).not.toContain('<diagnostics>');
+    expect(result).not.toContain('<response>');
+    expect(result).toContain('Some text without assistant_text tags.');
+  });
+
+  it("handles malformed XML (missing closing tag) by stripping tags", () => {
+    const xml = '<diagnostics>\nsome analysis\n<response>\n<assistant_text>Good text here.';
+    // No closing </assistant_text> → regex won't match → falls through to tag stripping (has <diagnostics>)
+    const result = sanitiseXmlHistory(xml);
+    expect(result).not.toContain('<diagnostics>');
+    expect(result).toContain('Good text here.');
+  });
+
+  it("returns empty string for empty <assistant_text> (does NOT fall through to tag strip)", () => {
+    const xml = '<diagnostics>\nstuff\n</diagnostics>\n<response>\n<assistant_text></assistant_text>\n<blocks/>\n</response>';
+    const result = sanitiseXmlHistory(xml);
+    // Empty <assistant_text> → returns '' immediately (not diagnostics text)
+    expect(result).toBe('');
+  });
+
+  it("empty <assistant_text> is dropped by filterHistoryV4 empty-message guard", () => {
+    const messages: Msg[] = [
+      { role: 'user', content: 'Draft a model' },
+      {
+        role: 'assistant',
+        content: '<diagnostics>\nstuff\n</diagnostics>\n<response>\n<assistant_text></assistant_text>\n<blocks/>\n</response>',
+      },
+      { role: 'user', content: 'Try again' },
+    ];
+
+    const result = filterHistoryV4(messages);
+    // The assistant message should be dropped (empty after sanitisation)
+    expect(result).toHaveLength(2);
+    expect(result[0].content).toBe('Draft a model');
+    expect(result[1].content).toBe('Try again');
+  });
+
+  it("does not modify user messages with angle brackets (called only on assistant)", () => {
+    // sanitiseXmlHistory is only called for assistant-role messages.
+    // This tests that content without known envelope tags passes through.
+    const code = 'Use x < 5 && y > 3 to filter the data.';
+    expect(sanitiseXmlHistory(code)).toBe(code);
+  });
+});
+
+describe("filterHistoryV4 — XML sanitisation integration", () => {
+  it("extracts assistant_text from XML-envelope assistant messages in history", () => {
+    const messages: Msg[] = [
+      { role: 'user', content: 'Draft a model for my hiring decision' },
+      {
+        role: 'assistant',
+        content: '<diagnostics>\n<turn_analysis>analysis</turn_analysis>\n</diagnostics>\n<response>\n<assistant_text>Here is your decision model with 8 factors.</assistant_text>\n<blocks/>\n<suggested_actions/>\n</response>',
+      },
+      { role: 'user', content: 'What should I focus on?' },
+    ];
+
+    const result = filterHistoryV4(messages);
+    expect(result).toHaveLength(3);
+    expect(result[1].content).toBe('Here is your decision model with 8 factors.');
+  });
+
+  it("does not modify user messages containing angle brackets", () => {
+    const messages: Msg[] = [
+      { role: 'user', content: 'The price range is $50-$100 and growth > 5%.' },
+      { role: 'assistant', content: 'Understood, I will factor in that price range.' },
+    ];
+
+    const result = filterHistoryV4(messages);
+    expect(result).toHaveLength(2);
+    expect(result[0].content).toBe('The price range is $50-$100 and growth > 5%.');
+  });
+
+  it("handles JSON-envelope history unchanged (existing behaviour)", () => {
+    // JSON content is handled by sanitiseAssistantHistory upstream,
+    // but even if it reaches filterHistoryV4, it should pass through
+    // (no envelope XML tags present).
+    const messages: Msg[] = [
+      { role: 'user', content: 'Hi' },
+      { role: 'assistant', content: '{"text": "Hello!", "insights": []}' },
+    ];
+
+    const result = filterHistoryV4(messages);
+    expect(result).toHaveLength(2);
+    // JSON is not modified by XML sanitiser (no envelope tags)
+    expect(result[1].content).toBe('{"text": "Hello!", "insights": []}');
   });
 });

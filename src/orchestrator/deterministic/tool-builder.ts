@@ -43,12 +43,22 @@ const GRAPH_EDIT_ACTIONS: ReadonlySet<ActionName> = new Set([
 ]);
 
 /** Stop words excluded from entity ambiguity detection. */
-const AMBIGUITY_STOP_WORDS: ReadonlySet<string> = new Set([
+export const AMBIGUITY_STOP_WORDS: ReadonlySet<string> = new Set([
   'the', 'and', 'or', 'of', 'a', 'an', 'in', 'on', 'to', 'for', 'by',
   'is', 'at', 'it', 'its', 'per', 'vs', 'with', 'from', 'as', 'into',
   'rate', 'cost', 'time', 'total', 'value', 'factor', 'score', 'level',
   'high', 'low', 'new', 'old', 'net', 'max', 'min', 'avg', 'mean',
+  // Generic modelling terms that appear frequently but rarely create real ambiguity
+  'growth', 'risk', 'impact', 'change', 'performance',
 ]);
+
+/**
+ * Minimum number of shared non-stop-words between same-kind entities
+ * required to trigger target_id tool suppression. A threshold of 2
+ * prevents common single-word overlaps (e.g. "revenue") from
+ * disabling most edit tools on typical graphs.
+ */
+const AMBIGUITY_SHARED_WORD_THRESHOLD = 2;
 
 // ============================================================================
 // Schema Validation
@@ -294,18 +304,24 @@ function detectAmbiguousEntities(ctx: DeterministicTurnContext): boolean {
   for (const labels of labelsByKind.values()) {
     if (labels.length < 2) continue;
 
-    const wordCounts = new Map<string, number>();
-    for (const label of labels) {
-      const words = new Set(
-        label.toLowerCase().split(/\s+/).filter(w => w.length > 1 && !AMBIGUITY_STOP_WORDS.has(w)),
-      );
-      for (const word of words) {
-        wordCounts.set(word, (wordCounts.get(word) ?? 0) + 1);
-      }
-    }
+    // Tokenise each label into non-stop-word sets (trim punctuation from tokens)
+    const tokenSets = labels.map((label) =>
+      new Set(
+        label.toLowerCase().split(/[\s_-]+/)
+          .map(w => w.replace(/[^a-z0-9]/g, ''))
+          .filter(w => w.length > 1 && !AMBIGUITY_STOP_WORDS.has(w)),
+      ),
+    );
 
-    for (const count of wordCounts.values()) {
-      if (count >= 2) return true;
+    // Check each pair of labels for shared non-stop-word count
+    for (let i = 0; i < tokenSets.length; i++) {
+      for (let j = i + 1; j < tokenSets.length; j++) {
+        let shared = 0;
+        for (const word of tokenSets[i]) {
+          if (tokenSets[j].has(word)) shared++;
+        }
+        if (shared >= AMBIGUITY_SHARED_WORD_THRESHOLD) return true;
+      }
     }
   }
 

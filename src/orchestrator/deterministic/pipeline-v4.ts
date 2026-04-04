@@ -179,9 +179,11 @@ export async function* executePipelineV4(
     // Build prompt (async — loads from PMS with TTL cache)
     const prompt = await buildDeterministicPromptV2(turnContext);
 
-    // Build tool definitions — add draft_graph when generate_model or no graph
+    // Build tool definitions — add draft_graph when generate_model or no usable graph
+    // An empty graph ({ nodes: [], edges: [] }) is truthy but has no model content,
+    // so treat zero-node graphs the same as null for draft_graph eligibility.
     const eligibleActions = [...turnContext.eligible_actions];
-    if (turnRequest.generate_model || !turnContext.graph) {
+    if (turnRequest.generate_model || !turnContext.graph || turnContext.graph_summary.node_count === 0) {
       if (!eligibleActions.includes('draft_graph')) {
         eligibleActions.push('draft_graph');
       }
@@ -214,7 +216,9 @@ export async function* executePipelineV4(
     const toolChoice = chipActionInTools
       ? { type: 'tool' as const, name: chipAction! }
       : { type: 'auto' as const };
+    let chipDowngradeText: string | null = null;
     if (chipAction && !chipActionInTools) {
+      chipDowngradeText = `That action isn't available right now. ${getDowngradeReason(chipAction, turnContext)}`;
       log.warn({
         request_id: requestId,
         chip_action: chipAction,
@@ -460,6 +464,16 @@ export async function* executePipelineV4(
           // follow-up delta so the streaming client also sees the failure.
           yield { type: 'text_delta', seq: seq++, delta: `\n\n${errorText}` };
         }
+      }
+    }
+
+    // Prepend chip downgrade explanation when a chip action was unavailable.
+    // Only prepend when the text doesn't already start with the downgrade string.
+    if (chipDowngradeText) {
+      if (!assistantText || !assistantText.startsWith(chipDowngradeText)) {
+        assistantText = assistantText
+          ? `${chipDowngradeText}\n\n${assistantText}`
+          : chipDowngradeText;
       }
     }
 
@@ -754,6 +768,22 @@ function buildFallbackContext(turnRequest: OrchestratorTurnRequest, turnId: stri
     analysis_inputs: null,
     request: undefined,
   };
+}
+
+function getDowngradeReason(action: string, ctx: DeterministicTurnContext): string {
+  // Check blockers first — they carry the most specific reason
+  const blocker = ctx.blockers.find((b) => b.action_type === action);
+  if (blocker) return blocker.reason;
+
+  // Stage-specific fallbacks for common chip actions
+  if (action === 'run_analysis' && (ctx.stage === 'frame' || ctx.stage === 'ideate')) {
+    return "Analysis isn't available during the modelling phase. Continue building your model, then analysis will become available.";
+  }
+  if ((action === 'explain_result' || action === 'compare_options' || action === 'what_would_flip') && !ctx.analysis_summary) {
+    return 'Run the analysis first to unlock this action.';
+  }
+
+  return 'Try a different action or continue refining your model.';
 }
 
 function resolveErrorCode(error: unknown): string {

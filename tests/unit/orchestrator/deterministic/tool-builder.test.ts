@@ -205,10 +205,10 @@ describe("buildToolDefinitions — context-aware filtering", () => {
 // ============================================================================
 
 describe("buildToolDefinitions — entity disambiguation", () => {
-  it("removes target_id tools when two factors share a significant word", () => {
+  it("removes target_id tools when two factors share 2+ significant words", () => {
     const entities = new Map<string, EntityEntry>([
-      ['f1', { id: 'f1', label: 'Employee Churn', kind: 'factor', aliases: [], is_action_target: true }],
-      ['f2', { id: 'f2', label: 'Customer Churn', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
     const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
 
@@ -218,7 +218,7 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     );
     const names = defs.map(d => d.name);
 
-    // set_factor_value has target_id — should be removed
+    // set_factor_value has target_id — should be removed (q3 + sales shared)
     expect(names).not.toContain('set_factor_value');
     // run_analysis has NO target_id — should remain
     expect(names).toContain('run_analysis');
@@ -226,10 +226,25 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     expect(names).toContain('explain_result');
   });
 
+  it("keeps target_id tools when only one non-stop-word is shared (below threshold of 2)", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Employee Churn', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Customer Churn', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const names = defs.map(d => d.name);
+
+    // Only "churn" shared — below threshold of 2 → target_id tools kept
+    expect(names).toContain('set_factor_value');
+    expect(names).toContain('run_analysis');
+  });
+
   it("keeps target_id tools when only one factor has the word", () => {
     const entities = new Map<string, EntityEntry>([
       ['f1', { id: 'f1', label: 'Employee Churn', kind: 'factor', aliases: [], is_action_target: true }],
-      ['f2', { id: 'f2', label: 'Revenue Growth', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Revenue Trend', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
     const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
 
@@ -543,5 +558,125 @@ describe("validateToolSchema", () => {
       additionalProperties: false,
     });
     expect(violations).toEqual([]);
+  });
+});
+
+// ============================================================================
+// P2 #5: Disambiguation threshold raised to 2 shared words
+// ============================================================================
+
+describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
+  it("single shared non-stop-word does NOT trigger suppression", () => {
+    // "Revenue Growth" and "Revenue Target" share only "revenue" → 1 shared → below threshold
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Revenue Target', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Revenue Stream', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const names = defs.map(d => d.name);
+
+    expect(names).toContain('set_factor_value');
+  });
+
+  it("two shared non-stop-words DOES trigger suppression", () => {
+    // "Q3 Sales Projection" and "Q3 Sales Forecast" share "q3" + "sales" → 2 shared
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const names = defs.map(d => d.name);
+
+    expect(names).not.toContain('set_factor_value');
+    expect(names).toContain('run_analysis');
+  });
+
+  it("expanded stop words are filtered correctly", () => {
+    // "growth", "risk", "impact", "change", "performance" are now stop words.
+    // "Market Growth" and "Revenue Growth" share only "growth" (stop word) → 0 shared
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Market Growth', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Revenue Growth', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value'], ctx);
+    const names = defs.map(d => d.name);
+
+    // "growth" is a stop word → 0 shared non-stop-words → no suppression
+    expect(names).toContain('set_factor_value');
+  });
+
+  it("zero shared words: no suppression", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Development Speed', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Market Demand', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value'], ctx);
+    expect(defs.map(d => d.name)).toContain('set_factor_value');
+  });
+
+  it("three factors where only two share 2+ words: suppression triggers", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Annual Sales Revenue', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Annual Sales Margin', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f3', { id: 'f3', label: 'Customer Retention', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const names = defs.map(d => d.name);
+
+    // f1 and f2 share "annual" + "sales" → 2 shared → suppression
+    expect(names).not.toContain('set_factor_value');
+    expect(names).toContain('run_analysis');
+  });
+
+  it("punctuation in labels is trimmed before overlap comparison", () => {
+    // "Q3 Sales," and "Q3 Sales" should match after punctuation trimming
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales, Projected', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: '(Q3) Sales Actual', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const names = defs.map(d => d.name);
+
+    // "q3" + "sales" shared after punctuation trim → 2 shared → suppression
+    expect(names).not.toContain('set_factor_value');
+    expect(names).toContain('run_analysis');
+  });
+
+  it("typical 12-node diverse graph does NOT trigger suppression", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['g1', { id: 'g1', label: 'Maximize Revenue', kind: 'goal', aliases: [], is_action_target: true }],
+      ['o1', { id: 'o1', label: 'Expand Europe', kind: 'option', aliases: [], is_action_target: true }],
+      ['o2', { id: 'o2', label: 'Focus Domestic', kind: 'option', aliases: [], is_action_target: true }],
+      ['o3', { id: 'o3', label: 'Partnership Model', kind: 'option', aliases: [], is_action_target: true }],
+      ['f1', { id: 'f1', label: 'Market Size', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Customer Acquisition Cost', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f3', { id: 'f3', label: 'Revenue Growth', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f4', { id: 'f4', label: 'Regulatory Risk', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f5', { id: 'f5', label: 'Brand Recognition', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f6', { id: 'f6', label: 'Team Capacity', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f7', { id: 'f7', label: 'Competition Intensity', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f8', { id: 'f8', label: 'Supply Chain Stability', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+
+    const defs = buildToolDefinitions(['set_factor_value', 'remove_factor', 'adjust_edge_strength'], ctx);
+    const names = defs.map(d => d.name);
+
+    // Diverse labels — no pair shares 2+ non-stop-words
+    expect(names).toContain('set_factor_value');
+    expect(names).toContain('remove_factor');
+    expect(names).toContain('adjust_edge_strength');
   });
 });

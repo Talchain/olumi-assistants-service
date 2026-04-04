@@ -620,4 +620,227 @@ describe("executePipelineV4", () => {
       expect(occurrences).toBeLessThanOrEqual(1);
     });
   });
+
+  // ── P1 #1: Empty graph draft_graph eligibility ─────────────────────────────
+
+  describe("P1 #1: draft_graph eligibility for empty graphs", () => {
+    it("includes draft_graph in tools when graph has zero nodes", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Building your model.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Building your model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'I need to decide whether to expand into Europe or focus on domestic growth.',
+        context: {
+          graph: { nodes: [], edges: [] } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          analysis_response: null,
+          framing: { stage: 'frame' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-empty-graph'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0];
+      const toolNames = callArgs.tools.map((t: { name: string }) => t.name);
+      expect(toolNames).toContain('draft_graph');
+    });
+
+    it("includes draft_graph when graph is null (regression)", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Building your model.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Building your model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'I need to decide whether to expand into Europe.',
+        context: {
+          graph: null,
+          analysis_response: null,
+          framing: { stage: 'frame' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-null-graph'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0];
+      const toolNames = callArgs.tools.map((t: { name: string }) => t.name);
+      expect(toolNames).toContain('draft_graph');
+    });
+
+    it("does NOT include draft_graph when graph has nodes and generate_model is false", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Here are the key factors.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Here are the key factors.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'What should I address first?',
+        context: {
+          graph: {
+            nodes: [
+              { id: 'goal_1', label: 'Maximize Revenue', kind: 'goal' },
+              { id: 'opt_1', label: 'Expand Europe', kind: 'option' },
+              { id: 'factor_1', label: 'Market Size', kind: 'factor' },
+            ],
+            edges: [
+              { from: 'factor_1', to: 'goal_1', strength: { mean: 0.7, std: 0.1 } },
+            ],
+          } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          analysis_response: null,
+          framing: { stage: 'ideate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-with-graph'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0];
+      const toolNames = callArgs.tools.map((t: { name: string }) => t.name);
+      expect(toolNames).not.toContain('draft_graph');
+    });
+
+    it("includes draft_graph when graph has nodes but generate_model is true", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Rebuilding your model.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Rebuilding your model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'Rebuild my model from scratch.',
+        generate_model: true,
+        context: {
+          graph: {
+            nodes: [
+              { id: 'goal_1', label: 'Maximize Revenue', kind: 'goal' },
+              { id: 'opt_1', label: 'Expand Europe', kind: 'option' },
+              { id: 'factor_1', label: 'Market Size', kind: 'factor' },
+            ],
+            edges: [
+              { from: 'factor_1', to: 'goal_1', strength: { mean: 0.7, std: 0.1 } },
+            ],
+          } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          analysis_response: null,
+          framing: { stage: 'ideate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-regenerate'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0];
+      const toolNames = callArgs.tools.map((t: { name: string }) => t.name);
+      expect(toolNames).toContain('draft_graph');
+    });
+  });
+
+  // ── P1 #3: Chip downgrade user feedback ─────────────────────────────────────
+
+  describe("P1 #3: Chip downgrade user feedback", () => {
+    it("prepends downgrade text when chip action is not in eligible actions", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Let me help you with your model.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Let me help you with your model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      // run_analysis chip click during ideate stage with a graph that has options
+      // (so can_run_analysis is true, but run_analysis is not in ideate stage policy)
+      const req = makeTurnRequest({
+        message: 'Run the analysis',
+        chip_metadata: { action_type: 'run_analysis' },
+        context: {
+          graph: {
+            nodes: [
+              { id: 'goal_1', label: 'Maximize Revenue', kind: 'goal' },
+              { id: 'opt_1', label: 'Expand Europe', kind: 'option' },
+              { id: 'factor_1', label: 'Market Size', kind: 'factor' },
+            ],
+            edges: [
+              { from: 'factor_1', to: 'goal_1', strength: { mean: 0.7, std: 0.1 } },
+            ],
+          } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          analysis_response: null,
+          framing: { stage: 'ideate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-chip-downgrade'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      const text = complete.envelope.assistant_text ?? '';
+      expect(text).toContain("That action isn't available right now");
+    });
+
+    it("does NOT produce downgrade text for valid chip action", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Building your decision model.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Building your decision model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      // draft_graph is added by the pipeline when graph is null, so it always works
+      const req = makeTurnRequest({
+        message: 'Build my model',
+        chip_metadata: { action_type: 'draft_graph' },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-chip-ok'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      const text = complete.envelope.assistant_text ?? '';
+      expect(text).not.toContain("That action isn't available right now");
+    });
+
+    it("does NOT produce downgrade text for non-chip turns", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Here is my response.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Here is my response.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({ message: 'Tell me about the options' });
+      const events = await collectEvents(executePipelineV4(req, 'req-no-chip'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      const text = complete.envelope.assistant_text ?? '';
+      expect(text).not.toContain("That action isn't available right now");
+    });
+
+    it("uses blocker reason when one exists for the chip action", async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Working on your request.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Working on your request.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      // run_analysis chip with no graph → blocker exists: "No decision model available"
+      const req = makeTurnRequest({
+        message: 'Run the analysis',
+        chip_metadata: { action_type: 'run_analysis' },
+        context: {
+          graph: null,
+          analysis_response: null,
+          framing: { stage: 'evaluate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-chip-blocker'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      const text = complete.envelope.assistant_text ?? '';
+      expect(text).toContain("That action isn't available right now");
+      expect(text).toContain("No decision model available");
+    });
+  });
 });
