@@ -109,6 +109,7 @@ describe("filterHistoryV4", () => {
       "Unable to generate the decision model right now.",
       "Try rephrasing your request.",
       "That action couldn't be completed. Try a different approach or rephrase your request.",
+      "This is taking longer than expected. Try again or rephrase your message.",
     ];
 
     for (const errMsg of errorMessages) {

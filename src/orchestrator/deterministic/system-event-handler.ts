@@ -7,8 +7,10 @@
  * leaks through, this handler produces a valid response without an LLM call.
  *
  * Design:
- * - System events with a user message get brief deterministic acknowledgement
- * - System events without a user message get a silent response
+ * - Graph-mutation events (patch_accepted, patch_dismissed, direct_graph_edit)
+ *   are always silent — the UI graph patch block already shows confirmation
+ * - Non-graph events with a user message get brief acknowledgement from template
+ * - Events without a user message get a silent response
  * - Unknown event types get a silent response with a warning log
  * - Never calls the LLM
  */
