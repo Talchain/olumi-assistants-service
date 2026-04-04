@@ -219,7 +219,7 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     const diagnosticTrace = (v3Body as any)?.trace?.pipeline;
     if (diagnosticTrace && typeof diagnosticTrace === 'object') {
       (diagnosticTrace as Record<string, unknown>).diagnostic_checks =
-        computeDiagnosticChecks(v3Body as Record<string, unknown>, diagnosticTrace as Record<string, unknown>);
+        computeDiagnosticChecks(v3Body as unknown as Record<string, unknown>, diagnosticTrace as Record<string, unknown>);
     }
 
     ctx.finalResponse = v3Body;

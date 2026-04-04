@@ -135,7 +135,7 @@ function mapKindToV3(kind: string): NodeV3T["kind"] {
  *
  * Legitimate parentheticals like `(0-100 range)`, `(Q4)`, `(UK)` survive.
  */
-const LABEL_NORMALISATION_RE = /\s*\(0[–\-\/]1(?:\s*(?:,\s*)?(?:scale|normali[sz]ed|share|cap|proportion|ratio|index|score|bounded|capped)[^)]*|)\)\s*/gi;
+const LABEL_NORMALISATION_RE = /\s*\(0[–\-/]1(?:\s*(?:,\s*)?(?:scale|normali[sz]ed|share|cap|proportion|ratio|index|score|bounded|capped)[^)]*|)\)\s*/gi;
 const LABEL_SCALE_RE = /\s*\((normali[sz]ed|scale\s+\d[^)]*)\)\s*/gi;
 
 export interface LabelCleaningEntry {
@@ -944,6 +944,26 @@ export function transformResponseToV3(
   const v1CausalClaims = v1Response.causal_claims;
   if (Array.isArray(v1CausalClaims)) {
     v3Response.causal_claims = v1CausalClaims as typeof v3Response.causal_claims;
+  }
+
+  // Carry rationales from V1 pipeline into V3 response.
+  // Rationales are LLM-generated per-node reasoning from Stage 1 (parse).
+  // Shape normalised to { target, why } — matches PlanAnnotationCheckpoint pattern.
+  // Length capped at 500 chars to prevent unexpectedly long LLM output from bloating responses.
+  const v1Rationales = v1Response.rationales;
+  if (Array.isArray(v1Rationales) && v1Rationales.length > 0) {
+    const normalised = v1Rationales
+      .filter((r: any) => r && typeof r === "object")
+      .map((r: any) => ({
+        target: String(r.target ?? r.node_id ?? r.id ?? ""),
+        why: String(r.why ?? r.rationale ?? r.text ?? "").slice(0, 500),
+        ...(r.provenance_source ? { provenance_source: String(r.provenance_source) } : {}),
+      }))
+      .filter((r: { target: string; why: string }) => r.target !== "" && r.why !== "");
+
+    if (normalised.length > 0) {
+      v3Response.rationales = normalised;
+    }
   }
 
   // CIL Phase 1: Strength default detection (production-enabled, not debug-gated)
