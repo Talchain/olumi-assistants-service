@@ -191,10 +191,17 @@ describe("sanitiseXmlHistory", () => {
     expect(result).toContain('Good text here.');
   });
 
-  it("returns empty string for empty <assistant_text> (does NOT fall through to tag strip)", () => {
+  it("returns empty string for empty <assistant_text> in full envelope", () => {
     const xml = '<diagnostics>\nstuff\n</diagnostics>\n<response>\n<assistant_text></assistant_text>\n<blocks/>\n</response>';
     const result = sanitiseXmlHistory(xml);
     // Empty <assistant_text> → returns '' immediately (not diagnostics text)
+    expect(result).toBe('');
+  });
+
+  it("returns empty string for isolated empty <assistant_text></assistant_text>", () => {
+    const xml = '<assistant_text></assistant_text>';
+    const result = sanitiseXmlHistory(xml);
+    // Isolated empty tag → regex matches and returns captured empty group
     expect(result).toBe('');
   });
 
