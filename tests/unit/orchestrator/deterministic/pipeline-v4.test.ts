@@ -134,7 +134,7 @@ describe("executePipelineV4", () => {
       expect(complete.envelope).toHaveProperty('blocks');
     });
 
-    it("system event with user message gets acknowledgement", async () => {
+    it("graph-mutation system event with user message returns null assistant_text", async () => {
       const req = makeTurnRequest({
         message: 'Great, what now?',
         system_event: makeEvent('patch_accepted'),
@@ -143,7 +143,20 @@ describe("executePipelineV4", () => {
       const events = await collectEvents(executePipelineV4(req, 'req-1'));
       const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
 
-      expect(complete.envelope.assistant_text).toBe('Changes applied.');
+      // Graph-mutation events are now suppressed — UI graph patch block already confirms
+      expect(complete.envelope.assistant_text).toBeNull();
+    });
+
+    it("non-graph system event with user message returns meaningful text", async () => {
+      const req = makeTurnRequest({
+        message: 'Running it now',
+        system_event: makeEvent('direct_analysis_run'),
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-1'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      expect(complete.envelope.assistant_text).toContain('Analysis is running');
     });
   });
 
@@ -841,6 +854,239 @@ describe("executePipelineV4", () => {
       const text = complete.envelope.assistant_text ?? '';
       expect(text).toContain("That action isn't available right now");
       expect(text).toContain("No decision model available");
+    });
+  });
+
+  // ── Task 1: System event acknowledgement suppression ───────────────────
+
+  describe("Task 1: System event acknowledgement suppression", () => {
+    it("direct_graph_edit event returns assistant_text: null", async () => {
+      const req = makeTurnRequest({
+        system_event: makeEvent('direct_graph_edit'),
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-dge'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      expect(complete.envelope.assistant_text).toBeNull();
+    });
+
+    it("patch_accepted event returns assistant_text: null", async () => {
+      const req = makeTurnRequest({
+        system_event: makeEvent('patch_accepted'),
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-pa'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      expect(complete.envelope.assistant_text).toBeNull();
+    });
+
+    it("patch_dismissed event returns assistant_text: null", async () => {
+      const req = makeTurnRequest({
+        system_event: makeEvent('patch_dismissed'),
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-pd'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      expect(complete.envelope.assistant_text).toBeNull();
+    });
+
+    it("direct_analysis_run event returns meaningful text (not suppressed)", async () => {
+      const req = makeTurnRequest({
+        message: 'Run the analysis',
+        system_event: makeEvent('direct_analysis_run'),
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-dar'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      expect(complete.envelope.assistant_text).toContain('Analysis is running');
+    });
+
+    it("null assistant_text does not cause downstream errors", async () => {
+      const req = makeTurnRequest({
+        system_event: makeEvent('direct_graph_edit'),
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-null-safe'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      // Envelope should be valid even with null assistant_text
+      expect(complete.envelope).toHaveProperty('turn_id');
+      expect(complete.envelope).toHaveProperty('blocks');
+      expect(complete.envelope.blocks).toEqual([]);
+    });
+  });
+
+  // ── Task 2: Mask raw provider errors ───────────────────────────────────
+
+  describe("Task 2: Mask raw provider errors", () => {
+    it("Anthropic 400 error produces clean user-facing text, not raw JSON", async () => {
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('Anthropic streaming chat_with_tools failed: 400 {"type":"error","error":{"type":"invalid_request_error"}}');
+      });
+
+      const req = makeTurnRequest();
+      const events = await collectEvents(executePipelineV4(req, 'req-400'));
+
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete.envelope.assistant_text).toBe('Something went wrong while processing your request. Please try again.');
+      expect(complete.envelope.assistant_text).not.toContain('Anthropic');
+      expect(complete.envelope.assistant_text).not.toContain('invalid_request_error');
+    });
+
+    it("Anthropic 500 error produces clean user-facing text", async () => {
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('Anthropic streaming failed: 500 Internal Server Error');
+      });
+
+      const req = makeTurnRequest();
+      const events = await collectEvents(executePipelineV4(req, 'req-500'));
+
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete.envelope.assistant_text).toBe('Something went wrong while processing your request. Please try again.');
+      expect(complete.envelope.assistant_text).not.toContain('500');
+    });
+
+    it("timeout error produces the timeout-specific message", async () => {
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('Request timeout after 30000ms');
+      });
+
+      const req = makeTurnRequest();
+      const events = await collectEvents(executePipelineV4(req, 'req-timeout'));
+
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete.envelope.assistant_text).toBe('This is taking longer than expected. Try again or rephrase your message.');
+    });
+
+    it("tool execution error produces the tool-specific message", async () => {
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('tool_execution_failed: action handler threw');
+      });
+
+      const req = makeTurnRequest();
+      const events = await collectEvents(executePipelineV4(req, 'req-tool'));
+
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete.envelope.assistant_text).toBe("That action couldn't be completed. Try a different approach or rephrase your request.");
+    });
+
+    it("raw error string is logged at error level with request_id", async () => {
+      const { log } = await import("../../../../src/utils/telemetry.js");
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('Anthropic 400 {"type":"error"}');
+      });
+
+      const req = makeTurnRequest();
+      await collectEvents(executePipelineV4(req, 'req-log'));
+
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request_id: 'req-log',
+          error: expect.stringContaining('Anthropic 400'),
+        }),
+        'v4.pipeline_error',
+      );
+    });
+
+    it("no raw provider error text in assistant_text for any error code path", async () => {
+      const rawErrors = [
+        'Anthropic streaming chat_with_tools failed: 400 {"type":"error","error":{"type":"invalid_request_error"}}',
+        'Anthropic streaming failed: 500 Internal Server Error',
+        'Request timeout after 30000ms',
+        'tool_execution_failed: action handler threw',
+      ];
+
+      for (const rawError of rawErrors) {
+        mockStreamChatWithTools.mockImplementation(() => { throw new Error(rawError); });
+        const req = makeTurnRequest();
+        const events = await collectEvents(executePipelineV4(req, 'req-raw'));
+        const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+        // assistant_text must never contain raw error fragments
+        const text = complete.envelope.assistant_text ?? '';
+        expect(text).not.toContain('Anthropic');
+        expect(text).not.toContain('streaming');
+        expect(text).not.toContain('{');
+        expect(text).not.toContain('failed:');
+      }
+    });
+  });
+
+  // ── Task 3: Fix stage indicator on error responses ─────────────────────
+
+  describe("Task 3: Stage indicator on error responses", () => {
+    it("error during LLM call (after TurnContext) returns stage from TurnContext", async () => {
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('LLM call failed');
+      });
+
+      const req = makeTurnRequest({
+        context: {
+          graph: { nodes: [{ id: 'n1', kind: 'decision', label: 'D1' }], edges: [] },
+          analysis_response: null,
+          framing: { stage: 'ideate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-stage'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      // TurnContext computes stage from graph state — should NOT fall back to 'frame'
+      expect(complete.envelope.stage_indicator).toBeDefined();
+      expect(complete.envelope.stage_indicator).not.toBe('frame');
+    });
+
+    it("error before TurnContext computation returns stage_indicator: 'frame'", async () => {
+      // Simulate error before TurnContext by having system_event return null
+      // and computeTurnContext throw — buildFallbackContext sets stage to 'frame'
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('LLM call failed');
+      });
+
+      const req = makeTurnRequest({
+        context: {
+          graph: null,
+          analysis_response: null,
+          framing: { stage: 'frame' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      });
+
+      const events = await collectEvents(executePipelineV4(req, 'req-early-error'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      expect(complete.envelope.stage_indicator).toBe('frame');
+    });
+  });
+
+  // ── Task 4: Normaliser DEFAULT_TEXT telemetry ──────────────────────────
+
+  describe("Task 4: Normaliser default text telemetry", () => {
+    it("logs warning when normaliser applies default text on v4 turn", async () => {
+      const { log } = await import("../../../../src/utils/telemetry.js");
+
+      // LLM returns empty text — normaliser will apply DEFAULT_TEXT
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'message_complete', result: { content: [{ type: 'text', text: '' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest();
+      await collectEvents(executePipelineV4(req, 'req-default'));
+
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'v4.normaliser_default_text_used',
+          request_id: 'req-default',
+        }),
+        'v4.normaliser_default_text_used',
+      );
     });
   });
 });

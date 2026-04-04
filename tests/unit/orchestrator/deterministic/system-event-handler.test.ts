@@ -109,9 +109,9 @@ describe("handleSystemEvent", () => {
     expect(result!.envelope.assistant_text).toBeNull();
   });
 
-  // ── Acknowledgement behavior: with user message → template text ──────────
+  // ── Suppressed graph-mutation events: null assistant_text ────────────────
 
-  it("direct_graph_edit with user message → acknowledgement text", () => {
+  it("direct_graph_edit with user message → null (suppressed)", () => {
     const req = makeTurnRequest({
       system_event: makeEvent('direct_graph_edit', {
         changed_node_ids: ['fac_1'],
@@ -122,18 +122,20 @@ describe("handleSystemEvent", () => {
     });
     const result = handleSystemEvent(req, 'turn-1', 'req-1');
     expect(result).not.toBeNull();
-    expect(result!.envelope.assistant_text).toBe('Noted the changes to your model.');
+    expect(result!.envelope.assistant_text).toBeNull();
   });
 
-  it("patch_accepted with user message → acknowledgement text", () => {
+  it("patch_accepted with user message → null (suppressed)", () => {
     const req = makeTurnRequest({
       system_event: makeEvent('patch_accepted', { patch_id: 'p-1', operations: [] }),
       message: 'Accept the changes',
     });
     const result = handleSystemEvent(req, 'turn-1', 'req-1');
     expect(result).not.toBeNull();
-    expect(result!.envelope.assistant_text).toBe('Changes applied.');
+    expect(result!.envelope.assistant_text).toBeNull();
   });
+
+  // ── Non-graph events: meaningful text preserved ────────────────────────
 
   it("direct_analysis_run with user message → informational message", () => {
     const req = makeTurnRequest({
@@ -229,7 +231,23 @@ describe("handleSystemEvent", () => {
     );
   });
 
-  it("logs acknowledgement response_type for message events", () => {
+  it("logs acknowledgement response_type for non-graph events with message", () => {
+    const req = makeTurnRequest({
+      system_event: makeEvent('direct_analysis_run', {}),
+      message: 'Run the analysis',
+    });
+    handleSystemEvent(req, 'turn-1', 'req-1');
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'direct_analysis_run',
+        has_user_message: true,
+        response_type: 'acknowledgement',
+      }),
+      'deterministic.system_event_handled',
+    );
+  });
+
+  it("logs silent response_type for suppressed graph-mutation events with message", () => {
     const req = makeTurnRequest({
       system_event: makeEvent('patch_accepted', { patch_id: 'p-1', operations: [] }),
       message: 'Apply the patch',
@@ -239,7 +257,7 @@ describe("handleSystemEvent", () => {
       expect.objectContaining({
         event_type: 'patch_accepted',
         has_user_message: true,
-        response_type: 'acknowledgement',
+        response_type: 'silent',
       }),
       'deterministic.system_event_handled',
     );

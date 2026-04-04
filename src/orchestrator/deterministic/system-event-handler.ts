@@ -21,12 +21,19 @@ import { log } from "../../utils/telemetry.js";
 // Acknowledgement Templates
 // ============================================================================
 
-const TEMPLATES: Record<string, string> = {
-  patch_accepted: 'Changes applied.',
-  patch_dismissed: 'Changes dismissed.',
-  direct_graph_edit: 'Noted the changes to your model.',
+/**
+ * Acknowledgement templates by system event type.
+ *
+ * Graph-mutation events (patch_accepted, patch_dismissed, direct_graph_edit)
+ * return null — the UI graph patch block already confirms the operation,
+ * so emitting text would duplicate the confirmation as a message bubble.
+ */
+const TEMPLATES: Record<string, string | null> = {
+  patch_accepted: null,     // Graph patch block shows "Changes applied"
+  patch_dismissed: null,     // Graph patch block shows dismissal
+  direct_graph_edit: null,   // Graph patch block shows mutation result
   direct_analysis_run: 'Analysis is running. You\u2019ll see the results in the analysis panel when it completes.',
-  feedback_submitted: '',  // Always silent
+  feedback_submitted: null,  // Always silent
 };
 
 // ============================================================================

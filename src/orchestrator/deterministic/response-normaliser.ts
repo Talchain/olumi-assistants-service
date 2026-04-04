@@ -7,7 +7,7 @@
 import type { OrchestratorResponseEnvelope, SuggestedAction, TypedConversationBlock } from "../types.js";
 import type { LLMJsonResponse } from "./types.js";
 import { isValidAction } from "./actions/registry.js";
-import { emit } from "../../utils/telemetry.js";
+import { emit, log } from "../../utils/telemetry.js";
 
 // ============================================================================
 // Constants
@@ -23,13 +23,25 @@ const DEFAULT_TEXT = "I'm here to help with your decision. What would you like t
 
 /**
  * Normalise a response envelope — belt-and-braces guardrails.
+ *
+ * @param opts.v4Context — when provided, emits telemetry if DEFAULT_TEXT is used on a v4 turn.
  */
 export function normaliseDeterministicResponse(
   envelope: OrchestratorResponseEnvelope,
+  opts?: { v4Context?: { request_id: string; turn_id: string; execution_class: string } },
 ): OrchestratorResponseEnvelope {
   // 1. Empty text → default message
   if (!envelope.assistant_text || envelope.assistant_text.trim().length === 0) {
     envelope.assistant_text = DEFAULT_TEXT;
+
+    if (opts?.v4Context) {
+      log.warn({
+        event: 'v4.normaliser_default_text_used',
+        request_id: opts.v4Context.request_id,
+        turn_id: opts.v4Context.turn_id,
+        execution_class: opts.v4Context.execution_class,
+      }, 'v4.normaliser_default_text_used');
+    }
   }
 
   // 2. Strip any XML tags (belt-and-braces)

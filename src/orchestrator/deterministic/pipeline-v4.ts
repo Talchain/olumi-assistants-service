@@ -95,6 +95,7 @@ export async function* executePipelineV4(
   const turnId = randomUUID();
   const startTime = Date.now();
   let seq = 0;
+  let computedStage: string | null = null;
 
   try {
     // ── Class 1: System events (deterministic, no LLM) ──────────────
@@ -130,6 +131,8 @@ export async function* executePipelineV4(
 
     const effectiveMessage = turnRequest.message?.trim() ?? '';
     const stage = turnContext.stage;
+    computedStage = stage;
+    const executionClass = determineExecutionClass(turnRequest, turnContext, effectiveMessage);
 
     log.info({
       request_id: requestId,
@@ -138,7 +141,7 @@ export async function* executePipelineV4(
       turn_count: turnContext.conversation.turn_count,
       entity_count: turnContext.entities.nodes.size,
       eligible_actions_count: turnContext.eligible_actions.length,
-      execution_class: determineExecutionClass(turnRequest, turnContext, effectiveMessage),
+      execution_class: executionClass,
       generate_model: !!turnRequest.generate_model,
     }, 'v4.turn_context');
 
@@ -158,6 +161,8 @@ export async function* executePipelineV4(
         const envelope = assembleV4Envelope({
           turnContext,
           turnId,
+          requestId,
+          executionClass,
           assistantText: confirmResult.actionResult.assistantText,
           actionResult: confirmResult.actionResult,
           routing: 'deterministic',
@@ -480,6 +485,8 @@ export async function* executePipelineV4(
     const envelope = assembleV4Envelope({
       turnContext,
       turnId,
+      requestId,
+      executionClass,
       assistantText,
       actionResult,
       routing,
@@ -493,36 +500,42 @@ export async function* executePipelineV4(
   } catch (error) {
     // Emit error event
     const errorCode = resolveErrorCode(error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const rawErrorMessage = error instanceof Error ? error.message : String(error);
+    const userFacingMessage = getUserFacingErrorMessage(errorCode);
 
     yield {
       type: 'error',
       seq: seq++,
-      error: { code: errorCode, message: errorMessage },
+      error: { code: errorCode, message: userFacingMessage },
       recoverable: errorCode !== STREAM_ERROR_CODES.PIPELINE_ERROR,
     };
 
+    // Log full raw error at error level for debugging — never surface to user
     log.error({
       request_id: requestId,
       turn_id: turnId,
       error_code: errorCode,
-      error: errorMessage,
+      error: rawErrorMessage,
       duration_ms: Date.now() - startTime,
     }, 'v4.pipeline_error');
+
+    // Use computed stage if available (error after stage inference),
+    // otherwise fall back to framing stage or 'frame'.
+    const errorStage = computedStage ?? turnRequest.context?.framing?.stage ?? 'frame';
 
     // Emit error envelope as turn_complete for UI consistency
     const errorEnvelope = {
       turn_id: turnId,
-      assistant_text: null,
+      assistant_text: userFacingMessage,
       blocks: [],
       lineage: { context_hash: '' },
       turn_plan: { selected_tool: null, routing: 'llm' as const, long_running: false },
-      stage_indicator: turnRequest.context?.framing?.stage ?? 'frame',
+      stage_indicator: errorStage,
       response_version: 2,
       guidance_items: [],
       error: {
         code: errorCode,
-        message: errorMessage,
+        message: userFacingMessage,
         recoverable: errorCode !== STREAM_ERROR_CODES.PIPELINE_ERROR,
       },
     } as unknown as OrchestratorResponseEnvelopeV2;
@@ -538,6 +551,8 @@ export async function* executePipelineV4(
 interface AssembleInput {
   turnContext: DeterministicTurnContext;
   turnId: string;
+  requestId: string;
+  executionClass: string;
   assistantText: string | null;
   actionResult: ActionResult | null;
   routing: 'deterministic' | 'llm';
@@ -556,6 +571,8 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
   const {
     turnContext,
     turnId,
+    requestId,
+    executionClass,
     assistantText: rawAssistantText,
     actionResult,
     routing,
@@ -654,7 +671,9 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
   };
 
   // Apply normaliser
-  const normalised = normaliseDeterministicResponse(envelope);
+  const normalised = normaliseDeterministicResponse(envelope, {
+    v4Context: { request_id: requestId, turn_id: turnId, execution_class: executionClass },
+  });
 
   // Outbound contract validation (warn-only, never blocks response)
   validateEnvelope(normalised as unknown as Record<string, unknown>, turnId);
@@ -790,6 +809,25 @@ function resolveErrorCode(error: unknown): string {
   if (error instanceof Error) {
     if (error.name === 'AbortError') return STREAM_ERROR_CODES.TURN_BUDGET_EXCEEDED;
     if (error.message.includes('timeout')) return STREAM_ERROR_CODES.LLM_TIMEOUT;
+    // Tool execution errors are caught by the inner handler (line ~383) and
+    // surfaced via failedToolCall — they never reach this outer catch block.
+    // Errors that DO reach here are LLM adapter or pipeline-level failures.
+    if (error.message.includes('tool_execution_failed') || error.message.includes('action handler')) {
+      return STREAM_ERROR_CODES.TOOL_ERROR;
+    }
   }
   return STREAM_ERROR_CODES.PIPELINE_ERROR;
+}
+
+/** Map error codes to clean user-facing messages. Raw error details are never surfaced. */
+function getUserFacingErrorMessage(errorCode: string): string {
+  switch (errorCode) {
+    case STREAM_ERROR_CODES.LLM_TIMEOUT:
+    case STREAM_ERROR_CODES.TURN_BUDGET_EXCEEDED:
+      return 'This is taking longer than expected. Try again or rephrase your message.';
+    case STREAM_ERROR_CODES.TOOL_ERROR:
+      return "That action couldn't be completed. Try a different approach or rephrase your request.";
+    default:
+      return 'Something went wrong while processing your request. Please try again.';
+  }
 }
