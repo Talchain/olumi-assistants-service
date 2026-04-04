@@ -475,7 +475,7 @@ describe("Backward Compatibility", () => {
       },
       quality: { overall: 0.9, structure: 0.85 },
       trace: { request_id: "req-123" },
-      draft_warnings: [{ type: "TEST", message: "Test warning" }],
+      draft_warnings: [{ id: "TEST", severity: "medium", affected_node_ids: [], affected_edge_ids: [] }],
     };
 
     const v2Response = transformResponseToV2(v1Response);
