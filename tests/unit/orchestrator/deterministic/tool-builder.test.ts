@@ -369,10 +369,8 @@ describe("ACTION_CATALOGUE — schema compliance", () => {
         expect(action.input_schema.type).toBe('object');
       });
 
-      it("root has additionalProperties", () => {
-        const ap = action.input_schema.additionalProperties;
-        expect(ap).toBeDefined();
-        expect(ap === false || typeof ap === 'object').toBe(true);
+      it("root has additionalProperties: false", () => {
+        expect(action.input_schema.additionalProperties).toBe(false);
       });
 
       it("required keys exist in properties", () => {
