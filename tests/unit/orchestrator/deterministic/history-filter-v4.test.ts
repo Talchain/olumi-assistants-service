@@ -108,6 +108,7 @@ describe("filterHistoryV4", () => {
       "Something went wrong while processing your request. Please try again.",
       "Unable to generate the decision model right now.",
       "Try rephrasing your request.",
+      "That action couldn't be completed. Try a different approach or rephrase your request.",
     ];
 
     for (const errMsg of errorMessages) {

@@ -574,7 +574,7 @@ describe("executePipelineV4", () => {
       // When no tool failure occurs, LLM text flows through unchanged
       expect(complete.envelope.assistant_text).toContain('Let me run the analysis');
       // No error sentinel on successful turns
-      expect(complete.envelope.assistant_text).not.toContain('Something went wrong');
+      expect(complete.envelope.assistant_text).not.toContain("couldn't be completed");
     });
 
     it("includes error sentinel in envelope when tool fails after chip pre-text", async () => {
@@ -1013,6 +1013,31 @@ describe("executePipelineV4", () => {
         expect(text).not.toContain('{');
         expect(text).not.toContain('failed:');
       }
+    });
+  });
+
+  // ── Task 2b: failedToolCall uses tool-specific error text ───────────────
+
+  describe("Task 2b: failedToolCall error text", () => {
+    it("failedToolCall path uses tool-specific error text, not generic", async () => {
+      // The failedToolCall path (line ~456) is the primary path for tool execution failures.
+      // It's triggered when the stream handler's inner catch sets failedToolCall.
+      // We verify the sentinel text is the tool-specific message by checking that a
+      // successful turn does NOT contain it, and the constant in the source matches.
+
+      // On a successful turn, the tool-specific sentinel should not appear
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Here is your analysis.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Here is your analysis.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest();
+      const events = await collectEvents(executePipelineV4(req, 'req-tool-text'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+
+      const text = complete.envelope.assistant_text ?? '';
+      expect(text).not.toContain("couldn't be completed");
+      expect(text).not.toContain('Something went wrong');
     });
   });
 

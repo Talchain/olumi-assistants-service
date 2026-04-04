@@ -454,7 +454,7 @@ export async function* executePipelineV4(
     }
 
     if (failedToolCall) {
-      const errorText = 'Something went wrong while processing your request. Please try again.';
+      const errorText = "That action couldn't be completed. Try a different approach or rephrase your request.";
       if (!assistantText || !assistantText.trim()) {
         // No text at all — set outright.
         assistantText = errorText;

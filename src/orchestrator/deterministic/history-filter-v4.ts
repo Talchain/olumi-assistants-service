@@ -31,6 +31,7 @@ const ERROR_PATTERNS: RegExp[] = [
   /something went wrong/i,
   /please try again/i,
   /unable to generate/i,
+  /couldn'?t be completed/i,
 ];
 
 /** System sentinel prefix — injected by system event router, not for LLM history. */
