@@ -430,15 +430,16 @@ describe("Task 12: OpenAI adapter edge legacy fallbacks", () => {
 // Task 3B: needs_user_input in V3 retry suggestion
 // ============================================================================
 
-describe("Task 3B: needs_user_input in retry suggestion", () => {
-  it("retry suggestion condition includes needs_user_input", async () => {
+describe("Task 3B: _retry_suggestion removed (CIL Phase 1)", () => {
+  it("_retry_suggestion code block has been removed from schema-v3.ts", async () => {
     const fs = await import("fs");
     const source = fs.readFileSync(
       "src/cee/transforms/schema-v3.ts",
       "utf-8"
     );
-    // Verify the retry condition checks for both statuses
-    expect(source).toContain('analysisReady.status === "needs_user_mapping" || analysisReady.status === "needs_user_input"');
+    // CIL Phase 1: _retry_suggestion leaked internal retry metadata to API clients.
+    // The code block and interface field have been removed. priceCheck telemetry is preserved.
+    expect(source).not.toContain('_retry_suggestion');
   });
 });
 

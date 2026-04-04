@@ -16,18 +16,20 @@ import {
   OptionForAnalysis,
   AnalysisReadyPayload,
 } from "../../src/schemas/analysis-ready.js";
-import { DraftGraphOutput } from "../../src/schemas/assist.js";
+import { DraftGraphOutput, GoalConstraintSchema } from "../../src/schemas/assist.js";
 import { LLMDraftResponse } from "../../src/adapters/llm/shared-schemas.js";
 
 /**
- * CIL Phase 0 — Verify .passthrough() on V3 egress schemas.
+ * CIL Phase 1 — Verify egress schemas strip unknown fields.
  *
- * Each test confirms that unknown/additive fields survive safeParse()
- * without affecting validation of known fields.
+ * NodeV3, EdgeV3, CEEGraphResponseV3 now use .strip() (Zod default)
+ * instead of .passthrough(). Unknown fields are silently dropped.
+ * Schemas that remain passthrough (OptionV3, ObservedStateV3, etc.)
+ * still preserve extra fields.
  */
-describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)", () => {
-  // ── NodeV3 ──────────────────────────────────────────────────────────────
-  it("NodeV3 preserves extra fields", () => {
+describe("CIL Phase 1: V3 egress schemas strip unknown fields on NodeV3, EdgeV3, CEEGraphResponseV3", () => {
+  // ── NodeV3 (stripped) ──────────────────────────────────────────────────
+  it("NodeV3 strips extra fields", () => {
     const input = {
       id: "factor_price",
       kind: "factor",
@@ -37,12 +39,12 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
     };
     const result = NodeV3.safeParse(input);
     expect(result.success).toBe(true);
-    expect((result as any).data.experimental_flag).toBe(true);
-    expect((result as any).data.custom_score).toBe(42);
+    expect((result as any).data.experimental_flag).toBeUndefined();
+    expect((result as any).data.custom_score).toBeUndefined();
   });
 
-  // ── EdgeV3 ──────────────────────────────────────────────────────────────
-  it("EdgeV3 preserves extra fields", () => {
+  // ── EdgeV3 (stripped) ──────────────────────────────────────────────────
+  it("EdgeV3 strips extra fields", () => {
     const input = {
       from: "a",
       to: "b",
@@ -53,7 +55,7 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
     };
     const result = EdgeV3.safeParse(input);
     expect(result.success).toBe(true);
-    expect((result as any).data.edge_metadata).toEqual({ source: "experiment" });
+    expect((result as any).data.edge_metadata).toBeUndefined();
   });
 
   // ── OptionV3 ────────────────────────────────────────────────────────────
@@ -158,8 +160,8 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
     expect((result as any).data.layout_version).toBe(2);
   });
 
-  // ── CEEGraphResponseV3 (top-level) ─────────────────────────────────────
-  it("CEEGraphResponseV3 preserves extra top-level fields", () => {
+  // ── CEEGraphResponseV3 (stripped) ───────────────────────────────────────
+  it("CEEGraphResponseV3 strips extra top-level fields", () => {
     const input = {
       schema_version: "3.0",
       nodes: [{ id: "goal_1", kind: "goal", label: "Goal" }],
@@ -171,7 +173,7 @@ describe("CIL Phase 0: V3 egress schemas preserve unknown fields (.passthrough)"
     };
     const result = CEEGraphResponseV3.safeParse(input);
     expect(result.success).toBe(true);
-    expect((result as any).data.custom_top_level).toBe("preserved");
+    expect((result as any).data.custom_top_level).toBeUndefined();
   });
 
   it("CEEGraphResponseV3 preserves extra trace fields", () => {
@@ -309,5 +311,206 @@ describe("Coaching passthrough across schema boundaries", () => {
     const result = CEEGraphResponseV3.safeParse(input);
     expect(result.success).toBe(true);
     expect((result as any).data.coaching).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// CIL Phase 1 — Schema hardening additions
+// ============================================================================
+
+describe("CIL Phase 1: Schema hardening — new field declarations and strip behaviour", () => {
+  // ── NodeV3 option-kind fields ─────────────────────────────────────────
+  it("NodeV3 accepts interventions and is_baseline on option-kind nodes", () => {
+    const input = {
+      id: "opt_expand",
+      kind: "option",
+      label: "Expand into EU",
+      interventions: {
+        fac_price: { value: 59, source: "brief_extraction", target_match: { node_id: "fac_price", match_type: "exact_id", confidence: "high" } },
+      },
+      is_baseline: false,
+    };
+    const result = NodeV3.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data.interventions).toBeDefined();
+    expect((result as any).data.is_baseline).toBe(false);
+  });
+
+  // ── NodeV3 declared CIL Phase 1 fields ─────────────────────────────────
+  it("NodeV3 accepts all declared metadata fields", () => {
+    const input = {
+      id: "fac_revenue",
+      kind: "factor",
+      label: "Revenue",
+      prior: { distribution: "uniform", range_min: 0, range_max: 100 },
+      factor_type: "continuous",
+      extractionType: "extracted",
+      uncertainty_drivers: ["market_volatility"],
+      intercept: 0.5,
+      display_value: "£40,000",
+      encoding_map: { "0": "Low", "1": "High" },
+    };
+    const result = NodeV3.safeParse(input);
+    expect(result.success).toBe(true);
+    const data = (result as any).data;
+    expect(data.prior.distribution).toBe("uniform");
+    expect(data.factor_type).toBe("continuous");
+    expect(data.extractionType).toBe("extracted");
+    expect(data.uncertainty_drivers).toEqual(["market_volatility"]);
+    expect(data.intercept).toBe(0.5);
+    expect(data.display_value).toBe("£40,000");
+    expect(data.encoding_map).toEqual({ "0": "Low", "1": "High" });
+  });
+
+  // ── _retry_suggestion stripped ─────────────────────────────────────────
+  it("CEEGraphResponseV3 strips _retry_suggestion", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Goal" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+      _retry_suggestion: {
+        should_retry: true,
+        reason: "missing factors",
+        missing_factor_terms: ["price"],
+      },
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data._retry_suggestion).toBeUndefined();
+  });
+
+  // ── Rationale validation ───────────────────────────────────────────────
+  it("CEEGraphResponseV3 accepts valid rationales with provenance_source", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Goal" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+      rationales: [
+        { target: "fac_price", why: "Price drives conversion", provenance_source: "brief" },
+        { target: "fac_cost", why: "Cost is a constraint" },
+      ],
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(true);
+    const rationales = (result as any).data.rationales;
+    expect(rationales).toHaveLength(2);
+    expect(rationales[0].provenance_source).toBe("brief");
+    expect(rationales[1].provenance_source).toBeUndefined();
+  });
+
+  it("CEEGraphResponseV3 rejects rationale missing target", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Goal" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+      rationales: [
+        { why: "missing target field" },
+      ],
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  // ── Coaching strips extra fields ───────────────────────────────────────
+  it("CEEGraphResponseV3 coaching strips undeclared fields from strengthen_items", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Goal" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+      coaching: {
+        summary: "Test coaching",
+        strengthen_items: [{
+          id: "str_1",
+          label: "Add cost data",
+          detail: "Brief mentions budget",
+          action_type: "add_constraint",
+          openai_hallucinated_field: "should be stripped",
+        }],
+      },
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(true);
+    const item = (result as any).data.coaching.strengthen_items[0];
+    expect(item.id).toBe("str_1");
+    expect(item.openai_hallucinated_field).toBeUndefined();
+  });
+
+  // ── GoalConstraint strips extra fields ─────────────────────────────────
+  it("GoalConstraintSchema strips undeclared fields", () => {
+    const input = {
+      constraint_id: "c1",
+      node_id: "fac_revenue",
+      operator: ">=",
+      value: 800,
+      label: "Revenue target",
+      extra_openai_field: "should be stripped",
+    };
+    const result = GoalConstraintSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data.extra_openai_field).toBeUndefined();
+    expect((result as any).data.constraint_id).toBe("c1");
+  });
+
+  // ── LLMDraftResponse rationale provenance_source ───────────────────────
+  it("LLMDraftResponse preserves provenance_source on rationales", () => {
+    const input = {
+      nodes: [{ id: "goal_1", kind: "goal", label: "Revenue" }],
+      edges: [],
+      rationales: [
+        { target: "fac_price", why: "Drives revenue", provenance_source: "user_brief" },
+      ],
+    };
+    const result = LLMDraftResponse.safeParse(input);
+    expect(result.success).toBe(true);
+    expect((result as any).data.rationales[0].provenance_source).toBe("user_brief");
+  });
+
+  // ── CEEGraphResponseV3 with all declared fields ────────────────────────
+  it("CEEGraphResponseV3 passes with all declared fields populated", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{
+        id: "goal_1",
+        kind: "goal",
+        label: "Revenue",
+        goal_threshold: 0.8,
+        goal_threshold_raw: 800,
+        goal_threshold_unit: "customers",
+        goal_threshold_cap: 1000,
+      }],
+      edges: [{
+        from: "fac_1",
+        to: "goal_1",
+        strength: { mean: 0.5, std: 0.1 },
+        exists_probability: 0.8,
+        effect_direction: "positive" as const,
+        defaulted: true,
+      }],
+      options: [{
+        id: "opt_1",
+        label: "Option A",
+        status: "ready" as const,
+        interventions: {},
+      }],
+      goal_node_id: "goal_1",
+      rationales: [{ target: "goal_1", why: "test" }],
+      draft_warnings: [{ type: "test", message: "warning" }],
+      coaching: {
+        summary: "test",
+        strengthen_items: [{ id: "s1", label: "l", detail: "d", action_type: "a" }],
+      },
+      quality: { overall: 7 },
+      meta: { roots: ["goal_1"] },
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(true);
   });
 });

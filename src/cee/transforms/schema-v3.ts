@@ -64,12 +64,6 @@ export interface V3DraftGraphResponse extends CEEGraphResponseV3T {
   }>;
   /** P0: Ready-to-use analysis payload for direct PLoT consumption */
   analysis_ready: AnalysisReadyPayloadT;
-  /** Retry suggestion when price-related factors are missing */
-  _retry_suggestion?: {
-    should_retry: boolean;
-    reason: string;
-    missing_factor_terms: string[];
-  };
 }
 
 /**
@@ -227,14 +221,13 @@ export function transformNodeToV3(
     };
   } else if (isFactorData(node.data)) {
     // Controllable factors without value: preserve factor_type and uncertainty_drivers
-    // directly on the node (NodeV3 .passthrough() preserves them). Required by PLoT's
-    // graph validator — stripping them causes CONTROLLABLE_MISSING_DATA errors.
-    const extended = v3Node as NodeV3T & { factor_type?: string; uncertainty_drivers?: unknown };
+    // directly on the node. Required by PLoT's graph validator —
+    // stripping them causes CONTROLLABLE_MISSING_DATA errors.
     if (node.data.factor_type !== undefined) {
-      extended.factor_type = node.data.factor_type;
+      v3Node.factor_type = node.data.factor_type;
     }
     if (node.data.uncertainty_drivers !== undefined) {
-      extended.uncertainty_drivers = node.data.uncertainty_drivers;
+      v3Node.uncertainty_drivers = node.data.uncertainty_drivers;
     }
   }
 
@@ -243,7 +236,7 @@ export function transformNodeToV3(
   // repair. ISL needs prior ranges to run Monte Carlo sampling on external factors.
   const nodePrior = (node as any).prior;
   if (nodePrior && typeof nodePrior === "object") {
-    (v3Node as any).prior = nodePrior;
+    v3Node.prior = nodePrior;
   }
 
   // Preserve node-level factor metadata for external factors.
@@ -251,14 +244,14 @@ export function transformNodeToV3(
   // extractionType, and uncertainty_drivers from data to node level when stripping
   // data.value from external factors. Pick them up here so they reach the V3 output.
   const anyNode = node as any;
-  if (anyNode.factor_type !== undefined && (v3Node as any).factor_type === undefined) {
-    (v3Node as any).factor_type = anyNode.factor_type;
+  if (anyNode.factor_type !== undefined && v3Node.factor_type === undefined) {
+    v3Node.factor_type = anyNode.factor_type;
   }
-  if (anyNode.extractionType !== undefined && (v3Node as any).extractionType === undefined) {
-    (v3Node as any).extractionType = anyNode.extractionType;
+  if (anyNode.extractionType !== undefined && v3Node.extractionType === undefined) {
+    v3Node.extractionType = anyNode.extractionType;
   }
-  if (anyNode.uncertainty_drivers !== undefined && (v3Node as any).uncertainty_drivers === undefined) {
-    (v3Node as any).uncertainty_drivers = anyNode.uncertainty_drivers;
+  if (anyNode.uncertainty_drivers !== undefined && v3Node.uncertainty_drivers === undefined) {
+    v3Node.uncertainty_drivers = anyNode.uncertainty_drivers;
   }
 
   // Preserve intercept as a top-level node field (v191+).
@@ -273,7 +266,7 @@ export function transformNodeToV3(
   const interceptEligible = v3Node.kind === 'factor' || v3Node.kind === 'outcome'
     || v3Node.kind === 'risk' || v3Node.kind === 'goal';
   if (interceptEligible && anyNode.intercept != null && typeof anyNode.intercept === 'number') {
-    (v3Node as any).intercept = anyNode.intercept;
+    v3Node.intercept = anyNode.intercept;
     log.debug({ event: 'cee.v3_transform.intercept_forwarded', node_id: id, value: anyNode.intercept }, 'cee.v3_transform.intercept_forwarded');
   }
 
@@ -287,7 +280,7 @@ export function transformNodeToV3(
   const nodeEncodingMap = anyNode.encoding_map;
   const resolvedEncodingMap = dataEncodingMap ?? nodeEncodingMap;
   if (resolvedEncodingMap !== undefined) {
-    (v3Node as any).encoding_map = resolvedEncodingMap;
+    v3Node.encoding_map = resolvedEncodingMap;
   }
 
   // Preserve display_value as a top-level node field (v191+).
@@ -296,7 +289,7 @@ export function transformNodeToV3(
   // Only defined when the LLM produced a non-null value.
   const dataDisplayValue = isFactorData(node.data) ? (node.data as any).display_value : undefined;
   if (dataDisplayValue !== undefined) {
-    (v3Node as any).display_value = dataDisplayValue;
+    v3Node.display_value = dataDisplayValue;
   }
 
   return v3Node;
@@ -796,15 +789,15 @@ export function transformResponseToV3(
   // the matching option nodes in nodes[]. options[] remains the canonical intervention
   // source for analysis; graph nodes carry the data for canvas display (ConnRow,
   // intervention labels).
-  // NodeV3 uses .passthrough() so these extra fields survive Zod validation.
+  // NodeV3 declares interventions and is_baseline as optional fields (CIL Phase 1).
   const optionById = new Map(v3Options.map((o) => [o.id, o]));
   for (const node of v3NodesTyped) {
     if (node.kind !== "option") continue;
     const opt = optionById.get(node.id);
     if (!opt) continue;
-    (node as any).interventions = opt.interventions;
+    node.interventions = opt.interventions;
     if (opt.is_baseline !== undefined) {
-      (node as any).is_baseline = opt.is_baseline;
+      node.is_baseline = opt.is_baseline;
     }
   }
 
@@ -1027,20 +1020,8 @@ export function transformResponseToV3(
     v3Response.validation_warnings = validationWarnings;
   }
 
-  // Add retry suggestion if price-related factors are missing
-  if (priceCheck.detected && (analysisReady.status === "needs_user_mapping" || analysisReady.status === "needs_user_input")) {
-    v3Response._retry_suggestion = {
-      should_retry: true,
-      reason: "LLM did not create factor nodes for quantitative dimensions",
-      missing_factor_terms: priceCheck.terms,
-    };
-
-    log.info({
-      requestId: context.requestId,
-      missingTerms: priceCheck.terms,
-      event: "cee.v3.retry_suggestion",
-    }, `Retry suggested: missing factor nodes for ${priceCheck.terms.join(", ")}`);
-  }
+  // CIL Phase 1: removed internal retry-suggestion field that leaked to API clients.
+  // priceCheck telemetry is preserved above (line ~860).
 
   // Add meta if present
   if (graph.meta) {

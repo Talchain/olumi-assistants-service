@@ -115,7 +115,26 @@ export const NodeV3 = z.object({
    * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)".
    * Node-level field (not in observed_state) — describes label encoding, not observed state. */
   encoding_map: z.record(z.string(), z.string()).optional(),
-}).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
+  /** Prior distribution data for external factors (set by LLM or synthesised by unreachable-factors repair).
+   *  ISL needs prior ranges to run Monte Carlo sampling on external factors. */
+  prior: z.object({ distribution: z.string(), range_min: z.number(), range_max: z.number() }).passthrough().optional(),
+  /** Factor type classification (e.g. "continuous", "categorical") — promoted to node level by repair stages */
+  factor_type: z.string().optional(),
+  /** Extraction type: "extracted" or "inferred" — promoted to node level by repair stages */
+  extractionType: z.string().optional(),
+  /** Uncertainty driver labels for controllable factors — promoted to node level by repair stages */
+  uncertainty_drivers: z.array(z.string()).optional(),
+  /** Prior mean / base rate for root nodes in ISL inference (v191+) */
+  intercept: z.number().optional(),
+  /** Human-readable value string for UI rendering (e.g. "£40,000", "18 months") */
+  display_value: z.string().optional(),
+  /** Intervention bundle copied from options[] for canvas display (option-kind nodes only).
+   *  options[] remains the canonical source for analysis; graph nodes carry this for ConnRow rendering.
+   *  Typed as z.any() per-value to avoid forward reference to InterventionV3; canonical shape lives on OptionV3. */
+  interventions: z.record(z.string(), z.any()).optional(),
+  /** Marks the status-quo / baseline option node (option-kind nodes only, v191+). */
+  is_baseline: z.boolean().optional(),
+}); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 
 // ============================================================================
@@ -169,7 +188,9 @@ export const EdgeV3 = z.object({
    *  Absent when the pipeline is disabled, skipped, or failed gracefully.
    *  Full type definition: ValidationMetadata (src/cee/validation-pipeline/types.ts). */
   validation: z.any().optional(),
-}).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
+  /** CIL flag: true when default strength was applied (no LLM differentiation) */
+  defaulted: z.boolean().optional(),
+}); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 /** EdgeV3 with full ValidationMetadata typing (superset of Zod schema). */
 export type EdgeV3T = z.infer<typeof EdgeV3> & {
   /** Per-edge validation metadata from the two-pass parameter review pipeline.
@@ -427,10 +448,20 @@ export const CEEGraphResponseV3 = z.object({
       detail: z.string(),
       action_type: z.string(),
       bias_category: z.string().optional(),
-    }).passthrough()),
-  }).passthrough().optional(),
+    })), // CIL Phase 1: strip unknown fields on strengthen_items
+  }).optional(), // CIL Phase 1: strip unknown fields on coaching wrapper
   /** LLM causal claims — stated reasoning about direct effects, mediations, confounders (Phase 2B) */
   causal_claims: CausalClaimsArraySchema,
+  /** Draft warnings from the pipeline (e.g. strength defaults, missing data) */
+  draft_warnings: z.array(z.object({ type: z.string(), message: z.string(), severity: z.string().optional() })).optional(),
+  /** Pre-computed analysis-ready payload for PLoT (complex nested structure) */
+  analysis_ready: z.any().optional(),
+  /** Per-node LLM reasoning from Stage 1 (parse). Carried through V1→V3 boundary. */
+  rationales: z.array(z.object({
+    target: z.string(),
+    why: z.string(),
+    provenance_source: z.string().optional(),
+  })).optional(),
   /** Graph metadata */
   meta: GraphMetaV3.optional(),
   /** Quality metrics (1–10 integer scale; see computeQuality / openapi.yaml CEEQualityMeta) */
@@ -455,8 +486,8 @@ export const CEEGraphResponseV3 = z.object({
     }).optional(),
     /** Pipeline diagnostics (P0) */
     pipeline: z.record(z.unknown()).optional(),
-  }).passthrough().optional(), // CIL Phase 0: preserve additive trace fields
-}).passthrough(); // CIL Phase 0: preserve additive fields (e.g. goal_constraints, analysis_ready)
+  }).passthrough().optional(), // Keep passthrough: trace is internal/extensible
+}); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type CEEGraphResponseV3T = z.infer<typeof CEEGraphResponseV3>;
 
 // ============================================================================
@@ -494,4 +525,42 @@ export function deriveEffectDirection(
   strengthMean: number
 ): "positive" | "negative" {
   return strengthMean >= 0 ? "positive" : "negative";
+}
+
+// ============================================================================
+// CIL Phase 1: Unknown field detection for strip-mode schemas
+// ============================================================================
+
+/** Known keys for each egress schema (used by warnOnUnknownV3Fields). */
+const NODE_V3_KEYS = new Set(Object.keys(NodeV3.shape));
+const EDGE_V3_KEYS = new Set(Object.keys(EdgeV3.shape));
+const RESPONSE_V3_KEYS = new Set(Object.keys(CEEGraphResponseV3.shape));
+
+/**
+ * Log a warning when an egress-facing V3 object contains fields that will be
+ * silently stripped by Zod's default strip behaviour.  Call this BEFORE parse
+ * so the caller can observe drift without production failures.
+ *
+ * @param input - Raw object before Zod parse
+ * @param schemaName - Human-readable label for log context ("NodeV3" | "EdgeV3" | "CEEGraphResponseV3")
+ * @param logFn - Logger callback (receives structured payload)
+ */
+export function warnOnUnknownV3Fields(
+  input: Record<string, unknown>,
+  schemaName: "NodeV3" | "EdgeV3" | "CEEGraphResponseV3",
+  logFn: (payload: { event: string; schema: string; unknownKeys: string[]; nodeId?: string }) => void,
+): void {
+  const knownKeys = schemaName === "NodeV3" ? NODE_V3_KEYS
+    : schemaName === "EdgeV3" ? EDGE_V3_KEYS
+    : RESPONSE_V3_KEYS;
+
+  const unknownKeys = Object.keys(input).filter((k) => !knownKeys.has(k));
+  if (unknownKeys.length > 0) {
+    logFn({
+      event: "cee.v3_schema.unknown_fields_stripped",
+      schema: schemaName,
+      unknownKeys,
+      ...(typeof input.id === "string" ? { nodeId: input.id } : {}),
+    });
+  }
 }

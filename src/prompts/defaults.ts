@@ -2190,6 +2190,10 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('repair_graph', REPAIR_GRAPH_PROMPT);
   registerDefaultPrompt('clarify_brief', CLARIFY_BRIEF_PROMPT);
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);
+  // DEPRECATED: explainer and bias_check prompts are registered but never loaded
+  // via getSystemPrompt(). bias_check route uses detectBiases() directly; explainer
+  // has no route. Kept for prompt-store schema completeness — remove when task IDs
+  // are retired from PROMPT_TASKS.
   registerDefaultPrompt('explainer', EXPLAINER_PROMPT);
   registerDefaultPrompt('bias_check', BIAS_CHECK_PROMPT);
   registerDefaultPrompt('enrich_factors', getEnrichFactorsPrompt());

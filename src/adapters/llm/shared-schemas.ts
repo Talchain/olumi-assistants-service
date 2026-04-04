@@ -131,7 +131,7 @@ export type LLMEdgeT = z.infer<typeof LLMEdge>;
 export const LLMDraftResponse = z.object({
   nodes: z.array(LLMNode),
   edges: z.array(LLMEdge),
-  rationales: z.array(z.object({ target: z.string(), why: z.string() })).optional(),
+  rationales: z.array(z.object({ target: z.string(), why: z.string(), provenance_source: z.string().optional() })).optional(),
   // .passthrough() preserves additive fields (e.g. goal_constraints, future
   // LLM output) so the normalisation → Zod pipeline doesn't silently drop them.
 }).passthrough();

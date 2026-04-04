@@ -7,7 +7,7 @@ import {
 } from "../../src/cee/transforms/index.js";
 import type { V1DraftGraphResponse } from "../../src/cee/transforms/index.js";
 import { validateV3Response } from "../../src/cee/validation/v3-validator.js";
-import { CEEGraphResponseV3 } from "../../src/schemas/cee-v3.js";
+import { CEEGraphResponseV3, NodeV3, EdgeV3, warnOnUnknownV3Fields } from "../../src/schemas/cee-v3.js";
 import { normaliseIdForMatch } from "../../src/cee/validation/integrity-sentinel.js";
 
 describe("CEE Schema V3 Integration", () => {
@@ -956,6 +956,160 @@ describe("CEE Schema V3 Integration", () => {
       // Both should report 100% (3 of 3)
       expect(strengthDefaultWarning?.details?.defaulted_percentage).toBe(100.0);
       expect(meanDominantWarning?.details?.mean_default_percentage).toBe(100.0);
+    });
+  });
+
+  // ==========================================================================
+  // CIL Phase 1: Schema hardening + rationale carrythrough tests
+  // ==========================================================================
+
+  describe("CIL Phase 1 — strip unknown fields", () => {
+    it("strips undeclared fields from NodeV3 during parse", () => {
+      const rawNode = {
+        id: "factor_test",
+        kind: "factor",
+        label: "Test Factor",
+        llm_invented_field: "should be stripped",
+      };
+
+      const result = NodeV3.safeParse(rawNode);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).not.toHaveProperty("llm_invented_field");
+        expect(result.data.id).toBe("factor_test");
+      }
+    });
+
+    it("strips undeclared fields from EdgeV3 during parse", () => {
+      const rawEdge = {
+        from: "factor_a",
+        to: "goal_b",
+        strength: { mean: 0.5, std: 0.1 },
+        exists_probability: 0.9,
+        effect_direction: "positive",
+        llm_extra: true,
+      };
+
+      const result = EdgeV3.safeParse(rawEdge);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).not.toHaveProperty("llm_extra");
+      }
+    });
+
+    it("warnOnUnknownV3Fields detects undeclared fields and calls logFn", () => {
+      const rawNode = {
+        id: "factor_test",
+        kind: "factor",
+        label: "Test",
+        unknown_a: 1,
+        unknown_b: "x",
+      };
+
+      const logged: Array<{ event: string; unknownKeys: string[] }> = [];
+      warnOnUnknownV3Fields(rawNode, "NodeV3", (payload) => logged.push(payload));
+
+      expect(logged).toHaveLength(1);
+      expect(logged[0].unknownKeys).toContain("unknown_a");
+      expect(logged[0].unknownKeys).toContain("unknown_b");
+      expect(logged[0].event).toBe("cee.v3_schema.unknown_fields_stripped");
+    });
+
+    it("preserves all newly declared NodeV3 fields through parse", () => {
+      const rawNode = {
+        id: "factor_ext",
+        kind: "factor",
+        label: "External Factor",
+        prior: { distribution: "uniform", range_min: 0, range_max: 100 },
+        factor_type: "continuous",
+        extractionType: "inferred",
+        uncertainty_drivers: ["market_conditions", "regulation"],
+        intercept: 0.45,
+        display_value: "£40,000",
+      };
+
+      const result = NodeV3.safeParse(rawNode);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.prior).toEqual({ distribution: "uniform", range_min: 0, range_max: 100 });
+        expect(result.data.factor_type).toBe("continuous");
+        expect(result.data.extractionType).toBe("inferred");
+        expect(result.data.uncertainty_drivers).toEqual(["market_conditions", "regulation"]);
+        expect(result.data.intercept).toBe(0.45);
+        expect(result.data.display_value).toBe("£40,000");
+      }
+    });
+  });
+
+  describe("CIL Phase 1 — rationale carrythrough", () => {
+    it("carries rationales from V1 to V3 response", () => {
+      const v1WithRationales: V1DraftGraphResponse = {
+        ...sampleV1Response,
+        rationales: [
+          { target: "factor_price", why: "Price is the primary lever for revenue" },
+          { target: "risk_churn", why: "Higher prices increase churn risk", provenance_source: "user_brief" },
+        ],
+      };
+
+      const v3Response = transformResponseToV3(v1WithRationales, { requestId: "test-rationale" });
+
+      expect(v3Response.rationales).toBeDefined();
+      expect(v3Response.rationales).toHaveLength(2);
+      expect(v3Response.rationales![0]).toEqual({
+        target: "factor_price",
+        why: "Price is the primary lever for revenue",
+      });
+      expect(v3Response.rationales![1]).toEqual({
+        target: "risk_churn",
+        why: "Higher prices increase churn risk",
+        provenance_source: "user_brief",
+      });
+    });
+
+    it("omits rationales when V1 has empty array", () => {
+      const v1Empty: V1DraftGraphResponse = {
+        ...sampleV1Response,
+        rationales: [],
+      };
+
+      const v3Response = transformResponseToV3(v1Empty, { requestId: "test-empty-rationales" });
+      expect(v3Response.rationales).toBeUndefined();
+    });
+
+    it("filters out malformed rationales missing target or why", () => {
+      const v1Malformed: V1DraftGraphResponse = {
+        ...sampleV1Response,
+        rationales: [
+          { target: "factor_price", why: "Valid rationale" },
+          { target: "", why: "Missing target" },
+          { target: "factor_marketing" },  // missing why
+          null,  // null entry
+          { node_id: "risk_churn", rationale: "Alternate field names" },
+        ],
+      };
+
+      const v3Response = transformResponseToV3(v1Malformed as any, { requestId: "test-malformed" });
+
+      expect(v3Response.rationales).toBeDefined();
+      expect(v3Response.rationales).toHaveLength(2);
+      expect(v3Response.rationales![0].target).toBe("factor_price");
+      expect(v3Response.rationales![1].target).toBe("risk_churn");
+      expect(v3Response.rationales![1].why).toBe("Alternate field names");
+    });
+
+    it("caps rationale why text at 500 characters", () => {
+      const longText = "A".repeat(800);
+      const v1Long: V1DraftGraphResponse = {
+        ...sampleV1Response,
+        rationales: [
+          { target: "factor_price", why: longText },
+        ],
+      };
+
+      const v3Response = transformResponseToV3(v1Long, { requestId: "test-cap" });
+
+      expect(v3Response.rationales).toBeDefined();
+      expect(v3Response.rationales![0].why).toHaveLength(500);
     });
   });
 });

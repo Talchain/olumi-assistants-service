@@ -160,67 +160,74 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       }
     }
 
-    // Belt-and-suspenders: validate V3 output before returning.
-    // Track 1 (progressive degradation): V3 validation failures log a warning
-    // and pass through the graph rather than returning a blocked response.
-    // A valid graph must never be discarded by schema validation failures.
-    const parseResult = CEEGraphResponseV3.safeParse(v3Body);
-    if (!parseResult.success) {
-      const runtimeEnv = getRuntimeEnv();
-      const allowInvalid = config.cee.boundaryAllowInvalid;
-
-      const validationIssues = extractZodIssues(parseResult.error, 5);
-      const errMsg = `V3 schema validation failed: ${parseResult.error.issues.length} issues`;
-
-      // Dev escape hatch: allow invalid graphs in local/test if explicitly enabled
-      // (Config-level enforcement already prevents this flag from being true in staging/prod)
-      if (allowInvalid) {
-        log.warn({
-          event: "cee.boundary.output_validation_failed",
-          error_count: parseResult.error.issues.length,
-          first_issues: extractZodIssues(parseResult.error, 3),
-          request_id: ctx.requestId,
-          dev_override_active: true,
-          runtime_env: runtimeEnv,
-        }, "V3 output failed schema validation (bypassed via CEE_BOUNDARY_ALLOW_INVALID)");
-        ctx.finalResponse = v3Body;
-        return;
-      }
-
-      // Soft gate (Track 1): log, record warning, pass through graph
-      log.warn({
-        event: "pipeline.soft_gate_degraded",
-        stage: "boundary_v3_validation",
-        error_count: parseResult.error.issues.length,
-        first_issues: extractZodIssues(parseResult.error, 3),
-        request_id: ctx.requestId,
-        runtime_env: runtimeEnv,
-      }, "V3 output failed schema validation — continuing with graph (soft gate)");
-
-      // Emit telemetry event (still useful for monitoring)
-      emit(TelemetryEvents.CeeBoundaryBlocked, {
-        request_id: ctx.requestId,
-        error_code: "CEE_V3_VALIDATION_DEGRADED",
-        error_message: errMsg,
-        validation_issues: validationIssues,
-        graph_hash: (v3Body as any)?.meta?.graph_hash,
-      });
-
-      ctx.pipelineOutcome.warnings.push({
-        stage: 'boundary_v3_validation',
-        error: errMsg,
-        degraded: true,
-      });
-    }
-
     // ── Diagnostic checks — debug bundle integrity verification ────────────
     // Compute after all transforms and integrity checks so the checks reflect
     // the actual final data state. Attached to trace.pipeline for debug bundles.
+    // Runs BEFORE Zod parse so diagnostics are included in the validated output.
     const diagnosticTrace = (v3Body as any)?.trace?.pipeline;
     if (diagnosticTrace && typeof diagnosticTrace === 'object') {
       (diagnosticTrace as Record<string, unknown>).diagnostic_checks =
         computeDiagnosticChecks(v3Body as unknown as Record<string, unknown>, diagnosticTrace as Record<string, unknown>);
     }
+
+    // Belt-and-suspenders: validate V3 output before returning.
+    // CIL Phase 1: when parse succeeds, use parseResult.data — Zod strips
+    // undeclared fields (e.g. _retry_suggestion) so internal metadata doesn't
+    // leak to API clients. On failure, fall through to soft gate with raw v3Body.
+    const parseResult = CEEGraphResponseV3.safeParse(v3Body);
+    if (parseResult.success) {
+      ctx.finalResponse = parseResult.data;
+      return;
+    }
+
+    // Track 1 (progressive degradation): V3 validation failures log a warning
+    // and pass through the raw graph rather than returning a blocked response.
+    // A valid graph must never be discarded by schema validation failures.
+    const runtimeEnv = getRuntimeEnv();
+    const allowInvalid = config.cee.boundaryAllowInvalid;
+
+    const validationIssues = extractZodIssues(parseResult.error, 5);
+    const errMsg = `V3 schema validation failed: ${parseResult.error.issues.length} issues`;
+
+    // Dev escape hatch: allow invalid graphs in local/test if explicitly enabled
+    // (Config-level enforcement already prevents this flag from being true in staging/prod)
+    if (allowInvalid) {
+      log.warn({
+        event: "cee.boundary.output_validation_failed",
+        error_count: parseResult.error.issues.length,
+        first_issues: extractZodIssues(parseResult.error, 3),
+        request_id: ctx.requestId,
+        dev_override_active: true,
+        runtime_env: runtimeEnv,
+      }, "V3 output failed schema validation (bypassed via CEE_BOUNDARY_ALLOW_INVALID)");
+      ctx.finalResponse = v3Body;
+      return;
+    }
+
+    // Soft gate (Track 1): log, record warning, pass through graph
+    log.warn({
+      event: "pipeline.soft_gate_degraded",
+      stage: "boundary_v3_validation",
+      error_count: parseResult.error.issues.length,
+      first_issues: extractZodIssues(parseResult.error, 3),
+      request_id: ctx.requestId,
+      runtime_env: runtimeEnv,
+    }, "V3 output failed schema validation — continuing with graph (soft gate)");
+
+    // Emit telemetry event (still useful for monitoring)
+    emit(TelemetryEvents.CeeBoundaryBlocked, {
+      request_id: ctx.requestId,
+      error_code: "CEE_V3_VALIDATION_DEGRADED",
+      error_message: errMsg,
+      validation_issues: validationIssues,
+      graph_hash: (v3Body as any)?.meta?.graph_hash,
+    });
+
+    ctx.pipelineOutcome.warnings.push({
+      stage: 'boundary_v3_validation',
+      error: errMsg,
+      degraded: true,
+    });
 
     ctx.finalResponse = v3Body;
   } else if (schemaVersion === "v2") {

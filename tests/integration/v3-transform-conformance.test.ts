@@ -299,18 +299,18 @@ describe("V3 transform conformance — CEEGraphResponseV3 schema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("V3 schema preserves unknown additive fields via passthrough", () => {
+  it("V3 schema strips unknown additive fields (CIL Phase 1)", () => {
     const v1 = makeMinimalV1Response();
-    const v3 = transformResponseToV3(v1, { requestId: "test-passthrough-001" });
+    const v3 = transformResponseToV3(v1, { requestId: "test-strip-001" });
 
     // Add an unknown additive field
-    (v3 as any).future_field = "should_be_preserved";
+    (v3 as any).future_field = "should_be_stripped";
 
     const result = CEEGraphResponseV3.safeParse(v3);
     expect(result.success).toBe(true);
-    // passthrough should preserve the field
+    // .strip() drops unknown fields
     if (result.success) {
-      expect((result.data as any).future_field).toBe("should_be_preserved");
+      expect((result.data as any).future_field).toBeUndefined();
     }
   });
 });
@@ -776,7 +776,7 @@ describe("GoalConstraintSchema passthrough — preserves additive metadata", () 
     expect(result.data.deadline_metadata.deadline_date).toBe("2025-12-31");
   });
 
-  it("GoalConstraintSchema preserves unknown additive fields via passthrough", async () => {
+  it("GoalConstraintSchema strips unknown additive fields (CIL Phase 1)", async () => {
     const { GoalConstraintSchema } = await vi.importActual<typeof import("../../src/schemas/assist.js")>(
       "../../src/schemas/assist.js"
     );
@@ -786,13 +786,13 @@ describe("GoalConstraintSchema passthrough — preserves additive metadata", () 
       node_id: "fac_cost",
       operator: "<=",
       value: 100000,
-      // Future additive field — should survive parse
+      // Future additive field — should be stripped
       _priority: "high",
     };
 
     const result = (GoalConstraintSchema as any).safeParse(input);
     expect(result.success).toBe(true);
-    expect(result.data._priority).toBe("high");
+    expect(result.data._priority).toBeUndefined();
   });
 });
 

@@ -33,10 +33,11 @@ vi.mock("../../src/utils/telemetry.js", () => ({
   },
 }));
 
-// Mock CEE V3 schema to bypass validation in unit tests
+// Mock CEE V3 schema — CIL Phase 1: safeParse returns { success: true, data: input }
+// to simulate Zod strip behaviour (boundary now uses parseResult.data).
 vi.mock("../../src/schemas/cee-v3.js", () => ({
   CEEGraphResponseV3: {
-    safeParse: vi.fn(() => ({ success: true })),
+    safeParse: vi.fn((input: unknown) => ({ success: true, data: input })),
   },
 }));
 

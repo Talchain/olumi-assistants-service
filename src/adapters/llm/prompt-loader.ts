@@ -105,8 +105,8 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   repair_graph: 'repair_graph',
   clarify_brief: 'clarify_brief',
   critique_graph: 'critique_graph',
-  explainer: 'explainer',
-  bias_check: 'bias_check',
+  explainer: 'explainer',   // DEPRECATED: no callers — see defaults.ts
+  bias_check: 'bias_check', // DEPRECATED: no callers — see defaults.ts
   decision_review: 'decision_review',
   edit_graph: 'edit_graph',
   repair_edit_graph: 'repair_edit_graph',
