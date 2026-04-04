@@ -25,9 +25,17 @@ export const addOptionAction: ActionDefinition = {
     properties: {
       label: { type: 'string', description: 'Name for the new option' },
       interventions: {
-        type: 'object',
-        description: 'Factor-level intervention overrides (factor_id → numeric value)',
-        additionalProperties: { type: 'number' },
+        type: 'array',
+        description: 'Factor-level intervention overrides',
+        items: {
+          type: 'object',
+          properties: {
+            factor_id: { type: 'string', description: 'Target factor ID' },
+            value: { type: 'number', description: 'Numeric intervention value' },
+          },
+          required: ['factor_id', 'value'],
+          additionalProperties: false,
+        },
       },
     },
     required: ['label'],
@@ -41,10 +49,29 @@ export const addOptionAction: ActionDefinition = {
 
   async execute(params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
     const label = params.label as string | undefined;
-    const interventions = params.interventions as Record<string, number> | undefined;
 
     if (!label) {
       return { blocks: [], assistantText: 'What should the new option be called?', guidance_items: [] };
+    }
+
+    // Normalize interventions: accept both array format (new) and legacy object format
+    let interventions: Record<string, number> = {};
+    const rawInterventions = params.interventions;
+
+    if (Array.isArray(rawInterventions)) {
+      // New array format: [{ factor_id, value }, ...]
+      for (const item of rawInterventions) {
+        if (item && typeof item === 'object') {
+          const factorId = (item as Record<string, unknown>).factor_id;
+          const value = (item as Record<string, unknown>).value;
+          if (typeof factorId === 'string' && typeof value === 'number') {
+            interventions[factorId] = value;
+          }
+        }
+      }
+    } else if (rawInterventions && typeof rawInterventions === 'object') {
+      // Legacy object format: { factor_id → value }
+      interventions = rawInterventions as Record<string, number>;
     }
 
     const nodeId = `option_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '')}`;
@@ -57,7 +84,7 @@ export const addOptionAction: ActionDefinition = {
           id: nodeId,
           kind: 'option',
           label,
-          data: { interventions: interventions ?? {} },
+          data: { interventions },
         },
       },
     ];
@@ -66,7 +93,7 @@ export const addOptionAction: ActionDefinition = {
     // Options connect to factors only; factor→outcome→goal paths already exist.
 
     // Intervention edges to factors
-    if (interventions) {
+    if (Object.keys(interventions).length > 0) {
       for (const [factorId, value] of Object.entries(interventions)) {
         operations.push({
           op: 'add_edge',
@@ -82,7 +109,7 @@ export const addOptionAction: ActionDefinition = {
       }
     }
 
-    const interventionCount = interventions ? Object.keys(interventions).length : 0;
+    const interventionCount = Object.keys(interventions).length;
     const summary = interventionCount > 0
       ? ` with ${interventionCount} intervention${interventionCount > 1 ? 's' : ''}`
       : '';

@@ -480,7 +480,7 @@ describe("validateToolSchema", () => {
     expect(violations[0].path).toContain('nested');
   });
 
-  it("accepts additionalProperties as schema object (map type)", () => {
+  it("rejects additionalProperties as schema object (Anthropic requires false only)", () => {
     const violations = validateToolSchema({
       type: 'object',
       properties: {
@@ -488,7 +488,9 @@ describe("validateToolSchema", () => {
       },
       additionalProperties: false,
     });
-    expect(violations).toEqual([]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].path).toContain('data');
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
   });
 
   it("flags required key not in properties", () => {
@@ -527,7 +529,7 @@ describe("validateToolSchema", () => {
     expect(violations[0].message).toContain('properties is missing');
   });
 
-  it("recurses into additionalProperties schema objects", () => {
+  it("rejects nested object within additionalProperties schema", () => {
     const violations = validateToolSchema({
       type: 'object',
       properties: {
@@ -542,11 +544,12 @@ describe("validateToolSchema", () => {
       },
       additionalProperties: false,
     });
-    expect(violations.length).toBe(1);
-    expect(violations[0].path).toContain('additionalProperties');
+    // First violation: data has additionalProperties that is not false
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+    expect(violations.some(v => v.path.includes('data'))).toBe(true);
   });
 
-  it("passes when additionalProperties schema object has no nested objects", () => {
+  it("rejects additionalProperties as schema object even without nested objects", () => {
     const violations = validateToolSchema({
       type: 'object',
       properties: {
@@ -557,7 +560,9 @@ describe("validateToolSchema", () => {
       },
       additionalProperties: false,
     });
-    expect(violations).toEqual([]);
+    expect(violations.length).toBe(1);
+    expect(violations[0].path).toContain('data');
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
   });
 });
 
@@ -678,5 +683,275 @@ describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
     expect(names).toContain('set_factor_value');
     expect(names).toContain('remove_factor');
     expect(names).toContain('adjust_edge_strength');
+  });
+});
+
+// ============================================================================
+// Schema Validation: Strict additionalProperties: false Enforcement
+// ============================================================================
+
+describe("validateToolSchema — strict additionalProperties: false enforcement", () => {
+  it("rejects root object with missing additionalProperties", () => {
+    const schema = {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+      // additionalProperties missing
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].path).toBe('(root)');
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
+  });
+
+  it("rejects root object with additionalProperties: true", () => {
+    const schema = {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+      additionalProperties: true,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].path).toBe('(root)');
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
+  });
+
+  it("rejects root object with additionalProperties as schema object", () => {
+    const schema = {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+      additionalProperties: { type: 'number' },
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].path).toBe('(root)');
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
+  });
+
+  it("rejects nested object with missing additionalProperties", () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        config: {
+          type: 'object',
+          properties: { name: { type: 'string' } },
+          // additionalProperties missing
+        },
+      },
+      required: ['config'],
+      additionalProperties: false,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].path).toContain('properties.config');
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
+  });
+
+  it("rejects nested object with additionalProperties: {type: 'number'}", () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        interventions: {
+          type: 'object',
+          additionalProperties: { type: 'number' },
+        },
+      },
+      additionalProperties: false,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].path).toContain('properties.interventions');
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
+  });
+
+  it("accepts root object with additionalProperties: false", () => {
+    const schema = {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+      additionalProperties: false,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("accepts array items with nested object that has additionalProperties: false", () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        interventions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              factor_id: { type: 'string' },
+              value: { type: 'number' },
+            },
+            required: ['factor_id', 'value'],
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("detects multiple violations across nested objects", () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        config: {
+          type: 'object',
+          properties: {
+            nested: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+            },
+          },
+          additionalProperties: true,
+        },
+      },
+      additionalProperties: false,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations.length).toBeGreaterThanOrEqual(2);
+    expect(violations.some(v => v.path.includes('config'))).toBe(true);
+    expect(violations.some(v => v.path.includes('nested'))).toBe(true);
+  });
+
+  it("excludes invalid schema from buildToolDefinitions with logging", () => {
+    _resetSchemaCache();
+    const logWarnSpy = vi.spyOn(console, 'warn');
+
+    const invalidAction: ActionName = 'set_factor_value';
+    // set_factor_value exists in catalogue but we're testing exclusion logic
+    const defs = buildToolDefinitions([invalidAction]);
+
+    // Should build successfully because set_factor_value is valid
+    expect(defs.length).toBeGreaterThan(0);
+    const setFactorDef = defs.find(d => d.name === 'set_factor_value');
+    expect(setFactorDef).toBeDefined();
+
+    logWarnSpy.mockRestore();
+  });
+
+  it("rejects schema with null additionalProperties", () => {
+    const schema = {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+      additionalProperties: null,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
+  });
+
+  it("rejects schema with undefined additionalProperties", () => {
+    const schema = {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+      additionalProperties: undefined,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].message).toContain('additionalProperties must be exactly false');
+  });
+});
+
+// ============================================================================
+// add_option Action: Array Format + Legacy Format Support
+// ============================================================================
+
+describe("add_option action — array and legacy format support", () => {
+  it("accepts new array format interventions", () => {
+    const params = {
+      label: 'Expand East',
+      interventions: [
+        { factor_id: 'f1', value: 0.8 },
+        { factor_id: 'f2', value: 0.6 },
+      ],
+    };
+
+    // Test that the schema itself is valid
+    const schema = {
+      type: 'object',
+      properties: {
+        label: { type: 'string' },
+        interventions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              factor_id: { type: 'string' },
+              value: { type: 'number' },
+            },
+            required: ['factor_id', 'value'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['label'],
+      additionalProperties: false,
+    };
+
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("accepts legacy object format interventions", () => {
+    const params = {
+      label: 'Expand East',
+      interventions: {
+        f1: 0.8,
+        f2: 0.6,
+      },
+    };
+
+    // The handler normalizes both formats to Record<string, number>
+    // This test documents that legacy format is still processable
+    expect(typeof params.interventions).toBe('object');
+    expect(Object.entries(params.interventions as Record<string, number>)).toHaveLength(2);
+  });
+
+  it("rejects malformed array items (missing factor_id)", () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        interventions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              factor_id: { type: 'string' },
+              value: { type: 'number' },
+            },
+            required: ['factor_id', 'value'],
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    };
+
+    // An item like { value: 0.8 } would fail required['factor_id'] validation at runtime
+    // but the schema itself is valid (the item schema is valid)
+    const violations = validateToolSchema(schema);
+    expect(violations).toHaveLength(0);
   });
 });

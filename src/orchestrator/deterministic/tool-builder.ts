@@ -97,17 +97,12 @@ function walkSchema(
 ): void {
   // Validate object-type nodes
   if (node.type === 'object') {
-    // Every object must declare additionalProperties (false or a schema object, never null/undefined)
+    // Every object must declare additionalProperties: false (strict requirement for Anthropic)
     const ap = node.additionalProperties;
-    if (ap === undefined || ap === null) {
+    if (ap !== false) {
       violations.push({
         path: path || '(root)',
-        message: 'object type missing additionalProperties',
-      });
-    } else if (ap !== false && (typeof ap !== 'object' || Array.isArray(ap))) {
-      violations.push({
-        path: path || '(root)',
-        message: 'additionalProperties must be false or a schema object',
+        message: `additionalProperties must be exactly false (got ${JSON.stringify(ap)})`,
       });
     }
 
