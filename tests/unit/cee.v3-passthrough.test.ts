@@ -502,7 +502,7 @@ describe("CIL Phase 1: Schema hardening — new field declarations and strip beh
       }],
       goal_node_id: "goal_1",
       rationales: [{ target: "goal_1", why: "test" }],
-      draft_warnings: [{ type: "test", message: "warning" }],
+      draft_warnings: [{ id: "orphan_node", severity: "medium", affected_node_ids: ["fac_1"], affected_edge_ids: [] }],
       coaching: {
         summary: "test",
         strengthen_items: [{ id: "s1", label: "l", detail: "d", action_type: "a" }],
@@ -512,5 +512,54 @@ describe("CIL Phase 1: Schema hardening — new field declarations and strip beh
     };
     const result = CEEGraphResponseV3.safeParse(input);
     expect(result.success).toBe(true);
+  });
+
+  // ── draft_warnings matches CEEStructuralWarningV1 shape ────────────────
+  it("CEEGraphResponseV3 accepts draft_warnings with CEEStructuralWarningV1 shape", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Goal" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+      draft_warnings: [
+        {
+          id: "orphan_node",
+          severity: "medium",
+          node_ids: ["fac_orphan"],
+          affected_node_ids: ["fac_orphan"],
+          affected_edge_ids: [],
+          explanation: "Node fac_orphan has no incoming or outgoing edges",
+          fix_hint: "Connect the node or remove it",
+        },
+        {
+          id: "uniform_edge_strengths",
+          severity: "low",
+          affected_node_ids: [],
+          affected_edge_ids: ["e1", "e2"],
+        },
+      ],
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(true);
+    const warnings = (result as any).data.draft_warnings;
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0].id).toBe("orphan_node");
+    expect(warnings[0].affected_node_ids).toEqual(["fac_orphan"]);
+    expect(warnings[0].explanation).toBe("Node fac_orphan has no incoming or outgoing edges");
+    expect(warnings[1].affected_edge_ids).toEqual(["e1", "e2"]);
+  });
+
+  it("CEEGraphResponseV3 rejects draft_warning missing required id field", () => {
+    const input = {
+      schema_version: "3.0",
+      nodes: [{ id: "goal_1", kind: "goal", label: "Goal" }],
+      edges: [],
+      options: [],
+      goal_node_id: "goal_1",
+      draft_warnings: [{ severity: "medium", affected_node_ids: [], affected_edge_ids: [] }],
+    };
+    const result = CEEGraphResponseV3.safeParse(input);
+    expect(result.success).toBe(false);
   });
 });

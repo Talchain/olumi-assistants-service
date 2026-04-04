@@ -58,9 +58,14 @@ export interface V3DraftGraphResponse extends CEEGraphResponseV3T {
     safety?: number;
   };
   draft_warnings?: Array<{
-    type: string;
-    message: string;
-    severity?: string;
+    id: string;
+    severity: string;
+    node_ids?: string[];
+    edge_ids?: string[];
+    affected_node_ids: string[];
+    affected_edge_ids: string[];
+    explanation?: string;
+    fix_hint?: string;
   }>;
   /** P0: Ready-to-use analysis payload for direct PLoT consumption */
   analysis_ready: AnalysisReadyPayloadT;

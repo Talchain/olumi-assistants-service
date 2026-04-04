@@ -167,9 +167,14 @@ export interface V1DraftGraphResponse {
   };
   validation_issues?: Array<Record<string, unknown>>;
   draft_warnings?: Array<{
-    type: string;
-    message: string;
-    severity?: string;
+    id: string;
+    severity: string;
+    node_ids?: string[];
+    edge_ids?: string[];
+    affected_node_ids: string[];
+    affected_edge_ids: string[];
+    explanation?: string;
+    fix_hint?: string;
   }>;
   [key: string]: unknown;
 }
@@ -266,9 +271,14 @@ export interface V2DraftGraphResponse {
   };
   validation_issues?: Array<Record<string, unknown>>;
   draft_warnings?: Array<{
-    type: string;
-    message: string;
-    severity?: string;
+    id: string;
+    severity: string;
+    node_ids?: string[];
+    edge_ids?: string[];
+    affected_node_ids: string[];
+    affected_edge_ids: string[];
+    explanation?: string;
+    fix_hint?: string;
   }>;
   [key: string]: unknown;
 }

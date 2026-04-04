@@ -452,8 +452,18 @@ export const CEEGraphResponseV3 = z.object({
   }).optional(), // CIL Phase 1: strip unknown fields on coaching wrapper
   /** LLM causal claims — stated reasoning about direct effects, mediations, confounders (Phase 2B) */
   causal_claims: CausalClaimsArraySchema,
-  /** Draft warnings from the pipeline (e.g. strength defaults, missing data) */
-  draft_warnings: z.array(z.object({ type: z.string(), message: z.string(), severity: z.string().optional() })).optional(),
+  /** Draft warnings from the pipeline — CEEStructuralWarningV1 shape from structure detection.
+   *  Fields: id (warning type), severity, affected_node_ids, affected_edge_ids, explanation, fix_hint. */
+  draft_warnings: z.array(z.object({
+    id: z.string(),
+    severity: z.string(),
+    node_ids: z.array(z.string()).optional(),
+    edge_ids: z.array(z.string()).optional(),
+    affected_node_ids: z.array(z.string()).default([]),
+    affected_edge_ids: z.array(z.string()).default([]),
+    explanation: z.string().optional(),
+    fix_hint: z.string().optional(),
+  })).optional(),
   /** Pre-computed analysis-ready payload for PLoT (complex nested structure) */
   analysis_ready: z.any().optional(),
   /** Per-node LLM reasoning from Stage 1 (parse). Carried through V1→V3 boundary. */
