@@ -216,8 +216,12 @@ export async function handleTurn(
     return { envelope, httpStatus: status };
   }
 
-  // 2. Turn budget timeout — draft_graph turns get a longer budget
-  const effectiveBudgetMs = turnRequest.generate_model
+  // 2. Turn budget timeout — draft_graph turns get a longer budget.
+  // draft_graph is triggered by generate_model OR when no graph exists.
+  const graphNodes = (turnRequest.context?.graph as Record<string, unknown> | null)?.nodes;
+  const hasGraph = turnRequest.context?.graph != null && Array.isArray(graphNodes) && (graphNodes as unknown[]).length > 0;
+  const likelyDraftGraph = turnRequest.generate_model || !hasGraph;
+  const effectiveBudgetMs = likelyDraftGraph
     ? DRAFT_GRAPH_TURN_BUDGET_MS
     : ORCHESTRATOR_TURN_BUDGET_MS;
   const turnStartedAt = Date.now();

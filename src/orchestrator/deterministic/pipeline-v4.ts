@@ -501,7 +501,10 @@ export async function* executePipelineV4(
     // Emit error event
     const errorCode = resolveErrorCode(error);
     const rawErrorMessage = error instanceof Error ? error.message : String(error);
-    const userFacingMessage = getUserFacingErrorMessage(errorCode, turnRequest.generate_model);
+    const graphNodes = (turnRequest.context?.graph as Record<string, unknown> | null)?.nodes;
+    const hasGraph = turnRequest.context?.graph != null && Array.isArray(graphNodes) && (graphNodes as unknown[]).length > 0;
+    const isDraftGraphLikely = turnRequest.generate_model || !hasGraph;
+    const userFacingMessage = getUserFacingErrorMessage(errorCode, isDraftGraphLikely);
 
     yield {
       type: 'error',

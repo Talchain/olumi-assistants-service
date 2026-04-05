@@ -151,7 +151,12 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
 
       // Budget controller — draft_graph turns get a longer budget because the
       // unified pipeline (LLM generation + enrichment + repair) routinely takes 30-45s.
-      const effectiveBudgetMs = turnRequest.generate_model
+      // draft_graph is triggered by generate_model OR when no graph exists (the LLM
+      // picks draft_graph as a tool on the user's first message).
+      const graphNodes = (turnRequest.context?.graph as Record<string, unknown> | null)?.nodes;
+      const hasGraph = turnRequest.context?.graph != null && Array.isArray(graphNodes) && (graphNodes as unknown[]).length > 0;
+      const likelyDraftGraph = turnRequest.generate_model || !hasGraph;
+      const effectiveBudgetMs = likelyDraftGraph
         ? DRAFT_GRAPH_TURN_BUDGET_MS
         : ORCHESTRATOR_TURN_BUDGET_MS;
       const budgetController = new AbortController();
