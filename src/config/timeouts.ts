@@ -143,6 +143,14 @@ export const ORCHESTRATOR_TURN_BUDGET_MS = clampTimeout(
   parseTimeoutEnv("ORCHESTRATOR_TURN_BUDGET_MS", 60_000),
 );
 
+/** Extended turn budget for draft_graph turns (default: 90s, clamped 5s–5m).
+ *  Draft graph involves LLM generation + enrichment + repair and routinely
+ *  takes 30-45s. The standard 60s budget causes frequent timeouts on first
+ *  submissions. */
+export const DRAFT_GRAPH_TURN_BUDGET_MS = clampTimeout(
+  parseTimeoutEnv("DRAFT_GRAPH_TURN_BUDGET_MS", 90_000),
+);
+
 /** PLoT /v2/run call timeout (default: 30s, clamped 5s–5m) */
 export const PLOT_RUN_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("PLOT_RUN_TIMEOUT_MS", 30_000),
@@ -315,6 +323,13 @@ export function validateTimeoutRelationships(): string[] {
     );
   }
 
+  if (DRAFT_GRAPH_TURN_BUDGET_MS > ROUTE_TIMEOUT_MS) {
+    warnings.push(
+      `DRAFT_GRAPH_TURN_BUDGET_MS (${DRAFT_GRAPH_TURN_BUDGET_MS}ms) > ROUTE_TIMEOUT_MS (${ROUTE_TIMEOUT_MS}ms) — ` +
+      `draft graph budget exceeds route timeout, Fastify will kill draft requests before budget expires`,
+    );
+  }
+
   return warnings;
 }
 
@@ -338,6 +353,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     ORCHESTRATOR_TIMEOUT_MS,
     ORCHESTRATOR_ACK_TIMEOUT_MS,
     ORCHESTRATOR_TURN_BUDGET_MS,
+    DRAFT_GRAPH_TURN_BUDGET_MS,
     PLOT_RUN_TIMEOUT_MS,
     PLOT_VALIDATE_TIMEOUT_MS,
     EXTRACTION_TIMEOUT_MS,

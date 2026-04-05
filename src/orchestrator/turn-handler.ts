@@ -19,7 +19,7 @@
 
 import type { FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { ORCHESTRATOR_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS, ORCHESTRATOR_ACK_TIMEOUT_MS } from "../config/timeouts.js";
+import { ORCHESTRATOR_TURN_BUDGET_MS, DRAFT_GRAPH_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS, ORCHESTRATOR_ACK_TIMEOUT_MS } from "../config/timeouts.js";
 import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
 import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type {
@@ -216,14 +216,17 @@ export async function handleTurn(
     return { envelope, httpStatus: status };
   }
 
-  // 2. Turn budget timeout
+  // 2. Turn budget timeout — draft_graph turns get a longer budget
+  const effectiveBudgetMs = turnRequest.generate_model
+    ? DRAFT_GRAPH_TURN_BUDGET_MS
+    : ORCHESTRATOR_TURN_BUDGET_MS;
   const turnStartedAt = Date.now();
   const budgetController = new AbortController();
-  const budgetTimeout = setTimeout(() => budgetController.abort(), ORCHESTRATOR_TURN_BUDGET_MS);
+  const budgetTimeout = setTimeout(() => budgetController.abort(), effectiveBudgetMs);
   const plotOpts: PLoTClientRunOpts = {
     turnSignal: budgetController.signal,
     turnStartedAt,
-    turnBudgetMs: ORCHESTRATOR_TURN_BUDGET_MS,
+    turnBudgetMs: effectiveBudgetMs,
   };
 
   // Register this request as in-flight for concurrent dedup

@@ -501,7 +501,7 @@ export async function* executePipelineV4(
     // Emit error event
     const errorCode = resolveErrorCode(error);
     const rawErrorMessage = error instanceof Error ? error.message : String(error);
-    const userFacingMessage = getUserFacingErrorMessage(errorCode);
+    const userFacingMessage = getUserFacingErrorMessage(errorCode, turnRequest.generate_model);
 
     yield {
       type: 'error',
@@ -820,11 +820,13 @@ function resolveErrorCode(error: unknown): string {
 }
 
 /** Map error codes to clean user-facing messages. Raw error details are never surfaced. */
-function getUserFacingErrorMessage(errorCode: string): string {
+function getUserFacingErrorMessage(errorCode: string, isDraftGraph?: boolean): string {
   switch (errorCode) {
     case STREAM_ERROR_CODES.LLM_TIMEOUT:
     case STREAM_ERROR_CODES.TURN_BUDGET_EXCEEDED:
-      return 'This is taking longer than expected. Try again or rephrase your message.';
+      return isDraftGraph
+        ? 'Building your decision model is taking longer than usual. Please try again — complex decisions can take up to a minute.'
+        : 'This is taking longer than expected. Try again or rephrase your message.';
     case STREAM_ERROR_CODES.TOOL_ERROR:
       return "That action couldn't be completed. Try a different approach or rephrase your request.";
     default:

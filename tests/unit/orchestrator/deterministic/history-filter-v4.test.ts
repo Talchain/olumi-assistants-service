@@ -110,6 +110,7 @@ describe("filterHistoryV4", () => {
       "Try rephrasing your request.",
       "That action couldn't be completed. Try a different approach or rephrase your request.",
       "This is taking longer than expected. Try again or rephrase your message.",
+      "Building your decision model is taking longer than usual. Please try again — complex decisions can take up to a minute.",
     ];
 
     for (const errMsg of errorMessages) {

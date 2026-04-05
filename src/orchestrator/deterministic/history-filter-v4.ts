@@ -32,7 +32,7 @@ const ERROR_PATTERNS: RegExp[] = [
   /please try again/i,
   /unable to generate/i,
   /couldn'?t be completed/i,
-  /taking longer than expected/i,
+  /taking longer than (expected|usual)/i,
 ];
 
 /** System sentinel prefix — injected by system event router, not for LLM history. */

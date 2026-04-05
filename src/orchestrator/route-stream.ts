@@ -28,7 +28,7 @@ import {
   getInflightRequest,
   registerInflightRequest,
 } from "./idempotency.js";
-import { ORCHESTRATOR_TURN_BUDGET_MS } from "../config/timeouts.js";
+import { ORCHESTRATOR_TURN_BUDGET_MS, DRAFT_GRAPH_TURN_BUDGET_MS } from "../config/timeouts.js";
 import { SSE_HEARTBEAT_INTERVAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
 import { executePipelineStream } from "./pipeline/pipeline-stream.js";
 import { createProductionLLMClient } from "./pipeline/llm-client.js";
@@ -149,9 +149,13 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         return reply.send(cached);
       }
 
-      // Budget controller
+      // Budget controller — draft_graph turns get a longer budget because the
+      // unified pipeline (LLM generation + enrichment + repair) routinely takes 30-45s.
+      const effectiveBudgetMs = turnRequest.generate_model
+        ? DRAFT_GRAPH_TURN_BUDGET_MS
+        : ORCHESTRATOR_TURN_BUDGET_MS;
       const budgetController = new AbortController();
-      const budgetTimeout = setTimeout(() => budgetController.abort(), ORCHESTRATOR_TURN_BUDGET_MS);
+      const budgetTimeout = setTimeout(() => budgetController.abort(), effectiveBudgetMs);
 
       // Client disconnect → abort
       req.raw.on('close', () => {
@@ -164,7 +168,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
       const plotOpts: PLoTClientRunOpts = {
         turnSignal: budgetController.signal,
         turnStartedAt: Date.now(),
-        turnBudgetMs: ORCHESTRATOR_TURN_BUDGET_MS,
+        turnBudgetMs: effectiveBudgetMs,
       };
 
       // Disable socket timeout — SSE streams may outlive the global requestTimeout.
