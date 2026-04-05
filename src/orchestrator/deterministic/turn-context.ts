@@ -318,8 +318,10 @@ export function mapRobustnessBand(raw: string | null): CanonicalRobustnessBand |
  * Resolve the driver/sensitivity source from the analysis envelope.
  * The UI may send this data in several locations:
  *  1. factor_sensitivity (canonical PLoT field)
- *  2. drivers.top_drivers (UI-assembled summary)
- *  3. compact_summary.top_drivers (compact analysis)
+ *  2. drivers (plain array)
+ *  3. drivers.top_drivers (object with nested array)
+ *  4. top_drivers (envelope root)
+ *  5. compact_summary.top_drivers (compact analysis)
  */
 function resolveDriverSource(analysis: V2RunResponseEnvelope): unknown[] | null {
   if (Array.isArray(analysis.factor_sensitivity) && analysis.factor_sensitivity.length > 0) {
@@ -336,8 +338,9 @@ function resolveDriverSource(analysis: V2RunResponseEnvelope): unknown[] | null 
     if (Array.isArray(nested) && nested.length > 0) return nested;
   }
   // top_drivers at envelope root
-  if (Array.isArray(r.top_drivers) && (r.top_drivers as unknown[]).length > 0) {
-    return r.top_drivers as unknown[];
+  const topDrivers = r.top_drivers;
+  if (Array.isArray(topDrivers) && topDrivers.length > 0) {
+    return topDrivers;
   }
   const compact = r.compact_summary as Record<string, unknown> | undefined;
   if (compact && Array.isArray(compact.top_drivers) && compact.top_drivers.length > 0) {
