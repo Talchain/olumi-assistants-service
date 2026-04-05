@@ -108,6 +108,12 @@ function boostBySignals(
     if (c.name === 'run_analysis' && !ctx.analysis_summary) {
       c.priority = 0;
     }
+    // Deprioritise run_analysis when analysis is complete and current —
+    // explanation and comparison chips should dominate post-analysis.
+    // Do not deprioritise when analysis_summary is null (stale/absent).
+    if (c.name === 'run_analysis' && ctx.analysis_summary && ctx.capabilities.can_explain_results) {
+      c.priority = 8;
+    }
     // Boost explain_result right after analysis completes
     if (c.name === 'explain_result' && ctx.analysis_summary && ctx.conversation.recent_actions_taken.includes('run_analysis')) {
       c.priority = 0;

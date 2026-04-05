@@ -284,10 +284,12 @@ function computeGraphSummary(graph: GraphV3T | null, entities: EntityRegistry): 
 export type CanonicalRobustnessBand = 'fragile' | 'moderate' | 'stable' | 'highly_stable';
 
 const ISL_ROBUSTNESS_MAP: Record<string, CanonicalRobustnessBand> = {
+  very_low: 'fragile',
   low: 'fragile',
   medium: 'moderate',
   high: 'stable',
   very_high: 'highly_stable',
+  robust: 'highly_stable',
   // Already canonical — pass through
   fragile: 'fragile',
   moderate: 'moderate',
@@ -309,6 +311,50 @@ export function mapRobustnessBand(raw: string | null): CanonicalRobustnessBand |
 }
 
 // ============================================================================
+// Analysis Field Resolution Helpers
+// ============================================================================
+
+/**
+ * Resolve the driver/sensitivity source from the analysis envelope.
+ * The UI may send this data in several locations:
+ *  1. factor_sensitivity (canonical PLoT field)
+ *  2. drivers.top_drivers (UI-assembled summary)
+ *  3. compact_summary.top_drivers (compact analysis)
+ */
+function resolveDriverSource(analysis: V2RunResponseEnvelope): unknown[] | null {
+  if (Array.isArray(analysis.factor_sensitivity) && analysis.factor_sensitivity.length > 0) {
+    return analysis.factor_sensitivity;
+  }
+  const r = analysis as Record<string, unknown>;
+  const drivers = r.drivers as Record<string, unknown> | undefined;
+  if (drivers && Array.isArray(drivers.top_drivers) && drivers.top_drivers.length > 0) {
+    return drivers.top_drivers;
+  }
+  const compact = r.compact_summary as Record<string, unknown> | undefined;
+  if (compact && Array.isArray(compact.top_drivers) && compact.top_drivers.length > 0) {
+    return compact.top_drivers;
+  }
+  return null;
+}
+
+/**
+ * Resolve the robustness level string from the analysis envelope.
+ * Checks robustness.level first, then compact_summary.robustness.level.
+ */
+function resolveRobustnessLevel(analysis: V2RunResponseEnvelope): string | null {
+  if (typeof analysis.robustness?.level === 'string') {
+    return analysis.robustness.level;
+  }
+  const r = analysis as Record<string, unknown>;
+  const compact = r.compact_summary as Record<string, unknown> | undefined;
+  const compactRobustness = compact?.robustness as Record<string, unknown> | undefined;
+  if (typeof compactRobustness?.level === 'string') {
+    return compactRobustness.level;
+  }
+  return null;
+}
+
+// ============================================================================
 // Analysis Summary
 // ============================================================================
 
@@ -325,16 +371,23 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
   const winner = results[0] ?? null;
   const runnerUp = results[1] ?? null;
 
-  // Extract top drivers from factor_sensitivity
+  // Extract top drivers from factor_sensitivity, or fallback to top-level
+  // drivers/compact_summary fields the UI may send instead.
   const topDrivers: DriverSummary[] = [];
-  if (Array.isArray(analysis.factor_sensitivity)) {
-    for (const fs of analysis.factor_sensitivity as Array<Record<string, unknown>>) {
-      if (typeof fs.label === 'string' && typeof fs.elasticity === 'number') {
+  const driverSource = resolveDriverSource(analysis);
+  if (driverSource) {
+    for (const fs of driverSource) {
+      const entry = fs as Record<string, unknown>;
+      const label = (entry.label as string) ?? (entry.factor_label as string);
+      const elasticity = entry.elasticity as number | undefined;
+      const sensitivity = entry.sensitivity as number | undefined;
+      const mag = elasticity != null ? Math.abs(elasticity) : (sensitivity ?? undefined);
+      if (typeof label === 'string' && typeof mag === 'number') {
         topDrivers.push({
-          label: fs.label as string,
-          factor_id: (fs.factor_id as string) ?? (fs.label as string),
-          sensitivity: Math.abs(fs.elasticity as number),
-          direction: (fs.direction as string) ?? 'unknown',
+          label,
+          factor_id: (entry.factor_id as string) ?? label,
+          sensitivity: mag,
+          direction: (entry.direction as string) ?? 'unknown',
         });
       }
     }
@@ -380,7 +433,7 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
     winner_probability: winner ? (winner.win_probability as number) ?? null : null,
     runner_up: runnerUp ? (runnerUp.option_label as string) ?? null : null,
     runner_up_probability: runnerUp ? (runnerUp.win_probability as number) ?? null : null,
-    robustness_band: mapRobustnessBand(analysis.robustness?.level ?? null),
+    robustness_band: mapRobustnessBand(resolveRobustnessLevel(analysis)),
     top_drivers: topDrivers.slice(0, 5),
     fragile_edge_count: fragileEdgeCount,
     constraints_met: constraintsMet,

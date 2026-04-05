@@ -57,6 +57,36 @@ export const addFactorAction: ActionDefinition = {
       return { blocks: [], assistantText: 'What should the new factor be called?', guidance_items: [] };
     }
 
+    // Check for existing factor with matching label (case-insensitive, whitespace-normalised)
+    const normalisedLabel = label.toLowerCase().replace(/\s+/g, ' ').trim();
+    const existingFactor = findExistingFactor(ctx, normalisedLabel);
+    if (existingFactor) {
+      // Redirect to update instead of creating a duplicate
+      const operations: PatchOperation[] = [];
+      if (value != null || unit) {
+        operations.push({
+          op: 'update_node',
+          path: existingFactor.id,
+          value: {
+            observed_state: {
+              ...(value != null ? { value } : {}),
+              ...(unit ? { unit } : {}),
+            },
+          },
+        });
+      }
+      const valueStr = value != null ? ` to ${value}${unit ? ` ${unit}` : ''}` : '';
+      const actionText = operations.length > 0
+        ? `Found existing factor **${existingFactor.label}**. I'll update its value${valueStr} instead of creating a duplicate. Please confirm.`
+        : `**${existingFactor.label}** already exists in the model. If you'd like to update its value, please specify a new value.`;
+      return {
+        blocks: [],
+        assistantText: actionText,
+        guidance_items: [],
+        ...(operations.length > 0 ? { operations } : {}),
+      };
+    }
+
     // Generate canonical node ID
     const nodeId = `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '')}`;
 
@@ -111,3 +141,21 @@ export const addFactorAction: ActionDefinition = {
     return rec.parameters?.label ? `Add a factor for ${rec.parameters.label}` : 'Add a new factor';
   },
 };
+
+/**
+ * Find an existing factor node whose label matches the given normalised label.
+ * Uses case-insensitive, whitespace-normalised comparison.
+ */
+function findExistingFactor(
+  ctx: DeterministicTurnContext,
+  normalisedLabel: string,
+): { id: string; label: string } | null {
+  for (const [id, entry] of ctx.entities.nodes) {
+    if (entry.kind !== 'factor') continue;
+    const entryNormalised = entry.label.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (entryNormalised === normalisedLabel) {
+      return { id, label: entry.label };
+    }
+  }
+  return null;
+}

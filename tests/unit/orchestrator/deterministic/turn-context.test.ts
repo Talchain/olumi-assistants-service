@@ -456,6 +456,14 @@ describe('mapRobustnessBand', () => {
     expect(mapRobustnessBand('very_high')).toBe('highly_stable');
   });
 
+  it('maps ISL "very_low" to "fragile"', () => {
+    expect(mapRobustnessBand('very_low')).toBe('fragile');
+  });
+
+  it('maps ISL "robust" to "highly_stable"', () => {
+    expect(mapRobustnessBand('robust')).toBe('highly_stable');
+  });
+
   it('passes through canonical values unchanged', () => {
     expect(mapRobustnessBand('fragile')).toBe('fragile');
     expect(mapRobustnessBand('moderate')).toBe('moderate');
@@ -466,6 +474,7 @@ describe('mapRobustnessBand', () => {
   it('handles case-insensitive input', () => {
     expect(mapRobustnessBand('LOW')).toBe('fragile');
     expect(mapRobustnessBand('Medium')).toBe('moderate');
+    expect(mapRobustnessBand('Very_Low')).toBe('fragile');
   });
 
   it('defaults unknown values to "moderate"', () => {
@@ -474,5 +483,99 @@ describe('mapRobustnessBand', () => {
 
   it('returns null for null input', () => {
     expect(mapRobustnessBand(null)).toBeNull();
+  });
+});
+
+// ============================================================================
+// Task 1: computeAnalysisSummary — top-level field resolution
+// ============================================================================
+
+describe('computeAnalysisSummary — driver and robustness resolution', () => {
+  it('reads drivers from top-level drivers.top_drivers when factor_sensitivity is absent', () => {
+    const analysis = makeAnalysis({
+      factor_sensitivity: undefined,
+    });
+    // Add top-level drivers field via index signature
+    (analysis as Record<string, unknown>).drivers = {
+      top_drivers: [
+        { label: 'Market Size', sensitivity: 0.9, direction: 'positive', factor_id: 'fac_market' },
+        { label: 'Price', sensitivity: 0.5, direction: 'negative', factor_id: 'fac_price' },
+      ],
+    };
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.top_drivers.length).toBe(2);
+    expect(ctx.analysis_summary!.top_drivers[0].label).toBe('Market Size');
+    expect(ctx.analysis_summary!.top_drivers[0].sensitivity).toBe(0.9);
+  });
+
+  it('reads drivers from compact_summary.top_drivers as last resort', () => {
+    const analysis = makeAnalysis({
+      factor_sensitivity: undefined,
+    });
+    (analysis as Record<string, unknown>).compact_summary = {
+      top_drivers: [
+        { label: 'Revenue', sensitivity: 0.7, direction: 'positive' },
+      ],
+    };
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.top_drivers.length).toBe(1);
+    expect(ctx.analysis_summary!.top_drivers[0].label).toBe('Revenue');
+  });
+
+  it('produces empty drivers when no driver source exists (no crash)', () => {
+    const analysis = makeAnalysis({
+      factor_sensitivity: undefined,
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.top_drivers).toEqual([]);
+  });
+
+  it('prefers factor_sensitivity over drivers.top_drivers (regression)', () => {
+    const analysis = makeAnalysis({
+      factor_sensitivity: [
+        { label: 'Revenue', factor_id: 'factor_revenue', elasticity: 0.8, direction: 'positive' },
+      ],
+    });
+    (analysis as Record<string, unknown>).drivers = {
+      top_drivers: [
+        { label: 'Overridden', sensitivity: 0.1, direction: 'negative' },
+      ],
+    };
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary!.top_drivers[0].label).toBe('Revenue');
+  });
+
+  it('reads robustness from compact_summary.robustness.level when robustness.level is absent', () => {
+    const analysis = makeAnalysis({
+      robustness: undefined,
+    });
+    (analysis as Record<string, unknown>).compact_summary = {
+      robustness: { level: 'very_low' },
+    };
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.robustness_band).toBe('fragile');
+  });
+
+  it('existing analysis with factor_sensitivity still works (regression)', () => {
+    const req = makeTurnRequest({ graph: makeGraph(), analysis: makeAnalysis() });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.top_drivers.length).toBeGreaterThan(0);
+    expect(ctx.analysis_summary!.robustness_band).toBe('moderate');
   });
 });

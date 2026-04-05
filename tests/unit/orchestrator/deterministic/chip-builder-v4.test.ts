@@ -110,4 +110,62 @@ describe("buildDeterministicChips", () => {
     const names = chips.map((c) => c.action_type);
     expect(names).toContain('what_would_flip');
   });
+
+  // ====================================================================
+  // Task 3: run_analysis chip suppression post-analysis
+  // ====================================================================
+
+  it("deprioritises run_analysis when analysis is complete (can_explain_results: true)", () => {
+    const ctx = makeTurnContext({
+      capabilities: { can_run_analysis: true, can_explain_results: true, can_edit_graph: true, can_compare_options: true, can_challenge: true, can_generate_artefact: false },
+      eligible_actions: ['run_analysis', 'explain_result', 'compare_options', 'what_would_flip', 'challenge_assumption'] as ActionName[],
+    });
+    const chips = buildDeterministicChips(ctx);
+
+    const top3 = chips.map((c) => c.action_type);
+    // run_analysis should NOT be in top 3 post-analysis
+    expect(top3).not.toContain('run_analysis');
+    // explain_result, compare_options, what_would_flip should be present
+    expect(top3).toContain('explain_result');
+    expect(top3).toContain('compare_options');
+  });
+
+  it("post-analysis chips include explain_result, compare_options, what_would_flip", () => {
+    const ctx = makeTurnContext({
+      capabilities: { can_run_analysis: true, can_explain_results: true, can_edit_graph: true, can_compare_options: true, can_challenge: true, can_generate_artefact: false },
+      eligible_actions: ['run_analysis', 'explain_result', 'compare_options', 'what_would_flip', 'challenge_assumption', 'set_factor_value'] as ActionName[],
+    });
+    const chips = buildDeterministicChips(ctx);
+
+    const top3 = chips.map((c) => c.action_type);
+    expect(top3).toContain('explain_result');
+    expect(top3).toContain('compare_options');
+    expect(top3).toContain('what_would_flip');
+  });
+
+  it("pre-analysis chips still include run_analysis (regression)", () => {
+    const ctx = makeTurnContext({
+      analysis_summary: null,
+      capabilities: { can_run_analysis: true, can_explain_results: false, can_edit_graph: true, can_compare_options: false, can_challenge: false, can_generate_artefact: false },
+      eligible_actions: ['run_analysis', 'set_factor_value', 'add_factor'] as ActionName[],
+    });
+    const chips = buildDeterministicChips(ctx);
+
+    const top3 = chips.map((c) => c.action_type);
+    expect(top3).toContain('run_analysis');
+    // Should be first due to boost when !analysis_summary
+    expect(top3[0]).toBe('run_analysis');
+  });
+
+  it("stale analysis (model changed) still shows run_analysis", () => {
+    // Stale = analysis_summary is null (model changed since last analysis) but can_explain is false
+    const ctx = makeTurnContext({
+      analysis_summary: null,
+      capabilities: { can_run_analysis: true, can_explain_results: false, can_edit_graph: true, can_compare_options: false, can_challenge: false, can_generate_artefact: false },
+      eligible_actions: ['run_analysis', 'set_factor_value', 'add_factor'] as ActionName[],
+    });
+    const chips = buildDeterministicChips(ctx);
+
+    expect(chips[0].action_type).toBe('run_analysis');
+  });
 });
