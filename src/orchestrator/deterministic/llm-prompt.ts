@@ -222,6 +222,8 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
     if (a.constraint_tensions.length > 0) {
       parts.push(`Constraint tensions: ${a.constraint_tensions.join('; ')}`);
     }
+  } else if (ctx.graph_summary.node_count > 0) {
+    parts.push('\n**Analysis:** Not yet run. No results are available. Do not reference winners, probabilities, or analysis findings.');
   }
 
   // Signals

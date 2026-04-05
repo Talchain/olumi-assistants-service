@@ -112,6 +112,46 @@ describe("buildDeterministicPromptV2", () => {
     expect(result.dynamic_block).toContain('Cost A');
   });
 
+  it("dynamic block includes no-analysis signal when graph has nodes but no analysis", async () => {
+    const ctx = makeTurnContext({ analysis_summary: null });
+    const result = await buildDeterministicPromptV2(ctx);
+
+    expect(result.dynamic_block).toContain('**Analysis:** Not yet run.');
+    expect(result.dynamic_block).toContain('Do not reference winners, probabilities, or analysis findings.');
+  });
+
+  it("dynamic block includes analysis results and not no-analysis signal when analysis exists", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: {
+        winner: 'Option A',
+        winner_probability: 0.65,
+        runner_up: 'Option B',
+        runner_up_probability: 0.35,
+        robustness_band: 'high',
+        top_drivers: [{ label: 'Cost', sensitivity: 0.45 }],
+        fragile_edge_count: 0,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await buildDeterministicPromptV2(ctx);
+
+    expect(result.dynamic_block).toContain('**Analysis Results:**');
+    expect(result.dynamic_block).toContain('Winner: Option A (65%)');
+    expect(result.dynamic_block).not.toContain('Not yet run');
+  });
+
+  it("dynamic block omits no-analysis signal when graph is empty", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: null,
+      graph_summary: { node_count: 0, edge_count: 0, option_count: 0, option_labels: [], goal_label: null, missing_structural: [] },
+    });
+    const result = await buildDeterministicPromptV2(ctx);
+
+    expect(result.dynamic_block).toContain('Model: not yet created');
+    expect(result.dynamic_block).not.toContain('Not yet run');
+  });
+
   it("static block instructs tool use for structural actions", async () => {
     const ctx = makeTurnContext();
     const result = await buildDeterministicPromptV2(ctx);
