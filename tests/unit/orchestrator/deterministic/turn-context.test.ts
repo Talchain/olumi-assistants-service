@@ -339,7 +339,10 @@ describe('computeTurnContext — Phase A/B resilience', () => {
     // Should not throw — Phase B fails gracefully
     const ctx = computeTurnContext(req);
 
-    // Phase A preserved: graph entities, graph_summary, conversation
+    // Phase A preserved: stage, graph entities, graph_summary, conversation
+    // Stage remains 'evaluate' — inferStage sees analysis_response as non-null
+    // (malformed content doesn't affect stage inference)
+    expect(ctx.stage).toBe('evaluate');
     expect(ctx.entities.nodes.size).toBe(5);
     expect(ctx.graph_summary.node_count).toBe(5);
     expect(ctx.graph_summary.option_count).toBe(2);

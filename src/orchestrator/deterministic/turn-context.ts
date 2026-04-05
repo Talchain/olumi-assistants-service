@@ -102,7 +102,10 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
     signals = computeSignals(graph, analysis, entities);
   } catch (error) {
     log.warn(
-      { error: error instanceof Error ? error.message : String(error) },
+      {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
       'turn_context.phase_b_fallback: analysis-derived computation failed, preserving graph and conversation state',
     );
     // Safe fallback: graph present but analysis unusable
