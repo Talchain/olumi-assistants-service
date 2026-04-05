@@ -108,7 +108,7 @@ export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2Ru
     if (Array.isArray(optComp) && optComp.length > 0) {
       const mapped = (optComp as Array<Record<string, unknown>>).map((entry) => ({
         ...entry,
-        option_label: (entry.option_label as string) ?? (entry.label as string) ?? undefined,
+        option_label: (entry.option_label as string) ?? (entry.label as string),
         win_probability: entry.win_probability,
       }));
       repaired = { ...response, results: mapped } as V2RunResponseEnvelope;
