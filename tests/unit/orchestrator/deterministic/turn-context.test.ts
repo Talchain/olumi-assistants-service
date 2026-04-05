@@ -257,6 +257,182 @@ describe('computeDisambiguationHints', () => {
 });
 
 // ============================================================================
+// Task 1: computeSignals guards against non-array results
+// ============================================================================
+
+describe('computeSignals — non-array results resilience', () => {
+  it('does not throw when results is { __circular: true }', () => {
+    const analysis = makeAnalysis({ results: { __circular: true } as unknown as unknown[] });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    // Should not crash — close_call requires iterable results, which are now empty
+    expect(ctx.signals.close_call).toBe(false);
+    // dominant_factor is derived from factor_sensitivity (independent of results)
+    expect(typeof ctx.signals.dominant_factor === 'string' || ctx.signals.dominant_factor === null).toBe(true);
+  });
+
+  it('does not throw when results is boolean true', () => {
+    const analysis = makeAnalysis({ results: true as unknown as unknown[] });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.signals.close_call).toBe(false);
+  });
+
+  it('handles empty results array', () => {
+    const analysis = makeAnalysis({ results: [] });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.signals.close_call).toBe(false);
+    // dominant_factor from factor_sensitivity still computes (independent of results)
+    expect(typeof ctx.signals.dominant_factor === 'string' || ctx.signals.dominant_factor === null).toBe(true);
+  });
+
+  it('computes correct signals with valid results (regression)', () => {
+    const analysis = makeAnalysis({
+      results: [
+        { option_label: 'Option A', win_probability: 0.52 },
+        { option_label: 'Option B', win_probability: 0.48 },
+      ],
+      factor_sensitivity: [
+        { label: 'Revenue', factor_id: 'factor_revenue', elasticity: 2.0, direction: 'positive' },
+        { label: 'Cost', factor_id: 'factor_cost', elasticity: 0.3, direction: 'negative' },
+      ],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.signals.close_call).toBe(true);
+    expect(ctx.signals.dominant_factor).toBe('factor_revenue');
+  });
+});
+
+// ============================================================================
+// Task 3: Phase A/B split resilience
+// ============================================================================
+
+describe('computeTurnContext — Phase A/B resilience', () => {
+  it('preserves graph state when analysis is malformed (Phase A survives Phase B failure)', () => {
+    // Use a getter that throws on iteration to simulate a deep analysis failure
+    const toxicAnalysis = {
+      meta: { seed_used: 42, n_samples: 100, response_hash: 'test' },
+      results: [
+        { option_label: 'Option A', win_probability: 0.6 },
+        { option_label: 'Option B', win_probability: 0.4 },
+      ],
+      robustness: { level: 'stable' },
+      factor_sensitivity: [
+        { label: 'Revenue', factor_id: 'factor_revenue', elasticity: 0.8, direction: 'positive' },
+      ],
+      // Poison pill: constraint_analysis.per_constraint getter throws
+      constraint_analysis: {
+        get per_constraint(): never { throw new Error('simulated analysis parse failure'); },
+        joint_probability: 0.7,
+      },
+    } as unknown as V2RunResponseEnvelope;
+
+    const graph = makeGraph();
+    const req = makeTurnRequest({ graph, analysis: toxicAnalysis });
+
+    // Should not throw — Phase B fails gracefully
+    const ctx = computeTurnContext(req);
+
+    // Phase A preserved: graph entities, graph_summary, conversation
+    expect(ctx.entities.nodes.size).toBe(5);
+    expect(ctx.graph_summary.node_count).toBe(5);
+    expect(ctx.graph_summary.option_count).toBe(2);
+    expect(ctx.graph_summary.goal_label).toBe('Maximise ROI');
+
+    // Phase B fallback: analysis-dependent capabilities disabled
+    expect(ctx.analysis_summary).toBeNull();
+    expect(ctx.capabilities.can_explain_results).toBe(false);
+    expect(ctx.capabilities.can_compare_options).toBe(false);
+    expect(ctx.capabilities.can_challenge).toBe(false);
+
+    // Graph-dependent capabilities preserved
+    expect(ctx.capabilities.can_edit_graph).toBe(true);
+    expect(ctx.capabilities.can_run_analysis).toBe(true);
+
+    // Graph-derived signals preserved via computeSignals(graph, null, entities)
+    expect(ctx.signals.default_value_count).toBe(1); // factor_cost is inferred
+    expect(ctx.signals.high_uncertainty_factors).toContain('factor_cost');
+    // Analysis-derived signals nulled
+    expect(ctx.signals.close_call).toBe(false);
+    expect(ctx.signals.dominant_factor).toBeNull();
+  });
+
+  it('preserves conversation turn_count when analysis fails', () => {
+    const toxicAnalysis = {
+      meta: { seed_used: 42, n_samples: 100, response_hash: 'test' },
+      get results(): never { throw new Error('results exploded'); },
+      robustness: { level: 'stable' },
+    } as unknown as V2RunResponseEnvelope;
+
+    const req = {
+      message: 'test message',
+      context: {
+        graph: makeGraph() as GraphV3T,
+        analysis_response: toxicAnalysis,
+        framing: { stage: 'evaluate' as const },
+        messages: [
+          { role: 'user', content: 'msg 1' },
+          { role: 'assistant', content: 'msg 2' },
+          { role: 'user', content: 'msg 3' },
+        ],
+        scenario_id: 'test-scenario',
+      },
+      scenario_id: 'test-scenario',
+      client_turn_id: 'test-turn-2',
+    } as unknown as OrchestratorTurnRequest;
+
+    const ctx = computeTurnContext(req);
+
+    // Conversation state preserved from Phase A
+    expect(ctx.conversation.turn_count).toBe(3);
+  });
+
+  it('both phases complete normally with valid analysis (regression)', () => {
+    const req = makeTurnRequest({ graph: makeGraph(), analysis: makeAnalysis() });
+    const ctx = computeTurnContext(req);
+
+    // Phase A
+    expect(ctx.entities.nodes.size).toBe(5);
+    expect(ctx.graph_summary.node_count).toBe(5);
+
+    // Phase B
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.winner).toBe('Option A');
+    expect(ctx.capabilities.can_explain_results).toBe(true);
+    expect(ctx.capabilities.can_challenge).toBe(true);
+  });
+
+  it('no analysis, no graph → stage from framing (regression)', () => {
+    const req = {
+      message: 'hello',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: { stage: 'frame' as const },
+        messages: [],
+        scenario_id: 'test-scenario',
+      },
+      scenario_id: 'test-scenario',
+      client_turn_id: 'test-turn-3',
+    } as unknown as OrchestratorTurnRequest;
+
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.entities.nodes.size).toBe(0);
+    expect(ctx.graph_summary.node_count).toBe(0);
+    expect(ctx.analysis_summary).toBeNull();
+    expect(ctx.capabilities.can_run_analysis).toBe(false);
+    expect(ctx.capabilities.can_explain_results).toBe(false);
+  });
+});
+
+// ============================================================================
 // mapRobustnessBand
 // ============================================================================
 

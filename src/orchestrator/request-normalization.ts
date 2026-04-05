@@ -68,8 +68,9 @@ export function normalizeGenerateModel(parsed: {
 }
 
 /**
- * Boundary warning: analysis_state present on non-analysis turns.
- * Non-production diagnostic only.
+ * Boundary diagnostic: analysis_state present on non-analysis turns.
+ * Non-production debug trace only. The UI intentionally sends analysis_state
+ * on conversation turns to provide post-analysis context.
  */
 export function warnAnalysisStateOnNonAnalysisTurn(
   data: { analysis_state?: unknown },
@@ -78,9 +79,9 @@ export function warnAnalysisStateOnNonAnalysisTurn(
   if (!isProduction() && data.analysis_state) {
     const turnType = inferTurnType(data as unknown as Record<string, unknown>);
     if (turnType === 'conversation' || turnType === 'explicit_generate') {
-      log.warn(
+      log.debug(
         { request_id: requestId, turn_type: turnType },
-        `[BOUNDARY WARNING] analysis_state present on ${turnType} turn — likely client-side request construction issue`,
+        `analysis_state present on ${turnType} turn`,
       );
     }
   }

@@ -100,15 +100,36 @@ export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2Ru
     has_option_comparison: Array.isArray(r.option_comparison),
   }, 'normalizeAnalysisEnvelope: incoming payload shape');
 
-  if (
-    !response.analysis_status
-    && response.meta?.response_hash
-    && getOptionResultCandidates(response).length > 0
-    && hasValidOptionResults(response)
-  ) {
-    return { ...response, analysis_status: 'completed' };
+  // Repair malformed results: when results is not an array, attempt to
+  // reconstruct from top-level option_comparison (the canonical PLoT V2 field).
+  let repaired = response;
+  if (!Array.isArray(r.results)) {
+    const optComp = r.option_comparison;
+    if (Array.isArray(optComp) && optComp.length > 0) {
+      const mapped = (optComp as Array<Record<string, unknown>>).map((entry) => ({
+        ...entry,
+        option_label: (entry.option_label as string) ?? (entry.label as string) ?? undefined,
+        win_probability: entry.win_probability,
+      }));
+      repaired = { ...response, results: mapped } as V2RunResponseEnvelope;
+      log.info({ repaired_from: 'option_comparison', count: mapped.length }, 'normalizeAnalysisEnvelope: results repaired');
+    } else {
+      repaired = { ...response, results: [] } as V2RunResponseEnvelope;
+      if (r.results !== undefined && r.results !== null) {
+        log.warn({ original_shape: resultsShape }, 'normalizeAnalysisEnvelope: results not repairable, set to empty array');
+      }
+    }
   }
-  return response;
+
+  if (
+    !repaired.analysis_status
+    && repaired.meta?.response_hash
+    && getOptionResultCandidates(repaired).length > 0
+    && hasValidOptionResults(repaired)
+  ) {
+    return { ...repaired, analysis_status: 'completed' };
+  }
+  return repaired;
 }
 
 export function isAnalysisExplainable(response: V2RunResponseEnvelope | null | undefined): response is V2RunResponseEnvelope {

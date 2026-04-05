@@ -70,6 +70,8 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
   const analysis = ctx.analysis_response ?? turnRequest.analysis_state ?? null;
   const analysisInputs = ctx.analysis_inputs ?? null;
 
+  // ── Phase A: graph + conversation (no analysis dependency) ──────────
+
   // Stage inference
   const stageResult = inferStage(ctx, turnRequest.system_event);
   const stage: DecisionStage = stageResult?.stage ?? 'frame';
@@ -77,27 +79,50 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
   // Build entity registry
   const entities = buildEntityRegistry(graph);
 
-  // Summaries
+  // Graph summary
   const graphSummary = computeGraphSummary(graph, entities);
-  const analysisSummary = computeAnalysisSummary(analysis);
-
-  // Capabilities
-  const capabilities = computeCapabilities(graph, analysis);
-
-  // Blockers
-  const blockers = computeBlockers(graph, analysis, capabilities);
-
-  // Signals
-  const signals = computeSignals(graph, analysis, entities);
 
   // Conversation summary
   const conversation = computeConversationSummary(turnRequest);
 
-  // Eligible actions
-  const eligibleActions = computeEligibleActions(stage, capabilities, blockers, conversation.recent_actions_taken);
-
   // Disambiguation hints
   const disambiguationHints = computeDisambiguationHints(turnRequest.message, entities);
+
+  // ── Phase B: analysis-derived (may fail on malformed analysis_state) ─
+
+  let analysisSummary: AnalysisSummary | null = null;
+  let capabilities: TurnCapabilities;
+  let blockers: Blocker[];
+  let signals: TurnSignals;
+
+  try {
+    analysisSummary = computeAnalysisSummary(analysis);
+    capabilities = computeCapabilities(graph, analysis);
+    blockers = computeBlockers(graph, analysis, capabilities);
+    signals = computeSignals(graph, analysis, entities);
+  } catch (error) {
+    log.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'turn_context.phase_b_fallback: analysis-derived computation failed, preserving graph and conversation state',
+    );
+    // Safe fallback: graph present but analysis unusable
+    const hasGraph = graph != null && Array.isArray(graph.nodes) && graph.nodes.length > 0;
+    const hasOptions = hasGraph && (graph!.nodes?.some((n: NodeV3T) => n.kind === 'option') ?? false);
+    capabilities = {
+      can_run_analysis: hasGraph && hasOptions,
+      can_explain_results: false,
+      can_edit_graph: hasGraph,
+      can_compare_options: false,
+      can_challenge: false,
+      can_generate_artefact: false,
+    };
+    blockers = computeBlockers(graph, null, capabilities);
+    // Compute graph-derived signals (uncertainty, weak edges) without analysis
+    signals = computeSignals(graph, null, entities);
+  }
+
+  // Eligible actions (uses Phase A + Phase B results)
+  const eligibleActions = computeEligibleActions(stage, capabilities, blockers, conversation.recent_actions_taken);
 
   return {
     stage,
@@ -483,7 +508,9 @@ function computeSignals(
 
   if (analysis) {
     // Close call
-    const results = (analysis.results as Array<Record<string, unknown>> | undefined) ?? [];
+    const results = Array.isArray(analysis.results)
+      ? analysis.results as Array<Record<string, unknown>>
+      : [];
     const sorted = [...results]
       .filter((r) => typeof r.win_probability === 'number')
       .sort((a, b) => (b.win_probability as number) - (a.win_probability as number));
