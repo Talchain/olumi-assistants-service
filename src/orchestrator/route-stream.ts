@@ -177,7 +177,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
       };
 
       // Disable socket timeout — SSE streams may outlive the global requestTimeout.
-      // The budget controller (ORCHESTRATOR_TURN_BUDGET_MS) is the authoritative timeout.
+      // The budget controller (effectiveBudgetMs) is the authoritative timeout.
       req.raw.socket?.setTimeout?.(0);
 
       // Commit to SSE response
