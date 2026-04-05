@@ -570,6 +570,30 @@ describe('computeAnalysisSummary — driver and robustness resolution', () => {
     expect(ctx.analysis_summary!.robustness_band).toBe('fragile');
   });
 
+  it('reads drivers from top-level analysis.drivers when it is a plain array', () => {
+    const analysis = makeAnalysis({ factor_sensitivity: undefined });
+    (analysis as Record<string, unknown>).drivers = [
+      { label: 'Ad Spend', sensitivity: 0.8, direction: 'positive', factor_id: 'fac_ad' },
+    ];
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary!.top_drivers.length).toBe(1);
+    expect(ctx.analysis_summary!.top_drivers[0].label).toBe('Ad Spend');
+  });
+
+  it('reads drivers from top-level analysis.top_drivers array', () => {
+    const analysis = makeAnalysis({ factor_sensitivity: undefined });
+    (analysis as Record<string, unknown>).top_drivers = [
+      { label: 'Conversion Rate', sensitivity: 0.6, direction: 'positive' },
+    ];
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary!.top_drivers.length).toBe(1);
+    expect(ctx.analysis_summary!.top_drivers[0].label).toBe('Conversion Rate');
+  });
+
   it('existing analysis with factor_sensitivity still works (regression)', () => {
     const req = makeTurnRequest({ graph: makeGraph(), analysis: makeAnalysis() });
     const ctx = computeTurnContext(req);

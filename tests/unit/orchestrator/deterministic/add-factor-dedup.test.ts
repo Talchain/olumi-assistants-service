@@ -7,7 +7,7 @@ import { addFactorAction } from "../../../../src/orchestrator/deterministic/acti
 import type { DeterministicTurnContext, EntityEntry, EntityRegistry } from "../../../../src/orchestrator/deterministic/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 
-function makeEntityRegistry(factors: Array<{ id: string; label: string }>): EntityRegistry {
+function makeEntityRegistry(factors: Array<{ id: string; label: string; unit?: string; cap?: number; value?: number }>): EntityRegistry {
   const nodes = new Map<string, EntityEntry>();
   for (const f of factors) {
     nodes.set(f.id, {
@@ -16,6 +16,9 @@ function makeEntityRegistry(factors: Array<{ id: string; label: string }>): Enti
       kind: 'factor',
       aliases: [],
       is_action_target: true,
+      ...(f.unit ? { unit: f.unit } : {}),
+      ...(f.cap != null ? { cap: f.cap } : {}),
+      ...(f.value != null ? { value: f.value } : {}),
     });
   }
   nodes.set('goal_1', {
@@ -28,7 +31,7 @@ function makeEntityRegistry(factors: Array<{ id: string; label: string }>): Enti
   return { nodes, edges: [], option_ids: [], goal_id: 'goal_1' };
 }
 
-function makeCtx(factors: Array<{ id: string; label: string }>): DeterministicTurnContext {
+function makeCtx(factors: Array<{ id: string; label: string; unit?: string; cap?: number; value?: number }>): DeterministicTurnContext {
   return {
     stage: 'ideate',
     entities: makeEntityRegistry(factors),
@@ -107,5 +110,32 @@ describe('add_factor — label deduplication', () => {
 
     expect(result.operations).toBeUndefined();
     expect(result.assistantText).toContain('already exists');
+  });
+
+  it('preserves existing unit when dedup update does not provide one', async () => {
+    const ctx = makeCtx([{ id: 'fac_ad_spend', label: 'Advertising Budget', unit: 'GBP', value: 100000 }]);
+    const result = await addFactorAction.execute(
+      { label: 'Advertising Budget', value: 200000 },
+      ctx,
+    );
+
+    const updateOp = result.operations?.find((op) => op.op === 'update_node');
+    expect(updateOp).toBeDefined();
+    const observedState = (updateOp!.value as Record<string, unknown>).observed_state as Record<string, unknown>;
+    expect(observedState.unit).toBe('GBP');
+    expect(observedState.value).toBe(200000);
+  });
+
+  it('rejects dedup update that exceeds existing cap', async () => {
+    const ctx = makeCtx([{ id: 'fac_ad_spend', label: 'Advertising Budget', unit: 'GBP', cap: 500000, value: 100000 }]);
+    const result = await addFactorAction.execute(
+      { label: 'Advertising Budget', value: 999999 },
+      ctx,
+    );
+
+    // Should reject with cap message, no operations
+    expect(result.operations).toBeUndefined();
+    expect(result.assistantText).toContain('cap');
+    expect(result.assistantText).toContain('500000');
   });
 });

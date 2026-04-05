@@ -326,9 +326,18 @@ function resolveDriverSource(analysis: V2RunResponseEnvelope): unknown[] | null 
     return analysis.factor_sensitivity;
   }
   const r = analysis as Record<string, unknown>;
-  const drivers = r.drivers as Record<string, unknown> | undefined;
-  if (drivers && Array.isArray(drivers.top_drivers) && drivers.top_drivers.length > 0) {
-    return drivers.top_drivers;
+  // drivers may be an object { top_drivers: [...] } or a plain array
+  const drivers = r.drivers;
+  if (Array.isArray(drivers) && drivers.length > 0) {
+    return drivers;
+  }
+  if (drivers && typeof drivers === 'object' && !Array.isArray(drivers)) {
+    const nested = (drivers as Record<string, unknown>).top_drivers;
+    if (Array.isArray(nested) && nested.length > 0) return nested;
+  }
+  // top_drivers at envelope root
+  if (Array.isArray(r.top_drivers) && (r.top_drivers as unknown[]).length > 0) {
+    return r.top_drivers as unknown[];
   }
   const compact = r.compact_summary as Record<string, unknown> | undefined;
   if (compact && Array.isArray(compact.top_drivers) && compact.top_drivers.length > 0) {

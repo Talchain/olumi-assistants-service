@@ -62,20 +62,31 @@ export const addFactorAction: ActionDefinition = {
     const existingFactor = findExistingFactor(ctx, normalisedLabel);
     if (existingFactor) {
       // Redirect to update instead of creating a duplicate
+      const nodeEntry = ctx.entities.nodes.get(existingFactor.id);
       const operations: PatchOperation[] = [];
       if (value != null || unit) {
+        // Enforce cap from existing node
+        if (value != null && nodeEntry?.cap != null && value > nodeEntry.cap) {
+          return {
+            blocks: [],
+            assistantText: `**${existingFactor.label}** already exists and has a cap of ${nodeEntry.cap}${nodeEntry.unit ? ' ' + nodeEntry.unit : ''}. The value ${value} exceeds this.`,
+            guidance_items: [],
+          };
+        }
         operations.push({
           op: 'update_node',
           path: existingFactor.id,
           value: {
             observed_state: {
               ...(value != null ? { value } : {}),
-              ...(unit ? { unit } : {}),
+              // Preserve existing unit unless caller provides one
+              ...(unit ? { unit } : nodeEntry?.unit ? { unit: nodeEntry.unit } : {}),
             },
           },
         });
       }
-      const valueStr = value != null ? ` to ${value}${unit ? ` ${unit}` : ''}` : '';
+      const effectiveUnit = unit ?? nodeEntry?.unit;
+      const valueStr = value != null ? ` to ${value}${effectiveUnit ? ` ${effectiveUnit}` : ''}` : '';
       const actionText = operations.length > 0
         ? `Found existing factor **${existingFactor.label}**. I'll update its value${valueStr} instead of creating a duplicate. Please confirm.`
         : `**${existingFactor.label}** already exists in the model. If you'd like to update its value, please specify a new value.`;
