@@ -36,22 +36,20 @@ export const explainResultAction: ActionDefinition = {
   },
 
   async execute(params: Record<string, unknown>, ctx: DeterministicTurnContext): Promise<ActionResult> {
-    const focus = params.focus as string | undefined;
+    // focus is unused today but kept on the schema so callers can pass it.
+    void params;
     const summary = ctx.analysis_summary!;
     const sections: DeterministicCommentaryBlockData['sections'] = [];
 
-    // Recommendation
-    if (summary.winner) {
-      const prob = summary.winner_probability != null
-        ? (summary.winner_probability * 100).toFixed(0)
-        : null;
-      sections.push({
-        heading: 'Recommendation',
-        content: prob
-          ? `${summary.winner} leads at ${prob}%.`
-          : `${summary.winner} leads.`,
-      });
-    }
+    // ── Winner headline → assistantText ONLY ───────────────────────────
+    // Fix 3 acceptance criterion: no duplicate winner statement across
+    // assistantText, block sections, and block narrative. The winner line
+    // lives in exactly one place — assistantText. The block carries the
+    // supporting structure (Stability, Key drivers, Constraints) without
+    // restating the recommendation.
+    const winnerHeadline = summary.winner
+      ? `${summary.winner} leads the analysis${summary.winner_probability != null ? ` at ${(summary.winner_probability * 100).toFixed(0)}%` : ''}.`
+      : 'Analysis results are ready.';
 
     // Stability
     if (summary.robustness_band) {
@@ -99,30 +97,21 @@ export const explainResultAction: ActionDefinition = {
       });
     }
 
-    // Build narrative from sections for the block
-    const narrativeParts: string[] = [];
-    for (const section of sections) {
-      if (section.content) narrativeParts.push(`**${section.heading}**: ${section.content}`);
-      if (section.items) narrativeParts.push(`**${section.heading}**: ${section.items.join(', ')}`);
-    }
-    const narrative = narrativeParts.join('\n\n');
-
-    // Build commentary block directly to include sections without post-hoc mutation
+    // Fix 3: narrative is intentionally empty. The UI renders `sections`
+    // when they are present; the previous implementation also re-rendered
+    // sections as markdown into `narrative`, causing the UI (which renders
+    // both) to display each heading twice. The narrative key is kept on the
+    // block because DeterministicCommentaryBlockData.narrative is required.
     const block: TypedConversationBlock = {
       block_id: `blk_commentary_${randomUUID().replace(/-/g, '').substring(0, 16)}`,
       block_type: 'commentary',
-      data: { narrative, sections, supporting_refs: [] },
+      data: { narrative: '', sections, supporting_refs: [] },
       provenance: { trigger: 'deterministic:explain_result', turn_id: ctx.turn_id, timestamp: new Date().toISOString() },
     };
 
-    // Short summary for assistantText
-    const summaryText = summary.winner
-      ? `${summary.winner} leads the analysis${summary.winner_probability != null ? ` at ${(summary.winner_probability * 100).toFixed(0)}%` : ''}.`
-      : 'Analysis results are ready.';
-
     return {
       blocks: [block],
-      assistantText: summaryText,
+      assistantText: winnerHeadline,
       guidance_items: [],
     };
   },
