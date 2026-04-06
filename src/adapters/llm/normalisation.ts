@@ -201,6 +201,12 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         if (node.goal_threshold_raw === null) node.goal_threshold_raw = undefined;
         if (node.goal_threshold_unit === null || node.goal_threshold_unit === '') node.goal_threshold_unit = undefined;
         if (node.goal_threshold_cap === null) node.goal_threshold_cap = undefined;
+        if (
+          node.goal_threshold_cap === 0 &&
+          (node.goal_threshold_raw === null || node.goal_threshold_raw === undefined)
+        ) {
+          node.goal_threshold_cap = undefined;
+        }
       }
 
       // is_baseline only meaningful on option nodes
