@@ -218,4 +218,166 @@ describe("processAdapterStream", () => {
     // Clean up
     (ACTION_CATALOGUE as Map<string, unknown>).delete('run_analysis');
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Regression: chip-driven forced tool choice (Sonnet 4.6 behaviour)
+  //
+  // When a chip click forces tool_choice: { type: 'tool', name }, Sonnet 4.6
+  // frequently emits zero text_delta events during streaming and surfaces
+  // the headline text only inside the final message_complete.content payload
+  // alongside the tool_use block. The pre-Fix-1 stream handler's
+  // `!toolExecution` guard discarded this text entirely, producing
+  // response_text_chars: 0 and no text_delta events reaching the UI.
+  //
+  // Post-fix contract:
+  //   1. Headline text from finalMessage.content must be extracted and
+  //      yielded as a text_delta event.
+  //   2. Event ordering must be: text_delta → block → tool_result.
+  //   3. assistantText on the returned result must be non-empty.
+  // ─────────────────────────────────────────────────────────────────────
+  it("regression: chip-forced tool call with text only in message_complete.content yields text_delta before block/tool_result", async () => {
+    // Simulates Sonnet-4.6 native tool use under forced tool_choice:
+    // - NO text_delta events during streaming
+    // - tool_input_start + tool_input_complete for the forced tool
+    // - message_complete carries BOTH the headline text block AND the
+    //   tool_use block in content[]
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: 'Updating the runway factor so we can see the downstream impact.' },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string; tool_name?: string }> = [];
+    let result;
+
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) {
+        result = value;
+        break;
+      }
+      events.push(value as { type: string; delta?: string; tool_name?: string });
+    }
+
+    // Contract 1: text_delta was yielded at least once for the extracted headline
+    const textDeltas = events.filter((e) => e.type === 'text_delta');
+    expect(textDeltas.length).toBeGreaterThan(0);
+    const headlineText = textDeltas.map((e) => e.delta).join('');
+    expect(headlineText).toContain('runway');
+
+    // Contract 2: assistantText on returned result is non-empty
+    expect(result!.assistantText.length).toBeGreaterThan(0);
+    expect(result!.assistantText).toBe('Updating the runway factor so we can see the downstream impact.');
+
+    // Contract 3: hard event ordering text_delta → block → tool_result.
+    // tool_start may precede text_delta (it fires on tool_input_start, which
+    // arrives before message_complete in the streaming path); what matters
+    // is that text_delta comes BEFORE block and tool_result.
+    const firstTextDeltaIdx = events.findIndex((e) => e.type === 'text_delta');
+    const firstBlockIdx = events.findIndex((e) => e.type === 'block');
+    const firstToolResultIdx = events.findIndex((e) => e.type === 'tool_result');
+
+    expect(firstTextDeltaIdx).toBeGreaterThanOrEqual(0);
+    expect(firstBlockIdx).toBeGreaterThanOrEqual(0);
+    expect(firstToolResultIdx).toBeGreaterThanOrEqual(0);
+    expect(firstTextDeltaIdx).toBeLessThan(firstBlockIdx);
+    expect(firstBlockIdx).toBeLessThan(firstToolResultIdx);
+
+    // Sanity: the tool still executed
+    expect(result!.toolExecution).toBeDefined();
+    expect(result!.toolExecution!.toolName).toBe('set_factor_value');
+    expect(result!.failedToolCall).toBeNull();
+    expect(result!.discardedToolCalls).toEqual([]);
+  });
+
+  it("regression: chip-forced tool call with ONLY text (no text block repeated in content) still extracts text", async () => {
+    // Variant: streaming yields no text_deltas, but the headline text arrives
+    // solely via message_complete.content (no preceding text_delta events).
+    // This is the pure forced-tool-choice case.
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: 'Here is the headline.' },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    const events: Array<{ type: string }> = [];
+
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string });
+    }
+
+    expect(result!.assistantText).toBe('Here is the headline.');
+    // Exactly one text_delta was yielded (for the extracted block)
+    expect(events.filter((e) => e.type === 'text_delta').length).toBe(1);
+  });
+
+  it("regression: does not double-emit text when streaming deltas arrived AND message_complete repeats the text block", async () => {
+    // Normal streaming path: text_deltas arrive first, then the tool call,
+    // then message_complete (which may redundantly include the assembled text
+    // block in content[]). The handler must NOT extract text from
+    // message_complete.content in this case — textChunks is non-empty, so
+    // the phase-1 extraction is skipped to avoid double-emission.
+    const stream = mockStream([
+      { type: 'text_delta', delta: 'Hello ' },
+      { type: 'text_delta', delta: 'world.' },
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: 'Hello world.' },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string }> = [];
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string; delta?: string });
+    }
+
+    // Only the two streaming deltas — no extra delta from message_complete
+    expect(events.filter((e) => e.type === 'text_delta').length).toBe(2);
+    expect(result!.assistantText).toBe('Hello world.');
+    expect(result!.toolExecution).toBeDefined();
+  });
 });

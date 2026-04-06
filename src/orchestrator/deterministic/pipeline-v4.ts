@@ -444,8 +444,17 @@ export async function* executePipelineV4(
 
     // ── Text injection for empty LLM responses (Task 3) ──────────────
     // When a tool executed successfully but the LLM produced no text,
-    // inject text from the action result or a template so no turn
-    // reaches the UI with a tool execution but no assistant text.
+    // inject text so no turn reaches the UI with a tool execution but no
+    // assistant text. Note: as of Fix 1+2, the stream handler already
+    // injects the tool handler's `assistantText` as a text_delta BEFORE
+    // the block/tool_result events (preserving the required ordering), so
+    // `streamResult.assistantText` will typically already carry the
+    // handler text. This block only fires when BOTH the LLM and the tool
+    // handler produced no text — a genuinely degenerate path — in which
+    // case we fall back to a static template for envelope text only. We
+    // intentionally do NOT yield a text_delta here because the block has
+    // already been sent and a late delta would violate the event ordering
+    // text_delta → block → tool_result.
     if ((!assistantText || !assistantText.trim()) && toolExecution && !failedToolCall) {
       if (toolExecution.result.assistantText) {
         assistantText = toolExecution.result.assistantText;

@@ -83,10 +83,100 @@ export async function* processAdapterStream(
 ): AsyncGenerator<OrchestratorStreamEvent & { type: 'text_delta' | 'tool_start' | 'block' | 'tool_result' }, StreamHandlerResult> {
   let seq = 0;
   const textChunks: string[] = [];
-  let toolExecution: ToolExecution | null = null;
-  let failedToolCall: { name: string; error: string } | null = null;
+  // Note: these are mutated from the nested executeShortTool generator.
+  // Explicit type annotations defeat TS's control-flow narrowing to the
+  // initial null literal, which would otherwise cause `toolExecution?.x`
+  // access to be flagged as property-on-never in the discard-guard below.
+  const state: {
+    toolExecution: ToolExecution | null;
+    failedToolCall: { name: string; error: string } | null;
+  } = { toolExecution: null, failedToolCall: null };
   let pendingLongRunningTool: PendingToolCall | null = null;
   const discardedToolCalls: Array<{ name: string; input: Record<string, unknown> }> = [];
+
+  // A short-running tool call seen during streaming but deferred until
+  // message_complete. We defer execution when no text_deltas have streamed yet
+  // so that, if the model surfaces the headline text only in the final
+  // message.content (common with Sonnet 4.6 + forced tool_choice), we can
+  // extract the text and yield it BEFORE the tool's block/tool_result events.
+  // Hard-required event ordering: text_delta → block → tool_result → turn_complete.
+  let deferredShortTool: { name: string; input: Record<string, unknown> } | null = null;
+
+  /**
+   * Execute a short-running tool and yield its block + tool_result events.
+   * Centralised so both the streaming path (tool_input_complete) and the
+   * deferred path (message_complete) emit identical event sequences.
+   */
+  async function* executeShortTool(
+    name: string,
+    input: Record<string, unknown>,
+    fallbackPath: boolean,
+  ): AsyncGenerator<OrchestratorStreamEvent & { type: 'text_delta' | 'block' | 'tool_result' }> {
+    const actionDef = ACTION_CATALOGUE.get(name as ActionName);
+    if (!actionDef) {
+      log.warn({ request_id: requestId, tool_name: name }, 'v4.unknown_tool_call');
+      return;
+    }
+
+    const startTime = Date.now();
+    try {
+      const result = await actionDef.execute(input, turnContext);
+      const durationMs = Date.now() - startTime;
+
+      state.toolExecution = { toolName: name, input, result, durationMs };
+
+      // Fix 2: if no headline text has been emitted yet (no LLM text_deltas
+      // streamed and no text extracted from message_complete.content), use
+      // the tool handler's own assistantText as a fallback headline and
+      // yield it as a text_delta BEFORE the block/tool_result events.
+      // Preserves the hard-required ordering: text_delta → block → tool_result.
+      if (textChunks.length === 0 && result.assistantText && result.assistantText.trim()) {
+        textChunks.push(result.assistantText);
+        yield { type: 'text_delta', seq: seq++, delta: result.assistantText };
+      }
+
+      for (const block of result.blocks) {
+        yield { type: 'block', seq: seq++, block };
+      }
+
+      yield {
+        type: 'tool_result',
+        seq: seq++,
+        tool_name: name,
+        success: true,
+        duration_ms: durationMs,
+      };
+
+      log.info({
+        request_id: requestId,
+        tool_name: name,
+        success: true,
+        duration_ms: durationMs,
+        blocks_produced: result.blocks.length,
+        ...(fallbackPath ? { fallback_path: true } : {}),
+      }, 'v4.tool_executed');
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      state.failedToolCall = { name, error: errorMessage };
+
+      yield {
+        type: 'tool_result',
+        seq: seq++,
+        tool_name: name,
+        success: false,
+        duration_ms: durationMs,
+      };
+
+      log.error({
+        request_id: requestId,
+        tool_name: name,
+        duration_ms: durationMs,
+        error: errorMessage,
+        ...(fallbackPath ? { fallback_path: true } : {}),
+      }, 'v4.tool_execution_failed');
+    }
+  }
 
   for await (const event of stream) {
     switch (event.type) {
@@ -104,12 +194,12 @@ export async function* processAdapterStream(
 
       case 'tool_input_complete': {
         // Only one tool per turn — discard subsequent calls
-        if (toolExecution || failedToolCall || pendingLongRunningTool) {
+        if (state.toolExecution || state.failedToolCall || pendingLongRunningTool || deferredShortTool) {
           discardedToolCalls.push({ name: event.tool_name, input: event.input });
           log.warn({
             request_id: requestId,
             discarded_tool: event.tool_name,
-            kept_tool: toolExecution?.toolName ?? failedToolCall?.name ?? pendingLongRunningTool?.name,
+            kept_tool: state.toolExecution?.toolName ?? state.failedToolCall?.name ?? pendingLongRunningTool?.name ?? deferredShortTool?.name,
           }, 'v4.tool_call_discarded');
           break;
         }
@@ -128,126 +218,68 @@ export async function* processAdapterStream(
           break;
         }
 
-        // Short-running tool — execute immediately
-        const startTime = Date.now();
-        try {
-          const result = await actionDef.execute(event.input, turnContext);
-          const durationMs = Date.now() - startTime;
-
-          toolExecution = {
-            toolName: event.tool_name,
-            input: event.input,
-            result,
-            durationMs,
-          };
-
-          for (const block of result.blocks) {
-            yield { type: 'block', seq: seq++, block };
-          }
-
-          yield {
-            type: 'tool_result',
-            seq: seq++,
-            tool_name: event.tool_name,
-            success: true,
-            duration_ms: durationMs,
-          };
-
-          log.info({
-            request_id: requestId,
-            tool_name: event.tool_name,
-            success: true,
-            duration_ms: durationMs,
-            blocks_produced: result.blocks.length,
-          }, 'v4.tool_executed');
-
-        } catch (error) {
-          const durationMs = Date.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          failedToolCall = { name: event.tool_name, error: errorMessage };
-
-          yield {
-            type: 'tool_result',
-            seq: seq++,
-            tool_name: event.tool_name,
-            success: false,
-            duration_ms: durationMs,
-          };
-
-          log.error({
-            request_id: requestId,
-            tool_name: event.tool_name,
-            duration_ms: durationMs,
-            error: errorMessage,
-          }, 'v4.tool_execution_failed');
+        // Short-running tool: if the model has already streamed text deltas
+        // ahead of the tool call, there will be no headline text buried in
+        // finalMessage.content — execute now for minimal latency. If no text
+        // has streamed yet (common with Sonnet 4.6 + forced tool_choice),
+        // defer execution until message_complete so any extracted text can be
+        // yielded BEFORE the block/tool_result events.
+        if (textChunks.length > 0) {
+          yield* executeShortTool(event.tool_name, event.input, false);
+        } else {
+          deferredShortTool = { name: event.tool_name, input: event.input };
         }
         break;
       }
 
       case 'message_complete': {
-        // Non-streaming fallback: when the adapter fell back to chatWithTools,
-        // message_complete is the ONLY event. Extract text and first tool call
-        // from the result's content blocks.
-        if (textChunks.length === 0 && !toolExecution && !failedToolCall && !pendingLongRunningTool) {
+        // Phase 1: extract any text blocks from the final message.
+        // Runs regardless of whether a tool was seen during streaming — the
+        // previous `!toolExecution` guard dropped headline text whenever the
+        // model emitted zero streaming deltas (Sonnet 4.6 forced tool_choice).
+        // Skip if deltas already streamed (textChunks non-empty) to avoid
+        // double-emission in the normal streaming path.
+        if (textChunks.length === 0) {
           for (const block of event.result.content) {
             if (block.type === 'text' && block.text) {
               textChunks.push(block.text);
               yield { type: 'text_delta', seq: seq++, delta: block.text };
-            } else if (block.type === 'tool_use') {
-              // One tool per turn — skip if we already have one
-              if (toolExecution || failedToolCall || pendingLongRunningTool) {
-                discardedToolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
-                continue;
-              }
-
-              const actionDef = ACTION_CATALOGUE.get(block.name as ActionName);
-              if (!actionDef) {
-                log.warn({ request_id: requestId, tool_name: block.name }, 'v4.unknown_tool_call');
-                continue;
-              }
-
-              const toolInput = block.input as Record<string, unknown>;
-              const isLongRunning = LONG_RUNNING_ACTIONS.has(block.name as ActionName);
-
-              if (isLongRunning) {
-                pendingLongRunningTool = { name: block.name, input: toolInput };
-                continue;
-              }
-
-              const startTime = Date.now();
-              try {
-                const result = await actionDef.execute(toolInput, turnContext);
-                const durationMs = Date.now() - startTime;
-                toolExecution = { toolName: block.name, input: toolInput, result, durationMs };
-
-                for (const b of result.blocks) {
-                  yield { type: 'block', seq: seq++, block: b };
-                }
-                yield { type: 'tool_result', seq: seq++, tool_name: block.name, success: true, duration_ms: durationMs };
-
-                log.info({
-                  request_id: requestId,
-                  tool_name: block.name,
-                  success: true,
-                  duration_ms: durationMs,
-                  blocks_produced: result.blocks.length,
-                  fallback_path: true,
-                }, 'v4.tool_executed');
-              } catch (error) {
-                const durationMs = Date.now() - startTime;
-                failedToolCall = { name: block.name, error: error instanceof Error ? error.message : String(error) };
-                yield { type: 'tool_result', seq: seq++, tool_name: block.name, success: false, duration_ms: durationMs };
-
-                log.error({
-                  request_id: requestId,
-                  tool_name: block.name,
-                  duration_ms: durationMs,
-                  error: failedToolCall.error,
-                  fallback_path: true,
-                }, 'v4.tool_execution_failed');
-              }
             }
+          }
+        }
+
+        // Phase 2: execute any deferred short-running tool from the streaming
+        // path. Emits block + tool_result AFTER the text_delta above, giving
+        // the required ordering: text_delta → block → tool_result.
+        if (deferredShortTool) {
+          const deferred = deferredShortTool;
+          deferredShortTool = null;
+          yield* executeShortTool(deferred.name, deferred.input, false);
+        }
+
+        // Phase 3: non-streaming fallback. If the adapter fell back to
+        // chatWithTools and never emitted tool_input_complete, extract the
+        // tool call from the final content blocks. Only runs when no tool
+        // has been seen yet via any path.
+        if (!state.toolExecution && !state.failedToolCall && !pendingLongRunningTool) {
+          for (const block of event.result.content) {
+            if (block.type !== 'tool_use') continue;
+
+            // One tool per turn — discard extras
+            if (state.toolExecution || state.failedToolCall || pendingLongRunningTool) {
+              discardedToolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
+              continue;
+            }
+
+            const toolInput = block.input as Record<string, unknown>;
+            const isLongRunning = LONG_RUNNING_ACTIONS.has(block.name as ActionName);
+
+            if (isLongRunning) {
+              pendingLongRunningTool = { name: block.name, input: toolInput };
+              continue;
+            }
+
+            yield* executeShortTool(block.name, toolInput, true);
           }
         }
         break;
@@ -255,10 +287,20 @@ export async function* processAdapterStream(
     }
   }
 
+  // Safety net: if the stream closed without a message_complete event but a
+  // short-running tool was deferred, execute it now so we never strand a
+  // pending tool call. (Should not happen in practice — the adapter always
+  // yields message_complete — but keeps the return invariant sound.)
+  if (deferredShortTool && !state.toolExecution && !state.failedToolCall) {
+    const deferred = deferredShortTool;
+    deferredShortTool = null;
+    yield* executeShortTool(deferred.name, deferred.input, false);
+  }
+
   return {
     assistantText: textChunks.join(''),
-    toolExecution,
-    failedToolCall,
+    toolExecution: state.toolExecution,
+    failedToolCall: state.failedToolCall,
     pendingLongRunningTool,
     discardedToolCalls,
   };
