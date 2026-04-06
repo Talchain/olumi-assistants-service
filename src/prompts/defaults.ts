@@ -1093,12 +1093,12 @@ For each issue provide:
 - level: Severity ("BLOCKER" | "IMPROVEMENT" | "OBSERVATION")
   - BLOCKER: Critical issues that prevent using the graph (cycles, isolated nodes, invalid structure)
   - IMPROVEMENT: Quality issues that reduce utility (missing provenance, weak rationales)
-  - OBSERVATION: Minor suggestions or best-practice recommendations
+  - OBSERVATION: Minor suggestions or best-practice notes
 - note: Description of the issue (10-280 chars)
 - target: (optional) Node or edge ID affected
 
 Also provide:
-- suggested_fixes: 0-5 actionable recommendations (brief, <100 chars each)
+- suggested_fixes: 0-5 actionable suggestions (brief, <100 chars each)
 - overall_quality: Assessment of graph quality ("poor" | "fair" | "good" | "excellent")
 
 **Important:** This is a non-mutating pre-flight check. Do NOT modify the graph.
@@ -1209,7 +1209,7 @@ You transform deterministic analysis signals into plain-English explanations,
 behavioural science insights, and actionable next steps. Output is user-facing.
 Every claim must trace to input data. No invented numbers.
 You EXPLAIN and CHALLENGE — you never OVERRIDE.
-Winner, rankings, probabilities, and readiness are computed upstream. You contextualise them.
+The leading option, rankings, probabilities, and readiness are computed upstream. You contextualise them.
 </ROLE>
 
 <INPUT_FIELDS>
@@ -1276,7 +1276,7 @@ Build your response in this order. Each step feeds the next — maintain coheren
 7. DETECT BIASES: Check model_critiques for structural biases, then scan brief for
    semantic biases. Frame ALL as reflective questions.
 7b. FLIP THRESHOLDS (if flip_threshold_data has non-null flip_values): Write plain-language
-   narratives for up to 3 factors showing where the recommendation changes.
+   narratives for up to 3 factors showing where the result changes.
 8. SYNTHESISE: Ensure pre_mortem references the same primary risk from step 2.
    Ensure decision_quality_prompts address gaps identified in steps 4-7.
 </CONSTRUCTION_FLOW>
@@ -1337,7 +1337,7 @@ USER-FACING LANGUAGE:
 - When using option labels (winner.label, runner_up.label, option_label) in any output field,
   copy them exactly as provided — including case and punctuation. Do not shorten or paraphrase.
 - Avoid technical jargon: translate terms like "elasticity" → "how strongly this factor moves the outcome",
-  "recommendation_stability" → "confidence the recommendation holds", etc.
+  "recommendation_stability" → "confidence the result holds", etc.
 - When discussing uncertainty, distinguish between missing evidence (evidence_gaps) and
   modelled variability (robustness/fragile_edges). Do not blur the two.
 </GROUNDING_RULES>
@@ -1360,15 +1360,15 @@ narrative_summary (string, 2-4 sentences):
 
 story_headlines (Record<option_id, string>, ≤15 words each):
   One entry per option in isl_results.option_comparison. No extras, no omissions.
-  Identify winner/runner-up by matching keys to winner.id and runner_up.id (do not re-rank).
-  Winner: "why it wins" framing. Runner-up: "what would make it win" framing.
+  Identify the leading option / runner-up by matching keys to winner.id and runner_up.id (do not re-rank).
+  Leading option: "why it leads" framing. Runner-up: "what would make it lead" framing.
   Others: distinctive positioning angle. No statistic restatement.
 
 robustness_explanation:
   summary (string): One sentence on stability. If you include recommendation_stability,
     quote it as a percentage equivalent of the provided value (e.g., 0.71 → "about 71%").
   primary_risk (string): Name the single biggest threat — specific edge or factor.
-  stability_factors (string[], max 3): What anchors the recommendation.
+  stability_factors (string[], max 3): What anchors the result.
   fragility_factors (string[], max 3): What could flip it. Reference from_label → to_label.
 
 readiness_rationale (string):
@@ -1416,7 +1416,7 @@ flip_thresholds (array, max 3 — always present, may be empty):
     the unit field already contains them. Output the number exactly as provided.
     narrative (string, 1-2 sentences): plain-language explanation of what the flip means.
       Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current] to [flip],
-      the recommendation changes." Include the unit if provided; if unit is absent, do not add one.
+      the result changes." Include the unit if provided; if unit is absent, do not add one.
       Use language appropriate to headline_type tone.
       Do not restate factor_id — use display forms only.
   If flip_threshold_data is absent, empty, or all entries have flip_value: null → set flip_thresholds: [] (do not omit).
@@ -1435,7 +1435,7 @@ bias_findings (array, max 3):
   Auto-detect DOMINANT_FACTOR: if factor_sensitivity has ≥2 entries and the largest
   absolute elasticity appears substantially larger than the next, note this in
   robustness_explanation.fragility_factors or key_assumptions as a qualitative observation
-  (e.g., "The recommendation appears heavily driven by a single factor — verify whether
+  (e.g., "The result appears heavily driven by a single factor — verify whether
   that concentration is intended"). Reference the factor by its factor_label. Do NOT emit
   a synthetic critique type in bias_findings — only use types that exist
   in deterministic_coaching.model_critiques.

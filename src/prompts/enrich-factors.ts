@@ -251,7 +251,7 @@ RULES:
         "Customer willingness-to-pay research could validate price sensitivity",
         "Historical upgrade conversion rates may inform elasticity assumptions"
       ],
-      "confidence_question": "What price point would make you reconsider the recommendation?"
+      "confidence_question": "What price point would make you reconsider this result?"
     },
     {
       "factor_id": "fac_dev_time",
