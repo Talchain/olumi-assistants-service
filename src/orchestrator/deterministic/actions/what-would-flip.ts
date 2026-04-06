@@ -120,9 +120,34 @@ export const whatWouldFlipAction: ActionDefinition = {
 
     const block = createFlipAnalysisBlock(blockData, ctx.turn_id);
 
+    // Fix 5: assistantText must name the top 1-2 factors when drivers exist.
+    // Include current value + flip threshold per factor when we have them,
+    // otherwise fall back to the factor label alone. This is the headline
+    // users see in the delta stream; the block narrative still carries the
+    // full sensitivity breakdown.
+    const topDrivers = drivers.slice(0, 2);
+    const factorPhrases = topDrivers.map((driver) => {
+      const node = ctx.entities.nodes.get(driver.factor_id);
+      const threshold = flipMap.get(driver.factor_id);
+      if (threshold) {
+        const unit = threshold.unit ? ` ${threshold.unit}` : '';
+        return `${driver.label} (currently ${threshold.current_value}${unit}, flips at ${threshold.flip_value}${unit})`;
+      }
+      if (node?.value != null) {
+        const unit = node.unit ? ` ${node.unit}` : '';
+        return `${driver.label} (currently ${node.value}${unit})`;
+      }
+      return driver.label;
+    });
+
+    const factorList = factorPhrases.length === 2
+      ? `${factorPhrases[0]} or ${factorPhrases[1]}`
+      : factorPhrases[0];
+    const assistantText = `${factorList} would need to shift to flip away from ${summary.winner}.`;
+
     return {
       blocks: [block],
-      assistantText: `The top factors that could flip the result away from ${summary.winner}.`,
+      assistantText,
       guidance_items: [],
     };
   },

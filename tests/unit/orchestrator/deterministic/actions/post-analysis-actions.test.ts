@@ -19,6 +19,7 @@ vi.mock("../../../../../src/utils/telemetry.js", () => ({
 
 import { explainResultAction } from "../../../../../src/orchestrator/deterministic/actions/explain-result.js";
 import { compareOptionsAction } from "../../../../../src/orchestrator/deterministic/actions/compare-options.js";
+import { whatWouldFlipAction } from "../../../../../src/orchestrator/deterministic/actions/what-would-flip.js";
 import type {
   DeterministicTurnContext,
   AnalysisSummary,
@@ -257,5 +258,58 @@ describe("compare_options action (Fix 4)", () => {
     const result = await compareOptionsAction.execute({}, ctx);
     expect(result.blocks.length).toBe(0);
     expect(result.assistantText).toContain('at least two');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Fix 5: what_would_flip — assistantText names top factors
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("what_would_flip action (Fix 5)", () => {
+  it("assistantText names the top driver by label when drivers exist", async () => {
+    const ctx = makeTurnContext();
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.assistantText).toBeDefined();
+    expect(result.assistantText!).toContain('Ramp time');
+  });
+
+  it("assistantText names up to two driver labels when >= 2 drivers exist", async () => {
+    const ctx = makeTurnContext();
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.assistantText!).toContain('Ramp time');
+    expect(result.assistantText!).toContain('Contractor cost');
+  });
+
+  it("assistantText includes the current winner when drivers exist", async () => {
+    const ctx = makeTurnContext();
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.assistantText!).toContain('Hire Tech Lead');
+  });
+
+  it("assistantText falls back to generic copy only when zero drivers exist", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: {
+        ...makeAnalysisSummary(),
+        top_drivers: [],
+      },
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.assistantText).toBeDefined();
+    // Zero-driver branch returns a generic header; does not name a driver
+    expect(result.assistantText!.toLowerCase()).toContain('no single driver');
+  });
+
+  it("still emits a FlipAnalysisBlock when drivers are present", async () => {
+    const ctx = makeTurnContext();
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.blocks.length).toBe(1);
+    expect(result.blocks[0].block_type).toBe('flip_analysis');
+  });
+
+  it("includes current value in assistantText when the entity has a value", async () => {
+    const ctx = makeTurnContext();
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    // fac_ramp has value 6, unit 'weeks' in the mocked entities
+    expect(result.assistantText!.toLowerCase()).toContain('currently 6');
   });
 });
