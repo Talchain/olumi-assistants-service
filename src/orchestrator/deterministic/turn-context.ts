@@ -393,8 +393,22 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
       const label = (entry.label as string) ?? (entry.factor_label as string);
       const elasticity = entry.elasticity as number | undefined;
       const sensitivity = entry.sensitivity as number | undefined;
-      const mag = elasticity != null ? Math.abs(elasticity) : (sensitivity ?? undefined);
-      if (typeof label === 'string' && typeof mag === 'number') {
+      const influencePercent = entry.influence_percent as number | undefined;
+      // Magnitude source preference: elasticity → sensitivity → influence_percent.
+      // The UI forwards factor_sensitivity with only `influence_percent` (no
+      // elasticity or sensitivity), and before this change those entries were
+      // silently dropped — leaving top_drivers empty and forcing every
+      // post-analysis handler (explain_result, compare_options, what_would_flip)
+      // into its zero-drivers fallback branch. Mirrors the dominant_factor
+      // computation below (lines ~750), which already accepted influence_percent.
+      const mag = elasticity != null
+        ? Math.abs(elasticity)
+        : sensitivity != null
+          ? Math.abs(sensitivity)
+          : influencePercent != null
+            ? Math.abs(influencePercent)
+            : undefined;
+      if (typeof label === 'string' && typeof mag === 'number' && Number.isFinite(mag)) {
         topDrivers.push({
           label,
           factor_id: (entry.factor_id as string) ?? label,

@@ -556,6 +556,52 @@ describe('computeAnalysisSummary — driver and robustness resolution', () => {
     expect(ctx.analysis_summary!.top_drivers[0].label).toBe('Revenue');
   });
 
+  it('derives top_drivers magnitude from influence_percent when elasticity/sensitivity are absent', () => {
+    // Regression: the UI forwards factor_sensitivity with `influence_percent`
+    // only (no elasticity, no sensitivity). Before this fix the extraction
+    // loop's `mag = elasticity ?? sensitivity` yielded undefined, every entry
+    // was silently dropped, and top_drivers was empty — forcing every
+    // post-analysis handler (explain_result / compare_options / what_would_flip)
+    // into its zero-drivers fallback branch with generic copy.
+    const analysis = makeAnalysis({
+      factor_sensitivity: [
+        { label: 'Ramp time', factor_id: 'factor_ramp', influence_percent: 45, direction: 'negative' },
+        { label: 'Contractor cost', factor_id: 'factor_cost', influence_percent: 30, direction: 'positive' },
+        { label: 'Team capacity', factor_id: 'factor_cap', influence_percent: 15, direction: 'positive' },
+      ] as unknown as never,
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.top_drivers.length).toBe(3);
+    // Sorted by magnitude descending
+    expect(ctx.analysis_summary!.top_drivers[0].label).toBe('Ramp time');
+    expect(ctx.analysis_summary!.top_drivers[0].sensitivity).toBe(45);
+    expect(ctx.analysis_summary!.top_drivers[1].label).toBe('Contractor cost');
+    expect(ctx.analysis_summary!.top_drivers[2].label).toBe('Team capacity');
+  });
+
+  it('prefers elasticity over influence_percent on mixed entries', () => {
+    // If an entry carries both elasticity and influence_percent, elasticity wins.
+    // Preserves canonical PLoT behaviour when the data is available.
+    const analysis = makeAnalysis({
+      factor_sensitivity: [
+        { label: 'Mixed', factor_id: 'factor_mixed', elasticity: 2.5, influence_percent: 10, direction: 'positive' },
+        { label: 'InfluenceOnly', factor_id: 'factor_inf', influence_percent: 20, direction: 'positive' },
+      ] as unknown as never,
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.analysis_summary!.top_drivers.length).toBe(2);
+    // Mixed should sort first with magnitude 2.5 (from elasticity), NOT 10 (from influence_percent)
+    expect(ctx.analysis_summary!.top_drivers[0].label).toBe('InfluenceOnly'); // 20 > 2.5
+    expect(ctx.analysis_summary!.top_drivers[0].sensitivity).toBe(20);
+    expect(ctx.analysis_summary!.top_drivers[1].label).toBe('Mixed');
+    expect(ctx.analysis_summary!.top_drivers[1].sensitivity).toBe(2.5);
+  });
+
   it('reads robustness from compact_summary.robustness.level when robustness.level is absent', () => {
     const analysis = makeAnalysis({
       robustness: undefined,
