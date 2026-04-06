@@ -125,12 +125,18 @@ export async function* processAdapterStream(
 
       state.toolExecution = { toolName: name, input, result, durationMs };
 
-      // Fix 2: if no headline text has been emitted yet (no LLM text_deltas
-      // streamed and no text extracted from message_complete.content), use
-      // the tool handler's own assistantText as a fallback headline and
-      // yield it as a text_delta BEFORE the block/tool_result events.
+      // Fix 2: if no substantive headline text has been emitted yet
+      // (no real LLM text_deltas, no text extracted from
+      // message_complete.content — whitespace-only deltas don't count),
+      // use the tool handler's own assistantText as a fallback headline
+      // and yield it as a text_delta BEFORE the block/tool_result events.
       // Preserves the hard-required ordering: text_delta → block → tool_result.
-      if (textChunks.length === 0 && result.assistantText && result.assistantText.trim()) {
+      //
+      // Uses `trim() === ''` to match the phase-1 guard above; otherwise a
+      // whitespace-only delta with empty finalMessage.content would leave
+      // textChunks.length === 1 and suppress the handler fallback, causing
+      // the block to emit with no preceding headline delta.
+      if (textChunks.join('').trim() === '' && result.assistantText && result.assistantText.trim()) {
         textChunks.push(result.assistantText);
         yield { type: 'text_delta', seq: seq++, delta: result.assistantText };
       }

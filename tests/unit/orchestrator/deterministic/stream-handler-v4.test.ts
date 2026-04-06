@@ -386,6 +386,53 @@ describe("processAdapterStream", () => {
     expect(firstHeadlineIdx).toBeLessThan(firstBlockIdx);
   });
 
+  it("regression: whitespace-only delta + empty content falls back to tool handler assistantText", async () => {
+    // Pathological case: model streams a stray whitespace delta, tool_use
+    // is deferred (per the tightened guard), message_complete has NO text
+    // blocks in content, so phase-1 extraction finds nothing. The tool
+    // handler's own assistantText must then be used as the headline —
+    // otherwise the block emits with no preceding text_delta at all.
+    // This regression pins that the handler-fallback emission inside
+    // executeShortTool uses the same trim()==='' semantics as the outer
+    // guards.
+    const stream = mockStream([
+      { type: 'text_delta', delta: '\n' },
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string }> = [];
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string; delta?: string });
+    }
+
+    // The mocked action returns assistantText: 'Action completed.'
+    expect(result!.assistantText).toContain('Action completed.');
+    // A non-whitespace text_delta was yielded before the block
+    const substantiveDeltaIdx = events.findIndex(
+      (e) => e.type === 'text_delta' && (e.delta ?? '').trim().length > 0,
+    );
+    const firstBlockIdx = events.findIndex((e) => e.type === 'block');
+    expect(substantiveDeltaIdx).toBeGreaterThanOrEqual(0);
+    expect(substantiveDeltaIdx).toBeLessThan(firstBlockIdx);
+  });
+
   it("regression: does not double-emit text when streaming deltas arrived AND message_complete repeats the text block", async () => {
     // Normal streaming path: text_deltas arrive first, then the tool call,
     // then message_complete (which may redundantly include the assembled text

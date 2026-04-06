@@ -440,7 +440,13 @@ export async function* executePipelineV4(
     // Surface tool failure in the envelope when no text was produced.
     // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
     // so failed tool turns are excluded from conversation history.
-    let assistantText = streamResult.assistantText || null;
+    //
+    // Trim leading/trailing whitespace because stream-handler-v4 accumulates
+    // every text_delta including pathological whitespace-only deltas from
+    // Sonnet 4.6. Preserving leading whitespace would produce envelope text
+    // like `"\nActual headline."` once the chip pre-text is prepended.
+    const rawAssistantText = streamResult.assistantText.trim();
+    let assistantText: string | null = rawAssistantText.length > 0 ? rawAssistantText : null;
 
     // ── Text injection for empty LLM responses (Task 3) ──────────────
     // When a tool executed successfully but the LLM produced no text,
