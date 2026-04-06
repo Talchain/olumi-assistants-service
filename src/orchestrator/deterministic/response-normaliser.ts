@@ -4,9 +4,8 @@
  * Server-side guardrails applied to every deterministic pipeline response.
  */
 
-import type { OrchestratorResponseEnvelope, SuggestedAction, TypedConversationBlock } from "../types.js";
+import type { OrchestratorResponseEnvelope, TypedConversationBlock } from "../types.js";
 import type { LLMJsonResponse } from "./types.js";
-import { isValidAction } from "./actions/registry.js";
 import { emit, log } from "../../utils/telemetry.js";
 
 // ============================================================================

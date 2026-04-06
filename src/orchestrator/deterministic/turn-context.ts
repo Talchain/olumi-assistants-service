@@ -26,7 +26,6 @@ import type {
 import type { ActionName } from "./actions/types.js";
 import { ACTION_NAMES } from "./actions/types.js";
 import { inferStage } from "../pipeline/phase1-enrichment/stage-inference.js";
-import { STAGE_TOOL_POLICY } from "../tools/stage-policy.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "../context/constants.js";
 import { log } from "../../utils/telemetry.js";
 
@@ -840,7 +839,7 @@ function computeEligibleActions(
   stage: DecisionStage,
   capabilities: TurnCapabilities,
   blockers: Blocker[],
-  recentActions: string[],
+  _recentActions: string[],
 ): ActionName[] {
   const stageActions = STAGE_ACTION_POLICY[stage] ?? new Set<ActionName>();
   const blockedActions = new Set(blockers.map((b) => b.action_type));
