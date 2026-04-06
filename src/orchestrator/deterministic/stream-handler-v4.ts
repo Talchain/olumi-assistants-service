@@ -218,13 +218,20 @@ export async function* processAdapterStream(
           break;
         }
 
-        // Short-running tool: if the model has already streamed text deltas
+        // Short-running tool: if substantive text has already streamed
         // ahead of the tool call, there will be no headline text buried in
-        // finalMessage.content — execute now for minimal latency. If no text
-        // has streamed yet (common with Sonnet 4.6 + forced tool_choice),
-        // defer execution until message_complete so any extracted text can be
-        // yielded BEFORE the block/tool_result events.
-        if (textChunks.length > 0) {
+        // finalMessage.content — execute now for minimal latency. If no
+        // substantive text has streamed yet (common with Sonnet 4.6 +
+        // forced tool_choice, including the whitespace-only delta case),
+        // defer execution until message_complete so any extracted text can
+        // be yielded BEFORE the block/tool_result events.
+        //
+        // Uses the same `trim() === ''` test as the phase-1 extraction
+        // guard in the message_complete handler — keeping the two in lock-
+        // step avoids the mismatch where phase-1 extracts but the tool has
+        // already executed inline (which would violate the required
+        // text_delta → block → tool_result ordering).
+        if (textChunks.join('').trim() !== '') {
           yield* executeShortTool(event.tool_name, event.input, false);
         } else {
           deferredShortTool = { name: event.tool_name, input: event.input };
@@ -237,9 +244,15 @@ export async function* processAdapterStream(
         // Runs regardless of whether a tool was seen during streaming — the
         // previous `!toolExecution` guard dropped headline text whenever the
         // model emitted zero streaming deltas (Sonnet 4.6 forced tool_choice).
-        // Skip if deltas already streamed (textChunks non-empty) to avoid
-        // double-emission in the normal streaming path.
-        if (textChunks.length === 0) {
+        //
+        // The guard treats whitespace-only streamed content as empty: if
+        // nothing substantive has arrived via deltas, the finalMessage text
+        // block is the headline. Using `.trim() === ''` (instead of
+        // `length === 0`) avoids silently dropping the headline when the
+        // model streams a stray whitespace delta before the tool_use block.
+        // When real content has streamed we skip extraction to prevent
+        // double-emission — the normal streaming path is preserved.
+        if (textChunks.join('').trim() === '') {
           for (const block of event.result.content) {
             if (block.type === 'text' && block.text) {
               textChunks.push(block.text);
