@@ -1141,8 +1141,8 @@ constraint, timeline. Draft immediately.
 Stage: FRAME.
 </diagnostics>
 <response>
-  <assistant_text>Drafting a model for tech lead vs two
-developers.</assistant_text>
+  <assistant_text>Structuring the tech lead vs two developers
+decision as a causal model.</assistant_text>
   <blocks></blocks>
   <suggested_actions></suggested_actions>
 </response>

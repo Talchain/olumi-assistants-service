@@ -2226,10 +2226,15 @@ export async function handleEditGraph(
     const block = createGraphPatchBlock(patchData, turnId);
 
     // Store per-operation metadata and removed_edges in block debug payload
-    // (not part of GraphPatchBlockData — attached to provenance for observability)
+    // (attached to provenance for observability + mirrored at the data top-level
+    // so the UI can read it without reaching into provenance internals).
     const debugMeta: Record<string, unknown> = {};
     if (operationMeta.some(m => m.impact !== 'low' || m.rationale !== '')) {
       debugMeta.operation_meta = operationMeta;
+      // Top-level mirror for the conversation block — array of
+      // { impact, rationale } indexed parallel to operations[].
+      // The UI's GraphPatchBlock.operation_meta reads from this path.
+      (block.data as GraphPatchBlockData).operation_meta = operationMeta;
     }
     if (llmResult.removed_edges.length > 0) {
       debugMeta.removed_edges = llmResult.removed_edges;

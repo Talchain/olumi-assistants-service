@@ -500,6 +500,18 @@ export interface GraphPatchBlockData {
     factor_id: string;
     value: number;
   }>;
+  /**
+   * Per-operation metadata, indexed parallel to operations[].
+   * Each entry: { impact, rationale } — rationale is the LLM's reason for the
+   * change, surfaced in the UI's edit-confirmation block.
+   * Mirrored at this top level so the UI can read it without reaching into
+   * provenance._meta. Only populated when at least one operation has a
+   * non-default impact or a non-empty rationale.
+   */
+  operation_meta?: Array<{
+    impact: string;
+    rationale: string;
+  }>;
 }
 
 // ---- Fact Block ----
