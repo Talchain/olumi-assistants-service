@@ -12,6 +12,8 @@ import { runStageBoundary } from "../../src/cee/unified-pipeline/stages/boundary
 import { _resetConfigCache } from "../../src/config/index.js";
 import * as telemetry from "../../src/utils/telemetry.js";
 import * as ceeV3Schema from "../../src/schemas/cee-v3.js";
+import * as schemaV3Transform from "../../src/cee/transforms/schema-v3.js";
+import { log } from "../../src/utils/telemetry.js";
 import { ZodError, ZodIssue } from "zod";
 
 /**
@@ -457,6 +459,204 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
         telemetry.TelemetryEvents.CeeBoundaryBlocked,
         expect.anything()
       );
+    });
+  });
+
+  /**
+   * Path 4: CIL Phase 1 — warnOnUnknownV3Fields fires when undeclared fields
+   * reach the boundary. Aggregates response root, nodes, and edges into one
+   * structured log entry per parse call.
+   */
+  describe("CIL Phase 1: warnOnUnknownV3Fields observability", () => {
+    let logWarnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      logWarnSpy = vi.spyOn(log, "warn");
+    });
+
+    afterEach(() => {
+      logWarnSpy.mockRestore();
+    });
+
+    it("logs aggregated unknown fields across response, nodes, and edges", async () => {
+      // Mock transformResponseToV3 to return a v3Body with undeclared fields
+      // at every level (response root, one node, one edge).
+      const v3WithDrift = {
+        schema_version: "3.0",
+        nodes: [
+          {
+            id: "goal_1",
+            kind: "goal",
+            label: "Test Goal",
+            llm_invented_node_field: "should be logged",
+          },
+        ],
+        edges: [
+          {
+            from: "fac_a",
+            to: "goal_1",
+            strength: { mean: 0.5, std: 0.1 },
+            exists_probability: 0.9,
+            effect_direction: "positive",
+            llm_invented_edge_field: 42,
+          },
+        ],
+        options: [],
+        goal_node_id: "goal_1",
+        causal_claims: [],
+        llm_invented_top_level: "should be logged",
+        analysis_ready: { status: "ready", goal_node_id: "goal_1" },
+      };
+
+      const transformSpy = vi
+        .spyOn(schemaV3Transform, "transformResponseToV3")
+        .mockReturnValue(v3WithDrift as any);
+
+      const ctx: StageContext = {
+        requestId: "test-warn-aggregation",
+        input: { brief: "Test brief" },
+        opts: { schemaVersion: "v3", strictMode: false, includeDebug: false },
+        ceeResponse: {
+          graph: { nodes: [{ id: "goal_1", kind: "goal", label: "Test" }], edges: [] },
+          goal_node_id: "goal_1",
+          options: [],
+          causal_claims: [],
+        } as any,
+        pipelineOutcome: makePipelineOutcome(),
+      } as StageContext;
+
+      await runStageBoundary(ctx);
+
+      // Find the drift warning among any other log.warn calls
+      const driftCall = logWarnSpy.mock.calls.find((call) => {
+        const payload = call[0] as Record<string, unknown> | undefined;
+        return payload?.event === "cee.v3_schema.unknown_fields_stripped";
+      });
+
+      expect(driftCall).toBeDefined();
+      const payload = driftCall![0] as Record<string, unknown>;
+      expect(payload.request_id).toBe("test-warn-aggregation");
+      expect(payload.response_unknown_keys).toEqual(
+        expect.arrayContaining(["llm_invented_top_level"])
+      );
+      expect(payload.node_unknowns).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            nodeId: "goal_1",
+            keys: expect.arrayContaining(["llm_invented_node_field"]),
+          }),
+        ])
+      );
+      expect(payload.edge_unknowns).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            from: "fac_a",
+            to: "goal_1",
+            keys: expect.arrayContaining(["llm_invented_edge_field"]),
+          }),
+        ])
+      );
+      expect(payload.total_unknown_levels).toBeGreaterThanOrEqual(3);
+
+      transformSpy.mockRestore();
+    });
+
+    it("does NOT log when all fields are declared", async () => {
+      const v3Clean = {
+        schema_version: "3.0",
+        nodes: [{ id: "goal_1", kind: "goal", label: "Test Goal" }],
+        edges: [],
+        options: [],
+        goal_node_id: "goal_1",
+        causal_claims: [],
+        analysis_ready: { status: "ready", goal_node_id: "goal_1" },
+      };
+
+      const transformSpy = vi
+        .spyOn(schemaV3Transform, "transformResponseToV3")
+        .mockReturnValue(v3Clean as any);
+
+      const ctx: StageContext = {
+        requestId: "test-no-drift",
+        input: { brief: "Test brief" },
+        opts: { schemaVersion: "v3", strictMode: false, includeDebug: false },
+        ceeResponse: {
+          graph: { nodes: [{ id: "goal_1", kind: "goal", label: "Test" }], edges: [] },
+          goal_node_id: "goal_1",
+          options: [],
+          causal_claims: [],
+        } as any,
+        pipelineOutcome: makePipelineOutcome(),
+      } as StageContext;
+
+      await runStageBoundary(ctx);
+
+      const driftCall = logWarnSpy.mock.calls.find((call) => {
+        const payload = call[0] as Record<string, unknown> | undefined;
+        return payload?.event === "cee.v3_schema.unknown_fields_stripped";
+      });
+
+      expect(driftCall).toBeUndefined();
+
+      transformSpy.mockRestore();
+    });
+
+    it("emits a single aggregated log line per parse call (not one per element)", async () => {
+      // Many nodes + many edges, each with one unknown field
+      const v3ManyDrifts = {
+        schema_version: "3.0",
+        nodes: Array.from({ length: 5 }, (_, i) => ({
+          id: `fac_${i}`,
+          kind: "factor",
+          label: `Factor ${i}`,
+          unknown_per_node: i,
+        })),
+        edges: Array.from({ length: 4 }, (_, i) => ({
+          from: `fac_${i}`,
+          to: `fac_${i + 1}`,
+          strength: { mean: 0.5, std: 0.1 },
+          exists_probability: 0.9,
+          effect_direction: "positive" as const,
+          unknown_per_edge: i,
+        })),
+        options: [],
+        goal_node_id: "fac_0",
+        causal_claims: [],
+        analysis_ready: { status: "ready", goal_node_id: "fac_0" },
+      };
+
+      const transformSpy = vi
+        .spyOn(schemaV3Transform, "transformResponseToV3")
+        .mockReturnValue(v3ManyDrifts as any);
+
+      const ctx: StageContext = {
+        requestId: "test-aggregation-throttling",
+        input: { brief: "Test" },
+        opts: { schemaVersion: "v3", strictMode: false, includeDebug: false },
+        ceeResponse: {
+          graph: { nodes: [{ id: "fac_0", kind: "goal", label: "Test" }], edges: [] },
+          goal_node_id: "fac_0",
+          options: [],
+          causal_claims: [],
+        } as any,
+        pipelineOutcome: makePipelineOutcome(),
+      } as StageContext;
+
+      await runStageBoundary(ctx);
+
+      // Exactly one drift-event log line, not one per node/edge
+      const driftCalls = logWarnSpy.mock.calls.filter((call) => {
+        const payload = call[0] as Record<string, unknown> | undefined;
+        return payload?.event === "cee.v3_schema.unknown_fields_stripped";
+      });
+      expect(driftCalls).toHaveLength(1);
+
+      // The single line aggregates all 5 node drifts and all 4 edge drifts
+      const payload = driftCalls[0][0] as Record<string, unknown>;
+      expect((payload.node_unknowns as unknown[]).length).toBe(5);
+      expect((payload.edge_unknowns as unknown[]).length).toBe(4);
+
+      transformSpy.mockRestore();
     });
   });
 });

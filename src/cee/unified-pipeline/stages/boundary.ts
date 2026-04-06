@@ -10,7 +10,7 @@ import type { StageContext } from "../types.js";
 import { transformResponseToV3, validateStrictModeV3 } from "../../transforms/schema-v3.js";
 import { transformResponseToV2 } from "../../transforms/schema-v2.js";
 import { mapMutationsToAdjustments, extractConstraintDropBlockers } from "../../transforms/analysis-ready.js";
-import { CEEGraphResponseV3 } from "../../../schemas/cee-v3.js";
+import { CEEGraphResponseV3, warnOnUnknownV3Fields } from "../../../schemas/cee-v3.js";
 import { extractZodIssues } from "../../../schemas/llmExtraction.js";
 import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import { config } from "../../../config/index.js";
@@ -168,6 +168,72 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     if (diagnosticTrace && typeof diagnosticTrace === 'object') {
       (diagnosticTrace as Record<string, unknown>).diagnostic_checks =
         computeDiagnosticChecks(v3Body as unknown as Record<string, unknown>, diagnosticTrace as Record<string, unknown>);
+    }
+
+    // CIL Phase 1: log unknown fields BEFORE parse so drift is observable.
+    // Aggregates unknown keys across response root, all nodes, and all edges
+    // into a single structured log entry per parse call (not per element) to
+    // keep log volume bounded.
+    {
+      const unknownByLevel: {
+        response: string[]
+        nodes: Array<{ nodeId?: string; keys: string[] }>
+        edges: Array<{ from?: string; to?: string; keys: string[] }>
+      } = { response: [], nodes: [], edges: [] }
+
+      warnOnUnknownV3Fields(
+        v3Body as unknown as Record<string, unknown>,
+        "CEEGraphResponseV3",
+        (payload) => { unknownByLevel.response = payload.unknownKeys },
+      )
+
+      const v3Nodes = (v3Body as any)?.nodes
+      if (Array.isArray(v3Nodes)) {
+        for (const node of v3Nodes) {
+          if (node && typeof node === "object") {
+            warnOnUnknownV3Fields(
+              node as Record<string, unknown>,
+              "NodeV3",
+              (payload) => unknownByLevel.nodes.push({
+                nodeId: payload.nodeId,
+                keys: payload.unknownKeys,
+              }),
+            )
+          }
+        }
+      }
+
+      const v3Edges = (v3Body as any)?.edges
+      if (Array.isArray(v3Edges)) {
+        for (const edge of v3Edges) {
+          if (edge && typeof edge === "object") {
+            warnOnUnknownV3Fields(
+              edge as Record<string, unknown>,
+              "EdgeV3",
+              (payload) => unknownByLevel.edges.push({
+                from: typeof (edge as any).from === "string" ? (edge as any).from : undefined,
+                to: typeof (edge as any).to === "string" ? (edge as any).to : undefined,
+                keys: payload.unknownKeys,
+              }),
+            )
+          }
+        }
+      }
+
+      const totalUnknown =
+        unknownByLevel.response.length +
+        unknownByLevel.nodes.length +
+        unknownByLevel.edges.length
+      if (totalUnknown > 0) {
+        log.warn({
+          event: "cee.v3_schema.unknown_fields_stripped",
+          request_id: ctx.requestId,
+          response_unknown_keys: unknownByLevel.response,
+          node_unknowns: unknownByLevel.nodes,
+          edge_unknowns: unknownByLevel.edges,
+          total_unknown_levels: totalUnknown,
+        }, "V3 egress schema dropped undeclared fields — investigate schema drift")
+      }
     }
 
     // Belt-and-suspenders: validate V3 output before returning.
