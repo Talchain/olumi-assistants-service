@@ -117,11 +117,15 @@ export const compareOptionsAction: ActionDefinition = {
     const block = createComparisonBlock(blockData, ctx.turn_id);
 
     // Fix 4: assistantText names the top differentiator when available.
-    // Falls back to winner+margin when no drivers exist.
+    // Verb choice scales with margin — "edges out" implies a narrow win,
+    // "leads" works for mid-range, "clearly leads" for wide gaps — so we
+    // don't describe an 80-point sweep as "edges out".
     const topDifferentiator = driverLabels.length > 0 ? driverLabels[0] : null;
+    const verb = margin < 5 ? 'edges out' : margin > 20 ? 'clearly leads' : 'leads';
+    const pctCompare = `${winnerPct.toFixed(0)}% vs ${runnerUpPct.toFixed(0)}%`;
     const assistantText = topDifferentiator
-      ? `${winnerLabel} edges out ${runnerUpLabel} (${winnerPct.toFixed(0)}% vs ${runnerUpPct.toFixed(0)}%) — ${topDifferentiator} is the main differentiator.`
-      : `${winnerLabel} leads ${runnerUpLabel} by ${margin.toFixed(0)} points (${winnerPct.toFixed(0)}% vs ${runnerUpPct.toFixed(0)}%).`;
+      ? `${winnerLabel} ${verb} ${runnerUpLabel} (${pctCompare}) — ${topDifferentiator} is the main differentiator.`
+      : `${winnerLabel} ${verb} ${runnerUpLabel} by ${margin.toFixed(0)} points (${pctCompare}).`;
 
     return {
       blocks: [block],

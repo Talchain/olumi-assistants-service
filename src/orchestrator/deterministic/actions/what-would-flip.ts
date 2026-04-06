@@ -131,11 +131,11 @@ export const whatWouldFlipAction: ActionDefinition = {
       const threshold = flipMap.get(driver.factor_id);
       if (threshold) {
         const unit = threshold.unit ? ` ${threshold.unit}` : '';
-        return `${driver.label} (currently ${threshold.current_value}${unit}, flips at ${threshold.flip_value}${unit})`;
+        return `${driver.label} (currently ${formatFlipValue(threshold.current_value)}${unit}, flips at ${formatFlipValue(threshold.flip_value)}${unit})`;
       }
       if (node?.value != null) {
         const unit = node.unit ? ` ${node.unit}` : '';
-        return `${driver.label} (currently ${node.value}${unit})`;
+        return `${driver.label} (currently ${formatFlipValue(node.value)}${unit})`;
       }
       return driver.label;
     });
@@ -164,6 +164,22 @@ interface FlipThresholdEntry {
   current_value: number;
   flip_value: number;
   unit: string | null;
+}
+
+/**
+ * Format a flip threshold value for display in the headline.
+ *
+ * Keeps integers as integers (no trailing `.0`), rounds decimals to 2 places,
+ * and renders tiny values (< 0.01) in fixed exponential form so we don't
+ * display "currently 0.00000000012 $/h". Avoids Number#toFixed's tendency
+ * to print trailing zeros on round values.
+ */
+function formatFlipValue(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (Number.isInteger(value)) return String(value);
+  if (Math.abs(value) < 0.01 && value !== 0) return value.toExponential(1);
+  // Round to 2 decimals, strip trailing zeros and any dangling decimal point.
+  return String(Math.round(value * 100) / 100);
 }
 
 /**

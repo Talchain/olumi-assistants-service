@@ -208,6 +208,41 @@ describe("compare_options action (Fix 4)", () => {
     expect(result.assistantText!).toContain('Contract');
   });
 
+  it("assistantText verb scales with margin", async () => {
+    // Wide margin (80 points) → "clearly leads", not "edges out"
+    const wideCtx = makeTurnContext();
+    const wideResult = await compareOptionsAction.execute({}, wideCtx);
+    expect(wideResult.assistantText!).toContain('clearly leads');
+    expect(wideResult.assistantText!).not.toContain('edges out');
+
+    // Narrow margin (<5 points) → "edges out"
+    const closeCtx = makeTurnContext({
+      analysis: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.51 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.49 },
+        ],
+      } as unknown as never,
+    });
+    const closeResult = await compareOptionsAction.execute({}, closeCtx);
+    expect(closeResult.assistantText!).toContain('edges out');
+    expect(closeResult.assistantText!).not.toContain('clearly leads');
+
+    // Mid-range margin (10 points) → plain "leads"
+    const midCtx = makeTurnContext({
+      analysis: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.55 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.45 },
+        ],
+      } as unknown as never,
+    });
+    const midResult = await compareOptionsAction.execute({}, midCtx);
+    expect(midResult.assistantText!).toContain('leads');
+    expect(midResult.assistantText!).not.toContain('clearly leads');
+    expect(midResult.assistantText!).not.toContain('edges out');
+  });
+
   it("narrative still populated when drivers are empty but fragile edges exist", async () => {
     const ctx = makeTurnContext({
       analysis_summary: {
@@ -311,5 +346,22 @@ describe("what_would_flip action (Fix 5)", () => {
     const result = await whatWouldFlipAction.execute({}, ctx);
     // fac_ramp has value 6, unit 'weeks' in the mocked entities
     expect(result.assistantText!.toLowerCase()).toContain('currently 6');
+  });
+
+  it("formats numeric values cleanly — integers as integers, decimals rounded", async () => {
+    // Entity value 6.123456 should render as "6.12", not "6.123456"
+    const ctx = makeTurnContext();
+    const nodes = new Map([
+      ['fac_ramp', { id: 'fac_ramp', label: 'Ramp time', type: 'factor', value: 6.123456, unit: 'weeks' } as unknown as never],
+      ['fac_cost', { id: 'fac_cost', label: 'Contractor cost', type: 'factor', value: 160, unit: '$/h' } as unknown as never],
+      ['fac_cap', { id: 'fac_cap', label: 'Team capacity', type: 'factor', value: 4, unit: 'people' } as unknown as never],
+    ]);
+    ctx.entities.nodes = nodes;
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.assistantText!).toContain('6.12');
+    expect(result.assistantText!).not.toContain('6.123456');
+    // Integer values stay as integers (no trailing .0)
+    expect(result.assistantText!).toContain('160');
+    expect(result.assistantText!).not.toContain('160.00');
   });
 });
