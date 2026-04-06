@@ -166,7 +166,7 @@ describe('Block factory — brief fixture shapes', () => {
 // ============================================================================
 
 describe('explain_result returns CommentaryBlock with sections', () => {
-  it('has sections array matching brief fixture', async () => {
+  it('has sections array matching brief fixture — Fix 3: no Recommendation section, narrative empty', async () => {
     const ctx = makeCtx();
     const result = await explainResultAction.execute({}, ctx);
     expect(result.blocks).toHaveLength(1);
@@ -174,17 +174,27 @@ describe('explain_result returns CommentaryBlock with sections', () => {
     const data = result.blocks[0].data as DeterministicCommentaryBlockData;
     expect(data.sections).toBeDefined();
     expect(data.sections!.length).toBeGreaterThanOrEqual(2);
-    // Verify section headings
+    // Fix 3: Recommendation section is removed — the winner headline lives
+    // in assistantText only. Sections retain the supporting context.
     const headings = data.sections!.map((s) => s.heading);
-    expect(headings).toContain('Recommendation');
+    expect(headings).not.toContain('Recommendation');
+    expect(headings).toContain('Key drivers');
     // Key drivers section should have items
     const driverSection = data.sections!.find((s) => s.heading === 'Key drivers');
     expect(driverSection?.items).toBeDefined();
     expect(driverSection!.items![0]).toContain('Price Sensitivity');
     expect(driverSection!.items![0]).toContain('0.42');
-    // assistantText is a 1-sentence summary
+    // Fix 3: narrative is intentionally empty (sections are the canonical rendering).
+    expect(data.narrative).toBe('');
+    // assistantText carries the winner headline
     expect(result.assistantText).toContain('Aggressive Pricing leads');
-    expect(result.assistantText!.length).toBeLessThan(data.narrative.length);
+    // Winner option label must NOT appear inside any section (lived in Recommendation
+    // pre-fix) — prevents double-rendering with assistantText.
+    for (const section of data.sections!) {
+      if (section.content) {
+        expect(section.content).not.toContain('Aggressive Pricing');
+      }
+    }
   });
 });
 
