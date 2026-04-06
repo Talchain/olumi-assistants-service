@@ -188,13 +188,20 @@ function isSchemaValid(name: string, schema: Record<string, unknown>): boolean {
  *
  * When `ctx` is provided, applies data-availability filtering, entity
  * disambiguation, and dynamic description enrichment.
+ *
+ * `bypassStaleness` is the narrow chip-click escape hatch for run_analysis:
+ * when set, the staleness suppression that filters run_analysis whenever fresh
+ * analysis results exist is skipped. The no-graph / no-analysis exclusions
+ * still apply — clicking "Run analysis" with no graph still downgrades cleanly.
+ * Schema validation and entity disambiguation also still apply.
  */
 export function buildToolDefinitions(
   eligibleActions: ActionName[],
   ctx?: DeterministicTurnContext,
+  bypassStaleness?: boolean,
 ): ToolDefinition[] {
   const definitions: ToolDefinition[] = [];
-  const excluded = ctx ? computeContextExclusions(ctx) : new Set<ActionName>();
+  const excluded = ctx ? computeContextExclusions(ctx, bypassStaleness === true) : new Set<ActionName>();
   const ambiguousTargetIds = ctx ? detectAmbiguousEntities(ctx) : false;
 
   for (const name of eligibleActions) {
@@ -231,8 +238,17 @@ export function buildToolDefinitions(
 
 /**
  * Compute which actions to exclude based on data availability in TurnContext.
+ *
+ * `bypassStaleness` lets a caller (currently only pipeline-v4 for chip clicks)
+ * skip the run_analysis-when-fresh-results-exist suppression. The no-graph and
+ * no-analysis exclusions are unaffected — those represent hard preconditions,
+ * not staleness, and a chip click against missing prerequisites should still
+ * downgrade with a clean message.
  */
-function computeContextExclusions(ctx: DeterministicTurnContext): Set<ActionName> {
+function computeContextExclusions(
+  ctx: DeterministicTurnContext,
+  bypassStaleness = false,
+): Set<ActionName> {
   const excluded = new Set<ActionName>();
   const hasGraph = !!ctx.graph && ctx.graph_summary.node_count > 0;
   const hasAnalysis = !!ctx.analysis_summary;
@@ -251,13 +267,16 @@ function computeContextExclusions(ctx: DeterministicTurnContext): Set<ActionName
   //   is true. So if `hasAnalysis` is true here, the analysis IS current — there is
   //   no stale-but-present case for the v4 pipeline to worry about. We suppress
   //   run_analysis to stop the LLM from wasting a long-running call on results that
-  //   already exist. Chip clicks bypass this via forced tool_choice in pipeline-v4,
-  //   so users can still re-run explicitly when they want fresh samples.
-  if (hasAnalysis) {
+  //   already exist. Chip clicks bypass this via the bypassStaleness flag passed
+  //   in by pipeline-v4, so users can still re-run explicitly when they want
+  //   fresh samples.
+  if (hasAnalysis && !bypassStaleness) {
     excluded.add('run_analysis');
   }
 
-  // No graph or empty graph → suppress edit tools and run_analysis
+  // No graph or empty graph → suppress edit tools and run_analysis.
+  // This is a hard prerequisite, not staleness, so bypassStaleness does NOT
+  // apply here — clicking run_analysis without a graph still downgrades.
   if (!hasGraph) {
     for (const action of GRAPH_EDIT_ACTIONS) {
       excluded.add(action);

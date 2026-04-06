@@ -24,6 +24,7 @@ vi.mock("../../../../src/config/index.js", () => ({
     llm: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
     promptCache: { anthropicEnabled: true },
   },
+  shouldUseStagingPrompts: () => false,
 }));
 
 vi.mock("../../../../src/prompts/loader.js", () => ({

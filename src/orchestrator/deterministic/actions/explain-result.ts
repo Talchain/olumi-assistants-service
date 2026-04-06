@@ -61,8 +61,21 @@ export const explainResultAction: ActionDefinition = {
       });
     }
 
-    // Key drivers
-    if (summary.top_drivers.length > 0) {
+    // Key drivers — prefer the UI-forwarded factor_sensitivity (carries
+    // influence_percent + confidence_band) over the legacy elasticity-based
+    // top_drivers. Mirrors prompt-builder-v2's ### Key drivers fallback chain
+    // so the commentary block stays in sync with what the LLM sees in Zone 2.
+    if (summary.factor_sensitivity.length > 0) {
+      sections.push({
+        heading: 'Key drivers',
+        items: summary.factor_sensitivity.slice(0, 3).map((f) => {
+          const segs: string[] = [f.label];
+          if (f.influence_percent != null) segs.push(`influence ${f.influence_percent.toFixed(0)}%`);
+          if (f.confidence_band) segs.push(`confidence: ${f.confidence_band}`);
+          return segs.join(' — ');
+        }),
+      });
+    } else if (summary.top_drivers.length > 0) {
       sections.push({
         heading: 'Key drivers',
         items: summary.top_drivers

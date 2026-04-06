@@ -28,6 +28,7 @@ vi.mock("../../../../src/config/index.js", () => ({
     llm: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
     promptCache: { anthropicEnabled: true },
   },
+  shouldUseStagingPrompts: () => false,
 }));
 
 // Mock prompt loader
@@ -854,6 +855,58 @@ describe("executePipelineV4", () => {
       const text = complete.envelope.assistant_text ?? '';
       expect(text).toContain("That action isn't available right now");
       expect(text).toContain("No decision model available");
+    });
+
+    it("run_analysis chip click forces tool_choice even when staleness suppression would otherwise drop it", async () => {
+      // Regression: run_analysis is normally suppressed when analysis_summary
+      // is present (staleness contract — fresh results already exist). But a
+      // chip click is the user's explicit "re-run anyway" intent and must
+      // bypass the suppression. The pipeline passes bypassStaleness=true to
+      // buildToolDefinitions when chip_metadata.action_type === 'run_analysis'.
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'run_analysis' },
+        { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'run_analysis', input: {} },
+        { type: 'message_complete', result: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'run_analysis', input: {} }], stop_reason: 'tool_use', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'Re-run the analysis',
+        chip_metadata: { action_type: 'run_analysis' },
+        context: {
+          graph: {
+            nodes: [
+              { id: 'goal_1', label: 'Maximize Revenue', kind: 'goal' },
+              { id: 'opt_1', label: 'Expand Europe', kind: 'option' },
+              { id: 'opt_2', label: 'Stay Domestic', kind: 'option' },
+              { id: 'factor_1', label: 'Market Size', kind: 'factor' },
+            ],
+            edges: [
+              { from: 'factor_1', to: 'goal_1', strength: { mean: 0.7, std: 0.1 } },
+            ],
+          } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          // Fresh analysis already present — without the bypass this would
+          // suppress run_analysis from toolDefs and downgrade the chip click.
+          analysis_response: {
+            results: [
+              { option_id: 'opt_1', option_label: 'Expand Europe', win_probability: 0.62 },
+              { option_id: 'opt_2', option_label: 'Stay Domestic', win_probability: 0.38 },
+            ],
+          } as unknown as import("../../../../src/orchestrator/types.js").V2RunResponseEnvelope,
+          framing: { stage: 'evaluate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      await collectEvents(executePipelineV4(req, 'req-chip-rerun'));
+
+      // The LLM call must have been made with run_analysis present in tools
+      // and tool_choice forcing run_analysis (not auto, not absent).
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0];
+      const toolNames = (callArgs.tools as Array<{ name: string }>).map(t => t.name);
+      expect(toolNames).toContain('run_analysis');
+      expect(callArgs.tool_choice).toEqual({ type: 'tool', name: 'run_analysis' });
     });
   });
 

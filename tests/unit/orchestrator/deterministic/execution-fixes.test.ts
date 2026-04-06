@@ -319,6 +319,48 @@ describe('generate_artefact gate', () => {
 // Fix A: Empty-driver graceful handling
 // ============================================================================
 
+describe('explain_result — factor_sensitivity preferred over top_drivers', () => {
+  it('renders Key drivers from forwarded factor_sensitivity (influence_percent + confidence_band)', async () => {
+    // Regression: when the UI forwards factor_sensitivity with influence_percent
+    // (the new shape), top_drivers stays empty (it filters on elasticity). The
+    // commentary block must read factor_sensitivity in that case so the user
+    // doesn't see the "no dominant driver" fallback when rich data is available.
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'moderate',
+        top_drivers: [],
+        fragile_edge_count: 0,
+        fragile_edges: [],
+        factor_sensitivity: [
+          { label: 'Price Sensitivity', influence_percent: 38, confidence_band: 'high', influence_rank: 1 },
+          { label: 'Market Size', influence_percent: 22, confidence_band: 'medium', influence_rank: 2 },
+          { label: 'Brand Strength', influence_percent: 14, confidence_band: 'medium', influence_rank: 3 },
+        ],
+        edge_e_values: [],
+        conditional_winners: [],
+        inference_warnings: [],
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await explainResultAction.execute({}, ctx);
+    const data = result.blocks[0].data as DeterministicCommentaryBlockData;
+    const keyDriversSection = data.sections!.find((s) => s.heading === 'Key drivers');
+    expect(keyDriversSection).toBeDefined();
+    expect(keyDriversSection!.items).toBeDefined();
+    expect(keyDriversSection!.items![0]).toContain('Price Sensitivity');
+    expect(keyDriversSection!.items![0]).toContain('influence 38%');
+    expect(keyDriversSection!.items![0]).toContain('confidence: high');
+    // Must not fall back to "combined effect" when factor_sensitivity has data
+    const driversFallback = data.sections!.find((s) => s.heading === 'Drivers');
+    expect(driversFallback).toBeUndefined();
+  });
+});
+
 describe('explain_result — empty driver fallback', () => {
   it('references fragile edges when top_drivers empty and fragile_edge_count > 0', async () => {
     const ctx = makeCtx({

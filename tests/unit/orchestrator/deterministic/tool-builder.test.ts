@@ -177,7 +177,39 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     expect(names).toContain('what_would_flip');
     // run_analysis is suppressed when analysis_summary is present — the UI's
     // staleness contract guarantees fresh results, so re-running would be
-    // wasted work. Chip clicks bypass via forced tool_choice.
+    // wasted work. Chip clicks pass bypassStaleness=true to override (see
+    // below).
+    expect(names).not.toContain('run_analysis');
+  });
+
+  it("bypassStaleness re-includes run_analysis when chip click overrides the staleness suppression", () => {
+    const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
+    const allActions: ActionName[] = [
+      'explain_result', 'compare_options', 'what_would_flip', 'run_analysis',
+    ];
+
+    const defs = buildToolDefinitions(allActions, ctx, true);
+    const names = defs.map(d => d.name);
+
+    // bypassStaleness lifts ONLY the staleness suppression. run_analysis is
+    // back in scope because the user explicitly clicked the re-run chip.
+    expect(names).toContain('run_analysis');
+    expect(names).toContain('explain_result');
+    expect(names).toContain('compare_options');
+    expect(names).toContain('what_would_flip');
+  });
+
+  it("bypassStaleness does NOT lift the no-graph hard prerequisite for run_analysis", () => {
+    // Even with bypassStaleness, clicking run_analysis without a graph must
+    // still downgrade cleanly — no graph is a hard precondition, not staleness.
+    const ctx = buildTestContext({
+      graph: null,
+      graph_summary: { node_count: 0, edge_count: 0, option_count: 0 },
+      analysis_summary: null,
+    });
+    const defs = buildToolDefinitions(['run_analysis'], ctx, true);
+    const names = defs.map(d => d.name);
+
     expect(names).not.toContain('run_analysis');
   });
 

@@ -195,7 +195,15 @@ export async function* executePipelineV4(
         eligibleActions.push('draft_graph');
       }
     }
-    const toolDefs = buildToolDefinitions(eligibleActions as ActionName[], turnContext);
+    // Chip-click bypass for run_analysis: the staleness suppression in
+    // tool-builder removes run_analysis whenever fresh analysis results already
+    // exist. A user clicking the "Re-run analysis" chip is explicitly asking
+    // to override that, so set bypassStaleness when the chip targets
+    // run_analysis. The hard prerequisites (graph required) still apply, so
+    // a click without a graph still downgrades cleanly.
+    const chipActionForLookup = turnRequest.chip_metadata?.action_type as ActionName | undefined;
+    const bypassStaleness = chipActionForLookup === 'run_analysis';
+    const toolDefs = buildToolDefinitions(eligibleActions as ActionName[], turnContext, bypassStaleness);
 
     // Log filtering impact when tools were removed
     const filteredCount = eligibleActions.length - toolDefs.length;

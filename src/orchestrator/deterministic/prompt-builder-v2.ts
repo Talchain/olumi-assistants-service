@@ -18,6 +18,7 @@
 
 import type { DeterministicTurnContext, DisambiguationHint } from "./types.js";
 import { loadPrompt } from "../../prompts/loader.js";
+import { shouldUseStagingPrompts } from "../../config/index.js";
 import { log, emit } from "../../utils/telemetry.js";
 
 // ============================================================================
@@ -53,14 +54,28 @@ export function _resetPromptCacheForTesting(): void { promptCache = null; }
  * by the caller. The dynamic block varies per turn.
  */
 export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext): Promise<DeterministicPromptV2> {
-  // Refresh cache if missing or expired
+  // Refresh cache if missing or expired.
+  //
+  // We pass `useStaging` so that when the deployment is configured for staging
+  // prompts (DD_ENV=staging, PROMPTS_USE_STAGING=true, etc., resolved by
+  // shouldUseStagingPrompts) the loader picks `stagingVersion` instead of the
+  // default `activeVersion`. Without this, every v4 turn loads the production
+  // pin even on the staging server, which silently masks staged prompt rollouts
+  // (e.g. v32a uploaded as stagingVersion would never reach the LLM).
   const now = Date.now();
   if (!promptCache || (now - promptCache.loadedAt) > PROMPT_CACHE_TTL_MS) {
     try {
-      const result = await loadPrompt('orchestrator', { forceDefault: false });
+      const result = await loadPrompt('orchestrator', {
+        forceDefault: false,
+        useStaging: shouldUseStagingPrompts(),
+      });
       if (result.source === 'store') {
         promptCache = { content: result.content, loadedAt: now };
-        log.info('v4.prompt.pms_loaded');
+        log.info({
+          prompt_id: result.promptId,
+          version: result.version,
+          is_staging: result.isStaging ?? false,
+        }, 'v4.prompt.pms_loaded');
       }
     } catch {
       // non-fatal — fall through to fallback
@@ -166,11 +181,10 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
   //     analysis_state to undefined whenever store.graphEditedSinceLastRun is true,
   //     so by the time it reaches CEE either the analysis matches the current graph
   //     or it is absent entirely.
-  //   - If analysis_summary is null AND the graph is non-empty, no analysis exists
-  //     yet (or the previous one was invalidated by an edit). We must say "not yet
-  //     run" — never "stale" — because CEE has no way to distinguish those cases.
-  //   - If analysis_summary is null AND the graph is empty, we say nothing about
-  //     analysis at all (covered by the absent branch below).
+  //   - If analysis_summary is null, we render NOTHING about analysis. We do not
+  //     say "not yet run", "no results available", or "stale" — the prompt itself
+  //     (v32a+) owns the rules for what to do when analysis data is absent. The
+  //     dynamic block must not contradict or pre-empt those rules.
   if (ctx.analysis_summary) {
     const a = ctx.analysis_summary;
     parts.push('\n**Analysis Results:**');
@@ -239,9 +253,9 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
         parts.push(`- ${w}`);
       }
     }
-  } else if (ctx.graph_summary.node_count > 0) {
-    parts.push('\n**Analysis:** Not yet run. No results are available. Do not reference winners, probabilities, or analysis findings.');
   }
+  // No `else` branch on purpose — see staleness contract above. When
+  // analysis_summary is null, the dynamic block says nothing about analysis.
 
   const signalParts: string[] = [];
   if (ctx.signals.close_call) signalParts.push('close call (tight margin)');

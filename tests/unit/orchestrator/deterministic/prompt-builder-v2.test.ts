@@ -112,12 +112,19 @@ describe("buildDeterministicPromptV2", () => {
     expect(result.dynamic_block).toContain('Cost A');
   });
 
-  it("dynamic block includes no-analysis signal when graph has nodes but no analysis", async () => {
+  it("dynamic block says NOTHING about analysis when analysis_summary is null (staleness contract)", async () => {
     const ctx = makeTurnContext({ analysis_summary: null });
     const result = await buildDeterministicPromptV2(ctx);
 
-    expect(result.dynamic_block).toContain('**Analysis:** Not yet run.');
-    expect(result.dynamic_block).toContain('Do not reference winners, probabilities, or analysis findings.');
+    // Per the staleness contract: when analysis_state is absent, the dynamic
+    // block must not contradict or pre-empt the prompt's own rules. It says
+    // nothing about analysis at all — no "not yet run", no "no results", no
+    // "stale". The PMS prompt (v32a+) owns those rules.
+    expect(result.dynamic_block).not.toContain('Not yet run');
+    expect(result.dynamic_block).not.toContain('No results are available');
+    expect(result.dynamic_block).not.toContain('Analysis Results');
+    expect(result.dynamic_block).not.toContain('### Key drivers');
+    expect(result.dynamic_block).not.toContain('### Fragile relationships');
   });
 
   it("dynamic block includes analysis results and not no-analysis signal when analysis exists", async () => {

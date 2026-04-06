@@ -726,14 +726,25 @@ function computeSignals(
       closeCall = margin < CLOSE_CALL_THRESHOLD;
     }
 
-    // Dominant factor
+    // Dominant factor — magnitude can come from elasticity (canonical PLoT
+    // shape) or influence_percent (UI-forwarded shape). Whichever is present,
+    // we sort by absolute magnitude and flag the leader when it dominates the
+    // runner-up by DOMINANT_FACTOR_RATIO.
     if (Array.isArray(analysis.factor_sensitivity)) {
       const sensitivities = (analysis.factor_sensitivity as Array<Record<string, unknown>>)
-        .filter((fs) => typeof fs.elasticity === 'number')
-        .map((fs) => ({
-          factor_id: (fs.factor_id as string) ?? (fs.label as string) ?? '',
-          sensitivity: Math.abs(fs.elasticity as number),
-        }))
+        .map((fs) => {
+          const elasticity = typeof fs.elasticity === 'number' ? fs.elasticity : null;
+          const influencePercent = typeof fs.influence_percent === 'number' ? fs.influence_percent : null;
+          const magnitude = elasticity != null
+            ? Math.abs(elasticity)
+            : (influencePercent != null ? Math.abs(influencePercent) : null);
+          if (magnitude == null) return null;
+          return {
+            factor_id: (fs.factor_id as string) ?? (fs.label as string) ?? '',
+            sensitivity: magnitude,
+          };
+        })
+        .filter((x): x is { factor_id: string; sensitivity: number } => x != null)
         .sort((a, b) => b.sensitivity - a.sensitivity);
 
       if (sensitivities.length >= 2 && sensitivities[0].sensitivity > sensitivities[1].sensitivity * DOMINANT_FACTOR_RATIO) {
