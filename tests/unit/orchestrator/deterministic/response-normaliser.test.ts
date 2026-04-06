@@ -90,6 +90,59 @@ describe('normaliseDeterministicResponse', () => {
     expect(result.blocks.length).toBe(1);
     expect((result.blocks[0].data as any).narrative).toBe('Valid');
   });
+
+  // Regression: Fix 3 has explain_result emit commentary blocks with
+  // `narrative: ''` and content living in `sections`. Before this normaliser
+  // update, isEmptyBlock only checked narrative — the block was silently
+  // dropped before reaching the UI, nuking Fix 3's entire output.
+  it('keeps commentary blocks that have sections even when narrative is empty', () => {
+    const envelope = makeEnvelope({
+      blocks: [
+        {
+          block_type: 'commentary',
+          data: {
+            narrative: '',
+            supporting_refs: [],
+            sections: [
+              { heading: 'Stability', content: 'Robustness: moderate.' },
+              { heading: 'Key drivers', items: ['Ramp time — influence 45%'] },
+            ],
+          },
+          block_id: '1',
+          provenance: { trigger: 'deterministic:explain_result', turn_id: 'x', timestamp: 'now' },
+        },
+      ] as any,
+    });
+    const result = normaliseDeterministicResponse(envelope);
+    expect(result.blocks.length).toBe(1);
+    expect((result.blocks[0].data as any).sections.length).toBe(2);
+  });
+
+  it('rejects commentary blocks with empty narrative AND empty sections', () => {
+    const envelope = makeEnvelope({
+      blocks: [
+        {
+          block_type: 'commentary',
+          data: { narrative: '   ', supporting_refs: [], sections: [] },
+          block_id: '1',
+          provenance: { trigger: 't', turn_id: 'x', timestamp: 'now' },
+        },
+        {
+          block_type: 'commentary',
+          data: {
+            narrative: '',
+            supporting_refs: [],
+            sections: [{ heading: 'Empty', content: '  ' }],
+          },
+          block_id: '2',
+          provenance: { trigger: 't', turn_id: 'x', timestamp: 'now' },
+        },
+      ] as any,
+    });
+    const result = normaliseDeterministicResponse(envelope);
+    // Both blocks are effectively empty — neither has substantive content
+    expect(result.blocks.length).toBe(0);
+  });
 });
 
 describe('scanBannedTerms', () => {

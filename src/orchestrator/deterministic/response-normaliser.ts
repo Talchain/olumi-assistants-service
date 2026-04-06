@@ -97,8 +97,20 @@ function deduplicateBlocks(blocks: TypedConversationBlock[]): TypedConversationB
 
 function isEmptyBlock(block: TypedConversationBlock): boolean {
   switch (block.block_type) {
-    case 'commentary':
-      return !block.data.narrative || block.data.narrative.trim().length === 0;
+    case 'commentary': {
+      // A commentary block is non-empty if it has EITHER substantive
+      // narrative text OR at least one structured section with content.
+      // The V4 explain_result action intentionally emits `narrative: ''`
+      // and carries its content in `sections` — checking narrative alone
+      // would silently drop those blocks from the envelope.
+      const hasNarrative = !!block.data.narrative && block.data.narrative.trim().length > 0;
+      const hasSections = Array.isArray(block.data.sections)
+        && block.data.sections.some(
+          (s) => (s.content && s.content.trim().length > 0)
+            || (Array.isArray(s.items) && s.items.length > 0),
+        );
+      return !hasNarrative && !hasSections;
+    }
     case 'graph_patch':
       return !block.data.operations || block.data.operations.length === 0;
     case 'fact':
