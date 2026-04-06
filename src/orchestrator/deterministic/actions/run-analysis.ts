@@ -72,17 +72,72 @@ export const runAnalysisAction: ActionDefinition = {
         `det-${ctx.scenario_id}`,
       );
 
+      // Check for blocked/failed analysis — surface specific reason instead of generic "complete"
+      const analysisResponse = result.analysisResponse;
+      const analysisStatus = (analysisResponse as Record<string, unknown>)?.analysis_status as string | undefined;
+
+      if (analysisStatus === 'blocked') {
+        const statusReason = (analysisResponse as Record<string, unknown>)?.status_reason as string | undefined;
+        const critiques = (analysisResponse as Record<string, unknown>)?.critiques as Array<{ message?: string }> | undefined;
+        const critiqueDetail = critiques?.map((c) => c.message).filter(Boolean).join('; ');
+        const message = statusReason
+          ? `Analysis blocked: ${statusReason}${critiqueDetail ? ` (${critiqueDetail})` : ''}`
+          : 'Analysis blocked due to model configuration issues. Check option interventions and retry.';
+        return {
+          blocks: result.blocks ?? [],
+          assistantText: message,
+          guidance_items: [],
+          analysis_response: analysisResponse ?? undefined,
+        };
+      }
+
+      if (analysisStatus === 'failed') {
+        const statusReason = (analysisResponse as Record<string, unknown>)?.status_reason as string | undefined;
+        return {
+          blocks: result.blocks ?? [],
+          assistantText: statusReason
+            ? `The analysis tool couldn't process the full request: ${statusReason}. Here's what I can tell you from the available data.`
+            : "The analysis tool couldn't process the full request. Here's what I can tell you from the available data.",
+          guidance_items: [],
+          analysis_response: analysisResponse ?? undefined,
+        };
+      }
+
       return {
         blocks: result.blocks ?? [],
         assistantText: 'Analysis complete.',
         guidance_items: [],
-        analysis_response: result.analysisResponse ?? undefined,
+        analysis_response: analysisResponse ?? undefined,
       };
     } catch (err) {
-      log.error({ err }, 'deterministic.run_analysis.failed');
+      // Distinguish error types for specific user-facing messages
+      const { PLoTTimeoutError: TimeoutErr, PLoTError: PlotErr } = await import("../../plot-client.js");
+
+      if (err instanceof TimeoutErr) {
+        log.error({ err, turn_id: ctx.turn_id }, 'deterministic.run_analysis.timeout');
+        return {
+          blocks: [],
+          assistantText: 'The analysis service timed out. Your model is unchanged — try again.',
+          guidance_items: [],
+        };
+      }
+
+      if (err instanceof PlotErr && err.v2RunError) {
+        const v2 = err.v2RunError;
+        const reason = v2.status_reason ?? 'Unknown analysis error';
+        const critiqueDetail = v2.critiques?.map((c) => c.message).filter(Boolean).join('; ');
+        log.error({ err, turn_id: ctx.turn_id, analysis_status: v2.analysis_status }, 'deterministic.run_analysis.plot_error');
+        return {
+          blocks: [],
+          assistantText: `Analysis failed: ${reason}${critiqueDetail ? ` — ${critiqueDetail}` : ''}`,
+          guidance_items: [],
+        };
+      }
+
+      log.error({ err, turn_id: ctx.turn_id }, 'deterministic.run_analysis.failed');
       return {
         blocks: [],
-        assistantText: 'Analysis could not be completed. Please try again.',
+        assistantText: 'The analysis service returned an error. Your model is unchanged.',
         guidance_items: [],
       };
     }

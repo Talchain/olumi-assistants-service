@@ -70,10 +70,12 @@ export const explainResultAction: ActionDefinition = {
           .map((d) => `${d.label} (${d.sensitivity.toFixed(2)})`),
       });
     } else {
-      sections.push({
-        heading: 'Drivers',
-        content: 'Driver data not available.',
-      });
+      // No individual driver dominated — build informative fallback
+      let content = 'No single dominant driver — the outcome is shaped by the combined effect of multiple factors.';
+      if (summary.fragile_edge_count > 0) {
+        content += ` ${summary.fragile_edge_count} fragile edge${summary.fragile_edge_count > 1 ? 's' : ''} detected — small changes in those connections could shift results.`;
+      }
+      sections.push({ heading: 'Drivers', content });
     }
 
     // Constraint tensions

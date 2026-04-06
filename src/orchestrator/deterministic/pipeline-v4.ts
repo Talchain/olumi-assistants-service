@@ -128,6 +128,8 @@ export async function* executePipelineV4(
       log.warn({ request_id: requestId, error: error instanceof Error ? error.message : String(error) }, 'v4.turn_context_fallback');
       turnContext = buildFallbackContext(turnRequest, turnId);
     }
+    // Thread abort signal after try/catch so both normal and fallback contexts get it
+    turnContext.signal = signal;
 
     const effectiveMessage = turnRequest.message?.trim() ?? '';
     const stage = turnContext.stage;

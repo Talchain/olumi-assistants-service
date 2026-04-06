@@ -2923,10 +2923,49 @@ export async function* streamChatWithToolsAnthropic(
         if (buf) {
           let input: Record<string, unknown> = {};
           const json = buf.chunks.join('');
-          try {
-            input = JSON.parse(json);
-          } catch {
-            log.warn({ tool_id: buf.id, tool_name: buf.name }, "failed to parse streamed tool input JSON");
+
+          // Check if this tool expects no input (properties: {} with no required fields).
+          // Tools like what_would_flip and compare_options have empty input schemas —
+          // an empty string or '{}' from the LLM is correct, not a parse failure.
+          const toolDef = args.tools.find((t) => t.name === buf.name);
+          const schemaProps = toolDef?.input_schema?.properties as Record<string, unknown> | undefined;
+          const isNoInputTool = schemaProps != null && Object.keys(schemaProps).length === 0;
+
+          if (json.length === 0 && isNoInputTool) {
+            // Expected: no-input tool produced no JSON — use empty object
+            input = {};
+          } else if (json.length > 0) {
+            try {
+              input = JSON.parse(json);
+            } catch {
+              // Include head + tail of raw payload and per-chunk lengths
+              // so parse failures can be traced to assembly vs model output.
+              const chunkLengths = buf.chunks.map((c) => c.length);
+              log.warn({
+                tool_id: buf.id,
+                tool_name: buf.name,
+                raw_length: json.length,
+                raw_head: json.substring(0, 200),
+                raw_tail: json.length > 200 ? json.substring(json.length - 100) : undefined,
+                chunk_count: buf.chunks.length,
+                chunk_lengths: chunkLengths.length <= 20 ? chunkLengths : chunkLengths.slice(0, 10).concat([-1], chunkLengths.slice(-5)),
+                is_no_input_tool: isNoInputTool,
+              }, "failed to parse streamed tool input JSON");
+              log.info({
+                event: 'v4.streamed_tool_json_parse_failed',
+                tool_name: buf.name,
+                raw_length: json.length,
+                first_200_chars: json.substring(0, 200),
+                chunk_count: buf.chunks.length,
+              }, 'v4.streamed_tool_json_parse_failed');
+            }
+          } else {
+            // Empty string for a tool that expects input — log diagnostic
+            log.warn({
+              tool_id: buf.id,
+              tool_name: buf.name,
+              chunk_count: buf.chunks.length,
+            }, "streamed tool input is empty for tool that expects parameters");
           }
           contentBlocks.push({ type: 'tool_use', id: buf.id, name: buf.name, input });
           yield { type: 'tool_input_complete', tool_id: buf.id, tool_name: buf.name, input };

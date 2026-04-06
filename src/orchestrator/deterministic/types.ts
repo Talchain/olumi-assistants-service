@@ -152,6 +152,8 @@ export interface DeterministicTurnContext {
   analysis_inputs: AnalysisInputs | null;
   /** Fastify request — required by draft_graph action handler (calls unified pipeline). */
   request?: FastifyRequest;
+  /** Abort signal — propagated from pipeline entry point for cancellation of long-running tools. */
+  signal?: AbortSignal;
 }
 
 /**

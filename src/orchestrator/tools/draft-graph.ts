@@ -82,7 +82,7 @@ export async function handleDraftGraph(
   brief: string,
   request: FastifyRequest,
   turnId: string,
-  draftOpts?: { briefSignalsHeader?: string },
+  draftOpts?: { briefSignalsHeader?: string; signal?: AbortSignal },
 ): Promise<DraftGraphResult> {
   const startTime = Date.now();
 
@@ -96,6 +96,7 @@ export async function handleDraftGraph(
 
   const opts: UnifiedPipelineOpts = {
     schemaVersion: 'v3',
+    signal: draftOpts?.signal,
   };
 
   log.info({ brief_length: brief.length, turn_id: turnId }, "draft_graph: starting unified pipeline");

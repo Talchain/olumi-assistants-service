@@ -53,6 +53,9 @@ export const compareOptionsAction: ActionDefinition = {
 
     const drivers = ctx.analysis_summary?.top_drivers ?? [];
     const driverLabels = drivers.slice(0, 3).map((d) => d.label);
+    const differentiators = driverLabels.length > 0
+      ? driverLabels
+      : ['Combined factor effects'];
 
     const options: ComparisonBlockData['options'] = results.map((r, i) => ({
       id: (r.option_id as string) ?? '',
@@ -61,16 +64,22 @@ export const compareOptionsAction: ActionDefinition = {
       rank: i + 1,
       strengths: [],
       weaknesses: [],
-      key_differentiators: driverLabels,
+      key_differentiators: differentiators,
     }));
 
     const margin = (results[0].win_probability as number - (results[1].win_probability as number)) * 100;
-    let narrative = '';
+    const narrativeParts: string[] = [];
     if (margin < 5) {
-      narrative = `This is a close call — only ${margin.toFixed(1)} percentage points separate the top two options.`;
+      narrativeParts.push(`This is a close call — only ${margin.toFixed(1)} percentage points separate the top two options.`);
     } else if (margin > 20) {
-      narrative = `${results[0].option_label} has a clear lead of ${margin.toFixed(0)} percentage points.`;
+      narrativeParts.push(`${results[0].option_label} has a clear lead of ${margin.toFixed(0)} percentage points.`);
     }
+    // When no driver data but fragile edges exist, surface fragility in the narrative
+    const fragileCount = ctx.analysis_summary?.fragile_edge_count ?? 0;
+    if (driverLabels.length === 0 && fragileCount > 0) {
+      narrativeParts.push(`${fragileCount} fragile edge${fragileCount > 1 ? 's' : ''} detected — small assumption changes could shift the ranking.`);
+    }
+    const narrative = narrativeParts.join(' ');
 
     const blockData: ComparisonBlockData = { options, narrative };
     const block = createComparisonBlock(blockData, ctx.turn_id);

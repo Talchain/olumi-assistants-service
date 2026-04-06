@@ -74,6 +74,24 @@ export const addOptionAction: ActionDefinition = {
       interventions = rawInterventions as Record<string, number>;
     }
 
+    // Guard: don't create an empty-intervention option when the graph has factors.
+    // This catches cases where streamed tool JSON failed to parse, leaving interventions
+    // as {} — the user needs to specify what the option changes.
+    if (Object.keys(interventions).length === 0 && ctx.graph) {
+      const factorLabels = [...ctx.entities.nodes.values()]
+        .filter((n) => n.kind === 'factor')
+        .map((n) => n.label);
+      if (factorLabels.length > 0) {
+        const namedFactors = factorLabels.slice(0, 5).join(', ');
+        const suffix = factorLabels.length > 5 ? `, and ${factorLabels.length - 5} more` : '';
+        return {
+          blocks: [],
+          assistantText: `Option **${label}** needs to specify how it changes ${namedFactors}${suffix}. What values would this option set for these factors?`,
+          guidance_items: [],
+        };
+      }
+    }
+
     const nodeId = `option_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '')}`;
 
     const operations: PatchOperation[] = [

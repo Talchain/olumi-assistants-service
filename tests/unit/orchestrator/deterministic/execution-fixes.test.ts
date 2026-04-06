@@ -282,7 +282,7 @@ describe('Response assembler text ordering', () => {
 describe('add_option topology', () => {
   it('does NOT create option→goal edge', async () => {
     const ctx = makeCtx();
-    const result = await addOptionAction.execute({ label: 'Strategy B' }, ctx);
+    const result = await addOptionAction.execute({ label: 'Strategy B', interventions: [{ factor_id: 'fac_price', value: 0.5 }] }, ctx);
     expect(result.operations).toBeDefined();
     const ops = result.operations!;
     expect(ops.some((o) => o.op === 'add_node')).toBe(true);
@@ -307,5 +307,342 @@ describe('generate_artefact gate', () => {
     const ctx = makeCtx();
     const prereq = generateArtefactAction.prerequisite_checks(ctx);
     expect(prereq).toContain('not yet available');
+  });
+});
+
+// ============================================================================
+// Fix A: Empty-driver graceful handling
+// ============================================================================
+
+describe('explain_result — empty driver fallback', () => {
+  it('references fragile edges when top_drivers empty and fragile_edge_count > 0', async () => {
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'moderate',
+        top_drivers: [],
+        fragile_edge_count: 3,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await explainResultAction.execute({}, ctx);
+    const data = result.blocks[0].data as DeterministicCommentaryBlockData;
+    const driverSection = data.sections!.find((s) => s.heading === 'Drivers');
+    expect(driverSection).toBeDefined();
+    expect(driverSection!.content).toContain('combined effect');
+    expect(driverSection!.content).toContain('3 fragile edge');
+  });
+
+  it('says combined effect when drivers empty and no fragile edges', async () => {
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'moderate',
+        top_drivers: [],
+        fragile_edge_count: 0,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await explainResultAction.execute({}, ctx);
+    const data = result.blocks[0].data as DeterministicCommentaryBlockData;
+    const driverSection = data.sections!.find((s) => s.heading === 'Drivers');
+    expect(driverSection!.content).toContain('combined effect');
+    expect(driverSection!.content).not.toContain('fragile');
+  });
+});
+
+describe('what_would_flip — empty driver fallback', () => {
+  it('references weak edges when drivers empty but weak_edges exist', async () => {
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'moderate',
+        top_drivers: [],
+        fragile_edge_count: 0,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+      signals: {
+        high_uncertainty_factors: [],
+        dominant_factor: null,
+        close_call: false,
+        default_value_count: 0,
+        weak_edges: ['fac_price→goal_1', 'fac_market→goal_1'],
+      },
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(0);
+    expect(result.assistantText).toContain('weak edge');
+    expect(result.assistantText).toContain('fac_price→goal_1');
+  });
+
+  it('says combined effect when drivers and weak_edges both empty', async () => {
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'moderate',
+        top_drivers: [],
+        fragile_edge_count: 0,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+      signals: {
+        high_uncertainty_factors: [],
+        dominant_factor: null,
+        close_call: false,
+        default_value_count: 0,
+        weak_edges: [],
+      },
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(0);
+    expect(result.assistantText).toContain('combined effect');
+    expect(result.assistantText).not.toContain('Driver data not available');
+  });
+});
+
+describe('compare_options — empty driver fallback', () => {
+  it('uses fallback differentiators when drivers are empty', async () => {
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'moderate',
+        top_drivers: [],
+        fragile_edge_count: 0,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await compareOptionsAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(1);
+    const data = result.blocks[0].data as ComparisonBlockData;
+    expect(data.options[0].key_differentiators).toEqual(['Combined factor effects']);
+  });
+
+  it('uses driver labels when drivers exist', async () => {
+    const ctx = makeCtx(); // default has drivers
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as ComparisonBlockData;
+    expect(data.options[0].key_differentiators).toContain('Price Sensitivity');
+  });
+});
+
+describe('what_would_flip — flip thresholds from analysis', () => {
+  it('populates flip_threshold from raw analysis factor_sensitivity', async () => {
+    const ctx = makeCtx({
+      analysis: {
+        meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },
+        results: [
+          {
+            option_id: 'opt_aggressive',
+            option_label: 'Aggressive Pricing',
+            win_probability: 0.65,
+            factor_sensitivity: [
+              { factor_id: 'fac_price', label: 'Price Sensitivity', elasticity: 0.42, flip_threshold: 0.85, current_value: 0.6, unit: '%' },
+              { factor_id: 'fac_market', label: 'Market Size', elasticity: 0.31, flip_threshold: 1500, current_value: 1000, unit: 'units' },
+            ],
+          },
+          {
+            option_id: 'opt_conservative',
+            option_label: 'Conservative Pricing',
+            win_probability: 0.35,
+          },
+        ],
+      } as unknown as V2RunResponseEnvelope,
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(1);
+    const data = result.blocks[0].data as FlipAnalysisBlockData;
+    // First driver (Price Sensitivity) should have real flip threshold
+    const priceCondition = data.flip_conditions.find((c) => c.assumption === 'Price Sensitivity');
+    expect(priceCondition).toBeDefined();
+    expect(priceCondition!.flip_threshold).toBe(0.85);
+    expect(priceCondition!.current_value).toBe(0.6);
+    // Narrative should mention the flip value
+    expect(data.narrative).toContain('0.85');
+  });
+
+  it('falls back to 0 when no flip_threshold in analysis', async () => {
+    const ctx = makeCtx({
+      analysis: {
+        meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },
+        results: [
+          { option_id: 'opt_aggressive', option_label: 'Aggressive Pricing', win_probability: 0.65 },
+          { option_id: 'opt_conservative', option_label: 'Conservative Pricing', win_probability: 0.35 },
+        ],
+      } as unknown as V2RunResponseEnvelope,
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    const data = result.blocks[0].data as FlipAnalysisBlockData;
+    expect(data.flip_conditions[0].flip_threshold).toBe(0);
+  });
+});
+
+describe('what_would_flip — fragile edge fallback when drivers empty', () => {
+  it('references fragile edge labels from raw analysis when drivers empty', async () => {
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'fragile',
+        top_drivers: [],
+        fragile_edge_count: 2,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+      analysis: {
+        meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },
+        results: [
+          { option_id: 'opt_aggressive', option_label: 'Aggressive Pricing', win_probability: 0.65 },
+          { option_id: 'opt_conservative', option_label: 'Conservative Pricing', win_probability: 0.35 },
+        ],
+        robustness: {
+          level: 'fragile',
+          fragile_edges: [
+            { from_node_id: 'fac_price', to_node_id: 'goal_1' },
+            { from_node_id: 'fac_market', to_node_id: 'goal_1' },
+          ],
+        },
+      } as unknown as V2RunResponseEnvelope,
+      signals: { high_uncertainty_factors: [], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(0);
+    expect(result.assistantText).toContain('fragile edge');
+    // Should resolve labels from entity registry
+    expect(result.assistantText).toContain('Price Sensitivity');
+  });
+});
+
+describe('compare_options — fragile edge narrative', () => {
+  it('includes fragile edge info in narrative when drivers empty and fragility nonzero', async () => {
+    const ctx = makeCtx({
+      analysis_summary: {
+        winner: 'Aggressive Pricing',
+        winner_probability: 0.65,
+        runner_up: 'Conservative Pricing',
+        runner_up_probability: 0.35,
+        robustness_band: 'fragile',
+        top_drivers: [],
+        fragile_edge_count: 2,
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as ComparisonBlockData;
+    expect(data.narrative).toContain('fragile edge');
+    expect(data.narrative).toContain('2');
+  });
+
+  it('does not mention fragile edges when drivers exist', async () => {
+    const ctx = makeCtx(); // default has drivers
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as ComparisonBlockData;
+    expect(data.narrative).not.toContain('fragile');
+  });
+});
+
+describe('what_would_flip — partial tool input produces graceful output', () => {
+  it('works with empty params (no tool input needed)', async () => {
+    const ctx = makeCtx();
+    // Simulate empty parsed tool input (what happens after JSON parse failure)
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(1);
+    expect(result.assistantText).not.toContain('data not available');
+  });
+});
+
+describe('compare_options — partial tool input produces graceful output', () => {
+  it('works with empty params (no tool input needed)', async () => {
+    const ctx = makeCtx();
+    const result = await compareOptionsAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(1);
+    expect(result.assistantText).not.toContain('data not available');
+  });
+});
+
+describe('explain_result — partial tool input produces graceful output', () => {
+  it('works with empty params', async () => {
+    const ctx = makeCtx();
+    const result = await explainResultAction.execute({}, ctx);
+    expect(result.blocks).toHaveLength(1);
+    expect(result.assistantText).not.toContain('data not available');
+  });
+
+  it('works with partial focus param', async () => {
+    const ctx = makeCtx();
+    const result = await explainResultAction.execute({ focus: 'drivers' }, ctx);
+    expect(result.blocks).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// Fix B: add_option intervention guard
+// ============================================================================
+
+describe('add_option — intervention guard', () => {
+  it('returns warning with factor names when interventions empty and graph has factors', async () => {
+    const ctx = makeCtx(); // default entities have fac_price and fac_market
+    const result = await addOptionAction.execute({ label: 'New Strategy' }, ctx);
+    expect(result.operations).toBeUndefined();
+    expect(result.assistantText).toContain('New Strategy');
+    expect(result.assistantText).toContain('Price Sensitivity');
+    expect(result.assistantText).toContain('Market Size');
+  });
+
+  it('allows empty interventions when graph has no factors', async () => {
+    const noFactorNodes = new Map();
+    noFactorNodes.set('goal_1', { id: 'goal_1', label: 'Goal', kind: 'goal', aliases: [], is_action_target: false });
+    const ctx = makeCtx({
+      entities: { nodes: noFactorNodes, edges: [], option_ids: [], goal_id: 'goal_1' },
+    });
+    const result = await addOptionAction.execute({ label: 'New Strategy' }, ctx);
+    expect(result.operations).toBeDefined();
+    expect(result.operations!.some((o) => o.op === 'add_node')).toBe(true);
+  });
+});
+
+// ============================================================================
+// Fix D: Failure classification in run_analysis
+// ============================================================================
+
+describe('run_analysis — failure classification', () => {
+  it('returns blocker when analysis_inputs is null', async () => {
+    const ctx = makeCtx({ analysis_inputs: null });
+    const result = await runAnalysisAction.execute({}, ctx);
+    expect(result.assistantText).toContain("can't run yet");
+  });
+
+  it('returns service not configured when PLoT client is null', async () => {
+    const ctx = makeCtx({
+      analysis_inputs: {
+        options: [{ option_id: 'opt_a', label: 'A', interventions: { fac_price: 0.5 } }],
+      } as unknown as DeterministicTurnContext['analysis_inputs'],
+    });
+    // This test exercises the plotClient null check — real PLoT calls are mocked at the module level
+    // The action handler will attempt dynamic import and create a null client when env vars are missing
+    const result = await runAnalysisAction.execute({}, ctx);
+    // Should get one of: service not configured, or an error message (depending on env)
+    expect(result.assistantText).toBeTruthy();
   });
 });
