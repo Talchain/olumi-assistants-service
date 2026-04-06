@@ -959,7 +959,7 @@ describe("executePipelineV4", () => {
       const events = await collectEvents(executePipelineV4(req, 'req-timeout'));
 
       const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
-      expect(complete.envelope.assistant_text).toBe('This is taking longer than expected. Try again or rephrase your message.');
+      expect(complete.envelope.assistant_text).toBe('Building your decision model is taking longer than usual. Please try again — complex decisions can take up to a minute.');
     });
 
     it("tool execution error produces the tool-specific message", async () => {
