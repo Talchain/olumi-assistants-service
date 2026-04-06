@@ -950,16 +950,36 @@ describe("executePipelineV4", () => {
       expect(complete.envelope.assistant_text).not.toContain('500');
     });
 
-    it("timeout error produces the timeout-specific message", async () => {
+    it("timeout error produces the draft-graph message when no graph exists (graph: null)", async () => {
       mockStreamChatWithTools.mockImplementation(() => {
         throw new Error('Request timeout after 30000ms');
       });
 
-      const req = makeTurnRequest();
+      const req = makeTurnRequest(); // graph: null → isDraftGraphLikely = true
       const events = await collectEvents(executePipelineV4(req, 'req-timeout'));
 
       const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
       expect(complete.envelope.assistant_text).toBe('Building your decision model is taking longer than usual. Please try again — complex decisions can take up to a minute.');
+    });
+
+    it("timeout error produces the generic message when a graph with nodes exists", async () => {
+      mockStreamChatWithTools.mockImplementation(() => {
+        throw new Error('Request timeout after 30000ms');
+      });
+
+      const req = makeTurnRequest({
+        context: {
+          graph: { nodes: [{ id: 'n1', kind: 'decision', label: 'D1' }], edges: [] },
+          analysis_response: null,
+          framing: { stage: 'ideate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      });
+      const events = await collectEvents(executePipelineV4(req, 'req-timeout-with-graph'));
+
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      expect(complete.envelope.assistant_text).toBe('This is taking longer than expected. Try again or rephrase your message.');
     });
 
     it("tool execution error produces the tool-specific message", async () => {
