@@ -159,6 +159,18 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
     if (optionDescs.length > 0) parts.push(`Options: ${optionDescs.join(', ')}`);
   }
 
+  // Analysis state rendering.
+  //
+  // Staleness contract (do not change without coordinating with the UI):
+  //   - If analysis_state is present on the request, it is current. The UI strips
+  //     analysis_state to undefined whenever store.graphEditedSinceLastRun is true,
+  //     so by the time it reaches CEE either the analysis matches the current graph
+  //     or it is absent entirely.
+  //   - If analysis_summary is null AND the graph is non-empty, no analysis exists
+  //     yet (or the previous one was invalidated by an edit). We must say "not yet
+  //     run" — never "stale" — because CEE has no way to distinguish those cases.
+  //   - If analysis_summary is null AND the graph is empty, we say nothing about
+  //     analysis at all (covered by the absent branch below).
   if (ctx.analysis_summary) {
     const a = ctx.analysis_summary;
     parts.push('\n**Analysis Results:**');
@@ -171,12 +183,61 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
     if (a.robustness_band) {
       parts.push(`Robustness: ${a.robustness_band}`);
     }
-    if (a.top_drivers.length > 0) {
-      const drivers = a.top_drivers.slice(0, 3).map((d) => `${d.label} (${d.sensitivity.toFixed(2)})`).join(', ');
-      parts.push(`Top drivers: ${drivers}`);
-    }
     if (a.constraint_tensions.length > 0) {
       parts.push(`Constraint tensions: ${a.constraint_tensions.join('; ')}`);
+    }
+
+    // ── Headed sections — these are the field names the prompt navigates by ──
+
+    // ### Key drivers — top 3 by influence_rank from forwarded factor_sensitivity.
+    // Falls back to legacy top_drivers when factor_sensitivity is not forwarded.
+    if (a.factor_sensitivity.length > 0) {
+      parts.push('\n### Key drivers');
+      for (const f of a.factor_sensitivity.slice(0, 3)) {
+        const segs: string[] = [`- ${f.label}`];
+        if (f.influence_percent != null) segs.push(`influence ${f.influence_percent.toFixed(0)}%`);
+        if (f.confidence_band) segs.push(`confidence: ${f.confidence_band}`);
+        parts.push(segs.join(' — '));
+      }
+    } else if (a.top_drivers.length > 0) {
+      parts.push('\n### Key drivers');
+      for (const d of a.top_drivers.slice(0, 3)) {
+        parts.push(`- ${d.label} (sensitivity ${d.sensitivity.toFixed(2)})`);
+      }
+    }
+
+    // ### Fragile relationships — top 3 fragile edges by switch_probability desc.
+    if (a.fragile_edges.length > 0) {
+      parts.push('\n### Fragile relationships');
+      for (const e of a.fragile_edges.slice(0, 3)) {
+        parts.push(`- ${e.label} — switch probability ${(e.switch_probability * 100).toFixed(0)}%`);
+      }
+    }
+
+    // ### Robustness detail — top 2 most fragile + top 1 most robust by e_value.
+    if (a.edge_e_values.length > 0) {
+      parts.push('\n### Robustness detail');
+      for (const e of a.edge_e_values) {
+        const tag = e.fragile ? 'fragile' : 'robust';
+        parts.push(`- ${e.label} — e-value ${e.e_value.toFixed(2)} (${tag})`);
+      }
+    }
+
+    // ### Conditional results — scenarios where the winner flips.
+    if (a.conditional_winners.length > 0) {
+      parts.push('\n### Conditional results');
+      for (const c of a.conditional_winners) {
+        const probSeg = c.probability != null ? ` (${(c.probability * 100).toFixed(0)}%)` : '';
+        parts.push(`- Under ${c.scenario}: ${c.winner_label}${probSeg}`);
+      }
+    }
+
+    // ### Inference warnings — one bullet per warning, max 5.
+    if (a.inference_warnings.length > 0) {
+      parts.push('\n### Inference warnings');
+      for (const w of a.inference_warnings) {
+        parts.push(`- ${w}`);
+      }
     }
   } else if (ctx.graph_summary.node_count > 0) {
     parts.push('\n**Analysis:** Not yet run. No results are available. Do not reference winners, probabilities, or analysis findings.');

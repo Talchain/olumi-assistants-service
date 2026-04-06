@@ -13,7 +13,7 @@ function makeTurnContext(overrides: Partial<DeterministicTurnContext> = {}): Det
     stage: 'evaluate',
     entities: { nodes: new Map(), edges: [], option_ids: [], goal_id: null },
     graph_summary: { node_count: 3, edge_count: 2, option_count: 2, option_labels: ['A', 'B'], goal_label: 'Success', missing_structural: [] },
-    analysis_summary: { winner: 'A', winner_probability: 0.65, runner_up: 'B', runner_up_probability: 0.35, robustness_band: 'moderate', top_drivers: [], fragile_edge_count: 0, constraints_met: true, constraint_tensions: [] },
+    analysis_summary: { winner: 'A', winner_probability: 0.65, runner_up: 'B', runner_up_probability: 0.35, robustness_band: 'moderate', top_drivers: [], fragile_edge_count: 0, fragile_edges: [], factor_sensitivity: [], edge_e_values: [], conditional_winners: [], inference_warnings: [], constraints_met: true, constraint_tensions: [] },
     capabilities: { can_run_analysis: true, can_explain_results: true, can_edit_graph: true, can_compare_options: true, can_challenge: true, can_generate_artefact: false },
     blockers: [],
     signals: { high_uncertainty_factors: [], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },

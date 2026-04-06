@@ -128,8 +128,13 @@ describe("buildDeterministicPromptV2", () => {
         runner_up: 'Option B',
         runner_up_probability: 0.35,
         robustness_band: 'high',
-        top_drivers: [{ label: 'Cost', sensitivity: 0.45 }],
+        top_drivers: [{ label: 'Cost', factor_id: 'fac_cost', sensitivity: 0.45, direction: 'positive' }],
         fragile_edge_count: 0,
+        fragile_edges: [],
+        factor_sensitivity: [],
+        edge_e_values: [],
+        conditional_winners: [],
+        inference_warnings: [],
         constraints_met: true,
         constraint_tensions: [],
       },
@@ -139,6 +144,103 @@ describe("buildDeterministicPromptV2", () => {
     expect(result.dynamic_block).toContain('**Analysis Results:**');
     expect(result.dynamic_block).toContain('Winner: Option A (65%)');
     expect(result.dynamic_block).not.toContain('Not yet run');
+  });
+
+  it("dynamic block renders ### Fragile relationships when fragile edges present", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: {
+        winner: 'Option A',
+        winner_probability: 0.65,
+        runner_up: 'Option B',
+        runner_up_probability: 0.35,
+        robustness_band: 'fragile',
+        top_drivers: [],
+        fragile_edge_count: 2,
+        fragile_edges: [
+          { label: 'Price → Demand', switch_probability: 0.42 },
+          { label: 'Cost → Margin', switch_probability: 0.31 },
+        ],
+        factor_sensitivity: [],
+        edge_e_values: [],
+        conditional_winners: [],
+        inference_warnings: [],
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await buildDeterministicPromptV2(ctx);
+
+    expect(result.dynamic_block).toContain('### Fragile relationships');
+    expect(result.dynamic_block).toContain('Price → Demand');
+    expect(result.dynamic_block).toContain('42%');
+    expect(result.dynamic_block).toContain('Cost → Margin');
+  });
+
+  it("dynamic block renders ### Key drivers from factor_sensitivity when present", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: {
+        winner: 'Option A',
+        winner_probability: 0.65,
+        runner_up: 'Option B',
+        runner_up_probability: 0.35,
+        robustness_band: 'moderate',
+        top_drivers: [],
+        fragile_edge_count: 0,
+        fragile_edges: [],
+        factor_sensitivity: [
+          { label: 'Demand', influence_percent: 38, confidence_band: 'high', influence_rank: 1 },
+          { label: 'Cost', influence_percent: 22, confidence_band: 'medium', influence_rank: 2 },
+        ],
+        edge_e_values: [],
+        conditional_winners: [],
+        inference_warnings: [],
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await buildDeterministicPromptV2(ctx);
+
+    expect(result.dynamic_block).toContain('### Key drivers');
+    expect(result.dynamic_block).toContain('Demand');
+    expect(result.dynamic_block).toContain('influence 38%');
+    expect(result.dynamic_block).toContain('confidence: high');
+  });
+
+  it("dynamic block renders ### Robustness detail, ### Conditional results, ### Inference warnings when present", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: {
+        winner: 'Option A',
+        winner_probability: 0.6,
+        runner_up: 'Option B',
+        runner_up_probability: 0.4,
+        robustness_band: 'fragile',
+        top_drivers: [],
+        fragile_edge_count: 0,
+        fragile_edges: [],
+        factor_sensitivity: [],
+        edge_e_values: [
+          { label: 'Price → Demand', e_value: 1.2, fragile: true },
+          { label: 'Cost → Margin', e_value: 1.4, fragile: true },
+          { label: 'Brand → Loyalty', e_value: 4.5, fragile: false },
+        ],
+        conditional_winners: [
+          { scenario: 'high churn', winner_label: 'Option B', probability: 0.7 },
+        ],
+        inference_warnings: ['Extrapolation outside training range for Demand'],
+        constraints_met: true,
+        constraint_tensions: [],
+      },
+    });
+    const result = await buildDeterministicPromptV2(ctx);
+
+    expect(result.dynamic_block).toContain('### Robustness detail');
+    expect(result.dynamic_block).toContain('Price → Demand');
+    expect(result.dynamic_block).toContain('e-value 1.20');
+    expect(result.dynamic_block).toContain('(robust)');
+    expect(result.dynamic_block).toContain('### Conditional results');
+    expect(result.dynamic_block).toContain('Under high churn: Option B');
+    expect(result.dynamic_block).toContain('### Inference warnings');
+    expect(result.dynamic_block).toContain('Extrapolation outside training range for Demand');
   });
 
   it("dynamic block omits no-analysis signal when graph is empty", async () => {

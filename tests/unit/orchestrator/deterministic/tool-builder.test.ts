@@ -62,6 +62,11 @@ function buildAnalysisSummary(overrides?: Partial<AnalysisSummary>): AnalysisSum
       { label: 'Market Size', factor_id: 'f3', sensitivity: 1.5, direction: 'positive' },
     ],
     fragile_edge_count: 0,
+    fragile_edges: [],
+    factor_sensitivity: [],
+    edge_e_values: [],
+    conditional_winners: [],
+    inference_warnings: [],
     constraints_met: true,
     constraint_tensions: [],
     ...overrides,
@@ -158,7 +163,7 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     expect(names).toContain('challenge_assumption');
   });
 
-  it("includes explain_result, compare_options, what_would_flip when analysis exists", () => {
+  it("includes explain_result, compare_options, what_would_flip when analysis exists; suppresses run_analysis (current results already present)", () => {
     const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
     const allActions: ActionName[] = [
       'explain_result', 'compare_options', 'what_would_flip', 'run_analysis',
@@ -170,7 +175,10 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     expect(names).toContain('explain_result');
     expect(names).toContain('compare_options');
     expect(names).toContain('what_would_flip');
-    expect(names).toContain('run_analysis');
+    // run_analysis is suppressed when analysis_summary is present — the UI's
+    // staleness contract guarantees fresh results, so re-running would be
+    // wasted work. Chip clicks bypass via forced tool_choice.
+    expect(names).not.toContain('run_analysis');
   });
 
   it("excludes edit tools and run_analysis when no graph", () => {
@@ -210,18 +218,19 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
+    // analysis_summary present so explain_result is not analysis-suppressed.
+    // run_analysis is omitted from the asserted-present set because the new
+    // staleness contract suppresses it whenever analysis_summary is present.
     const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
 
     const defs = buildToolDefinitions(
-      ['set_factor_value', 'run_analysis', 'explain_result'],
+      ['set_factor_value', 'explain_result'],
       ctx,
     );
     const names = defs.map(d => d.name);
 
     // set_factor_value has target_id — should be removed (q3 + sales shared)
     expect(names).not.toContain('set_factor_value');
-    // run_analysis has NO target_id — should remain
-    expect(names).toContain('run_analysis');
     // explain_result has no target_id as required — should remain
     expect(names).toContain('explain_result');
   });
@@ -231,7 +240,9 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       ['f1', { id: 'f1', label: 'Employee Churn', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Customer Churn', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    // analysis_summary: null so run_analysis is not staleness-suppressed; the
+    // assertion below verifies disambiguation does not affect non-target_id tools.
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
@@ -246,7 +257,7 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       ['f1', { id: 'f1', label: 'Employee Churn', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Revenue Trend', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
@@ -260,14 +271,17 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       ['f1', { id: 'f1', label: 'Employee Churn', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Customer Churn', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
+    // analysis_summary present so compare_options survives the analysis-required filter.
+    // run_analysis is correctly suppressed (staleness contract); use compare_options
+    // as the non-target_id tool that should survive disambiguation.
     const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
 
-    const defs = buildToolDefinitions(['run_analysis', 'compare_options'], ctx);
+    const defs = buildToolDefinitions(['compare_options', 'what_would_flip'], ctx);
     const names = defs.map(d => d.name);
 
     // Neither tool has target_id — both should remain
-    expect(names).toContain('run_analysis');
     expect(names).toContain('compare_options');
+    expect(names).toContain('what_would_flip');
   });
 
   it("does not flag ambiguity between different entity kinds sharing a word", () => {
@@ -276,7 +290,7 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       ['f1', { id: 'f1', label: 'Revenue Growth', kind: 'factor', aliases: [], is_action_target: true }],
       ['o1', { id: 'o1', label: 'Growth Strategy', kind: 'option', aliases: [], is_action_target: true }],
     ]);
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
@@ -291,7 +305,7 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       ['f1', { id: 'f1', label: 'Alpha Factor', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Beta Factor', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    const ctx = buildTestContext({ entities, analysis_summary: null });
     // Simulate disambiguation hints from user message
     ctx.disambiguation_hints = [
       { term: 'factor', candidates: [{ id: 'f1', label: 'Alpha Factor' }, { id: 'f2', label: 'Beta Factor' }] },
@@ -589,7 +603,9 @@ describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
       ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    // analysis_summary: null so run_analysis is not staleness-suppressed and
+    // the test isolates the disambiguation behaviour.
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
@@ -631,7 +647,7 @@ describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
       ['f2', { id: 'f2', label: 'Annual Sales Margin', kind: 'factor', aliases: [], is_action_target: true }],
       ['f3', { id: 'f3', label: 'Customer Retention', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
@@ -647,7 +663,7 @@ describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
       ['f1', { id: 'f1', label: 'Q3 Sales, Projected', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: '(Q3) Sales Actual', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);

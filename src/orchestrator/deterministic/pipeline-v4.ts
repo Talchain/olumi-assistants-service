@@ -656,8 +656,19 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
       if (postAnalysis.length > 0) {
         guidanceItems = [...guidanceItems, ...postAnalysis];
       }
-    } catch {
-      // Non-fatal
+    } catch (error) {
+      // Non-fatal — guidance items are nice-to-have, not required for the turn.
+      // Log so silent regressions in generatePostAnalysisGuidance are visible.
+      const analysisStatus = typeof (turnContext.analysis as Record<string, unknown> | null)?.analysis_status === 'string'
+        ? (turnContext.analysis as Record<string, unknown>).analysis_status
+        : null;
+      log.warn({
+        request_id: requestId,
+        turn_id: turnId,
+        stage: turnContext.stage,
+        analysis_status: analysisStatus,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'v4.post_analysis_guidance_failed');
     }
   }
 

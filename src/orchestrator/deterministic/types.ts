@@ -71,6 +71,16 @@ export interface AnalysisSummary {
   robustness_band: string | null;
   top_drivers: DriverSummary[];
   fragile_edge_count: number;
+  /** Fragile-edge details (label + switch_probability), sorted desc by switch_probability. Top 5 retained. */
+  fragile_edges: FragileEdgeSummary[];
+  /** Per-factor sensitivity entries forwarded by the UI (top-level on analysis_state). Top 5 by influence_rank. */
+  factor_sensitivity: FactorSensitivitySummary[];
+  /** Edge-level e-value summary from robustness analysis. Sorted by fragility (most fragile first). */
+  edge_e_values: EdgeEValueSummary[];
+  /** Conditional winner scenarios from robustness analysis. */
+  conditional_winners: ConditionalWinnerSummary[];
+  /** Inference warnings emitted by the analysis layer. */
+  inference_warnings: string[];
   constraints_met: boolean | null;
   constraint_tensions: string[];
 }
@@ -80,6 +90,35 @@ export interface DriverSummary {
   factor_id: string;
   sensitivity: number;
   direction: string;
+}
+
+/** Fragile-edge entry — surfaces the structural relationship and how easily its sign flips. */
+export interface FragileEdgeSummary {
+  label: string;
+  switch_probability: number;
+}
+
+/** Factor sensitivity entry forwarded by the UI on analysis_state.factor_sensitivity. */
+export interface FactorSensitivitySummary {
+  label: string;
+  influence_percent: number | null;
+  confidence_band: string | null;
+  influence_rank: number | null;
+}
+
+/** Edge e-value entry — quantifies how robust an edge's contribution is. */
+export interface EdgeEValueSummary {
+  label: string;
+  e_value: number;
+  /** True when this edge is among the most fragile; false for the most robust pick. */
+  fragile: boolean;
+}
+
+/** Conditional winner — option that wins under a specific scenario assumption. */
+export interface ConditionalWinnerSummary {
+  scenario: string;
+  winner_label: string;
+  probability: number | null;
 }
 
 /** What prevents a specific action from executing. */

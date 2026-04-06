@@ -406,10 +406,106 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
     topDrivers.sort((a, b) => b.sensitivity - a.sensitivity);
   }
 
-  // Fragile edges
-  const fragileEdgeCount = Array.isArray(analysis.robustness?.fragile_edges)
-    ? analysis.robustness!.fragile_edges!.length
-    : 0;
+  // Fragile edges — count and labelled details
+  const fragileEdgesRaw = Array.isArray(analysis.robustness?.fragile_edges)
+    ? (analysis.robustness!.fragile_edges as Array<Record<string, unknown>>)
+    : [];
+  const fragileEdgeCount = fragileEdgesRaw.length;
+  const fragileEdges: import("./types.js").FragileEdgeSummary[] = fragileEdgesRaw
+    .map((e) => {
+      const fromLabel = typeof e.from_label === 'string' ? e.from_label : null;
+      const toLabel = typeof e.to_label === 'string' ? e.to_label : null;
+      const edgeId = typeof e.edge_id === 'string' ? e.edge_id : null;
+      const label = fromLabel && toLabel ? `${fromLabel} → ${toLabel}` : (edgeId ?? 'unlabelled edge');
+      const sp = typeof e.switch_probability === 'number'
+        ? e.switch_probability
+        : (typeof e.marginal_switch_probability === 'number' ? e.marginal_switch_probability : null);
+      return sp != null ? { label, switch_probability: sp } : null;
+    })
+    .filter((x): x is import("./types.js").FragileEdgeSummary => x != null)
+    .sort((a, b) => b.switch_probability - a.switch_probability)
+    .slice(0, 5);
+
+  // factor_sensitivity — forwarded by the UI as a top-level field on analysis_state.
+  // Accept either canonical (importance_rank, elasticity) or UI-forwarded names
+  // (influence_rank, influence_percent) and either confidence/confidence_band naming.
+  const factorSensitivityRaw = extractAnalysisArray(analysis, 'factor_sensitivity');
+  const factorSensitivity: import("./types.js").FactorSensitivitySummary[] = factorSensitivityRaw
+    .map((f) => {
+      const label = typeof f.factor_label === 'string'
+        ? f.factor_label
+        : (typeof f.label === 'string' ? f.label : null);
+      if (!label) return null;
+      const rank = typeof f.influence_rank === 'number'
+        ? f.influence_rank
+        : (typeof f.importance_rank === 'number' ? f.importance_rank : null);
+      const influencePercent = typeof f.influence_percent === 'number'
+        ? f.influence_percent
+        : (typeof f.elasticity === 'number' ? Math.abs(f.elasticity) * 100 : null);
+      const confidenceBand = typeof f.confidence_band === 'string'
+        ? f.confidence_band
+        : (typeof f.confidence === 'string' ? f.confidence : null);
+      return { label, influence_percent: influencePercent, confidence_band: confidenceBand, influence_rank: rank };
+    })
+    .filter((x): x is import("./types.js").FactorSensitivitySummary => x != null)
+    .sort((a, b) => {
+      const ra = a.influence_rank ?? Number.MAX_SAFE_INTEGER;
+      const rb = b.influence_rank ?? Number.MAX_SAFE_INTEGER;
+      return ra - rb;
+    })
+    .slice(0, 5);
+
+  // edge_e_values — nested under analysis.robustness.edge_e_values
+  const edgeEValuesRaw = extractAnalysisArray(analysis, 'edge_e_values');
+  const edgeEValuesParsed = edgeEValuesRaw
+    .map((e) => {
+      const fromLabel = typeof e.from_label === 'string' ? e.from_label : null;
+      const toLabel = typeof e.to_label === 'string' ? e.to_label : null;
+      const edgeId = typeof e.edge_id === 'string' ? e.edge_id : null;
+      const label = fromLabel && toLabel ? `${fromLabel} → ${toLabel}` : (edgeId ?? null);
+      const eValue = typeof e.e_value === 'number' ? e.e_value : null;
+      return label && eValue != null ? { label, e_value: eValue } : null;
+    })
+    .filter((x): x is { label: string; e_value: number } => x != null);
+  // Convention: lower e_value → more fragile, higher e_value → more robust.
+  // Take top 2 most fragile + top 1 most robust.
+  const sortedAsc = [...edgeEValuesParsed].sort((a, b) => a.e_value - b.e_value);
+  const edgeEValues: import("./types.js").EdgeEValueSummary[] = [];
+  for (const entry of sortedAsc.slice(0, 2)) {
+    edgeEValues.push({ ...entry, fragile: true });
+  }
+  if (sortedAsc.length > 2) {
+    const mostRobust = sortedAsc[sortedAsc.length - 1];
+    edgeEValues.push({ ...mostRobust, fragile: false });
+  }
+
+  // conditional_winners — nested under analysis.robustness.conditional_winners
+  const conditionalWinnersRaw = extractAnalysisArray(analysis, 'conditional_winners');
+  const conditionalWinners: import("./types.js").ConditionalWinnerSummary[] = conditionalWinnersRaw
+    .map((c) => {
+      const scenario = typeof c.scenario === 'string'
+        ? c.scenario
+        : (typeof c.factor_label === 'string' ? c.factor_label : (typeof c.label === 'string' ? c.label : null));
+      const winnerLabel = typeof c.winner_label === 'string'
+        ? c.winner_label
+        : (typeof c.alternative_winner_label === 'string' ? c.alternative_winner_label : null);
+      if (!scenario || !winnerLabel) return null;
+      const probability = typeof c.probability === 'number' ? c.probability : null;
+      return { scenario, winner_label: winnerLabel, probability };
+    })
+    .filter((x): x is import("./types.js").ConditionalWinnerSummary => x != null)
+    .slice(0, 5);
+
+  // inference_warnings — nested under analysis.robustness.inference_warnings
+  const inferenceWarningsRaw = extractAnalysisArray(analysis, 'inference_warnings');
+  const inferenceWarnings: string[] = inferenceWarningsRaw
+    .map((w) => {
+      if (typeof w.message === 'string' && w.message.length > 0) return w.message;
+      if (typeof w.code === 'string' && w.code.length > 0) return w.code;
+      return null;
+    })
+    .filter((x): x is string => x != null)
+    .slice(0, 5);
 
   // Constraints
   let constraintsMet: boolean | null = null;
@@ -448,9 +544,52 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
     robustness_band: mapRobustnessBand(resolveRobustnessLevel(analysis)),
     top_drivers: topDrivers.slice(0, 5),
     fragile_edge_count: fragileEdgeCount,
+    fragile_edges: fragileEdges,
+    factor_sensitivity: factorSensitivity,
+    edge_e_values: edgeEValues,
+    conditional_winners: conditionalWinners,
+    inference_warnings: inferenceWarnings,
     constraints_met: constraintsMet,
     constraint_tensions: constraintTensions,
   };
+}
+
+/**
+ * Extract an array field from the analysis envelope, walking the common nested
+ * shapes the UI / PLoT may use:
+ *   1. analysis[field] (top-level)
+ *   2. analysis.results[field] (single-result object)
+ *   3. analysis.results[0][field] (results array)
+ *   4. analysis.robustness[field] (nested under robustness — primary location for
+ *      edge_e_values, conditional_winners, inference_warnings per the UI fix)
+ *   5. analysis.robustness_synthesis[field]
+ *
+ * Mirrors the helper in phase1-enrichment/index.ts to keep the deterministic
+ * pipeline self-contained.
+ */
+function extractAnalysisArray(analysis: V2RunResponseEnvelope, field: string): Array<Record<string, unknown>> {
+  const a = analysis as Record<string, unknown>;
+  if (Array.isArray(a[field])) return a[field] as Array<Record<string, unknown>>;
+  const results = a.results;
+  if (results && typeof results === 'object' && !Array.isArray(results)) {
+    const nested = (results as Record<string, unknown>)[field];
+    if (Array.isArray(nested)) return nested as Array<Record<string, unknown>>;
+  }
+  if (Array.isArray(results) && results.length > 0) {
+    const first = results[0] as Record<string, unknown>;
+    if (Array.isArray(first?.[field])) return first[field] as Array<Record<string, unknown>>;
+  }
+  const robustness = a.robustness;
+  if (robustness && typeof robustness === 'object') {
+    const nested = (robustness as Record<string, unknown>)[field];
+    if (Array.isArray(nested)) return nested as Array<Record<string, unknown>>;
+  }
+  const synth = a.robustness_synthesis;
+  if (synth && typeof synth === 'object') {
+    const nested = (synth as Record<string, unknown>)[field];
+    if (Array.isArray(nested)) return nested as Array<Record<string, unknown>>;
+  }
+  return [];
 }
 
 // ============================================================================

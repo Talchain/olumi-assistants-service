@@ -244,12 +244,18 @@ function computeContextExclusions(ctx: DeterministicTurnContext): Set<ActionName
     }
   }
 
-  // Analysis exists and is current → suppress run_analysis
-  // NOTE: No explicit staleness signal exists on DeterministicTurnContext yet.
-  // When one is added (e.g. ctx.analysis_stale or ctx.analysis.staleness_reason),
-  // use it here: only exclude run_analysis when analysis is confirmed fresh.
-  // For now, we do NOT exclude run_analysis when analysis exists — erring on
-  // the side of keeping the tool available.
+  // Analysis exists and is current → suppress run_analysis.
+  //
+  // Staleness contract (mirrors prompt-builder-v2.ts):
+  //   The UI sets analysis_state to undefined whenever store.graphEditedSinceLastRun
+  //   is true. So if `hasAnalysis` is true here, the analysis IS current — there is
+  //   no stale-but-present case for the v4 pipeline to worry about. We suppress
+  //   run_analysis to stop the LLM from wasting a long-running call on results that
+  //   already exist. Chip clicks bypass this via forced tool_choice in pipeline-v4,
+  //   so users can still re-run explicitly when they want fresh samples.
+  if (hasAnalysis) {
+    excluded.add('run_analysis');
+  }
 
   // No graph or empty graph → suppress edit tools and run_analysis
   if (!hasGraph) {
