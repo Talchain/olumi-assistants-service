@@ -390,10 +390,7 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
   if (driverSource) {
     for (const fs of driverSource) {
       const entry = fs as Record<string, unknown>;
-      const label = (entry.label as string) ?? (entry.factor_label as string);
-      const elasticity = entry.elasticity as number | undefined;
-      const sensitivity = entry.sensitivity as number | undefined;
-      const influencePercent = entry.influence_percent as number | undefined;
+      const label = pickString(entry.label) ?? pickString(entry.factor_label);
       // Magnitude source preference: elasticity → sensitivity → influence_percent.
       // The UI forwards factor_sensitivity with only `influence_percent` (no
       // elasticity or sensitivity), and before this change those entries were
@@ -401,19 +398,25 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
       // post-analysis handler (explain_result, compare_options, what_would_flip)
       // into its zero-drivers fallback branch. Mirrors the dominant_factor
       // computation below (lines ~750), which already accepted influence_percent.
+      //
+      // Uses pickFiniteNumber throughout so malformed inputs (strings,
+      // NaN, Infinity) are rejected rather than silently coerced.
+      const elasticity = pickFiniteNumber(entry.elasticity);
+      const sensitivity = pickFiniteNumber(entry.sensitivity);
+      const influencePercent = pickFiniteNumber(entry.influence_percent);
       const mag = elasticity != null
         ? Math.abs(elasticity)
         : sensitivity != null
           ? Math.abs(sensitivity)
           : influencePercent != null
             ? Math.abs(influencePercent)
-            : undefined;
-      if (typeof label === 'string' && typeof mag === 'number' && Number.isFinite(mag)) {
+            : null;
+      if (label != null && mag != null) {
         topDrivers.push({
           label,
-          factor_id: (entry.factor_id as string) ?? label,
+          factor_id: pickString(entry.factor_id) ?? label,
           sensitivity: mag,
-          direction: (entry.direction as string) ?? 'unknown',
+          direction: pickString(entry.direction) ?? 'unknown',
         });
       }
     }
