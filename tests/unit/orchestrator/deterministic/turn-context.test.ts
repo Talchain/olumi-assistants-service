@@ -603,3 +603,195 @@ describe('computeAnalysisSummary — driver and robustness resolution', () => {
     expect(ctx.analysis_summary!.robustness_band).toBe('moderate');
   });
 });
+
+describe('computeAnalysisSummary — defensive parsing', () => {
+  it('drops fragile_edges entries with NaN, Infinity, or non-numeric switch_probability', () => {
+    const analysis = makeAnalysis({
+      robustness: {
+        level: 'fragile',
+        fragile_edges: [
+          { from_label: 'A', to_label: 'B', switch_probability: 0.42 },
+          { from_label: 'C', to_label: 'D', switch_probability: NaN },
+          { from_label: 'E', to_label: 'F', switch_probability: Infinity },
+          { from_label: 'G', to_label: 'H', switch_probability: '0.5' as unknown as number },
+          { from_label: 'I', to_label: 'J', switch_probability: 0.18 },
+          // marginal_switch_probability fallback
+          { from_label: 'K', to_label: 'L', marginal_switch_probability: 0.31 },
+        ],
+      } as unknown as V2RunResponseEnvelope['robustness'],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+    const summary = ctx.analysis_summary!;
+
+    // fragile_edge_count mirrors the raw upstream length (6 entries) — does
+    // NOT collapse to the parsed count. This preserves the contract used by
+    // explain-result.ts / compare-options.ts / run-premortem.ts.
+    expect(summary.fragile_edge_count).toBe(6);
+
+    // fragile_edges only contains the entries with finite probabilities,
+    // sorted desc, capped at 5.
+    const labels = summary.fragile_edges.map(e => e.label);
+    expect(labels).not.toContain('C → D'); // NaN dropped
+    expect(labels).not.toContain('E → F'); // Infinity dropped
+    expect(labels).not.toContain('G → H'); // string dropped
+    expect(labels).toContain('A → B');
+    expect(labels).toContain('I → J');
+    expect(labels).toContain('K → L'); // marginal fallback worked
+    // Sort order: 0.42 > 0.31 > 0.18
+    expect(summary.fragile_edges[0].label).toBe('A → B');
+    expect(summary.fragile_edges[0].switch_probability).toBe(0.42);
+  });
+
+  it('drops factor_sensitivity entries with missing label or non-string label; NaN numerics are nulled but the entry survives', () => {
+    const analysis = makeAnalysis({
+      factor_sensitivity: [
+        { factor_label: 'Demand', influence_percent: 38, confidence_band: 'high', influence_rank: 1 },
+        { factor_label: 'Cost', influence_percent: NaN, influence_rank: 2 },           // NaN nulled, entry survives as bare label
+        { factor_label: 'Margin', elasticity: NaN, influence_rank: 3 },                 // NaN elasticity nulled, entry survives
+        { influence_percent: 22, influence_rank: 4 },                                    // no label → DROPPED
+        { factor_label: 42 as unknown as string, influence_percent: 18, influence_rank: 5 }, // non-string label → DROPPED
+        { factor_label: 'Brand', elasticity: 0.5, influence_rank: 6 },                  // valid: elasticity → 50%
+      ],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+    const summary = ctx.analysis_summary!;
+
+    const labels = summary.factor_sensitivity.map(f => f.label);
+    // Entries with a usable label survive — entries without don't.
+    expect(labels).toContain('Demand');
+    expect(labels).toContain('Cost');     // survives as bare label, influence_percent: null
+    expect(labels).toContain('Margin');   // survives as bare label, influence_percent: null
+    expect(labels).toContain('Brand');
+    expect(labels).toHaveLength(4);       // numeric-less label "42" and the missing-label entry both dropped
+
+    // NaN-input entries surface with null numerics — the prompt renderer
+    // emits them as bare bullets, which is degraded but non-broken.
+    const cost = summary.factor_sensitivity.find(f => f.label === 'Cost');
+    expect(cost?.influence_percent).toBeNull();
+    const margin = summary.factor_sensitivity.find(f => f.label === 'Margin');
+    expect(margin?.influence_percent).toBeNull();
+
+    // Brand: elasticity 0.5 → influence_percent 50
+    const brand = summary.factor_sensitivity.find(f => f.label === 'Brand');
+    expect(brand?.influence_percent).toBe(50);
+  });
+
+  it('drops edge_e_values entries with malformed e_value or unlabelled edges', () => {
+    const analysis = makeAnalysis({
+      robustness: {
+        level: 'fragile',
+        edge_e_values: [
+          { from_label: 'A', to_label: 'B', e_value: 1.2 },
+          { from_label: 'C', to_label: 'D', e_value: NaN },
+          { e_value: 1.5 },                                          // missing edge label
+          { from_label: 'E', to_label: 'F', e_value: 1.4 },
+          { from_label: 'G', to_label: 'H', e_value: 4.5 },
+        ],
+      } as unknown as V2RunResponseEnvelope['robustness'],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+    const summary = ctx.analysis_summary!;
+
+    expect(summary.edge_e_values.length).toBe(3); // 2 fragile + 1 robust, NaN and unlabelled dropped
+    // Sort by e_value asc, take top 2 fragile + 1 robust
+    expect(summary.edge_e_values[0]).toEqual({ label: 'A → B', e_value: 1.2, fragile: true });
+    expect(summary.edge_e_values[1]).toEqual({ label: 'E → F', e_value: 1.4, fragile: true });
+    expect(summary.edge_e_values[2]).toEqual({ label: 'G → H', e_value: 4.5, fragile: false });
+  });
+
+  it('does not double-count when e_values has exactly 2 entries (no most-robust pick)', () => {
+    const analysis = makeAnalysis({
+      robustness: {
+        level: 'moderate',
+        edge_e_values: [
+          { from_label: 'A', to_label: 'B', e_value: 1.2 },
+          { from_label: 'C', to_label: 'D', e_value: 2.5 },
+        ],
+      } as unknown as V2RunResponseEnvelope['robustness'],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+    const summary = ctx.analysis_summary!;
+
+    // Both entries are tagged fragile; we don't add a 'robust' pick because
+    // all entries are already in the fragile slice.
+    expect(summary.edge_e_values.length).toBe(2);
+    expect(summary.edge_e_values.every(e => e.fragile === true)).toBe(true);
+  });
+
+  it('drops conditional_winners entries missing scenario or winner_label', () => {
+    const analysis = makeAnalysis({
+      robustness: {
+        level: 'fragile',
+        conditional_winners: [
+          { scenario: 'high churn', winner_label: 'Option B', probability: 0.7 },
+          { winner_label: 'Option C' },                              // missing scenario
+          { scenario: 'low margin' },                                 // missing winner
+          { factor_label: 'Demand fallback', alternative_winner_label: 'Option D' }, // both fallbacks used
+        ],
+      } as unknown as V2RunResponseEnvelope['robustness'],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+    const summary = ctx.analysis_summary!;
+
+    expect(summary.conditional_winners.length).toBe(2);
+    expect(summary.conditional_winners[0].scenario).toBe('high churn');
+    expect(summary.conditional_winners[1].scenario).toBe('Demand fallback');
+    expect(summary.conditional_winners[1].winner_label).toBe('Option D');
+  });
+
+  it('drops inference_warnings entries with empty message and code', () => {
+    const analysis = makeAnalysis({
+      robustness: {
+        level: 'fragile',
+        inference_warnings: [
+          { code: 'EXTRAPOLATION', message: 'Outside training range' },
+          { code: '', message: '' },                                  // both empty
+          { code: 'CONVERGENCE' },                                    // code only
+          { message: 'Sample size below threshold' },                 // message only
+        ],
+      } as unknown as V2RunResponseEnvelope['robustness'],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+    const summary = ctx.analysis_summary!;
+
+    expect(summary.inference_warnings).toContain('Outside training range');
+    expect(summary.inference_warnings).toContain('CONVERGENCE');
+    expect(summary.inference_warnings).toContain('Sample size below threshold');
+    expect(summary.inference_warnings.length).toBe(3);
+  });
+
+  it('dominant_factor accepts influence_percent when elasticity is absent (regression)', () => {
+    const analysis = makeAnalysis({
+      factor_sensitivity: [
+        { factor_label: 'Pricing Power', factor_id: 'fac_price', influence_percent: 60 },
+        { factor_label: 'Market Size', factor_id: 'fac_market', influence_percent: 20 },
+      ],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    // 60 > 20 * 2.0 → dominant
+    expect(ctx.signals.dominant_factor).toBe('fac_price');
+  });
+
+  it('dominant_factor skips entries without a string factor_id (no empty-string fallthrough)', () => {
+    const analysis = makeAnalysis({
+      factor_sensitivity: [
+        { factor_label: 'Cost', influence_percent: 80 },              // no factor_id, label fallback used
+        { factor_id: 42 as unknown as string, influence_percent: 30 },// non-string factor_id dropped
+      ],
+    });
+    const req = makeTurnRequest({ graph: makeGraph(), analysis });
+    const ctx = computeTurnContext(req);
+
+    // First entry survives via label fallback to factor_id, second is dropped.
+    // Only one valid entry → no dominance signal (needs >= 2).
+    expect(ctx.signals.dominant_factor).toBeNull();
+  });
+});

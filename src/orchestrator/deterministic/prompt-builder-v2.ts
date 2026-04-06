@@ -62,6 +62,13 @@ export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext):
   // default `activeVersion`. Without this, every v4 turn loads the production
   // pin even on the staging server, which silently masks staged prompt rollouts
   // (e.g. v32a uploaded as stagingVersion would never reach the LLM).
+  //
+  // Concurrency note: this is a module-level singleton with no in-flight dedupe.
+  // Two parallel turns hitting an expired cache will both call loadPrompt and
+  // both write `promptCache`. The writes carry the same content for the same
+  // TTL window, so the only cost is one extra PMS call — acceptable for now.
+  // useStaging is resolved from process env at startup and does not change at
+  // runtime, so it is safe to omit from the cache key.
   const now = Date.now();
   if (!promptCache || (now - promptCache.loadedAt) > PROMPT_CACHE_TTL_MS) {
     try {
@@ -77,8 +84,15 @@ export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext):
           is_staging: result.isStaging ?? false,
         }, 'v4.prompt.pms_loaded');
       }
-    } catch {
-      // non-fatal — fall through to fallback
+    } catch (error) {
+      // Non-fatal — we fall through to STATIC_PROMPT_FALLBACK below and emit
+      // v4.pms_fallback_used. We log the error here so ops can see WHY the
+      // fallback was used (network, parse error, etc.) instead of having to
+      // hunt for it elsewhere.
+      log.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'v4.prompt.pms_load_failed',
+      );
     }
   }
 

@@ -406,20 +406,19 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
     topDrivers.sort((a, b) => b.sensitivity - a.sensitivity);
   }
 
-  // Fragile edges — count and labelled details
+  // Fragile edges — count and labelled details.
+  // `fragile_edge_count` mirrors the raw upstream array length so existing
+  // call-sites that count "edges in the model" stay correct. The detailed
+  // `fragile_edges` array can be shorter because we drop entries without a
+  // finite switch_probability and cap at 5.
   const fragileEdgesRaw = Array.isArray(analysis.robustness?.fragile_edges)
     ? (analysis.robustness!.fragile_edges as Array<Record<string, unknown>>)
     : [];
   const fragileEdgeCount = fragileEdgesRaw.length;
   const fragileEdges: import("./types.js").FragileEdgeSummary[] = fragileEdgesRaw
     .map((e) => {
-      const fromLabel = typeof e.from_label === 'string' ? e.from_label : null;
-      const toLabel = typeof e.to_label === 'string' ? e.to_label : null;
-      const edgeId = typeof e.edge_id === 'string' ? e.edge_id : null;
-      const label = fromLabel && toLabel ? `${fromLabel} → ${toLabel}` : (edgeId ?? 'unlabelled edge');
-      const sp = typeof e.switch_probability === 'number'
-        ? e.switch_probability
-        : (typeof e.marginal_switch_probability === 'number' ? e.marginal_switch_probability : null);
+      const label = pickEdgeLabel(e) ?? 'unlabelled edge';
+      const sp = pickFiniteNumber(e.switch_probability) ?? pickFiniteNumber(e.marginal_switch_probability);
       return sp != null ? { label, switch_probability: sp } : null;
     })
     .filter((x): x is import("./types.js").FragileEdgeSummary => x != null)
@@ -432,19 +431,13 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
   const factorSensitivityRaw = extractAnalysisArray(analysis, 'factor_sensitivity');
   const factorSensitivity: import("./types.js").FactorSensitivitySummary[] = factorSensitivityRaw
     .map((f) => {
-      const label = typeof f.factor_label === 'string'
-        ? f.factor_label
-        : (typeof f.label === 'string' ? f.label : null);
+      const label = pickString(f.factor_label) ?? pickString(f.label);
       if (!label) return null;
-      const rank = typeof f.influence_rank === 'number'
-        ? f.influence_rank
-        : (typeof f.importance_rank === 'number' ? f.importance_rank : null);
-      const influencePercent = typeof f.influence_percent === 'number'
-        ? f.influence_percent
-        : (typeof f.elasticity === 'number' ? Math.abs(f.elasticity) * 100 : null);
-      const confidenceBand = typeof f.confidence_band === 'string'
-        ? f.confidence_band
-        : (typeof f.confidence === 'string' ? f.confidence : null);
+      const rank = pickFiniteNumber(f.influence_rank) ?? pickFiniteNumber(f.importance_rank);
+      const elasticity = pickFiniteNumber(f.elasticity);
+      const influencePercent = pickFiniteNumber(f.influence_percent)
+        ?? (elasticity != null ? Math.abs(elasticity) * 100 : null);
+      const confidenceBand = pickString(f.confidence_band) ?? pickString(f.confidence);
       return { label, influence_percent: influencePercent, confidence_band: confidenceBand, influence_rank: rank };
     })
     .filter((x): x is import("./types.js").FactorSensitivitySummary => x != null)
@@ -459,22 +452,21 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
   const edgeEValuesRaw = extractAnalysisArray(analysis, 'edge_e_values');
   const edgeEValuesParsed = edgeEValuesRaw
     .map((e) => {
-      const fromLabel = typeof e.from_label === 'string' ? e.from_label : null;
-      const toLabel = typeof e.to_label === 'string' ? e.to_label : null;
-      const edgeId = typeof e.edge_id === 'string' ? e.edge_id : null;
-      const label = fromLabel && toLabel ? `${fromLabel} → ${toLabel}` : (edgeId ?? null);
-      const eValue = typeof e.e_value === 'number' ? e.e_value : null;
-      return label && eValue != null ? { label, e_value: eValue } : null;
+      const label = pickEdgeLabel(e);
+      const eValue = pickFiniteNumber(e.e_value);
+      return label != null && eValue != null ? { label, e_value: eValue } : null;
     })
     .filter((x): x is { label: string; e_value: number } => x != null);
   // Convention: lower e_value → more fragile, higher e_value → more robust.
-  // Take top 2 most fragile + top 1 most robust.
+  // Take top 2 most fragile + top 1 most robust. Avoid double-counting when
+  // the most-robust pick overlaps the fragile slice (length === 3 boundary).
   const sortedAsc = [...edgeEValuesParsed].sort((a, b) => a.e_value - b.e_value);
   const edgeEValues: import("./types.js").EdgeEValueSummary[] = [];
-  for (const entry of sortedAsc.slice(0, 2)) {
-    edgeEValues.push({ ...entry, fragile: true });
+  const fragileSliceCount = Math.min(2, sortedAsc.length);
+  for (let i = 0; i < fragileSliceCount; i++) {
+    edgeEValues.push({ ...sortedAsc[i], fragile: true });
   }
-  if (sortedAsc.length > 2) {
+  if (sortedAsc.length > fragileSliceCount) {
     const mostRobust = sortedAsc[sortedAsc.length - 1];
     edgeEValues.push({ ...mostRobust, fragile: false });
   }
@@ -483,14 +475,10 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
   const conditionalWinnersRaw = extractAnalysisArray(analysis, 'conditional_winners');
   const conditionalWinners: import("./types.js").ConditionalWinnerSummary[] = conditionalWinnersRaw
     .map((c) => {
-      const scenario = typeof c.scenario === 'string'
-        ? c.scenario
-        : (typeof c.factor_label === 'string' ? c.factor_label : (typeof c.label === 'string' ? c.label : null));
-      const winnerLabel = typeof c.winner_label === 'string'
-        ? c.winner_label
-        : (typeof c.alternative_winner_label === 'string' ? c.alternative_winner_label : null);
+      const scenario = pickString(c.scenario) ?? pickString(c.factor_label) ?? pickString(c.label);
+      const winnerLabel = pickString(c.winner_label) ?? pickString(c.alternative_winner_label);
       if (!scenario || !winnerLabel) return null;
-      const probability = typeof c.probability === 'number' ? c.probability : null;
+      const probability = pickFiniteNumber(c.probability);
       return { scenario, winner_label: winnerLabel, probability };
     })
     .filter((x): x is import("./types.js").ConditionalWinnerSummary => x != null)
@@ -499,12 +487,8 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
   // inference_warnings — nested under analysis.robustness.inference_warnings
   const inferenceWarningsRaw = extractAnalysisArray(analysis, 'inference_warnings');
   const inferenceWarnings: string[] = inferenceWarningsRaw
-    .map((w) => {
-      if (typeof w.message === 'string' && w.message.length > 0) return w.message;
-      if (typeof w.code === 'string' && w.code.length > 0) return w.code;
-      return null;
-    })
-    .filter((x): x is string => x != null)
+    .map((w) => pickString(w.message) ?? pickString(w.code))
+    .filter((x): x is string => x != null && x.length > 0)
     .slice(0, 5);
 
   // Constraints
@@ -552,6 +536,34 @@ function computeAnalysisSummary(analysis: V2RunResponseEnvelope | null): Analysi
     constraints_met: constraintsMet,
     constraint_tensions: constraintTensions,
   };
+}
+
+/**
+ * Defensive narrowing helpers for analysis-payload field extraction.
+ *
+ * Upstream PLoT/ISL payloads are typed loosely (Record<string, unknown>) and
+ * have to be parsed defensively. We accept finite numbers only (no NaN, no
+ * Infinity, no string-numbers) and non-empty strings only. Anything else
+ * returns null so the caller can fall back or skip the entry.
+ */
+function pickFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function pickString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * Build a human-readable edge label from the typical edge-shape fields PLoT
+ * sends. Prefers `from_label → to_label`, falls back to `edge_id`, returns
+ * null when neither is usable.
+ */
+function pickEdgeLabel(edge: Record<string, unknown>): string | null {
+  const fromLabel = pickString(edge.from_label);
+  const toLabel = pickString(edge.to_label);
+  if (fromLabel && toLabel) return `${fromLabel} → ${toLabel}`;
+  return pickString(edge.edge_id);
 }
 
 /**
@@ -727,22 +739,23 @@ function computeSignals(
     }
 
     // Dominant factor — magnitude can come from elasticity (canonical PLoT
-    // shape) or influence_percent (UI-forwarded shape). Whichever is present,
-    // we sort by absolute magnitude and flag the leader when it dominates the
-    // runner-up by DOMINANT_FACTOR_RATIO.
+    // shape) or influence_percent (UI-forwarded shape). Whichever is present
+    // and finite, we sort by absolute magnitude and flag the leader when it
+    // dominates the runner-up by DOMINANT_FACTOR_RATIO. Entries without a
+    // string factor_id (or label fallback) are skipped — we'd otherwise
+    // produce dominant_factor='' which is silently swallowed downstream.
     if (Array.isArray(analysis.factor_sensitivity)) {
       const sensitivities = (analysis.factor_sensitivity as Array<Record<string, unknown>>)
         .map((fs) => {
-          const elasticity = typeof fs.elasticity === 'number' ? fs.elasticity : null;
-          const influencePercent = typeof fs.influence_percent === 'number' ? fs.influence_percent : null;
+          const elasticity = pickFiniteNumber(fs.elasticity);
+          const influencePercent = pickFiniteNumber(fs.influence_percent);
           const magnitude = elasticity != null
             ? Math.abs(elasticity)
             : (influencePercent != null ? Math.abs(influencePercent) : null);
           if (magnitude == null) return null;
-          return {
-            factor_id: (fs.factor_id as string) ?? (fs.label as string) ?? '',
-            sensitivity: magnitude,
-          };
+          const factorId = pickString(fs.factor_id) ?? pickString(fs.label);
+          if (factorId == null) return null;
+          return { factor_id: factorId, sensitivity: magnitude };
         })
         .filter((x): x is { factor_id: string; sensitivity: number } => x != null)
         .sort((a, b) => b.sensitivity - a.sensitivity);

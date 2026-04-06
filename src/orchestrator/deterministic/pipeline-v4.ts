@@ -201,8 +201,12 @@ export async function* executePipelineV4(
     // to override that, so set bypassStaleness when the chip targets
     // run_analysis. The hard prerequisites (graph required) still apply, so
     // a click without a graph still downgrades cleanly.
-    const chipActionForLookup = turnRequest.chip_metadata?.action_type as ActionName | undefined;
-    const bypassStaleness = chipActionForLookup === 'run_analysis';
+    //
+    // Note: this hard-codes 'run_analysis' as the only staleness-bypass case.
+    // If we add another long-running tool with the same staleness pattern in
+    // future (e.g. regenerate_brief), generalise to a Set lookup here.
+    const chipAction = turnRequest.chip_metadata?.action_type as ActionName | undefined;
+    const bypassStaleness = chipAction === 'run_analysis';
     const toolDefs = buildToolDefinitions(eligibleActions as ActionName[], turnContext, bypassStaleness);
 
     // Log filtering impact when tools were removed
@@ -218,15 +222,15 @@ export async function* executePipelineV4(
         has_analysis: !!turnContext.analysis_summary,
         has_graph: !!turnContext.graph && turnContext.graph_summary.node_count > 0,
         disambiguation_hints: turnContext.disambiguation_hints.length,
+        bypass_staleness: bypassStaleness,
       }, 'v4.tool_filtering');
     }
 
-    // Determine tool_choice
-    const chipAction = turnRequest.chip_metadata?.action_type as ActionName | undefined;
-    // Guard: only force tool_choice when the chip action survived context filtering
-    // and is present in toolDefs. If context filtering removed it (e.g. run_analysis
-    // suppressed because no graph, or target_id tool suppressed due to ambiguity),
-    // forcing the name would produce an invalid API call → downgrade to auto.
+    // Determine tool_choice.
+    // Force the chip action when it survived all tool-builder filters
+    // (data-availability, staleness with bypass, entity disambiguation, schema
+    // validation). If any filter removed it, downgrade to 'auto' so the API
+    // call stays valid and the LLM can pick something or respond conversationally.
     const chipActionInTools = chipAction && toolDefs.some(t => t.name === chipAction);
     const toolChoice = chipActionInTools
       ? { type: 'tool' as const, name: chipAction! }
