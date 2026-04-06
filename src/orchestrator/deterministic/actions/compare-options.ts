@@ -51,8 +51,13 @@ export const compareOptionsAction: ActionDefinition = {
       };
     }
 
-    const drivers = ctx.analysis_summary?.top_drivers ?? [];
-    const driverLabels = drivers.slice(0, 3).map((d) => d.label);
+    // Fix 4: differentiator source. Prefer the UI-forwarded factor_sensitivity
+    // (carries influence_percent) over the legacy top_drivers.
+    const factorSensitivity = ctx.analysis_summary?.factor_sensitivity ?? [];
+    const topDrivers = ctx.analysis_summary?.top_drivers ?? [];
+    const driverLabels: string[] = factorSensitivity.length > 0
+      ? factorSensitivity.slice(0, 3).map((f) => f.label)
+      : topDrivers.slice(0, 3).map((d) => d.label);
     const differentiators = driverLabels.length > 0
       ? driverLabels
       : ['Combined factor effects'];
@@ -67,26 +72,60 @@ export const compareOptionsAction: ActionDefinition = {
       key_differentiators: differentiators,
     }));
 
-    const margin = (results[0].win_probability as number - (results[1].win_probability as number)) * 100;
-    const narrativeParts: string[] = [];
-    if (margin < 5) {
-      narrativeParts.push(`This is a close call — only ${margin.toFixed(1)} percentage points separate the top two options.`);
-    } else if (margin > 20) {
-      narrativeParts.push(`${results[0].option_label} has a clear lead of ${margin.toFixed(0)} percentage points.`);
-    }
-    // When no driver data but fragile edges exist, surface fragility in the narrative
+    const winnerLabel = results[0].option_label as string;
+    const runnerUpLabel = results[1].option_label as string;
+    const winnerPct = (results[0].win_probability as number) * 100;
+    const runnerUpPct = (results[1].win_probability as number) * 100;
+    const margin = winnerPct - runnerUpPct;
     const fragileCount = ctx.analysis_summary?.fragile_edge_count ?? 0;
-    if (driverLabels.length === 0 && fragileCount > 0) {
-      narrativeParts.push(`${fragileCount} fragile edge${fragileCount > 1 ? 's' : ''} detected — small assumption changes could shift the ranking.`);
+
+    // Fix 4: narrative must ALWAYS be non-empty when results.length >= 2.
+    // It must reference winner, runner-up, margin, and at least one
+    // concrete differentiator (driver label or structural fragility cue).
+    const narrativeParts: string[] = [];
+
+    // Base comparison line — fired unconditionally
+    narrativeParts.push(
+      `${winnerLabel} leads at ${winnerPct.toFixed(0)}%, ahead of ${runnerUpLabel} at ${runnerUpPct.toFixed(0)}% — a ${margin.toFixed(0)}-point gap.`,
+    );
+
+    // Margin context
+    if (margin < 5) {
+      narrativeParts.push(`This is a close call — relatively small assumption changes could swap the ranking.`);
+    } else if (margin > 20) {
+      narrativeParts.push(`${winnerLabel} has a clear lead.`);
     }
+
+    // Differentiator context — always include when drivers exist
+    if (driverLabels.length > 0) {
+      const topLabel = driverLabels[0];
+      const supporting = driverLabels.slice(1, 3);
+      if (supporting.length > 0) {
+        narrativeParts.push(`Main differentiators: ${topLabel}, ${supporting.join(', ')}.`);
+      } else {
+        narrativeParts.push(`Main differentiator: ${topLabel}.`);
+      }
+    } else if (fragileCount > 0) {
+      narrativeParts.push(`${fragileCount} fragile edge${fragileCount > 1 ? 's' : ''} detected — small assumption changes could shift the ranking.`);
+    } else {
+      narrativeParts.push(`The outcome is shaped by the combined effect of multiple factors.`);
+    }
+
     const narrative = narrativeParts.join(' ');
 
     const blockData: ComparisonBlockData = { options, narrative };
     const block = createComparisonBlock(blockData, ctx.turn_id);
 
+    // Fix 4: assistantText names the top differentiator when available.
+    // Falls back to winner+margin when no drivers exist.
+    const topDifferentiator = driverLabels.length > 0 ? driverLabels[0] : null;
+    const assistantText = topDifferentiator
+      ? `${winnerLabel} edges out ${runnerUpLabel} (${winnerPct.toFixed(0)}% vs ${runnerUpPct.toFixed(0)}%) — ${topDifferentiator} is the main differentiator.`
+      : `${winnerLabel} leads ${runnerUpLabel} by ${margin.toFixed(0)} points (${winnerPct.toFixed(0)}% vs ${runnerUpPct.toFixed(0)}%).`;
+
     return {
       blocks: [block],
-      assistantText: `Comparing ${results.length} options — ${results[0].option_label} leads at ${((results[0].win_probability as number) * 100).toFixed(0)}%.`,
+      assistantText,
       guidance_items: [],
     };
   },

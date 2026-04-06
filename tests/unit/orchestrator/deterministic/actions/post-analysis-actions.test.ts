@@ -18,6 +18,7 @@ vi.mock("../../../../../src/utils/telemetry.js", () => ({
 }));
 
 import { explainResultAction } from "../../../../../src/orchestrator/deterministic/actions/explain-result.js";
+import { compareOptionsAction } from "../../../../../src/orchestrator/deterministic/actions/compare-options.js";
 import type {
   DeterministicTurnContext,
   AnalysisSummary,
@@ -167,5 +168,94 @@ describe("explain_result action (Fix 3)", () => {
   });
 });
 
-// Fix 4 (compare_options) and Fix 5 (what_would_flip) tests are added in
-// their own commits.
+// ─────────────────────────────────────────────────────────────────────────
+// Fix 4: compare_options — narrative non-empty, names a differentiator
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("compare_options action (Fix 4)", () => {
+  it("narrative is non-empty when results.length >= 2", async () => {
+    const ctx = makeTurnContext();
+    const result = await compareOptionsAction.execute({}, ctx);
+    expect(result.blocks.length).toBe(1);
+    const data = result.blocks[0].data as { options: unknown[]; narrative: string };
+    expect(data.narrative.length).toBeGreaterThan(0);
+  });
+
+  it("narrative names winner, runner-up, and margin", async () => {
+    const ctx = makeTurnContext();
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as { narrative: string };
+    expect(data.narrative).toContain('Hire Tech Lead');
+    expect(data.narrative).toContain('Contract');
+    // Margin is 80 points
+    expect(data.narrative).toMatch(/\b8\d\b|\b90\b/);
+  });
+
+  it("narrative names at least one concrete differentiator when drivers exist", async () => {
+    const ctx = makeTurnContext();
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as { narrative: string };
+    expect(data.narrative.toLowerCase()).toContain('ramp time');
+  });
+
+  it("assistantText names the top differentiator when drivers exist", async () => {
+    const ctx = makeTurnContext();
+    const result = await compareOptionsAction.execute({}, ctx);
+    expect(result.assistantText).toBeDefined();
+    expect(result.assistantText!).toContain('Ramp time');
+    expect(result.assistantText!).toContain('Hire Tech Lead');
+    expect(result.assistantText!).toContain('Contract');
+  });
+
+  it("narrative still populated when drivers are empty but fragile edges exist", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: {
+        ...makeAnalysisSummary(),
+        top_drivers: [],
+        factor_sensitivity: [],
+        fragile_edge_count: 3,
+      },
+    });
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as { narrative: string };
+    expect(data.narrative.length).toBeGreaterThan(0);
+    expect(data.narrative.toLowerCase()).toContain('fragile');
+  });
+
+  it("narrative still populated when both drivers and fragile edges are empty (structural cue)", async () => {
+    const ctx = makeTurnContext({
+      analysis_summary: {
+        ...makeAnalysisSummary(),
+        top_drivers: [],
+        factor_sensitivity: [],
+        fragile_edge_count: 0,
+      },
+    });
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as { narrative: string };
+    expect(data.narrative.length).toBeGreaterThan(0);
+    // Narrative still mentions winner + runner-up
+    expect(data.narrative).toContain('Hire Tech Lead');
+    expect(data.narrative).toContain('Contract');
+  });
+
+  it("returns error assistantText when results are empty", async () => {
+    const ctx = makeTurnContext({
+      analysis: { results: [] } as unknown as never,
+    });
+    const result = await compareOptionsAction.execute({}, ctx);
+    expect(result.blocks.length).toBe(0);
+    expect(result.assistantText).toContain('No analysis results');
+  });
+
+  it("returns guidance assistantText when only one result", async () => {
+    const ctx = makeTurnContext({
+      analysis: {
+        results: [{ option_id: 'opt_hire', option_label: 'Hire Tech Lead', win_probability: 0.9 }],
+      } as unknown as never,
+    });
+    const result = await compareOptionsAction.execute({}, ctx);
+    expect(result.blocks.length).toBe(0);
+    expect(result.assistantText).toContain('at least two');
+  });
+});
