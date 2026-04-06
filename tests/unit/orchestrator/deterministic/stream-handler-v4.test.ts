@@ -473,4 +473,133 @@ describe("processAdapterStream", () => {
     expect(result!.assistantText).toBe('Hello world.');
     expect(result!.toolExecution).toBeDefined();
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Regression: XML envelope parsing on phase-1 extraction.
+  //
+  // Sonnet 4.6 + forced tool_choice bundles the entire response envelope
+  // (<diagnostics>...</diagnostics><response><assistant_text>...</assistant_text></response>)
+  // into a single text block in message_complete.content. The phase-1
+  // extraction must parse this so the diagnostics prose never reaches the
+  // SSE text_delta or the assembled assistant_text.
+  // ─────────────────────────────────────────────────────────────────────
+  it("regression: phase-1 strips full XML envelope from bundled text block", async () => {
+    const envelopeText =
+      '<diagnostics>Mode: ACT. Tool: set_factor_value. Stage: IDEATE.</diagnostics>'
+      + '<response><assistant_text>Updating runway as the dominant driver.</assistant_text></response>';
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: envelopeText },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string }> = [];
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string; delta?: string });
+    }
+
+    // Returned assistantText is the cleaned <assistant_text> content only.
+    expect(result!.assistantText).toBe('Updating runway as the dominant driver.');
+    // No yielded delta carries diagnostics prose.
+    for (const e of events) {
+      if (e.type === 'text_delta') {
+        expect(e.delta).not.toContain('<diagnostics>');
+        expect(e.delta).not.toContain('Mode:');
+        expect(e.delta).not.toContain('Tool:');
+      }
+    }
+    // The cleaned headline was yielded as a text_delta.
+    const headlineDelta = events.find((e) => e.type === 'text_delta');
+    expect(headlineDelta).toBeDefined();
+    expect(headlineDelta!.delta).toBe('Updating runway as the dominant driver.');
+    // Ordering: text_delta → block → tool_result.
+    const firstTextDeltaIdx = events.findIndex((e) => e.type === 'text_delta');
+    const firstBlockIdx = events.findIndex((e) => e.type === 'block');
+    const firstToolResultIdx = events.findIndex((e) => e.type === 'tool_result');
+    expect(firstTextDeltaIdx).toBeLessThan(firstBlockIdx);
+    expect(firstBlockIdx).toBeLessThan(firstToolResultIdx);
+  });
+
+  it("regression: phase-1 strips diagnostics-style preamble without XML tags", async () => {
+    const preambleText = 'Mode: ACT. Tool: set_factor_value.\nHere is the option rationale.';
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: preambleText },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string }> = [];
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string; delta?: string });
+    }
+
+    expect(result!.assistantText).toBe('Here is the option rationale.');
+    const headlineDelta = events.find((e) => e.type === 'text_delta');
+    expect(headlineDelta!.delta).toBe('Here is the option rationale.');
+  });
+
+  it("regression: phase-1 passes plain text through unchanged when no envelope present", async () => {
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: 'Just a plain headline, no envelope.' },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string }> = [];
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string; delta?: string });
+    }
+
+    expect(result!.assistantText).toBe('Just a plain headline, no envelope.');
+    const headlineDelta = events.find((e) => e.type === 'text_delta');
+    expect(headlineDelta!.delta).toBe('Just a plain headline, no envelope.');
+  });
 });

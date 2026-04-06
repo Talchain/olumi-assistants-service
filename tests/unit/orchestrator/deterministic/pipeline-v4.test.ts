@@ -1187,4 +1187,55 @@ describe("executePipelineV4", () => {
       );
     });
   });
+
+  // ── Regression: XML envelope diagnostics leak ────────────────────────────
+
+  describe("XML envelope diagnostics stripping", () => {
+    it("envelope assistant_text is clean when LLM bundles diagnostics + response in one text block", async () => {
+      // Simulates Sonnet 4.6 + forced tool_choice: zero streaming deltas,
+      // and the entire XML envelope (diagnostics + response) arrives in
+      // a single text block alongside the tool_use in message_complete.
+      const envelopeText =
+        '<diagnostics>Mode: ACT. Tool: draft_graph. Stage: IDEATE.</diagnostics>'
+        + '<response><assistant_text>Building your decision model now.</assistant_text></response>';
+
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'draft_graph' },
+        { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'draft_graph', input: {} },
+        {
+          type: 'message_complete',
+          result: {
+            content: [
+              { type: 'text', text: envelopeText },
+              { type: 'tool_use', id: 'toolu_1', name: 'draft_graph', input: {} },
+            ],
+            stop_reason: 'tool_use',
+            model: 'claude-sonnet-4-6',
+            latencyMs: 200,
+            usage: {},
+          },
+        },
+      ]));
+
+      const req = makeTurnRequest({ message: 'Build my model' });
+      const events = await collectEvents(executePipelineV4(req, 'req-xml'));
+      const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      const text = complete.envelope.assistant_text ?? '';
+
+      // The envelope text must not contain any diagnostics prose or tags.
+      expect(text).not.toContain('<diagnostics>');
+      expect(text).not.toContain('Mode:');
+      expect(text).not.toContain('Tool:');
+      expect(text).not.toContain('Stage:');
+      // The cleaned headline is preserved.
+      expect(text).toContain('Building your decision model now.');
+
+      // No streamed text_delta carries diagnostics either.
+      const textDeltas = events.filter((e) => e.type === 'text_delta') as Array<Extract<OrchestratorStreamEvent, { type: 'text_delta' }>>;
+      for (const d of textDeltas) {
+        expect(d.delta).not.toContain('<diagnostics>');
+        expect(d.delta).not.toContain('Mode:');
+      }
+    });
+  });
 });

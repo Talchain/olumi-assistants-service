@@ -13,6 +13,7 @@ import type { OrchestratorStreamEvent } from "../pipeline/stream-events.js";
 import type { ActionResult, DeterministicTurnContext } from "./types.js";
 import type { ActionName } from "./actions/types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
+import { parseOrchestratorResponse } from "../response-parser.js";
 import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
@@ -261,8 +262,20 @@ export async function* processAdapterStream(
         if (textChunks.join('').trim() === '') {
           for (const block of event.result.content) {
             if (block.type === 'text' && block.text) {
-              textChunks.push(block.text);
-              yield { type: 'text_delta', seq: seq++, delta: block.text };
+              // Sonnet 4.6 + forced tool_choice bundles the entire XML
+              // envelope (<diagnostics>...</diagnostics><response>
+              // <assistant_text>...</assistant_text></response>) into a
+              // single final text block. Parse it so the SSE text_delta
+              // and the accumulated textChunks both carry only the
+              // user-visible assistant_text — never the diagnostics prose.
+              // parseOrchestratorResponse never throws and has a plain-text
+              // fallback, so unwrapped prose round-trips unchanged.
+              const parsed = parseOrchestratorResponse(block.text);
+              const clean = parsed.assistant_text;
+              if (clean) {
+                textChunks.push(clean);
+                yield { type: 'text_delta', seq: seq++, delta: clean };
+              }
             }
           }
         }
