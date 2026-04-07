@@ -58,20 +58,44 @@ function getNestedResults(response: V2RunResponseEnvelope): Record<string, unkno
 }
 
 /**
- * True when `results` is a nested object containing one of the recognized
- * option-result arrays (option_comparison / options / option_results).
+ * True when `results` is a non-null object that carries at least one
+ * field downstream readers understand: option_comparison / options /
+ * option_results (option arrays), factor_sensitivity (sensitivity
+ * array), constraint_analysis (object with joint_probability), or
+ * robustness (object with level).
  *
- * Used by normalizeAnalysisEnvelope to gate the destructive results repair:
- * a nested-object shape is a legitimate UI-side payload that downstream
- * readers (getOptionResultCandidates, getNestedResults) already understand,
- * so the repair must not overwrite it with [].
+ * Used by normalizeAnalysisEnvelope to gate the destructive results
+ * repair. Two competing concerns drive the discriminator:
+ *
+ *   1. The UI may wrap analytic data inside `results` as an object —
+ *      including nested option arrays AND nested factor_sensitivity /
+ *      constraint_analysis / robustness with no option arrays at all.
+ *      Downstream readers (getOptionResultCandidates, getNestedResults,
+ *      hasValidSensitivity, etc.) all understand the nested shape;
+ *      overwriting it with [] would silently destroy the payload.
+ *
+ *   2. The UI's redux state can hit circular references during JSON
+ *      serialisation and substitute a sentinel like
+ *      `{ __circular: true, type: 'object' }`. That object MUST be
+ *      treated as malformed and rebuilt from top-level option_comparison
+ *      so analysis data still reaches the LLM context.
+ *
+ * The discriminator is: does the object expose any field a downstream
+ * reader will recognise? Legitimate payloads do; sentinels do not.
+ *
+ * Keep this list in sync with hasValidOptionResults (via
+ * getOptionResultCandidates), hasValidSensitivity,
+ * hasValidConstraintAnalysis, hasValidRobustness.
  */
-function hasNestedResultArrays(results: unknown): boolean {
+function isPreservableResultsPayload(results: unknown): boolean {
   if (!results || typeof results !== 'object' || Array.isArray(results)) return false;
   const nested = results as Record<string, unknown>;
   return Array.isArray(nested.option_comparison)
     || Array.isArray(nested.options)
-    || Array.isArray(nested.option_results);
+    || Array.isArray(nested.option_results)
+    || Array.isArray(nested.factor_sensitivity)
+    || (typeof nested.constraint_analysis === 'object' && nested.constraint_analysis !== null)
+    || (typeof nested.robustness === 'object' && nested.robustness !== null);
 }
 
 function hasValidSensitivity(response: V2RunResponseEnvelope): boolean {
@@ -117,16 +141,19 @@ export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2Ru
     has_option_comparison: Array.isArray(r.option_comparison),
   }, 'normalizeAnalysisEnvelope: incoming payload shape');
 
-  // Repair malformed results: when results is not an array, attempt to
-  // reconstruct from top-level option_comparison (the canonical PLoT V2 field).
+  // Repair malformed results: when results is genuinely malformed
+  // (null / undefined / string / number / boolean / object that does
+  // not contain any recognised analytic field), attempt to reconstruct
+  // from top-level option_comparison (the canonical PLoT V2 field —
+  // see real-PLoT shape in tests/fixtures/golden/ui-analysis-state-real.json).
   //
-  // If results is a nested object that getOptionResultCandidates already
-  // understands (option_comparison / options / option_results arrays inside),
-  // leave it alone — downstream readers (getOptionResultCandidates,
-  // getNestedResults, isAnalysisExplainable) all understand the nested
-  // shape, and overwriting it with [] would destroy real data.
+  // Object payloads that DO contain a recognised analytic field are
+  // preserved unconditionally — see isPreservableResultsPayload for
+  // the rationale and the field list. The discriminator distinguishes
+  // legitimate UI-side wrapping (preserve) from circular-reference
+  // sentinels like `{ __circular: true }` (rebuild).
   let repaired = response;
-  if (!Array.isArray(r.results) && !hasNestedResultArrays(r.results)) {
+  if (!Array.isArray(r.results) && !isPreservableResultsPayload(r.results)) {
     const optComp = r.option_comparison;
     if (Array.isArray(optComp) && optComp.length > 0) {
       const mapped = (optComp as Array<Record<string, unknown>>).map((entry) => ({

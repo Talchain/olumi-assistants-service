@@ -25,6 +25,7 @@ SMOKE_TESTS=(
   tests/unit/orchestrator/pipeline/phase4-tools.test.ts
   tests/unit/orchestrator/pipeline/phase5-envelope-assembler.test.ts
   tests/unit/orchestrator/pipeline/analysis-state-normalization.test.ts
+  tests/unit/orchestrator/analysis-state-normalizer.test.ts
   tests/unit/orchestrator/tools/dispatch-chaining.test.ts
   tests/unit/orchestrator/tools/edit-graph-normalisation.test.ts
 )

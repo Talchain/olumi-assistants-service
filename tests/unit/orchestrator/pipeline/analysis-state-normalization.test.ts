@@ -490,6 +490,96 @@ describe("normalizeAnalysisEnvelope + isAnalysisExplainable integration", () => 
     expect(isAnalysisExplainable(normalized)).toBe(true);
   });
 
+  // Regression: previously normalizeAnalysisEnvelope's repair branch
+  // overwrote any non-array results with [], including UI-side nested
+  // payloads that carried only factor_sensitivity / constraint_analysis /
+  // robustness (no option arrays). The destruction made the data
+  // unreachable because downstream readers look inside results.
+  // The narrow option-array-only fix from the previous commit did not
+  // address this — only nested option_comparison/options/option_results
+  // were preserved. The broader fix preserves any non-null object.
+  it("preserves nested factor_sensitivity-only payload through normalize → isAnalysisExplainable", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        factor_sensitivity: [{ label: "Cost", elasticity: 0.8 }],
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    // The nested object survives the normaliser intact.
+    expect((normalized as Record<string, unknown>).results).toEqual({
+      factor_sensitivity: [{ label: "Cost", elasticity: 0.8 }],
+    });
+    // And the data remains explainable downstream.
+    expect(isAnalysisExplainable(normalized)).toBe(true);
+  });
+
+  it("preserves nested constraint_analysis-only payload through normalize → isAnalysisExplainable", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        constraint_analysis: { joint_probability: 0.72 },
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect((normalized as Record<string, unknown>).results).toEqual({
+      constraint_analysis: { joint_probability: 0.72 },
+    });
+    expect(isAnalysisExplainable(normalized)).toBe(true);
+  });
+
+  it("preserves nested robustness-only payload through normalize → isAnalysisExplainable", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: {
+        robustness: { level: "moderate" },
+      },
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect((normalized as Record<string, unknown>).results).toEqual({
+      robustness: { level: "moderate" },
+    });
+    expect(isAnalysisExplainable(normalized)).toBe(true);
+  });
+
+  it("repair branch still rebuilds results from top-level option_comparison when results is undefined (real PLoT shape)", () => {
+    // This is the canonical PLoT /v2/run shape — see
+    // tests/fixtures/golden/ui-analysis-state-real.json: top-level
+    // option_comparison / factor_sensitivity / robustness, no results
+    // field at all. The repair must still fire and lift option_comparison
+    // into results so downstream array-readers find it.
+    const envelope = {
+      analysis_status: "completed",
+      option_comparison: [
+        { option_label: "A", win_probability: 0.6 },
+        { option_label: "B", win_probability: 0.4 },
+      ],
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect(Array.isArray((normalized as Record<string, unknown>).results)).toBe(true);
+    expect((normalized as { results: Array<{ option_label: string }> }).results.length).toBe(2);
+    expect((normalized as { results: Array<{ option_label: string }> }).results[0].option_label).toBe("A");
+  });
+
+  it("repair branch still degrades to [] when results is null and no option_comparison present", () => {
+    const envelope = {
+      analysis_status: "completed",
+      results: null,
+      meta: { response_hash: "abc123", seed_used: 42, n_samples: 1000 },
+    } as unknown as V2RunResponseEnvelope;
+
+    const normalized = normalizeAnalysisEnvelope(envelope);
+    expect((normalized as Record<string, unknown>).results).toEqual([]);
+  });
+
   it("analysis from context.analysis_response path is normalized and explainable", () => {
     const context = makeContext({
       graph: STUB_GRAPH,
