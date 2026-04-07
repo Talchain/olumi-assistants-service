@@ -8,6 +8,10 @@
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
 import type { PatchOperation } from "../../types.js";
+import type { GraphV3T } from "../../../schemas/cee-v3.js";
+import { computeStructuralReadiness } from "../../tools/analysis-ready-helper.js";
+import { AnalysisReadyPayload } from "../../../schemas/analysis-ready.js";
+import { log } from "../../../utils/telemetry.js";
 
 export const addOptionAction: ActionDefinition = {
   action_type: 'add_option',
@@ -132,11 +136,104 @@ export const addOptionAction: ActionDefinition = {
       ? ` with ${interventionCount} intervention${interventionCount > 1 ? 's' : ''}`
       : '';
 
+    // Build a synthetic post-patch graph as READ-ONLY input to
+    // computeStructuralReadiness. This is the same helper draft_graph uses
+    // (src/orchestrator/tools/draft-graph.ts:163-165) and handles per-option
+    // status derivation, so we never hand-roll status logic here.
+    //
+    // CRITICAL: this synthetic graph must NOT mutate ctx.graph. We use a
+    // shallow clone of nodes/edges arrays and never call .push on the
+    // original. Existing entries are referenced by identity (we don't deep
+    // clone) which is safe because computeStructuralReadiness only reads.
+    // The real graph mutation happens server-side when the patch is applied.
+    let analysisReady: ActionResult['analysis_ready'];
+    if (ctx.graph) {
+      // Mirror interventions on both `data.interventions` (canonical edit
+      // location, gated by CEE_EDIT_INTERVENTION_ROUTING_ENABLED) and on
+      // top-level `interventions` (always-on fallback per
+      // mergeInterventionSources, source 3). This makes the synthetic node
+      // robust to the flag being toggled in tests or staging.
+      const newOptionNode = {
+        id: nodeId,
+        kind: 'option' as const,
+        label,
+        data: { interventions },
+        interventions,
+      };
+      // If an option with the same id already exists, replace it; otherwise append.
+      // Replacement matters for re-add scenarios — duplicates would skew status counts.
+      const existingIdx = ctx.graph.nodes.findIndex((n) => n.id === nodeId);
+      const syntheticNodes = existingIdx >= 0
+        ? [
+            ...ctx.graph.nodes.slice(0, existingIdx),
+            newOptionNode,
+            ...ctx.graph.nodes.slice(existingIdx + 1),
+          ]
+        : [...ctx.graph.nodes, newOptionNode];
+
+      // Append intervention edges (option → factor). The numeric value is
+      // encoded on the option node's data.interventions (above), not the
+      // edge — mirrors the real patch shape (see operations[] earlier in
+      // this function). computeStructuralReadiness reads interventions off
+      // the node, so the edges only need to assert connectivity.
+      //
+      // Filter out any existing edges FROM this nodeId first: when replacing
+      // an option (existingIdx >= 0), the old edges would otherwise accumulate
+      // in syntheticEdges alongside the new ones, making optionToFactors in
+      // computeStructuralReadiness include stale targets and biasing status
+      // toward needs_encoding rather than needs_user_mapping.
+      const baseEdges = ctx.graph.edges.filter((e) => e.from !== nodeId);
+      const newEdges = Object.keys(interventions).map((factorId) => ({
+        from: nodeId,
+        to: factorId,
+        strength: { mean: 1.0, std: 0.01 },
+        exists_probability: 1.0,
+        effect_direction: 'positive' as const,
+      }));
+      const syntheticEdges = [...baseEdges, ...newEdges];
+
+      const syntheticGraph: GraphV3T = {
+        ...ctx.graph,
+        nodes: syntheticNodes as GraphV3T['nodes'],
+        edges: syntheticEdges as GraphV3T['edges'],
+      };
+
+      const rawReadiness = computeStructuralReadiness(syntheticGraph);
+      if (rawReadiness) {
+        // Validate against the canonical Zod schema to catch divergence between
+        // the local GraphPatchBlockData TS type and AnalysisReadyPayload.
+        // Mirrors the non-fatal pattern in draft_graph.ts:545. The payload uses
+        // option_id (outward contract) while the Zod schema expects id — re-map
+        // for validation only, then return the option_id version unchanged.
+        const forValidation = {
+          ...rawReadiness,
+          options: rawReadiness.options.map((o) => ({
+            id: o.option_id,
+            label: o.label,
+            status: o.status,
+            interventions: o.interventions,
+          })),
+        };
+        const parseResult = AnalysisReadyPayload.safeParse(forValidation);
+        if (!parseResult.success) {
+          log.warn(
+            {
+              errors_flat: parseResult.error.flatten(),
+              error_paths: parseResult.error.issues.slice(0, 3).map((i) => ({ path: i.path, message: i.message })),
+            },
+            'add_option: analysis_ready failed Zod contract validation — emitting anyway (non-fatal)',
+          );
+        }
+        analysisReady = rawReadiness;
+      }
+    }
+
     return {
       blocks: [],
       assistantText: `I'll add option **${label}**${summary}. Please confirm.`,
       guidance_items: [],
       operations,
+      ...(analysisReady ? { analysis_ready: analysisReady } : {}),
     };
   },
 

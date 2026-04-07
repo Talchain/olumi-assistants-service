@@ -344,6 +344,16 @@ export interface ActionResult {
   applied_graph_hash?: string;
   /** Applied graph state after patch. */
   applied_graph?: GraphV3T;
+  /**
+   * Recomputed analysis_ready payload for graph-mutating actions.
+   * Action handlers that change option/intervention state populate this so
+   * the v4 envelope assembler can refresh both the graph_patch block's
+   * analysis_ready and (where applicable) the top-level envelope field.
+   * Without this, downstream consumers see a stale view from the previous
+   * turn — e.g. add_option followed by run_analysis hits PLoT with empty
+   * interventions and gets EMPTY_INTERVENTIONS.
+   */
+  analysis_ready?: import("../types.js").GraphPatchBlockData['analysis_ready'];
 }
 
 // ============================================================================

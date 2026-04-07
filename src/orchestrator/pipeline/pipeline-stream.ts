@@ -110,10 +110,30 @@ export async function* executePipelineStream(
       const { executePipelineV4 } = await import("../deterministic/pipeline-v4.js");
       const fastifyReq = (deps as { _fastifyRequest?: import("fastify").FastifyRequest })._fastifyRequest;
 
+      // Strip XML envelope tags from text deltas before emitting to the client.
+      // The v2 streaming path does this for raw LLM streams (see lines below);
+      // the v4 path needs the same protection because deterministic action handlers
+      // can still surface LLM-produced text deltas that may contain XML/diagnostics
+      // fragments. Stripping at this choke point keeps stream-handler-v4 untouched.
+      const v4Stripper = new StreamingEnvelopeStripper();
+
       for await (const event of executePipelineV4(request, requestId, signal, fastifyReq)) {
-        yield { ...event, seq: seq++ };
+        if (event.type === 'text_delta') {
+          const clean = v4Stripper.process(event.delta);
+          if (clean) {
+            yield { ...event, delta: clean, seq: seq++ };
+          }
+          // Empty result → suppress entirely (no seq consumed; seq is monotonic, not contiguous).
+        } else {
+          yield { ...event, seq: seq++ };
+        }
         if (signal?.aborted) return;
       }
+      // Intentionally do NOT call v4Stripper.flush() at end-of-stream:
+      // any buffered content is by definition an unterminated XML/diagnostics
+      // fragment (the stripper only buffers when inside a tag or holding a
+      // partial `<…` opener). turn_complete carries the canonical assistant
+      // text, so flushing here would only leak diagnostics noise.
       return;
     }
 

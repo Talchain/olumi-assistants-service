@@ -580,7 +580,7 @@ export async function* executePipelineV4(
 // Response Assembly
 // ============================================================================
 
-interface AssembleInput {
+export interface AssembleInput {
   turnContext: DeterministicTurnContext;
   turnId: string;
   requestId: string;
@@ -599,7 +599,7 @@ interface AssembleInput {
  * Chips are built deterministically — no LLM input.
  * Assistant text comes directly from LLM text blocks (never JSON).
  */
-function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV2 {
+export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV2 {
   const {
     turnContext,
     turnId,
@@ -641,6 +641,11 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
         auto_apply: false,
         applied_graph_hash: actionResult.applied_graph_hash,
         applied_graph: actionResult.applied_graph,
+        // Propagate recomputed analysis_ready from the action handler.
+        // Without this, downstream consumers (UI / next-turn run_analysis)
+        // see the previous turn's stale view and PLoT rejects with
+        // EMPTY_INTERVENTIONS — see add-option.ts for why this matters.
+        ...(actionResult.analysis_ready ? { analysis_ready: actionResult.analysis_ready } : {}),
       },
       turnId,
     );
@@ -706,6 +711,10 @@ function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEnvelopeV
     blocks,
     suggested_actions: suggestedActions.length > 0 ? suggestedActions : undefined,
     analysis_response: actionResult?.analysis_response,
+    // Mirror analysis_ready at the top-level envelope as well as on the
+    // graph_patch block above. Some UI consumers read it from the envelope,
+    // others from the patch block — populate both to keep them in sync.
+    ...(actionResult?.analysis_ready ? { analysis_ready: actionResult.analysis_ready } : {}),
     lineage,
     turn_plan: turnPlan,
     stage_indicator: turnContext.stage,
