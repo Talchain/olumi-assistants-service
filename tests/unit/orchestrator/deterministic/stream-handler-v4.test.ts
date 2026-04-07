@@ -772,6 +772,66 @@ describe("processAdapterStream", () => {
     expect(result!.assistantText).toBe('Hello plain world.');
   });
 
+  it("regression: post-assembly handles bundle-pattern leak (headline + middle diagnostics + prose)", async () => {
+    // Real-world leak shape from debug bundle bce361c4 (quoted in the
+    // 7-Apr-2026 fix brief). The model emits a clean headline, then a
+    // diagnostics block as prose (no XML tags), then the actual response
+    // prose. stripDiagnosticsPreamble should remove the middle diagnostics
+    // lines while preserving the surrounding prose.
+    const bundleText =
+      'Startup Accelerator Programme leads the analysis at 50%.\n'
+      + '\n'
+      + 'Mode: ACT. Tool: explain_result. User explicitly asks for causal decomposition of winner. Analysis present in context.\n'
+      + 'Stage: EVALUATE.\n'
+      + '\n'
+      + "Here's the causal breakdown of why the Startup Accelerator Programme leads at 50%.";
+    const stream = mockStream([
+      { type: 'text_delta', delta: bundleText },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    expect(result!.assistantText).toContain('Startup Accelerator Programme leads the analysis at 50%.');
+    expect(result!.assistantText).toContain("Here's the causal breakdown");
+    expect(result!.assistantText).not.toContain('Mode: ACT');
+    expect(result!.assistantText).not.toContain('Stage: EVALUATE');
+    expect(result!.assistantText).not.toContain('Tool: explain_result');
+  });
+
+  it("regression: post-assembly preserves inline Facilitator/Challenger lines on clean streamed prose", async () => {
+    // The post-assembly parser would otherwise extract these lines into
+    // suggested_actions[], which the stream handler does not plumb through —
+    // so they would silently disappear from assistant_text. The
+    // needsEnvelopeParse gate must skip parsing entirely on this kind of
+    // clean prose so the lines survive in the headline text.
+    const cleanProse =
+      'Here is what I would explore next:\n'
+      + '\n'
+      + 'Facilitator: Run sensitivity analysis — See how robust the recommendation is to your inputs.\n'
+      + 'Challenger: Pause and reframe — The model may be missing a key option.';
+    const stream = mockStream([
+      { type: 'text_delta', delta: cleanProse },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    expect(result!.assistantText).toBe(cleanProse);
+    expect(result!.assistantText).toContain('Facilitator: Run sensitivity analysis');
+    expect(result!.assistantText).toContain('Challenger: Pause and reframe');
+  });
+
   it("regression: post-assembly does not overwrite empty stream with parser fallback string", async () => {
     // No text_deltas at all and no text content in message_complete.
     // The stream-handler must return an empty assistantText so the

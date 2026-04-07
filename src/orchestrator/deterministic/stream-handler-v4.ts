@@ -35,6 +35,41 @@ export const PROGRESS_MESSAGES: Partial<Record<ActionName, string>> = {
 /** Interval between progress events (ms). */
 export const PROGRESS_INTERVAL_MS = 5000;
 
+/**
+ * Detects whether streamed text needs to go through parseOrchestratorResponse.
+ *
+ * Returns true when the text either:
+ *   (a) contains an XML envelope tag anywhere
+ *       (<diagnostics>, <response>, <assistant_text>, <blocks>, <suggested_actions>), or
+ *   (b) contains any line matching the diagnostics-preamble pattern
+ *       (Mode:|Stage:|Context:|Route:|Tool:|Using:|No tool needed/invocation).
+ *
+ * Returns false for clean prose so the parser's side-effects do not run on
+ * legitimate streamed output:
+ *   1. rescueInlineActions() (Path 5 plain text) would strip lines like
+ *      "Facilitator: Label — Message" into suggested_actions[]; the stream
+ *      handler does not plumb suggested_actions through, so those lines
+ *      would silently disappear from assistant_text. The gate skips clean
+ *      prose entirely so this side-effect never fires on streamed text.
+ *   2. Path 5 telemetry (`orchestrator.xml_parse_fallback`) would emit on
+ *      every clean streamed turn, polluting the parse-fallback signal.
+ *
+ * Mirrors the parser's own DIAGNOSTICS_PREAMBLE_LINE pattern so the gate
+ * triggers on the same conditions the stripper would actually act on.
+ * Falsely matching legitimate prose (e.g. "Tool: a Monte Carlo simulation.")
+ * is a known limitation shared with the parser itself; the fail-safe inside
+ * stripDiagnosticsPreamble restores the original text if stripping would
+ * empty it. Catching the bundle-evidenced "headline + middle diagnostics +
+ * prose" leak (debug bundle bce361c4) is more important than that edge.
+ */
+const ENVELOPE_TAG_RE = /<(?:diagnostics|response|assistant_text|blocks|suggested_actions)\b/i;
+const DIAGNOSTICS_LINE_RE =
+  /^[ \t]*(?:Mode:|Stage:|Context:|Route:|Tool:|Using:|No tool (?:needed|invocation)\b)/im;
+
+function needsEnvelopeParse(text: string): boolean {
+  return ENVELOPE_TAG_RE.test(text) || DIAGNOSTICS_LINE_RE.test(text);
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -352,16 +387,41 @@ export async function* processAdapterStream(
   // the client reconciles to the canonical assistant_text in the final
   // envelope, so transient deltas are acceptable.
   //
-  // Skip parsing on whitespace-only/empty input to avoid the parser's
-  // Path 6 generic-fallback string ("I had trouble processing that…")
-  // overwriting an empty assistantText that pipeline-v4 would otherwise
-  // populate via its tool-handler / template fallbacks. Fall back to
-  // the raw text if the parser returns an empty assistant_text (e.g.
-  // a malformed envelope with no <assistant_text>) so we never strand
-  // a non-empty stream as empty.
+  // We GATE this parse on the presence of envelope or diagnostics
+  // markers because parseOrchestratorResponse has two side-effects we
+  // do not want on clean prose:
+  //   1. rescueInlineActions() (Path 5 plain text) strips lines like
+  //      "Facilitator: Label — Message" into suggested_actions[]. The
+  //      stream handler does not plumb suggested_actions through, so
+  //      those lines would silently disappear from assistant_text.
+  //   2. stripDiagnosticsPreamble() scans the entire text when no XML
+  //      tag is present, removing legitimate prose lines that begin
+  //      with "Mode:", "Stage:", "Tool:", "Context:", "Route:",
+  //      "Using:", or "No tool needed/invocation". On clean turns this
+  //      mangles real prose.
+  // Gating also avoids telemetry pollution: every clean streamed turn
+  // would otherwise emit an `orchestrator.xml_parse_fallback` event.
+  //
+  // The gate triggers when EITHER an envelope tag is present anywhere
+  // in the text, OR any line in the text matches the diagnostics
+  // preamble pattern. This covers both the full-envelope leak and the
+  // bundle-evidenced "headline + middle diagnostics + prose" leak
+  // (debug bundle bce361c4) where the diagnostics block sits between
+  // two prose paragraphs with no XML tags. See needsEnvelopeParse for
+  // the matching rules and the rationale.
+  // The phase-1 path remains unchanged — it parses unconditionally
+  // because it knows it is looking at envelope content.
+  //
+  // Empty/whitespace-only input bypasses the parser entirely so the
+  // parser's Path 6 generic fallback ("I had trouble processing that…")
+  // never replaces an empty assistantText that pipeline-v4 will
+  // populate via its chip pre-text / template / tool-handler fallbacks.
+  // If the parser returns an empty assistant_text (e.g. a malformed
+  // envelope with no <assistant_text>), fall back to the raw text so
+  // we never strand a non-empty stream as empty.
   const rawAssistantText = textChunks.join('');
   let assistantText = rawAssistantText;
-  if (rawAssistantText.trim().length > 0) {
+  if (rawAssistantText.trim().length > 0 && needsEnvelopeParse(rawAssistantText)) {
     const parsed = parseOrchestratorResponse(rawAssistantText);
     if (parsed.assistant_text && parsed.assistant_text.length > 0) {
       assistantText = parsed.assistant_text;
