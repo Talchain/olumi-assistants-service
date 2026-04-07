@@ -260,22 +260,34 @@ export async function* processAdapterStream(
         // When real content has streamed we skip extraction to prevent
         // double-emission — the normal streaming path is preserved.
         if (textChunks.join('').trim() === '') {
+          // Sonnet 4.6 + forced tool_choice bundles the entire XML envelope
+          // (<diagnostics>...</diagnostics><response><assistant_text>...
+          // </assistant_text></response>) into the final message content.
+          // Concatenate all substantive text blocks in order and parse once
+          // so the SSE text_delta and the accumulated textChunks carry only
+          // the user-visible assistant_text — never the diagnostics prose.
+          //
+          // Skipping whitespace-only blocks before joining prevents the
+          // parser's empty-input Path 6 from substituting its generic
+          // "I had trouble processing that..." fallback in place of an
+          // actual tool-handler headline (which is owned by the Fix 2
+          // fallback inside executeShortTool, gated on textChunks staying
+          // empty). Joining once also avoids splitting an envelope across
+          // independent parses.
+          const rawTextParts: string[] = [];
           for (const block of event.result.content) {
-            if (block.type === 'text' && block.text) {
-              // Sonnet 4.6 + forced tool_choice bundles the entire XML
-              // envelope (<diagnostics>...</diagnostics><response>
-              // <assistant_text>...</assistant_text></response>) into a
-              // single final text block. Parse it so the SSE text_delta
-              // and the accumulated textChunks both carry only the
-              // user-visible assistant_text — never the diagnostics prose.
-              // parseOrchestratorResponse never throws and has a plain-text
-              // fallback, so unwrapped prose round-trips unchanged.
-              const parsed = parseOrchestratorResponse(block.text);
-              const clean = parsed.assistant_text;
-              if (clean) {
-                textChunks.push(clean);
-                yield { type: 'text_delta', seq: seq++, delta: clean };
-              }
+            if (block.type === 'text' && block.text && block.text.trim().length > 0) {
+              rawTextParts.push(block.text);
+            }
+          }
+          if (rawTextParts.length > 0) {
+            // parseOrchestratorResponse never throws and has a plain-text
+            // fallback, so unwrapped prose round-trips unchanged.
+            const parsed = parseOrchestratorResponse(rawTextParts.join(''));
+            const clean = parsed.assistant_text;
+            if (clean) {
+              textChunks.push(clean);
+              yield { type: 'text_delta', seq: seq++, delta: clean };
             }
           }
         }

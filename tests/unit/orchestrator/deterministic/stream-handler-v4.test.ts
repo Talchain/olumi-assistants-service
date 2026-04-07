@@ -570,6 +570,95 @@ describe("processAdapterStream", () => {
     expect(headlineDelta!.delta).toBe('Here is the option rationale.');
   });
 
+  it("regression: phase-1 strips XML envelope with leading whitespace before <diagnostics>", async () => {
+    // Some streaming paths emit a leading newline or BOM-like whitespace
+    // before the envelope. parseOrchestratorResponse handles this via
+    // raw.trimStart(); pin the contract here so a future change to the
+    // parser cannot regress the leak silently.
+    const envelopeText =
+      '\n  \t<diagnostics>Mode: ACT. Tool: set_factor_value.</diagnostics>'
+      + '<response><assistant_text>Headline after leading whitespace.</assistant_text></response>';
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: envelopeText },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string }> = [];
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string; delta?: string });
+    }
+
+    expect(result!.assistantText).toBe('Headline after leading whitespace.');
+    for (const e of events) {
+      if (e.type === 'text_delta') {
+        expect(e.delta).not.toContain('<diagnostics>');
+        expect(e.delta).not.toContain('Mode:');
+        expect(e.delta).not.toMatch(/^\s/);
+      }
+    }
+  });
+
+  it("regression: phase-1 ignores whitespace-only text blocks (preserves tool-handler fallback)", async () => {
+    // If a stray whitespace-only text block is the only text content,
+    // phase-1 must NOT push the parser's empty-input Path 6 fallback
+    // ("I had trouble processing that…") into textChunks, otherwise the
+    // executeShortTool handler-text fallback (Fix 2, line 139) is silently
+    // suppressed and the user sees a generic error instead of the real
+    // tool headline. The mocked action returns assistantText 'Action completed.'.
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: '   \n  ' },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    const events: Array<{ type: string; delta?: string }> = [];
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+      events.push(value as { type: string; delta?: string });
+    }
+
+    // Tool handler fallback fires; user never sees "I had trouble processing that..."
+    expect(result!.assistantText).toBe('Action completed.');
+    expect(result!.assistantText).not.toContain('I had trouble processing');
+    for (const e of events) {
+      if (e.type === 'text_delta') {
+        expect(e.delta).not.toContain('I had trouble processing');
+      }
+    }
+  });
+
   it("regression: phase-1 passes plain text through unchanged when no envelope present", async () => {
     const stream = mockStream([
       { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
