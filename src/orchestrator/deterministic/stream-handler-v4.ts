@@ -341,8 +341,35 @@ export async function* processAdapterStream(
     yield* executeShortTool(deferred.name, deferred.input, false);
   }
 
+  // Post-assembly parse: covers the streamed-delta path where the LLM
+  // emits the entire <diagnostics>...</diagnostics><response>
+  // <assistant_text>...</assistant_text></response> envelope as
+  // token-level deltas. The phase-1 message_complete extraction only
+  // fires when textChunks is empty pre-finalisation, so streamed turns
+  // never went through it. Parse the accumulated text once here to
+  // strip diagnostics from the returned assistantText. SSE text_delta
+  // events were already yielded raw to the client during streaming —
+  // the client reconciles to the canonical assistant_text in the final
+  // envelope, so transient deltas are acceptable.
+  //
+  // Skip parsing on whitespace-only/empty input to avoid the parser's
+  // Path 6 generic-fallback string ("I had trouble processing that…")
+  // overwriting an empty assistantText that pipeline-v4 would otherwise
+  // populate via its tool-handler / template fallbacks. Fall back to
+  // the raw text if the parser returns an empty assistant_text (e.g.
+  // a malformed envelope with no <assistant_text>) so we never strand
+  // a non-empty stream as empty.
+  const rawAssistantText = textChunks.join('');
+  let assistantText = rawAssistantText;
+  if (rawAssistantText.trim().length > 0) {
+    const parsed = parseOrchestratorResponse(rawAssistantText);
+    if (parsed.assistant_text && parsed.assistant_text.length > 0) {
+      assistantText = parsed.assistant_text;
+    }
+  }
+
   return {
-    assistantText: textChunks.join(''),
+    assistantText,
     toolExecution: state.toolExecution,
     failedToolCall: state.failedToolCall,
     pendingLongRunningTool,

@@ -691,4 +691,106 @@ describe("processAdapterStream", () => {
     const headlineDelta = events.find((e) => e.type === 'text_delta');
     expect(headlineDelta!.delta).toBe('Just a plain headline, no envelope.');
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Regression: post-assembly parse for the streamed-delta path.
+  //
+  // When the LLM streams the full XML envelope token-by-token (the
+  // streamed-delta path, not the bundled message_complete path), each
+  // text_delta arrives as raw tokens that cannot be meaningfully parsed
+  // mid-stream. The phase-1 message_complete extraction does not fire
+  // because textChunks is non-empty by then. The post-assembly parse at
+  // the function return covers this case so the returned assistantText
+  // (which becomes envelope.assistant_text) carries only the user-visible
+  // payload — never the diagnostics prose.
+  //
+  // SSE text_delta events still carry raw tokens during streaming — the
+  // client reconciles to the canonical assistant_text in the final
+  // envelope. That trade-off is documented inline.
+  // ─────────────────────────────────────────────────────────────────────
+  it("regression: post-assembly strips streamed XML envelope", async () => {
+    // Simulates the LLM streaming the full envelope as token-level deltas.
+    const stream = mockStream([
+      { type: 'text_delta', delta: '<diagnostics>Mode: ACT.' },
+      { type: 'text_delta', delta: ' Tool: explain_result.' },
+      { type: 'text_delta', delta: ' Stage: EVALUATE.</diagnostics>' },
+      { type: 'text_delta', delta: '<response><assistant_text>' },
+      { type: 'text_delta', delta: 'Clean explanation of the winner.' },
+      { type: 'text_delta', delta: '</assistant_text></response>' },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    expect(result!.assistantText).toBe('Clean explanation of the winner.');
+    expect(result!.assistantText).not.toContain('<diagnostics>');
+    expect(result!.assistantText).not.toContain('Mode:');
+    expect(result!.assistantText).not.toContain('Stage:');
+  });
+
+  it("regression: post-assembly strips diagnostics-style preamble from streamed text without tags", async () => {
+    // The model omits the <diagnostics> tags but still emits the
+    // diagnostics-style preamble lines as plain prose before the headline.
+    const stream = mockStream([
+      { type: 'text_delta', delta: 'Mode: INTERPRET. Stage: IDEATE.\n' },
+      { type: 'text_delta', delta: 'Actual explanation of the result.' },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    expect(result!.assistantText).toBe('Actual explanation of the result.');
+    expect(result!.assistantText).not.toContain('Mode:');
+    expect(result!.assistantText).not.toContain('Stage:');
+  });
+
+  it("regression: post-assembly preserves clean streamed text unchanged", async () => {
+    const stream = mockStream([
+      { type: 'text_delta', delta: 'Hello ' },
+      { type: 'text_delta', delta: 'plain ' },
+      { type: 'text_delta', delta: 'world.' },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    expect(result!.assistantText).toBe('Hello plain world.');
+  });
+
+  it("regression: post-assembly does not overwrite empty stream with parser fallback string", async () => {
+    // No text_deltas at all and no text content in message_complete.
+    // The stream-handler must return an empty assistantText so the
+    // pipeline-v4 fallback paths (chip pre-text, error text, template
+    // text) can populate it. The parser's Path 6 generic fallback
+    // ("I had trouble processing that…") must NOT replace the empty
+    // string here.
+    const stream = mockStream([
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    expect(result!.assistantText).toBe('');
+    expect(result!.assistantText).not.toContain('I had trouble processing');
+  });
 });
