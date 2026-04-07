@@ -57,6 +57,23 @@ function getNestedResults(response: V2RunResponseEnvelope): Record<string, unkno
   return null;
 }
 
+/**
+ * True when `results` is a nested object containing one of the recognized
+ * option-result arrays (option_comparison / options / option_results).
+ *
+ * Used by normalizeAnalysisEnvelope to gate the destructive results repair:
+ * a nested-object shape is a legitimate UI-side payload that downstream
+ * readers (getOptionResultCandidates, getNestedResults) already understand,
+ * so the repair must not overwrite it with [].
+ */
+function hasNestedResultArrays(results: unknown): boolean {
+  if (!results || typeof results !== 'object' || Array.isArray(results)) return false;
+  const nested = results as Record<string, unknown>;
+  return Array.isArray(nested.option_comparison)
+    || Array.isArray(nested.options)
+    || Array.isArray(nested.option_results);
+}
+
 function hasValidSensitivity(response: V2RunResponseEnvelope): boolean {
   const sensitivity = response.factor_sensitivity ?? getNestedResults(response)?.factor_sensitivity;
   return Array.isArray(sensitivity) && sensitivity.some((factor) => {
@@ -102,8 +119,14 @@ export function normalizeAnalysisEnvelope(response: V2RunResponseEnvelope): V2Ru
 
   // Repair malformed results: when results is not an array, attempt to
   // reconstruct from top-level option_comparison (the canonical PLoT V2 field).
+  //
+  // If results is a nested object that getOptionResultCandidates already
+  // understands (option_comparison / options / option_results arrays inside),
+  // leave it alone — downstream readers (getOptionResultCandidates,
+  // getNestedResults, isAnalysisExplainable) all understand the nested
+  // shape, and overwriting it with [] would destroy real data.
   let repaired = response;
-  if (!Array.isArray(r.results)) {
+  if (!Array.isArray(r.results) && !hasNestedResultArrays(r.results)) {
     const optComp = r.option_comparison;
     if (Array.isArray(optComp) && optComp.length > 0) {
       const mapped = (optComp as Array<Record<string, unknown>>).map((entry) => ({

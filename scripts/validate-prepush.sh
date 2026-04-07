@@ -16,7 +16,7 @@ cd "$REPO_ROOT"
 # Capture stdin before any function can consume it
 STDIN_DATA=$(cat || true)
 
-# Smoke test file set: 8 critical orchestrator pipeline tests
+# Smoke test file set: critical orchestrator pipeline tests
 SMOKE_TESTS=(
   tests/unit/orchestrator/pipeline/pipeline.test.ts
   tests/unit/orchestrator/pipeline/pipeline-stream.test.ts
@@ -24,6 +24,7 @@ SMOKE_TESTS=(
   tests/unit/orchestrator/pipeline/phase3-llm.test.ts
   tests/unit/orchestrator/pipeline/phase4-tools.test.ts
   tests/unit/orchestrator/pipeline/phase5-envelope-assembler.test.ts
+  tests/unit/orchestrator/pipeline/analysis-state-normalization.test.ts
   tests/unit/orchestrator/tools/dispatch-chaining.test.ts
   tests/unit/orchestrator/tools/edit-graph-normalisation.test.ts
 )
