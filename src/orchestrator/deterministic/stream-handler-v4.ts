@@ -129,6 +129,13 @@ export async function* processAdapterStream(
   } = { toolExecution: null, failedToolCall: null };
   let pendingLongRunningTool: PendingToolCall | null = null;
   const discardedToolCalls: Array<{ name: string; input: Record<string, unknown> }> = [];
+  // Tracks whether phase-1 message_complete extraction ran the envelope
+  // parser successfully. When true, `textChunks` already contains the
+  // cleaned <assistant_text> payload and the post-assembly parser must
+  // not run a second time — a second Path 5 parse on clean prose could
+  // strip legitimate marker lines (e.g. "Using: historical data…") via
+  // stripDiagnosticsPreamble, mangling the already-correct headline.
+  let phase1Parsed = false;
 
   // A short-running tool call seen during streaming but deferred until
   // message_complete. We defer execution when no text_deltas have streamed yet
@@ -324,6 +331,9 @@ export async function* processAdapterStream(
               textChunks.push(clean);
               yield { type: 'text_delta', seq: seq++, delta: clean };
             }
+            // Mark phase-1 as having run the parser (even if clean was
+            // empty) so post-assembly does not double-parse the result.
+            phase1Parsed = true;
           }
         }
 
@@ -409,23 +419,45 @@ export async function* processAdapterStream(
   // (debug bundle bce361c4) where the diagnostics block sits between
   // two prose paragraphs with no XML tags. See needsEnvelopeParse for
   // the matching rules and the rationale.
-  // The phase-1 path remains unchanged — it parses unconditionally
-  // because it knows it is looking at envelope content.
+  //
+  // CRITICAL: we also skip post-assembly parsing when phase-1 already
+  // ran the parser. After phase-1, `textChunks` holds the cleaned
+  // <assistant_text> payload. Re-parsing it could mangle legitimate
+  // marker lines inside that payload (e.g. "Using: historical data as
+  // the baseline"), because stripDiagnosticsPreamble on clean prose
+  // would scan the whole text and drop the line. Single-parse guarantee.
   //
   // Empty/whitespace-only input bypasses the parser entirely so the
   // parser's Path 6 generic fallback ("I had trouble processing that…")
   // never replaces an empty assistantText that pipeline-v4 will
   // populate via its chip pre-text / template / tool-handler fallbacks.
-  // If the parser returns an empty assistant_text (e.g. a malformed
-  // envelope with no <assistant_text>), fall back to the raw text so
-  // we never strand a non-empty stream as empty.
+  //
+  // Empty-result handling: when the gate triggered because an envelope
+  // tag was present (the structural case), trust the parser's output
+  // even if empty — a malformed envelope with no <assistant_text>
+  // should degrade to the response-normaliser's DEFAULT_TEXT, not
+  // leak the raw envelope through to the response-normaliser's naive
+  // tag-stripper (which would leave the diagnostics content intact).
+  // When the gate triggered only via a diagnostics-style line with no
+  // envelope tags, the stripping is heuristic: prefer the raw text if
+  // parsing would empty it, so a false-positive never silently drops
+  // a real response.
   const rawAssistantText = textChunks.join('');
   let assistantText = rawAssistantText;
-  if (rawAssistantText.trim().length > 0 && needsEnvelopeParse(rawAssistantText)) {
+  if (
+    !phase1Parsed
+    && rawAssistantText.trim().length > 0
+    && needsEnvelopeParse(rawAssistantText)
+  ) {
     const parsed = parseOrchestratorResponse(rawAssistantText);
     if (parsed.assistant_text && parsed.assistant_text.length > 0) {
       assistantText = parsed.assistant_text;
+    } else if (ENVELOPE_TAG_RE.test(rawAssistantText)) {
+      // Structural envelope but no <assistant_text> payload → empty
+      // string; the response-normaliser will substitute DEFAULT_TEXT.
+      assistantText = '';
     }
+    // else: diagnostics-line-only match that emptied the text → keep raw.
   }
 
   return {

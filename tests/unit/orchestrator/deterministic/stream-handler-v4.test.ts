@@ -832,6 +832,105 @@ describe("processAdapterStream", () => {
     expect(result!.assistantText).toContain('Challenger: Pause and reframe');
   });
 
+  it("regression: phase-1 cleaned text containing a 'Using:' line is not re-parsed by post-assembly", async () => {
+    // Double-parse mangling guard: if phase-1 extracts and parses a
+    // bundled envelope whose <assistant_text> payload legitimately
+    // contains a line starting with "Using:" (a diagnostics marker
+    // prefix), the post-assembly parser must NOT run a second time.
+    // A second Path 5 parse would invoke stripDiagnosticsPreamble on
+    // the clean prose, drop the legitimate "Using:" line, and mangle
+    // the headline. Fix: phase1Parsed flag skips post-assembly when
+    // phase-1 already ran the parser.
+    const envelopeText =
+      '<diagnostics>Mode: ACT. Tool: set_factor_value.</diagnostics>'
+      + '<response><assistant_text>Updating runway.\n\nUsing: historical data as the baseline for the projection.</assistant_text></response>';
+    const stream = mockStream([
+      { type: 'tool_input_start', tool_id: 'toolu_1', tool_name: 'set_factor_value' },
+      { type: 'tool_input_complete', tool_id: 'toolu_1', tool_name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+      {
+        type: 'message_complete',
+        result: {
+          content: [
+            { type: 'text', text: envelopeText },
+            { type: 'tool_use', id: 'toolu_1', name: 'set_factor_value', input: { target_id: 'fac_1', value: 42 } },
+          ],
+          stop_reason: 'tool_use',
+          model: 'test',
+          latencyMs: 100,
+          usage: {},
+        },
+      },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    // Phase-1 cleaned the envelope; post-assembly must leave the payload
+    // intact, preserving the legitimate "Using:" line.
+    expect(result!.assistantText).toBe(
+      'Updating runway.\n\nUsing: historical data as the baseline for the projection.',
+    );
+    expect(result!.assistantText).toContain('Using: historical data');
+  });
+
+  it("regression: malformed envelope without <assistant_text> yields empty string (downstream default applies)", async () => {
+    // A streamed envelope with structural tags but no <assistant_text>
+    // content is a malformed edge case. The stream handler must NOT
+    // preserve the raw envelope as a fallback — the response-normaliser
+    // would only strip the tags and leak the diagnostics prose through
+    // as user-visible text. Instead, return empty so the normaliser's
+    // DEFAULT_TEXT fallback kicks in.
+    const malformedEnvelope =
+      '<diagnostics>Mode: ACT. Tool: explain_result.</diagnostics>'
+      + '<response><blocks><block><type>commentary</type><content>Something</content></block></blocks></response>';
+    const stream = mockStream([
+      { type: 'text_delta', delta: malformedEnvelope },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    // Empty so the response-normaliser installs its DEFAULT_TEXT fallback.
+    expect(result!.assistantText).toBe('');
+    // Critically, the raw envelope (which would leak diagnostics through
+    // the normaliser's naive stripXmlTags) is NOT returned.
+    expect(result!.assistantText).not.toContain('Mode: ACT');
+    expect(result!.assistantText).not.toContain('<diagnostics>');
+  });
+
+  it("regression: diagnostics-line-only false positive preserves raw text on empty parse", async () => {
+    // The gate triggers on any line matching the diagnostics-preamble
+    // pattern, including legitimate prose that happens to start with
+    // "Tool:" or similar. When the entire text is a single line like
+    // "Tool: Monte Carlo simulation was used.", stripDiagnosticsPreamble
+    // would strip it, the fail-safe would restore the original, the
+    // parser returns that original as assistant_text, and we install
+    // it. No loss. The test pins this happy path.
+    const stream = mockStream([
+      { type: 'text_delta', delta: 'Tool: Monte Carlo simulation was used.' },
+      { type: 'message_complete', result: { content: [], stop_reason: 'end_turn', model: 'test', latencyMs: 100, usage: {} } },
+    ]);
+
+    const gen = processAdapterStream(stream, makeTurnContext(), 'req-1');
+    let result;
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) { result = value; break; }
+    }
+
+    // Parser's fail-safe restores the original when stripping would empty the text.
+    expect(result!.assistantText).toBe('Tool: Monte Carlo simulation was used.');
+  });
+
   it("regression: post-assembly does not overwrite empty stream with parser fallback string", async () => {
     // No text_deltas at all and no text content in message_complete.
     // The stream-handler must return an empty assistantText so the
