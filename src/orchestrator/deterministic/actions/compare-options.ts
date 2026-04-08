@@ -86,12 +86,12 @@ export const compareOptionsAction: ActionDefinition = {
 
     // Base comparison line — fired unconditionally
     narrativeParts.push(
-      `${winnerLabel} leads at ${winnerPct.toFixed(0)}%, ahead of ${runnerUpLabel} at ${runnerUpPct.toFixed(0)}% — a ${margin.toFixed(0)}-point gap.`,
+      `${winnerLabel} leads in ${winnerPct.toFixed(0)}% of simulations, ahead of ${runnerUpLabel} at ${runnerUpPct.toFixed(0)}%, a ${margin.toFixed(0)}-point gap.`,
     );
 
     // Margin context
     if (margin < 5) {
-      narrativeParts.push(`This is a close call — relatively small assumption changes could swap the ranking.`);
+      narrativeParts.push(`This is a close call: relatively small assumption changes could swap the ranking.`);
     } else if (margin > 20) {
       narrativeParts.push(`${winnerLabel} has a clear lead.`);
     }
@@ -106,7 +106,7 @@ export const compareOptionsAction: ActionDefinition = {
         narrativeParts.push(`Main differentiator: ${topLabel}.`);
       }
     } else if (fragileCount > 0) {
-      narrativeParts.push(`${fragileCount} fragile edge${fragileCount > 1 ? 's' : ''} detected — small assumption changes could shift the ranking.`);
+      narrativeParts.push(`${fragileCount} fragile edge${fragileCount > 1 ? 's' : ''} detected; small assumption changes could shift the ranking.`);
     } else {
       narrativeParts.push(`The outcome is shaped by the combined effect of multiple factors.`);
     }
@@ -124,7 +124,7 @@ export const compareOptionsAction: ActionDefinition = {
     const verb = margin < 5 ? 'edges out' : margin > 20 ? 'clearly leads' : 'leads';
     const pctCompare = `${winnerPct.toFixed(0)}% vs ${runnerUpPct.toFixed(0)}%`;
     const assistantText = topDifferentiator
-      ? `${winnerLabel} ${verb} ${runnerUpLabel} (${pctCompare}) — ${topDifferentiator} is the main differentiator.`
+      ? `${winnerLabel} ${verb} ${runnerUpLabel} (${pctCompare}); ${topDifferentiator} is the main differentiator.`
       : `${winnerLabel} ${verb} ${runnerUpLabel} by ${margin.toFixed(0)} points (${pctCompare}).`;
 
     return {

@@ -75,16 +75,16 @@ export const runPremortemAction: ActionDefinition = {
     const narrativeParts: string[] = [];
     if (ctx.analysis_summary && ctx.analysis_summary.fragile_edge_count > 0) {
       narrativeParts.push(
-        `The model has ${ctx.analysis_summary.fragile_edge_count} fragile edge${ctx.analysis_summary.fragile_edge_count > 1 ? 's' : ''} — causal links where small changes in strength could change the result.`,
+        `The model has ${ctx.analysis_summary.fragile_edge_count} fragile edge${ctx.analysis_summary.fragile_edge_count > 1 ? 's' : ''}: causal links where small changes in strength could change the result.`,
       );
     }
     if (ctx.signals.close_call) {
       narrativeParts.push(
-        'The race is tight — a small shift in any key driver could flip the recommendation.',
+        'The race is tight: a small shift in any key driver could flip the result.',
       );
     }
     narrativeParts.push(
-      'Pre-mortem technique — imagining failure in advance helps identify risks that optimism bias would otherwise hide.',
+      'Pre-mortem technique: imagining failure in advance helps identify risks that optimism bias would otherwise hide.',
     );
 
     const blockData: PremortemBlockData = {

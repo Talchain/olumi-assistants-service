@@ -29,7 +29,7 @@ export const whatWouldFlipAction: ActionDefinition = {
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.analysis_summary) return 'No analysis results available. Run analysis first.';
-    if (!ctx.analysis_summary.winner) return 'No clear winner to flip.';
+    if (!ctx.analysis_summary.winner) return 'No clear leading option to analyse. Run analysis first.';
     return null;
   },
 
@@ -53,7 +53,7 @@ export const whatWouldFlipAction: ActionDefinition = {
         const edgeList = ctx.signals.weak_edges.slice(0, 3).join(', ');
         parts.push(`${ctx.signals.weak_edges.length} weak edge${ctx.signals.weak_edges.length > 1 ? 's' : ''} (${edgeList}) could amplify a flip under small changes.`);
       } else {
-        parts.push('The result is shaped by the combined effect of multiple factors — no single lever would flip it alone.');
+        parts.push('The result is shaped by the combined effect of multiple factors; no single lever would flip it alone.');
       }
       return {
         blocks: [],
@@ -82,18 +82,18 @@ export const whatWouldFlipAction: ActionDefinition = {
       const node = ctx.entities.nodes.get(driver.factor_id);
       const threshold = flipMap.get(driver.factor_id);
       const valueStr = node?.value != null ? ` (current: ${node.value}${node.unit ? ' ' + node.unit : ''})` : '';
-      const flipStr = threshold ? ` — flips at ${threshold.flip_value}${threshold.unit ? ' ' + threshold.unit : ''}` : '';
+      const flipStr = threshold ? `; flips at ${threshold.flip_value}${threshold.unit ? ' ' + threshold.unit : ''}` : '';
       narrativeParts.push(
-        `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}${flipStr}${!flipStr ? ` — a ${driver.sensitivity > 1 ? 'small' : 'moderate'} change here could shift the winner` : ''}.`,
+        `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}${flipStr}${!flipStr ? `; a ${driver.sensitivity > 1 ? 'small' : 'moderate'} change here could shift the leading option` : ''}.`,
       );
     }
 
     if (summary.runner_up && summary.winner_probability != null && summary.runner_up_probability != null) {
       const margin = (summary.winner_probability - summary.runner_up_probability) * 100;
       if (margin < 10) {
-        narrativeParts.push(`The margin is only ${margin.toFixed(1)} points — relatively easy to flip.`);
+        narrativeParts.push(`The margin is only ${margin.toFixed(1)} points: relatively easy to flip.`);
       } else {
-        narrativeParts.push(`The margin is ${margin.toFixed(0)} points — a significant shift would be needed.`);
+        narrativeParts.push(`The margin is ${margin.toFixed(0)} points: a significant shift would be needed.`);
       }
     }
 

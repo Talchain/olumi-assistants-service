@@ -117,7 +117,7 @@ export const runAnalysisAction: ActionDefinition = {
         log.error({ err, turn_id: ctx.turn_id }, 'deterministic.run_analysis.timeout');
         return {
           blocks: [],
-          assistantText: 'The analysis service timed out. Your model is unchanged — try again.',
+          assistantText: 'The analysis service timed out. Your model is unchanged; try again.',
           guidance_items: [],
         };
       }
@@ -129,7 +129,7 @@ export const runAnalysisAction: ActionDefinition = {
         log.error({ err, turn_id: ctx.turn_id, analysis_status: v2.analysis_status }, 'deterministic.run_analysis.plot_error');
         return {
           blocks: [],
-          assistantText: `Analysis failed: ${reason}${critiqueDetail ? ` — ${critiqueDetail}` : ''}`,
+          assistantText: `Analysis failed: ${reason}${critiqueDetail ? `: ${critiqueDetail}` : ''}`,
           guidance_items: [],
         };
       }

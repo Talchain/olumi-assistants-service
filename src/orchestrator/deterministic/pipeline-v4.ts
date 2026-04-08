@@ -48,7 +48,7 @@ import type { GuidanceItem } from "../types/guidance-item.js";
 /** Pre-generated text for forced tool calls (chip clicks). */
 const CHIP_TEXT_TEMPLATES: Record<string, (ctx: DeterministicTurnContext) => string> = {
   compare_options: (ctx) => `Comparing your ${ctx.graph_summary.option_count} options.`,
-  what_would_flip: () => 'Looking at what would need to change to flip the recommendation.',
+  what_would_flip: () => 'Looking at what would need to change to flip the result.',
   run_premortem: () => 'Running a pre-mortem analysis.',
   explain_result: () => 'Breaking down what is driving the result.',
   run_analysis: () => 'Running the analysis now.',
@@ -59,7 +59,7 @@ const CHIP_TEXT_TEMPLATES: Record<string, (ctx: DeterministicTurnContext) => str
 /** Fallback text templates for empty LLM responses after successful tool execution (Task 3). */
 const TOOL_RESULT_TEXT_TEMPLATES: Record<string, string> = {
   compare_options: "Here's how your options compare.",
-  what_would_flip: "Here's what would need to change to flip the winner.",
+  what_would_flip: "Here's what would need to change to flip the leading option.",
   run_premortem: 'Running a pre-mortem on your leading option.',
   explain_result: "Here's what's driving the result.",
   run_analysis: 'Running the analysis now.',
@@ -511,6 +511,15 @@ export async function* executePipelineV4(
       }
     }
 
+    // Compound action acknowledgement: surface discarded tool calls as
+    // deferred chips so the user can resume the unfulfilled intent. The
+    // one-tool-per-turn policy means subsequent calls were silently dropped;
+    // exposing them as top-priority chips preserves user intent without
+    // changing the LLM's tool call behaviour.
+    const deferredActions = streamResult.discardedToolCalls
+      .map((d) => d.name as ActionName)
+      .filter((name) => name !== executedAction);
+
     const envelope = assembleV4Envelope({
       turnContext,
       turnId,
@@ -522,6 +531,7 @@ export async function* executePipelineV4(
       executedAction,
       contextFallbackUsed,
       llmLatencyMs: llmDurationMs,
+      deferredActions,
     });
 
     yield { type: 'turn_complete', seq: seq++, envelope };
@@ -591,6 +601,8 @@ export interface AssembleInput {
   executedAction: ActionName | null;
   contextFallbackUsed: boolean;
   llmLatencyMs?: number;
+  /** Tool names the LLM tried to call beyond the one-tool-per-turn limit. */
+  deferredActions?: ActionName[];
 }
 
 /**
@@ -611,6 +623,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     executedAction,
     contextFallbackUsed: _contextFallbackUsed,
     llmLatencyMs,
+    deferredActions = [],
   } = input;
 
   // Combine assistant text: action confirmation + LLM text.
@@ -652,8 +665,10 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     blocks.push(patchBlock);
   }
 
-  // Build chips deterministically — no LLM input
-  const suggestedActions = buildDeterministicChips(turnContext, executedAction);
+  // Build chips deterministically — no LLM input.
+  // Deferred actions (compound calls dropped by one-tool-per-turn) are
+  // promoted to the front so the user can resume the unfulfilled intent.
+  const suggestedActions = buildDeterministicChips(turnContext, executedAction, deferredActions);
 
   // Build lineage
   const lineage = {
@@ -673,7 +688,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     long_running: executedAction === 'run_analysis' || executedAction === 'draft_graph',
     ...(llmLatencyMs != null ? { tool_latency_ms: llmLatencyMs } : {}),
     executed_tools: executedTools,
-    deferred_tools: [] as string[],
+    deferred_tools: deferredActions as string[],
   };
 
   // Collect guidance items

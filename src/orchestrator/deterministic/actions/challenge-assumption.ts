@@ -84,7 +84,7 @@ export const challengeAssumptionAction: ActionDefinition = {
       const weakConnections = connectedEdges.filter((e) => Math.abs(e.strength_mean) < 0.5);
       if (weakConnections.length > 0) {
         sections.push(
-          `This factor has ${weakConnections.length} weak connection${weakConnections.length > 1 ? 's' : ''} — the assumed relationship may not hold.`,
+          `This factor has ${weakConnections.length} weak connection${weakConnections.length > 1 ? 's' : ''}; the assumed relationship may not hold.`,
         );
       }
     }
@@ -93,13 +93,13 @@ export const challengeAssumptionAction: ActionDefinition = {
     const driver = ctx.analysis_summary?.top_drivers.find((d) => d.factor_id === targetId);
     if (driver) {
       sections.push(
-        `This is a top driver with sensitivity ${driver.sensitivity.toFixed(2)}. If the assumed value is wrong, the recommendation could change.`,
+        `This is a top driver with sensitivity ${driver.sensitivity.toFixed(2)}. If the assumed value is wrong, the result could change.`,
       );
     }
 
     // Science concept
     sections.push(
-      '\n*Confirmation bias* — we tend to seek evidence that supports existing beliefs. Consider what evidence would disprove this assumption.',
+      '\n*Confirmation bias*: we tend to seek evidence that supports existing beliefs. Consider what evidence would disprove this assumption.',
     );
 
     return {

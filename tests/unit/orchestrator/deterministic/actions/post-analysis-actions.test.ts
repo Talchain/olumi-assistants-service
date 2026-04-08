@@ -113,6 +113,79 @@ function makeTurnContext(overrides: Partial<DeterministicTurnContext> = {}): Det
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Handler template quality (em dashes, phrasing, banned terms)
+// ─────────────────────────────────────────────────────────────────────────
+
+function collectHandlerText(result: { assistantText: string | null; blocks: Array<{ data: unknown }> }): string {
+  const parts: string[] = [];
+  if (result.assistantText) parts.push(result.assistantText);
+  for (const block of result.blocks) {
+    const data = block.data as Record<string, unknown>;
+    if (typeof data.narrative === 'string') parts.push(data.narrative);
+    const sections = data.sections as Array<{ content?: string; items?: string[] }> | undefined;
+    if (Array.isArray(sections)) {
+      for (const s of sections) {
+        if (s.content) parts.push(s.content);
+        if (s.items) parts.push(s.items.join('\n'));
+      }
+    }
+  }
+  return parts.join('\n');
+}
+
+describe("handler template quality", () => {
+  it("explain_result output contains no em dashes or en dashes", async () => {
+    const ctx = makeTurnContext();
+    const result = await explainResultAction.execute({}, ctx);
+    const text = collectHandlerText(result);
+    expect(text).not.toMatch(/[—–]/);
+  });
+
+  it("compare_options output contains no em dashes or en dashes", async () => {
+    const ctx = makeTurnContext();
+    const result = await compareOptionsAction.execute({}, ctx);
+    const text = collectHandlerText(result);
+    expect(text).not.toMatch(/[—–]/);
+  });
+
+  it("what_would_flip output contains no em dashes or en dashes", async () => {
+    const ctx = makeTurnContext();
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    const text = collectHandlerText(result);
+    expect(text).not.toMatch(/[—–]/);
+  });
+
+  it("explain_result uses 'leads in X% of simulations' phrasing", async () => {
+    const ctx = makeTurnContext();
+    const result = await explainResultAction.execute({}, ctx);
+    expect(result.assistantText).toContain('leads in 90% of simulations');
+    expect(result.assistantText).not.toContain('leads the analysis');
+  });
+
+  it("explain_result uses 'stability', not 'robustness', in user-facing text", async () => {
+    const ctx = makeTurnContext();
+    const result = await explainResultAction.execute({}, ctx);
+    const text = collectHandlerText(result);
+    expect(text.toLowerCase()).not.toContain('robustness');
+  });
+
+  it("explain_result uses 'drives X% of the outcome', not 'influence X%'", async () => {
+    const ctx = makeTurnContext();
+    const result = await explainResultAction.execute({}, ctx);
+    const text = collectHandlerText(result);
+    expect(text).toContain('drives 45% of the outcome');
+    expect(text).not.toMatch(/influence \d/);
+  });
+
+  it("compare_options uses 'leads in X% of simulations' in narrative", async () => {
+    const ctx = makeTurnContext();
+    const result = await compareOptionsAction.execute({}, ctx);
+    const data = result.blocks[0].data as { narrative: string };
+    expect(data.narrative).toContain('leads in 90% of simulations');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // Fix 3: explain_result — no duplicate winner line
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -346,6 +419,13 @@ describe("what_would_flip action (Fix 5)", () => {
     const result = await whatWouldFlipAction.execute({}, ctx);
     // fac_ramp has value 6, unit 'weeks' in the mocked entities
     expect(result.assistantText!.toLowerCase()).toContain('currently 6');
+  });
+
+  it("template uses 'leading option', not 'winner', in fallback prose", async () => {
+    const ctx = makeTurnContext();
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    const data = result.blocks[0].data as { narrative: string };
+    expect(data.narrative.toLowerCase()).not.toContain('shift the winner');
   });
 
   it("formats numeric values cleanly — integers as integers, decimals rounded", async () => {

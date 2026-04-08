@@ -20,6 +20,55 @@ const EXCLUDED_FROM_CHIPS: ReadonlySet<ActionName> = new Set([
 ]);
 
 /**
+ * Stage-relevance filter: which actions are appropriate per decision stage.
+ * Applied after priority ranking; chips outside the stage's allow-set are
+ * dropped. Stages not present here (e.g. 'optimise', null) skip filtering.
+ */
+const STAGE_ALLOWED_ACTIONS: Record<string, ReadonlySet<ActionName>> = {
+  // draft_graph is in EXCLUDED_FROM_CHIPS so is never a chip candidate.
+  // add_option and adjust_edge_strength have stage_eligibility that excludes
+  // frame, so they are omitted to avoid dead entries.
+  // frame chips surface graph-building actions available in the framing stage.
+  frame: new Set<ActionName>([
+    'add_factor',
+    'set_factor_value',
+    'add_constraint',
+    'set_goal_target',
+  ]),
+  // run_analysis has stage_eligibility ['evaluate', 'optimise'], so it cannot
+  // appear in ideate via eligible_actions today. It is listed here as a
+  // forward-compatible entry so it surfaces automatically if the action's
+  // eligibility is ever extended to include ideate.
+  ideate: new Set<ActionName>([
+    'add_factor',
+    'add_option',
+    'adjust_edge_strength',
+    'set_factor_value',
+    'add_constraint',
+    'run_analysis',
+    'remove_factor',
+    'set_goal_target',
+  ]),
+  evaluate: new Set<ActionName>([
+    'explain_result',
+    'compare_options',
+    'what_would_flip',
+    'run_premortem',
+    'challenge_assumption',
+    'set_factor_value',
+    'adjust_edge_strength',
+    'run_analysis',
+  ]),
+  // generate_artefact is in EXCLUDED_FROM_CHIPS so is never a chip candidate;
+  // it is omitted here to avoid a misleading dead entry.
+  decide: new Set<ActionName>([
+    'run_premortem',
+    'challenge_assumption',
+    'compare_options',
+  ]),
+};
+
+/**
  * Priority tiers for chip ordering.
  * Lower number = higher priority in the chip bar.
  */
@@ -47,11 +96,14 @@ const CHIP_PRIORITY: Partial<Record<ActionName, number>> = {
  * 2. Exclude recently executed actions (cooldown: suppress_same_turn)
  * 3. Exclude stub/internal actions
  * 4. Promote signal-driven actions (e.g. run_analysis when model changed)
- * 5. Cap at 3
+ * 5. Filter to actions relevant for the current stage
+ * 6. Promote deferred actions (LLM-requested, not executed) to the front
+ * 7. Cap at 3
  */
 export function buildDeterministicChips(
   ctx: DeterministicTurnContext,
   executedAction?: ActionName | null,
+  deferredActions: ActionName[] = [],
 ): SuggestedAction[] {
   const recentSet = new Set(ctx.conversation.recent_actions_taken);
   if (executedAction) recentSet.add(executedAction);
@@ -75,7 +127,32 @@ export function buildDeterministicChips(
   candidates.sort((a, b) => a.priority - b.priority);
 
   // Boost signal-driven actions to top
-  const boosted = boostBySignals(candidates, ctx);
+  let boosted = boostBySignals(candidates, ctx);
+
+  // Stage-aware relevance filter (additive, after priority + boosting).
+  // Skipped when stage is unknown so unfamiliar stages don't drop all chips.
+  const stageAllowed = STAGE_ALLOWED_ACTIONS[ctx.stage];
+  if (stageAllowed) {
+    boosted = boosted.filter((c) => stageAllowed.has(c.name));
+  }
+
+  // Promote deferred actions (compound calls discarded by one-tool-per-turn)
+  // to the front of the chip list so the user can resume the unfulfilled
+  // intent on the next turn. Skipped if no catalogue entry, already executed
+  // this turn, or already present in the candidate list.
+  if (deferredActions.length > 0) {
+    const seen = new Set(boosted.map((c) => c.name));
+    const promoted: Array<{ name: ActionName; priority: number }> = [];
+    for (const name of deferredActions) {
+      if (recentSet.has(name)) continue;
+      if (EXCLUDED_FROM_CHIPS.has(name)) continue;
+      if (!ACTION_CATALOGUE.get(name)) continue;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      promoted.push({ name, priority: -1 });
+    }
+    boosted = [...promoted, ...boosted];
+  }
 
   // Take top 3
   const chips: SuggestedAction[] = [];

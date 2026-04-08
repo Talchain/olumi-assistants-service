@@ -48,14 +48,17 @@ export const explainResultAction: ActionDefinition = {
     // supporting structure (Stability, Key drivers, Constraints) without
     // restating the recommendation.
     const winnerHeadline = summary.winner
-      ? `${summary.winner} leads the analysis${summary.winner_probability != null ? ` at ${(summary.winner_probability * 100).toFixed(0)}%` : ''}.`
+      ? summary.winner_probability != null
+        ? `${summary.winner} leads in ${(summary.winner_probability * 100).toFixed(0)}% of simulations.`
+        : `${summary.winner} performs best.`
       : 'Analysis results are ready.';
 
-    // Stability
+    // Stability — content is the band alone (heading already labels it,
+    // and "robustness" is not a user-facing term).
     if (summary.robustness_band) {
       sections.push({
         heading: 'Stability',
-        content: `Robustness: ${summary.robustness_band}.`,
+        content: `${capitaliseFirst(summary.robustness_band)}.`,
       });
     }
 
@@ -68,9 +71,9 @@ export const explainResultAction: ActionDefinition = {
         heading: 'Key drivers',
         items: summary.factor_sensitivity.slice(0, 3).map((f) => {
           const segs: string[] = [f.label];
-          if (f.influence_percent != null) segs.push(`influence ${f.influence_percent.toFixed(0)}%`);
+          if (f.influence_percent != null) segs.push(`drives ${f.influence_percent.toFixed(0)}% of the outcome`);
           if (f.confidence_band) segs.push(`confidence: ${f.confidence_band}`);
-          return segs.join(' — ');
+          return segs.join(', ');
         }),
       });
     } else if (summary.top_drivers.length > 0) {
@@ -82,9 +85,9 @@ export const explainResultAction: ActionDefinition = {
       });
     } else {
       // No individual driver dominated — build informative fallback
-      let content = 'No single dominant driver — the outcome is shaped by the combined effect of multiple factors.';
+      let content = 'No single dominant driver: the outcome is shaped by the combined effect of multiple factors.';
       if (summary.fragile_edge_count > 0) {
-        content += ` ${summary.fragile_edge_count} fragile edge${summary.fragile_edge_count > 1 ? 's' : ''} detected — small changes in those connections could shift results.`;
+        content += ` ${summary.fragile_edge_count} fragile edge${summary.fragile_edge_count > 1 ? 's' : ''} detected; small changes in those connections could shift results.`;
       }
       sections.push({ heading: 'Drivers', content });
     }
@@ -119,3 +122,8 @@ export const explainResultAction: ActionDefinition = {
   chipLabel() { return 'Explain results'; },
   chipPrompt() { return 'Explain the results'; },
 };
+
+function capitaliseFirst(value: string): string {
+  if (!value) return value;
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}

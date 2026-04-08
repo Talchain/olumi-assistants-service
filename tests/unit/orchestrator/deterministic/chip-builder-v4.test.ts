@@ -168,4 +168,123 @@ describe("buildDeterministicChips", () => {
 
     expect(chips[0].action_type).toBe('run_analysis');
   });
+
+  // ====================================================================
+  // Stage-aware chip filtering
+  // ====================================================================
+
+  describe("stage-aware filtering", () => {
+    it("frame stage: filters out compare_options, preserves add_factor", () => {
+      const ctx = makeTurnContext({
+        stage: 'frame',
+        analysis_summary: null,
+        eligible_actions: ['compare_options', 'add_factor'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx);
+      const names = chips.map((c) => c.action_type);
+      expect(names).not.toContain('compare_options');
+      // Positive assertion: graph-building chip survives in frame
+      expect(names).toContain('add_factor');
+    });
+
+    it("ideate stage: filters out explain_result, preserves add_factor", () => {
+      const ctx = makeTurnContext({
+        stage: 'ideate',
+        eligible_actions: ['explain_result', 'add_factor', 'set_factor_value'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx);
+      const names = chips.map((c) => c.action_type);
+      expect(names).not.toContain('explain_result');
+      expect(names).toContain('add_factor');
+    });
+
+    it("evaluate stage: filters out add_factor, preserves explain_result", () => {
+      const ctx = makeTurnContext({
+        stage: 'evaluate',
+        eligible_actions: ['add_factor', 'explain_result'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx);
+      const names = chips.map((c) => c.action_type);
+      expect(names).not.toContain('add_factor');
+      expect(names).toContain('explain_result');
+    });
+
+    it("decide stage: filters out add_factor, preserves compare_options", () => {
+      const ctx = makeTurnContext({
+        stage: 'decide',
+        eligible_actions: ['add_factor', 'compare_options', 'set_factor_value'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx);
+      const names = chips.map((c) => c.action_type);
+      expect(names).not.toContain('add_factor');
+      expect(names).not.toContain('set_factor_value');
+      expect(names).toContain('compare_options');
+    });
+
+    it("unknown stage skips filtering (passes everything through)", () => {
+      const ctx = makeTurnContext({
+        // optimise has no entry in STAGE_ALLOWED_ACTIONS — filter is skipped
+        stage: 'optimise' as never,
+        eligible_actions: ['explain_result', 'add_factor'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx);
+      const names = chips.map((c) => c.action_type);
+      expect(names).toContain('explain_result');
+      expect(names).toContain('add_factor');
+    });
+  });
+
+  // ====================================================================
+  // Deferred actions (compound action acknowledgement)
+  // ====================================================================
+
+  describe("deferred actions (compound action acknowledgement)", () => {
+    it("no deferred actions: chip list is unchanged", () => {
+      const ctx = makeTurnContext();
+      const before = buildDeterministicChips(ctx, null, []);
+      const after = buildDeterministicChips(ctx);
+      expect(before.map((c) => c.action_type)).toEqual(after.map((c) => c.action_type));
+    });
+
+    it("one deferred action surfaces as the top chip", () => {
+      const ctx = makeTurnContext({
+        stage: 'evaluate',
+        eligible_actions: ['explain_result', 'compare_options'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx, 'explain_result', ['what_would_flip'] as ActionName[]);
+      expect(chips[0].action_type).toBe('what_would_flip');
+    });
+
+    it("two deferred actions both appear at the front of the chip list", () => {
+      const ctx = makeTurnContext({
+        stage: 'evaluate',
+        eligible_actions: ['compare_options'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx, 'explain_result', ['what_would_flip', 'challenge_assumption'] as ActionName[]);
+      const names = chips.map((c) => c.action_type);
+      expect(names).toContain('what_would_flip');
+      expect(names).toContain('challenge_assumption');
+    });
+
+    it("deferred action that was already executed this turn is not promoted", () => {
+      const ctx = makeTurnContext({
+        stage: 'evaluate',
+        eligible_actions: ['explain_result', 'compare_options'] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx, 'explain_result', ['explain_result'] as ActionName[]);
+      const names = chips.map((c) => c.action_type);
+      expect(names).not.toContain('explain_result');
+    });
+
+    it("deferred action overrides stage filter (LLM intent wins)", () => {
+      const ctx = makeTurnContext({
+        stage: 'frame',
+        analysis_summary: null,
+        eligible_actions: [] as ActionName[],
+      });
+      const chips = buildDeterministicChips(ctx, null, ['compare_options'] as ActionName[]);
+      const names = chips.map((c) => c.action_type);
+      expect(names).toContain('compare_options');
+    });
+  });
 });

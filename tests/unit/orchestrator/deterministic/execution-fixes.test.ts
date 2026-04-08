@@ -363,7 +363,7 @@ describe('explain_result — factor_sensitivity preferred over top_drivers', () 
     expect(keyDriversSection).toBeDefined();
     expect(keyDriversSection!.items).toBeDefined();
     expect(keyDriversSection!.items![0]).toContain('Price Sensitivity');
-    expect(keyDriversSection!.items![0]).toContain('influence 38%');
+    expect(keyDriversSection!.items![0]).toContain('drives 38% of the outcome');
     expect(keyDriversSection!.items![0]).toContain('confidence: high');
     // Must not fall back to "combined effect" when factor_sensitivity has data
     const driversFallback = data.sections!.find((s) => s.heading === 'Drivers');
