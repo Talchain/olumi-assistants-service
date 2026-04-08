@@ -12,6 +12,8 @@ import type { DeterministicTurnContext } from "./types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
 
 const MAX_CHIPS = 3;
+/** At most one deferred chip per turn; guarantees ≥2 proactive slots survive. */
+const MAX_DEFERRED_CHIPS = 1;
 
 /** Actions excluded from chip generation (stubs or not user-actionable). */
 const EXCLUDED_FROM_CHIPS: ReadonlySet<ActionName> = new Set([
@@ -138,12 +140,15 @@ export function buildDeterministicChips(
 
   // Promote deferred actions (compound calls discarded by one-tool-per-turn)
   // to the front of the chip list so the user can resume the unfulfilled
-  // intent on the next turn. Skipped if no catalogue entry, already executed
-  // this turn, or already present in the candidate list.
+  // intent on the next turn. Capped at MAX_DEFERRED_CHIPS (1) so proactive
+  // coaching chips always retain ≥2 of the 3 available slots. Only the first
+  // deferred action is promoted — it is the LLM's immediate next intent; any
+  // further discarded calls are lower-signal and not worth displacing.
   if (deferredActions.length > 0) {
     const seen = new Set(boosted.map((c) => c.name));
     const promoted: Array<{ name: ActionName; priority: number }> = [];
     for (const name of deferredActions) {
+      if (promoted.length >= MAX_DEFERRED_CHIPS) break;
       if (recentSet.has(name)) continue;
       if (EXCLUDED_FROM_CHIPS.has(name)) continue;
       if (!ACTION_CATALOGUE.get(name)) continue;

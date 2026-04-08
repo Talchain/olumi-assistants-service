@@ -255,15 +255,19 @@ describe("buildDeterministicChips", () => {
       expect(chips[0].action_type).toBe('what_would_flip');
     });
 
-    it("two deferred actions both appear at the front of the chip list", () => {
+    it("only the first deferred action is promoted (MAX_DEFERRED_CHIPS = 1)", () => {
       const ctx = makeTurnContext({
         stage: 'evaluate',
         eligible_actions: ['compare_options'] as ActionName[],
       });
       const chips = buildDeterministicChips(ctx, 'explain_result', ['what_would_flip', 'challenge_assumption'] as ActionName[]);
       const names = chips.map((c) => c.action_type);
-      expect(names).toContain('what_would_flip');
-      expect(names).toContain('challenge_assumption');
+      // First deferred promoted to slot 0
+      expect(names[0]).toBe('what_would_flip');
+      // Second deferred NOT promoted (cap = 1); slot filled by proactive chip
+      expect(names).not.toContain('challenge_assumption');
+      // Total chip count still ≤ 3
+      expect(chips.length).toBeLessThanOrEqual(3);
     });
 
     it("deferred action that was already executed this turn is not promoted", () => {
