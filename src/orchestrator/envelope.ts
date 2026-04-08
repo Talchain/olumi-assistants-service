@@ -289,17 +289,40 @@ function validateAnalysisReadyOnBlocks(blocks: TypedConversationBlock[]): void {
     if (block.block_type !== 'graph_patch') continue;
     const data = block.data as GraphPatchBlockData;
 
-    // Patches that aren't fresh proposals don't carry analysis_ready by design:
-    // - 'rejected' / 'dismissed': proposal failed or user dismissed; nothing to check.
-    // - 'accepted': post-acceptance confirmation block from system-event-router;
-    //   the UI already has the canonical analysis_ready from the prior turn.
-    // analysis_ready is expected on freshly-proposed patches from action handlers.
-    if (data.status !== 'proposed') continue;
-
+    // Two independent checks:
+    //
+    // 1) Missing-payload warning is gated to status='proposed'. Other statuses
+    //    don't carry analysis_ready by design:
+    //      - 'rejected' / 'dismissed': proposal failed or user dismissed.
+    //      - 'accepted': post-acceptance confirmation from system-event-router;
+    //        the UI already has the canonical analysis_ready from a prior turn.
+    //
+    // 2) Shape validation runs whenever analysis_ready IS present, regardless
+    //    of status — if a handler does emit one on an unusual status, we still
+    //    want to catch malformed shapes. The validator must never throw, so
+    //    every access is defensively guarded.
     if (data.analysis_ready == null) {
+      if (data.status === 'proposed') {
+        log.warn(
+          { block_type: 'graph_patch', patch_type: data.patch_type, status: data.status },
+          'graph_patch block has no analysis_ready — handler should provide one',
+        );
+      }
+      continue;
+    }
+
+    // Defensive: handler may have emitted a malformed payload. Detect missing
+    // or non-array `options` before mapping so we warn instead of throwing.
+    const ar = data.analysis_ready as { options?: unknown };
+    if (!Array.isArray(ar.options)) {
       log.warn(
-        { block_type: 'graph_patch', patch_type: data.patch_type, status: data.status },
-        'graph_patch block has no analysis_ready — handler should provide one',
+        {
+          block_type: 'graph_patch',
+          patch_type: data.patch_type,
+          status: data.status,
+          options_type: ar.options === undefined ? 'undefined' : typeof ar.options,
+        },
+        'analysis_ready on graph_patch block has missing or non-array options',
       );
       continue;
     }
@@ -308,13 +331,21 @@ function validateAnalysisReadyOnBlocks(blocks: TypedConversationBlock[]): void {
     // (See draft-graph.ts:535-543 and add-option.ts:208-216 for the same pattern.)
     const forValidation = {
       ...data.analysis_ready,
-      options: data.analysis_ready.options.map((o) => ({
-        id: (o as { option_id?: string; id?: string }).option_id
-          ?? (o as { id?: string }).id,
-        label: o.label,
-        status: o.status,
-        interventions: o.interventions,
-      })),
+      options: ar.options.map((rawOpt) => {
+        const o = (rawOpt ?? {}) as {
+          option_id?: string;
+          id?: string;
+          label?: string;
+          status?: string;
+          interventions?: Record<string, number>;
+        };
+        return {
+          id: o.option_id ?? o.id,
+          label: o.label,
+          status: o.status,
+          interventions: o.interventions,
+        };
+      }),
     };
 
     const parseResult = AnalysisReadyPayload.safeParse(forValidation);
@@ -323,6 +354,7 @@ function validateAnalysisReadyOnBlocks(blocks: TypedConversationBlock[]): void {
         {
           block_type: 'graph_patch',
           patch_type: data.patch_type,
+          status: data.status,
           errors_flat: parseResult.error.flatten(),
           error_paths: parseResult.error.issues.slice(0, 3).map((i) => ({
             path: i.path,

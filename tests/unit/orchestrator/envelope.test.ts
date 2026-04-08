@@ -299,6 +299,86 @@ describe("Envelope analysis_ready validation (regression)", () => {
     expect(warnedMessages.some((m) => typeof m === 'string' && m.includes('no analysis_ready'))).toBe(true);
   });
 
+  it("does not throw when analysis_ready.options is missing entirely", () => {
+    // Defensive regression: an earlier draft of the validator did
+    // `data.analysis_ready.options.map(...)` without guarding, which would
+    // throw TypeError on a payload like this and crash envelope assembly.
+    const malformed = {
+      goal_node_id: 'goal_revenue',
+      status: 'ready',
+      // options field intentionally absent
+    } as unknown as NonNullable<GraphPatchBlockData['analysis_ready']>;
+
+    const block = makeFullDraftPatchBlock({
+      patch_type: 'full_draft',
+      operations: [{ op: 'add_node', path: '/nodes/g', value: { id: 'g', kind: 'goal', label: 'G' } }],
+      status: 'proposed',
+      auto_apply: true,
+      analysis_ready: malformed,
+    });
+
+    expect(() => assembleEnvelope({
+      assistantText: null,
+      blocks: [block],
+      context: makeContextWithBareOptionGraph(),
+    })).not.toThrow();
+
+    const warnedMessages = warnSpy.mock.calls.map((c) => c[1]);
+    expect(warnedMessages.some((m) => typeof m === 'string' && m.includes('missing or non-array options'))).toBe(true);
+  });
+
+  it("does not throw when analysis_ready.options is non-array (e.g. null)", () => {
+    const malformed = {
+      goal_node_id: 'goal_revenue',
+      status: 'ready',
+      options: null,
+    } as unknown as NonNullable<GraphPatchBlockData['analysis_ready']>;
+
+    const block = makeFullDraftPatchBlock({
+      patch_type: 'full_draft',
+      operations: [{ op: 'add_node', path: '/nodes/g', value: { id: 'g', kind: 'goal', label: 'G' } }],
+      status: 'proposed',
+      auto_apply: true,
+      analysis_ready: malformed,
+    });
+
+    expect(() => assembleEnvelope({
+      assistantText: null,
+      blocks: [block],
+      context: makeContextWithBareOptionGraph(),
+    })).not.toThrow();
+
+    const warnedMessages = warnSpy.mock.calls.map((c) => c[1]);
+    expect(warnedMessages.some((m) => typeof m === 'string' && m.includes('missing or non-array options'))).toBe(true);
+  });
+
+  it("validates analysis_ready shape on accepted/rejected blocks too when present", () => {
+    // Skip rule applies only to the missing-payload warning. If a non-proposed
+    // block does carry analysis_ready, we still validate its shape — that's
+    // a useful upstream-bug detector.
+    const malformed = {
+      goal_node_id: 'goal_revenue',
+      status: 'ready',
+      // options missing
+    } as unknown as NonNullable<GraphPatchBlockData['analysis_ready']>;
+
+    const block = makeFullDraftPatchBlock({
+      patch_type: 'edit',
+      operations: [],
+      status: 'accepted',
+      analysis_ready: malformed,
+    });
+
+    assembleEnvelope({
+      assistantText: null,
+      blocks: [block],
+      context: makeContextWithBareOptionGraph(),
+    });
+
+    const warnedMessages = warnSpy.mock.calls.map((c) => c[1]);
+    expect(warnedMessages.some((m) => typeof m === 'string' && m.includes('missing or non-array options'))).toBe(true);
+  });
+
   it("warns but does not mutate when analysis_ready fails Zod validation", () => {
     const malformed = {
       // Missing goal_node_id and status — schema must reject.
