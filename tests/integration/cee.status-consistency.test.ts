@@ -263,8 +263,12 @@ describe("CEE Status Consistency", () => {
       }
     });
 
-    it("graph-readiness treats needs_encoding as ready for analysis", async () => {
-      // Create a minimal graph with needs_encoding options
+    it("graph-readiness blocks needs_encoding options (post-2026-04-08)", async () => {
+      // After 2026-04-08, needs_encoding is a hard blocker. The run path
+      // (run-analysis.ts) checks numeric interventions directly and rejects
+      // empty/non-numeric ones; the readiness route must agree to avoid the
+      // false-positive "can run" → PLoT EMPTY_INTERVENTIONS divergence that
+      // motivated the intervention-lifecycle audit.
       const analysisReady: AnalysisReadyPayloadT = {
         options: [
           {
@@ -317,23 +321,11 @@ describe("CEE Status Consistency", () => {
       expect(readinessResponse.statusCode).toBe(200);
       const readinessResult = JSON.parse(readinessResponse.body);
 
-      // KEY: needs_encoding options should be counted as ready for analysis
-      // (they have placeholder values, so analysis CAN run)
-      expect(readinessResult.options_ready).toBe(2);
+      // needs_encoding options no longer count as ready.
+      expect(readinessResult.options_ready).toBe(0);
       expect(readinessResult.options_total).toBe(2);
-      expect(readinessResult.can_run_analysis).toBe(true);
-
-      // Confidence should be medium (not high) due to encoding warnings
-      expect(["high", "medium"]).toContain(readinessResult.confidence_level);
-
-      console.log({
-        test: "graph-readiness treats needs_encoding as ready",
-        options_ready: readinessResult.options_ready,
-        options_total: readinessResult.options_total,
-        can_run_analysis: readinessResult.can_run_analysis,
-        confidence_level: readinessResult.confidence_level,
-        confidence_explanation: readinessResult.confidence_explanation,
-      });
+      expect(readinessResult.can_run_analysis).toBe(false);
+      expect(readinessResult.blocker_reason).toBeDefined();
     });
   });
 

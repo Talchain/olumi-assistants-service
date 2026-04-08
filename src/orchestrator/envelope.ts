@@ -19,12 +19,12 @@ import type {
   V2RunResponseEnvelope,
   DecisionStage,
   GraphPatchBlockData,
-  GraphV3T,
 } from "./types.js";
 import { hashContext } from "./context/hash.js";
-import { computeStructuralReadiness } from "./tools/analysis-ready-helper.js";
 import { buildModelReceipt } from "./pipeline/phase5-validation/model-receipt.js";
 import { validateV1EnvelopeContract } from "./validation/response-contract.js";
+import { AnalysisReadyPayload } from "../schemas/analysis-ready.js";
+import { log } from "../utils/telemetry.js";
 
 // ============================================================================
 // Envelope Builder
@@ -117,9 +117,10 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
     envelope.dsk_coaching = input.dskCoaching;
   }
 
-  // Recompute analysis_ready on graph_patch blocks from the graph being returned.
-  // This is the canonical recompute — avoids stale/pass-through values.
-  recomputeAnalysisReady(envelope.blocks, input.context);
+  // Validate (do NOT recompute) analysis_ready on graph_patch blocks.
+  // Action handlers are the authoritative producers; the envelope only warns
+  // when a payload is malformed or missing. Never overwrite handler output.
+  validateAnalysisReadyOnBlocks(envelope.blocks);
 
   // Model receipt — server-constructed metadata for the UI after draft_graph
   const lastPatchBlock = [...envelope.blocks].reverse().find((b) => b.block_type === 'graph_patch');
@@ -268,35 +269,68 @@ export function buildTurnPlan(
 }
 
 // ============================================================================
-// analysis_ready Recomputation
+// analysis_ready Validation (non-mutating)
 // ============================================================================
 
 /**
- * Recompute analysis_ready on graph_patch blocks from the post-patch graph.
+ * Validates but does not recompute analysis_ready on graph_patch blocks.
  *
- * Canonical recompute at envelope assembly time — the graph being returned
- * to the user is the single source of truth. Prefers applied_graph (post-PLoT)
- * over the input context graph (pre-turn).
+ * The action handler (draft_graph, add_option, edit_graph, …) is the
+ * authoritative producer of analysis_ready. This validator warns on malformed
+ * or missing payloads but never overwrites handler output. The previous
+ * recompute path discarded handler-flattened intervention values when the
+ * post-patch graph nodes did not carry intervention bundles, silently
+ * regressing every option to needs_encoding with empty interventions.
  *
- * Mutates blocks in place (they are owned by this envelope).
+ * See: docs/intervention-lifecycle-and-health-audit-2026-04-08.md §6.
  */
-function recomputeAnalysisReady(
-  blocks: TypedConversationBlock[],
-  context: ConversationContext,
-): void {
+function validateAnalysisReadyOnBlocks(blocks: TypedConversationBlock[]): void {
   for (const block of blocks) {
     if (block.block_type !== 'graph_patch') continue;
     const data = block.data as GraphPatchBlockData;
 
-    // Resolve the graph to compute readiness from:
-    // 1. applied_graph on the block (post-PLoT canonical state)
-    // 2. context.graph (pre-turn state, for drafts that haven't been through PLoT yet)
-    const graph: GraphV3T | null = data.applied_graph ?? context.graph ?? null;
-    if (!graph) continue;
+    // Patches that aren't fresh proposals don't carry analysis_ready by design:
+    // - 'rejected' / 'dismissed': proposal failed or user dismissed; nothing to check.
+    // - 'accepted': post-acceptance confirmation block from system-event-router;
+    //   the UI already has the canonical analysis_ready from the prior turn.
+    // analysis_ready is expected on freshly-proposed patches from action handlers.
+    if (data.status !== 'proposed') continue;
 
-    const readiness = computeStructuralReadiness(graph);
-    if (readiness) {
-      data.analysis_ready = readiness;
+    if (data.analysis_ready == null) {
+      log.warn(
+        { block_type: 'graph_patch', patch_type: data.patch_type, status: data.status },
+        'graph_patch block has no analysis_ready — handler should provide one',
+      );
+      continue;
+    }
+
+    // Re-map outward-contract option_id → schema id for validation only.
+    // (See draft-graph.ts:535-543 and add-option.ts:208-216 for the same pattern.)
+    const forValidation = {
+      ...data.analysis_ready,
+      options: data.analysis_ready.options.map((o) => ({
+        id: (o as { option_id?: string; id?: string }).option_id
+          ?? (o as { id?: string }).id,
+        label: o.label,
+        status: o.status,
+        interventions: o.interventions,
+      })),
+    };
+
+    const parseResult = AnalysisReadyPayload.safeParse(forValidation);
+    if (!parseResult.success) {
+      log.warn(
+        {
+          block_type: 'graph_patch',
+          patch_type: data.patch_type,
+          errors_flat: parseResult.error.flatten(),
+          error_paths: parseResult.error.issues.slice(0, 3).map((i) => ({
+            path: i.path,
+            message: i.message,
+          })),
+        },
+        'analysis_ready on graph_patch block failed schema validation',
+      );
     }
   }
 }

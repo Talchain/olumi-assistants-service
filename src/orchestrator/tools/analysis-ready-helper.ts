@@ -42,6 +42,17 @@ export function extractNumericIntervention(v: unknown): number | undefined {
 /**
  * Merge intervention values from all known locations on an option node.
  *
+ * Scope (post-2026-04-08): this helper is used by `computeStructuralReadiness`
+ * which is now invoked ONLY by action handlers that compute their own readiness
+ * payload from a synthetic graph (e.g. add_option's preview, edit_graph's
+ * post-patch readiness). It is NOT used by envelope.ts anymore — the envelope
+ * validates handler-produced analysis_ready instead of recomputing it. The
+ * three-source merge below exists because each handler builds its synthetic
+ * graph slightly differently and writes interventions to a different location.
+ * Do not extend this helper for new envelope-time recomputation paths; the
+ * canonical rule is "handlers produce analysis_ready, the envelope validates."
+ * See: docs/intervention-lifecycle-and-health-audit-2026-04-08.md §6.
+ *
  * Sources (in precedence order — first write wins per factor_id):
  * 1. `node.data.interventions` — prompt-taught canonical edit location (wins on conflict)
  * 2. `node["data/interventions/<fac_id>"]` — slash-keyed flat entries from scalar wrapping

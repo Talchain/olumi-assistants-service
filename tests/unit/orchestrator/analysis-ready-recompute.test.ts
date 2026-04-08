@@ -140,55 +140,78 @@ function makeGraphPatchBlock(opts: {
   } as ConversationBlock;
 }
 
-describe('Envelope-level analysis_ready recomputation', () => {
-  it('stale block-level analysis_ready is overridden by envelope recompute', () => {
-    // applied_graph has valid interventions on all options → should be "ready"
-    const validGraph = makeGraph();
+describe('Envelope-level analysis_ready: handler is authoritative', () => {
+  // Post-2026-04-08: assembleEnvelope no longer recomputes analysis_ready.
+  // Action handlers (draft_graph, add_option, edit_graph, …) are the
+  // authoritative producers; the envelope only validates and warns.
+  // See: docs/intervention-lifecycle-and-health-audit-2026-04-08.md §6.
+
+  it('handler-produced analysis_ready is preserved unchanged (no recompute)', () => {
+    // Even when applied_graph would compute differently, the envelope must
+    // not overwrite the handler payload. This is the core regression fix:
+    // the recompute used to clobber a 'ready' handler payload with a
+    // 'needs_encoding' graph-derived payload when the post-patch graph
+    // nodes lacked intervention bundles.
+    const handlerProduced: GraphPatchBlockData['analysis_ready'] = {
+      status: 'ready',
+      goal_node_id: 'goal_1',
+      options: [
+        { option_id: 'opt_a', label: 'Option A', status: 'ready', interventions: { fac_1: 0.5 } },
+        { option_id: 'opt_b', label: 'Option B', status: 'ready', interventions: { fac_1: 0.7 } },
+      ],
+    };
+    // applied_graph has option nodes with NO interventions on them — the old
+    // recompute would have produced needs_encoding here.
+    const bareGraph = makeGraph({
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Maximise Revenue' },
+        { id: 'dec_1', kind: 'decision', label: 'Choose supplier' },
+        { id: 'opt_a', kind: 'option', label: 'Option A' },
+        { id: 'opt_b', kind: 'option', label: 'Option B' },
+        { id: 'fac_1', kind: 'factor', label: 'Market share' },
+      ],
+    } as unknown as Partial<GraphV3T>);
     const block = makeGraphPatchBlock({
-      appliedGraph: validGraph,
-      staleAnalysisReady: {
-        status: 'needs_user_mapping',
-        goal_node_id: 'goal_1',
-        options: [
-          { option_id: 'opt_a', label: 'Option A', status: 'needs_user_mapping', interventions: {} },
-          { option_id: 'opt_b', label: 'Option B', status: 'needs_user_mapping', interventions: {} },
-        ],
-      },
+      appliedGraph: bareGraph,
+      staleAnalysisReady: handlerProduced,
     });
 
     const envelope = assembleEnvelope({
-      turnId: 'test-stale-override',
+      turnId: 'test-handler-authoritative',
       assistantText: 'Test',
       blocks: [block],
       context: makeContext(),
     });
 
     const patchData = envelope.blocks[0].data as GraphPatchBlockData;
-    expect(patchData.analysis_ready).toBeDefined();
+    // Handler payload survives intact; no graph-derived overwrite.
+    expect(patchData.analysis_ready).toBe(handlerProduced);
     expect(patchData.analysis_ready!.status).toBe('ready');
+    expect(patchData.analysis_ready!.options.every((o) => o.status === 'ready')).toBe(true);
+    expect(Object.keys(patchData.analysis_ready!.options[0].interventions).length).toBeGreaterThan(0);
   });
 
-  it('fallback to context.graph when no applied_graph on block', () => {
-    // No applied_graph on the block, but context.graph is valid → should still compute
+  it('block without analysis_ready stays without it (envelope does not synthesise one)', () => {
+    // Even with a perfectly good context.graph, the envelope no longer
+    // synthesises analysis_ready when the handler omitted it. The handler
+    // is the authoritative producer — silence here means a warning will be
+    // logged, but no payload is invented.
     const contextGraph = makeGraph();
     const block = makeGraphPatchBlock({});
 
     const envelope = assembleEnvelope({
-      turnId: 'test-context-fallback',
+      turnId: 'test-no-synthesis',
       assistantText: 'Test',
       blocks: [block],
       context: makeContext(contextGraph),
     });
 
     const patchData = envelope.blocks[0].data as GraphPatchBlockData;
-    expect(patchData.analysis_ready).toBeDefined();
-    expect(patchData.analysis_ready!.status).toBe('ready');
-    expect(patchData.analysis_ready!.goal_node_id).toBe('goal_1');
+    expect(patchData.analysis_ready).toBeUndefined();
   });
 
   it('no applied_graph and no context.graph → analysis_ready unchanged (null safe)', () => {
     const block = makeGraphPatchBlock({});
-    // Confirm analysis_ready is not set before assembly
     expect((block.data as GraphPatchBlockData).analysis_ready).toBeUndefined();
 
     const envelope = assembleEnvelope({
@@ -199,7 +222,6 @@ describe('Envelope-level analysis_ready recomputation', () => {
     });
 
     const patchData = envelope.blocks[0].data as GraphPatchBlockData;
-    // Should remain undefined — no graph available to compute from
     expect(patchData.analysis_ready).toBeUndefined();
   });
 });

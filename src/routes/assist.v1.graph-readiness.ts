@@ -101,22 +101,39 @@ function assessV3Readiness(
     issues.push(`Goal node "${goalNodeId}" not found in graph`);
   }
 
-  // Check options - track different status types
+  // Check options - track ready vs blocked.
+  // After 2026-04-08: needs_encoding is a hard blocker (no soft tier).
+  // The run path checks numeric interventions directly; this route must agree.
   const options = analysisReady.options ?? [];
   const readyOptions: string[] = [];
-  const encodingOptions: string[] = []; // Options with needs_encoding (soft issue)
-  const blockedOptions: string[] = [];  // Options with needs_user_mapping (hard blocker)
+  const blockedOptions: string[] = [];
 
   for (const opt of options) {
     // Check interventions exist (required regardless of status)
-    const interventionKeys = Object.keys(opt.interventions ?? {});
-    if (interventionKeys.length === 0) {
+    const interventionEntries = Object.entries(opt.interventions ?? {});
+    if (interventionEntries.length === 0) {
       issues.push(`Option "${opt.id}" has no interventions`);
       blockedOptions.push(opt.id);
       continue;
     }
 
+    // Check intervention values are finite numbers — must agree with what
+    // run_analysis will accept. Non-numeric or non-finite values would be
+    // rejected by PLoT (INVALID_INTERVENTION_VALUE) so they're hard blockers
+    // here, regardless of the option's status field.
+    const nonNumeric = interventionEntries
+      .filter(([, v]) => typeof v !== 'number' || !Number.isFinite(v))
+      .map(([k]) => k);
+    if (nonNumeric.length > 0) {
+      issues.push(
+        `Option "${opt.id}" has non-numeric intervention values for: ${nonNumeric.join(", ")}`,
+      );
+      blockedOptions.push(opt.id);
+      continue;
+    }
+
     // Check intervention targets exist in graph
+    const interventionKeys = interventionEntries.map(([k]) => k);
     const missingTargets = interventionKeys.filter((targetId) => !nodeIds.has(targetId));
     if (missingTargets.length > 0) {
       issues.push(
@@ -126,17 +143,16 @@ function assessV3Readiness(
       continue;
     }
 
-    // Handle status (Raw+Encoded pattern support + Phase 2B needs_user_input)
+    // Status handling. After v2026-04-08, needs_encoding is treated as a
+    // hard blocker — the run path checks numeric interventions directly,
+    // and the readiness route must agree with it. needs_encoding implies
+    // the option's interventions are not yet encoded, so analysis cannot
+    // run safely. See intervention-lifecycle audit §6.
     switch (opt.status) {
       case "ready":
         readyOptions.push(opt.id);
         break;
       case "needs_encoding":
-        // Soft issue: has placeholder values, can still run analysis
-        // but results may need user review after encoding is specified
-        encodingOptions.push(opt.id);
-        readyOptions.push(opt.id); // Count as "ready enough" for analysis
-        break;
       case "needs_user_mapping":
       default:
         issues.push(`Option "${opt.id}" has status "${opt.status}" instead of "ready"`);
@@ -157,26 +173,18 @@ function assessV3Readiness(
   }
 
   // Determine overall readiness
-  // Options with needs_encoding are counted as ready (they have placeholder values)
   const optionsReady = readyOptions.length;
   const optionsTotal = options.length;
-  const optionsNeedingEncoding = encodingOptions.length;
   const hasEnoughOptions = optionsReady >= 2;
 
-  // Analysis can run if we have enough options (including those with needs_encoding)
-  // but we note if some options need encoding for user awareness
+  // Analysis can run only when every option is fully ready and goal is valid.
   const isReady = hasEnoughOptions && goalNodeValid && blockedOptions.length === 0;
-  const hasEncodingWarnings = optionsNeedingEncoding > 0;
 
-  // Calculate readiness score (0-100)
-  // Options with needs_encoding get partial credit (they work, but aren't optimal)
+  // Calculate readiness score (0-100). Only fully-ready options count.
   let readinessScore = 0;
   if (goalNodeValid) readinessScore += 30;
   if (optionsTotal > 0) {
-    // Full ready options get full credit, needs_encoding get 80% credit
-    const fullyReady = readyOptions.length - encodingOptions.length;
-    const effectiveReady = fullyReady + (encodingOptions.length * 0.8);
-    const optionRatio = effectiveReady / optionsTotal;
+    const optionRatio = readyOptions.length / optionsTotal;
     readinessScore += Math.round(optionRatio * 50);
   }
   if (hasEnoughOptions) readinessScore += 20;
@@ -193,11 +201,8 @@ function assessV3Readiness(
 
   // Determine confidence level
   let confidenceLevel: "high" | "medium" | "low";
-  if (optionsTotal >= 2 && goalNodeValid && blockedOptions.length === 0 && !hasEncodingWarnings) {
+  if (optionsTotal >= 2 && goalNodeValid && blockedOptions.length === 0) {
     confidenceLevel = "high";
-  } else if (optionsTotal >= 2 && goalNodeValid && blockedOptions.length === 0) {
-    // Has encoding warnings but can still run
-    confidenceLevel = "medium";
   } else if (optionsTotal >= 1 && goalNodeValid) {
     confidenceLevel = "medium";
   } else {
@@ -218,14 +223,10 @@ function assessV3Readiness(
     }
   }
 
-  // Add encoding warning to confidence explanation if applicable
+  // Build the confidence explanation.
   let confidenceExplanation: string;
   if (isReady) {
-    if (hasEncodingWarnings) {
-      confidenceExplanation = `V3 analysis ready with ${optionsReady} options (${optionsNeedingEncoding} need encoding confirmation)`;
-    } else {
-      confidenceExplanation = `V3 analysis ready with ${optionsReady} options and valid goal node`;
-    }
+    confidenceExplanation = `V3 analysis ready with ${optionsReady} options and valid goal node`;
   } else {
     confidenceExplanation = `V3 analysis not ready: ${blockerReason || "unknown issue"}`;
   }
