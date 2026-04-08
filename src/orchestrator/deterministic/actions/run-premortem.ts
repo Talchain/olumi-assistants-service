@@ -12,7 +12,7 @@ import { createPremortemBlock } from "../../blocks/factory.js";
 
 export const runPremortemAction: ActionDefinition = {
   action_type: 'run_premortem',
-  description: 'Run a pre-mortem analysis for an option — imagine it failed and explore why.',
+  description: 'Run a pre-mortem analysis for an option: imagine it failed and explore why.',
   stage_eligibility: new Set(['evaluate', 'decide', 'optimise']),
   requires_target: false,
   requires_confirmation: false,

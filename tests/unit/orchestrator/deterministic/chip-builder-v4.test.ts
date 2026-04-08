@@ -290,5 +290,20 @@ describe("buildDeterministicChips", () => {
       const names = chips.map((c) => c.action_type);
       expect(names).toContain('compare_options');
     });
+
+    it("deferred action already in proactive list is moved to slot 0", () => {
+      // what_would_flip is a natural proactive chip (eligible, passes stage filter)
+      // but it was also a deferred call — it should be promoted to slot 0.
+      const ctx = makeTurnContext({
+        stage: 'evaluate',
+        eligible_actions: ['explain_result', 'compare_options', 'what_would_flip'] as ActionName[],
+      });
+      // explain_result is the executed action; what_would_flip is deferred
+      const chips = buildDeterministicChips(ctx, 'explain_result', ['what_would_flip'] as ActionName[]);
+      // Chip count unchanged — no duplicate was added
+      expect(chips.length).toBeLessThanOrEqual(3);
+      // what_would_flip bumped to front
+      expect(chips[0].action_type).toBe('what_would_flip');
+    });
   });
 });

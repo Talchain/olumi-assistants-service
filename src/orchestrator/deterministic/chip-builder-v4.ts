@@ -144,6 +144,11 @@ export function buildDeterministicChips(
   // coaching chips always retain ≥2 of the 3 available slots. Only the first
   // deferred action is promoted — it is the LLM's immediate next intent; any
   // further discarded calls are lower-signal and not worth displacing.
+  //
+  // Special case: if the deferred action is already a proactive chip (passed
+  // stage filter and was in eligible_actions), move it to the front rather
+  // than adding a duplicate. This preserves LLM intent ordering without
+  // inflating the chip count.
   if (deferredActions.length > 0) {
     const seen = new Set(boosted.map((c) => c.name));
     const promoted: Array<{ name: ActionName; priority: number }> = [];
@@ -152,7 +157,16 @@ export function buildDeterministicChips(
       if (recentSet.has(name)) continue;
       if (EXCLUDED_FROM_CHIPS.has(name)) continue;
       if (!ACTION_CATALOGUE.get(name)) continue;
-      if (seen.has(name)) continue;
+      if (seen.has(name)) {
+        // Already a proactive chip — move to slot 0 to honour LLM intent,
+        // then consume the deferred cap.
+        const idx = boosted.findIndex((c) => c.name === name);
+        if (idx > 0) {
+          const [item] = boosted.splice(idx, 1);
+          boosted.unshift(item);
+        }
+        break;
+      }
       seen.add(name);
       promoted.push({ name, priority: -1 });
     }

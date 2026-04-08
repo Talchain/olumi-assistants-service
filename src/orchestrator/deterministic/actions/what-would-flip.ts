@@ -29,7 +29,7 @@ export const whatWouldFlipAction: ActionDefinition = {
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
     if (!ctx.analysis_summary) return 'No analysis results available. Run analysis first.';
-    if (!ctx.analysis_summary.winner) return 'No clear leading option to analyse. Run analysis first.';
+    if (!ctx.analysis_summary.winner) return 'No clear leading option identified in the analysis.';
     return null;
   },
 
