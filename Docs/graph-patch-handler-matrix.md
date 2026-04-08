@@ -16,7 +16,7 @@ After [envelope.ts:283-302](src/orchestrator/envelope.ts#L283-L302) was changed 
 | **adjust_edge_strength** ([actions/adjust-edge-strength.ts:92-105](src/orchestrator/deterministic/actions/adjust-edge-strength.ts#L92-L105)) | Yes | **No** | n/a | No (updates edge `strength.mean`) | **Validator gap (benign)** — edge strength is independent of intervention values. Prior payload remains valid. |
 | **set_goal_target** ([actions/set-goal-target.ts:50-65](src/orchestrator/deterministic/actions/set-goal-target.ts#L50-L65)) | Yes | **No** | n/a | No (updates `goal_threshold/unit/cap`) | **Validator gap (benign)** — goal threshold is separate from option interventions. Prior payload remains valid. |
 | **add_constraint** ([actions/add-constraint.ts:87-100](src/orchestrator/deterministic/actions/add-constraint.ts#L87-L100)) | Yes | **No** | n/a | No (appends to `goal_constraints[]` on goal node) | **Validator gap (benign)** — constraints are separate from option interventions. Prior payload remains valid. |
-| **remove_factor** ([actions/remove-factor.ts:62-86](src/orchestrator/deterministic/actions/remove-factor.ts#L62-L86)) | Yes | **No** | n/a | **Indirectly: yes** — if any option's interventions referenced this factor, the prior `analysis_ready` is now stale (still references a now-deleted factor) | **⚠ REAL GAP** — see "Stale analysis_ready after remove_factor" below. |
+| **remove_factor** ([actions/remove-factor.ts:88-203](src/orchestrator/deterministic/actions/remove-factor.ts#L88-L203)) | Yes | **Yes** (since 2026-04-08) | `computeStructuralReadiness` against a synthetic post-removal graph that prunes the removed factor from option intervention maps (all 3 storage locations) and drops the connected edges | **Indirectly: yes** — if any option's interventions referenced this factor, the recomputed `analysis_ready` no longer references the deleted node | Mirrors `add_option`'s synthetic-graph pattern. Validates against `AnalysisReadyPayload` Zod schema; parse failure is non-fatal. See "Fixed gap" section below. |
 | **draft_graph** ([tools/draft-graph.ts:148-166](src/orchestrator/tools/draft-graph.ts#L148-L166)) | Yes (created directly via `createGraphPatchBlock`) | Yes | `extractAnalysisReady(body)` if pipeline emitted one, else `computeStructuralReadiness(graphOutput)` ([draft-graph.ts:160-163](src/orchestrator/tools/draft-graph.ts#L160-L163)) | **Yes** — drafts the entire graph including all options + interventions | Validates against `AnalysisReadyPayload` Zod schema in `extractAnalysisReady` ([draft-graph.ts:545](src/orchestrator/tools/draft-graph.ts#L545)); returns `undefined` (omitted from block) on parse failure rather than emitting malformed. |
 | **edit_graph (main path)** ([tools/edit-graph.ts:2201-2226](src/orchestrator/tools/edit-graph.ts#L2201-L2226)) | Yes | Yes | `computeStructuralReadiness(appliedGraph ?? candidateGraph)` ([edit-graph.ts:2202-2203](src/orchestrator/tools/edit-graph.ts#L2202-L2203)) | **Yes** — LLM-driven structural edits can add/remove/modify options | Computes from post-PLoT applied_graph when available, falls back to the candidate graph. |
 | **edit_graph (constraint shortcut)** ([tools/edit-graph.ts:1380-1410](src/orchestrator/tools/edit-graph.ts#L1380-L1410)) | Yes (created directly via `createGraphPatchBlock`) | **No** | n/a | No (constraint-only update on goal node) | **Validator gap (benign)** — same reasoning as `add_constraint`. |
@@ -31,23 +31,32 @@ The post-2026-04-08 validator at [envelope.ts:287-373](src/orchestrator/envelope
 3. **Validates payload shape** whenever `analysis_ready` is present, regardless of status — guards with `Array.isArray` so it never throws.
 4. **Never mutates** `data.analysis_ready`.
 
-Of the 11 handler paths above, 8 will trigger the missing-payload warning on every invocation (`add_factor`, `set_factor_value`, `adjust_edge_strength`, `set_goal_target`, `add_constraint`, `remove_factor`, edit_graph constraint shortcut, and add_factor's "redirect" branch). For 7 of these, the warning is **benign** because the patch doesn't touch option interventions and the prior payload remains structurally valid. The eighth — `remove_factor` — is a real bug.
+Of the 11 handler paths above, 7 will trigger the missing-payload warning on every invocation (`add_factor`, `set_factor_value`, `adjust_edge_strength`, `set_goal_target`, `add_constraint`, edit_graph constraint shortcut, and add_factor's "redirect" branch). All 7 are **benign** — the patch doesn't touch option interventions and the prior payload remains structurally valid. `remove_factor` was previously the eighth (a real bug); fixed on 2026-04-08.
 
-## Real gap: stale `analysis_ready` after `remove_factor`
+## Fixed gap (2026-04-08): stale `analysis_ready` after `remove_factor`
 
-`remove_factor` removes a factor node and its connected edges ([remove-factor.ts:62-79](src/orchestrator/deterministic/actions/remove-factor.ts#L62-L79)). It does **not** update `analysis_ready`. If the factor being removed was the target of any option's intervention (i.e. `analysis_ready.options[i].interventions[fac_id]` exists), then after the patch is applied:
+**Original problem.** `remove_factor` used to remove a factor node and its connected edges without producing a fresh `analysis_ready`. If the factor being removed was the target of any option's intervention (i.e. `analysis_ready.options[i].interventions[fac_id]` existed), then after the patch was applied:
 
-- The UI store still has the prior `ceeAnalysisReady` payload referencing the removed factor.
-- The next `run_analysis` call will assemble a PLoT request that includes an intervention targeting a now-non-existent node.
-- PLoT will reject with `INVALID_INTERVENTION_TARGET` ([plot-lite-service/src/validation/preflight-v2.ts:204](../plot-lite-service/src/validation/preflight-v2.ts#L204)).
+- The UI store still had the prior `ceeAnalysisReady` payload referencing the removed factor.
+- The next `run_analysis` call assembled a PLoT request that included an intervention targeting a now-non-existent node.
+- PLoT rejected with `INVALID_INTERVENTION_TARGET` ([plot-lite-service/src/validation/preflight-v2.ts:204](../plot-lite-service/src/validation/preflight-v2.ts#L204)).
 
-**Recommended fix (separate PR, not in scope for the doc-only Risk-Tier-A brief):**
+**Fix shipped on 2026-04-08.** `remove-factor.ts` now mirrors `add-option`'s synthetic-graph pattern:
 
-`remove_factor` should produce a fresh `analysis_ready` after the operation. Either:
-- **A.** Reuse `add_option`'s pattern: build a synthetic post-patch graph (apply the remove ops to a clone of `ctx.graph`), call `computeStructuralReadiness` against it. Cost: ~30 lines, mirrors the existing pattern.
-- **B.** Have the action filter the prior `analysis_ready.options[].interventions` to drop entries targeting the removed factor. Cheaper but doesn't catch downstream effects (e.g. options that become orphaned with no remaining interventions).
+1. Builds a read-only synthetic graph from `ctx.graph` with the removed factor node filtered out.
+2. Filters connected edges (sourced from `entities.edges`, same source the operation enumeration uses, so the synthetic graph and the patch ops can never disagree).
+3. Walks every option node and prunes the removed factor key from all three intervention storage locations (`node.data.interventions`, `node["data/interventions/<fac_id>"]`, and top-level `node.interventions`) so `mergeInterventionSources` cannot re-emit the stale key.
+4. Calls `computeStructuralReadiness(syntheticGraph)` and validates the result against `AnalysisReadyPayload` Zod schema (parse failure non-fatal — emits anyway so the envelope validator surfaces a structured warning).
+5. Returns the fresh payload alongside the patch operations.
 
-Option A is the right answer.
+Pinned by 7 unit tests in `tests/unit/orchestrator/deterministic/actions/remove-factor.test.ts`:
+- Removed factor is absent from every option's recomputed interventions.
+- `goal_node_id` is preserved.
+- Per-option status reflects remaining interventions (`'ready'` if any remain).
+- Option whose only intervention targeted the removed factor gracefully degrades to `'needs_user_mapping'` (empty interventions, no connected factors after edge removal).
+- `ctx.graph` is NOT mutated (read-only synthetic graph contract).
+- Slash-keyed intervention storage (source 2) is also pruned.
+- The handler still emits `remove_node` and `remove_edge` patch operations alongside `analysis_ready`.
 
 ## Other downstream effects worth knowing
 
