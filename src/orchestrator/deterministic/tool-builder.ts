@@ -15,6 +15,7 @@ import type { ToolDefinition } from "../../adapters/llm/types.js";
 import type { ActionName } from "./actions/types.js";
 import type { DeterministicTurnContext } from "./types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
+import { POST_ANALYSIS_EXPLANATION_ACTIONS } from "./post-analysis-policy.js";
 import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
@@ -23,24 +24,6 @@ import { log } from "../../utils/telemetry.js";
 
 /** Actions excluded from tool definitions (stubs or non-LLM-callable). */
 const EXCLUDED_ACTIONS: ReadonlySet<ActionName> = new Set(['generate_artefact']);
-
-/**
- * Actions whose handler templates would intercept the LLM response when
- * analysis is in context. Suppressed when fresh analysis exists so the LLM
- * writes a coached response from Zone 2 data instead of calling a stub
- * handler. Kept available when analysis is absent (or stale, per the UI's
- * staleness contract — see computeContextExclusions) so the user can still
- * request decomposition after re-running.
- *
- * Exported via `isExplanationChipSuppressedByAnalysis()` so pipeline-v4 can
- * distinguish "tool intentionally suppressed, LLM will answer from Zone 2"
- * from "tool genuinely unavailable, downgrade with a user-facing message".
- */
-const POST_ANALYSIS_EXPLANATION_ACTIONS: ReadonlySet<ActionName> = new Set([
-  'explain_result',
-  'compare_options',
-  'what_would_flip',
-]);
 
 /**
  * True when a chip click would have its tool stripped specifically by the

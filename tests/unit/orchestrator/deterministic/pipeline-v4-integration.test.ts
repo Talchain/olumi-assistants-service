@@ -213,7 +213,12 @@ describe("v4 pipeline infrastructure integration", () => {
       const ctx = makeTurnContext();
       const result = await buildDeterministicPromptV2(ctx);
 
-      expect(result.static_block).toBe(pmsContent);
+      // Static block is the PMS content followed by the v4 runtime tool-use
+      // suffix. The suffix is appended unconditionally (Task 5) so the LLM
+      // gets an explicit native-tool-calling instruction even when the PMS
+      // body still carries dead JSON/XML envelope text.
+      expect(result.static_block.startsWith(pmsContent)).toBe(true);
+      expect(result.static_block).toContain('native tool calling');
     });
 
     it("falls back to STATIC_PROMPT_FALLBACK when loadPrompt returns source: default", async () => {

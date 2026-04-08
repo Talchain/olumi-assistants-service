@@ -19,6 +19,7 @@
 import type { DeterministicTurnContext, DisambiguationHint } from "./types.js";
 import { loadPrompt } from "../../prompts/loader.js";
 import { shouldUseStagingPrompts } from "../../config/index.js";
+import { auditPromptForV4, RUNTIME_TOOL_USE_SUFFIX } from "./prompt-audit.js";
 import { log, emit } from "../../utils/telemetry.js";
 
 // ============================================================================
@@ -83,6 +84,20 @@ export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext):
           version: result.version,
           is_staging: result.isStaging ?? false,
         }, 'v4.prompt.pms_loaded');
+        // Audit fires on cache miss only (every 5 min per process), not per
+        // turn. Logging-only — never mutates the prompt content.
+        const audit = auditPromptForV4(result.content);
+        log.info({
+          event: 'v4.prompt.audit',
+          prompt_id: result.promptId,
+          version: result.version,
+          total_chars: audit.totalChars,
+          dead_section_count: audit.deadSectionCount,
+          estimated_dead_chars: audit.estimatedDeadChars,
+          sentinels_found: audit.sentinelsFound,
+          sentinels_not_found: audit.sentinelsNotFound,
+          prompt_hash: audit.promptHash,
+        }, 'v4.prompt.audit');
       }
     } catch (error) {
       // Non-fatal — we fall through to STATIC_PROMPT_FALLBACK below and emit
@@ -105,6 +120,13 @@ export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext):
     emit('v4.pms_fallback_used', fallbackMeta);
     log.warn(fallbackMeta, 'v4.pms_fallback_used');
   }
+
+  // Append the runtime tool-use suffix to the cached static block. The suffix
+  // tells the LLM that v4 uses native tool calling, so the dead JSON/XML
+  // envelope instructions still in the cf-v28 prompt body have an explicit
+  // counter-instruction. Stays in the static block so it's covered by the
+  // ephemeral cache_control marker — never put this in the dynamic block.
+  staticBlock = staticBlock + RUNTIME_TOOL_USE_SUFFIX;
 
   const dynamicSections: string[] = [];
   dynamicSections.push(buildStateSection(ctx));

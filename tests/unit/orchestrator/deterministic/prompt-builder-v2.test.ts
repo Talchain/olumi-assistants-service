@@ -267,4 +267,27 @@ describe("buildDeterministicPromptV2", () => {
 
     expect(result.static_block).toContain('tool');
   });
+
+  it("static block ends with the runtime tool-use suffix (logging/Task 5)", async () => {
+    const ctx = makeTurnContext();
+    const result = await buildDeterministicPromptV2(ctx);
+
+    // Suffix is the last content in the static block — appended after either
+    // PMS content or STATIC_PROMPT_FALLBACK so the LLM sees an unambiguous
+    // "respond in plain text" instruction even with the dead JSON/XML
+    // sections still present in cf-v28.
+    expect(result.static_block).toContain('native tool calling');
+    expect(result.static_block).toContain('No XML envelopes');
+    expect(result.static_block.trimEnd().endsWith(']')).toBe(true);
+  });
+
+  it("dynamic block does NOT contain the runtime tool-use suffix", async () => {
+    const ctx = makeTurnContext();
+    const result = await buildDeterministicPromptV2(ctx);
+
+    // The suffix lives in the static (cached) block, never the per-turn dynamic
+    // block — putting it in the dynamic block would defeat caching.
+    expect(result.dynamic_block).not.toContain('native tool calling');
+    expect(result.dynamic_block).not.toContain('Runtime context');
+  });
 });

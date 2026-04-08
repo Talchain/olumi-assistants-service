@@ -58,6 +58,26 @@ export const addOptionAction: ActionDefinition = {
       return { blocks: [], assistantText: 'What should the new option be called?', guidance_items: [] };
     }
 
+    // Duplicate detection — case-insensitive, whitespace-normalised comparison.
+    // Mirrors findExistingFactor in add-factor.ts. Short-circuits before any
+    // intervention parsing or graph mutation: returns no operations, no blocks,
+    // no analysis_ready — the action is a conversational nudge toward the
+    // existing option, not a silent update.
+    //
+    // Why early-return rather than redirect-to-update (unlike add-factor):
+    // factor updates carry a single value field; option updates would need to
+    // diff intervention maps, which is its own surface area. Surfacing the
+    // existing option is the safer default.
+    const normalisedLabel = label.toLowerCase().replace(/\s+/g, ' ').trim();
+    const existingOption = findExistingOption(ctx, normalisedLabel);
+    if (existingOption) {
+      return {
+        blocks: [],
+        assistantText: `Option **${existingOption.label}** already exists. Would you like to update its effects instead of creating a duplicate?`,
+        guidance_items: [],
+      };
+    }
+
     // Normalize interventions: accept both array format (new) and legacy object format
     let interventions: Record<string, number> = {};
     const rawInterventions = params.interventions;
@@ -242,3 +262,23 @@ export const addOptionAction: ActionDefinition = {
     return rec.parameters?.label ? `Add option: ${rec.parameters.label}` : 'Add a new option';
   },
 };
+
+/**
+ * Find an existing option node whose label matches the given normalised label.
+ * Uses case-insensitive, whitespace-normalised comparison. Mirrors
+ * `findExistingFactor` in add-factor.ts so both action handlers apply
+ * identical duplicate-detection semantics.
+ */
+function findExistingOption(
+  ctx: DeterministicTurnContext,
+  normalisedLabel: string,
+): { id: string; label: string } | null {
+  for (const [id, entry] of ctx.entities.nodes) {
+    if (entry.kind !== 'option') continue;
+    const entryNormalised = entry.label.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (entryNormalised === normalisedLabel) {
+      return { id, label: entry.label };
+    }
+  }
+  return null;
+}

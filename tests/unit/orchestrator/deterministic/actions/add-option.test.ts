@@ -329,3 +329,112 @@ describe("add_option action — analysis_ready propagation", () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Duplicate detection tests
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Variant fixture that registers an option in entities.nodes alongside the
+ * factor entries. The duplicate-detection helper iterates ctx.entities.nodes,
+ * so options must be present there for the lookup to fire. The base
+ * makeTurnContext only seeds factors, which is why the existing
+ * "replaces/dedups by ID" tests don't trigger the new guard.
+ */
+function makeTurnContextWithOption(
+  graph: GraphV3T,
+  optionLabel: string,
+  optionId: string = 'option_existing',
+): DeterministicTurnContext {
+  const ctx = makeTurnContext(graph);
+  ctx.entities.nodes.set(optionId, {
+    id: optionId,
+    label: optionLabel,
+    kind: 'option',
+  } as unknown as never);
+  return ctx;
+}
+
+describe("add_option action — duplicate detection", () => {
+  it("returns conversational nudge for an exact label match (case-sensitive)", async () => {
+    const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
+    const result = await addOptionAction.execute(
+      { label: 'Hire Contractor', interventions: [{ factor_id: 'fac_ramp', value: 0.5 }] },
+      ctx,
+    );
+
+    expect(result.operations).toBeUndefined();
+    expect(result.blocks).toEqual([]);
+    expect(result.analysis_ready).toBeUndefined();
+    expect(result.assistantText).toContain('Hire Contractor');
+    expect(result.assistantText).toContain('already exists');
+  });
+
+  it("matches case-insensitively", async () => {
+    const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
+    const result = await addOptionAction.execute(
+      { label: 'hire contractor' },
+      ctx,
+    );
+
+    expect(result.operations).toBeUndefined();
+    expect(result.analysis_ready).toBeUndefined();
+    expect(result.assistantText).toContain('Hire Contractor'); // surfaces canonical label
+    expect(result.assistantText).toContain('already exists');
+  });
+
+  it("matches with whitespace normalisation", async () => {
+    const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
+    const result = await addOptionAction.execute(
+      { label: '  Hire   Contractor ' },
+      ctx,
+    );
+
+    expect(result.operations).toBeUndefined();
+    expect(result.analysis_ready).toBeUndefined();
+    expect(result.assistantText).toContain('already exists');
+  });
+
+  it("creates normally for a genuinely different label", async () => {
+    const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
+    const result = await addOptionAction.execute(
+      { label: 'Hire Tech Lead', interventions: [{ factor_id: 'fac_ramp', value: 0.6 }] },
+      ctx,
+    );
+
+    expect(result.operations).toBeDefined();
+    expect(result.operations!.length).toBeGreaterThan(0);
+    expect(result.assistantText).toContain('Hire Tech Lead');
+    expect(result.assistantText).toContain("I'll add option");
+  });
+
+  it("does not match a factor with the same label as the requested option", async () => {
+    // Defensive: the kind filter must keep factors out of the option-dup check.
+    // Build a factor named 'Risk' and try to add an option named 'Risk'.
+    const ctx = makeTurnContext(makeGraph());
+    ctx.entities.nodes.set('fac_risk', {
+      id: 'fac_risk',
+      label: 'Risk',
+      kind: 'factor',
+    } as unknown as never);
+
+    const result = await addOptionAction.execute(
+      { label: 'Risk', interventions: [{ factor_id: 'fac_ramp', value: 0.6 }] },
+      ctx,
+    );
+
+    // Should proceed past the dup check and either succeed or fall through
+    // to the empty-interventions guard. Either way, NOT the dup-guard message.
+    expect(result.assistantText).not.toContain('already exists');
+  });
+
+  it("duplicate path returns no analysis_ready (Brief B contract regression check)", async () => {
+    const ctx = makeTurnContextWithOption(makeGraph(), 'Status Quo');
+    const result = await addOptionAction.execute(
+      { label: 'Status Quo', interventions: [{ factor_id: 'fac_ramp', value: 0.5 }] },
+      ctx,
+    );
+
+    expect(result.analysis_ready).toBeUndefined();
+  });
+});
