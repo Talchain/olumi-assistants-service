@@ -1188,6 +1188,135 @@ describe("executePipelineV4", () => {
     });
   });
 
+  // ── Post-analysis explanation tools removed when analysis is in context ──
+
+  describe("Post-analysis explanation tools — analysis-in-context exclusion", () => {
+    // The v4 pipeline is single-pass: when the LLM calls explain_result,
+    // compare_options, or what_would_flip, the handler template IS the
+    // response and the LLM only emits a 40-60 char stub. Removing the tools
+    // when analysis is current forces the LLM to write a coached response
+    // from Zone 2 data (analysis_state) directly.
+    //
+    // These unit tests verify the tool-availability decision (the only thing
+    // *our* code controls). The full coached-response behaviour the redesign
+    // produces is the LLM responding from Zone 2 with the explanation tools
+    // unavailable; that is verified manually via the staging walkthrough in
+    // the redesign handover doc and is documented as a manual integration
+    // test below.
+
+    function makeAnalysisInContextRequest(message: string): OrchestratorTurnRequest {
+      return makeTurnRequest({
+        message,
+        context: {
+          graph: {
+            nodes: [
+              { id: 'goal_1', label: 'Maximize Revenue', kind: 'goal' },
+              { id: 'opt_1', label: 'Expand Europe', kind: 'option' },
+              { id: 'opt_2', label: 'Stay Domestic', kind: 'option' },
+              { id: 'factor_1', label: 'Market Size', kind: 'factor' },
+            ],
+            edges: [
+              { from: 'factor_1', to: 'goal_1', strength: { mean: 0.7, std: 0.1 } },
+            ],
+          } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          analysis_response: {
+            results: [
+              { option_id: 'opt_1', option_label: 'Expand Europe', win_probability: 0.62 },
+              { option_id: 'opt_2', option_label: 'Stay Domestic', win_probability: 0.38 },
+            ],
+          } as unknown as import("../../../../src/orchestrator/types.js").V2RunResponseEnvelope,
+          framing: { stage: 'evaluate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+    }
+
+    function expectExplanationToolsAbsent(callArgs: { tools: Array<{ name: string }> }): void {
+      const toolNames = callArgs.tools.map(t => t.name);
+      expect(toolNames).not.toContain('explain_result');
+      expect(toolNames).not.toContain('compare_options');
+      expect(toolNames).not.toContain('what_would_flip');
+      // run_analysis is also suppressed by the staleness contract
+      expect(toolNames).not.toContain('run_analysis');
+    }
+
+    it('"Can you explain these results?" with analysis in context → explanation tools NOT in tool set', async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Expand Europe leads at 62% because Market Size carries the strongest positive signal toward your revenue goal.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Expand Europe leads at 62% because Market Size carries the strongest positive signal toward your revenue goal.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeAnalysisInContextRequest('Can you explain these results?');
+      await collectEvents(executePipelineV4(req, 'req-explain'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }> };
+      expectExplanationToolsAbsent(callArgs);
+    });
+
+    it('"Why does Option A lead?" with analysis in context → explanation tools NOT in tool set', async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Option A leads because of...' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Option A leads because of...' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeAnalysisInContextRequest('Why does Option A lead?');
+      await collectEvents(executePipelineV4(req, 'req-why'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }> };
+      expectExplanationToolsAbsent(callArgs);
+    });
+
+    it('"Compare the options for me" with analysis in context → explanation tools NOT in tool set', async () => {
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'Comparing the two options...' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'Comparing the two options...' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeAnalysisInContextRequest('Compare the options for me');
+      await collectEvents(executePipelineV4(req, 'req-compare'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }> };
+      expectExplanationToolsAbsent(callArgs);
+    });
+
+    it('run_premortem and challenge_assumption stay in tool set when analysis is in context', async () => {
+      // These tools must always remain available — run_premortem produces
+      // content not in Zone 2, and challenge_assumption is conversational.
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'response' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'response' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeAnalysisInContextRequest('Anything else I should think about?');
+      await collectEvents(executePipelineV4(req, 'req-always'));
+
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }> };
+      const toolNames = callArgs.tools.map(t => t.name);
+      expect(toolNames).toContain('run_premortem');
+      expect(toolNames).toContain('challenge_assumption');
+    });
+
+    // Manual integration test cases (post-implementation staging
+    // verification — see redesign handover doc):
+    //   1. Run analysis, then ask "Can you explain these results?" — verify
+    //      the response is a full coached paragraph from Zone 2 data, not
+    //      a 40-60 char stub.
+    //   2. Ask "Why does that option lead?" — verify response is grounded
+    //      in drivers and fragilities, distinct from the previous answer.
+    //   3. Ask "Compare the options" — verify prose comparison from analysis
+    //      data, not a handler card.
+    //   4. Ask two explanation questions back-to-back — verify the second
+    //      response builds on the first, not a paraphrase.
+    //   5. Edit the graph (UI clears analysis_state), ask for explanation —
+    //      verify explain_result is available again (mirrors the
+    //      "stale analysis" unit test in tool-builder.test.ts).
+  });
+
   // ── Regression: XML envelope diagnostics leak ────────────────────────────
 
   describe("XML envelope diagnostics stripping", () => {

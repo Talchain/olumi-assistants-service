@@ -144,7 +144,11 @@ describe("buildToolDefinitions", () => {
 // ============================================================================
 
 describe("buildToolDefinitions — context-aware filtering", () => {
-  it("excludes explain_result, compare_options, what_would_flip when no analysis", () => {
+  it("includes explain_result, compare_options, what_would_flip when no analysis is in context", () => {
+    // When analysis is absent (or stale, per the UI's staleness contract),
+    // the explanation tools remain available so the user can request
+    // decomposition after re-running. Their handlers still execute in this
+    // path — see post-analysis-actions tests.
     const ctx = buildTestContext({ analysis_summary: null });
     const allActions: ActionName[] = [
       'set_factor_value', 'run_analysis', 'explain_result', 'compare_options',
@@ -154,35 +158,84 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     const defs = buildToolDefinitions(allActions, ctx);
     const names = defs.map(d => d.name);
 
-    expect(names).not.toContain('explain_result');
-    expect(names).not.toContain('compare_options');
-    expect(names).not.toContain('what_would_flip');
-    // These should remain
+    expect(names).toContain('explain_result');
+    expect(names).toContain('compare_options');
+    expect(names).toContain('what_would_flip');
+    // These should also remain
     expect(names).toContain('set_factor_value');
     expect(names).toContain('run_analysis');
     expect(names).toContain('challenge_assumption');
   });
 
-  it("includes explain_result, compare_options, what_would_flip when analysis exists; suppresses run_analysis (current results already present)", () => {
+  it("excludes explain_result, compare_options, what_would_flip when fresh analysis is in context; also suppresses run_analysis", () => {
+    // Single-pass v4 pipeline: when these tools are called, the handler
+    // template IS the response and the LLM only writes a 40-60 char stub.
+    // Removing them forces the LLM to produce a coached response from
+    // Zone 2 data (analysis_state) directly.
     const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
     const allActions: ActionName[] = [
       'explain_result', 'compare_options', 'what_would_flip', 'run_analysis',
+      'run_premortem', 'challenge_assumption', 'set_factor_value',
     ];
 
     const defs = buildToolDefinitions(allActions, ctx);
     const names = defs.map(d => d.name);
 
-    expect(names).toContain('explain_result');
-    expect(names).toContain('compare_options');
-    expect(names).toContain('what_would_flip');
-    // run_analysis is suppressed when analysis_summary is present — the UI's
-    // staleness contract guarantees fresh results, so re-running would be
-    // wasted work. Chip clicks pass bypassStaleness=true to override (see
-    // below).
+    expect(names).not.toContain('explain_result');
+    expect(names).not.toContain('compare_options');
+    expect(names).not.toContain('what_would_flip');
+    // run_analysis is also suppressed (UI staleness contract guarantees
+    // results are fresh; chip clicks pass bypassStaleness=true to override).
     expect(names).not.toContain('run_analysis');
+    // Always available regardless of analysis state
+    expect(names).toContain('run_premortem');
+    expect(names).toContain('challenge_assumption');
+    expect(names).toContain('set_factor_value');
   });
 
-  it("bypassStaleness re-includes run_analysis when chip click overrides the staleness suppression", () => {
+  it("run_premortem and challenge_assumption are always available regardless of analysis state", () => {
+    // No analysis
+    const ctxNoAnalysis = buildTestContext({ analysis_summary: null });
+    const defsNoAnalysis = buildToolDefinitions(
+      ['run_premortem', 'challenge_assumption'],
+      ctxNoAnalysis,
+    );
+    expect(defsNoAnalysis.map(d => d.name)).toEqual(
+      expect.arrayContaining(['run_premortem', 'challenge_assumption']),
+    );
+
+    // With analysis
+    const ctxWithAnalysis = buildTestContext({ analysis_summary: buildAnalysisSummary() });
+    const defsWithAnalysis = buildToolDefinitions(
+      ['run_premortem', 'challenge_assumption'],
+      ctxWithAnalysis,
+    );
+    expect(defsWithAnalysis.map(d => d.name)).toEqual(
+      expect.arrayContaining(['run_premortem', 'challenge_assumption']),
+    );
+  });
+
+  it("graph mutation tools remain available regardless of analysis state", () => {
+    const editTools: ActionName[] = [
+      'set_factor_value', 'add_factor', 'add_option', 'add_constraint',
+      'adjust_edge_strength', 'remove_factor', 'set_goal_target',
+    ];
+
+    // No analysis
+    const ctxNoAnalysis = buildTestContext({ analysis_summary: null });
+    const defsNoAnalysis = buildToolDefinitions(editTools, ctxNoAnalysis);
+    expect(defsNoAnalysis.length).toBe(editTools.length);
+
+    // With analysis
+    const ctxWithAnalysis = buildTestContext({ analysis_summary: buildAnalysisSummary() });
+    const defsWithAnalysis = buildToolDefinitions(editTools, ctxWithAnalysis);
+    expect(defsWithAnalysis.length).toBe(editTools.length);
+  });
+
+  it("bypassStaleness re-includes run_analysis but does NOT re-include the explanation tools", () => {
+    // bypassStaleness is the chip-click escape hatch for run_analysis only.
+    // The explanation tools must stay suppressed even with bypassStaleness
+    // because their handlers would still intercept the LLM response.
     const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
     const allActions: ActionName[] = [
       'explain_result', 'compare_options', 'what_would_flip', 'run_analysis',
@@ -191,12 +244,10 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     const defs = buildToolDefinitions(allActions, ctx, true);
     const names = defs.map(d => d.name);
 
-    // bypassStaleness lifts ONLY the staleness suppression. run_analysis is
-    // back in scope because the user explicitly clicked the re-run chip.
     expect(names).toContain('run_analysis');
-    expect(names).toContain('explain_result');
-    expect(names).toContain('compare_options');
-    expect(names).toContain('what_would_flip');
+    expect(names).not.toContain('explain_result');
+    expect(names).not.toContain('compare_options');
+    expect(names).not.toContain('what_would_flip');
   });
 
   it("bypassStaleness does NOT lift the no-graph hard prerequisite for run_analysis", () => {
@@ -238,6 +289,34 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     // Non-edit, non-analysis tools should remain
     expect(names).toContain('challenge_assumption');
   });
+
+  it("stale analysis (UI clears analysis_state) does NOT trigger the post-analysis explanation suppression at the tool-builder layer", () => {
+    // The UI's staleness contract: when the graph is edited after a run,
+    // the UI sets analysis_state to undefined before the next turn — so
+    // a stale-but-present case never reaches the v4 pipeline. Stale state
+    // surfaces here as `analysis_summary === null`, exactly the same field
+    // the run_analysis filter reads.
+    //
+    // This test pins the contract at the tool-builder layer: when the
+    // analysis field is null, the new post-analysis suppression must NOT
+    // fire. (turn-context.ts has a separate eligible_actions filter that
+    // also gates these tools on hasAnalysis — that interaction is verified
+    // in turn-context.test.ts. The two filters need to read the same field
+    // so that re-running analysis brings tool availability back into a
+    // consistent state.)
+    const ctx = buildTestContext({ analysis_summary: null });
+    const allActions: ActionName[] = [
+      'explain_result', 'compare_options', 'what_would_flip', 'run_analysis',
+    ];
+
+    const defs = buildToolDefinitions(allActions, ctx);
+    const names = defs.map(d => d.name);
+
+    expect(names).toContain('explain_result');
+    expect(names).toContain('compare_options');
+    expect(names).toContain('what_would_flip');
+    expect(names).toContain('run_analysis');
+  });
 });
 
 // ============================================================================
@@ -250,10 +329,12 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    // analysis_summary present so explain_result is not analysis-suppressed.
-    // run_analysis is omitted from the asserted-present set because the new
-    // staleness contract suppresses it whenever analysis_summary is present.
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    // analysis_summary: null so explain_result is not analysis-suppressed
+    // (post-redesign: explanation tools are excluded when fresh analysis is
+    // in context). The disambiguation behaviour we want to verify is that
+    // target_id tools are stripped while a non-target_id explanation tool
+    // survives.
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(
       ['set_factor_value', 'explain_result'],
@@ -300,20 +381,27 @@ describe("buildToolDefinitions — entity disambiguation", () => {
 
   it("keeps non-target_id tools even with ambiguous entities", () => {
     const entities = new Map<string, EntityEntry>([
-      ['f1', { id: 'f1', label: 'Employee Churn', kind: 'factor', aliases: [], is_action_target: true }],
-      ['f2', { id: 'f2', label: 'Customer Churn', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
-    // analysis_summary present so compare_options survives the analysis-required filter.
-    // run_analysis is correctly suppressed (staleness contract); use compare_options
-    // as the non-target_id tool that should survive disambiguation.
-    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    // analysis_summary: null so the explanation tools survive the
+    // post-analysis filter (post-redesign: explain_result/compare_options/
+    // what_would_flip are excluded when fresh analysis is in context).
+    // run_analysis is always free of target_id so it should survive too.
+    const ctx = buildTestContext({ entities, analysis_summary: null });
 
-    const defs = buildToolDefinitions(['compare_options', 'what_would_flip'], ctx);
+    const defs = buildToolDefinitions(
+      ['compare_options', 'what_would_flip', 'run_analysis', 'set_factor_value'],
+      ctx,
+    );
     const names = defs.map(d => d.name);
 
-    // Neither tool has target_id — both should remain
+    // None of these have target_id — all should remain
     expect(names).toContain('compare_options');
     expect(names).toContain('what_would_flip');
+    expect(names).toContain('run_analysis');
+    // set_factor_value has target_id — disambiguation strips it
+    expect(names).not.toContain('set_factor_value');
   });
 
   it("does not flag ambiguity between different entity kinds sharing a word", () => {
@@ -357,19 +445,14 @@ describe("buildToolDefinitions — entity disambiguation", () => {
 // ============================================================================
 
 describe("buildToolDefinitions — dynamic descriptions", () => {
-  it("enriches explain_result description with winner and drivers when analysis exists", () => {
-    const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
-    const defs = buildToolDefinitions(['explain_result'], ctx);
+  // Note: post-redesign, the explanation tools (explain_result, compare_options,
+  // what_would_flip) are excluded when analysis_summary is in context, so the
+  // dynamic-description enrichment paths for those tools are no longer reached
+  // from buildToolDefinitions. The enrichDescription branches are kept in the
+  // source as a defensive fall-back if the filter ever inverts again.
 
-    expect(defs.length).toBe(1);
-    expect(defs[0].description).toContain('Option A');
-    expect(defs[0].description).toContain('72%');
-    expect(defs[0].description).toContain('Revenue Growth');
-  });
-
-  it("uses static description when no analysis exists", () => {
+  it("uses static description for set_factor_value when no factors have default values", () => {
     const ctx = buildTestContext({ analysis_summary: null });
-    // explain_result is excluded when no analysis — test with set_factor_value instead
     const defs = buildToolDefinitions(['set_factor_value'], ctx);
 
     expect(defs.length).toBe(1);
@@ -377,25 +460,22 @@ describe("buildToolDefinitions — dynamic descriptions", () => {
     expect(defs[0].description).toBe(action.description);
   });
 
-  it("enriches compare_options with option count and leader", () => {
-    const ctx = buildTestContext({
-      analysis_summary: buildAnalysisSummary(),
-      graph_summary: { option_count: 3, option_labels: ['A', 'B', 'C'] },
-    });
+  it("enriches set_factor_value with default-value factor labels", () => {
+    // The enrichDescription early-returns the static description when no
+    // analysis_summary is present, so we attach an analysis to enable the
+    // enrichment path. Post-redesign, set_factor_value is NOT in the
+    // analysis-suppressed set, so it survives buildToolDefinitions with
+    // analysis present.
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Revenue Growth', kind: 'factor', aliases: [], is_action_target: true, value: undefined }],
+      ['f2', { id: 'f2', label: 'Customer Acquisition', kind: 'factor', aliases: [], is_action_target: true, value: undefined }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: buildAnalysisSummary() });
+    const defs = buildToolDefinitions(['set_factor_value'], ctx);
 
-    const defs = buildToolDefinitions(['compare_options'], ctx);
-    expect(defs[0].description).toContain('3 options');
-    expect(defs[0].description).toContain('Option A');
-  });
-
-  it("enriches what_would_flip with winner and runner-up", () => {
-    const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
-    const defs = buildToolDefinitions(['what_would_flip'], ctx);
-
-    expect(defs[0].description).toContain('Option A');
-    expect(defs[0].description).toContain('Option B');
-    expect(defs[0].description).toContain('72%');
-    expect(defs[0].description).toContain('28%');
+    expect(defs.length).toBe(1);
+    expect(defs[0].description).toContain('Revenue Growth');
+    expect(defs[0].description).toContain('Customer Acquisition');
   });
 });
 

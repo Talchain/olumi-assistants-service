@@ -24,8 +24,15 @@ import { log } from "../../utils/telemetry.js";
 /** Actions excluded from tool definitions (stubs or non-LLM-callable). */
 const EXCLUDED_ACTIONS: ReadonlySet<ActionName> = new Set(['generate_artefact']);
 
-/** Actions that require analysis data to be useful. */
-const ANALYSIS_REQUIRED_ACTIONS: ReadonlySet<ActionName> = new Set([
+/**
+ * Actions whose handler templates would intercept the LLM response when
+ * analysis is in context. Suppressed when fresh analysis exists so the LLM
+ * writes a coached response from Zone 2 data instead of calling a stub
+ * handler. Kept available when analysis is absent (or stale, per the UI's
+ * staleness contract — see computeContextExclusions) so the user can still
+ * request decomposition after re-running.
+ */
+const POST_ANALYSIS_EXPLANATION_ACTIONS: ReadonlySet<ActionName> = new Set([
   'explain_result',
   'compare_options',
   'what_would_flip',
@@ -240,10 +247,12 @@ export function buildToolDefinitions(
  * Compute which actions to exclude based on data availability in TurnContext.
  *
  * `bypassStaleness` lets a caller (currently only pipeline-v4 for chip clicks)
- * skip the run_analysis-when-fresh-results-exist suppression. The no-graph and
- * no-analysis exclusions are unaffected — those represent hard preconditions,
- * not staleness, and a chip click against missing prerequisites should still
- * downgrade with a clean message.
+ * skip the run_analysis-when-fresh-results-exist suppression. The no-graph
+ * exclusion is unaffected — that represents a hard precondition, not
+ * staleness, and a chip click against missing prerequisites should still
+ * downgrade with a clean message. The post-analysis explanation-tool
+ * suppression is also unaffected by `bypassStaleness` — see the inline
+ * rationale below.
  */
 function computeContextExclusions(
   ctx: DeterministicTurnContext,
@@ -253,25 +262,36 @@ function computeContextExclusions(
   const hasGraph = !!ctx.graph && ctx.graph_summary.node_count > 0;
   const hasAnalysis = !!ctx.analysis_summary;
 
-  // No analysis data → suppress analysis-dependent tools
-  if (!hasAnalysis) {
-    for (const action of ANALYSIS_REQUIRED_ACTIONS) {
-      excluded.add(action);
-    }
-  }
-
-  // Analysis exists and is current → suppress run_analysis.
+  // Analysis exists and is current → suppress the post-analysis explanation
+  // tools AND run_analysis.
   //
   // Staleness contract (mirrors prompt-builder-v2.ts):
   //   The UI sets analysis_state to undefined whenever store.graphEditedSinceLastRun
   //   is true. So if `hasAnalysis` is true here, the analysis IS current — there is
-  //   no stale-but-present case for the v4 pipeline to worry about. We suppress
-  //   run_analysis to stop the LLM from wasting a long-running call on results that
-  //   already exist. Chip clicks bypass this via the bypassStaleness flag passed
-  //   in by pipeline-v4, so users can still re-run explicitly when they want
-  //   fresh samples.
-  if (hasAnalysis && !bypassStaleness) {
-    excluded.add('run_analysis');
+  //   no stale-but-present case for the v4 pipeline to worry about. Both filters
+  //   below read the same `ctx.analysis_summary` field for that reason.
+  //
+  // Why suppress explain_result / compare_options / what_would_flip when
+  // analysis is current: the v4 pipeline is single-pass — when the LLM calls
+  // these tools, the handler template IS the response and the LLM only
+  // emits a 40-60 char stub. The full coached response from Zone 2 data
+  // (option_comparison, robustness, factor_sensitivity, drivers, fragile
+  // edges) never gets written. Removing the tools forces the LLM to answer
+  // from Zone 2 directly, which is what the prompt's coaching expects.
+  //
+  // Why suppress run_analysis when analysis is current: stops the LLM from
+  // wasting a long-running call on results that already exist. Chip clicks
+  // bypass this via `bypassStaleness` so users can re-run explicitly. The
+  // explanation-tool suppression intentionally does NOT honour bypassStaleness
+  // — there is no chip path that should reinstate those tools when fresh
+  // analysis is in context.
+  if (hasAnalysis) {
+    for (const action of POST_ANALYSIS_EXPLANATION_ACTIONS) {
+      excluded.add(action);
+    }
+    if (!bypassStaleness) {
+      excluded.add('run_analysis');
+    }
   }
 
   // No graph or empty graph → suppress edit tools and run_analysis.
