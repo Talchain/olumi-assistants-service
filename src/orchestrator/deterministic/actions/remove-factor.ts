@@ -96,8 +96,11 @@ export const removeFactorAction: ActionDefinition = {
     //
     // Three rewrites against the prior graph:
     //   1. Drop the removed factor node from `nodes`.
-    //   2. Drop every edge connected to the removed factor (already enumerated
-    //      in `connectedEdges` above).
+    //   2. Drop every edge connected to the removed factor (filtered by
+    //      endpoint against `ctx.graph.edges` directly, decoupled from the
+    //      `connectedEdges` enumeration above so any drift between
+    //      `ctx.entities.edges` and `ctx.graph.edges` cannot leave dangling
+    //      edges in the synthetic graph).
     //   3. Walk option nodes and prune any intervention key that targets the
     //      removed factor — this is the bit that prevents stale
     //      analysis_ready leaking into the UI store. Without it,
@@ -111,7 +114,6 @@ export const removeFactorAction: ActionDefinition = {
     let analysisReady: ActionResult['analysis_ready'];
     if (ctx.graph) {
       const removedFactorId = entity.id;
-      const removedEdgeKeys = new Set(connectedEdges.map((e) => `${e.from}->${e.to}`));
 
       const pruneInterventionsObject = (
         obj: Record<string, unknown> | undefined,
@@ -171,8 +173,15 @@ export const removeFactorAction: ActionDefinition = {
           return cloned;
         });
 
+      // Filter the synthetic edges directly by endpoint rather than by the
+      // operation-enumeration `removedEdgeKeys`. This protects the synthetic
+      // graph from any drift between `ctx.entities.edges` (used to derive the
+      // patch operations) and `ctx.graph.edges` (the source
+      // computeStructuralReadiness reads). If those two ever disagree — e.g.
+      // a stale entity registry — endpoint-based filtering still produces a
+      // graph with no dangling edges referencing the removed factor.
       const syntheticEdges = ctx.graph.edges.filter(
-        (e) => !removedEdgeKeys.has(`${e.from}->${e.to}`),
+        (e) => e.from !== removedFactorId && e.to !== removedFactorId,
       );
 
       const syntheticGraph: GraphV3T = {

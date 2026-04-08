@@ -44,7 +44,7 @@ Of the 11 handler paths above, 7 will trigger the missing-payload warning on eve
 **Fix shipped on 2026-04-08.** `remove-factor.ts` now mirrors `add-option`'s synthetic-graph pattern:
 
 1. Builds a read-only synthetic graph from `ctx.graph` with the removed factor node filtered out.
-2. Filters connected edges (sourced from `entities.edges`, same source the operation enumeration uses, so the synthetic graph and the patch ops can never disagree).
+2. Filters connected edges directly by endpoint against `ctx.graph.edges` (decoupled from the `entities.edges`-based operation enumeration so any drift between the two cannot leave dangling edges in the synthetic graph).
 3. Walks every option node and prunes the removed factor key from all three intervention storage locations (`node.data.interventions`, `node["data/interventions/<fac_id>"]`, and top-level `node.interventions`) so `mergeInterventionSources` cannot re-emit the stale key.
 4. Calls `computeStructuralReadiness(syntheticGraph)` and validates the result against `AnalysisReadyPayload` Zod schema (parse failure non-fatal — emits anyway so the envelope validator surfaces a structured warning).
 5. Returns the fresh payload alongside the patch operations.

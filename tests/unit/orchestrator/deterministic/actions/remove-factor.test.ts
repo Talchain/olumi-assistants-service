@@ -329,4 +329,31 @@ describe("remove_factor action — analysis_ready recompute", () => {
     expect(removeEdges.some((o) => o.path === 'opt_aggressive->fac_price')).toBe(true);
     expect(removeEdges.some((o) => o.path === 'opt_conservative->fac_price')).toBe(true);
   });
+
+  it("synthetic graph filters edges by endpoint even when entities.edges is incomplete (entity-registry skew)", async () => {
+    // Defensive test for the entities/graph edge skew case. Build a graph
+    // where ctx.graph.edges contains the option→factor edges but
+    // ctx.entities.edges deliberately omits them (simulating a stale entity
+    // registry). Without endpoint-based filtering on the synthetic graph,
+    // computeStructuralReadiness would still see the dangling edges via
+    // graph.edges and push the affected options into needs_encoding instead
+    // of needs_user_mapping.
+    const graph = makeGraphWithOptions();
+    const ctx = makeTurnContext(graph);
+    // Strip the option→factor edges from entities.edges to simulate skew.
+    // Keep only the factor→goal edges (to avoid an empty registry crash).
+    ctx.entities.edges = ctx.entities.edges.filter(
+      (e: { from: string; to: string }) =>
+        !e.from.startsWith('opt_') && e.to !== 'fac_price' || e.to === 'goal_revenue',
+    ) as never;
+
+    const result = await removeFactorAction.execute({ target_id: 'fac_price' }, ctx);
+    expect(result.analysis_ready).toBeDefined();
+
+    // Even with skewed entities, the synthetic graph should still produce
+    // a clean recompute: no option's interventions should reference fac_price.
+    for (const opt of result.analysis_ready!.options) {
+      expect(Object.keys(opt.interventions)).not.toContain('fac_price');
+    }
+  });
 });
