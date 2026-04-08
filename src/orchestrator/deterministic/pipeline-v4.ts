@@ -23,7 +23,7 @@ import { computeTurnContext } from "./turn-context.js";
 import { handleSystemEvent } from "./system-event-handler.js";
 import { handlePendingConfirmation } from "./confirmation-flow.js";
 import { buildDeterministicPromptV2 } from "./prompt-builder-v2.js";
-import { buildToolDefinitions } from "./tool-builder.js";
+import { buildToolDefinitions, isExplanationChipSuppressedByAnalysis } from "./tool-builder.js";
 import { buildDeterministicChips } from "./chip-builder-v4.js";
 import { processAdapterStream, PROGRESS_MESSAGES, PROGRESS_INTERVAL_MS } from "./stream-handler-v4.js";
 import type { StreamHandlerResult, ToolExecution } from "./stream-handler-v4.js";
@@ -235,14 +235,30 @@ export async function* executePipelineV4(
     const toolChoice = chipActionInTools
       ? { type: 'tool' as const, name: chipAction! }
       : { type: 'auto' as const };
+    // When the chip action was filtered specifically by the post-analysis
+    // explanation suppression, the tool's removal is by design, not a real
+    // unavailability — the LLM is expected to write a coached response from
+    // Zone 2 data directly. Showing a "not available" downgrade message here
+    // would prefix that perfectly good response with a misleading apology.
+    // The chip-builder still produces explanation chips post-analysis (and
+    // boosts explain_result to top priority), so this path is hot.
+    const chipFilteredByExplanationSuppression =
+      chipAction != null
+      && !chipActionInTools
+      && isExplanationChipSuppressedByAnalysis(chipAction, turnContext);
     let chipDowngradeText: string | null = null;
-    if (chipAction && !chipActionInTools) {
+    if (chipAction && !chipActionInTools && !chipFilteredByExplanationSuppression) {
       chipDowngradeText = `That action isn't available right now. ${getDowngradeReason(chipAction, turnContext)}`;
       log.warn({
         request_id: requestId,
         chip_action: chipAction,
         tool_count: toolDefs.length,
       }, 'v4.chip_action_filtered_downgrade: chip action was removed by context filtering, downgrading tool_choice to auto');
+    } else if (chipFilteredByExplanationSuppression) {
+      log.info({
+        request_id: requestId,
+        chip_action: chipAction,
+      }, 'v4.chip_action_handled_via_zone2: explanation chip click — LLM will respond from analysis_state directly, no tool call needed');
     }
 
     // Build messages

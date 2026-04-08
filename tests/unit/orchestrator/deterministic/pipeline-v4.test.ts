@@ -1283,6 +1283,146 @@ describe("executePipelineV4", () => {
       expectExplanationToolsAbsent(callArgs);
     });
 
+    it('chip click on explain_result with fresh analysis: tool stripped, no "not available" downgrade text, LLM response is the assistant_text', async () => {
+      // Regression: chip-builder-v4 still produces and boosts the explain_result
+      // chip post-analysis, so this is the hot path for users asking for a
+      // breakdown. With the new tool-builder filter, the tool is correctly
+      // stripped — but pipeline-v4 must NOT prepend the standard chip-downgrade
+      // text ("That action isn't available right now...") because the suppression
+      // is intentional and the LLM is expected to answer from Zone 2 data directly.
+      const llmResponse = 'Expand Europe leads at 62% because Market Size carries the strongest positive signal toward your revenue goal, and the runner-up sits 24 points back. The result is robust under the current assumption set.';
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: llmResponse },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: llmResponse }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'Explain these results',
+        chip_metadata: { action_type: 'explain_result' },
+        context: {
+          graph: {
+            nodes: [
+              { id: 'goal_1', label: 'Maximize Revenue', kind: 'goal' },
+              { id: 'opt_1', label: 'Expand Europe', kind: 'option' },
+              { id: 'opt_2', label: 'Stay Domestic', kind: 'option' },
+              { id: 'factor_1', label: 'Market Size', kind: 'factor' },
+            ],
+            edges: [
+              { from: 'factor_1', to: 'goal_1', strength: { mean: 0.7, std: 0.1 } },
+            ],
+          } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          analysis_response: {
+            results: [
+              { option_id: 'opt_1', option_label: 'Expand Europe', win_probability: 0.62 },
+              { option_id: 'opt_2', option_label: 'Stay Domestic', win_probability: 0.38 },
+            ],
+          } as unknown as import("../../../../src/orchestrator/types.js").V2RunResponseEnvelope,
+          framing: { stage: 'evaluate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-explain-chip'));
+
+      // Tool was stripped — call goes through with auto tool_choice, not forced
+      expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
+      const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }>; tool_choice?: unknown };
+      const toolNames = callArgs.tools.map(t => t.name);
+      expect(toolNames).not.toContain('explain_result');
+      // Forced tool_choice would mean the chip downgrade did not fire AND the
+      // tool was still available. That contradicts the suppression. The valid
+      // states are 'auto' or no tool_choice (when the tools array is empty).
+      if (callArgs.tool_choice) {
+        expect(callArgs.tool_choice).toEqual({ type: 'auto' });
+      }
+
+      // The user-facing assistant_text MUST NOT begin with the standard
+      // "That action isn't available right now" downgrade preamble.
+      const complete = events.find(e => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      const text = complete.envelope.assistant_text ?? '';
+      expect(text).not.toContain("isn't available right now");
+      // The LLM's coached response IS the user-facing text.
+      expect(text).toContain('Expand Europe leads at 62%');
+
+      // No streamed text_delta should carry the downgrade preamble either.
+      const textDeltas = events.filter(e => e.type === 'text_delta') as Array<Extract<OrchestratorStreamEvent, { type: 'text_delta' }>>;
+      for (const d of textDeltas) {
+        expect(d.delta).not.toContain("isn't available right now");
+      }
+    });
+
+    it('chip click on compare_options with fresh analysis: same suppression-without-downgrade behaviour', async () => {
+      // Mirrors the explain_result test for compare_options to pin the
+      // suppression contract for the second member of POST_ANALYSIS_EXPLANATION_ACTIONS.
+      const llmResponse = 'Comparing the two options: Expand Europe edges out Stay Domestic 62% to 38%, with Market Size as the dominant driver. The gap is meaningful but not overwhelming.';
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: llmResponse },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: llmResponse }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'Compare the options',
+        chip_metadata: { action_type: 'compare_options' },
+        context: {
+          graph: {
+            nodes: [
+              { id: 'goal_1', label: 'Maximize Revenue', kind: 'goal' },
+              { id: 'opt_1', label: 'Expand Europe', kind: 'option' },
+              { id: 'opt_2', label: 'Stay Domestic', kind: 'option' },
+            ],
+            edges: [],
+          } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T,
+          analysis_response: {
+            results: [
+              { option_id: 'opt_1', option_label: 'Expand Europe', win_probability: 0.62 },
+              { option_id: 'opt_2', option_label: 'Stay Domestic', win_probability: 0.38 },
+            ],
+          } as unknown as import("../../../../src/orchestrator/types.js").V2RunResponseEnvelope,
+          framing: { stage: 'evaluate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-compare-chip'));
+
+      const complete = events.find(e => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      const text = complete.envelope.assistant_text ?? '';
+      expect(text).not.toContain("isn't available right now");
+      expect(text).toContain('Comparing the two options');
+    });
+
+    it('chip click on run_analysis with no graph: standard downgrade text STILL fires (regression guard for the unrelated path)', async () => {
+      // The new branch only suppresses the downgrade for explanation chips
+      // when analysis is fresh. The "no graph → run_analysis unavailable"
+      // path must still produce a downgrade message — verify here so the
+      // new branch doesn't accidentally swallow legitimate downgrades.
+      mockStreamChatWithTools.mockReturnValue(mockStream([
+        { type: 'text_delta', delta: 'I need a model first.' },
+        { type: 'message_complete', result: { content: [{ type: 'text', text: 'I need a model first.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
+      ]));
+
+      const req = makeTurnRequest({
+        message: 'Run the analysis',
+        chip_metadata: { action_type: 'run_analysis' },
+        context: {
+          graph: null,
+          analysis_response: null,
+          framing: { stage: 'evaluate' },
+          messages: [],
+          scenario_id: 'test-scenario',
+        },
+      } as unknown as Partial<OrchestratorTurnRequest>);
+
+      const events = await collectEvents(executePipelineV4(req, 'req-run-no-graph'));
+
+      const complete = events.find(e => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
+      const text = complete.envelope.assistant_text ?? '';
+      // The legitimate downgrade message should still appear for this case.
+      expect(text).toContain("isn't available right now");
+    });
+
     it('run_premortem and challenge_assumption stay in tool set when analysis is in context', async () => {
       // These tools must always remain available — run_premortem produces
       // content not in Zone 2, and challenge_assumption is conversational.

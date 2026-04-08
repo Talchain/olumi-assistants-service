@@ -31,12 +31,34 @@ const EXCLUDED_ACTIONS: ReadonlySet<ActionName> = new Set(['generate_artefact'])
  * handler. Kept available when analysis is absent (or stale, per the UI's
  * staleness contract — see computeContextExclusions) so the user can still
  * request decomposition after re-running.
+ *
+ * Exported via `isExplanationChipSuppressedByAnalysis()` so pipeline-v4 can
+ * distinguish "tool intentionally suppressed, LLM will answer from Zone 2"
+ * from "tool genuinely unavailable, downgrade with a user-facing message".
  */
 const POST_ANALYSIS_EXPLANATION_ACTIONS: ReadonlySet<ActionName> = new Set([
   'explain_result',
   'compare_options',
   'what_would_flip',
 ]);
+
+/**
+ * True when a chip click would have its tool stripped specifically by the
+ * post-analysis explanation suppression. Pipeline-v4 uses this to skip the
+ * "That action isn't available right now" downgrade text for these clicks:
+ * the user's intent is still honoured, just by the LLM responding from
+ * Zone 2 data instead of through a handler template.
+ *
+ * The predicate mirrors the conditions inside `computeContextExclusions`
+ * exactly — both read `ctx.analysis_summary` so the two layers can never
+ * disagree about whether suppression is in effect.
+ */
+export function isExplanationChipSuppressedByAnalysis(
+  chipAction: ActionName,
+  ctx: DeterministicTurnContext,
+): boolean {
+  return POST_ANALYSIS_EXPLANATION_ACTIONS.has(chipAction) && !!ctx.analysis_summary;
+}
 
 /** Graph-editing actions that require a non-empty graph. */
 const GRAPH_EDIT_ACTIONS: ReadonlySet<ActionName> = new Set([
