@@ -21,6 +21,7 @@ import { config } from "../../config/index.js";
 import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
+import { synthesiseDisplayValue } from "./display-value.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -723,6 +724,7 @@ export async function enrichGraphWithFactorsAsync(
             normalizedValue = factor.value / cap;
           }
 
+          const inferredFactorType = inferFactorType(factor.unit, factor.label);
           const factorData: FactorDataT = {
             value: normalizedValue,
             baseline: factor.baseline,
@@ -736,8 +738,16 @@ export async function enrichGraphWithFactorsAsync(
             range: factor.rangeMin !== undefined && factor.rangeMax !== undefined
               ? { min: factor.rangeMin, max: factor.rangeMax }
               : undefined,
-            factor_type: inferFactorType(factor.unit, factor.label),
+            factor_type: inferredFactorType,
             uncertainty_drivers: ["Extracted from brief — confirm value"],
+            // Synthesise display_value when the LLM hasn't provided one (CEE-1 fallback)
+            display_value: synthesiseDisplayValue({
+              value: normalizedValue,
+              raw_value: rawValue,
+              unit: factor.unit,
+              factor_type: inferredFactorType,
+              cap,
+            }),
           };
           const beforeData = enrichedGraph.nodes[nodeIndex].data;
           enrichedGraph.nodes[nodeIndex] = {
@@ -813,6 +823,7 @@ export async function enrichGraphWithFactorsAsync(
 
     // Create new factor node with V3 fields
     const nodeId = generateFactorId(factor.label, factorsAdded);
+    const newFactorType = inferFactorType(factor.unit, factor.label);
     const factorData: FactorDataT = {
       value: normalizedValue,
       baseline: factor.baseline,
@@ -827,8 +838,16 @@ export async function enrichGraphWithFactorsAsync(
         ? { min: factor.rangeMin, max: factor.rangeMax }
         : undefined,
       // V3 fields for injected factors
-      factor_type: inferFactorType(factor.unit, factor.label),
+      factor_type: newFactorType,
       uncertainty_drivers: ["Extracted from brief — confirm value"],
+      // Synthesise display_value when the LLM hasn't provided one (CEE-1 fallback)
+      display_value: synthesiseDisplayValue({
+        value: normalizedValue,
+        raw_value: rawValue,
+        unit: factor.unit,
+        factor_type: newFactorType,
+        cap,
+      }),
     };
 
     // Connect to relevant node first (needed for category inference)

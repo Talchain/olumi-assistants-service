@@ -25,6 +25,7 @@ import type {
 } from "../../schemas/analysis-ready.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
+import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
 
 // ============================================================================
 // Types
@@ -165,6 +166,165 @@ export interface AnalysisReadyContext {
   requestId?: string;
 }
 
+// ============================================================================
+// is_baseline Detection (Task 3 / CEE-2)
+// ============================================================================
+
+/**
+ * Keywords whose presence (at a word boundary) in an option label indicates
+ * the status-quo / do-nothing option. Checked case-insensitively.
+ *
+ * Order matters: earlier entries are higher confidence. The first match across
+ * all options wins if no LLM-provided `is_baseline` flag is set.
+ */
+const BASELINE_KEYWORDS = [
+  "status quo",
+  "do nothing",
+  "no change",
+  "as-is",
+  "as is",
+  "baseline",
+  "current",
+  "existing",
+  "stay",
+  "remain",
+  "keep",
+];
+
+/**
+ * Detect which option, if any, represents the status-quo baseline.
+ *
+ * Detection order (highest confidence first):
+ * 1. Option has `is_baseline === true` set by the LLM (OptionV3T field).
+ * 2. Option label matches a BASELINE_KEYWORD at a word boundary.
+ *    If multiple options match rule 2, the first by array index wins.
+ * 3. No match → returns `null` (no baseline marked).
+ *
+ * @param options - V3 options in their original order
+ * @returns Index of the baseline option, or `null` if none detected
+ */
+function detectBaselineOptionIndex(options: OptionV3T[]): number | null {
+  // Priority 1: LLM-provided flag
+  for (let i = 0; i < options.length; i++) {
+    if ((options[i] as Record<string, unknown>).is_baseline === true) return i;
+  }
+
+  // Priority 2: label keyword match
+  for (let i = 0; i < options.length; i++) {
+    const label = options[i].label.toLowerCase();
+    for (const kw of BASELINE_KEYWORDS) {
+      // Word-boundary match: keyword must not be surrounded by alphanumeric chars
+      const escaped = kw.replace(/[-\s]/g, "[\\s\\-]");
+      const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i");
+      if (re.test(label)) return i;
+    }
+  }
+
+  return null;
+}
+
+// ============================================================================
+// Intervention Details (Task 4 / CEE-9)
+// ============================================================================
+
+/**
+ * A single intervention detail entry for a factor.
+ * Additive alongside the existing `interventions: Record<string, number>`.
+ */
+export interface InterventionDetail {
+  /** Human-readable display string (e.g. "5 developers", "£200k", "High (0.7)") */
+  display_value: string;
+  /** Mirrors `interventions[factorId]` — normalised numeric value */
+  normalised_value: number;
+  /** Pre-normalisation value when available */
+  raw_value?: number;
+  /** Unit string when available */
+  unit?: string;
+}
+
+/**
+ * Build `intervention_details` for a single option using factor node metadata.
+ *
+ * For each intervention the caller provides `normalisedValue` (from
+ * `interventions[factorId]`) and, optionally, a matching factor node from the
+ * graph.  The display string is synthesised using the factor's display_value
+ * (from the enricher/LLM), raw_value, unit, and factor_type. If none of that
+ * is available the normalised value is rendered via the qualitative band.
+ *
+ * CEE-6 echo stripping: when the synthesised display string would be identical
+ * to the factor label (case-insensitive trim), fall back to a pure numeric/
+ * qualitative representation so the card interior doesn't just repeat the label.
+ *
+ * @param factorId - Factor node ID
+ * @param normalisedValue - Normalised numeric intervention value
+ * @param factorNode - Optional factor node from the V3 graph
+ * @returns An InterventionDetail entry
+ */
+function buildInterventionDetail(
+  factorId: string,
+  normalisedValue: number,
+  factorNode: NodeV3T | undefined,
+): InterventionDetail {
+  // Prefer LLM/enricher-provided display_value on the factor node
+  if (factorNode?.display_value) {
+    const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
+    const candidate = factorNode.display_value.toLowerCase().trim();
+    // CEE-6: strip echo — if display_value is just the label, don't use it
+    const isEcho =
+      candidate === factorLabel ||
+      candidate.includes(factorLabel) ||
+      factorLabel.includes(candidate);
+
+    if (!isEcho) {
+      return {
+        display_value: factorNode.display_value,
+        normalised_value: normalisedValue,
+        ...(factorNode.observed_state?.raw_value !== undefined && {
+          raw_value: factorNode.observed_state.raw_value,
+        }),
+        ...(factorNode.observed_state?.unit !== undefined && {
+          unit: factorNode.observed_state.unit,
+        }),
+      };
+    }
+  }
+
+  // Synthesise from observed_state fields
+  const os = factorNode?.observed_state;
+  const rawValue = os?.raw_value;
+  const unit = os?.unit;
+  const factorType = factorNode?.factor_type ?? os?.factor_type;
+
+  const synthesised = synthesiseDisplayValue({
+    value: normalisedValue,
+    raw_value: rawValue,
+    unit,
+    factor_type: factorType,
+  });
+
+  const displayValue = synthesised ?? String(parseFloat(normalisedValue.toFixed(2)));
+
+  // CEE-6 echo check on synthesised value too
+  const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
+  const displayLower = displayValue.toLowerCase().trim();
+  const isEcho =
+    factorLabel !== "" &&
+    (displayLower === factorLabel ||
+      displayLower.includes(factorLabel) ||
+      factorLabel.includes(displayLower));
+
+  const finalDisplay = isEcho
+    ? String(parseFloat(normalisedValue.toFixed(2)))
+    : displayValue;
+
+  return {
+    display_value: finalDisplay,
+    normalised_value: normalisedValue,
+    ...(rawValue !== undefined && { raw_value: rawValue }),
+    ...(unit !== undefined && { unit }),
+  };
+}
+
 /**
  * Build analysis-ready payload from V3 options and graph.
  *
@@ -186,6 +346,14 @@ export function buildAnalysisReadyPayload(
 ): AnalysisReadyPayloadT & { _fallback_meta?: AnalysisReadyFallbackMeta } {
   // Transform all options
   const analysisOptions = options.map(transformOptionToAnalysisReady);
+
+  // === is_baseline detection (CEE-2) ===
+  // Mark exactly one option as the status-quo baseline, based on LLM flag or
+  // label keyword matching. This is additive — no existing field is modified.
+  const baselineIdx = detectBaselineOptionIndex(options);
+  if (baselineIdx !== null) {
+    (analysisOptions[baselineIdx] as Record<string, unknown>).is_baseline = true;
+  }
 
   // === Task 2A+2B: Factor value fallback + blocker emission ===
   // For qualitative briefs, V3 options may have empty interventions because
@@ -302,6 +470,25 @@ export function buildAnalysisReadyPayload(
     }, `analysis-ready: resolved ${fallbackCount} intervention(s) via factor node fallback, ${dedupedBlockers.length} blocker(s)`);
   }
   // === End Task 2A+2B ===
+
+  // === intervention_details (CEE-9 / CEE-6) ===
+  // Build a richer display-oriented map alongside the existing numeric-only
+  // `interventions`. Each entry includes a human-readable display_value, the
+  // normalised numeric value, and optional raw_value/unit from factor metadata.
+  // CEE-6 echo stripping is applied inside buildInterventionDetail.
+  for (let i = 0; i < analysisOptions.length; i++) {
+    const analysisOpt = analysisOptions[i];
+    const interventionEntries = Object.entries(analysisOpt.interventions);
+    if (interventionEntries.length === 0) continue;
+
+    const details: Record<string, InterventionDetail> = {};
+    for (const [factorId, normalisedValue] of interventionEntries) {
+      const factorNode = factorNodeMap.get(factorId);
+      details[factorId] = buildInterventionDetail(factorId, normalisedValue, factorNode);
+    }
+    (analysisOpt as Record<string, unknown>).intervention_details = details;
+  }
+  // === End intervention_details ===
 
   // Determine status based on transformed options (Raw+Encoded pattern)
   // Priority: needs_user_mapping > needs_encoding > ready
