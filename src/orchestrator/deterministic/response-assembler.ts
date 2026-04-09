@@ -30,7 +30,7 @@ import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import { enforceProposalLanguage } from "./proposal-language-guard.js";
 import { assessMutationHealth } from "./mutation-health.js";
-import { applyOperationsToGraph } from "./apply-operations.js";
+import { applyPatchOperations } from "../patch-applier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { log } from "../../utils/telemetry.js";
 
@@ -171,9 +171,13 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     turnContext.graph
   ) {
     try {
+      // Reuse the canonical patch applier (patch-applier.ts) — same code
+      // path PLoT validation uses, so the gate sees the exact post-state
+      // production would. Throws on invalid ops; the surrounding catch
+      // skips the gate when that happens (advisory, never blocking).
       const postGraph =
         actionResult.applied_graph ??
-        applyOperationsToGraph(turnContext.graph, actionResult.operations);
+        applyPatchOperations(turnContext.graph, actionResult.operations);
       const health = assessMutationHealth(turnContext.graph, postGraph, actionResult.operations);
       if (!health.healthy) {
         const issueText = health.issues.slice(0, 3).map((i) => `- ${i}`).join('\n');

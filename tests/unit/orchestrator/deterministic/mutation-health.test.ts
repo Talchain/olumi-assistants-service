@@ -15,7 +15,7 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
 }));
 
 import { assessMutationHealth } from "../../../../src/orchestrator/deterministic/mutation-health.js";
-import { applyOperationsToGraph } from "../../../../src/orchestrator/deterministic/apply-operations.js";
+import { applyPatchOperations as applyOperationsToGraph } from "../../../../src/orchestrator/patch-applier.js";
 import { addOptionAction } from "../../../../src/orchestrator/deterministic/actions/add-option.js";
 import { addFactorAction } from "../../../../src/orchestrator/deterministic/actions/add-factor.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
@@ -83,7 +83,10 @@ function makeCtx(graph: GraphV3T): DeterministicTurnContext {
 // applyOperationsToGraph — narrow contract
 // ---------------------------------------------------------------------------
 
-describe("applyOperationsToGraph — shim contract", () => {
+// F4: the deterministic response-assembler now uses applyPatchOperations
+// from patch-applier.ts (the canonical applier) instead of a hand-rolled
+// shim. The tests below pin the behaviours the health gate depends on.
+describe("applyPatchOperations (canonical applier) — health gate contract", () => {
   it("applies an add_node + add_edge sequence (the add_option shape)", async () => {
     // Capture real operations from the add_option handler.
     const baseGraph = makeGraph();
@@ -128,7 +131,7 @@ describe("applyOperationsToGraph — shim contract", () => {
     expect(post.edges.length).toBeGreaterThan(baseGraph.edges.length);
   });
 
-  it("update_node shallow-merges value into the existing node", () => {
+  it("update_node merges value into the existing node (canonical Object.assign)", () => {
     const base = makeGraph();
     const ops: PatchOperation[] = [
       { op: 'update_node', path: 'fac_ramp', value: { observed_state: { value: 0.9 } } },
@@ -160,14 +163,15 @@ describe("applyOperationsToGraph — shim contract", () => {
     ).toBeUndefined();
   });
 
-  it("unknown op kind is a no-op (advisory gate must never throw)", () => {
+  it("unknown op kind throws (caller must catch — the response-assembler wire-in does)", () => {
+    // Behaviour difference vs. the old shim: the canonical applier throws
+    // PatchApplyError on unknown op kinds. The response-assembler wraps the
+    // applyPatchOperations call in try/catch so the gate stays advisory and
+    // never blocks the response. The throw is verified here so future changes
+    // to the wire-in can't accidentally let an unknown-op crash the assembler.
     const base = makeGraph();
-    // Cast through unknown — we're deliberately passing a kind the shim doesn't support.
     const ops = [{ op: 'rename_node', path: 'fac_ramp', value: { label: 'X' } } as unknown as PatchOperation];
-    const post = applyOperationsToGraph(base, ops);
-    // Graph unchanged (deep equality of node count + edge count is enough).
-    expect(post.nodes).toHaveLength(base.nodes.length);
-    expect(post.edges).toHaveLength(base.edges.length);
+    expect(() => applyOperationsToGraph(base, ops)).toThrow();
   });
 
   it("never mutates the input graph (reference identity preserved on inputs)", () => {
@@ -246,8 +250,12 @@ describe("assessMutationHealth — healthy / unhealthy classification", () => {
     expect(health.issues.find((i) => i.includes('New Option') && i.includes('was ready'))).toBeUndefined();
   });
 
-  it("EXEMPTS the option being actively edited from degradation warnings", () => {
-    // Pre: option 'Active' is ready with one intervention.
+  it("WARNS when an actively-edited existing option degrades from ready to needs_encoding (F3)", () => {
+    // F3 — review feedback corrected this: actively-edited options are NOT
+    // exempt. If a user updates an existing ready option in a way that
+    // empties or breaks its interventions, the gate must warn. Only
+    // newly-added options stay exempt (they may legitimately be needs_encoding
+    // while awaiting user mapping).
     const baseGraph = makeGraph(
       [
         { id: 'option_active', kind: 'option', label: 'Active', data: { interventions: { fac_ramp: 0.5 } }, interventions: { fac_ramp: 0.5 } },
@@ -258,7 +266,7 @@ describe("assessMutationHealth — healthy / unhealthy classification", () => {
         { from: 'option_other',  to: 'fac_cost', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
       ],
     );
-    // Update_node empties option_active's interventions (would degrade ready → needs_encoding).
+    // Update_node empties option_active's interventions (degrades ready → needs_encoding/needs_user_mapping).
     const ops: PatchOperation[] = [
       {
         op: 'update_node',
@@ -268,8 +276,9 @@ describe("assessMutationHealth — healthy / unhealthy classification", () => {
     ];
     const post = applyOperationsToGraph(baseGraph, ops);
     const health = assessMutationHealth(baseGraph, post, ops);
-    // The active option should be exempted, so no warning about it.
-    expect(health.issues.find((i) => i.includes('"Active"') && i.includes('was ready'))).toBeUndefined();
+    // The warning MUST fire — this is the very signal the gate exists for.
+    expect(health.healthy).toBe(false);
+    expect(health.issues.find((i) => i.includes('"Active"') && i.includes('was ready'))).toBeDefined();
   });
 
   it("flags structural violations from validateGraphStructure (e.g. orphan node)", () => {

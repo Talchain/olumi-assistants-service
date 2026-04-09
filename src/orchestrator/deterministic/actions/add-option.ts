@@ -384,19 +384,44 @@ function buildOptionConfigurationResult(
     : undefined;
 
   // 4. Human-facing assistant text describing the change in decision terms.
-  const factorLabels = Object.keys(interventions)
-    .map((fid) => ctx.entities.nodes.get(fid)?.label ?? fid)
-    .slice(0, 3);
-  const joined =
-    factorLabels.length === 1
-      ? factorLabels[0]
-      : factorLabels.length === 2
-        ? `${factorLabels[0]} and ${factorLabels[1]}`
-        : `${factorLabels.slice(0, -1).join(', ')}, and ${factorLabels[factorLabels.length - 1]}`;
+  // F5: drop unresolvable factor ids rather than leaking raw `factor_x` /
+  // `fac_x` strings into user-facing text. The LLM may hallucinate factor
+  // ids; if any can't be resolved to a label, prefer a neutral phrasing.
+  const factorIds = Object.keys(interventions);
+  const resolvedLabels: string[] = [];
+  let unresolvedCount = 0;
+  for (const fid of factorIds) {
+    const label = ctx.entities.nodes.get(fid)?.label;
+    if (label) {
+      resolvedLabels.push(label);
+    } else {
+      unresolvedCount++;
+    }
+  }
+
+  let effectsPhrase: string;
+  if (resolvedLabels.length === 0) {
+    // Every factor id was unresolvable — fall back to a generic phrasing.
+    effectsPhrase = `${factorIds.length} ${factorIds.length === 1 ? 'factor' : 'factors'}`;
+  } else {
+    const visibleLabels = resolvedLabels.slice(0, 3);
+    const joined =
+      visibleLabels.length === 1
+        ? visibleLabels[0]
+        : visibleLabels.length === 2
+          ? `${visibleLabels[0]} and ${visibleLabels[1]}`
+          : `${visibleLabels.slice(0, -1).join(', ')}, and ${visibleLabels[visibleLabels.length - 1]}`;
+    // Append "and N other(s)" only when there are unresolved or trimmed extras
+    // we deliberately did not name. Keep the sentence in plain English.
+    const overflow = (resolvedLabels.length - visibleLabels.length) + unresolvedCount;
+    effectsPhrase = overflow > 0
+      ? `${joined} and ${overflow} other${overflow === 1 ? '' : 's'}`
+      : joined;
+  }
 
   return {
     blocks: [],
-    assistantText: `Updated **${existingOption.label}**'s effects on ${joined}. Please confirm.`,
+    assistantText: `Updated **${existingOption.label}**'s effects on ${effectsPhrase}. Please confirm.`,
     guidance_items: [],
     operations,
     ...(analysisReady ? { analysis_ready: analysisReady } : {}),

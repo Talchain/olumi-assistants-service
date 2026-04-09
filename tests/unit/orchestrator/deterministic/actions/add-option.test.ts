@@ -587,6 +587,56 @@ describe("add_option action — repair redirect on existing option", () => {
     expect(opt!.status).toBe('ready');
   });
 
+  it("F5: drops unresolvable factor ids from assistant text rather than leaking raw ids", async () => {
+    // The LLM may hallucinate factor ids. The repair-redirect text must NOT
+    // surface them — fall back to a neutral phrasing instead.
+    const ctx = makeContextWithExistingOption('Hire Contractor', 'option_hire_contractor');
+
+    const result = await addOptionAction.execute(
+      {
+        label: 'Hire Contractor',
+        interventions: [
+          { factor_id: 'fac_ramp', value: 0.6 },               // exists
+          { factor_id: 'factor_hallucinated_one', value: 0.4 }, // doesn't exist
+          { factor_id: 'fac_unknown_two', value: 0.3 },         // doesn't exist
+        ],
+      },
+      ctx,
+    );
+
+    expect(result.assistantText).toBeTruthy();
+    // No raw ids of any scheme should appear in the user-facing text.
+    expect(result.assistantText).not.toContain('factor_hallucinated_one');
+    expect(result.assistantText).not.toContain('fac_unknown_two');
+    expect(result.assistantText).not.toContain('factor_');
+    // The resolvable factor's label should still appear.
+    expect(result.assistantText).toContain('Ramp time');
+    // The unresolved ones should be summarised rather than dropped silently.
+    expect(result.assistantText).toMatch(/2 other/);
+  });
+
+  it("F5: when EVERY factor id is unresolvable, falls back to a count-only phrasing", async () => {
+    const ctx = makeContextWithExistingOption('Hire Contractor', 'option_hire_contractor');
+
+    const result = await addOptionAction.execute(
+      {
+        label: 'Hire Contractor',
+        interventions: [
+          { factor_id: 'factor_ghost_one', value: 0.6 },
+          { factor_id: 'factor_ghost_two', value: 0.4 },
+        ],
+      },
+      ctx,
+    );
+
+    expect(result.assistantText).toBeTruthy();
+    expect(result.assistantText).not.toContain('factor_ghost_one');
+    expect(result.assistantText).not.toContain('factor_ghost_two');
+    expect(result.assistantText).not.toContain('factor_');
+    // Generic "2 factors" fallback.
+    expect(result.assistantText).toMatch(/2 factors/);
+  });
+
   it("logs the v4.option_repair_redirect telemetry event", async () => {
     const { log } = await import('../../../../../src/utils/telemetry.js');
     const infoSpy = vi.mocked(log.info);

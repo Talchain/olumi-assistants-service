@@ -600,6 +600,52 @@ describe("buildPatchSummary — T4 semantic summaries (graph-aware)", () => {
     expect(summary).not.toContain('fac_quality');
   });
 
+  it("update_node with full-word factor_<slug> field path → bails to count-based", () => {
+    // Regression for F2: the action handlers (add-option / add-factor) generate
+    // ids like factor_team_morale and option_hire_tech_lead — full-word prefixes
+    // that the original ENTITY_ID_LEAK_RE didn't cover. The extended regex now
+    // catches both schemes so a slash-keyed field with these ids cannot leak.
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Ship on time' },
+        { id: 'factor_team_morale', kind: 'factor', label: 'Team morale' },
+      ],
+      edges: [
+        { from: 'factor_team_morale', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    } as unknown as GraphV3T;
+    const ops: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'factor_team_morale',
+        value: { 'data/interventions/factor_team_morale': 0.8 },
+      },
+    ];
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).not.toContain('factor_team_morale');
+    expect(summary).not.toContain('data/interventions');
+  });
+
+  it("update_node with full-word option_<slug> field path → bails to count-based", () => {
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Ship on time' },
+        { id: 'option_hire_tech_lead', kind: 'option', label: 'Hire Tech Lead' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+    const ops: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'option_hire_tech_lead',
+        value: { 'data/interventions/option_hire_tech_lead': 0.8 },
+      },
+    ];
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).not.toContain('option_hire_tech_lead');
+    expect(summary).not.toContain('data/interventions');
+  });
+
   it("add_edge between two existing entities → 'connect' verb with both labels", () => {
     const graph = makeGraphForSemantic();
     const ops: PatchOperation[] = [

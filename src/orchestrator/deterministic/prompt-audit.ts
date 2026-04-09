@@ -119,8 +119,16 @@ export function auditPromptForV4(rawPrompt: string): PromptAuditResult {
  * dead JSON/XML envelope instructions in the cf-v28 prompt body have a clear
  * counter-instruction. This is a stop-gap until PMS is updated at source.
  *
+ * The proposal-language directive (T5) is the upstream prevention for the
+ * proposal-language guard. The runtime scanner in proposal-language-guard.ts
+ * is the safety net; this directive teaches the model to avoid the leak in
+ * the first place.
+ *
  * Belongs in the static block (cacheable) — DO NOT put in the dynamic block.
  */
 export const RUNTIME_TOOL_USE_SUFFIX =
   '\n\n[Runtime context: This system uses native tool calling. Respond in plain text. ' +
-  'No XML envelopes, no JSON wrappers, no code blocks.]';
+  'No XML envelopes, no JSON wrappers, no code blocks.]' +
+  '\n\n[Proposal language: When proposing a change that requires confirmation, use proposal ' +
+  "language: \"I'd suggest\", \"proposing\", \"here's what I'd change\". Never \"Adding now\" or " +
+  "\"I've added\" on unconfirmed changes.]";

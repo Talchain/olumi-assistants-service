@@ -41,32 +41,24 @@ export interface MutationHealthResult {
 
 /**
  * Build the set of option ids that are exempt from readiness-degradation
- * warnings. Exemptions:
- *   - Newly added options (add_node ops with kind === 'option') — they may
- *     be needs_encoding in a proposal flow.
- *   - The option being actively edited (any update_node op whose path is an
- *     option id) — partial proposal flows may temporarily degrade it.
+ * warnings. ONLY newly-added options are exempt — they may legitimately be
+ * needs_encoding while awaiting user mapping in a proposal flow.
+ *
+ * Actively-edited options are NOT exempt: if a user updates an existing
+ * ready option in a way that empties or breaks its interventions, the gate
+ * should warn — that's the very signal the gate exists to surface.
+ *
+ * (An earlier revision exempted the active-edit target as well, on the
+ * assumption that partial proposal flows might temporarily degrade it.
+ * Review feedback was correct: that exemption silenced legitimate warnings
+ * and was removed.)
  */
-function collectEditedOptionIds(operations: PatchOperation[], preGraph: GraphV3T | null): Set<string> {
+function collectExemptOptionIds(operations: PatchOperation[]): Set<string> {
   const exempt = new Set<string>();
-  const preOptionIds = new Set<string>();
-  if (preGraph) {
-    for (const n of preGraph.nodes) {
-      if ((n as { kind?: string }).kind === 'option') {
-        const id = (n as { id?: string }).id;
-        if (id) preOptionIds.add(id);
-      }
-    }
-  }
   for (const op of operations) {
     if (op.op === 'add_node') {
       const v = op.value as Record<string, unknown> | undefined;
       if (v?.kind === 'option' && typeof v.id === 'string') exempt.add(v.id);
-    } else if (op.op === 'update_node') {
-      // If the update target is an option in the pre-graph, exempt it.
-      if (typeof op.path === 'string' && preOptionIds.has(op.path)) {
-        exempt.add(op.path);
-      }
     }
   }
   return exempt;
@@ -88,10 +80,11 @@ export function assessMutationHealth(
     }
   }
 
-  // 2. Readiness degradation on options that already existed pre-mutation
-  //    AND are not in the exemption set (newly added or actively edited).
+  // 2. Readiness degradation on options that already existed pre-mutation.
+  //    Only newly-added options are exempt; actively-edited existing options
+  //    SHOULD warn if they degrade — that's the warning users want.
   if (preGraph) {
-    const exempt = collectEditedOptionIds(operations, preGraph);
+    const exempt = collectExemptOptionIds(operations);
     const pre = computeStructuralReadiness(preGraph);
     const post = computeStructuralReadiness(postGraph);
     if (pre && post) {
