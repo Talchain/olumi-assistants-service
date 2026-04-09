@@ -354,6 +354,32 @@ export interface ActionResult {
    * interventions and gets EMPTY_INTERVENTIONS.
    */
   analysis_ready?: import("../types.js").GraphPatchBlockData['analysis_ready'];
+  /**
+   * T1 (Phase A): Structured failure object emitted by deterministic action
+   * handlers when a precondition (e.g. cap exceeded) blocks the action.
+   *
+   * When set, the response assembler:
+   *   - Surfaces `failure.user_message` as `assistant_text`
+   *   - Skips emitting any operations / blocks
+   *   - Mirrors `failure.code` and `failure.recovery_hint` onto the envelope
+   *     as `failure_code` / `failure_recovery_hint` so future consumers
+   *     (Phase B history threading, future UI hints) can read them without
+   *     reworking the response shape.
+   *   - Emits `v4.action_failed` telemetry.
+   */
+  failure?: ActionFailure;
+}
+
+/** Structured action failure (T1 Phase A). */
+export interface ActionFailure {
+  /** Stable code for telemetry, history threading, and UI logic. */
+  code: string;
+  /** Internal/developer-facing description (NOT shown to the user). */
+  message: string;
+  /** Plain-language assistant-facing message — surfaced as assistant_text. */
+  user_message: string;
+  /** Optional hint to LLM/UI about what to do next. */
+  recovery_hint?: string;
 }
 
 // ============================================================================

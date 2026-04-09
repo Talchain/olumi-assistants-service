@@ -385,3 +385,234 @@ describe("analyseOperations", () => {
     expect(a.totalOps).toBe(4);
   });
 });
+
+// ============================================================================
+// T4 — Semantic, label-aware summaries (graph-aware path)
+// ============================================================================
+
+import type { GraphV3T } from "../../../src/orchestrator/types.js";
+
+function makeGraphForSemantic(extraNodes: unknown[] = [], extraEdges: unknown[] = []): GraphV3T {
+  return {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Ship on time' },
+      { id: 'fac_dev_capacity', kind: 'factor', label: 'Development capacity' },
+      { id: 'fac_cost', kind: 'factor', label: 'Cost' },
+      { id: 'fac_quality', kind: 'factor', label: 'Quality' },
+      ...extraNodes,
+    ],
+    edges: [
+      { from: 'fac_dev_capacity', to: 'goal_1', strength: { mean: 0.7, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'fac_cost', to: 'goal_1', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' },
+      ...extraEdges,
+    ],
+  } as unknown as GraphV3T;
+}
+
+describe("buildPatchSummary — T4 semantic summaries (graph-aware)", () => {
+  it("add_option with intervention edges → semantic sentence with target factor labels", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'option_contractor',
+        value: { id: 'option_contractor', kind: 'option', label: 'Contractor' },
+      },
+      {
+        op: 'add_edge',
+        path: 'option_contractor->fac_dev_capacity',
+        value: { from: 'option_contractor', to: 'fac_dev_capacity', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Contractor');
+    expect(summary).toContain('Development capacity');
+    // Proposal wording, not applied
+    expect(summary).toMatch(/Proposing to add/i);
+    // Defence-in-depth: no raw IDs leak
+    expect(summary).not.toContain('option_contractor');
+    expect(summary).not.toContain('fac_dev_capacity');
+  });
+
+  it("add_option with multiple intervention targets joins with 'and'", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'option_hybrid',
+        value: { id: 'option_hybrid', kind: 'option', label: 'Hybrid Approach' },
+      },
+      {
+        op: 'add_edge',
+        path: 'option_hybrid->fac_dev_capacity',
+        value: { from: 'option_hybrid', to: 'fac_dev_capacity', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      },
+      {
+        op: 'add_edge',
+        path: 'option_hybrid->fac_cost',
+        value: { from: 'option_hybrid', to: 'fac_cost', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Hybrid Approach');
+    expect(summary).toContain('Development capacity');
+    expect(summary).toContain('Cost');
+    expect(summary).toContain(' and ');
+  });
+
+  it("add_factor with category → 'as a controllable factor'", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'fac_team_morale',
+        value: { id: 'fac_team_morale', kind: 'factor', label: 'Team morale', category: 'controllable' },
+      },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Team morale');
+    expect(summary).toContain('controllable factor');
+  });
+
+  it("update_node single field → 'Updated <label>: <field>'", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'fac_dev_capacity',
+        value: { observed_state: { value: 0.8 } },
+      },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Development capacity');
+    expect(summary).toMatch(/Proposing to update/i);
+  });
+
+  it("applied (full_draft) wording differs from proposal (edit) wording", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'option_baseline',
+        value: { id: 'option_baseline', kind: 'option', label: 'Baseline' },
+      },
+      {
+        op: 'add_edge',
+        path: 'option_baseline->fac_dev_capacity',
+        value: { from: 'option_baseline', to: 'fac_dev_capacity', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      },
+    ];
+
+    const proposal = buildPatchSummary(ops, null, 'edit', graph);
+    const applied = buildPatchSummary(ops, null, 'full_draft', graph);
+
+    expect(proposal).toMatch(/Proposing to add/);
+    expect(applied).toMatch(/^Added/);
+    expect(proposal).not.toMatch(/^Added/);
+  });
+
+  it("large patch → grouped sentence with top entity label call-out", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      { op: 'add_node', path: 'fac_one',   value: { id: 'fac_one',   kind: 'factor', label: 'Factor One' } },
+      { op: 'add_node', path: 'fac_two',   value: { id: 'fac_two',   kind: 'factor', label: 'Factor Two' } },
+      { op: 'add_node', path: 'fac_three', value: { id: 'fac_three', kind: 'factor', label: 'Factor Three' } },
+      { op: 'add_node', path: 'opt_one',   value: { id: 'opt_one',   kind: 'option', label: 'Option One' } },
+      { op: 'add_edge', path: 'opt_one->fac_one', value: { from: 'opt_one', to: 'fac_one', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' } },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'full_draft', graph);
+    // Top label is the first add_node — Factor One
+    expect(summary).toContain('Factor One');
+    expect(summary).toContain('factors');
+    expect(summary).toContain('option');
+  });
+
+  it("missing labels → graceful fallback to count-based", () => {
+    const graph = makeGraphForSemantic();
+    // add_edge references a target NOT in the graph
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'option_x',
+        value: { id: 'option_x', kind: 'option', label: 'Option X' },
+      },
+      {
+        op: 'add_edge',
+        path: 'option_x->fac_missing',
+        value: { from: 'option_x', to: 'fac_missing', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    // Falls back to count-based — no claim about Option X with target labels
+    expect(summary).not.toContain('Development capacity');
+    // Count-based path emits "Added X" / specific counts
+    expect(summary.length).toBeGreaterThan(0);
+  });
+
+  it("no graph passed → count-based behaviour (regression)", () => {
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'option_baseline',
+        value: { id: 'option_baseline', kind: 'option', label: 'Baseline' },
+      },
+    ];
+    const summary = buildPatchSummary(ops, null, 'edit');
+    // Count-based: still mentions the label but does NOT use "Proposing to add" prefix
+    expect(summary).toBeTruthy();
+  });
+
+  it("coachingSummary still wins over graph-aware computed summary", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'option_x',
+        value: { id: 'option_x', kind: 'option', label: 'Option X' },
+      },
+    ];
+    const summary = buildPatchSummary(ops, 'Custom coaching note from LLM.', 'edit', graph);
+    expect(summary).toBe('Custom coaching note from LLM.');
+  });
+
+  it("update_node where friendly field resolution fails → falls back to count-based", () => {
+    // Use a slash-keyed path field that contains an internal token. The
+    // friendlyFieldName helper returns it unchanged, so the entity-leak
+    // check trips and bails out of the semantic path.
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'fac_dev_capacity',
+        value: { 'data/interventions/fac_quality': 0.8 },
+      },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    // Must NOT contain the raw internal token
+    expect(summary).not.toContain('data/interventions/fac_quality');
+    expect(summary).not.toContain('fac_quality');
+  });
+
+  it("add_edge between two existing entities → 'connect' verb with both labels", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_edge',
+        path: 'fac_quality->goal_1',
+        value: { from: 'fac_quality', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      },
+    ];
+
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Quality');
+    expect(summary).toContain('Ship on time');
+    expect(summary).toMatch(/Proposing to connect/i);
+  });
+});

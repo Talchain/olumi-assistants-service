@@ -168,7 +168,9 @@ export async function handleDraftGraph(
   // Extract coaching summary for narration hint (brief: include in assistantText)
   const coachingSummary = extractCoachingSummary(body);
   // Always emit a summary: prefer coaching text, fall back to operation-derived description
-  patchData.summary = buildPatchSummary(operations, coachingSummary, 'full_draft');
+  // Pass the freshly drafted graph so the summary can resolve labels for
+  // add_edge ops (factor → goal connections, option → factor interventions).
+  patchData.summary = buildPatchSummary(operations, coachingSummary, 'full_draft', graphOutput ?? null);
 
   // Extract validation warnings if present (plain strings for assistantText / validation_warnings)
   const warnings = extractWarnings(body);

@@ -26,6 +26,7 @@ import type {
   ConversationMessage,
   GraphPatchBlockData,
   V2RunResponseEnvelope,
+  GraphV3T,
 } from "./types.js";
 import type { PLoTClient, PLoTClientRunOpts } from "./plot-client.js";
 import type { GuidanceItem } from "./types/guidance-item.js";
@@ -329,6 +330,7 @@ async function handlePatchAccepted(
       details.operations,
       graphHash,
       turnId,
+      turnRequest.graph_state ?? null,
     );
 
     log.info(
@@ -466,6 +468,7 @@ async function handlePatchAccepted(
     details.operations,
     graphHash,
     turnId,
+    turnRequest.graph_state ?? null,
   );
 
   log.info(
@@ -708,7 +711,9 @@ function buildPatchConfirmationText(
   v2Enabled?: boolean,
 ): { confirmationText: string; staleAnalysisEntry: string | null; rerun_recommended: boolean } {
   const opsForSummary = operations as unknown as PatchOperation[];
-  const raw = buildPatchSummary(opsForSummary, null, 'accepted');
+  // T4: pass context.graph so the summary can resolve target labels for any
+  // edge ops in the accepted patch. Falls back to count-based on miss.
+  const raw = buildPatchSummary(opsForSummary, null, 'accepted', context?.graph ?? null);
   const hasMeaningfulSummary = raw && raw !== 'No changes were applied.';
 
   // Flag stale analysis when analysis exists and is now superseded by graph changes
@@ -735,6 +740,7 @@ function buildGraphPatchBlock(
   operations: Record<string, unknown>[],
   graphHash: string | undefined,
   turnId: string,
+  graph?: GraphV3T | null,
 ): TypedConversationBlock {
   // Cast to PatchOperation[] for summary derivation — formatter handles unknown ops gracefully.
   const opsForSummary = operations as unknown as PatchOperation[];
@@ -743,7 +749,8 @@ function buildGraphPatchBlock(
     operations: [],  // UI-provided ops are opaque — not mapped to PatchOperation[]
     status: 'accepted',
     applied_graph_hash: graphHash,
-    summary: buildPatchSummary(opsForSummary, null, 'accepted'),
+    // T4: pass the post-accept graph for label resolution.
+    summary: buildPatchSummary(opsForSummary, null, 'accepted', graph ?? null),
   };
 
   return createGraphPatchBlock(data, turnId, undefined, [

@@ -12,7 +12,50 @@
  * - Robust pluralisation and graceful fallback for unknown kinds
  */
 
-import type { PatchOperation } from './types.js';
+import type { PatchOperation, GraphV3T } from './types.js';
+
+// ============================================================================
+// Label resolution helpers (T4)
+// ============================================================================
+
+/**
+ * Regex matching all known node entity ID prefixes — used to detect raw IDs
+ * leaking into user-facing summary text. Mirrors the prefix list in
+ * response-assembler.ts ENTITY_ID_RE. This is a defence-in-depth check; the
+ * primary protection is always routing through resolveLabel.
+ */
+const ENTITY_ID_LEAK_RE = /\b(?:fac|opt|goal|dec|out|risk|con)[_:-][a-z0-9_:-]+\b/i;
+
+/**
+ * Resolve a node ID to its human-readable label by searching graph.nodes.
+ * Returns null when the graph is missing OR the id has no matching node.
+ *
+ * For add_node operations, callers should resolve from `op.value.label` FIRST
+ * (the new node is not in the graph yet) and only fall through to this helper
+ * for existing-entity references.
+ */
+function resolveLabel(graph: GraphV3T | null | undefined, id: string): string | null {
+  if (!graph) return null;
+  for (const node of graph.nodes) {
+    if ((node as { id?: string }).id === id) {
+      const label = (node as { label?: string }).label;
+      return typeof label === 'string' && label.length > 0 ? label : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Pull the label off an `add_node` operation's value payload.
+ * For add_node, the new node is NOT yet in the graph, so the value is the
+ * authoritative label source. Returns null when the value has no label.
+ */
+function labelFromAddNodeValue(op: PatchOperation): string | null {
+  if (op.op !== 'add_node') return null;
+  const v = op.value as Record<string, unknown> | undefined;
+  const label = v?.label;
+  return typeof label === 'string' && label.length > 0 ? label : null;
+}
 
 // ============================================================================
 // Node kind label map
@@ -158,6 +201,208 @@ function extractLabelFromPath(path: string | undefined): string {
 const SMALL_PATCH_THRESHOLD = 3;
 
 /**
+ * Verb form for the leading clause of a semantic summary.
+ *
+ * - `'edit'` (proposal): "Proposing to add" / "Proposing to update" / "Proposing to remove"
+ * - `'full_draft'` and `'accepted'` (applied): "Added" / "Updated" / "Removed"
+ *
+ * Proposal vs. applied wording is part of the contract: a proposal turn must
+ * not say "Added" because nothing has been applied yet.
+ */
+function verbFor(
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+  variant: 'add' | 'update' | 'remove' | 'connect',
+): string {
+  const isProposal = patchContext === 'edit';
+  switch (variant) {
+    case 'add':
+      return isProposal ? 'Proposing to add' : 'Added';
+    case 'update':
+      return isProposal ? 'Proposing to update' : 'Updated';
+    case 'remove':
+      return isProposal ? 'Proposing to remove' : 'Removed';
+    case 'connect':
+      return isProposal ? 'Proposing to connect' : 'Connected';
+  }
+}
+
+/**
+ * Build a label-aware semantic summary. Returns null when ANY required label
+ * cannot be resolved (callers fall back to count-based output in that case).
+ */
+function buildSemanticSummary(
+  operations: PatchOperation[],
+  graph: GraphV3T,
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+): string | null {
+  const a = analyseOperations(operations);
+  const isLarge = a.totalOps > SMALL_PATCH_THRESHOLD;
+  if (!isLarge) return buildSmallSemanticSummary(operations, graph, patchContext);
+  return buildLargeSemanticSummary(operations, graph, patchContext);
+}
+
+function buildSmallSemanticSummary(
+  operations: PatchOperation[],
+  graph: GraphV3T,
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+): string | null {
+  const sentences: string[] = [];
+
+  // Track ids of nodes added in THIS patch so add_edge resolution can prefer
+  // the in-patch label over a graph lookup (the new node isn't in the graph yet).
+  const addedNodeOpById = new Map<string, PatchOperation>();
+  for (const op of operations) {
+    if (op.op !== 'add_node') continue;
+    const v = op.value as Record<string, unknown> | undefined;
+    const id = typeof v?.id === 'string' ? v.id : op.path;
+    if (id) addedNodeOpById.set(id, op);
+  }
+
+  // Track add_edge ops we've already consumed inside an add_node sentence
+  // so we don't double-count them as standalone connections.
+  const consumedEdgeIndices = new Set<number>();
+
+  for (let i = 0; i < operations.length; i++) {
+    const op = operations[i];
+
+    if (op.op === 'add_node') {
+      const v = op.value as Record<string, unknown> | undefined;
+      const nodeId = typeof v?.id === 'string' ? v.id : op.path;
+      // For add_node, label MUST come from op.value FIRST — the node is not
+      // in the graph yet. resolveLabel is the existing-entity fallback only.
+      const label = labelFromAddNodeValue(op);
+      if (!label) return null;
+      const kind = typeof v?.kind === 'string' ? v.kind : 'node';
+
+      if (kind === 'option') {
+        // Find sibling add_edge ops whose `from` is this option — those are
+        // the option's intervention/structural targets.
+        const targetLabels: string[] = [];
+        for (let j = 0; j < operations.length; j++) {
+          const other = operations[j];
+          if (other.op !== 'add_edge') continue;
+          const ev = other.value as Record<string, unknown> | undefined;
+          if (ev?.from !== nodeId) continue;
+          const to = typeof ev?.to === 'string' ? ev.to : null;
+          if (!to) continue;
+          // The target is an existing factor — resolve from the graph.
+          const targetLabel = resolveLabel(graph, to);
+          if (!targetLabel) return null;
+          targetLabels.push(targetLabel);
+          consumedEdgeIndices.add(j);
+        }
+        if (targetLabels.length > 0) {
+          sentences.push(
+            `${verbFor(patchContext, 'add')} **${label}** option that affects ${joinList(targetLabels)}`,
+          );
+        } else {
+          sentences.push(`${verbFor(patchContext, 'add')} **${label}** option`);
+        }
+      } else if (kind === 'factor') {
+        const category = typeof v?.category === 'string' ? v.category : null;
+        sentences.push(
+          category
+            ? `${verbFor(patchContext, 'add')} **${label}** as a ${category} factor`
+            : `${verbFor(patchContext, 'add')} **${label}** as a factor`,
+        );
+      } else {
+        sentences.push(`${verbFor(patchContext, 'add')} **${label}** as a ${nodeKindLabel(kind, 1)}`);
+      }
+    } else if (op.op === 'update_node') {
+      // update_node always targets an existing node — resolve from the graph.
+      const label = resolveLabel(graph, op.path);
+      if (!label) return null;
+      const v = op.value as Record<string, unknown> | undefined;
+      const fields = v ? Object.keys(v).filter((k) => k !== 'id') : [];
+      if (fields.length === 1) {
+        const friendly = friendlyFieldName(fields[0]);
+        // Friendly-field resolution can fall back to the raw field name. If
+        // the raw name still contains an internal token (e.g. "data/interventions/fac_x"),
+        // bail to count-based fallback rather than leak it to the user.
+        if (ENTITY_ID_LEAK_RE.test(friendly)) return null;
+        sentences.push(`${verbFor(patchContext, 'update')} **${label}**: ${friendly}`);
+      } else {
+        sentences.push(`${verbFor(patchContext, 'update')} **${label}**`);
+      }
+    } else if (op.op === 'add_edge') {
+      if (consumedEdgeIndices.has(i)) continue;
+      const ev = op.value as Record<string, unknown> | undefined;
+      const from = typeof ev?.from === 'string' ? ev.from : null;
+      const to = typeof ev?.to === 'string' ? ev.to : null;
+      if (!from || !to) return null;
+      // For each endpoint: prefer in-patch add_node label; fall back to graph lookup.
+      const fromAdded = addedNodeOpById.get(from);
+      const toAdded = addedNodeOpById.get(to);
+      const fromLabel = (fromAdded ? labelFromAddNodeValue(fromAdded) : null) ?? resolveLabel(graph, from);
+      const toLabel = (toAdded ? labelFromAddNodeValue(toAdded) : null) ?? resolveLabel(graph, to);
+      if (!fromLabel || !toLabel) return null;
+      sentences.push(`${verbFor(patchContext, 'connect')} **${fromLabel}** to **${toLabel}**`);
+    } else if (op.op === 'remove_node') {
+      const ov = (op.old_value ?? op.value) as Record<string, unknown> | undefined;
+      const label =
+        (typeof ov?.label === 'string' ? ov.label : null) ?? resolveLabel(graph, op.path);
+      if (!label) return null;
+      sentences.push(`${verbFor(patchContext, 'remove')} **${label}**`);
+    } else {
+      // Unhandled op kind on the semantic path — bail to count fallback.
+      return null;
+    }
+  }
+
+  if (sentences.length === 0) return null;
+  return sentences.join('. ') + '.';
+}
+
+function buildLargeSemanticSummary(
+  operations: PatchOperation[],
+  graph: GraphV3T,
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+): string | null {
+  // The large-patch sentence is anchored on the first add_node with a usable label.
+  let topLabel: string | null = null;
+  let topKind: string | null = null;
+  for (const op of operations) {
+    if (op.op !== 'add_node') continue;
+    const lbl = labelFromAddNodeValue(op);
+    if (lbl) {
+      topLabel = lbl;
+      const v = op.value as Record<string, unknown> | undefined;
+      topKind = typeof v?.kind === 'string' ? v.kind : 'node';
+      break;
+    }
+  }
+  if (!topLabel) return null;
+
+  const a = analyseOperations(operations);
+  const factorCount = a.addedByKind.get('factor') ?? 0;
+  const optionCount = a.addedByKind.get('option') ?? 0;
+  const edgeCount = a.edgesAdded;
+
+  const verb = verbFor(patchContext, 'add');
+  const parts: string[] = [];
+
+  if (factorCount > 0) {
+    parts.push(
+      `${factorCount} ${nodeKindLabel('factor', factorCount)}${topKind === 'factor' ? ` including **${topLabel}**` : ''}`,
+    );
+  }
+  if (optionCount > 0) {
+    parts.push(
+      `${optionCount} ${nodeKindLabel('option', optionCount)}${topKind === 'option' ? ` including **${topLabel}**` : ''}`,
+    );
+  }
+  if (edgeCount > 0) {
+    parts.push(`${edgeCount} ${plural('connection', edgeCount)}`);
+  }
+
+  if (parts.length === 0) return null;
+  // Reference graph parameter so the linter doesn't complain — also helps the
+  // future case where we add label-aware grouping for non-additive ops.
+  void graph;
+  return `${verb} ${joinList(parts)}.`;
+}
+
+/**
  * Generate a concise, user-facing summary for an applied/proposed graph patch.
  *
  * Rules:
@@ -166,15 +411,21 @@ const SMALL_PATCH_THRESHOLD = 3;
  * - Reflects what materially changed, not just op count
  * - Prefers the LLM-provided coaching summary when available (for edit_graph)
  * - Falls back to operation-derived description
+ * - When `graph` is provided, emits semantic label-aware sentences
+ *   ("Added contractor option that affects development capacity") instead of
+ *   the count-based fallback ("1 option, 2 edges").
  *
  * @param operations  The validated PatchOperation array
  * @param coachingSummary  Optional LLM-generated summary to prefer if present
  * @param patchContext  Optional context hint ('full_draft' | 'edit' | 'accepted')
+ * @param graph  Optional pre-mutation graph used for label resolution. When
+ *               omitted, the function falls back to count-based behaviour.
  */
 export function buildPatchSummary(
   operations: PatchOperation[],
   coachingSummary?: string | null,
   patchContext?: 'full_draft' | 'edit' | 'accepted',
+  graph?: GraphV3T | null,
 ): string {
   // Prefer LLM coaching summary when available — it's the highest-quality signal
   if (coachingSummary && coachingSummary.trim().length > 0) {
@@ -183,6 +434,20 @@ export function buildPatchSummary(
 
   if (operations.length === 0) {
     return 'No changes were applied.';
+  }
+
+  // Semantic, label-aware path — only when a graph is provided AND label
+  // resolution succeeds for every reference. Any failure falls through to the
+  // count-based path (graceful degradation).
+  if (graph) {
+    const semantic = buildSemanticSummary(operations, graph, patchContext);
+    if (semantic) {
+      // Defence in depth: if a raw entity ID slipped through, drop the
+      // semantic output and fall back to the count-based path.
+      if (!ENTITY_ID_LEAK_RE.test(semantic)) {
+        return semantic;
+      }
+    }
   }
 
   const a = analyseOperations(operations);

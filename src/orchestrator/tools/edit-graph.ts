@@ -65,6 +65,8 @@ import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
+import { STRUCTURAL_EDGE_DEFAULTS } from "../context/constants.js";
+import { enforceProposalLanguage } from "../deterministic/proposal-language-guard.js";
 
 // ============================================================================
 // Types
@@ -810,17 +812,6 @@ function logNormalisation(fieldFrom: string, fieldTo: string, opIndex: number): 
 // ============================================================================
 // Structural Edge Enforcement (A1)
 // ============================================================================
-
-/**
- * Canonical defaults for structural edges (decision→option, option→factor).
- * These edges represent graph topology, not causal beliefs, so their strength
- * and existence probability are fixed at 1.0.
- */
-const STRUCTURAL_EDGE_DEFAULTS = {
-  exists_probability: 1.0,
-  strength: { mean: 1.0, std: 0.01 },
-  effect_direction: 'positive' as const,
-};
 
 /**
  * Enforce canonical strength/probability on structural edges (decision→option,
@@ -2214,7 +2205,10 @@ export async function handleEditGraph(
       status: 'proposed',
       auto_apply: false,
       base_graph_hash: baseGraphHash,
-      summary: buildPatchSummary(operations, llmResult.coaching?.summary, 'edit'),
+      // Pass the pre-mutation graph so buildPatchSummary can resolve target
+      // labels for add_edge ops (the new option's intervention targets are
+      // existing factors). Falls back to count-based summary on resolution failure.
+      summary: buildPatchSummary(operations, llmResult.coaching?.summary, 'edit', context.graph ?? null),
       ...(appliedGraph && { applied_graph: appliedGraph }),
       ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),
@@ -2289,6 +2283,17 @@ export async function handleEditGraph(
 
     if (textParts.length > 0) {
       assistantText = textParts.join('\n\n');
+    }
+
+    // T5: proposal-language guard. edit_graph emits patches with
+    // auto_apply: false (line 2215 above), so any completion-language phrase
+    // in the assistant text is a leak. Scan and replace with the corrective
+    // suffix when matched.
+    if (patchData.auto_apply === false && assistantText) {
+      const guardResult = enforceProposalLanguage(assistantText, 'edit_graph');
+      if (guardResult.leaked && guardResult.suffixed) {
+        assistantText = guardResult.suffixed;
+      }
     }
 
     // Build suggested actions: "Re-run analysis" chip driven by deterministic rerun_recommended

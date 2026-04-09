@@ -38,7 +38,7 @@ const TOOL_DEFINITIONS: OrchestratorToolDefinition[] = [
   },
   {
     name: 'edit_graph',
-    description: 'Edit the existing causal decision graph based on user instructions. Use when the user wants to add, remove, or modify nodes or edges.',
+    description: 'Edit the existing causal decision graph based on user instructions. Use when the user wants to add, remove, or modify nodes or edges. Use this to configure or update an existing option\'s effects on factors (intervention mapping) — do not use add_option for options that already exist.',
     input_schema: {
       type: 'object',
       properties: {

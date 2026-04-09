@@ -355,11 +355,11 @@ function makeTurnContextWithOption(
   return ctx;
 }
 
-describe("add_option action — duplicate detection", () => {
-  it("returns conversational nudge for an exact label match (case-sensitive)", async () => {
+describe("add_option action — duplicate detection (no interventions → nudge)", () => {
+  it("returns conversational nudge for an exact label match with no interventions", async () => {
     const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
     const result = await addOptionAction.execute(
-      { label: 'Hire Contractor', interventions: [{ factor_id: 'fac_ramp', value: 0.5 }] },
+      { label: 'Hire Contractor' },
       ctx,
     );
 
@@ -370,7 +370,7 @@ describe("add_option action — duplicate detection", () => {
     expect(result.assistantText).toContain('already exists');
   });
 
-  it("matches case-insensitively", async () => {
+  it("matches case-insensitively (no interventions → nudge)", async () => {
     const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
     const result = await addOptionAction.execute(
       { label: 'hire contractor' },
@@ -383,13 +383,35 @@ describe("add_option action — duplicate detection", () => {
     expect(result.assistantText).toContain('already exists');
   });
 
-  it("matches with whitespace normalisation", async () => {
+  it("matches with whitespace normalisation (no interventions → nudge)", async () => {
     const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
     const result = await addOptionAction.execute(
       { label: '  Hire   Contractor ' },
       ctx,
     );
 
+    expect(result.operations).toBeUndefined();
+    expect(result.analysis_ready).toBeUndefined();
+    expect(result.assistantText).toContain('already exists');
+  });
+
+  it("nudges when interventions normalise to empty (all items fail type validation)", async () => {
+    // Repair redirect must NOT fire when normaliseInterventions returns {}.
+    // Mixed bag of bad input shapes — none survive normalisation.
+    const ctx = makeTurnContextWithOption(makeGraph(), 'Hire Contractor');
+    const result = await addOptionAction.execute(
+      {
+        label: 'Hire Contractor',
+        interventions: [
+          { factor_id: 'fac_ramp', value: 'high' }, // wrong value type
+          { factor_id: 42, value: 0.5 },             // wrong factor_id type
+          { not_a_factor_field: 'fac_ramp' },        // missing fields
+        ],
+      },
+      ctx,
+    );
+
+    // Falls through to nudge because no interventions survived normalisation.
     expect(result.operations).toBeUndefined();
     expect(result.analysis_ready).toBeUndefined();
     expect(result.assistantText).toContain('already exists');
@@ -410,7 +432,6 @@ describe("add_option action — duplicate detection", () => {
 
   it("does not match a factor with the same label as the requested option", async () => {
     // Defensive: the kind filter must keep factors out of the option-dup check.
-    // Build a factor named 'Risk' and try to add an option named 'Risk'.
     const ctx = makeTurnContext(makeGraph());
     ctx.entities.nodes.set('fac_risk', {
       id: 'fac_risk',
@@ -427,14 +448,164 @@ describe("add_option action — duplicate detection", () => {
     // to the empty-interventions guard. Either way, NOT the dup-guard message.
     expect(result.assistantText).not.toContain('already exists');
   });
+});
 
-  it("duplicate path returns no analysis_ready (Brief B contract regression check)", async () => {
-    const ctx = makeTurnContextWithOption(makeGraph(), 'Status Quo');
+// ─────────────────────────────────────────────────────────────────────────
+// Repair redirect tests (T2)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// When add_option is called for an existing option WITH interventions, the
+// handler must redirect to update_node on the existing option (not duplicate).
+// This is the option-repair routing fix from Tier 2 Task 2.
+
+describe("add_option action — repair redirect on existing option", () => {
+  /**
+   * Variant context that registers an existing option in BOTH the entities map
+   * and the graph nodes/edges. The repair path needs the option in
+   * `entities.nodes` for findExistingOption AND in `graph.nodes`/`graph.edges`
+   * for buildOptionConfigurationResult to compute analysis_ready and to
+   * detect pre-existing structural edges.
+   */
+  function makeContextWithExistingOption(optionLabel: string, optionId: string, preExistingTargets: string[] = []) {
+    const optionNode = {
+      id: optionId,
+      kind: 'option',
+      label: optionLabel,
+      data: { interventions: {} },
+      interventions: {},
+    };
+    const preEdges = preExistingTargets.map((to) => ({
+      from: optionId,
+      to,
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    }));
+    const graph = makeGraph([optionNode], preEdges);
+    const ctx = makeTurnContext(graph);
+    ctx.entities.nodes.set(optionId, {
+      id: optionId,
+      label: optionLabel,
+      kind: 'option',
+    } as unknown as never);
+    return ctx;
+  }
+
+  it("redirects to update_node on the existing option when interventions are supplied", async () => {
+    const ctx = makeContextWithExistingOption('Hire Contractor', 'option_hire_contractor');
+
     const result = await addOptionAction.execute(
-      { label: 'Status Quo', interventions: [{ factor_id: 'fac_ramp', value: 0.5 }] },
+      {
+        label: 'Hire Contractor',
+        interventions: [
+          { factor_id: 'fac_ramp', value: 0.6 },
+          { factor_id: 'fac_cost', value: 0.4 },
+        ],
+      },
       ctx,
     );
 
-    expect(result.analysis_ready).toBeUndefined();
+    expect(result.operations).toBeDefined();
+    // First op is the update_node on the existing option (not add_node).
+    const updateOp = result.operations!.find((op) => op.op === 'update_node');
+    expect(updateOp).toBeDefined();
+    expect(updateOp!.path).toBe('option_hire_contractor');
+    // No add_node — proves we didn't fall to the new-option path.
+    expect(result.operations!.find((op) => op.op === 'add_node')).toBeUndefined();
+    expect(result.assistantText).toContain('Updated');
+    expect(result.assistantText).toContain('Hire Contractor');
+  });
+
+  it("writes interventions to data.interventions, top-level interventions, and slash-keyed paths (when flag enabled)", async () => {
+    // Note: editInterventionRoutingEnabled defaults to true in dev/test
+    // (see src/config/index.ts:394 default). The test reads the live flag.
+    const { config } = await import('../../../../../src/config/index.js');
+    const ctx = makeContextWithExistingOption('Hire Contractor', 'option_hire_contractor');
+
+    const result = await addOptionAction.execute(
+      {
+        label: 'Hire Contractor',
+        interventions: [{ factor_id: 'fac_ramp', value: 0.6 }],
+      },
+      ctx,
+    );
+
+    const updateOp = result.operations!.find((op) => op.op === 'update_node');
+    const value = updateOp!.value as Record<string, unknown>;
+
+    // Path 1: data.interventions (canonical)
+    expect(value.data).toEqual({ interventions: { fac_ramp: 0.6 } });
+    // Path 2: top-level interventions (fallback)
+    expect(value.interventions).toEqual({ fac_ramp: 0.6 });
+    // Path 3: slash-keyed (gated by flag)
+    if (config.cee.editInterventionRoutingEnabled) {
+      expect(value['data/interventions/fac_ramp']).toBe(0.6);
+    }
+  });
+
+  it("only adds structural edges for factors not already connected from the option", async () => {
+    // fac_ramp already connected; fac_cost is new.
+    const ctx = makeContextWithExistingOption('Hire Contractor', 'option_hire_contractor', ['fac_ramp']);
+
+    const result = await addOptionAction.execute(
+      {
+        label: 'Hire Contractor',
+        interventions: [
+          { factor_id: 'fac_ramp', value: 0.6 }, // already connected
+          { factor_id: 'fac_cost', value: 0.4 }, // new
+        ],
+      },
+      ctx,
+    );
+
+    const addEdges = result.operations!.filter((op) => op.op === 'add_edge');
+    expect(addEdges).toHaveLength(1);
+    const edge = addEdges[0];
+    expect((edge.value as { to: string }).to).toBe('fac_cost');
+    // Uses canonical structural defaults (mean 1.0, std 0.01, ep 1.0).
+    const ev = edge.value as { strength: { mean: number; std: number }; exists_probability: number };
+    expect(ev.strength.mean).toBe(1.0);
+    expect(ev.strength.std).toBe(0.01);
+    expect(ev.exists_probability).toBe(1.0);
+  });
+
+  it("computes analysis_ready against the synthetic post-update graph", async () => {
+    const ctx = makeContextWithExistingOption('Hire Contractor', 'option_hire_contractor');
+
+    const result = await addOptionAction.execute(
+      {
+        label: 'Hire Contractor',
+        interventions: [{ factor_id: 'fac_ramp', value: 0.6 }],
+      },
+      ctx,
+    );
+
+    expect(result.analysis_ready).toBeDefined();
+    const opt = result.analysis_ready!.options.find((o) => o.option_id === 'option_hire_contractor');
+    expect(opt).toBeDefined();
+    expect(opt!.interventions).toEqual({ fac_ramp: 0.6 });
+    expect(opt!.status).toBe('ready');
+  });
+
+  it("logs the v4.option_repair_redirect telemetry event", async () => {
+    const { log } = await import('../../../../../src/utils/telemetry.js');
+    const infoSpy = vi.mocked(log.info);
+    infoSpy.mockClear();
+
+    const ctx = makeContextWithExistingOption('Hire Contractor', 'option_hire_contractor');
+    await addOptionAction.execute(
+      {
+        label: 'Hire Contractor',
+        interventions: [{ factor_id: 'fac_ramp', value: 0.6 }],
+      },
+      ctx,
+    );
+
+    const redirectCall = infoSpy.mock.calls.find(
+      (call) => (call[0] as { event?: string })?.event === 'v4.option_repair_redirect',
+    );
+    expect(redirectCall).toBeDefined();
+    expect((redirectCall![0] as { option_id: string }).option_id).toBe('option_hire_contractor');
+    expect((redirectCall![0] as { intervention_count: number }).intervention_count).toBe(1);
   });
 });

@@ -65,13 +65,22 @@ export const setFactorValueAction: ActionDefinition = {
 
     const entity = resolution.entity!;
 
-    // Check cap
+    // Check cap. T1 (Phase A): emit a structured failure instead of bare
+    // assistant text so the response assembler can route through the
+    // failure_code / recovery_hint envelope path AND so future Phase B can
+    // thread the failure into next-turn LLM context.
     const nodeEntry = ctx.entities.nodes.get(entity.id);
     if (nodeEntry?.cap != null && value > nodeEntry.cap) {
       return {
         blocks: [],
-        assistantText: `${entity.label} has a cap of ${nodeEntry.cap}${nodeEntry.unit ? ' ' + nodeEntry.unit : ''}. The value ${value} exceeds this.`,
+        assistantText: '',
         guidance_items: [],
+        failure: {
+          code: 'CAP_EXCEEDED',
+          message: `${entity.label} cap ${nodeEntry.cap} exceeded by ${value}`,
+          user_message: `${entity.label} is at its maximum in the current model. To reflect a higher level, the model's scale needs adjusting first.`,
+          recovery_hint: 'Ask what level they mean in practical terms, then propose a value within range.',
+        },
       };
     }
 

@@ -126,16 +126,22 @@ describe('add_factor — label deduplication', () => {
     expect(observedState.value).toBe(200000);
   });
 
-  it('rejects dedup update that exceeds existing cap', async () => {
+  it('rejects dedup update that exceeds existing cap with a structured CAP_EXCEEDED failure', async () => {
+    // T1 (Phase A) — handlers now emit a structured ActionResult.failure
+    // for cap-exceeded paths instead of bare assistantText. The user_message
+    // is decision-language ("at its maximum") rather than the old internal
+    // "cap of 500000" format.
     const ctx = makeCtx([{ id: 'fac_ad_spend', label: 'Advertising Budget', unit: 'GBP', cap: 500000, value: 100000 }]);
     const result = await addFactorAction.execute(
       { label: 'Advertising Budget', value: 999999 },
       ctx,
     );
 
-    // Should reject with cap message, no operations
     expect(result.operations).toBeUndefined();
-    expect(result.assistantText).toContain('cap');
-    expect(result.assistantText).toContain('500000');
+    expect(result.failure).toBeDefined();
+    expect(result.failure!.code).toBe('CAP_EXCEEDED');
+    expect(result.failure!.user_message).toContain('Advertising Budget');
+    expect(result.failure!.user_message).toContain('maximum');
+    expect(result.failure!.recovery_hint).toBeTruthy();
   });
 });

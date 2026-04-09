@@ -12,10 +12,13 @@ import type { GraphV3T } from "../../../schemas/cee-v3.js";
 import { computeStructuralReadiness } from "../../tools/analysis-ready-helper.js";
 import { AnalysisReadyPayload } from "../../../schemas/analysis-ready.js";
 import { log } from "../../../utils/telemetry.js";
+import { STRUCTURAL_EDGE_DEFAULTS } from "../../context/constants.js";
+import { config } from "../../../config/index.js";
 
 export const addOptionAction: ActionDefinition = {
   action_type: 'add_option',
-  description: 'Add a new option to the decision model.',
+  description:
+    'Add a NEW option to the decision model. Do not use for options that already exist — to update an existing option\'s effects on factors (intervention mapping), use edit_graph instead.',
   stage_eligibility: new Set(['ideate']),
   requires_target: false,
   requires_confirmation: true,
@@ -58,44 +61,41 @@ export const addOptionAction: ActionDefinition = {
       return { blocks: [], assistantText: 'What should the new option be called?', guidance_items: [] };
     }
 
+    // Normalise interventions FIRST so the duplicate-redirect path can decide
+    // whether the caller actually has anything to update on the existing option.
+    const interventions = normaliseInterventions(params.interventions);
+
     // Duplicate detection — case-insensitive, whitespace-normalised comparison.
-    // Mirrors findExistingFactor in add-factor.ts. Short-circuits before any
-    // intervention parsing or graph mutation: returns no operations, no blocks,
-    // no analysis_ready — the action is a conversational nudge toward the
-    // existing option, not a silent update.
+    // Mirrors findExistingFactor in add-factor.ts. Two paths:
+    //   1. Caller passed real interventions → repair redirect: build update_node
+    //      patch on the existing option (with structural edges + analysis_ready)
+    //      via buildOptionConfigurationResult.
+    //   2. No interventions → conversational nudge toward the existing option.
     //
-    // Why early-return rather than redirect-to-update (unlike add-factor):
-    // factor updates carry a single value field; option updates would need to
-    // diff intervention maps, which is its own surface area. Surfacing the
-    // existing option is the safer default.
+    // findExistingOption uses the EXACT same matching contract as the Tier 1
+    // duplicate guard. Do not introduce a second matching rule.
     const normalisedLabel = label.toLowerCase().replace(/\s+/g, ' ').trim();
     const existingOption = findExistingOption(ctx, normalisedLabel);
     if (existingOption) {
-      return {
-        blocks: [],
-        assistantText: `Option **${existingOption.label}** already exists. Would you like to update its effects instead of creating a duplicate?`,
-        guidance_items: [],
-      };
-    }
-
-    // Normalize interventions: accept both array format (new) and legacy object format
-    let interventions: Record<string, number> = {};
-    const rawInterventions = params.interventions;
-
-    if (Array.isArray(rawInterventions)) {
-      // New array format: [{ factor_id, value }, ...]
-      for (const item of rawInterventions) {
-        if (item && typeof item === 'object') {
-          const factorId = (item as Record<string, unknown>).factor_id;
-          const value = (item as Record<string, unknown>).value;
-          if (typeof factorId === 'string' && typeof value === 'number') {
-            interventions[factorId] = value;
-          }
-        }
+      // Empty interventions → fall to nudge. An empty object after normalisation
+      // means the caller did NOT supply any factor mappings (or they all failed
+      // type validation), so there is nothing to repair.
+      if (Object.keys(interventions).length === 0) {
+        return {
+          blocks: [],
+          assistantText: `Option **${existingOption.label}** already exists. Would you like to update its effects instead of creating a duplicate?`,
+          guidance_items: [],
+        };
       }
-    } else if (rawInterventions && typeof rawInterventions === 'object') {
-      // Legacy object format: { factor_id → value }
-      interventions = rawInterventions as Record<string, number>;
+      log.info(
+        {
+          event: 'v4.option_repair_redirect',
+          option_id: existingOption.id,
+          intervention_count: Object.keys(interventions).length,
+        },
+        'add_option: redirecting to option repair on existing option',
+      );
+      return buildOptionConfigurationResult(ctx, existingOption, interventions);
     }
 
     // Guard: don't create an empty-intervention option when the graph has factors.
@@ -134,18 +134,18 @@ export const addOptionAction: ActionDefinition = {
     // No option→goal edge — forbidden by platform STRUCTURAL_RULES.
     // Options connect to factors only; factor→outcome→goal paths already exist.
 
-    // Intervention edges to factors
+    // Intervention edges to factors. Use the canonical STRUCTURAL_EDGE_DEFAULTS
+    // (shared with edit_graph.enforceStructuralEdgeDefaults) — never hand-roll
+    // these values. Drift between handlers silently distorts analysis.
     if (Object.keys(interventions).length > 0) {
-      for (const [factorId, value] of Object.entries(interventions)) {
+      for (const factorId of Object.keys(interventions)) {
         operations.push({
           op: 'add_edge',
           path: `${nodeId}->${factorId}`,
           value: {
             from: nodeId,
             to: factorId,
-            strength: { mean: 1.0, std: 0.01 },
-            exists_probability: 1.0,
-            effect_direction: 'positive',
+            ...STRUCTURAL_EDGE_DEFAULTS,
           },
         });
       }
@@ -156,97 +156,16 @@ export const addOptionAction: ActionDefinition = {
       ? ` with ${interventionCount} intervention${interventionCount > 1 ? 's' : ''}`
       : '';
 
-    // Build a synthetic post-patch graph as READ-ONLY input to
-    // computeStructuralReadiness. This is the same helper draft_graph uses
-    // (src/orchestrator/tools/draft-graph.ts:163-165) and handles per-option
-    // status derivation, so we never hand-roll status logic here.
-    //
-    // CRITICAL: this synthetic graph must NOT mutate ctx.graph. We use a
-    // shallow clone of nodes/edges arrays and never call .push on the
-    // original. Existing entries are referenced by identity (we don't deep
-    // clone) which is safe because computeStructuralReadiness only reads.
-    // The real graph mutation happens server-side when the patch is applied.
-    let analysisReady: ActionResult['analysis_ready'];
-    if (ctx.graph) {
-      // Mirror interventions on both `data.interventions` (canonical edit
-      // location, gated by CEE_EDIT_INTERVENTION_ROUTING_ENABLED) and on
-      // top-level `interventions` (always-on fallback per
-      // mergeInterventionSources, source 3). This makes the synthetic node
-      // robust to the flag being toggled in tests or staging.
-      const newOptionNode = {
-        id: nodeId,
-        kind: 'option' as const,
-        label,
-        data: { interventions },
-        interventions,
-      };
-      // If an option with the same id already exists, replace it; otherwise append.
-      // Replacement matters for re-add scenarios — duplicates would skew status counts.
-      const existingIdx = ctx.graph.nodes.findIndex((n) => n.id === nodeId);
-      const syntheticNodes = existingIdx >= 0
-        ? [
-            ...ctx.graph.nodes.slice(0, existingIdx),
-            newOptionNode,
-            ...ctx.graph.nodes.slice(existingIdx + 1),
-          ]
-        : [...ctx.graph.nodes, newOptionNode];
-
-      // Append intervention edges (option → factor). The numeric value is
-      // encoded on the option node's data.interventions (above), not the
-      // edge — mirrors the real patch shape (see operations[] earlier in
-      // this function). computeStructuralReadiness reads interventions off
-      // the node, so the edges only need to assert connectivity.
-      //
-      // Filter out any existing edges FROM this nodeId first: when replacing
-      // an option (existingIdx >= 0), the old edges would otherwise accumulate
-      // in syntheticEdges alongside the new ones, making optionToFactors in
-      // computeStructuralReadiness include stale targets and biasing status
-      // toward needs_encoding rather than needs_user_mapping.
-      const baseEdges = ctx.graph.edges.filter((e) => e.from !== nodeId);
-      const newEdges = Object.keys(interventions).map((factorId) => ({
-        from: nodeId,
-        to: factorId,
-        strength: { mean: 1.0, std: 0.01 },
-        exists_probability: 1.0,
-        effect_direction: 'positive' as const,
-      }));
-      const syntheticEdges = [...baseEdges, ...newEdges];
-
-      const syntheticGraph: GraphV3T = {
-        ...ctx.graph,
-        nodes: syntheticNodes as GraphV3T['nodes'],
-        edges: syntheticEdges as GraphV3T['edges'],
-      };
-
-      const rawReadiness = computeStructuralReadiness(syntheticGraph);
-      if (rawReadiness) {
-        // Validate against the canonical Zod schema to catch divergence between
-        // the local GraphPatchBlockData TS type and AnalysisReadyPayload.
-        // Mirrors the non-fatal pattern in draft_graph.ts:545. The payload uses
-        // option_id (outward contract) while the Zod schema expects id — re-map
-        // for validation only, then return the option_id version unchanged.
-        const forValidation = {
-          ...rawReadiness,
-          options: rawReadiness.options.map((o) => ({
-            id: o.option_id,
-            label: o.label,
-            status: o.status,
-            interventions: o.interventions,
-          })),
-        };
-        const parseResult = AnalysisReadyPayload.safeParse(forValidation);
-        if (!parseResult.success) {
-          log.warn(
-            {
-              errors_flat: parseResult.error.flatten(),
-              error_paths: parseResult.error.issues.slice(0, 3).map((i) => ({ path: i.path, message: i.message })),
-            },
-            'add_option: analysis_ready failed Zod contract validation — emitting anyway (non-fatal)',
-          );
-        }
-        analysisReady = rawReadiness;
-      }
-    }
+    // Build synthetic post-patch graph for analysis_ready computation.
+    // Delegates to the shared helper used by both the new-option and the
+    // repair-redirect paths so the logic stays in one place.
+    const analysisReady = ctx.graph
+      ? computeSyntheticOptionReadiness(ctx.graph, {
+          id: nodeId,
+          label,
+          interventions,
+        })
+      : undefined;
 
     return {
       blocks: [],
@@ -281,4 +200,205 @@ function findExistingOption(
     }
   }
   return null;
+}
+
+/**
+ * Normalise raw `params.interventions` into a `Record<string, number>`.
+ * Accepts both the new array format (`[{ factor_id, value }, ...]`) and the
+ * legacy object format (`{ factor_id: value, ... }`). Items that fail type
+ * validation are dropped silently — callers must check the resulting object's
+ * size before relying on it (`Object.keys(...).length === 0` → no usable input).
+ */
+function normaliseInterventions(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (item && typeof item === 'object') {
+        const factorId = (item as Record<string, unknown>).factor_id;
+        const value = (item as Record<string, unknown>).value;
+        if (typeof factorId === 'string' && typeof value === 'number') {
+          out[factorId] = value;
+        }
+      }
+    }
+    return out;
+  }
+  if (raw && typeof raw === 'object') {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === 'number') out[k] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Compute analysis_ready against a synthetic post-patch graph that contains
+ * the given option (added or updated) with the given interventions.
+ *
+ * Shared by both the new-option path and the repair-redirect path so the two
+ * never drift. The synthetic graph is READ-ONLY input to
+ * `computeStructuralReadiness` — never mutates `baseGraph`.
+ *
+ * Why mirror interventions on BOTH `data.interventions` and top-level
+ * `interventions`: `mergeInterventionSources` reads `data.interventions`
+ * (canonical) only when `CEE_EDIT_INTERVENTION_ROUTING_ENABLED` is true; the
+ * top-level `interventions` field is the always-on fallback. Mirroring on both
+ * makes the synthetic node robust to the flag being toggled in tests/staging.
+ *
+ * Returns undefined when `computeStructuralReadiness` returns nothing
+ * (e.g. graph has no goal yet). Schema validation failure is logged but
+ * non-fatal — the payload is still returned to mirror draft_graph.
+ */
+function computeSyntheticOptionReadiness(
+  baseGraph: GraphV3T,
+  option: { id: string; label: string; interventions: Record<string, number> },
+): ActionResult['analysis_ready'] {
+  const newOptionNode = {
+    id: option.id,
+    kind: 'option' as const,
+    label: option.label,
+    data: { interventions: option.interventions },
+    interventions: option.interventions,
+  };
+
+  // Replace if an option with the same id already exists; append otherwise.
+  // Replacement matters for the repair-redirect path AND for re-add scenarios
+  // — duplicates would skew status counts in computeStructuralReadiness.
+  const existingIdx = baseGraph.nodes.findIndex((n) => n.id === option.id);
+  const syntheticNodes = existingIdx >= 0
+    ? [
+        ...baseGraph.nodes.slice(0, existingIdx),
+        newOptionNode,
+        ...baseGraph.nodes.slice(existingIdx + 1),
+      ]
+    : [...baseGraph.nodes, newOptionNode];
+
+  // Filter pre-existing edges FROM this option, then re-add the canonical
+  // intervention edges. Avoids stale targets accumulating when an option is
+  // replaced (would otherwise bias status toward needs_encoding).
+  const baseEdges = baseGraph.edges.filter((e) => e.from !== option.id);
+  const newEdges = Object.keys(option.interventions).map((factorId) => ({
+    from: option.id,
+    to: factorId,
+    ...STRUCTURAL_EDGE_DEFAULTS,
+  }));
+  const syntheticEdges = [...baseEdges, ...newEdges];
+
+  const syntheticGraph: GraphV3T = {
+    ...baseGraph,
+    nodes: syntheticNodes as GraphV3T['nodes'],
+    edges: syntheticEdges as GraphV3T['edges'],
+  };
+
+  const rawReadiness = computeStructuralReadiness(syntheticGraph);
+  if (!rawReadiness) return undefined;
+
+  // Validate against the canonical Zod schema. The payload uses option_id
+  // (outward contract) while the schema expects id — re-map for validation
+  // only, then return the option_id version unchanged. Mirrors the non-fatal
+  // pattern in draft_graph.ts.
+  const forValidation = {
+    ...rawReadiness,
+    options: rawReadiness.options.map((o) => ({
+      id: o.option_id,
+      label: o.label,
+      status: o.status,
+      interventions: o.interventions,
+    })),
+  };
+  const parseResult = AnalysisReadyPayload.safeParse(forValidation);
+  if (!parseResult.success) {
+    log.warn(
+      {
+        errors_flat: parseResult.error.flatten(),
+        error_paths: parseResult.error.issues
+          .slice(0, 3)
+          .map((i) => ({ path: i.path, message: i.message })),
+      },
+      'add_option: analysis_ready failed Zod contract validation — emitting anyway (non-fatal)',
+    );
+  }
+  return rawReadiness;
+}
+
+/**
+ * Build a repair-redirect ActionResult: an `update_node` patch on the existing
+ * option that writes interventions to all canonical paths, plus structural
+ * edges for any factors not already connected from the option.
+ *
+ * Writes interventions to:
+ *   - `data.interventions` (primary store, prompt-taught canonical location)
+ *   - top-level `interventions` (fallback read by mergeInterventionSources)
+ *   - `data/interventions/<factor_id>` slash-keyed entries IFF
+ *     `CEE_EDIT_INTERVENTION_ROUTING_ENABLED` is true
+ *
+ * See `Docs/intervention-authority-contract.md` for the storage contract.
+ */
+function buildOptionConfigurationResult(
+  ctx: DeterministicTurnContext,
+  existingOption: { id: string; label: string },
+  interventions: Record<string, number>,
+): ActionResult {
+  // 1. Build update_node operation for the existing option.
+  const updateValue: Record<string, unknown> = {
+    data: { interventions },
+    interventions, // fallback path read by mergeInterventionSources
+  };
+  if (config.cee.editInterventionRoutingEnabled) {
+    for (const [fid, v] of Object.entries(interventions)) {
+      updateValue[`data/interventions/${fid}`] = v;
+    }
+  }
+  const operations: PatchOperation[] = [
+    { op: 'update_node', path: existingOption.id, value: updateValue },
+  ];
+
+  // 2. Add structural edges only for factors not already connected from
+  //    this option. Use the canonical defaults (never hand-roll).
+  const graph = ctx.graph;
+  if (graph) {
+    const existingEdgeTargets = new Set(
+      graph.edges.filter((e) => e.from === existingOption.id).map((e) => e.to),
+    );
+    for (const factorId of Object.keys(interventions)) {
+      if (existingEdgeTargets.has(factorId)) continue;
+      operations.push({
+        op: 'add_edge',
+        path: `${existingOption.id}->${factorId}`,
+        value: {
+          from: existingOption.id,
+          to: factorId,
+          ...STRUCTURAL_EDGE_DEFAULTS,
+        },
+      });
+    }
+  }
+
+  // 3. Compute analysis_ready against a synthetic post-patch graph.
+  const analysisReady = graph
+    ? computeSyntheticOptionReadiness(graph, {
+        id: existingOption.id,
+        label: existingOption.label,
+        interventions,
+      })
+    : undefined;
+
+  // 4. Human-facing assistant text describing the change in decision terms.
+  const factorLabels = Object.keys(interventions)
+    .map((fid) => ctx.entities.nodes.get(fid)?.label ?? fid)
+    .slice(0, 3);
+  const joined =
+    factorLabels.length === 1
+      ? factorLabels[0]
+      : factorLabels.length === 2
+        ? `${factorLabels[0]} and ${factorLabels[1]}`
+        : `${factorLabels.slice(0, -1).join(', ')}, and ${factorLabels[factorLabels.length - 1]}`;
+
+  return {
+    blocks: [],
+    assistantText: `Updated **${existingOption.label}**'s effects on ${joined}. Please confirm.`,
+    guidance_items: [],
+    operations,
+    ...(analysisReady ? { analysis_ready: analysisReady } : {}),
+  };
 }

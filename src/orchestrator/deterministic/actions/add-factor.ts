@@ -65,12 +65,18 @@ export const addFactorAction: ActionDefinition = {
       const nodeEntry = ctx.entities.nodes.get(existingFactor.id);
       const operations: PatchOperation[] = [];
       if (value != null || unit) {
-        // Enforce cap from existing node
+        // Enforce cap from existing node. T1 (Phase A): structured failure.
         if (value != null && nodeEntry?.cap != null && value > nodeEntry.cap) {
           return {
             blocks: [],
-            assistantText: `**${existingFactor.label}** already exists and has a cap of ${nodeEntry.cap}${nodeEntry.unit ? ' ' + nodeEntry.unit : ''}. The value ${value} exceeds this.`,
+            assistantText: '',
             guidance_items: [],
+            failure: {
+              code: 'CAP_EXCEEDED',
+              message: `${existingFactor.label} cap ${nodeEntry.cap} exceeded by ${value}`,
+              user_message: `**${existingFactor.label}** is at its maximum in the current model. To reflect a higher level, the model's scale needs adjusting first.`,
+              recovery_hint: 'Ask what level they mean in practical terms, then propose a value within range.',
+            },
           };
         }
         operations.push({

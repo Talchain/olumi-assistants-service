@@ -28,6 +28,11 @@ import { computeContextHash } from "../context/context-hash.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
+import { enforceProposalLanguage } from "./proposal-language-guard.js";
+import { assessMutationHealth } from "./mutation-health.js";
+import { applyOperationsToGraph } from "./apply-operations.js";
+import { buildPatchSummary } from "../patch-summary.js";
+import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
 // Public API
@@ -72,24 +77,57 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     streamingExtractorState,
   } = input;
 
-  // Build assistant text — action confirmation first, LLM coaching second
+  // T1 (Phase A): structured failure short-circuit. When the action handler
+  // returned a failure object (e.g. CAP_EXCEEDED), surface user_message as
+  // assistant_text, mirror code+hint to envelope-level fields, log telemetry,
+  // and skip ALL operations / blocks / gates. The failure path is mutually
+  // exclusive with the operations path — handlers never set both.
+  let failureCode: string | undefined;
+  let failureRecoveryHint: string | undefined;
+  if (actionResult?.failure) {
+    failureCode = actionResult.failure.code;
+    failureRecoveryHint = actionResult.failure.recovery_hint;
+    log.warn(
+      {
+        event: 'v4.action_failed',
+        code: actionResult.failure.code,
+        tool_name: selectedAction ?? 'unknown',
+      },
+      'Deterministic action returned structured failure',
+    );
+  }
+
+  // Build assistant text — failure user_message wins; otherwise action
+  // confirmation first, LLM coaching second.
   let assistantText: string | null = null;
-  if (actionResult?.assistantText) {
+  if (actionResult?.failure) {
+    assistantText = actionResult.failure.user_message;
+  } else if (actionResult?.assistantText) {
     assistantText = actionResult.assistantText;
   }
-  if (llmResponse?.text) {
+  if (!actionResult?.failure && llmResponse?.text) {
     assistantText = assistantText
       ? `${assistantText}\n\n${llmResponse.text}`
       : llmResponse.text;
   }
 
-  // Build blocks
-  const blocks: TypedConversationBlock[] = [
-    ...(actionResult?.blocks ?? []),
-  ];
+  // Build blocks. On failure: skip action.blocks too, since we don't want
+  // ANY block leaking through alongside a CAP_EXCEEDED-style message.
+  const blocks: TypedConversationBlock[] = actionResult?.failure
+    ? []
+    : [...(actionResult?.blocks ?? [])];
 
-  // Emit graph_patch block when operations were produced
-  if (actionResult?.operations && actionResult.operations.length > 0) {
+  // Emit graph_patch block when operations were produced (and no failure).
+  let emittedProposalBlock = false;
+  if (!actionResult?.failure && actionResult?.operations && actionResult.operations.length > 0) {
+    // T4: build a label-aware semantic summary using the pre-mutation graph
+    // for label resolution. Falls back to count-based on resolution failure.
+    const patchSummary = buildPatchSummary(
+      actionResult.operations,
+      null,
+      'edit',
+      turnContext.graph ?? null,
+    );
     const patchBlock = createGraphPatchBlock(
       {
         patch_type: 'edit',
@@ -98,10 +136,74 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
         auto_apply: false,
         applied_graph_hash: actionResult.applied_graph_hash,
         applied_graph: actionResult.applied_graph,
+        summary: patchSummary,
       },
       turnId,
     );
     blocks.push(patchBlock);
+    // Track for the T5 proposal-language guard. Gates on the actual emitted
+    // block's auto_apply being false — NOT on operations.length, so a future
+    // path emitting auto-applied operations would not trigger the guard.
+    emittedProposalBlock = true;
+  }
+
+  // T5: proposal-language guard. When this turn emits a proposal block
+  // (auto_apply: false), scan the assembled assistant text for completion
+  // phrases ("Adding now", "I've added", "Done"). On match, append a
+  // corrective suffix and log telemetry.
+  if (emittedProposalBlock && assistantText) {
+    const guardResult = enforceProposalLanguage(assistantText, selectedAction ?? 'deterministic');
+    if (guardResult.leaked && guardResult.suffixed) {
+      assistantText = guardResult.suffixed;
+    }
+  }
+
+  // T3: post-mutation health gate. Advisory — never blocks the response.
+  // Builds a post-mutation graph (using actionResult.applied_graph when
+  // available, otherwise the applyOperationsToGraph shim) and checks for
+  // structural violations, option readiness degradation, and duplicate
+  // option labels. On any issue, append a note to assistant text and
+  // downgrade rerun_recommended on the patch block.
+  if (
+    !actionResult?.failure &&
+    actionResult?.operations &&
+    actionResult.operations.length > 0 &&
+    turnContext.graph
+  ) {
+    try {
+      const postGraph =
+        actionResult.applied_graph ??
+        applyOperationsToGraph(turnContext.graph, actionResult.operations);
+      const health = assessMutationHealth(turnContext.graph, postGraph, actionResult.operations);
+      if (!health.healthy) {
+        const issueText = health.issues.slice(0, 3).map((i) => `- ${i}`).join('\n');
+        const note = `\n\nNote:\n${issueText}\nYou may need to address these before running analysis.`;
+        assistantText = (assistantText ?? '') + note;
+        // Downgrade rerun_recommended on the just-pushed patch block. The
+        // block is the last entry in `blocks` because emittedProposalBlock
+        // is true (push happened above). Cast via unknown to bypass the
+        // strict block-data union — we already know it's a graph_patch block.
+        const lastBlock = blocks[blocks.length - 1];
+        if (lastBlock && lastBlock.block_type === 'graph_patch') {
+          const data = (lastBlock as unknown as { data: Record<string, unknown> }).data;
+          data.rerun_recommended = false;
+        }
+        log.warn(
+          {
+            event: 'v4.mutation_health_warning',
+            issues: health.issues,
+            tool_name: selectedAction ?? 'unknown',
+          },
+          'Post-mutation health gate raised issues',
+        );
+      }
+    } catch (err) {
+      // Health gate is advisory — never let it break response assembly.
+      log.warn(
+        { event: 'v4.mutation_health_error', error: (err as Error).message },
+        'Post-mutation health gate threw — skipping',
+      );
+    }
   }
 
   // Build chips from LLM recommendations
@@ -159,8 +261,15 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     }
   }
 
-  // Assemble envelope
-  const envelope: OrchestratorResponseEnvelope & { response_version: 2; guidance_items?: unknown[] } = {
+  // Assemble envelope. T1 (Phase A): mirror failure_code / failure_recovery_hint
+  // onto the envelope so future Phase B (history threading) and any future UI
+  // hint surface can read them without reworking the response shape.
+  const envelope: OrchestratorResponseEnvelope & {
+    response_version: 2;
+    guidance_items?: unknown[];
+    failure_code?: string;
+    failure_recovery_hint?: string;
+  } = {
     turn_id: turnId,
     assistant_text: assistantText,
     blocks,
@@ -172,6 +281,8 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
     response_version: 2,
     ...(insights.length > 0 ? { insights } : {}),
     guidance_items: guidanceItems,
+    ...(failureCode ? { failure_code: failureCode } : {}),
+    ...(failureRecoveryHint ? { failure_recovery_hint: failureRecoveryHint } : {}),
   };
 
   // Apply normaliser
