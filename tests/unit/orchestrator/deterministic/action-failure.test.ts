@@ -27,7 +27,7 @@ vi.mock("../../../../src/orchestrator/guidance/post-analysis.js", () => ({
 
 import { setFactorValueAction } from "../../../../src/orchestrator/deterministic/actions/set-factor-value.js";
 import { addFactorAction } from "../../../../src/orchestrator/deterministic/actions/add-factor.js";
-import { assembleDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-assembler.js";
+import { assembleDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-assembler.legacy.js";
 import { log } from "../../../../src/utils/telemetry.js";
 import type { DeterministicTurnContext } from "../../../../src/orchestrator/deterministic/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";

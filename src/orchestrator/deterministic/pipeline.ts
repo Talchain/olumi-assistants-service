@@ -20,7 +20,7 @@ import { computeTurnContext } from "./turn-context.js";
 import { handlePendingConfirmation, storePendingProposal, buildProposal } from "./confirmation-flow.js";
 import { buildDeterministicPrompt } from "./llm-prompt.js";
 import { parseLLMJsonResponse } from "./llm-response-parser.js";
-import { assembleDeterministicResponse } from "./response-assembler.js";
+import { assembleDeterministicResponse } from "./response-assembler.legacy.js";
 import { ACTION_CATALOGUE, isValidAction } from "./actions/registry.js";
 import { classifyIntent } from "../intent-gate.js";
 import { getAdapter } from "../../adapters/llm/router.js";

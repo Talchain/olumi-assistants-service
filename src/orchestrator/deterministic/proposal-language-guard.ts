@@ -39,6 +39,20 @@ const LEAK_PATTERNS: ReadonlyArray<RegExp> = [
   /\bdone\b/i,
   /\bapplied\b/i,
   /\bmaking that change\b/i,
+  // Deterministic-handler assistantText leak styles. These fire only on
+  // proposal turns (gated by emittedProposalBlock in the caller), so they
+  // cannot flag legitimate completion language on auto-apply turns.
+  //
+  // Anchor on sentence-start (or line-start) + verb so we catch handler
+  // confirmations like "Got it, setting the AI Tool Cost to £2,000" but NOT
+  // proposal framings like "I'd recommend setting the cost to 2000" or
+  // "proposing to set the cost to 2000". The (?:^|[.\n]\s*) prefix matches
+  // either the very start of the text or the start of a new sentence.
+  /\bgot it\b/i,
+  /(?:^|[.\n]\s*)setting\s+.+\s+to\s+/i,
+  /(?:^|[.\n]\s*)(?:i['’]ve\s+)?set\s+.+\s+to\s+/i,
+  /(?:^|[.\n]\s*)(?:i['’]ve\s+)?updated\s+.+\s+to\s+/i,
+  /(?:^|[.\n]\s*)(?:i['’]ve\s+)?changed\s+.+\s+to\s+/i,
 ];
 
 export interface ProposalLanguageScanResult {

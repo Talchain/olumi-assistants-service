@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { resolveInsightEntities } from "../../../../src/orchestrator/deterministic/response-assembler.js";
+import { resolveInsightEntities } from "../../../../src/orchestrator/deterministic/response-assembler.legacy.js";
 import type { LLMInsight, EntityRegistry, EntityEntry } from "../../../../src/orchestrator/deterministic/types.js";
 
 vi.mock("../../../../src/utils/telemetry.js", () => ({

@@ -1,8 +1,20 @@
 /**
- * Response Assembler
+ * Response Assembler — LEGACY PIPELINE ONLY
  *
- * Assembles a typed OrchestratorResponseEnvelope from LLM output + action results.
- * Adds response_version: 2 to every response.
+ * Used by `pipeline.ts` (non-v4 path). When `CEE_PIPELINE_V4_ENABLED=true`
+ * (the default as of 2026-04), this file is unreachable at runtime.
+ *
+ * The three guards wired in here — T4 `buildPatchSummary`, T5
+ * `enforceProposalLanguage`, T3 `assessMutationHealth` — are independently
+ * wired into `pipeline-v4.ts`'s `assembleV4Envelope`. DO NOT add new guard
+ * logic to this file; wire into `pipeline-v4.ts` instead. If both pipelines
+ * need the same logic, extract a shared helper rather than duplicating here.
+ *
+ * See `docs/open-issues-root-cause-investigation-2026-04-09.md` for the
+ * investigation that uncovered the dead-code wiring and the v4 remediation.
+ *
+ * Assembles a typed OrchestratorResponseEnvelope from LLM output + action
+ * results. Adds response_version: 2 to every response.
  */
 
 import { randomUUID } from "node:crypto";

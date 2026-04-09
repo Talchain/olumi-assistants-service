@@ -20,7 +20,7 @@ import { runPremortemAction } from "../../../../src/orchestrator/deterministic/a
 import { runAnalysisAction } from "../../../../src/orchestrator/deterministic/actions/run-analysis.js";
 import { addOptionAction } from "../../../../src/orchestrator/deterministic/actions/add-option.js";
 import { generateArtefactAction } from "../../../../src/orchestrator/deterministic/actions/generate-artefact.js";
-import { assembleDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-assembler.js";
+import { assembleDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-assembler.legacy.js";
 import type { DeterministicTurnContext, DeterministicCommentaryBlockData } from "../../../../src/orchestrator/deterministic/types.js";
 import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";

@@ -117,6 +117,89 @@ describe("enforceProposalLanguage — false-positive guards", () => {
   });
 });
 
+describe("enforceProposalLanguage — deterministic-handler leak styles (2026-04-09)", () => {
+  // These patterns target deterministic action handler assistantText that
+  // leaks through the v4 pipeline guard call on proposal turns. The issue
+  // brief: handler returns "Got it, setting the AI Tool Cost to £2,000" on
+  // an auto_apply=false turn. The prior regex set did not cover this.
+
+  it("flags 'Got it, setting the AI Tool Cost to £2,000' (brief example)", () => {
+    const r = enforceProposalLanguage(
+      "Got it, setting the AI Tool Cost to £2,000.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(true);
+    expect(r.suffixed).toContain('Review the suggested changes above.');
+  });
+
+  it("flags 'Got it' on its own (standalone handler confirmation)", () => {
+    const r = enforceProposalLanguage("Got it. Looking at your options now.", "add_option");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("flags 'Setting X to Y' at start of text", () => {
+    const r = enforceProposalLanguage("Setting Market Size to 500.", "set_factor_value");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("flags 'I've set Market Size to 500'", () => {
+    const r = enforceProposalLanguage("I've set Market Size to 500.", "set_factor_value");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("flags 'Updated Market Size to 500' at start", () => {
+    const r = enforceProposalLanguage("Updated Market Size to 500.", "set_factor_value");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("flags 'Changed the cost to £2,000' at start", () => {
+    const r = enforceProposalLanguage("Changed the cost to £2,000.", "set_factor_value");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("flags leak appearing after a proposal sentence (second-sentence leak)", () => {
+    const r = enforceProposalLanguage(
+      "Here's what I'd suggest for your model. Setting the cost to £2,000.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(true);
+  });
+});
+
+describe("enforceProposalLanguage — deterministic-handler false-positive guards", () => {
+  it("does NOT flag 'I'd recommend setting the cost to 2000' (proposal framing)", () => {
+    const r = enforceProposalLanguage(
+      "I'd recommend setting the cost to 2000 to match benchmark.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(false);
+  });
+
+  it("does NOT flag 'proposing to set the cost to 2000' (proposal framing)", () => {
+    const r = enforceProposalLanguage(
+      "Proposing to set the cost to 2000 in your model.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(false);
+  });
+
+  it("does NOT flag 'The current value is set to 500' (stative)", () => {
+    const r = enforceProposalLanguage(
+      "The current value is set to 500 based on the brief.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(false);
+  });
+
+  it("does NOT flag 'consider updating the threshold to 0.3' (recommendation)", () => {
+    const r = enforceProposalLanguage(
+      "You could consider updating the threshold to 0.3 here.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(false);
+  });
+});
+
 describe("enforceProposalLanguage — suffix preserves original text", () => {
   it("appends the suffix exactly once with the expected separator", () => {
     const original = "I've added the option.";

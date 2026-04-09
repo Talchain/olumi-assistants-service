@@ -35,6 +35,10 @@ import { filterHistoryV4 } from "./history-filter-v4.js";
 import { computeContextHash } from "../context/context-hash.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
+import { buildPatchSummary } from "../patch-summary.js";
+import { enforceProposalLanguage } from "./proposal-language-guard.js";
+import { assessMutationHealth } from "./mutation-health.js";
+import { applyPatchOperations } from "../patch-applier.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { log } from "../../utils/telemetry.js";
@@ -642,26 +646,64 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     deferredActions = [],
   } = input;
 
-  // Combine assistant text: action confirmation + LLM text.
-  // Guard: when the pipeline injected actionResult.assistantText as rawAssistantText
-  // (Task 3 empty-LLM-text injection) or prepended chip pre-text, skip the prefix
-  // to avoid duplication.
-  let assistantText = rawAssistantText;
-  if (actionResult?.assistantText && rawAssistantText) {
-    const alreadyContains = rawAssistantText === actionResult.assistantText
-      || rawAssistantText.includes(actionResult.assistantText);
-    if (!alreadyContains) {
-      assistantText = `${actionResult.assistantText}\n\n${rawAssistantText}`;
-    }
-  } else if (actionResult?.assistantText) {
-    assistantText = actionResult.assistantText;
+  // T1 (Phase A): structured failure short-circuit. When the action handler
+  // returned a failure object (e.g. CAP_EXCEEDED), surface user_message as
+  // assistant_text, mirror code+hint to envelope-level fields, log telemetry,
+  // and skip ALL operations / blocks / gates. The failure path is mutually
+  // exclusive with the operations path — handlers never set both.
+  // Mirrors response-assembler.ts:80-98 (legacy pipeline).
+  let failureCode: string | undefined;
+  let failureRecoveryHint: string | undefined;
+  if (actionResult?.failure) {
+    failureCode = actionResult.failure.code;
+    failureRecoveryHint = actionResult.failure.recovery_hint;
+    log.warn(
+      {
+        event: 'v4.action_failed',
+        code: actionResult.failure.code,
+        tool_name: executedAction ?? 'unknown',
+      },
+      'Deterministic action returned structured failure',
+    );
   }
 
-  // Build blocks
-  const blocks = [...(actionResult?.blocks ?? [])];
+  // Combine assistant text: failure user_message wins; otherwise action
+  // confirmation first, raw LLM text second. Guard: when the pipeline
+  // injected actionResult.assistantText as rawAssistantText (Task 3
+  // empty-LLM-text injection) or prepended chip pre-text, skip the prefix
+  // to avoid duplication.
+  let assistantText: string | null;
+  if (actionResult?.failure) {
+    assistantText = actionResult.failure.user_message;
+  } else {
+    assistantText = rawAssistantText;
+    if (actionResult?.assistantText && rawAssistantText) {
+      const alreadyContains = rawAssistantText === actionResult.assistantText
+        || rawAssistantText.includes(actionResult.assistantText);
+      if (!alreadyContains) {
+        assistantText = `${actionResult.assistantText}\n\n${rawAssistantText}`;
+      }
+    } else if (actionResult?.assistantText) {
+      assistantText = actionResult.assistantText;
+    }
+  }
 
-  // Emit graph_patch block for graph-mutating actions
-  if (actionResult?.operations && actionResult.operations.length > 0) {
+  // Build blocks. On failure: skip action.blocks too, since we don't want
+  // ANY block leaking through alongside a CAP_EXCEEDED-style message.
+  const blocks = actionResult?.failure ? [] : [...(actionResult?.blocks ?? [])];
+
+  // Emit graph_patch block for graph-mutating actions. Skipped on failure.
+  let emittedProposalBlock = false;
+  if (!actionResult?.failure && actionResult?.operations && actionResult.operations.length > 0) {
+    // T4: label-aware semantic patch summary using the pre-mutation graph
+    // for label resolution. Falls back to count-based on resolution failure.
+    // Mirrors response-assembler.ts:125-139 (legacy pipeline).
+    const patchSummary = buildPatchSummary(
+      actionResult.operations,
+      null,
+      'edit',
+      turnContext.graph ?? null,
+    );
     const patchBlock = createGraphPatchBlock(
       {
         patch_type: 'edit',
@@ -670,6 +712,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
         auto_apply: false,
         applied_graph_hash: actionResult.applied_graph_hash,
         applied_graph: actionResult.applied_graph,
+        summary: patchSummary,
         // Propagate recomputed analysis_ready from the action handler.
         // Without this, downstream consumers (UI / next-turn run_analysis)
         // see the previous turn's stale view and PLoT rejects with
@@ -679,6 +722,77 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
       turnId,
     );
     blocks.push(patchBlock);
+    // Track for the T5 proposal-language guard. Gates on the actual emitted
+    // block's auto_apply being false — NOT on operations.length, so a future
+    // path emitting auto-applied operations would not trigger the guard.
+    emittedProposalBlock = true;
+  }
+
+  // T5: proposal-language guard. When this turn emits a proposal block
+  // (auto_apply: false), scan the assembled assistant text for completion
+  // phrases ("Adding now", "I've added", "Setting X to Y"). On match, append
+  // a corrective suffix and log telemetry.
+  // Mirrors response-assembler.ts:154-159 (legacy pipeline).
+  if (emittedProposalBlock && assistantText) {
+    const guardResult = enforceProposalLanguage(
+      assistantText,
+      executedAction ?? 'deterministic',
+    );
+    if (guardResult.leaked && guardResult.suffixed) {
+      assistantText = guardResult.suffixed;
+    }
+  }
+
+  // T3: post-mutation health gate. Advisory — never blocks the response.
+  // Builds a post-mutation graph (using actionResult.applied_graph when
+  // available, otherwise the canonical applyPatchOperations from
+  // patch-applier.ts) and checks for NEW structural violations, option
+  // readiness degradation on existing options, and duplicate option labels.
+  // On any issue, append a note to assistant text and downgrade
+  // rerun_recommended on the patch block.
+  // Mirrors response-assembler.ts:168-215 (legacy pipeline).
+  if (
+    !actionResult?.failure &&
+    actionResult?.operations &&
+    actionResult.operations.length > 0 &&
+    turnContext.graph
+  ) {
+    try {
+      const postGraph =
+        actionResult.applied_graph ??
+        applyPatchOperations(turnContext.graph, actionResult.operations);
+      const health = assessMutationHealth(
+        turnContext.graph,
+        postGraph,
+        actionResult.operations,
+      );
+      if (!health.healthy) {
+        const issueText = health.issues.slice(0, 3).map((i) => `- ${i}`).join('\n');
+        const hasExistingText = assistantText != null && assistantText.trim().length > 0;
+        const prefix = hasExistingText ? `${assistantText}\n\n` : '';
+        assistantText = `${prefix}Note:\n${issueText}\nYou may need to address these before running analysis.`;
+        // Downgrade rerun_recommended on the just-pushed patch block.
+        const lastBlock = blocks[blocks.length - 1];
+        if (lastBlock && lastBlock.block_type === 'graph_patch') {
+          const data = (lastBlock as unknown as { data: Record<string, unknown> }).data;
+          data.rerun_recommended = false;
+        }
+        log.warn(
+          {
+            event: 'v4.mutation_health_warning',
+            issues: health.issues,
+            tool_name: executedAction ?? 'unknown',
+          },
+          'Post-mutation health gate raised issues',
+        );
+      }
+    } catch (err) {
+      // Advisory — never let it break response assembly.
+      log.warn(
+        { event: 'v4.mutation_health_error', error: (err as Error).message },
+        'Post-mutation health gate threw — skipping',
+      );
+    }
   }
 
   // Build chips deterministically — no LLM input.
@@ -735,7 +849,10 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     }
   }
 
-  // Assemble envelope
+  // Assemble envelope. T1 (Phase A): mirror failure_code / failure_recovery_hint
+  // onto the envelope so future Phase B (history threading) and any future UI
+  // hint surface can read them without reworking the response shape. Mirrors
+  // response-assembler.ts:275-294 (legacy pipeline).
   const envelope = {
     turn_id: turnId,
     assistant_text: assistantText,
@@ -745,12 +862,17 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     // Mirror analysis_ready at the top-level envelope as well as on the
     // graph_patch block above. Some UI consumers read it from the envelope,
     // others from the patch block — populate both to keep them in sync.
-    ...(actionResult?.analysis_ready ? { analysis_ready: actionResult.analysis_ready } : {}),
+    // Skipped on failure (no analysis_ready in a failure envelope).
+    ...(!actionResult?.failure && actionResult?.analysis_ready
+      ? { analysis_ready: actionResult.analysis_ready }
+      : {}),
     lineage,
     turn_plan: turnPlan,
     stage_indicator: turnContext.stage,
     response_version: 2 as const,
     guidance_items: guidanceItems,
+    ...(failureCode ? { failure_code: failureCode } : {}),
+    ...(failureRecoveryHint ? { failure_recovery_hint: failureRecoveryHint } : {}),
   };
 
   // Apply normaliser
