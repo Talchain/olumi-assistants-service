@@ -308,12 +308,12 @@ export function transformNodeToV3(
     v3Node.display_value === undefined &&
     v3Node.kind === "factor" &&
     (node as any).category === "external" &&
-    v3Node.prior &&
-    (v3Node.prior.range_min !== undefined || v3Node.prior.range_max !== undefined)
+    v3Node.prior
   ) {
+    const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
     const synthesised = synthesiseRangeDisplayValue(
       v3Node.prior,
-      anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined),
+      priorUnit,
       v3Node.factor_type,
     );
     if (synthesised !== undefined) {

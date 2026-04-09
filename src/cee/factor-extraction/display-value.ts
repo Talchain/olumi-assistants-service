@@ -83,18 +83,21 @@ function isCurrencyUnit(unit: string | undefined): boolean {
  * - 1,000 → "1k"    - 1,500 → "1.5k"
  * - 1,000,000 → "1m" - 1,250,000 → "1.25m"
  * - < 1,000 → integer or 1 d.p.
+ * Handles negative values: -500000 → "-500k".
  */
 function formatCurrencyAmount(amount: number): string {
-  if (amount >= 1_000_000) {
-    const m = amount / 1_000_000;
-    return m % 1 === 0 ? `${m}m` : `${parseFloat(m.toFixed(2))}m`;
+  const sign = amount < 0 ? "-" : "";
+  const abs = Math.abs(amount);
+  if (abs >= 1_000_000) {
+    const m = abs / 1_000_000;
+    return `${sign}${m % 1 === 0 ? `${m}m` : `${parseFloat(m.toFixed(2))}m`}`;
   }
-  if (amount >= 1_000) {
-    const k = amount / 1_000;
-    return k % 1 === 0 ? `${k}k` : `${parseFloat(k.toFixed(1))}k`;
+  if (abs >= 1_000) {
+    const k = abs / 1_000;
+    return `${sign}${k % 1 === 0 ? `${k}k` : `${parseFloat(k.toFixed(1))}k`}`;
   }
   // Sub-thousand: show as integer or 1 d.p. if non-integer
-  return amount % 1 === 0 ? String(amount) : String(parseFloat(amount.toFixed(1)));
+  return abs % 1 === 0 ? `${sign}${abs}` : `${sign}${parseFloat(abs.toFixed(1))}`;
 }
 
 /**
@@ -248,7 +251,9 @@ export function synthesiseRangeDisplayValue(
     const prefix = unit ? currencyPrefix(unit) : undefined;
     if (prefix) return `${prefix}${formatCurrencyAmount(n)}`;
     if (unit === "%") {
-      const pct = n <= 1 ? parseFloat((n * 100).toFixed(2)) : parseFloat(n.toFixed(2));
+      // range_min/range_max are normalised (0–1) values; multiply by 100 for display.
+      // For values outside 0–1 (e.g. already-display percentages like 25), use as-is.
+      const pct = n >= 0 && n <= 1 ? parseFloat((n * 100).toFixed(2)) : parseFloat(n.toFixed(2));
       return `${pct}%`;
     }
     if (unit && /^(?:days?|weeks?|months?|years?|hrs?|hours?)$/i.test(unit)) {

@@ -286,3 +286,44 @@ describe("synthesiseRangeDisplayValue — time range", () => {
     ).toBe("3 to 8 months");
   });
 });
+
+// ============================================================================
+// Negative value handling (Finding 2 regression)
+// ============================================================================
+
+describe("synthesiseDisplayValue — negative currency values", () => {
+  it("formats negative thousands with sign before amount", () => {
+    expect(synthesiseDisplayValue({ raw_value: -500000, unit: "£" })).toBe("£-500k");
+  });
+
+  it("formats negative millions", () => {
+    expect(synthesiseDisplayValue({ raw_value: -2000000, unit: "£" })).toBe("£-2m");
+  });
+
+  it("formats negative sub-thousand", () => {
+    expect(synthesiseDisplayValue({ raw_value: -500, unit: "£" })).toBe("£-500");
+  });
+
+  it("formats negative fractional millions", () => {
+    expect(synthesiseDisplayValue({ raw_value: -1500000, unit: "$" })).toBe("$-1.5m");
+  });
+});
+
+// ============================================================================
+// synthesiseRangeDisplayValue — negative percentage bound (Finding 4 regression)
+// ============================================================================
+
+describe("synthesiseRangeDisplayValue — percentage edge cases", () => {
+  it("does not multiply values outside 0-1 range by 100", () => {
+    // range_min/max already in display-percentage form (25 = 25%)
+    expect(
+      synthesiseRangeDisplayValue({ range_min: 25, range_max: 75 }, "%"),
+    ).toBe("25% to 75%");
+  });
+
+  it("normalised values in 0-1 range are multiplied by 100", () => {
+    expect(
+      synthesiseRangeDisplayValue({ range_min: 0.1, range_max: 0.25 }, "%"),
+    ).toBe("10% to 25%");
+  });
+});

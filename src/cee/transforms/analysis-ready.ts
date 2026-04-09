@@ -206,16 +206,18 @@ const BASELINE_KEYWORDS = [
 function detectBaselineOptionIndex(options: OptionV3T[]): number | null {
   // Priority 1: LLM-provided flag
   for (let i = 0; i < options.length; i++) {
-    if ((options[i] as Record<string, unknown>).is_baseline === true) return i;
+    if (options[i].is_baseline === true) return i;
   }
 
   // Priority 2: label keyword match
   for (let i = 0; i < options.length; i++) {
     const label = options[i].label.toLowerCase();
     for (const kw of BASELINE_KEYWORDS) {
-      // Word-boundary match: keyword must not be surrounded by alphanumeric chars
+      // Word-boundary match: keyword must not be immediately preceded or followed
+      // by a letter, digit, or hyphen. This prevents "pre-existing" matching
+      // "existing" or "sub-baseline" matching "baseline".
       const escaped = kw.replace(/[-\s]/g, "[\\s\\-]");
-      const re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i");
+      const re = new RegExp(`(?<![a-z0-9\\-])${escaped}(?![a-z0-9\\-])`, "i");
       if (re.test(label)) return i;
     }
   }
@@ -269,11 +271,13 @@ function buildInterventionDetail(
   if (factorNode?.display_value) {
     const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
     const candidate = factorNode.display_value.toLowerCase().trim();
-    // CEE-6: strip echo — if display_value is just the label, don't use it
+    // CEE-6: strip echo — display_value must not be identical to or fully contain the
+    // label (e.g. "Marketing Expertise" as display for the "Marketing Expertise" factor).
+    // Guard against empty label: String.includes("") is always true, which would
+    // incorrectly strip every LLM-provided display_value for unlabelled nodes.
     const isEcho =
-      candidate === factorLabel ||
-      candidate.includes(factorLabel) ||
-      factorLabel.includes(candidate);
+      factorLabel !== "" &&
+      (candidate === factorLabel || candidate.includes(factorLabel));
 
     if (!isEcho) {
       return {
@@ -304,14 +308,15 @@ function buildInterventionDetail(
 
   const displayValue = synthesised ?? String(parseFloat(normalisedValue.toFixed(2)));
 
-  // CEE-6 echo check on synthesised value too
+  // CEE-6 echo check on synthesised value: only strip when display is identical to
+  // or fully contains the label. Do NOT strip when the label contains the display
+  // value as a substring — that would incorrectly discard valid qualitative band
+  // output (e.g. "High (0.7)" for a factor labelled "High Risk").
   const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
   const displayLower = displayValue.toLowerCase().trim();
   const isEcho =
     factorLabel !== "" &&
-    (displayLower === factorLabel ||
-      displayLower.includes(factorLabel) ||
-      factorLabel.includes(displayLower));
+    (displayLower === factorLabel || displayLower.includes(factorLabel));
 
   const finalDisplay = isEcho
     ? String(parseFloat(normalisedValue.toFixed(2)))
@@ -352,7 +357,7 @@ export function buildAnalysisReadyPayload(
   // label keyword matching. This is additive — no existing field is modified.
   const baselineIdx = detectBaselineOptionIndex(options);
   if (baselineIdx !== null) {
-    (analysisOptions[baselineIdx] as Record<string, unknown>).is_baseline = true;
+    analysisOptions[baselineIdx].is_baseline = true;
   }
 
   // === Task 2A+2B: Factor value fallback + blocker emission ===
@@ -486,7 +491,7 @@ export function buildAnalysisReadyPayload(
       const factorNode = factorNodeMap.get(factorId);
       details[factorId] = buildInterventionDetail(factorId, normalisedValue, factorNode);
     }
-    (analysisOpt as Record<string, unknown>).intervention_details = details;
+    analysisOpt.intervention_details = details;
   }
   // === End intervention_details ===
 

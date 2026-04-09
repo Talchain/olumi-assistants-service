@@ -81,9 +81,9 @@ describe("is_baseline detection", () => {
       makeOption("opt_nothing", "Do nothing"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect((payload.options[2] as Record<string, unknown>).is_baseline).toBe(true);
-    expect((payload.options[0] as Record<string, unknown>).is_baseline).toBeUndefined();
-    expect((payload.options[1] as Record<string, unknown>).is_baseline).toBeUndefined();
+    expect(payload.options[2].is_baseline).toBe(true);
+    expect(payload.options[0].is_baseline).toBeUndefined();
+    expect(payload.options[1].is_baseline).toBeUndefined();
   });
 
   it("matches 'current' keyword", () => {
@@ -93,7 +93,7 @@ describe("is_baseline detection", () => {
       makeOption("opt_c", "Maintain current strategy"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect((payload.options[2] as Record<string, unknown>).is_baseline).toBe(true);
+    expect(payload.options[2].is_baseline).toBe(true);
   });
 
   it("does not mark any option when no keyword matches", () => {
@@ -104,7 +104,7 @@ describe("is_baseline detection", () => {
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
     for (const opt of payload.options) {
-      expect((opt as Record<string, unknown>).is_baseline).toBeUndefined();
+      expect(opt.is_baseline).toBeUndefined();
     }
   });
 
@@ -114,7 +114,7 @@ describe("is_baseline detection", () => {
       makeOption("opt_sq", "Status quo"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect((payload.options[1] as Record<string, unknown>).is_baseline).toBe(true);
+    expect(payload.options[1].is_baseline).toBe(true);
   });
 
   it("prefers LLM-provided is_baseline flag over keyword", () => {
@@ -123,9 +123,9 @@ describe("is_baseline detection", () => {
       makeOption("opt_b", "Current approach"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect((payload.options[0] as Record<string, unknown>).is_baseline).toBe(true);
+    expect(payload.options[0].is_baseline).toBe(true);
     // Second option keyword matched but LLM flag on first wins
-    expect((payload.options[1] as Record<string, unknown>).is_baseline).toBeUndefined();
+    expect(payload.options[1].is_baseline).toBeUndefined();
   });
 
   it("first match wins when multiple labels match keyword", () => {
@@ -134,8 +134,8 @@ describe("is_baseline detection", () => {
       makeOption("opt_b", "Maintain current setup"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect((payload.options[0] as Record<string, unknown>).is_baseline).toBe(true);
-    expect((payload.options[1] as Record<string, unknown>).is_baseline).toBeUndefined();
+    expect(payload.options[0].is_baseline).toBe(true);
+    expect(payload.options[1].is_baseline).toBeUndefined();
   });
 
   it("matches 'baseline' keyword", () => {
@@ -144,7 +144,7 @@ describe("is_baseline detection", () => {
       makeOption("opt_b", "Baseline scenario"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect((payload.options[1] as Record<string, unknown>).is_baseline).toBe(true);
+    expect(payload.options[1].is_baseline).toBe(true);
   });
 
   it("is case-insensitive", () => {
@@ -153,7 +153,7 @@ describe("is_baseline detection", () => {
       makeOption("opt_b", "Something else"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect((payload.options[0] as Record<string, unknown>).is_baseline).toBe(true);
+    expect(payload.options[0].is_baseline).toBe(true);
   });
 
   it("does not match partial word (e.g. 'currently' does not trigger 'current')", () => {
@@ -165,7 +165,7 @@ describe("is_baseline detection", () => {
     // "currently" contains "current" so the boundary check should handle this
     // The regex uses word boundary so "currently" should NOT match "current"
     for (const opt of payload.options) {
-      expect((opt as Record<string, unknown>).is_baseline).toBeUndefined();
+      expect(opt.is_baseline).toBeUndefined();
     }
   });
 });
@@ -188,17 +188,14 @@ describe("intervention_details construction", () => {
     const graph = makeGraph([factorNode]);
 
     const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
-    const details = (payload.options[0] as Record<string, unknown>).intervention_details as Record<
-      string,
-      { display_value: string; normalised_value: number; raw_value?: number; unit?: string }
-    >;
+    const details = payload.options[0].intervention_details;
 
     expect(details).toBeDefined();
-    expect(details["fac_dev_headcount"]).toBeDefined();
-    expect(details["fac_dev_headcount"].display_value).toBe("5 people");
-    expect(details["fac_dev_headcount"].normalised_value).toBe(0.5);
-    expect(details["fac_dev_headcount"].raw_value).toBe(5);
-    expect(details["fac_dev_headcount"].unit).toBe("people");
+    expect(details!["fac_dev_headcount"]).toBeDefined();
+    expect(details!["fac_dev_headcount"].display_value).toBe("5 people");
+    expect(details!["fac_dev_headcount"].normalised_value).toBe(0.5);
+    expect(details!["fac_dev_headcount"].raw_value).toBe(5);
+    expect(details!["fac_dev_headcount"].unit).toBe("people");
   });
 
   it("CEE-6: strips echo when display_value matches factor label", () => {
@@ -211,14 +208,11 @@ describe("intervention_details construction", () => {
     const graph = makeGraph([factorNode]);
 
     const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
-    const details = (payload.options[0] as Record<string, unknown>).intervention_details as Record<
-      string,
-      { display_value: string; normalised_value: number }
-    >;
+    const details = payload.options[0].intervention_details;
 
-    expect(details["fac_marketing"].display_value).not.toBe("Marketing Expertise");
+    expect(details!["fac_marketing"].display_value).not.toBe("Marketing Expertise");
     // Should be numeric/qualitative instead
-    expect(details["fac_marketing"].normalised_value).toBe(0.7);
+    expect(details!["fac_marketing"].normalised_value).toBe(0.7);
   });
 
   it("uses LLM display_value from factor when not an echo", () => {
@@ -235,12 +229,9 @@ describe("intervention_details construction", () => {
     const graph = makeGraph([factorNode]);
 
     const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
-    const details = (payload.options[0] as Record<string, unknown>).intervention_details as Record<
-      string,
-      { display_value: string }
-    >;
+    const details = payload.options[0].intervention_details;
 
-    expect(details["fac_dev_cost"].display_value).toBe("£200k");
+    expect(details!["fac_dev_cost"].display_value).toBe("£200k");
   });
 
   it("falls back to qualitative band when no factor metadata", () => {
@@ -248,22 +239,18 @@ describe("intervention_details construction", () => {
     const options = [makeOptionWithIntervention("opt_a", "Some option", "fac_unknown", 0.7)];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
 
-    const details = (payload.options[0] as Record<string, unknown>).intervention_details as Record<
-      string,
-      { display_value: string }
-    >;
+    const details = payload.options[0].intervention_details;
 
     // Without factor metadata, should still produce something reasonable
-    expect(details["fac_unknown"]).toBeDefined();
-    expect(details["fac_unknown"].display_value).toBeTruthy();
+    expect(details!["fac_unknown"]).toBeDefined();
+    expect(details!["fac_unknown"].display_value).toBeTruthy();
   });
 
   it("omits intervention_details when no interventions", () => {
     const options = [makeOption("opt_empty", "Empty option")];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    const details = (payload.options[0] as Record<string, unknown>).intervention_details;
     // No interventions → no details object
-    expect(details).toBeUndefined();
+    expect(payload.options[0].intervention_details).toBeUndefined();
   });
 
   it("preserves existing interventions field unchanged", () => {
@@ -277,5 +264,74 @@ describe("intervention_details construction", () => {
 
     // Original interventions field must be unchanged
     expect(payload.options[0].interventions["fac_price"]).toBe(0.6);
+  });
+
+  it("does not strip display_value when factor label is empty (Finding 1 regression)", () => {
+    // Factor with no label — empty-label guard must prevent isEcho=true for all candidates
+    const factorNode = makeFactorNode("fac_no_label", "", {
+      display_value: "£500k",
+      observed_state: { value: 0.5, raw_value: 500000, unit: "£", source: "brief_extraction" },
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Big spend", "fac_no_label", 0.5)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    const details = payload.options[0].intervention_details;
+
+    expect(details!["fac_no_label"].display_value).toBe("£500k");
+  });
+
+  it("does not strip qualitative band display when label is a band word (Finding 3 regression)", () => {
+    // Factor labelled "High Risk" — display "High (0.7)" must NOT be echo-stripped
+    // because "high" is a substring of "high risk", not the other way around
+    const factorNode = makeFactorNode("fac_high_risk", "High Risk", {
+      observed_state: { value: 0.7, source: "brief_extraction" },
+      factor_type: "probability",
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Mitigate risk", "fac_high_risk", 0.7)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    const details = payload.options[0].intervention_details;
+
+    // "High (0.7)" must be preserved, not stripped to "0.7"
+    expect(details!["fac_high_risk"].display_value).toBe("High (0.7)");
+  });
+});
+
+// ============================================================================
+// is_baseline — hyphenated label regression (Finding 5)
+// ============================================================================
+
+describe("is_baseline — hyphenated label regression", () => {
+  it("does not match 'existing' inside 'pre-existing'", () => {
+    const options = [
+      makeOption("opt_a", "Address pre-existing conditions"),
+      makeOption("opt_b", "Build new system"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    for (const opt of payload.options) {
+      expect(opt.is_baseline).toBeUndefined();
+    }
+  });
+
+  it("does not match 'baseline' inside 'sub-baseline'", () => {
+    const options = [
+      makeOption("opt_a", "Improve sub-baseline performance"),
+      makeOption("opt_b", "New approach"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    for (const opt of payload.options) {
+      expect(opt.is_baseline).toBeUndefined();
+    }
+  });
+
+  it("still matches standalone 'existing' at word boundary", () => {
+    const options = [
+      makeOption("opt_a", "Keep existing process"),
+      makeOption("opt_b", "New process"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[0].is_baseline).toBe(true);
   });
 });

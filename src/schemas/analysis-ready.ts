@@ -96,6 +96,17 @@ export const OptionForAnalysis = z.object({
   raw_interventions: z.record(z.string(), RawInterventionValue).optional(),
   /** Extraction metadata for transparency */
   extraction_metadata: ExtractionMetadata.optional(),
+  /** Marks the status-quo / baseline option. Propagated from OptionV3.is_baseline
+   * or detected by label keyword in buildAnalysisReadyPayload (CEE-2). */
+  is_baseline: z.boolean().optional(),
+  /** Richer display-oriented intervention entries alongside the numeric-only
+   * `interventions` map. Added by buildAnalysisReadyPayload (CEE-9/CEE-6). */
+  intervention_details: z.record(z.string(), z.object({
+    display_value: z.string(),
+    normalised_value: z.number(),
+    raw_value: z.number().optional(),
+    unit: z.string().optional(),
+  })).optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
 
