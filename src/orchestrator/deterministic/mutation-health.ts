@@ -9,13 +9,17 @@
  *
  * What it checks (REUSING existing validators — never re-implementing):
  *   1. validateGraphStructure(postGraph) — orphan nodes, no path to goal,
- *      cycles, limit violations, missing required node kinds.
+ *      cycles, limit violations, missing required node kinds. Only NEW
+ *      violation codes are surfaced; pre-existing violations carried over
+ *      from preGraph are silently ignored (they were not introduced by this
+ *      mutation, so warning about them now would cry wolf during early
+ *      build flows).
  *   2. Option readiness degradation: any option that was 'ready' pre-mutation
  *      and is no longer 'ready' post-mutation (compared via
- *      computeStructuralReadiness). Newly added options in proposal flows are
- *      EXEMPT — they may legitimately be needs_encoding while awaiting user
- *      mapping. The option being actively edited is also exempt to avoid
- *      false positives during partial intervention updates.
+ *      computeStructuralReadiness). Only newly-added options are exempt —
+ *      they may legitimately be needs_encoding while awaiting user mapping.
+ *      Actively-edited options are NOT exempt; if they degrade, the gate
+ *      warns (that's the very signal it exists for).
  *   3. Duplicate option labels created by the mutation (case-insensitive,
  *      whitespace-normalised — same matching contract as findExistingOption).
  *
@@ -71,10 +75,26 @@ export function assessMutationHealth(
 ): MutationHealthResult {
   const issues: string[] = [];
 
-  // 1. Structural validity (delegates to existing validator).
-  const struct = validateGraphStructure(postGraph);
-  if (!struct.valid) {
-    for (const v of struct.violations) {
+  // 1. Structural validity — delegates to the existing validator.
+  //    Only surface violations that are NEW in postGraph. Pre-existing
+  //    violations carried over from preGraph are the user's in-progress
+  //    state (e.g. a model still missing a second option during early
+  //    build); warning about them on every mutation would cry wolf. We
+  //    diff by violation code, which is intentional: adding a third
+  //    orphan node when one already exists still counts as "same issue,
+  //    already flagged once in the build history" — acceptable for an
+  //    advisory gate.
+  const postStruct = validateGraphStructure(postGraph);
+  if (!postStruct.valid) {
+    const preCodes = new Set<string>();
+    if (preGraph) {
+      const preStruct = validateGraphStructure(preGraph);
+      for (const v of preStruct.violations) {
+        preCodes.add(v.code);
+      }
+    }
+    for (const v of postStruct.violations) {
+      if (preCodes.has(v.code)) continue;
       // Surface the user-facing message rather than the raw code.
       issues.push(VIOLATION_MESSAGES[v.code] ?? v.detail);
     }

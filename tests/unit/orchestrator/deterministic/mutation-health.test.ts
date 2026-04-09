@@ -281,21 +281,81 @@ describe("assessMutationHealth — healthy / unhealthy classification", () => {
     expect(health.issues.find((i) => i.includes('"Active"') && i.includes('was ready'))).toBeDefined();
   });
 
-  it("flags structural violations from validateGraphStructure (e.g. orphan node)", () => {
-    // Build a baseline that's already barely valid, then add an orphan node.
-    const baseGraph = makeGraph();
+  it("flags a cycle introduced by the mutation (new violation code)", () => {
+    // Use a test where the mutation introduces a NEW violation code that
+    // didn't exist in the pre-graph, so the K fix doesn't filter it.
+    // A cycle between two factors is the cleanest trigger: pre-graph has
+    // no cycle, post-graph has fac_a ↔ fac_b which triggers CYCLE_DETECTED.
+    const baseGraph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Ship on time' },
+        { id: 'dec_1',  kind: 'decision', label: 'Hiring decision' },
+        { id: 'option_a', kind: 'option', label: 'A', data: { interventions: { fac_a: 0.5 } }, interventions: { fac_a: 0.5 } },
+        { id: 'option_b', kind: 'option', label: 'B', data: { interventions: { fac_a: 0.7 } }, interventions: { fac_a: 0.7 } },
+        { id: 'fac_a', kind: 'factor', label: 'A Factor' },
+        { id: 'fac_b', kind: 'factor', label: 'B Factor' },
+      ],
+      edges: [
+        { from: 'dec_1', to: 'option_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'dec_1', to: 'option_b', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'option_a', to: 'fac_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'option_b', to: 'fac_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_a', to: 'goal_1', strength: { mean: 0.7, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_b', to: 'fac_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    } as unknown as GraphV3T;
+    // Mutation: add fac_a → fac_b edge, creating a cycle.
     const ops: PatchOperation[] = [
       {
-        op: 'add_node',
-        path: 'fac_orphan',
-        value: { id: 'fac_orphan', kind: 'factor', label: 'Orphan' },
+        op: 'add_edge',
+        path: 'fac_a->fac_b',
+        value: {
+          from: 'fac_a',
+          to: 'fac_b',
+          strength: { mean: 0.5, std: 0.1 },
+          exists_probability: 1,
+          effect_direction: 'positive',
+        },
       },
     ];
     const post = applyOperationsToGraph(baseGraph, ops);
     const health = assessMutationHealth(baseGraph, post, ops);
-    // The new factor has no edges → orphan / no path to goal violations.
     expect(health.healthy).toBe(false);
-    expect(health.issues.length).toBeGreaterThan(0);
+    expect(health.issues.some((i) => i.toLowerCase().includes('circular') || i.toLowerCase().includes('cycle'))).toBe(true);
+  });
+
+  it("K: does NOT flag pre-existing structural violations carried over from preGraph", () => {
+    // Audit fix K — the baseline graph here is missing options entirely, so
+    // validateGraphStructure flags FEWER_THAN_TWO_OPTIONS on BOTH pre and
+    // post. The gate must silently ignore the carry-over: an add_factor
+    // mutation does not introduce that violation, so warning on every
+    // mutation during early build would cry wolf. Only NEW violation codes
+    // should surface.
+    const baseGraph = makeGraph(); // no options — already FEWER_THAN_TWO_OPTIONS
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'fac_team_morale',
+        value: { id: 'fac_team_morale', kind: 'factor', label: 'Team morale' },
+      },
+      {
+        op: 'add_edge',
+        path: 'fac_team_morale->goal_1',
+        value: {
+          from: 'fac_team_morale',
+          to: 'goal_1',
+          strength: { mean: 0.5, std: 0.1 },
+          exists_probability: 1,
+          effect_direction: 'positive',
+        },
+      },
+    ];
+    const post = applyOperationsToGraph(baseGraph, ops);
+    const health = assessMutationHealth(baseGraph, post, ops);
+    // Clean mutation that does NOT introduce a new structural violation.
+    // Pre-existing carry-overs (like FEWER_THAN_TWO_OPTIONS) must be filtered.
+    expect(health.issues.find((i) => i.toLowerCase().includes('fewer than two options'))).toBeUndefined();
+    expect(health.issues.find((i) => i.toLowerCase().includes('goal'))).toBeUndefined();
   });
 
   it("never throws when preGraph is null (paranoid path)", () => {

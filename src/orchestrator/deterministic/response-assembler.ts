@@ -160,10 +160,11 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
 
   // T3: post-mutation health gate. Advisory — never blocks the response.
   // Builds a post-mutation graph (using actionResult.applied_graph when
-  // available, otherwise the applyOperationsToGraph shim) and checks for
-  // structural violations, option readiness degradation, and duplicate
-  // option labels. On any issue, append a note to assistant text and
-  // downgrade rerun_recommended on the patch block.
+  // available, otherwise the canonical applyPatchOperations from
+  // patch-applier.ts) and checks for NEW structural violations, option
+  // readiness degradation on existing options, and duplicate option labels.
+  // On any issue, append a note to assistant text and downgrade
+  // rerun_recommended on the patch block.
   if (
     !actionResult?.failure &&
     actionResult?.operations &&
@@ -181,8 +182,11 @@ export function assembleDeterministicResponse(input: AssemblerInput): Determinis
       const health = assessMutationHealth(turnContext.graph, postGraph, actionResult.operations);
       if (!health.healthy) {
         const issueText = health.issues.slice(0, 3).map((i) => `- ${i}`).join('\n');
-        const note = `\n\nNote:\n${issueText}\nYou may need to address these before running analysis.`;
-        assistantText = (assistantText ?? '') + note;
+        // When assistantText is empty or null, open directly with the note
+        // (no leading blank lines). Otherwise separate with a paragraph break.
+        const hasExistingText = assistantText != null && assistantText.trim().length > 0;
+        const prefix = hasExistingText ? `${assistantText}\n\n` : '';
+        assistantText = `${prefix}Note:\n${issueText}\nYou may need to address these before running analysis.`;
         // Downgrade rerun_recommended on the just-pushed patch block. The
         // block is the last entry in `blocks` because emittedProposalBlock
         // is true (push happened above). Cast via unknown to bypass the
