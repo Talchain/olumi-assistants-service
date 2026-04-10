@@ -49,9 +49,10 @@ describe('ISL config helpers', () => {
       expect(calls.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('clamps timeout to [100, 30000] ms', () => {
+    it('clamps timeout to [100, 60000] ms', () => {
       expect(parseTimeout('50', 5000)).toBe(100);
-      expect(parseTimeout('999999', 5000)).toBe(30000);
+      expect(parseTimeout('999999', 5000)).toBe(60000);
+      expect(parseTimeout('45000', 5000)).toBe(45000);
       expect(parseTimeout('2000', 5000)).toBe(2000);
     });
   });
@@ -142,7 +143,7 @@ describe('ISL config helpers', () => {
     it('applies clamping and defaults for invalid timeout and retries', async () => {
       process.env.CEE_CAUSAL_VALIDATION_ENABLED = 'true';
       process.env.ISL_BASE_URL = 'http://localhost:8888';
-      process.env.ISL_TIMEOUT_MS = '999999'; // too large -> clamp to 30000
+      process.env.ISL_TIMEOUT_MS = '999999'; // too large -> clamp to 60000
       process.env.ISL_MAX_RETRIES = '-1';    // negative -> fallback to default 1
 
       const { getISLConfig: getConfig } = await import('../../src/adapters/isl/config.js');
@@ -150,7 +151,7 @@ describe('ISL config helpers', () => {
 
       expect(cfg.enabled).toBe(true);
       expect(cfg.configured).toBe(true);
-      expect(cfg.timeout).toBe(30000);
+      expect(cfg.timeout).toBe(60000);
       expect(cfg.maxRetries).toBe(1);
     });
   });

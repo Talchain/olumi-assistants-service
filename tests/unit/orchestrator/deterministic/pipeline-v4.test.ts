@@ -45,6 +45,7 @@ const mockGetAdapter = vi.fn().mockReturnValue({
 });
 vi.mock("../../../../src/adapters/llm/router.js", () => ({
   getAdapter: (...args: unknown[]) => mockGetAdapter(...args),
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 // Mock timeouts

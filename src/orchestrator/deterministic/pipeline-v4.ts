@@ -39,7 +39,7 @@ import { buildPatchSummary } from "../patch-summary.js";
 import { enforceProposalLanguage } from "./proposal-language-guard.js";
 import { assessMutationHealth } from "./mutation-health.js";
 import { applyPatchOperations } from "../patch-applier.js";
-import { getAdapter } from "../../adapters/llm/router.js";
+import { getAdapter, getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { log } from "../../utils/telemetry.js";
 import { STREAM_ERROR_CODES } from "../pipeline/stream-events.js";
@@ -315,7 +315,7 @@ export async function* executePipelineV4(
         tools: toolDefs,
         ...(hasTools ? { tool_choice: toolChoice } : {}),
         temperature: 0,
-        maxTokens: 2048,
+        maxTokens: getMaxTokensFromConfig('orchestrator') ?? 4096,
       },
       { requestId, timeoutMs: ORCHESTRATOR_TIMEOUT_MS, signal },
     );
