@@ -328,22 +328,16 @@ function validateAnalysisReadyOnBlocks(blocks: TypedConversationBlock[]): void {
     }
 
     // Re-map outward-contract option_id → schema id for validation only.
-    // (See draft-graph.ts:535-543 and add-option.ts:208-216 for the same pattern.)
+    // Spread all fields so Batch 1 optional fields (is_baseline, intervention_details,
+    // etc.) are included in Zod validation.
     const forValidation = {
       ...data.analysis_ready,
       options: ar.options.map((rawOpt) => {
-        const o = (rawOpt ?? {}) as {
-          option_id?: string;
-          id?: string;
-          label?: string;
-          status?: string;
-          interventions?: Record<string, number>;
-        };
+        const o = (rawOpt ?? {}) as Record<string, unknown>;
+        const { option_id, id, ...rest } = o;
         return {
-          id: o.option_id ?? o.id,
-          label: o.label,
-          status: o.status,
-          interventions: o.interventions,
+          id: (option_id ?? id) as string,
+          ...rest,
         };
       }),
     };

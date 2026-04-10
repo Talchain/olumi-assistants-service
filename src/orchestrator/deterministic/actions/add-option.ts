@@ -299,11 +299,9 @@ function computeSyntheticOptionReadiness(
   // pattern in draft_graph.ts.
   const forValidation = {
     ...rawReadiness,
-    options: rawReadiness.options.map((o) => ({
-      id: o.option_id,
-      label: o.label,
-      status: o.status,
-      interventions: o.interventions,
+    options: rawReadiness.options.map(({ option_id, ...rest }) => ({
+      id: option_id,
+      ...rest,
     })),
   };
   const parseResult = AnalysisReadyPayload.safeParse(forValidation);
