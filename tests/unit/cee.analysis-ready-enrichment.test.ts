@@ -376,7 +376,7 @@ describe("is_baseline — staging regression labels", () => {
 
     const options = [
       makeOption("opt_a", "Option A", {
-        interventions: { fac_cost: { value: 0.5, source: "explicit", target_match: { confidence: "high" } } },
+        interventions: { fac_cost: { value: 0.5, source: "brief_extraction", target_match: { confidence: "high" } } },
       }),
     ];
 

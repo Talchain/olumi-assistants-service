@@ -565,11 +565,9 @@ export function extractAnalysisReady(
   // uses `option_id`. Re-map for validation, then return the option_id version.
   const forValidation = {
     ...payload,
-    options: payload.options.map(o => ({
-      id: o.option_id,
-      label: o.label,
-      status: o.status,
-      interventions: o.interventions,
+    options: payload.options.map(({ option_id, ...rest }) => ({
+      id: option_id,
+      ...rest,
     })),
   };
 

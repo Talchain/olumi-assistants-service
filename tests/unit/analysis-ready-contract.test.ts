@@ -339,7 +339,7 @@ describe("extractAnalysisReady", () => {
           {
             id: "opt_a", label: "Option A", status: "ready",
             interventions: { fac_x: 0.5 },
-            extraction_metadata: { source: "explicit", confidence: "high" },
+            extraction_metadata: { source: "brief_extraction", confidence: "high" },
             status_reason: "Resolved via factor node value fallback",
           },
         ],
@@ -350,7 +350,7 @@ describe("extractAnalysisReady", () => {
 
     const result = extractAnalysisReady(body);
     expect(result).toBeDefined();
-    expect(result!.options[0].extraction_metadata).toEqual({ source: "explicit", confidence: "high" });
+    expect(result!.options[0].extraction_metadata).toEqual({ source: "brief_extraction", confidence: "high" });
     expect(result!.options[0].status_reason).toBe("Resolved via factor node value fallback");
   });
 
@@ -374,5 +374,32 @@ describe("extractAnalysisReady", () => {
     expect(result).toBeDefined();
     expect(result!.options[0]).not.toHaveProperty("extraction_metadata");
     expect(result!.options[0]).not.toHaveProperty("raw_interventions");
+  });
+
+  it("rejects malformed intervention_details via contract validation", async () => {
+    const { log: warnLog } = await import("../../src/utils/telemetry.js");
+
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          {
+            id: "opt_a", label: "Option A", status: "ready",
+            interventions: { fac_x: 0.5 },
+            // display_value should be string, normalised_value should be number
+            intervention_details: { fac_x: { display_value: 999, normalised_value: "not_a_number" } },
+          },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeUndefined();
+
+    expect(warnLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ omission_reason: "contract_validation_failed" }),
+      expect.stringContaining("contract validation"),
+    );
   });
 });
