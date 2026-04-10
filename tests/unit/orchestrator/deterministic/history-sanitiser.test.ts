@@ -11,7 +11,7 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
 }));
 
 // Import after mock is set up
-import { sanitiseAssistantHistory } from "../../../../src/orchestrator/deterministic/pipeline.js";
+import { sanitiseAssistantHistory } from "../../../../src/orchestrator/deterministic/history-sanitiser.js";
 import { log } from "../../../../src/utils/telemetry.js";
 
 describe("sanitiseAssistantHistory", () => {

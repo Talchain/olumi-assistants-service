@@ -20,7 +20,6 @@ import { runPremortemAction } from "../../../../src/orchestrator/deterministic/a
 import { runAnalysisAction } from "../../../../src/orchestrator/deterministic/actions/run-analysis.js";
 import { addOptionAction } from "../../../../src/orchestrator/deterministic/actions/add-option.js";
 import { generateArtefactAction } from "../../../../src/orchestrator/deterministic/actions/generate-artefact.js";
-import { assembleDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-assembler.legacy.js";
 import type { DeterministicTurnContext, DeterministicCommentaryBlockData } from "../../../../src/orchestrator/deterministic/types.js";
 import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
@@ -264,29 +263,6 @@ describe('run_analysis delegation', () => {
     const ctx = makeCtx({ graph: null });
     const prereq = runAnalysisAction.prerequisite_checks(ctx);
     expect(prereq).toBe('No decision model available.');
-  });
-});
-
-// ============================================================================
-// Task 5: Response text ordering
-// ============================================================================
-
-describe('Response assembler text ordering', () => {
-  it('action text comes before LLM text', () => {
-    const ctx = makeCtx();
-    const result = assembleDeterministicResponse({
-      turnContext: ctx,
-      llmResponse: { text: 'Good move. Anchoring churn helps.', insights: [], recommended_actions: [] },
-      actionResult: { blocks: [], assistantText: 'Updated Customer Churn Rate to 4%.', guidance_items: [] },
-      turnId: 'test-turn',
-      routing: 'deterministic',
-      selectedAction: 'set_factor_value',
-      executedActions: ['set_factor_value'],
-    });
-    const text = result.envelope.assistant_text!;
-    expect(text).toContain('Updated Customer Churn Rate');
-    expect(text).toContain('Good move');
-    expect(text.indexOf('Updated')).toBeLessThan(text.indexOf('Good move'));
   });
 });
 

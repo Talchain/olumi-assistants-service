@@ -11,28 +11,17 @@
  *   - v4.action_failed telemetry event is logged
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../../../../src/utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
 }));
 
-vi.mock("../../../../src/orchestrator/context/context-hash.js", () => ({
-  computeContextHash: () => 'hash',
-}));
-vi.mock("../../../../src/orchestrator/guidance/post-analysis.js", () => ({
-  generatePostAnalysisGuidance: () => [],
-}));
-
 import { setFactorValueAction } from "../../../../src/orchestrator/deterministic/actions/set-factor-value.js";
 import { addFactorAction } from "../../../../src/orchestrator/deterministic/actions/add-factor.js";
-import { assembleDeterministicResponse } from "../../../../src/orchestrator/deterministic/response-assembler.legacy.js";
-import { log } from "../../../../src/utils/telemetry.js";
 import type { DeterministicTurnContext } from "../../../../src/orchestrator/deterministic/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
-
-const warnSpy = vi.mocked(log.warn);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -139,117 +128,4 @@ describe("add_factor — structured CAP_EXCEEDED failure (T1)", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────
-// Response assembler routing
-// ─────────────────────────────────────────────────────────────────────────
-
-describe("response-assembler — failure routing", () => {
-  beforeEach(() => {
-    warnSpy.mockClear();
-  });
-
-  it("surfaces failure.user_message as assistant_text and mirrors code/hint to envelope", async () => {
-    const ctx = makeCtxWithCap(10);
-    const actionResult = await setFactorValueAction.execute(
-      { target_id: 'fac_capacity', value: 25 },
-      ctx,
-    );
-
-    const result = assembleDeterministicResponse({
-      turnContext: ctx,
-      llmResponse: null,
-      actionResult,
-      turnId: 'turn-failure-1',
-      routing: 'deterministic',
-      selectedAction: 'set_factor_value',
-      executedActions: ['set_factor_value'],
-    });
-
-    const env = result.envelope as unknown as {
-      assistant_text: string;
-      blocks: unknown[];
-      failure_code?: string;
-      failure_recovery_hint?: string;
-    };
-
-    expect(env.assistant_text).toContain('Capacity');
-    expect(env.assistant_text).toContain('maximum');
-    expect(env.failure_code).toBe('CAP_EXCEEDED');
-    expect(env.failure_recovery_hint).toBeTruthy();
-  });
-
-  it("emits NO graph_patch block on failure path (envelope regression)", async () => {
-    const ctx = makeCtxWithCap(10);
-    const actionResult = await setFactorValueAction.execute(
-      { target_id: 'fac_capacity', value: 25 },
-      ctx,
-    );
-
-    const result = assembleDeterministicResponse({
-      turnContext: ctx,
-      llmResponse: null,
-      actionResult,
-      turnId: 'turn-failure-2',
-      routing: 'deterministic',
-      selectedAction: 'set_factor_value',
-      executedActions: ['set_factor_value'],
-    });
-
-    const env = result.envelope as unknown as { blocks: Array<{ block_type?: string }> };
-    // No graph_patch block — failure path must skip them entirely.
-    expect(env.blocks.find((b) => b.block_type === 'graph_patch')).toBeUndefined();
-  });
-
-  it("logs the v4.action_failed telemetry event with code and tool_name", async () => {
-    warnSpy.mockClear();
-    const ctx = makeCtxWithCap(10);
-    const actionResult = await setFactorValueAction.execute(
-      { target_id: 'fac_capacity', value: 25 },
-      ctx,
-    );
-
-    assembleDeterministicResponse({
-      turnContext: ctx,
-      llmResponse: null,
-      actionResult,
-      turnId: 'turn-failure-3',
-      routing: 'deterministic',
-      selectedAction: 'set_factor_value',
-      executedActions: ['set_factor_value'],
-    });
-
-    const failedCall = warnSpy.mock.calls.find(
-      (call) => (call[0] as { event?: string })?.event === 'v4.action_failed',
-    );
-    expect(failedCall).toBeDefined();
-    expect((failedCall![0] as { code: string }).code).toBe('CAP_EXCEEDED');
-    expect((failedCall![0] as { tool_name: string }).tool_name).toBe('set_factor_value');
-  });
-
-  it("normal (non-failure) path still propagates operations and produces a graph_patch block", async () => {
-    const ctx = makeCtxWithCap(50);
-    const actionResult = await setFactorValueAction.execute(
-      { target_id: 'fac_capacity', value: 25 },
-      ctx,
-    );
-    expect(actionResult.failure).toBeUndefined();
-
-    const result = assembleDeterministicResponse({
-      turnContext: ctx,
-      llmResponse: null,
-      actionResult,
-      turnId: 'turn-success-1',
-      routing: 'deterministic',
-      selectedAction: 'set_factor_value',
-      executedActions: ['set_factor_value'],
-    });
-
-    const env = result.envelope as unknown as {
-      blocks: Array<{ block_type?: string }>;
-      failure_code?: string;
-    };
-    expect(env.failure_code).toBeUndefined();
-    expect(env.blocks.find((b) => b.block_type === 'graph_patch')).toBeDefined();
-  });
-});
 

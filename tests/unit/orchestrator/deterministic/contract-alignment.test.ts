@@ -1,18 +1,15 @@
 /**
  * Contract Alignment Tests — CEE Brief 1
  *
- * Golden fixtures: Zod schema validation, chip transport, pipeline chip_metadata,
- * TurnContext analysis_inputs, and missing_structural.
+ * Golden fixtures: Zod schema validation, TurnContext analysis_inputs,
+ * and missing_structural.
  */
 
 import { describe, it, expect } from "vitest";
 import { LLMResponseSchema, InsightSchema, RecommendedActionSchema } from "../../../../src/orchestrator/deterministic/llm-response-schema.js";
-import { buildChipsFromRecommendations } from "../../../../src/orchestrator/deterministic/chip-assembler.js";
 import { computeTurnContext } from "../../../../src/orchestrator/deterministic/turn-context.js";
 import type { OrchestratorTurnRequest, V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
-import type { DeterministicTurnContext, LLMRecommendedAction } from "../../../../src/orchestrator/deterministic/types.js";
-import type { ActionName } from "../../../../src/orchestrator/deterministic/actions/types.js";
 
 // ============================================================================
 // Task 1: Zod schema golden fixtures
@@ -153,75 +150,6 @@ describe('LLM Zod schema — canonical enums', () => {
       priority: 'low',
     });
     expect(factor.success).toBe(true);
-  });
-});
-
-// ============================================================================
-// Task 2 + 3: Chip assembler — action_type, parameters, scientist role
-// ============================================================================
-
-describe('Chip assembler — deterministic transport', () => {
-  function makeCtx(eligibleActions: ActionName[]): DeterministicTurnContext {
-    return {
-      stage: 'evaluate',
-      entities: { nodes: new Map(), edges: [], option_ids: [], goal_id: null },
-      graph_summary: { node_count: 5, edge_count: 4, option_count: 2, option_labels: [], goal_label: null, missing_structural: [] },
-      analysis_summary: null,
-      capabilities: { can_run_analysis: true, can_explain_results: true, can_edit_graph: true, can_compare_options: true, can_challenge: true, can_generate_artefact: true },
-      blockers: [],
-      signals: { high_uncertainty_factors: [], dominant_factor: null, close_call: false, default_value_count: 0, weak_edges: [] },
-      conversation: { turn_count: 0, last_user_intent: null, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null },
-      eligible_actions: eligibleActions,
-      disambiguation_hints: [],
-      graph: null,
-      analysis: null,
-      conversational_state: null,
-      scenario_id: 'test',
-      analysis_inputs: null,
-    };
-  }
-
-  it('includes action_type and parameters on chips', () => {
-    const ctx = makeCtx(['challenge_assumption']);
-    const recs: LLMRecommendedAction[] = [{
-      action_type: 'challenge_assumption',
-      target_id: 'fac_churn',
-      priority: 'high',
-      rationale: 'Churn is inferred.',
-    }];
-
-    const { chips } = buildChipsFromRecommendations(recs, ctx);
-    expect(chips).toHaveLength(1);
-    expect(chips[0].action_type).toBe('challenge_assumption');
-    expect(chips[0].parameters).toEqual({ target_id: 'fac_churn' });
-    expect(chips[0].role).toBe('challenger');
-  });
-
-  it('preserves scientist role (does NOT remap to facilitator)', () => {
-    const ctx = makeCtx(['what_would_flip']);
-    const recs: LLMRecommendedAction[] = [{
-      action_type: 'what_would_flip',
-      priority: 'medium',
-    }];
-
-    const { chips } = buildChipsFromRecommendations(recs, ctx);
-    expect(chips).toHaveLength(1);
-    expect(chips[0].role).toBe('scientist');
-  });
-
-  it('extracts typed set_factor_value parameters correctly', () => {
-    const ctx = makeCtx(['set_factor_value']);
-    const recs: LLMRecommendedAction[] = [{
-      action_type: 'set_factor_value',
-      target_id: 'fac_churn',
-      value: 0.04,
-      priority: 'high',
-    }];
-
-    const { chips } = buildChipsFromRecommendations(recs, ctx);
-    expect(chips).toHaveLength(1);
-    expect(chips[0].action_type).toBe('set_factor_value');
-    expect(chips[0].parameters).toEqual({ target_id: 'fac_churn', value: 0.04 });
   });
 });
 

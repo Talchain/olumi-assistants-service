@@ -295,7 +295,6 @@ const ConfigSchema = z.object({
     artefactRenderingEnabled: booleanString.default(false), // CEE_ARTEFACT_RENDERING_ENABLED — when false, artefact blocks are suppressed with fallback commentary
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
-    legacyOrchestratorEnabled: booleanString.default(false), // CEE_LEGACY_ORCHESTRATOR_ENABLED — preserve old XML envelope path as rollback (overrides deterministic when true)
     pipelineV4Enabled: booleanString.default(true), // CEE_PIPELINE_V4_ENABLED — native tool-use pipeline (v4), replaces JSON-contract pipeline. Default flipped true (April 2026): V4 is the only supported path and the V1 handlers (e.g. src/orchestrator/tools/explain-results.ts) are stubbed to throw if reached. Set to false only for emergency rollback AND revert the V1 stubs.
   }),
 
@@ -660,7 +659,6 @@ function parseConfig(): Config {
       artefactRenderingEnabled: env.CEE_ARTEFACT_RENDERING_ENABLED,
       diagnosticTraceEnabled: env.CEE_DIAGNOSTIC_TRACE_ENABLED,
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
-      legacyOrchestratorEnabled: env.CEE_LEGACY_ORCHESTRATOR_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
     },
     promptCache: {

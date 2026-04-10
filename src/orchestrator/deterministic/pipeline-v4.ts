@@ -30,7 +30,7 @@ import type { StreamHandlerResult, ToolExecution } from "./stream-handler-v4.js"
 import { normaliseDeterministicResponse, scanBannedTerms } from "./response-normaliser.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
 import { assembleMessages } from "../prompt-assembly.js";
-import { sanitiseAssistantHistory } from "./pipeline.js";
+import { sanitiseAssistantHistory } from "./history-sanitiser.js";
 import { filterHistoryV4 } from "./history-filter-v4.js";
 import { computeContextHash } from "../context/context-hash.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
@@ -651,7 +651,6 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   // assistant_text, mirror code+hint to envelope-level fields, log telemetry,
   // and skip ALL operations / blocks / gates. The failure path is mutually
   // exclusive with the operations path — handlers never set both.
-  // Mirrors response-assembler.ts:80-98 (legacy pipeline).
   let failureCode: string | undefined;
   let failureRecoveryHint: string | undefined;
   if (actionResult?.failure) {
@@ -697,7 +696,6 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   if (!actionResult?.failure && actionResult?.operations && actionResult.operations.length > 0) {
     // T4: label-aware semantic patch summary using the pre-mutation graph
     // for label resolution. Falls back to count-based on resolution failure.
-    // Mirrors response-assembler.ts:125-139 (legacy pipeline).
     const patchSummary = buildPatchSummary(
       actionResult.operations,
       null,
@@ -732,7 +730,6 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   // (auto_apply: false), scan the assembled assistant text for completion
   // phrases ("Adding now", "I've added", "Setting X to Y"). On match, append
   // a corrective suffix and log telemetry.
-  // Mirrors response-assembler.ts:154-159 (legacy pipeline).
   if (emittedProposalBlock && assistantText) {
     const guardResult = enforceProposalLanguage(
       assistantText,
@@ -750,7 +747,6 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   // readiness degradation on existing options, and duplicate option labels.
   // On any issue, append a note to assistant text and downgrade
   // rerun_recommended on the patch block.
-  // Mirrors response-assembler.ts:168-215 (legacy pipeline).
   if (
     !actionResult?.failure &&
     actionResult?.operations &&
@@ -849,10 +845,9 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     }
   }
 
-  // Assemble envelope. T1 (Phase A): mirror failure_code / failure_recovery_hint
-  // onto the envelope so future Phase B (history threading) and any future UI
-  // hint surface can read them without reworking the response shape. Mirrors
-  // response-assembler.ts:275-294 (legacy pipeline).
+  // Assemble envelope. Mirror failure_code / failure_recovery_hint onto the
+  // envelope so future history threading and UI hint surfaces can read them
+  // without reworking the response shape.
   const envelope = {
     turn_id: turnId,
     assistant_text: assistantText,

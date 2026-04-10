@@ -187,8 +187,6 @@ export interface TurnResult {
   httpStatus: number;
 }
 
-// DEPRECATED: Legacy XML envelope orchestrator. Retained behind CEE_LEGACY_ORCHESTRATOR_ENABLED
-// for rollback only. Do not add features. Remove after v30.5 stable for 4+ weeks.
 /**
  * Process a single orchestrator turn.
  */
@@ -251,17 +249,6 @@ export async function handleTurn(
       setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, result.envelope);
       resolveInflight(result.envelope);
       return result;
-    }
-
-    // 3b. Deterministic intelligence pipeline (feature-flagged)
-    //     CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED enables the new three-layer pipeline.
-    //     CEE_LEGACY_ORCHESTRATOR_ENABLED forces the old XML path as rollback (takes priority).
-    if (config.features.deterministicOrchestratorEnabled && !config.features.legacyOrchestratorEnabled) {
-      const { executeDeterministicPipeline } = await import('./deterministic/pipeline.js');
-      const deterministicResult = await executeDeterministicPipeline(turnRequest, requestId);
-      setIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id, deterministicResult.envelope);
-      resolveInflight(deterministicResult.envelope);
-      return { envelope: deterministicResult.envelope, httpStatus: deterministicResult.httpStatus };
     }
 
     // 3c. Compute authoritative stage — override UI-provided stage when state disagrees.
