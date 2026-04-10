@@ -1,4 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock("../../../../src/utils/telemetry.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
 import { computeStructuralReadiness } from '../../../../src/orchestrator/tools/analysis-ready-helper.js';
 import type { GraphV3T } from '../../../../src/schemas/cee-v3.js';
 
@@ -80,5 +85,67 @@ describe('computeStructuralReadiness', () => {
     const result = computeStructuralReadiness(graph);
     expect(result).toBeDefined();
     expect(result!.status).toBe('needs_user_input');
+  });
+
+  // ===========================================================================
+  // is_baseline detection (CEE-2)
+  // ===========================================================================
+
+  it('detects baseline from option label keyword ("Status Quo")', () => {
+    const graph = makeReadyGraph();
+    // Rename opt_b to a baseline-like label
+    const optB = graph.nodes.find((n) => n.id === 'opt_b')!;
+    optB.label = 'No New Hire (Status Quo)';
+
+    const result = computeStructuralReadiness(graph);
+    expect(result).toBeDefined();
+    const baselineOpt = result!.options.find((o) => o.option_id === 'opt_b');
+    const nonBaselineOpt = result!.options.find((o) => o.option_id === 'opt_a');
+    expect(baselineOpt!.is_baseline).toBe(true);
+    expect(nonBaselineOpt!.is_baseline).toBe(false);
+  });
+
+  it('detects baseline from node-level is_baseline flag (priority over label)', () => {
+    const graph = makeReadyGraph();
+    // opt_a has no baseline label but has is_baseline = true on the node
+    const optA = graph.nodes.find((n) => n.id === 'opt_a') as Record<string, unknown>;
+    optA.is_baseline = true;
+    // opt_b has baseline-like label but no flag
+    const optB = graph.nodes.find((n) => n.id === 'opt_b')!;
+    optB.label = 'Keep Current (Status Quo)';
+
+    const result = computeStructuralReadiness(graph);
+    expect(result).toBeDefined();
+    // Node-level flag wins over label keyword
+    expect(result!.options.find((o) => o.option_id === 'opt_a')!.is_baseline).toBe(true);
+    expect(result!.options.find((o) => o.option_id === 'opt_b')!.is_baseline).toBe(false);
+  });
+
+  it('sets is_baseline: false on all options when no baseline detected', () => {
+    const result = computeStructuralReadiness(makeReadyGraph());
+    expect(result).toBeDefined();
+    for (const opt of result!.options) {
+      expect(opt.is_baseline).toBe(false);
+    }
+  });
+
+  it('detects all four staging labels that surfaced the original bug', () => {
+    const labels = [
+      'Make No New Hire (Status Quo)',
+      'No New Hire (Status Quo)',
+      'No Dedicated Marketing (Status Quo)',
+      'No Dedicated Campaign (Status Quo)',
+    ];
+
+    for (const baselineLabel of labels) {
+      const graph = makeReadyGraph();
+      const optB = graph.nodes.find((n) => n.id === 'opt_b')!;
+      optB.label = baselineLabel;
+
+      const result = computeStructuralReadiness(graph);
+      expect(result).toBeDefined();
+      const baselineOpt = result!.options.find((o) => o.option_id === 'opt_b');
+      expect(baselineOpt!.is_baseline, `Expected is_baseline=true for label: "${baselineLabel}"`).toBe(true);
+    }
   });
 });

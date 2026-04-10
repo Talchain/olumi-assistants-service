@@ -177,7 +177,7 @@ export interface AnalysisReadyContext {
  * Order matters: earlier entries are higher confidence. The first match across
  * all options wins if no LLM-provided `is_baseline` flag is set.
  */
-const BASELINE_KEYWORDS = [
+export const BASELINE_KEYWORDS = [
   "status quo",
   "do nothing",
   "no change",
@@ -203,6 +203,21 @@ const BASELINE_KEYWORDS = [
  * @param options - V3 options in their original order
  * @returns Index of the baseline option, or `null` if none detected
  */
+/**
+ * Test whether a single label matches any BASELINE_KEYWORD at a word boundary.
+ * Shared between detectBaselineOptionIndex (CEE pipeline) and
+ * computeStructuralReadiness (orchestrator action handlers).
+ */
+export function labelMatchesBaseline(label: string): boolean {
+  const lower = label.toLowerCase();
+  for (const kw of BASELINE_KEYWORDS) {
+    const escaped = kw.replace(/[-\s]/g, "[\\s\\-]");
+    const re = new RegExp(`(?<![a-z0-9\\-])${escaped}(?![a-z0-9\\-])`, "i");
+    if (re.test(lower)) return true;
+  }
+  return false;
+}
+
 function detectBaselineOptionIndex(options: OptionV3T[]): number | null {
   // Priority 1: LLM-provided flag
   for (let i = 0; i < options.length; i++) {
@@ -211,15 +226,7 @@ function detectBaselineOptionIndex(options: OptionV3T[]): number | null {
 
   // Priority 2: label keyword match
   for (let i = 0; i < options.length; i++) {
-    const label = options[i].label.toLowerCase();
-    for (const kw of BASELINE_KEYWORDS) {
-      // Word-boundary match: keyword must not be immediately preceded or followed
-      // by a letter, digit, or hyphen. This prevents "pre-existing" matching
-      // "existing" or "sub-baseline" matching "baseline".
-      const escaped = kw.replace(/[-\s]/g, "[\\s\\-]");
-      const re = new RegExp(`(?<![a-z0-9\\-])${escaped}(?![a-z0-9\\-])`, "i");
-      if (re.test(label)) return i;
-    }
+    if (labelMatchesBaseline(options[i].label)) return i;
   }
 
   return null;

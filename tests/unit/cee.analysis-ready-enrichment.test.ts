@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildAnalysisReadyPayload } from "../../src/cee/transforms/analysis-ready.js";
+import { buildAnalysisReadyPayload, labelMatchesBaseline } from "../../src/cee/transforms/analysis-ready.js";
 import type { OptionV3T, GraphV3T, NodeV3T } from "../../src/schemas/cee-v3.js";
 
 // ============================================================================
@@ -333,5 +333,81 @@ describe("is_baseline — hyphenated label regression", () => {
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
     expect(payload.options[0].is_baseline).toBe(true);
+  });
+});
+
+describe("is_baseline — staging regression labels", () => {
+  const stagingLabels = [
+    "Make No New Hire (Status Quo)",
+    "No New Hire (Status Quo)",
+    "No Dedicated Marketing (Status Quo)",
+    "No Dedicated Campaign (Status Quo)",
+  ];
+
+  for (const label of stagingLabels) {
+    it(`labelMatchesBaseline detects "${label}"`, () => {
+      expect(labelMatchesBaseline(label)).toBe(true);
+    });
+  }
+
+  it("all four staging labels are detected as baseline by buildAnalysisReadyPayload", () => {
+    for (const label of stagingLabels) {
+      const options = [
+        makeOption("opt_a", "Hire a Senior Developer"),
+        makeOption("opt_b", label),
+      ];
+      const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+      expect(payload.options[1].is_baseline, `Expected is_baseline=true for "${label}"`).toBe(true);
+      expect(payload.options[0].is_baseline).toBeUndefined();
+    }
+  });
+
+  it("intervention_details survives extractAnalysisReady round-trip", async () => {
+    const { extractAnalysisReady } = await import("../../src/orchestrator/tools/draft-graph.js");
+
+    // Build a payload with intervention_details via the real pipeline
+    const factorNode = {
+      id: "fac_cost", kind: "factor", label: "Cost",
+      observed_state: { raw_value: 50000, unit: "GBP", value: 0.5 },
+      display_value: "£50,000",
+    } as unknown as NodeV3T;
+    const graph = makeGraph([factorNode]);
+    graph.edges = [{ from: "opt_a", to: "fac_cost" }] as any;
+
+    const options = [
+      makeOption("opt_a", "Option A", {
+        interventions: { fac_cost: { value: 0.5, source: "explicit", target_match: { confidence: "high" } } },
+      }),
+    ];
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    expect(payload.options[0].intervention_details).toBeDefined();
+    expect(Object.keys(payload.options[0].intervention_details!).length).toBeGreaterThan(0);
+
+    // Now round-trip through extractAnalysisReady (simulates pipeline → draft-graph.ts)
+    const body = { analysis_ready: payload };
+    const extracted = extractAnalysisReady(body as any);
+    expect(extracted).toBeDefined();
+    expect(extracted!.options[0].intervention_details).toBeDefined();
+    expect(extracted!.options[0].intervention_details!["fac_cost"]).toBeDefined();
+    expect(extracted!.options[0].intervention_details!["fac_cost"].display_value).toBe("£50,000");
+  });
+
+  it("empty intervention_details is omitted after extractAnalysisReady", async () => {
+    const { extractAnalysisReady } = await import("../../src/orchestrator/tools/draft-graph.js");
+
+    const body = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "ready", interventions: { fac_x: 0.5 }, intervention_details: {} },
+        ],
+        goal_node_id: "goal_1",
+        status: "ready",
+      },
+    };
+
+    const extracted = extractAnalysisReady(body as any);
+    expect(extracted).toBeDefined();
+    expect(extracted!.options[0]).not.toHaveProperty("intervention_details");
   });
 });

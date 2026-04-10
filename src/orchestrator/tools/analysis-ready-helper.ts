@@ -13,6 +13,7 @@ import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { config } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
+import { labelMatchesBaseline } from "../../cee/transforms/analysis-ready.js";
 
 // ============================================================================
 // Types
@@ -187,6 +188,31 @@ export function computeStructuralReadiness(
       status,
       interventions: interventions ?? {},
     });
+  }
+
+  // === is_baseline detection (CEE-2) ===
+  // Mirror the detection logic from buildAnalysisReadyPayload:
+  // Priority 1: node-level is_baseline flag from LLM
+  // Priority 2: label keyword match via shared BASELINE_KEYWORDS
+  // Non-matching options get explicit false (not omitted) so downstream can
+  // distinguish "detected as not baseline" from "detection didn't run".
+  let baselineIdx: number | null = null;
+  for (let i = 0; i < optionNodes.length; i++) {
+    if ((optionNodes[i] as Record<string, unknown>).is_baseline === true) {
+      baselineIdx = i;
+      break;
+    }
+  }
+  if (baselineIdx === null) {
+    for (let i = 0; i < options.length; i++) {
+      if (labelMatchesBaseline(options[i].label)) {
+        baselineIdx = i;
+        break;
+      }
+    }
+  }
+  for (let i = 0; i < options.length; i++) {
+    options[i].is_baseline = i === baselineIdx;
   }
 
   // Determine overall status

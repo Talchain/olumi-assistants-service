@@ -114,6 +114,94 @@ describe("deterministic-sweep field deletion: EXTERNAL_HAS_DATA", () => {
   });
 });
 
+describe("deterministic-sweep EXTERNAL_HAS_DATA: unit promotion", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("promotes unit to node level before deleting data", async () => {
+    const nodes = [
+      { id: "dec_1", kind: "decision", label: "D" },
+      { id: "opt_a", kind: "option", label: "A" },
+      {
+        id: "fac_ext",
+        kind: "factor",
+        label: "Revenue",
+        category: "external",
+        data: { value: 0.3, factor_type: "revenue", unit: "GBP" },
+      },
+      { id: "out_1", kind: "outcome", label: "O" },
+      { id: "goal_1", kind: "goal", label: "G" },
+    ];
+    const edges = [
+      { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_a", to: "out_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+      { from: "fac_ext", to: "out_1", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
+      { from: "out_1", to: "goal_1", strength_mean: 0.9, strength_std: 0.05, belief_exists: 1, effect_direction: "positive" },
+    ];
+
+    mockValidateGraph
+      .mockReturnValueOnce({
+        valid: false,
+        errors: [{ code: "EXTERNAL_HAS_DATA", path: "fac_ext", message: "external has data" }],
+        warnings: [],
+        errorCount: 1,
+        warningCount: 0,
+      })
+      .mockReturnValue(validResult());
+
+    const ctx = makeCtx(nodes, edges);
+    await runDeterministicSweep(ctx);
+
+    const extNode = ctx.graph.nodes.find((n: any) => n.id === "fac_ext");
+    // unit promoted to node level
+    expect(extNode.unit).toBe("GBP");
+    // factor_type also promoted
+    expect(extNode.factor_type).toBe("revenue");
+    // data deleted (value was the only union-required field and it was removed)
+    expect(extNode.data).toBeUndefined();
+  });
+
+  it("does not promote null unit to node level", async () => {
+    const nodes = [
+      { id: "dec_1", kind: "decision", label: "D" },
+      { id: "opt_a", kind: "option", label: "A" },
+      {
+        id: "fac_ext",
+        kind: "factor",
+        label: "Revenue",
+        category: "external",
+        data: { value: 0.3, factor_type: "revenue", unit: null },
+      },
+      { id: "out_1", kind: "outcome", label: "O" },
+      { id: "goal_1", kind: "goal", label: "G" },
+    ];
+    const edges = [
+      { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_a", to: "out_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+      { from: "fac_ext", to: "out_1", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
+      { from: "out_1", to: "goal_1", strength_mean: 0.9, strength_std: 0.05, belief_exists: 1, effect_direction: "positive" },
+    ];
+
+    mockValidateGraph
+      .mockReturnValueOnce({
+        valid: false,
+        errors: [{ code: "EXTERNAL_HAS_DATA", path: "fac_ext", message: "external has data" }],
+        warnings: [],
+        errorCount: 1,
+        warningCount: 0,
+      })
+      .mockReturnValue(validResult());
+
+    const ctx = makeCtx(nodes, edges);
+    await runDeterministicSweep(ctx);
+
+    const extNode = ctx.graph.nodes.find((n: any) => n.id === "fac_ext");
+    // null unit should NOT be promoted
+    expect(extNode.unit).toBeUndefined();
+  });
+});
+
 describe("deterministic-sweep field deletion: OBSERVABLE_EXTRA_DATA", () => {
   beforeEach(() => {
     vi.clearAllMocks();

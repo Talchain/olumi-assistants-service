@@ -474,6 +474,16 @@ export interface GraphPatchBlockData {
       label: string;
       status: string;
       interventions: Record<string, number>;
+      is_baseline?: boolean;
+      intervention_details?: Record<string, {
+        display_value: string;
+        normalised_value: number;
+        raw_value?: number;
+        unit?: string;
+      }>;
+      extraction_metadata?: Record<string, unknown>;
+      raw_interventions?: Record<string, unknown>;
+      status_reason?: string;
     }>;
     goal_node_id: string;
     status: string;

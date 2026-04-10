@@ -224,4 +224,155 @@ describe("extractAnalysisReady", () => {
     const result = extractAnalysisReady(body);
     expect(result).toBeUndefined();
   });
+
+  // ===========================================================================
+  // Batch 1 field carry-through (CEE-2, CEE-9)
+  // ===========================================================================
+
+  it("carries through is_baseline from source options", () => {
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "ready", is_baseline: false, interventions: { fac_x: 0.5 } },
+          { id: "opt_b", label: "Status Quo", status: "ready", is_baseline: true, interventions: { fac_x: 0.3 } },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0].is_baseline).toBe(false);
+    expect(result!.options[1].is_baseline).toBe(true);
+  });
+
+  it("preserves is_baseline: false (distinguishes from undefined)", () => {
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "ready", is_baseline: false, interventions: { fac_x: 0.5 } },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0].is_baseline).toBe(false);
+  });
+
+  it("omits is_baseline when undefined on source (detection didn't run)", () => {
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "ready", interventions: { fac_x: 0.5 } },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0]).not.toHaveProperty("is_baseline");
+  });
+
+  it("carries through intervention_details from source options", () => {
+    const details = {
+      fac_x: { display_value: "£200k", normalised_value: 0.5, raw_value: 200000, unit: "GBP" },
+    };
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "ready", interventions: { fac_x: 0.5 }, intervention_details: details },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0].intervention_details).toEqual(details);
+  });
+
+  it("omits empty intervention_details (not {})", () => {
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "ready", interventions: { fac_x: 0.5 }, intervention_details: {} },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0]).not.toHaveProperty("intervention_details");
+  });
+
+  it("preserves source status instead of hardcoding 'ready'", () => {
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "needs_encoding", interventions: { fac_x: 0.5 } },
+          { id: "opt_b", label: "Option B", status: "ready", interventions: { fac_x: 0.3 } },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0].status).toBe("needs_encoding");
+    expect(result!.options[1].status).toBe("ready");
+  });
+
+  it("carries through extraction_metadata and status_reason", () => {
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          {
+            id: "opt_a", label: "Option A", status: "ready",
+            interventions: { fac_x: 0.5 },
+            extraction_metadata: { source: "explicit", confidence: "high" },
+            status_reason: "Resolved via factor node value fallback",
+          },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0].extraction_metadata).toEqual({ source: "explicit", confidence: "high" });
+    expect(result!.options[0].status_reason).toBe("Resolved via factor node value fallback");
+  });
+
+  it("omits empty extraction_metadata and raw_interventions", () => {
+    const body: Record<string, unknown> = {
+      analysis_ready: {
+        options: [
+          {
+            id: "opt_a", label: "Option A", status: "ready",
+            interventions: { fac_x: 0.5 },
+            extraction_metadata: {},
+            raw_interventions: {},
+          },
+        ],
+        goal_node_id: "goal_outcome",
+        status: "ready",
+      },
+    };
+
+    const result = extractAnalysisReady(body);
+    expect(result).toBeDefined();
+    expect(result!.options[0]).not.toHaveProperty("extraction_metadata");
+    expect(result!.options[0]).not.toHaveProperty("raw_interventions");
+  });
 });

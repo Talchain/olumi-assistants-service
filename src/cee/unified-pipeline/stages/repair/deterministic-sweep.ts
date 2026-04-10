@@ -532,6 +532,9 @@ function fixExternalHasData(
     if (data.encoding_map !== undefined) {
       (node as any).encoding_map = data.encoding_map;
     }
+    if (data.unit !== undefined && data.unit !== null) {
+      (node as any).unit = data.unit;
+    }
     // After stripping value, remove data if it can't satisfy any NodeData union branch.
     // This is only reachable when changed=true (value was just deleted), because the
     // validator only flags EXTERNAL_HAS_DATA when data.value is present. A metadata-only
@@ -551,7 +554,7 @@ function fixExternalHasData(
       repairs.push({
         code: "EXTERNAL_HAS_DATA",
         path: `nodes[${node.id}].data`,
-        action: `Removed value (prohibited for external). Promoted factor_type, extractionType, uncertainty_drivers, encoding_map to node level.`,
+        action: `Removed value (prohibited for external). Promoted factor_type, extractionType, uncertainty_drivers, encoding_map, unit to node level.`,
       });
     }
   }

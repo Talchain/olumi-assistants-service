@@ -453,8 +453,9 @@ function extractCoachingSummary(body: Record<string, unknown>): string | null {
  * Present when the unified pipeline produces a V3 schema response with
  * options, interventions, and goal_node_id.
  *
- * Sets status: 'ready' on every option (pipeline has resolved interventions
- * for full_draft, so this is always valid).
+ * Preserves source status from each option (falls back to 'ready' when absent).
+ * Carries through Batch 1 optional fields: is_baseline, intervention_details,
+ * extraction_metadata, raw_interventions, status_reason.
  *
  * Validates the constructed payload against AnalysisReadyPayload before returning.
  * Returns undefined (not a malformed payload) if validation fails.
@@ -489,7 +490,8 @@ export function extractAnalysisReady(
   }
 
   // Build options for the contract (outward contract uses option_id, not id)
-  const options: Array<{ option_id: string; label: string; status: string; interventions: Record<string, number> }> = [];
+  type AnalysisReadyOption = NonNullable<GraphPatchBlockData['analysis_ready']>['options'][number];
+  const options: AnalysisReadyOption[] = [];
   for (const opt of rawOptions) {
     if (!opt || typeof opt !== 'object') continue;
     const o = opt as Record<string, unknown>;
@@ -511,7 +513,34 @@ export function extractAnalysisReady(
       }
     }
 
-    options.push({ option_id: optionId, label: label as string, status: 'ready', interventions: flat });
+    const built: AnalysisReadyOption = {
+      option_id: optionId,
+      label: label as string,
+      status: typeof o.status === 'string' ? o.status : 'ready',
+      interventions: flat,
+    };
+
+    // Carry through Batch 1 optional fields (CEE-2, CEE-9)
+    if (o.is_baseline === true || o.is_baseline === false) {
+      built.is_baseline = o.is_baseline as boolean;
+    }
+    if (o.intervention_details != null && typeof o.intervention_details === 'object'
+        && Object.keys(o.intervention_details as object).length > 0) {
+      built.intervention_details = o.intervention_details as AnalysisReadyOption['intervention_details'];
+    }
+    if (o.extraction_metadata != null && typeof o.extraction_metadata === 'object'
+        && Object.keys(o.extraction_metadata as object).length > 0) {
+      built.extraction_metadata = o.extraction_metadata as Record<string, unknown>;
+    }
+    if (o.raw_interventions != null && typeof o.raw_interventions === 'object'
+        && Object.keys(o.raw_interventions as object).length > 0) {
+      built.raw_interventions = o.raw_interventions as Record<string, unknown>;
+    }
+    if (typeof o.status_reason === 'string') {
+      built.status_reason = o.status_reason;
+    }
+
+    options.push(built);
   }
 
   if (options.length === 0) {
