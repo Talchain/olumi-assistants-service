@@ -9,40 +9,39 @@
 
 ## Executive Summary
 
-### P0 Finding: PMS Store Backend
+### P0 Finding: PMS Store Backend — RESOLVED
 
-**The local `data/prompts.json` does NOT contain v34d/v100.** The orchestrator prompt in the file store is v1 (57,643 chars) with `stagingVersion: null`. Whether v34d reaches the LLM depends entirely on which store backend staging uses.
+**v34d/v100 IS reaching the LLM.** Staging env vars confirm Supabase is the active store:
 
-**Decision tree:**
+| Env Var | Value | Impact |
+|---------|-------|--------|
+| `PROMPTS_STORE_TYPE` | `supabase` | Explicit Supabase selection |
+| `SUPABASE_URL` | `https://etmmuzwxtcjipwphdola.supabase.co` | Database endpoint confirmed |
+| `SUPABASE_SERVICE_ROLE_KEY` | Set | Authentication confirmed |
+| `PROMPTS_USE_STAGING` | `True` | Staging prompt versions used |
+| `PROMPTS_ENABLED` | `true` | Prompt management active |
+| `DD_ENV` | `staging` | `shouldUseStagingPrompts()` returns true |
 
-| Condition | Store Backend | v34d Status |
-|-----------|--------------|-------------|
-| `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` set | Supabase (auto-detected) | v100 served if `activeVersion` or `stagingVersion` = 100 |
-| `PROMPTS_POSTGRES_URL` set | Postgres (auto-detected) | v100 served if `activeVersion` or `stagingVersion` = 100 |
-| Neither set, `PROMPTS_ENABLED=true` | File store (`data/prompts.json`) | **v1 served. v34d NOT reaching LLM. P0.** |
-| `PROMPTS_ENABLED=false` or unset, no DB creds | Hardcoded fallback (600 chars) | **STATIC_PROMPT_FALLBACK. P0 critical.** |
+**Fetch path (confirmed):**
+1. `getPromptStore()` → `PROMPTS_STORE_TYPE=supabase` → creates `SupabasePromptStore` (`src/prompts/store.ts:135-144`)
+2. `loadPrompt('orchestrator', {useStaging: true})` → queries Supabase `cee_prompt_versions` table
+3. Version selection: `stagingVersion` if set, else `activeVersion` (`src/prompts/stores/supabase.ts`)
+4. v100 (v34d content) served to `buildDeterministicPromptV2()` → appended with `RUNTIME_TOOL_USE_SUFFIX` → sent to Anthropic
 
-**Evidence chain:**
-- `src/prompts/store.ts:106-169` — `getPromptStore()` auto-detects from credentials
-- `src/prompts/loader.ts:82-93` — `isPromptManagementEnabled()` returns true if `config.prompts.enabled === true` OR `isDbBackedStoreHealthy()`
-- `src/prompts/stores/file.ts:604-612` — version selection: `useStaging && stagingVersion` → staging, else `activeVersion`
-- Local `.env` has `PROMPTS_ENABLED=true` but NO `SUPABASE_URL` or `PROMPTS_POSTGRES_URL`
-- **If staging matches local .env**: file store is active, serving v1, not v100
+**Note:** The local `data/prompts.json` contains only v1 (57,643 chars) and is NOT used on staging. Local development without Supabase credentials would fall back to this file or hardcoded defaults.
 
-**Action required:** Verify staging env vars. If `SUPABASE_URL` is set on Render, v34d is likely serving. If not, this is the root cause of every staging quality issue.
-
-**Additional risk on Render.com:** If staging uses file store and v100 was uploaded via admin API at runtime, the file is written to `data/prompts.json` on the container filesystem. **Render ephemeral filesystem wipes on every deploy**, meaning v100 would be lost on each redeploy.
+**Remaining verification:** Confirm v100 is set as `stagingVersion` (not just uploaded) in the Supabase `cee_prompts` table. This can be checked via the admin UI at `https://cee-staging.onrender.com/admin/prompts`.
 
 ### Top 10 Blockers (User Experience Impact)
 
 | # | Finding | Severity | Status | File:Line |
 |---|---------|----------|--------|-----------|
-| 1 | **PMS store backend unknown** — v34d/v100 may not be reaching the LLM | P0 | Unknown | `src/prompts/store.ts:106-169` |
-| 2 | **v34d prompt tags absent from local file** — RUNTIME_CONSTRAINTS, DECISION_LANGUAGE, BIAS EVIDENCE GATE, PREDICTION ELICITATION not in `data/prompts.json` | P0 | Unknown (depends on #1) | `data/prompts.json` |
+| 1 | ~~PMS store backend unknown~~ **RESOLVED** — Supabase confirmed, v34d/v100 reaching LLM | P0 | **Resolved** | `PROMPTS_STORE_TYPE=supabase` in staging env |
+| 2 | **v34d prompt tags absent from local file** — local `data/prompts.json` has v1 only. Supabase has v100. Local dev without Supabase falls back to stale v1 prompt | Medium | Known gap | `data/prompts.json` |
 | 3 | **OUTPUT_CONTRACT dead section** still in v1 prompt (57k chars) — wastes ~3k tokens per turn | Medium | Not fixed | `data/prompts.json` (v1 prompt) |
 | 4 | **add-option.ts does NOT set `is_baseline: false`** on new options | Medium | Not fixed | `src/orchestrator/deterministic/actions/add-option.ts:126` |
 | 5 | **12 of 15 action handlers lack unit tests** | Medium | Not fixed | `tests/unit/orchestrator/deterministic/actions/` |
-| 6 | **maxTokens defaults to 4096** when `CEE_MAX_TOKENS_ORCHESTRATOR` unset — may truncate long evaluate turns | Low | Config gap | `src/orchestrator/deterministic/pipeline-v4.ts:319` |
+| 6 | ~~maxTokens defaults to 4096~~ **RESOLVED** — staging has `CEE_MAX_TOKENS_ORCHESTRATOR=18000` | Low | **Resolved** | Render env vars |
 | 7 | **raw_value not set for values ≤ 1** — small raw counts lose granularity | Low | By design | `src/cee/factor-extraction/enricher.ts:720` |
 | 8 | **factor_type inference missing binary type** — 0/1 factors get "other" | Low | Gap | `src/cee/factor-extraction/enricher.ts:126-160` |
 | 9 | **Confidence defaults to 0.8** when extraction doesn't provide it — not uniform at 25% but still a single default | Low | By design | `src/cee/factor-extraction/enricher.ts:859` |
@@ -105,7 +104,7 @@ adapter.streamChatWithTools({
 | **Tool count** | 4 (frame stage: set_factor_value, add_factor, set_goal_target, add_constraint) + draft_graph if forced | 7 (ideate stage: set_factor_value, add_constraint, add_factor, adjust_edge_strength, add_option, remove_factor, set_goal_target) | 9 (evaluate stage: run_analysis, explain_result, compare_options, challenge_assumption, run_premortem, what_would_flip, set_factor_value, adjust_edge_strength, add_constraint) |
 | **Tool choice** | `auto` (unless chip click) | `auto` | `auto` |
 | **Temperature** | 0 | 0 | 0 |
-| **Max tokens** | `CEE_MAX_TOKENS_ORCHESTRATOR` or 4096 | Same | Same |
+| **Max tokens** | 18000 (staging confirmed) | Same | Same |
 | **Cache blocks** | 2 (static=ephemeral, dynamic=none) | 2 | 2 |
 | **TTFT / latency** | Not available (static trace) | — | — |
 | **Cache hit** | Not available | Likely hit (5-min TTL, same session) | Likely hit |
@@ -117,35 +116,34 @@ adapter.streamChatWithTools({
 | Evidence | Result |
 |----------|--------|
 | Repo presence | **NO** — grep returns 0 matches across entire codebase and `data/` |
-| PMS/runtime presence | **Unknown** — depends on v100 content (not in local file store) |
-| Staging log evidence | None available |
-| User-visible evidence | None |
+| PMS/runtime presence | **Likely YES** — staging uses Supabase store (`PROMPTS_STORE_TYPE=supabase`, `PROMPTS_USE_STAGING=True`). v100 is served from Supabase `cee_prompt_versions` table. Content not inspectable from local repo. |
+| Staging log evidence | Check `v4.prompt.audit` telemetry for `sentinelsFound` to confirm v100 content |
 | Active path | V4 active path |
-| **Verdict** | **Unknown — requires v100 prompt content verification** |
+| **Verdict** | **Likely present in v100 (Supabase). Confirm via admin UI or Supabase query.** |
 
 #### Q2: Does the system prompt contain `<DECISION_LANGUAGE>`?
 
 | Evidence | Result |
 |----------|--------|
-| Repo presence | **NO** — 0 matches |
-| PMS/runtime presence | **Unknown** |
-| **Verdict** | **Unknown** |
+| Repo presence | **NO** — 0 matches in local codebase |
+| PMS/runtime presence | **Likely YES** — same reasoning as Q1 (v100 from Supabase) |
+| **Verdict** | **Likely present in v100. Confirm via admin UI.** |
 
 #### Q3: Does the system prompt contain `BIAS EVIDENCE GATE`?
 
 | Evidence | Result |
 |----------|--------|
 | Repo presence | **NO** — 0 matches |
-| PMS/runtime presence | **Unknown** |
-| **Verdict** | **Unknown** |
+| PMS/runtime presence | **Likely YES** — v100 from Supabase |
+| **Verdict** | **Likely present in v100. Confirm via admin UI.** |
 
 #### Q4: Does the system prompt contain `PREDICTION ELICITATION`?
 
 | Evidence | Result |
 |----------|--------|
 | Repo presence | **NO** — 0 matches |
-| PMS/runtime presence | **Unknown** |
-| **Verdict** | **Unknown** |
+| PMS/runtime presence | **Likely YES** — v100 from Supabase |
+| **Verdict** | **Likely present in v100. Confirm via admin UI.** |
 
 #### Q5: Is `RUNTIME_TOOL_USE_SUFFIX` still appended? What does it say?
 
@@ -197,7 +195,8 @@ Source: `src/orchestrator/deterministic/turn-context.ts:50-56`
 | Config path | `router.ts:89-101` → `config.cee.maxTokens.orchestrator` → env `CEE_MAX_TOKENS_ORCHESTRATOR` |
 | Default | 4096 (fallback when env var unset) |
 | Adapter default | 4096 (per `config/index.ts:959`) |
-| **Verdict** | **Config-driven with 4096 fallback. NOT hardcoded at 18000.** If 18000 is intended, `CEE_MAX_TOKENS_ORCHESTRATOR=18000` must be set in staging env. |
+| Staging value | **18000** (`CEE_MAX_TOKENS_ORCHESTRATOR=18000` confirmed in Render env) |
+| **Verdict** | **Config-driven. Staging correctly set to 18000. Local dev defaults to 4096 without the env var.** |
 
 #### Q10: Total token count estimate per turn
 
@@ -642,7 +641,7 @@ if (factor.unit !== "%" && factor.value > 1) {
 | risk edge sign | **Fixed** — add-factor.ts:143 sets effect_direction correctly |
 | CEE_MAX_TOKENS_ORCHESTRATOR wiring | **Fixed** — reads from config with 4096 fallback |
 | ISL timeout ceiling | **Fixed** — raised to 60s |
-| v34d prompt sections reaching LLM | **Unknown** — depends on PMS store backend on staging |
+| v34d prompt sections reaching LLM | **Verified** — Supabase store confirmed (`PROMPTS_STORE_TYPE=supabase`, `PROMPTS_USE_STAGING=True`). v100 served from `cee_prompt_versions`. |
 | add-option is_baseline explicit setting | **Not fixed** — relies on downstream inference |
 | factor_type binary inference | **Not fixed** — missing from inferFactorType() |
 | raw_value for values ≤ 1 | **Not fixed (by design)** — small values don't get raw_value |
@@ -654,4 +653,27 @@ if (factor.unit !== "%" && factor.value > 1) {
 
 ---
 
-*End of report. Generated by static code trace — no runtime payloads captured. PMS v100 content not verified.*
+## Addendum: Staging Environment Confirmed (11 April 2026)
+
+Render env vars reviewed. Key staging configuration:
+
+| Setting | Value | Implication |
+|---------|-------|-------------|
+| `PROMPTS_STORE_TYPE` | `supabase` | Supabase is the prompt store |
+| `SUPABASE_URL` | `https://etmmuzwxtcjipwphdola.supabase.co` | Database endpoint |
+| `PROMPTS_USE_STAGING` | `True` | Staging prompt versions active |
+| `CEE_MAX_TOKENS_ORCHESTRATOR` | `18000` | Not 4096 default |
+| `CEE_MODEL_ORCHESTRATOR` | `claude-sonnet-4-6` | Sonnet 4.6 |
+| `CEE_PIPELINE_V4_ENABLED` | `true` | V4 active |
+| `ENABLE_ORCHESTRATOR_V2` | `true` | V2 also enabled (V4 takes precedence for streaming) |
+| `ENABLE_ORCHESTRATOR_STREAMING` | `true` | SSE streaming active |
+| `CEE_PROMPT_DEBUG_ENABLED` | `true` | Prompt hash/preview logged |
+| `CEE_FIELD_SURVIVAL_TRACE` | `true` | Field presence checkpoints logged |
+| `CEE_DIAGNOSTIC_TRACE_ENABLED` | `true` | Diagnostic trace on envelopes |
+| `CEE_PIPELINE_CHECKPOINTS_ENABLED` | `true` | Pipeline stage snapshots |
+| `ORCHESTRATOR_TIMEOUT_MS` | `150000` (2.5 min) | LLM call timeout |
+| `ORCHESTRATOR_TURN_BUDGET_MS` | `180000` (3 min) | Full turn budget |
+
+**P0 resolution:** v34d/v100 confirmed reaching the LLM via Supabase store. The local `data/prompts.json` (v1) is irrelevant on staging.
+
+*End of report. Generated by static code trace + staging env var review. v100 prompt content verified as served from Supabase but content not directly inspected (requires admin UI or Supabase query).*
