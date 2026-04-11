@@ -37,7 +37,7 @@ import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { enforceProposalLanguage } from "./proposal-language-guard.js";
-import { sanitiseAssistantText } from "./sanitise-output.js";
+import { sanitiseAssistantText, sanitiseEnvelopeText } from "./sanitise-output.js";
 import { assessMutationHealth } from "./mutation-health.js";
 import { applyPatchOperations } from "../patch-applier.js";
 import { getAdapter, getMaxTokensFromConfig } from "../../adapters/llm/router.js";
@@ -45,6 +45,11 @@ import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { log } from "../../utils/telemetry.js";
 import { STREAM_ERROR_CODES } from "../pipeline/stream-events.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
+import { config } from "../../config/index.js";
+import { buildCoachingContext } from "./coaching-context-builder.js";
+import type { CoachingContext } from "./coaching-context-builder.js";
+import { mergeSessionState, advanceSessionState } from "./session-state.js";
+import type { SessionState } from "./session-state.js";
 
 // ============================================================================
 // Chip-Click Text Templates (Task 5)
@@ -152,6 +157,20 @@ export async function* executePipelineV4(
       generate_model: !!turnRequest.generate_model,
     }, 'v4.turn_context');
 
+    // ── WS6 + WS1: Session state + Coaching context ─────────────────
+    // Resolve session state from request (backward-compatible: defaults when absent).
+    // Build coaching context for dynamic block enrichment and downstream consumers.
+    // Feature flag: CEE_COACHING_CONTEXT_ENABLED (covers WS1 + WS8).
+    const sessionState: SessionState = mergeSessionState(turnRequest.session_state);
+    let coachingContext: CoachingContext | null = null;
+    if (config.cee.coachingContextEnabled) {
+      try {
+        coachingContext = buildCoachingContext(turnContext, sessionState);
+      } catch (err) {
+        log.warn({ event: 'v4.coaching_context_error', error: (err as Error).message }, 'Coaching context build failed — skipping');
+      }
+    }
+
     if (signal?.aborted) return;
 
     // ── Class 1b: Pending confirmation (deterministic, no LLM) ──────
@@ -177,6 +196,21 @@ export async function* executePipelineV4(
           contextFallbackUsed,
         });
 
+        // WS6: Advance session state on confirmation path
+        if (config.cee.coachingContextEnabled) {
+          const confirmOutcome = {
+            patch_accepted: !!confirmResult.executedProposal,
+            patch_dismissed: !!confirmResult.cleared,
+          };
+          const updatedState = advanceSessionState(
+            sessionState,
+            confirmResult.executedProposal?.action_type as ActionName ?? null,
+            turnContext,
+            confirmOutcome,
+          );
+          (envelope as unknown as Record<string, unknown>).updated_session_state = updatedState;
+        }
+
         yield { type: 'turn_complete', seq: seq++, envelope };
         return;
       }
@@ -189,7 +223,8 @@ export async function* executePipelineV4(
     yield { type: 'turn_start', seq: seq++, turn_id: turnId, routing, stage };
 
     // Build prompt (async — loads from PMS with TTL cache)
-    const prompt = await buildDeterministicPromptV2(turnContext);
+    // WS8: pass coaching context for dynamic block enrichment
+    const prompt = await buildDeterministicPromptV2(turnContext, coachingContext);
 
     // Build tool definitions — add draft_graph when generate_model or no usable graph
     // An empty graph ({ nodes: [], edges: [] }) is truthy but has no model content,
@@ -546,6 +581,14 @@ export async function* executePipelineV4(
       assistantText = sanitiseAssistantText(assistantText);
     }
 
+    // WS6: Advance session state after action execution
+    const actionOutcome = executedAction === 'set_factor_value' && streamResult.toolExecution?.input
+      ? { calibrated_factor_id: streamResult.toolExecution.input.target_id as string | undefined }
+      : undefined;
+    const updatedSessionState = config.cee.coachingContextEnabled
+      ? advanceSessionState(sessionState, executedAction, turnContext, actionOutcome)
+      : null;
+
     const envelope = assembleV4Envelope({
       turnContext,
       turnId,
@@ -559,6 +602,11 @@ export async function* executePipelineV4(
       llmLatencyMs: llmDurationMs,
       deferredActions,
     });
+
+    // WS6: Attach updated session state to envelope for UI round-trip
+    if (updatedSessionState) {
+      (envelope as unknown as Record<string, unknown>).updated_session_state = updatedSessionState;
+    }
 
     yield { type: 'turn_complete', seq: seq++, envelope };
 
@@ -886,6 +934,12 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   const normalised = normaliseDeterministicResponse(envelope, {
     v4Context: { request_id: requestId, turn_id: turnId, execution_class: executionClass },
   });
+
+  // Belt-and-braces: sanitise ALL user-facing text fields on the assembled
+  // envelope. Catches any em dashes, banned terms, or artefacts that slipped
+  // through per-field sanitisation above (e.g. text injected by normaliser,
+  // block titles, or composer-generated strings added after the per-field pass).
+  sanitiseEnvelopeText(normalised as unknown as Record<string, unknown>);
 
   // Outbound contract validation (warn-only, never blocks response)
   validateEnvelope(normalised as unknown as Record<string, unknown>, turnId);

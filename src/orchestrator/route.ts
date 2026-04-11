@@ -168,6 +168,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       graph_state: parsed.data.graph_state as OrchestratorTurnRequest['graph_state'],
       analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
       generate_model: generateModel,
+      session_state: parsed.data.session_state ?? undefined,
     };
 
     try {

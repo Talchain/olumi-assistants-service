@@ -39,6 +39,7 @@ vi.mock("../../../../../src/config/index.js", () => ({
     cee: {
       clarifierEnabled: false,
       preflightEnabled: false,
+      coachingContextEnabled: false,
     },
   },
   shouldUseStagingPrompts: () => false,

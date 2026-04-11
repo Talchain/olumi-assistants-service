@@ -101,3 +101,49 @@ export function sanitiseAssistantText(text: string, opts?: SanitiseOptions): str
 
   return result;
 }
+
+/**
+ * Belt-and-braces pass: sanitise all user-facing text fields on an assembled
+ * response envelope. Catches em dashes, banned terms, or artefacts that
+ * slipped through per-field sanitisation (e.g. text injected by normaliser,
+ * block titles, or post-assembly additions).
+ *
+ * Mutates the envelope in place — call after normaliseDeterministicResponse.
+ */
+export function sanitiseEnvelopeText(envelope: Record<string, unknown>): void {
+  // assistant_text
+  if (typeof envelope.assistant_text === 'string') {
+    envelope.assistant_text = sanitiseAssistantText(envelope.assistant_text);
+  }
+
+  // suggested_actions[].label and suggested_actions[].prompt
+  const actions = envelope.suggested_actions;
+  if (Array.isArray(actions)) {
+    for (const chip of actions) {
+      if (chip && typeof chip === 'object') {
+        const c = chip as Record<string, unknown>;
+        if (typeof c.label === 'string') c.label = sanitiseAssistantText(c.label);
+        if (typeof c.prompt === 'string') c.prompt = sanitiseAssistantText(c.prompt);
+      }
+    }
+  }
+
+  // blocks[].data.summary (graph_patch summaries) and blocks[].data.narrative
+  const blocks = envelope.blocks;
+  if (Array.isArray(blocks)) {
+    for (const block of blocks) {
+      if (block && typeof block === 'object') {
+        const data = (block as Record<string, unknown>).data;
+        if (data && typeof data === 'object') {
+          const d = data as Record<string, unknown>;
+          if (typeof d.summary === 'string') {
+            d.summary = sanitiseAssistantText(d.summary, { preserveBold: true });
+          }
+          if (typeof d.narrative === 'string') {
+            d.narrative = sanitiseAssistantText(d.narrative, { preserveBold: true });
+          }
+        }
+      }
+    }
+  }
+}

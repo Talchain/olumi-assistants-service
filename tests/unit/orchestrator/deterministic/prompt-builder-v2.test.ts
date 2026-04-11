@@ -291,3 +291,152 @@ describe("buildDeterministicPromptV2", () => {
     expect(result.dynamic_block).not.toContain('Runtime context');
   });
 });
+
+// ============================================================================
+// Coaching Context Section (WS8)
+// ============================================================================
+
+describe("buildDeterministicPromptV2 — coaching section", () => {
+  it("omits coaching section when coaching is null", async () => {
+    const ctx = makeTurnContext();
+    const result = await buildDeterministicPromptV2(ctx, null);
+    expect(result.dynamic_block).not.toContain('Coaching Context');
+  });
+
+  it("omits coaching section when coaching is undefined", async () => {
+    const ctx = makeTurnContext();
+    const result = await buildDeterministicPromptV2(ctx);
+    expect(result.dynamic_block).not.toContain('Coaching Context');
+  });
+
+  it("renders coaching mode and primary move", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({ coaching_mode: 'calibrate', primary_move: 'surface_assumption' });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('## Coaching Context');
+    expect(result.dynamic_block).toContain('Mode: calibrate');
+    expect(result.dynamic_block).toContain('Move: surface_assumption');
+  });
+
+  it("renders headline when present", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({
+      headline: {
+        leading_option: 'Option A',
+        leading_probability: 72,
+        runner_up: 'Option B',
+        runner_up_probability: 28,
+        win_gap: 44,
+        stability_band: 'moderate',
+        stability_pct: 55,
+      },
+    });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('Leading: Option A (72%)');
+    expect(result.dynamic_block).toContain('Runner-up: Option B (28%)');
+    expect(result.dynamic_block).toContain('Stability: moderate (55%)');
+  });
+
+  it("renders tradeoff when present", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({
+      tradeoff: { option_a: 'Hire Lead', benefit_a: 'leadership depth', option_b: 'Hire Devs', benefit_b: 'delivery capacity' },
+    });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('Trade-off: Hire Lead offers leadership depth; Hire Devs offers delivery capacity');
+  });
+
+  it("renders provenance counts", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({ user_provided_count: 3, ai_estimated_count: 5, total_factor_count: 8 });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('Provenance: 3 from brief, 5 inferred by Olumi (8 total)');
+  });
+
+  it("renders triggered plays", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({
+      triggered_plays: [
+        { play: 'dominant_factor', trigger_reason: 'Cost at 42%', factor_label: 'Cost', recommended_angle: 'ask_for_calibration' },
+      ],
+    });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('### Active coaching plays');
+    expect(result.dynamic_block).toContain('dominant_factor: Cost at 42%');
+  });
+
+  it("renders CTA when present", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({
+      cta: { guidance: 'Calibrate the key assumptions.', readiness: 'not_ready' },
+    });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('Decision readiness: not_ready');
+    expect(result.dynamic_block).toContain('CTA: Calibrate the key assumptions.');
+  });
+
+  it("renders calibration target as question", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({
+      calibration_target: { source_label: 'Cost', target_label: 'Productivity', factor_id: 'f1' },
+    });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('How strong is the effect of Cost on Productivity?');
+  });
+
+  it("renders critical gap", async () => {
+    const ctx = makeTurnContext();
+    const coaching = makeCoachingContext({
+      critical_gap: { type: 'missing_factor', detail: 'No risk factors modelled.' },
+    });
+    const result = await buildDeterministicPromptV2(ctx, coaching);
+    expect(result.dynamic_block).toContain('Critical gap: No risk factors modelled.');
+  });
+
+  it("static block is unchanged by coaching context", async () => {
+    const ctx = makeTurnContext();
+    const without = await buildDeterministicPromptV2(ctx);
+    const withCtx = await buildDeterministicPromptV2(ctx, makeCoachingContext());
+    expect(without.static_block).toBe(withCtx.static_block);
+  });
+});
+
+// ============================================================================
+// Coaching context fixture helper
+// ============================================================================
+
+function makeCoachingContext(overrides: Record<string, unknown> = {}): import("../../../../src/orchestrator/deterministic/coaching-context-builder.js").CoachingContext {
+  return {
+    coaching_mode: 'calibrate',
+    primary_move: 'surface_assumption',
+    ask_question_now: false,
+    challenge_now: false,
+    response_posture: 'exploratory',
+    headline: null,
+    tradeoff: null,
+    biggest_inference: null,
+    calibration_target: null,
+    ai_estimated_count: 2,
+    user_provided_count: 3,
+    total_factor_count: 5,
+    drivers: [],
+    top_fragile: null,
+    triggered_plays: [],
+    cta: null,
+    risk_factor_count: 0,
+    option_mechanism_overlap: false,
+    critical_gap: null,
+    prediction_state: 'none',
+    chip_inputs: {
+      stage: 'ideate',
+      has_analysis: false,
+      analysis_fresh: false,
+      top_uncalibrated_factor: null,
+      has_risk_factors: false,
+      option_mechanism_overlap: false,
+      stability_band: null,
+      dominant_factor_label: null,
+    },
+    ...overrides,
+  } as import("../../../../src/orchestrator/deterministic/coaching-context-builder.js").CoachingContext;
+}

@@ -23,6 +23,7 @@ vi.mock("../../../../src/config/index.js", () => ({
     features: { pipelineV4Enabled: true, deterministicOrchestratorEnabled: true },
     llm: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
     promptCache: { anthropicEnabled: true },
+    cee: { coachingContextEnabled: false },
   },
   shouldUseStagingPrompts: () => false,
 }));

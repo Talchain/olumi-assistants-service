@@ -17,6 +17,7 @@
  */
 
 import type { DeterministicTurnContext, DisambiguationHint } from "./types.js";
+import type { CoachingContext } from "./coaching-context-builder.js";
 import { loadPrompt } from "../../prompts/loader.js";
 import { shouldUseStagingPrompts } from "../../config/index.js";
 import { auditPromptForV4, RUNTIME_TOOL_USE_SUFFIX } from "./prompt-audit.js";
@@ -54,7 +55,10 @@ export function _resetPromptCacheForTesting(): void { promptCache = null; }
  * The static block is identical across turns and marked with cache_control
  * by the caller. The dynamic block varies per turn.
  */
-export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext): Promise<DeterministicPromptV2> {
+export async function buildDeterministicPromptV2(
+  ctx: DeterministicTurnContext,
+  coaching?: CoachingContext | null,
+): Promise<DeterministicPromptV2> {
   // Refresh cache if missing or expired.
   //
   // We pass `useStaging` so that when the deployment is configured for staging
@@ -133,6 +137,10 @@ export async function buildDeterministicPromptV2(ctx: DeterministicTurnContext):
 
   if (ctx.disambiguation_hints.length > 0) {
     dynamicSections.push(buildDisambiguationSection(ctx.disambiguation_hints));
+  }
+
+  if (coaching) {
+    dynamicSections.push(buildCoachingSection(coaching));
   }
 
   return {
@@ -330,4 +338,110 @@ function buildDisambiguationSection(hints: DisambiguationHint[]): string {
   }
 
   return lines.join('\n');
+}
+
+// ============================================================================
+// Coaching Context Section (WS8)
+// ============================================================================
+
+/**
+ * Render coaching context into the dynamic block.
+ * Stage-aware: FRAME, IDEATE, and EVALUATE each get a tailored section.
+ */
+function buildCoachingSection(coaching: CoachingContext): string {
+  const parts: string[] = ['## Coaching Context'];
+
+  parts.push(`Mode: ${coaching.coaching_mode}`);
+  parts.push(`Move: ${coaching.primary_move}`);
+  parts.push(`Posture: ${coaching.response_posture}`);
+
+  // Headline (EVALUATE / DECIDE)
+  if (coaching.headline) {
+    const h = coaching.headline;
+    parts.push('');
+    parts.push('### Analysis');
+    parts.push(`Leading: ${h.leading_option} (${h.leading_probability}%)`);
+    parts.push(`Runner-up: ${h.runner_up} (${h.runner_up_probability}%)`);
+    parts.push(`Stability: ${h.stability_band} (${h.stability_pct}%)`);
+  }
+
+  // Top drivers
+  if (coaching.drivers.length > 0) {
+    parts.push('');
+    parts.push('### Top drivers');
+    for (const d of coaching.drivers) {
+      const aiTag = d.is_ai_estimated ? ' (AI estimated)' : '';
+      parts.push(`- ${d.factor_label}: sensitivity ${Math.round(d.sensitivity * 100)}%, confidence: ${d.confidence_band}${aiTag}`);
+    }
+  }
+
+  // Tradeoff (IDEATE post-draft)
+  if (coaching.tradeoff) {
+    const t = coaching.tradeoff;
+    parts.push(`Trade-off: ${t.option_a} offers ${t.benefit_a}; ${t.option_b} offers ${t.benefit_b}`);
+  }
+
+  // Biggest inference
+  if (coaching.biggest_inference) {
+    const bi = coaching.biggest_inference;
+    parts.push(`Biggest inference: ${bi.factor_label} (${bi.source}, ${bi.reason})`);
+  }
+
+  // Calibration target
+  if (coaching.calibration_target) {
+    const ct = coaching.calibration_target;
+    parts.push(`Calibration target: How strong is the effect of ${ct.source_label} on ${ct.target_label}?`);
+  }
+
+  // Provenance
+  parts.push(`Provenance: ${coaching.user_provided_count} from brief, ${coaching.ai_estimated_count} inferred by Olumi (${coaching.total_factor_count} total)`);
+
+  // Risk + overlap
+  if (coaching.risk_factor_count === 0 && coaching.total_factor_count > 3) {
+    parts.push('Risk factors: 0');
+  }
+  if (coaching.option_mechanism_overlap) {
+    parts.push('Option mechanism overlap: true (all options act through same factors)');
+  }
+
+  // Fragile edge
+  if (coaching.top_fragile) {
+    const f = coaching.top_fragile;
+    parts.push(`Fragile link: ${f.source_label} to ${f.target_label} (${Math.round(f.flip_probability * 100)}% flip)`);
+  }
+
+  // Triggered plays
+  if (coaching.triggered_plays.length > 0) {
+    parts.push('');
+    parts.push('### Active coaching plays');
+    for (const p of coaching.triggered_plays) {
+      parts.push(`- ${p.play}: ${p.trigger_reason} (angle: ${p.recommended_angle})`);
+    }
+  }
+
+  // Challenge / question gates
+  if (coaching.challenge_now) {
+    parts.push('Challenge now: true');
+  }
+  if (coaching.ask_question_now) {
+    parts.push('Ask question now: true');
+  }
+
+  // Prediction state
+  if (coaching.prediction_state !== 'none') {
+    parts.push(`Prediction: ${coaching.prediction_state}`);
+  }
+
+  // Critical gap
+  if (coaching.critical_gap) {
+    parts.push(`Critical gap: ${coaching.critical_gap.detail}`);
+  }
+
+  // CTA
+  if (coaching.cta) {
+    parts.push(`Decision readiness: ${coaching.cta.readiness}`);
+    parts.push(`CTA: ${coaching.cta.guidance}`);
+  }
+
+  return parts.join('\n');
 }

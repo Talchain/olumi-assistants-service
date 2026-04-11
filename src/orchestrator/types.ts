@@ -100,6 +100,9 @@ export interface OrchestratorTurnRequest {
     action_type: string;
     parameters?: Record<string, unknown>;
   };
+  /** Session decision state — echoed from previous turn's updated_session_state.
+   *  Partial: UI may send incomplete state; mergeSessionState() fills defaults. */
+  session_state?: Partial<import("./deterministic/session-state.js").SessionState>;
 }
 
 // ============================================================================

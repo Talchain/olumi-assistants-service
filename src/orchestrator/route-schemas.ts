@@ -145,6 +145,23 @@ const ConversationContextSchema = z.object({
   analysis_inputs: AnalysisInputsSchema,
 });
 
+/**
+ * Session decision state schema — validates session_state round-tripped from the UI.
+ * Permissive: accepts partial state and falls back to defaults in the pipeline.
+ */
+export const SessionStateSchema = z.object({
+  prediction: z.string().nullable().optional(),
+  calibrations_provided: z.array(z.string()).optional(),
+  plays_fired: z.array(z.string()).optional(),
+  questions_asked: z.array(z.string()).optional(),
+  accepted_patches: z.number().int().min(0).optional(),
+  dismissed_patches: z.number().int().min(0).optional(),
+  last_chip_ids_shown: z.array(z.string()).optional(),
+  last_question_turn: z.number().int().min(0).optional(),
+  preferred_option: z.string().nullable().optional(),
+  convergence_signal: z.enum(['exploring', 'narrowing', 'converging']).optional(),
+}).optional();
+
 export const TurnRequestSchema = z.object({
   message: z.string().min(0).max(10_000).default(''),
   context: ConversationContextSchema.optional(),
@@ -162,6 +179,8 @@ export const TurnRequestSchema = z.object({
   generate_model: z.boolean().optional().default(false),
   /** UI alias for generate_model — accepted for backward compatibility. */
   explicit_generate: z.boolean().optional(),
+  /** Session decision state — echoed from previous turn's updated_session_state. */
+  session_state: SessionStateSchema,
 });
 
 /** Maximum user message length (friendly limit below Zod's 10,000 cap). */
