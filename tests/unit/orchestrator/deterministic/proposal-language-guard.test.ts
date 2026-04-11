@@ -200,6 +200,40 @@ describe("enforceProposalLanguage — deterministic-handler false-positive guard
   });
 });
 
+describe("enforceProposalLanguage — I'll <verb> leak patterns", () => {
+  it("flags \"I'll add Team Dynamics Risk as an observable factor. Please confirm.\"", () => {
+    const r = enforceProposalLanguage(
+      "I'll add Team Dynamics Risk as an observable factor. Please confirm.",
+      "add_factor",
+    );
+    expect(r.leaked).toBe(true);
+    expect(r.matchedPhrase?.toLowerCase()).toContain("i'll add");
+  });
+
+  it("flags \"I'll update the edge strength.\"", () => {
+    const r = enforceProposalLanguage("I'll update the edge strength.", "edit_graph");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("flags \"I'll remove that option.\" with smart quote", () => {
+    const r = enforceProposalLanguage("I\u2019ll remove that option.", "remove_option");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("flags \"I'll change the category.\"", () => {
+    const r = enforceProposalLanguage("I'll change the category.", "edit_graph");
+    expect(r.leaked).toBe(true);
+  });
+
+  it("does NOT flag 'If I add a factor' (no contraction)", () => {
+    const r = enforceProposalLanguage(
+      "If I add a factor, it would improve coverage.",
+      "add_factor",
+    );
+    expect(r.leaked).toBe(false);
+  });
+});
+
 describe("enforceProposalLanguage — suffix preserves original text", () => {
   it("appends the suffix exactly once with the expected separator", () => {
     const original = "I've added the option.";

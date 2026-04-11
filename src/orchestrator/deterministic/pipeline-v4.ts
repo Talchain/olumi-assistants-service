@@ -37,6 +37,7 @@ import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { enforceProposalLanguage } from "./proposal-language-guard.js";
+import { sanitiseAssistantText } from "./sanitise-output.js";
 import { assessMutationHealth } from "./mutation-health.js";
 import { applyPatchOperations } from "../patch-applier.js";
 import { getAdapter, getMaxTokensFromConfig } from "../../adapters/llm/router.js";
@@ -540,6 +541,11 @@ export async function* executePipelineV4(
       .map((d) => d.name as ActionName)
       .filter((name) => name !== executedAction);
 
+    // Sanitise user-facing text before envelope assembly
+    if (assistantText) {
+      assistantText = sanitiseAssistantText(assistantText);
+    }
+
     const envelope = assembleV4Envelope({
       turnContext,
       turnId,
@@ -696,12 +702,12 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   if (!actionResult?.failure && actionResult?.operations && actionResult.operations.length > 0) {
     // T4: label-aware semantic patch summary using the pre-mutation graph
     // for label resolution. Falls back to count-based on resolution failure.
-    const patchSummary = buildPatchSummary(
+    const patchSummary = sanitiseAssistantText(buildPatchSummary(
       actionResult.operations,
       null,
       'edit',
       turnContext.graph ?? null,
-    );
+    ), { preserveBold: true });
     const patchBlock = createGraphPatchBlock(
       {
         patch_type: 'edit',
@@ -795,6 +801,12 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   // Deferred actions (compound calls dropped by one-tool-per-turn) are
   // promoted to the front so the user can resume the unfulfilled intent.
   const suggestedActions = buildDeterministicChips(turnContext, executedAction, deferredActions);
+
+  // Sanitise chip labels and prompts
+  for (const chip of suggestedActions) {
+    if (chip.label) chip.label = sanitiseAssistantText(chip.label);
+    if (chip.prompt) chip.prompt = sanitiseAssistantText(chip.prompt);
+  }
 
   // Build lineage
   const lineage = {

@@ -53,6 +53,12 @@ const LEAK_PATTERNS: ReadonlyArray<RegExp> = [
   /(?:^|[.\n]\s*)(?:i['’]ve\s+)?set\s+.+\s+to\s+/i,
   /(?:^|[.\n]\s*)(?:i['’]ve\s+)?updated\s+.+\s+to\s+/i,
   /(?:^|[.\n]\s*)(?:i['’]ve\s+)?changed\s+.+\s+to\s+/i,
+  // "I’ll <verb>" patterns — the LLM sometimes frames a completed action as
+  // a future intent on proposal turns. Same quote-class as lines 35-36.
+  /\bI['’]ll add\b/i,
+  /\bI['’]ll update\b/i,
+  /\bI['’]ll remove\b/i,
+  /\bI['’]ll change\b/i,
 ];
 
 export interface ProposalLanguageScanResult {

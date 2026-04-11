@@ -29,6 +29,7 @@ export const addFactorAction: ActionDefinition = {
       category: { type: 'string', enum: ['controllable', 'observable', 'external'], description: 'Factor category' },
       value: { type: 'number', description: 'Initial observed value' },
       unit: { type: 'string', description: 'Unit label for the value' },
+      kind: { type: 'string', enum: ['factor', 'risk'], description: 'Node kind — risk factors get negative edge direction to goals' },
       connect_to: { type: 'array', items: { type: 'string' }, description: 'IDs of factors to connect to' },
     },
     required: ['label'],
@@ -45,6 +46,7 @@ export const addFactorAction: ActionDefinition = {
     const value = params.value as number | undefined;
     const unit = params.unit as string | undefined;
     const category = (params.category as string) ?? 'observable';
+    const kind = (params.kind as string) === 'risk' ? 'risk' : 'factor';
     const rawConnectTo = params.connect_to;
     // connect_to may arrive as a single string or an array of target IDs
     const connectToTargets: string[] = Array.isArray(rawConnectTo)
@@ -104,8 +106,9 @@ export const addFactorAction: ActionDefinition = {
       };
     }
 
-    // Generate canonical node ID
-    const nodeId = `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '')}`;
+    // Generate canonical node ID — risk nodes get a `risk_` prefix
+    const idPrefix = kind === 'risk' ? 'risk_' : 'factor_';
+    const nodeId = `${idPrefix}${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '')}`;
 
     const operations: PatchOperation[] = [
       {
@@ -113,7 +116,7 @@ export const addFactorAction: ActionDefinition = {
         path: nodeId,
         value: {
           id: nodeId,
-          kind: 'factor',
+          kind,
           label,
           category,
           ...(value != null || unit ? {
@@ -137,7 +140,7 @@ export const addFactorAction: ActionDefinition = {
           to: targetId,
           strength: { mean: 0.5, std: 0.15 },
           exists_probability: DEFAULT_EXISTS_PROBABILITY,
-          effect_direction: 'positive',
+          effect_direction: kind === 'risk' ? 'negative' : 'positive',
         },
       });
     }
@@ -147,7 +150,7 @@ export const addFactorAction: ActionDefinition = {
 
     return {
       blocks: [],
-      assistantText: `I'll add **${label}**${valueStr} as a ${category} factor. Please confirm.`,
+      assistantText: `I'll add **${label}**${valueStr} as a ${kind === 'risk' ? 'risk factor' : `${category} factor`}. Please confirm.`,
       guidance_items: [],
       operations,
     };
@@ -168,7 +171,7 @@ function findExistingFactor(
   normalisedLabel: string,
 ): { id: string; label: string } | null {
   for (const [id, entry] of ctx.entities.nodes) {
-    if (entry.kind !== 'factor') continue;
+    if (entry.kind !== 'factor' && entry.kind !== 'risk') continue;
     const entryNormalised = entry.label.toLowerCase().replace(/\s+/g, ' ').trim();
     if (entryNormalised === normalisedLabel) {
       return { id, label: entry.label };
