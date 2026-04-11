@@ -126,6 +126,7 @@ export const addOptionAction: ActionDefinition = {
           id: nodeId,
           kind: 'option',
           label,
+          is_baseline: false,
           data: { interventions },
         },
       },
