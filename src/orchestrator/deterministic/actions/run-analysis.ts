@@ -108,6 +108,13 @@ export const runAnalysisAction: ActionDefinition = {
         assistantText: 'Analysis complete.',
         guidance_items: [],
         analysis_response: analysisResponse ?? undefined,
+        fact: {
+          action: 'analysis_complete',
+          entities_affected: [],
+          what_changed: 'analysis complete',
+          stale_analysis: false,
+          auto_apply: true,
+        },
       };
     } catch (err) {
       // Distinguish error types for specific user-facing messages

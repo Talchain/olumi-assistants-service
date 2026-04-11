@@ -7,6 +7,33 @@
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
 import { resolveEntity } from "../entity-resolver.js";
+import { log } from "../../../utils/telemetry.js";
+
+/**
+ * Map a raw currency signal (symbol or short code) to a canonical unit label.
+ * Returns null when the signal is not a recognised currency.
+ */
+function normaliseCurrency(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Direct symbol → ISO-ish code mapping. Keeping short codes preserves the
+  // user's stated currency without inventing locale-specific prose.
+  const symbolMap: Record<string, string> = {
+    '$': 'USD',
+    '£': 'GBP',
+    '€': 'EUR',
+    '¥': 'JPY',
+    '₹': 'INR',
+  };
+  if (trimmed in symbolMap) return symbolMap[trimmed];
+  // 3-letter currency codes pass through (already canonical).
+  if (/^[A-Z]{3}$/.test(trimmed)) return trimmed;
+  // Symbol + code variants ("$USD") — take the code.
+  const codeMatch = trimmed.match(/([A-Z]{3})/);
+  if (codeMatch) return codeMatch[1];
+  return null;
+}
 
 export const setFactorValueAction: ActionDefinition = {
   action_type: 'set_factor_value',
@@ -84,22 +111,113 @@ export const setFactorValueAction: ActionDefinition = {
       };
     }
 
+    // Resolve effective unit. Precedence (highest to lowest):
+    //   1. Unit param supplied by the LLM tool call (if a recognised currency
+    //      or plain string).
+    //   2. Currency detected in the user's raw message
+    //      (ctx.user_currency_hint, populated by turn-context.detectCurrencyInMessage).
+    //      This catches the common case where the user says "$100,000" but
+    //      the LLM tool call omits `unit`, letting the graph's default unit
+    //      silently override the user's stated currency.
+    //   3. Graph node's existing unit.
+    //
+    // On any mismatch between the user-stated currency (params OR message)
+    // and the graph node's unit, log `v4.set_factor_value_currency_mismatch`
+    // so staging drift is visible in telemetry.
+    const paramUnit = typeof params.unit === 'string' ? params.unit : undefined;
+    const normalisedParamCurrency = normaliseCurrency(paramUnit);
+    const messageCurrency = ctx.user_currency_hint ?? null;
+    const nodeUnit = nodeEntry?.unit;
+    const nodeCurrency = nodeUnit ? normaliseCurrency(nodeUnit) : null;
+
+    let effectiveUnit: string | undefined;
+    let resolvedSource: 'param' | 'message' | 'node' | 'none' = 'none';
+
+    if (normalisedParamCurrency) {
+      effectiveUnit = normalisedParamCurrency;
+      resolvedSource = 'param';
+    } else if (messageCurrency) {
+      effectiveUnit = messageCurrency;
+      resolvedSource = 'message';
+    } else if (paramUnit) {
+      // Non-currency unit passed explicitly — honour it.
+      effectiveUnit = paramUnit;
+      resolvedSource = 'param';
+    } else if (nodeUnit) {
+      effectiveUnit = nodeUnit;
+      resolvedSource = 'node';
+    }
+
+    // Log any mismatch between the user's stated currency and the node's
+    // stored currency. Fires on both param-user and message-user paths.
+    const userCurrency = normalisedParamCurrency ?? messageCurrency;
+    if (userCurrency && nodeCurrency && userCurrency !== nodeCurrency) {
+      log.warn(
+        {
+          event: 'v4.set_factor_value_currency_mismatch',
+          entity_id: entity.id,
+          entity_label: entity.label,
+          node_unit: nodeUnit,
+          param_unit: paramUnit,
+          message_currency: messageCurrency,
+          resolved: effectiveUnit,
+          source: resolvedSource,
+        },
+        'set_factor_value: user currency differs from graph node currency — honouring user',
+      );
+    }
+
+    // Separate warning: the LLM passed a non-currency unit string (e.g.
+    // "percentage") but the node was storing a currency. The param wins
+    // (honour explicit LLM intent), but we surface the override in telemetry
+    // so unit-drift from the currency path becomes visible in staging.
+    if (
+      paramUnit
+      && !normalisedParamCurrency
+      && nodeCurrency
+      && effectiveUnit === paramUnit
+      && effectiveUnit !== nodeCurrency
+    ) {
+      log.warn(
+        {
+          event: 'v4.set_factor_value_unit_overwrite',
+          entity_id: entity.id,
+          entity_label: entity.label,
+          node_unit: nodeUnit,
+          param_unit: paramUnit,
+          resolved: effectiveUnit,
+        },
+        'set_factor_value: non-currency param unit is overwriting a currency node unit — honouring LLM intent',
+      );
+    }
+
     const operations = [{
       op: 'update_node' as const,
       path: entity.id,
       value: {
         observed_state: {
           value,
-          ...(nodeEntry?.unit ? { unit: nodeEntry.unit } : {}),
+          ...(effectiveUnit ? { unit: effectiveUnit } : {}),
         },
       },
     }];
 
     return {
       blocks: [],
-      assistantText: `Updated **${entity.label}** to ${value}${nodeEntry?.unit ? ' ' + nodeEntry.unit : ''}.`,
+      assistantText: `Updated **${entity.label}** to ${value}${effectiveUnit ? ' ' + effectiveUnit : ''}.`,
       guidance_items: [],
       operations,
+      fact: {
+        action: 'value_set',
+        entities_affected: [{ id: entity.id, label: entity.label, kind: 'factor' }],
+        what_changed: `${entity.label} to ${value}${effectiveUnit ? ' ' + effectiveUnit : ''}`,
+        stale_analysis: ctx.analysis_summary != null,
+        auto_apply: true,
+        data: {
+          new_value: value,
+          unit: effectiveUnit,
+        },
+      },
     };
   },
 

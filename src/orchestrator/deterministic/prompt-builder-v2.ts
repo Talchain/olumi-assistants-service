@@ -58,6 +58,10 @@ export function _resetPromptCacheForTesting(): void { promptCache = null; }
 export async function buildDeterministicPromptV2(
   ctx: DeterministicTurnContext,
   coaching?: CoachingContext | null,
+  /** Pre-computed chip labels — injected into the coaching section so the
+   *  LLM knows exactly which suggestions the UI renders and doesn't duplicate
+   *  them as inline quoted text in its response (Task 6 / P1.2). */
+  chipLabels?: string[],
 ): Promise<DeterministicPromptV2> {
   // Refresh cache if missing or expired.
   //
@@ -140,7 +144,7 @@ export async function buildDeterministicPromptV2(
   }
 
   if (coaching) {
-    dynamicSections.push(buildCoachingSection(coaching));
+    dynamicSections.push(buildCoachingSection(coaching, chipLabels));
   }
 
   return {
@@ -347,8 +351,12 @@ function buildDisambiguationSection(hints: DisambiguationHint[]): string {
 /**
  * Render coaching context into the dynamic block.
  * Stage-aware: FRAME, IDEATE, and EVALUATE each get a tailored section.
+ *
+ * When `chipLabels` is provided, they are listed in the "Suggested actions"
+ * subsection so the LLM knows exactly which chips the UI will render and
+ * does not need to duplicate them as inline quoted text (Task 6 / P1.2).
  */
-function buildCoachingSection(coaching: CoachingContext): string {
+function buildCoachingSection(coaching: CoachingContext, chipLabels?: string[]): string {
   const parts: string[] = ['## Coaching Context'];
 
   parts.push(`Mode: ${coaching.coaching_mode}`);
@@ -441,6 +449,23 @@ function buildCoachingSection(coaching: CoachingContext): string {
   if (coaching.cta) {
     parts.push(`Decision readiness: ${coaching.cta.readiness}`);
     parts.push(`CTA: ${coaching.cta.guidance}`);
+  }
+
+  // Task 6 / P1.2: chip-format guard + label list.
+  // Suggested next steps are rendered by the UI as clickable chips from the
+  // envelope's suggested_actions field. When we have the computed chip labels
+  // (pre-execution), list them so the LLM sees exactly what the user will
+  // see. The LLM must NOT duplicate these as quoted chip-like lines in its
+  // response body (e.g. `"Challenge the Cost driver" (challenger)`).
+  parts.push('');
+  parts.push('### Suggested actions');
+  if (chipLabels && chipLabels.length > 0) {
+    parts.push(`The user will see these clickable actions below your response: ${chipLabels.map(l => `"${l}"`).join(', ')}.`);
+    parts.push('Do not repeat them as quoted lines with role tags in your message.');
+  } else {
+    parts.push(
+      'Suggested next steps are provided to the user as clickable actions below your response. Do not list them as quoted lines with role tags in your message.',
+    );
   }
 
   return parts.join('\n');

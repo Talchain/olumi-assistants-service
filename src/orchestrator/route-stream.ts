@@ -137,6 +137,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
         generate_model: normalizeGenerateModel(parsed.data),
         session_state: parsed.data.session_state ?? undefined,
+        chip_metadata: parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'],
       };
 
       // Idempotency check — cache hit returns JSON, not SSE

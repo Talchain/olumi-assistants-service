@@ -48,8 +48,10 @@ import type { GuidanceItem } from "../types/guidance-item.js";
 import { config } from "../../config/index.js";
 import { buildCoachingContext } from "./coaching-context-builder.js";
 import type { CoachingContext } from "./coaching-context-builder.js";
-import { mergeSessionState, advanceSessionState } from "./session-state.js";
+import { mergeSessionState, advanceSessionState, updateLastChipIds, registerChipClick } from "./session-state.js";
 import type { SessionState } from "./session-state.js";
+import { composeResponse } from "./response-composer.js";
+import { computeChips, getChipIdsForSession } from "./chip-engine.js";
 
 // ============================================================================
 // Chip-Click Text Templates (Task 5)
@@ -66,7 +68,13 @@ const CHIP_TEXT_TEMPLATES: Record<string, (ctx: DeterministicTurnContext) => str
   draft_graph: () => 'Building your decision model.',
 };
 
-/** Fallback text templates for empty LLM responses after successful tool execution (Task 3). */
+/**
+ * Fallback text templates for empty LLM responses after successful tool
+ * execution. Fires only on the degenerate path where both the LLM and the
+ * action handler produced no text (handler text or composer output is
+ * preferred). Uses the same decision-language framing as the response
+ * composer — no banned completion verbs (Added, Updated, Done, Applied).
+ */
 const TOOL_RESULT_TEXT_TEMPLATES: Record<string, string> = {
   compare_options: "Here's how your options compare.",
   what_would_flip: "Here's what would need to change to flip the leading option.",
@@ -74,13 +82,13 @@ const TOOL_RESULT_TEXT_TEMPLATES: Record<string, string> = {
   explain_result: "Here's what's driving the result.",
   run_analysis: 'Running the analysis now.',
   draft_graph: 'Building your decision model.',
-  set_factor_value: 'Updated the factor value.',
-  add_factor: 'Added the factor to your model.',
-  add_option: 'Added the option to your model.',
-  add_constraint: 'Added the constraint.',
-  adjust_edge_strength: 'Adjusted the edge strength.',
-  remove_factor: 'Removed the factor from your model.',
-  set_goal_target: 'Updated the goal target.',
+  set_factor_value: 'The factor value is now set.',
+  add_factor: 'The factor is now in your model.',
+  add_option: 'The option is now in your model.',
+  add_constraint: 'The constraint is now in your model.',
+  adjust_edge_strength: 'The edge strength is now set.',
+  remove_factor: 'The factor is no longer in your model.',
+  set_goal_target: 'The goal target is now set.',
   challenge_assumption: 'Examining that assumption.',
 };
 
@@ -161,7 +169,13 @@ export async function* executePipelineV4(
     // Resolve session state from request (backward-compatible: defaults when absent).
     // Build coaching context for dynamic block enrichment and downstream consumers.
     // Feature flag: CEE_COACHING_CONTEXT_ENABLED (covers WS1 + WS8).
-    const sessionState: SessionState = mergeSessionState(turnRequest.session_state);
+    let sessionState: SessionState = mergeSessionState(turnRequest.session_state);
+    // Register the clicked chip so the 2-turn suppression window does not
+    // hide it on re-render if it's still relevant.
+    const clickedChipId = turnRequest.chip_metadata?.parameters?.chip_id;
+    if (typeof clickedChipId === 'string') {
+      sessionState = registerChipClick(sessionState, clickedChipId);
+    }
     let coachingContext: CoachingContext | null = null;
     if (config.cee.coachingContextEnabled) {
       try {
@@ -184,6 +198,24 @@ export async function* executePipelineV4(
           yield { type: 'block', seq: seq++, block };
         }
 
+        // WS6: Advance session state BEFORE envelope assembly so the chip
+        // engine (called inside assembleV4Envelope) sees the post-confirmation
+        // counters (accepted_patches / dismissed_patches). Without this,
+        // chips are computed against the stale pre-confirmation state and
+        // the updated counters are visible only on the next turn.
+        const confirmedAction = confirmResult.executedProposal?.action_type as ActionName ?? null;
+        const confirmSessionState = config.cee.coachingContextEnabled
+          ? advanceSessionState(
+              sessionState,
+              confirmedAction,
+              turnContext,
+              {
+                patch_accepted: !!confirmResult.executedProposal,
+                patch_dismissed: !!confirmResult.cleared,
+              },
+            )
+          : sessionState;
+
         const envelope = assembleV4Envelope({
           turnContext,
           turnId,
@@ -192,23 +224,20 @@ export async function* executePipelineV4(
           assistantText: confirmResult.actionResult.assistantText,
           actionResult: confirmResult.actionResult,
           routing: 'deterministic',
-          executedAction: confirmResult.executedProposal?.action_type as ActionName ?? null,
+          executedAction: confirmedAction,
           contextFallbackUsed,
+          coachingContext,
+          sessionState: confirmSessionState,
         });
 
-        // WS6: Advance session state on confirmation path
+        // Capture chip_ids produced this turn so the next turn's 2-turn
+        // suppression window is driven by what the user actually saw.
         if (config.cee.coachingContextEnabled) {
-          const confirmOutcome = {
-            patch_accepted: !!confirmResult.executedProposal,
-            patch_dismissed: !!confirmResult.cleared,
-          };
-          const updatedState = advanceSessionState(
-            sessionState,
-            confirmResult.executedProposal?.action_type as ActionName ?? null,
-            turnContext,
-            confirmOutcome,
-          );
-          (envelope as unknown as Record<string, unknown>).updated_session_state = updatedState;
+          const chipIds = getChipIdsForSession(envelope.suggested_actions ?? []);
+          const stateForRoundTrip = chipIds.length > 0
+            ? updateLastChipIds(confirmSessionState, chipIds)
+            : confirmSessionState;
+          (envelope as unknown as Record<string, unknown>).updated_session_state = stateForRoundTrip;
         }
 
         yield { type: 'turn_complete', seq: seq++, envelope };
@@ -222,9 +251,25 @@ export async function* executePipelineV4(
     const routing: 'deterministic' | 'llm' = 'llm';
     yield { type: 'turn_start', seq: seq++, turn_id: turnId, routing, stage };
 
+    // WS5 (P1.2): precompute the chip labels the user will see so we can
+    // inject them into the dynamic block's coaching section. The LLM then
+    // knows exactly which suggestions the UI will render and can avoid
+    // duplicating them as inline quoted prose. Pre-execution state (no
+    // executed action, no deferred actions yet) is used deliberately —
+    // the final envelope chips are recomputed after the LLM call.
+    let preComputedChipLabels: string[] = [];
+    if (coachingContext && config.cee.chipEngineEnabled !== false) {
+      try {
+        const preChips = computeChips(coachingContext, sessionState, turnContext, null, []);
+        preComputedChipLabels = preChips.map(c => c.label);
+      } catch (err) {
+        log.warn({ event: 'v4.precompute_chips_error', error: (err as Error).message }, 'Precomputing chip labels for prompt failed');
+      }
+    }
+
     // Build prompt (async — loads from PMS with TTL cache)
-    // WS8: pass coaching context for dynamic block enrichment
-    const prompt = await buildDeterministicPromptV2(turnContext, coachingContext);
+    // WS8: pass coaching context + chip labels for dynamic block enrichment
+    const prompt = await buildDeterministicPromptV2(turnContext, coachingContext, preComputedChipLabels);
 
     // Build tool definitions — add draft_graph when generate_model or no usable graph
     // An empty graph ({ nodes: [], edges: [] }) is truthy but has no model content,
@@ -247,7 +292,22 @@ export async function* executePipelineV4(
     // future (e.g. regenerate_brief), generalise to a Set lookup here.
     const chipAction = turnRequest.chip_metadata?.action_type as ActionName | undefined;
     const bypassStaleness = chipAction === 'run_analysis';
-    const toolDefs = buildToolDefinitions(eligibleActions as ActionName[], turnContext, bypassStaleness);
+    // Task 1 (P0): action-type-first deterministic chip routing.
+    // When the chip click targets an explanation tool that post-analysis
+    // suppression would normally strip, force it back into the tool set.
+    // Combined with the `tool_choice: { type: 'tool', name }` below, this
+    // guarantees "Explain results" clicks execute `explain_result` (not
+    // run_premortem or challenge_assumption) regardless of the LLM's own
+    // preferences.
+    const chipForceInclude = chipAction && isExplanationChipSuppressedByAnalysis(chipAction, turnContext)
+      ? new Set<ActionName>([chipAction])
+      : undefined;
+    const toolDefs = buildToolDefinitions(
+      eligibleActions as ActionName[],
+      turnContext,
+      bypassStaleness,
+      chipForceInclude,
+    );
 
     // Log filtering impact when tools were removed
     const filteredCount = eligibleActions.length - toolDefs.length;
@@ -271,34 +331,24 @@ export async function* executePipelineV4(
     // (data-availability, staleness with bypass, entity disambiguation, schema
     // validation). If any filter removed it, downgrade to 'auto' so the API
     // call stays valid and the LLM can pick something or respond conversationally.
+    //
+    // Task 1 (P0): post-analysis explanation chips are now force-included in
+    // the tool set above, so chipActionInTools will be true for them and the
+    // routing lands on the requested tool deterministically. The hijack-guard
+    // fallback for the 'auto' downgrade path remains in case some other
+    // filter (schema invalidity, hard prerequisite) removes the chip action.
     const chipActionInTools = chipAction && toolDefs.some(t => t.name === chipAction);
     const toolChoice = chipActionInTools
       ? { type: 'tool' as const, name: chipAction! }
       : { type: 'auto' as const };
-    // When the chip action was filtered specifically by the post-analysis
-    // explanation suppression, the tool's removal is by design, not a real
-    // unavailability — the LLM is expected to write a coached response from
-    // Zone 2 data directly. Showing a "not available" downgrade message here
-    // would prefix that perfectly good response with a misleading apology.
-    // The chip-builder still produces explanation chips post-analysis (and
-    // boosts explain_result to top priority), so this path is hot.
-    const chipFilteredByExplanationSuppression =
-      chipAction != null
-      && !chipActionInTools
-      && isExplanationChipSuppressedByAnalysis(chipAction, turnContext);
     let chipDowngradeText: string | null = null;
-    if (chipAction && !chipActionInTools && !chipFilteredByExplanationSuppression) {
+    if (chipAction && !chipActionInTools) {
       chipDowngradeText = `That action isn't available right now. ${getDowngradeReason(chipAction, turnContext)}`;
       log.warn({
         request_id: requestId,
         chip_action: chipAction,
         tool_count: toolDefs.length,
       }, 'v4.chip_action_filtered_downgrade: chip action was removed by context filtering, downgrading tool_choice to auto');
-    } else if (chipFilteredByExplanationSuppression) {
-      log.info({
-        request_id: requestId,
-        chip_action: chipAction,
-      }, 'v4.chip_action_handled_via_zone2: explanation chip click — LLM will respond from analysis_state directly, no tool call needed');
     }
 
     // Build messages
@@ -504,6 +554,34 @@ export async function* executePipelineV4(
     const rawAssistantText = streamResult.assistantText.trim();
     let assistantText: string | null = rawAssistantText.length > 0 ? rawAssistantText : null;
 
+    // ── WS2: Response composer (replaces handler text when fact is present) ─
+    // When the action handler emitted a structured HandlerFact, run the
+    // composer to produce decision-language text that replaces both the
+    // handler's legacy assistantText AND any LLM-generated text for this
+    // turn. The composer reads coachingContext, so it is gated on the
+    // coaching-context feature flag.
+    //
+    // IMPORTANT: This runs BEFORE the empty-text injection below, so the
+    // fallback-template path only fires when there is no fact AND no text.
+    if (
+      config.cee.coachingContextEnabled
+      && actionResult?.fact
+      && !actionResult.failure
+      && !failedToolCall
+    ) {
+      try {
+        const composed = composeResponse(actionResult.fact, coachingContext);
+        if (composed && composed.trim().length > 0) {
+          assistantText = composed;
+        }
+      } catch (err) {
+        log.warn(
+          { event: 'v4.response_composer_error', error: (err as Error).message, action: actionResult.fact.action },
+          'Response composer threw — falling back to handler text',
+        );
+      }
+    }
+
     // ── Text injection for empty LLM responses (Task 3) ──────────────
     // When a tool executed successfully but the LLM produced no text,
     // inject text so no turn reaches the UI with a tool execution but no
@@ -601,11 +679,20 @@ export async function* executePipelineV4(
       contextFallbackUsed,
       llmLatencyMs: llmDurationMs,
       deferredActions,
+      coachingContext,
+      sessionState: updatedSessionState ?? sessionState,
     });
 
-    // WS6: Attach updated session state to envelope for UI round-trip
+    // WS6: Attach updated session state to envelope for UI round-trip.
+    // Capture the chip_ids produced this turn so the next turn's
+    // chip_ids_shown_prev_turn + last_chip_ids_shown drive the 2-turn
+    // suppression window deterministically.
     if (updatedSessionState) {
-      (envelope as unknown as Record<string, unknown>).updated_session_state = updatedSessionState;
+      const chipIds = getChipIdsForSession(envelope.suggested_actions ?? []);
+      const stateForRoundTrip = chipIds.length > 0
+        ? updateLastChipIds(updatedSessionState, chipIds)
+        : updatedSessionState;
+      (envelope as unknown as Record<string, unknown>).updated_session_state = stateForRoundTrip;
     }
 
     yield { type: 'turn_complete', seq: seq++, envelope };
@@ -677,6 +764,10 @@ export interface AssembleInput {
   llmLatencyMs?: number;
   /** Tool names the LLM tried to call beyond the one-tool-per-turn limit. */
   deferredActions?: ActionName[];
+  /** WS1/WS5: coaching context for chip-engine input. */
+  coachingContext?: CoachingContext | null;
+  /** WS6/WS5: session state for chip suppression. */
+  sessionState?: SessionState | null;
 }
 
 /**
@@ -698,6 +789,8 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     contextFallbackUsed: _contextFallbackUsed,
     llmLatencyMs,
     deferredActions = [],
+    coachingContext = null,
+    sessionState = null,
   } = input;
 
   // T1 (Phase A): structured failure short-circuit. When the action handler
@@ -848,9 +941,20 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   // Build chips deterministically — no LLM input.
   // Deferred actions (compound calls dropped by one-tool-per-turn) are
   // promoted to the front so the user can resume the unfulfilled intent.
-  const suggestedActions = buildDeterministicChips(turnContext, executedAction, deferredActions);
+  //
+  // WS5: when the chip engine is enabled and a coaching context was built,
+  // use the typed chip engine to produce decision-language chips. Falls
+  // back to the legacy tool-name chip builder when the flag is off or the
+  // coaching context is absent (e.g. fallback context path).
+  const useChipEngine =
+    config.cee.chipEngineEnabled !== false
+    && coachingContext != null
+    && sessionState != null;
+  const suggestedActions = useChipEngine
+    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions)
+    : buildDeterministicChips(turnContext, executedAction, deferredActions);
 
-  // Sanitise chip labels and prompts
+  // Sanitise chip labels and prompts (belt-and-braces — engine already sanitises).
   for (const chip of suggestedActions) {
     if (chip.label) chip.label = sanitiseAssistantText(chip.label);
     if (chip.prompt) chip.prompt = sanitiseAssistantText(chip.prompt);
@@ -1052,6 +1156,7 @@ function buildFallbackContext(turnRequest: OrchestratorTurnRequest, turnId: stri
     turn_id: turnId,
     analysis_inputs: null,
     request: undefined,
+    user_currency_hint: null,
   };
 }
 

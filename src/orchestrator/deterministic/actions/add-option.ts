@@ -170,10 +170,22 @@ export const addOptionAction: ActionDefinition = {
 
     return {
       blocks: [],
-      assistantText: `I'll add option **${label}**${summary}. Please confirm.`,
+      assistantText: `Proposing to add option **${label}**${summary}. Confirm to apply.`,
       guidance_items: [],
       operations,
       ...(analysisReady ? { analysis_ready: analysisReady } : {}),
+      fact: {
+        action: 'option_added',
+        entities_affected: [{ id: nodeId, label, kind: 'option' }],
+        what_changed: interventionCount > 0
+          ? `new option with ${interventionCount} effect${interventionCount === 1 ? '' : 's'}`
+          : 'new option',
+        stale_analysis: ctx.analysis_summary != null,
+        auto_apply: false,
+        data: {
+          intervention_count: interventionCount,
+        },
+      },
     };
   },
 
@@ -420,7 +432,7 @@ function buildOptionConfigurationResult(
 
   return {
     blocks: [],
-    assistantText: `Updated **${existingOption.label}**'s effects on ${effectsPhrase}. Please confirm.`,
+    assistantText: `Proposing to update **${existingOption.label}**'s effects on ${effectsPhrase}. Confirm to apply.`,
     guidance_items: [],
     operations,
     ...(analysisReady ? { analysis_ready: analysisReady } : {}),

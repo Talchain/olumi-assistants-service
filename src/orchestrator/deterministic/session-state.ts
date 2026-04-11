@@ -30,8 +30,13 @@ export interface SessionState {
   accepted_patches: number;
   /** Count of dismissed graph patches */
   dismissed_patches: number;
-  /** chip_ids shown on the last turn (for suppression) */
+  /** chip_ids shown on the most recent turn */
   last_chip_ids_shown: string[];
+  /** chip_ids shown on the turn before the most recent (two-turn suppression window) */
+  chip_ids_shown_prev_turn: string[];
+  /** chip_ids the user explicitly clicked on any recent turn — exempt from the
+   *  suppression window so a clicked chip can reappear immediately if still relevant. */
+  chip_ids_clicked: string[];
   /** Turn number when last question was asked */
   last_question_turn: number;
   /** Detected preferred option from user messages */
@@ -51,14 +56,20 @@ export interface SessionState {
 export function mergeSessionState(input: Partial<SessionState> | null | undefined): SessionState {
   const defaults = defaultSessionState();
   if (!input || typeof input !== 'object') return defaults;
+  // Defensive copies for all array fields so a mutation in CEE cannot reach
+  // back into the request payload. Without this, any future consumer that
+  // forgets to spread (e.g. a direct .push into next.calibrations_provided)
+  // would corrupt the client's state on round-trip.
   return {
     prediction: typeof input.prediction === 'string' ? input.prediction : defaults.prediction,
-    calibrations_provided: Array.isArray(input.calibrations_provided) ? input.calibrations_provided : defaults.calibrations_provided,
-    plays_fired: Array.isArray(input.plays_fired) ? input.plays_fired : defaults.plays_fired,
-    questions_asked: Array.isArray(input.questions_asked) ? input.questions_asked : defaults.questions_asked,
+    calibrations_provided: Array.isArray(input.calibrations_provided) ? [...input.calibrations_provided] : defaults.calibrations_provided,
+    plays_fired: Array.isArray(input.plays_fired) ? [...input.plays_fired] : defaults.plays_fired,
+    questions_asked: Array.isArray(input.questions_asked) ? [...input.questions_asked] : defaults.questions_asked,
     accepted_patches: typeof input.accepted_patches === 'number' ? input.accepted_patches : defaults.accepted_patches,
     dismissed_patches: typeof input.dismissed_patches === 'number' ? input.dismissed_patches : defaults.dismissed_patches,
-    last_chip_ids_shown: Array.isArray(input.last_chip_ids_shown) ? input.last_chip_ids_shown : defaults.last_chip_ids_shown,
+    last_chip_ids_shown: Array.isArray(input.last_chip_ids_shown) ? [...input.last_chip_ids_shown] : defaults.last_chip_ids_shown,
+    chip_ids_shown_prev_turn: Array.isArray(input.chip_ids_shown_prev_turn) ? [...input.chip_ids_shown_prev_turn] : defaults.chip_ids_shown_prev_turn,
+    chip_ids_clicked: Array.isArray(input.chip_ids_clicked) ? [...input.chip_ids_clicked] : defaults.chip_ids_clicked,
     last_question_turn: typeof input.last_question_turn === 'number' ? input.last_question_turn : defaults.last_question_turn,
     preferred_option: typeof input.preferred_option === 'string' ? input.preferred_option : defaults.preferred_option,
     convergence_signal: input.convergence_signal === 'exploring' || input.convergence_signal === 'narrowing' || input.convergence_signal === 'converging'
@@ -77,6 +88,8 @@ export function defaultSessionState(): SessionState {
     accepted_patches: 0,
     dismissed_patches: 0,
     last_chip_ids_shown: [],
+    chip_ids_shown_prev_turn: [],
+    chip_ids_clicked: [],
     last_question_turn: 0,
     preferred_option: null,
     convergence_signal: 'exploring',
@@ -116,7 +129,9 @@ export function advanceSessionState(
     questions_asked: [...prev.questions_asked],
     accepted_patches: prev.accepted_patches,
     dismissed_patches: prev.dismissed_patches,
-    last_chip_ids_shown: prev.last_chip_ids_shown, // updated externally by chip engine
+    last_chip_ids_shown: [...prev.last_chip_ids_shown], // updated externally by chip engine
+    chip_ids_shown_prev_turn: [...prev.chip_ids_shown_prev_turn],
+    chip_ids_clicked: [...prev.chip_ids_clicked],
     last_question_turn: prev.last_question_turn,
     preferred_option: prev.preferred_option,
     convergence_signal: prev.convergence_signal,
@@ -237,9 +252,47 @@ export function registerCalibration(state: SessionState, factorId: string): Sess
 }
 
 /**
- * Update last shown chip IDs for suppression tracking.
+ * Update last shown chip IDs for suppression tracking. Shifts the previous
+ * turn's shown IDs into `chip_ids_shown_prev_turn` so the chip engine can
+ * suppress chips shown in the last 2 turns (not just the most recent).
+ *
  * Returns a new SessionState — does not mutate.
  */
 export function updateLastChipIds(state: SessionState, chipIds: string[]): SessionState {
-  return { ...state, last_chip_ids_shown: chipIds };
+  return {
+    ...state,
+    chip_ids_shown_prev_turn: state.last_chip_ids_shown,
+    last_chip_ids_shown: chipIds,
+  };
+}
+
+/**
+ * Return the set of chip_ids that should be suppressed on the current turn:
+ * the union of chips shown on the most recent turn and the turn before,
+ * MINUS any chip the user has explicitly clicked (clicked chips can reappear
+ * immediately if still relevant).
+ *
+ * Used by the chip engine to enforce the "shown and ignored in last 2 turns"
+ * suppression rule from the WS5 brief.
+ */
+export function suppressedChipIds(state: SessionState): Set<string> {
+  const clicked = new Set(state.chip_ids_clicked);
+  const suppressed = new Set<string>();
+  for (const id of state.last_chip_ids_shown) {
+    if (!clicked.has(id)) suppressed.add(id);
+  }
+  for (const id of state.chip_ids_shown_prev_turn) {
+    if (!clicked.has(id)) suppressed.add(id);
+  }
+  return suppressed;
+}
+
+/**
+ * Register a chip click — removes the chip from future suppression so that
+ * if still relevant it can reappear immediately. Called by the pipeline when
+ * a turn comes in with `chip_metadata.action_type`.
+ */
+export function registerChipClick(state: SessionState, chipId: string): SessionState {
+  if (state.chip_ids_clicked.includes(chipId)) return state;
+  return { ...state, chip_ids_clicked: [...state.chip_ids_clicked, chipId] };
 }

@@ -9,7 +9,10 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
   emit: vi.fn(),
 }));
 
-import { sanitiseAssistantText } from "../../../../src/orchestrator/deterministic/sanitise-output.js";
+import {
+  sanitiseAssistantText,
+  stripInlineChipLines,
+} from "../../../../src/orchestrator/deterministic/sanitise-output.js";
 import { log } from "../../../../src/utils/telemetry.js";
 
 const warnSpy = vi.mocked(log.warn);
@@ -166,5 +169,93 @@ describe("sanitiseAssistantText — edge cases", () => {
   it("returns plain text unchanged", () => {
     const plain = "This is a simple sentence with no issues.";
     expect(sanitiseAssistantText(plain)).toBe(plain);
+  });
+});
+
+// ============================================================================
+// stripInlineChipLines (Task 6 Part B)
+// ============================================================================
+
+describe("stripInlineChipLines — chip-like line removal", () => {
+  it("strips a single quoted chip line with role tag", () => {
+    const input = [
+      "Here's what I think about the leading option.",
+      "\"Challenge the Cost driver\" (challenger)",
+      "This is the main driver.",
+    ].join('\n');
+    const result = stripInlineChipLines(input);
+    expect(result).not.toContain("(challenger)");
+    expect(result).not.toContain("Challenge the Cost driver");
+    expect(result).toContain("Here's what I think");
+    expect(result).toContain("This is the main driver.");
+    expect(warnSpy).toHaveBeenCalled();
+    expect((warnSpy.mock.calls[0][0] as { event: string }).event).toBe('v4.inline_chip_stripped');
+  });
+
+  it("strips multiple consecutive chip lines", () => {
+    const input = [
+      "Here are my thoughts:",
+      "",
+      '"Calibrate Market Size" (facilitator)',
+      '"What could go wrong?" (challenger)',
+      '"Run a pre-mortem on the leading option" (scientist)',
+      "",
+      "That's my take.",
+    ].join('\n');
+    const result = stripInlineChipLines(input);
+    expect(result).not.toContain('(facilitator)');
+    expect(result).not.toContain('(challenger)');
+    expect(result).not.toContain('(scientist)');
+    expect(result).toContain("Here are my thoughts");
+    expect(result).toContain("That's my take");
+    // Count should match 3 stripped lines.
+    expect((warnSpy.mock.calls[0][0] as { count: number }).count).toBe(3);
+  });
+
+  it("strips chip lines without a role tag in parentheses (with role word nearby)", () => {
+    // Variant where LLM drops parens but keeps a dash.
+    const input = [
+      "My analysis says:",
+      '"Calibrate the cost assumption" - facilitator',
+    ].join('\n');
+    const result = stripInlineChipLines(input);
+    expect(result).not.toContain('facilitator');
+  });
+});
+
+describe("stripInlineChipLines — false-positive guards", () => {
+  it("does NOT strip quoted user text mid-paragraph", () => {
+    const input = 'The user said "we need to move fast" in the brief.';
+    const result = stripInlineChipLines(input);
+    expect(result).toBe(input);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT strip factor names wrapped in quotes", () => {
+    const input = '"Customer Churn" is currently set at 4%.';
+    const result = stripInlineChipLines(input);
+    expect(result).toBe(input);
+  });
+
+  it("does NOT strip example questions mid-paragraph", () => {
+    const input = 'Consider asking "what would flip this?" to stress-test.';
+    const result = stripInlineChipLines(input);
+    expect(result).toBe(input);
+  });
+
+  it("does NOT strip a standalone quoted line without a role tag", () => {
+    // A lone quoted line with no role word is legitimate (could be a user quote).
+    const input = 'Look at the brief:\n"we need to move fast"\nThat tells us something.';
+    const result = stripInlineChipLines(input);
+    expect(result).toBe(input);
+  });
+
+  it("returns empty string as-is", () => {
+    expect(stripInlineChipLines("")).toBe("");
+  });
+
+  it("returns unchanged text when no matches", () => {
+    const plain = "Option A leads at 72%. Cost Per Developer drives 42% of the outcome.";
+    expect(stripInlineChipLines(plain)).toBe(plain);
   });
 });

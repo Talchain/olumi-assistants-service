@@ -96,7 +96,7 @@ export const addFactorAction: ActionDefinition = {
       const effectiveUnit = unit ?? nodeEntry?.unit;
       const valueStr = value != null ? ` to ${value}${effectiveUnit ? ` ${effectiveUnit}` : ''}` : '';
       const actionText = operations.length > 0
-        ? `Found existing factor **${existingFactor.label}**. I'll update its value${valueStr} instead of creating a duplicate. Please confirm.`
+        ? `Found existing factor **${existingFactor.label}**. Proposing to update its value${valueStr} instead of creating a duplicate. Confirm to apply.`
         : `**${existingFactor.label}** already exists in the model. If you'd like to update its value, please specify a new value.`;
       return {
         blocks: [],
@@ -148,11 +148,30 @@ export const addFactorAction: ActionDefinition = {
     const unitStr = unit ? ` ${unit}` : '';
     const valueStr = value != null ? ` (value: ${value}${unitStr})` : '';
 
+    // WS2: HandlerFact for the response composer. When the composer is
+    // enabled it replaces the legacy assistantText below with proposal-
+    // language output generated from this fact + coaching context.
+    const targetLabel = targets.length > 0
+      ? ctx.entities.nodes.get(targets[0])?.label
+      : undefined;
+
     return {
       blocks: [],
-      assistantText: `I'll add **${label}**${valueStr} as a ${kind === 'risk' ? 'risk factor' : `${category} factor`}. Please confirm.`,
+      assistantText: `Proposing to add **${label}**${valueStr} as a ${kind === 'risk' ? 'risk factor' : `${category} factor`}. Confirm to apply.`,
       guidance_items: [],
       operations,
+      fact: {
+        action: 'factor_added',
+        entities_affected: [{ id: nodeId, label, kind }],
+        what_changed: value != null ? `new factor at ${value}${unitStr}` : 'new factor',
+        stale_analysis: ctx.analysis_summary != null,
+        auto_apply: false,
+        data: {
+          value_label: value != null ? `value: ${value}${unitStr}` : undefined,
+          target_label: targetLabel,
+          category,
+        },
+      },
     };
   },
 

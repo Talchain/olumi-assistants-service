@@ -116,6 +116,13 @@ export const explainResultAction: ActionDefinition = {
       blocks: [block],
       assistantText: winnerHeadline,
       guidance_items: [],
+      fact: {
+        action: 'analysis_complete',
+        entities_affected: [],
+        what_changed: winnerHeadline,
+        stale_analysis: false,
+        auto_apply: true,
+      },
     };
   },
 

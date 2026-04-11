@@ -70,11 +70,31 @@ export const draftGraphAction: ActionDefinition = {
         has_graph: result.graphOutput != null,
       }, 'draft_graph.action_completed');
 
+      // WS2: Build HandlerFact from the generated graph so the composer can
+      // produce decision-language text (leading with options + goal + trade-off).
+      const graph = result.graphOutput;
+      const optionNodes = graph?.nodes.filter((n) => n.kind === 'option') ?? [];
+      const goalNode = graph?.nodes.find((n) => n.kind === 'goal');
+      const fact = graph
+        ? {
+            action: 'draft_created' as const,
+            entities_affected: optionNodes.map((n) => ({ id: n.id, label: n.label, kind: 'option' })),
+            what_changed: `${optionNodes.length} option${optionNodes.length === 1 ? '' : 's'} captured`,
+            stale_analysis: false,
+            auto_apply: true,
+            data: {
+              option_count: optionNodes.length,
+              goal_label: goalNode?.label ?? 'your decision',
+            },
+          }
+        : undefined;
+
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,
         guidance_items: [],
         applied_graph: result.graphOutput ?? undefined,
+        ...(fact ? { fact } : {}),
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;

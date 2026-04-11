@@ -169,6 +169,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
       generate_model: generateModel,
       session_state: parsed.data.session_state ?? undefined,
+      chip_metadata: parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'],
     };
 
     try {

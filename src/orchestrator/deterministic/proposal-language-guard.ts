@@ -65,14 +65,61 @@ export interface ProposalLanguageScanResult {
   leaked: boolean;
   /** The exact substring that matched, when leaked === true. */
   matchedPhrase?: string;
-  /** The text with the corrective suffix appended, when leaked === true. */
+  /** The text with the leaked phrase rewritten to proposal language, when leaked === true. */
   suffixed?: string;
 }
 
 /**
- * Scan an assembled assistant text for proposal-language leaks. When a leak
- * is found, log telemetry and return a corrected version of the text with a
- * "Review the suggested changes above." suffix appended.
+ * Inline rewrites that replace completion-language phrases with proposal
+ * phrasing. Applied BEFORE the LEAK_PATTERNS scan so that common handler
+ * text ("I'll add X", "Updated X to Y") is normalised into proposal framing
+ * directly, not just suffixed with a corrective sentence.
+ *
+ * Order matters: more specific patterns first. Each rewrite is case-preserving
+ * at the rewrite boundary (handlers are the main source and use sentence-case).
+ */
+const INLINE_REWRITES: ReadonlyArray<{ pattern: RegExp; replacement: string }> = [
+  // "I'll add/update/remove/change …" → "Proposing to add/update/remove/change …"
+  // Handler text: "I'll add **Label** (value: ...) as a risk factor. Please confirm."
+  //             → "Proposing to add **Label** (value: ...) as a risk factor. Please confirm."
+  { pattern: /\bI['’]ll add\b/gi, replacement: 'Proposing to add' },
+  { pattern: /\bI['’]ll update\b/gi, replacement: 'Proposing to update' },
+  { pattern: /\bI['’]ll remove\b/gi, replacement: 'Proposing to remove' },
+  { pattern: /\bI['’]ll change\b/gi, replacement: 'Proposing to change' },
+  { pattern: /\bI['’]ll set\b/gi, replacement: 'Proposing to set' },
+  // Handler completion phrases at sentence start: "Updated X to Y" → "Proposing to update X to Y"
+  // Matches beginning-of-text or after sentence break. Whitespace is preserved.
+  { pattern: /(^|[.\n]\s*)Updated\s+/g, replacement: '$1Proposing to update ' },
+  { pattern: /(^|[.\n]\s*)Added\s+/g, replacement: '$1Proposing to add ' },
+  { pattern: /(^|[.\n]\s*)Removed\s+/g, replacement: '$1Proposing to remove ' },
+  { pattern: /(^|[.\n]\s*)Changed\s+/g, replacement: '$1Proposing to change ' },
+  // Gerund forms: "Setting X to Y" → "Proposing to set X to Y"
+  // These come from handler text like "Setting Market Size to 500."
+  //
+  // Narrow the match: it must be followed by a word that's NOT an idiomatic
+  // non-completion phrase ("Setting now", "Setting aside", "Setting that",
+  // "Setting it") so legitimate prose flows through unchanged. LEAK_PATTERNS
+  // catches the genuinely leaked cases ("Setting now") via the suffix path.
+  { pattern: /(^|[.\n]\s*)Setting\s+(?!now\b|that\b|it\b|aside\b|up\b|out\b)/g, replacement: '$1Proposing to set ' },
+  { pattern: /(^|[.\n]\s*)Updating\s+(?!now\b|that\b|it\b)/g, replacement: '$1Proposing to update ' },
+  // Only rewrite "Adding" when followed by a capitalised label (starts with
+  // uppercase letter), not when followed by "now"/"that"/"it" etc. This
+  // preserves the original leak-suffix path for phrases like "Adding now".
+  { pattern: /(^|[.\n]\s*)Adding\s+(?=[A-Z])/g, replacement: '$1Proposing to add ' },
+  // Past-tense "Set X to Y" at sentence start (narrow: only when followed
+  // by an identifier + " to " to avoid matching "Set to one side ...").
+  { pattern: /(^|[.\n]\s*)Set\s+(?=\S+\s+to\s+)/g, replacement: '$1Proposing to set ' },
+];
+
+/**
+ * Scan an assembled assistant text for proposal-language leaks. Two-stage
+ * approach:
+ *   1. Inline rewrite: common handler phrasings ("I'll add X", "Updated X to Y")
+ *      are rewritten to proposal language in place. This catches the majority
+ *      of leaks from deterministic handlers (add-factor, set-factor-value, etc.).
+ *   2. Pattern scan: anything the rewrite missed triggers a suffix fallback
+ *      ("Review the suggested changes above.") so the user sees a coherent
+ *      proposal frame even when the leak is novel prose from the LLM.
  *
  * The caller is responsible for gating this on the actual block state
  * (`auto_apply === false`). This function does not inspect blocks itself.
@@ -86,8 +133,39 @@ export function enforceProposalLanguage(
   toolName: string,
 ): ProposalLanguageScanResult {
   if (!text) return { leaked: false };
+
+  // Stage 1: inline rewrite. Track whether any rewrite fired so we can log once.
+  let rewritten = text;
+  let rewroteSomething = false;
+  let firstRewriteMatch: string | null = null;
+  for (const rule of INLINE_REWRITES) {
+    const before = rewritten;
+    rewritten = rewritten.replace(rule.pattern, (match, ...args) => {
+      if (!firstRewriteMatch) firstRewriteMatch = match;
+      // If the pattern captured a leading-sentence-break group, preserve it.
+      if (typeof args[0] === 'string' && (args[0] === '' || /^[.\n\s]+$/.test(args[0]))) {
+        return rule.replacement.replace('$1', args[0]);
+      }
+      return rule.replacement;
+    });
+    if (rewritten !== before) rewroteSomething = true;
+  }
+
+  if (rewroteSomething) {
+    log.warn(
+      {
+        event: 'v4.proposal_language_rewrite',
+        matched_phrase: firstRewriteMatch,
+        tool_name: toolName,
+      },
+      'Proposal turn contained applied-language completion phrase — rewritten to proposal language',
+    );
+  }
+
+  // Stage 2: residual leak scan on the rewritten text. If anything still
+  // matches a completion pattern, fall back to the suffix strategy.
   for (const re of LEAK_PATTERNS) {
-    const m = text.match(re);
+    const m = rewritten.match(re);
     if (m) {
       log.warn(
         {
@@ -95,14 +173,24 @@ export function enforceProposalLanguage(
           matched_phrase: m[0],
           tool_name: toolName,
         },
-        'Proposal turn contained applied-language completion phrase',
+        'Proposal turn contained applied-language completion phrase (residual after rewrite)',
       );
       return {
         leaked: true,
         matchedPhrase: m[0],
-        suffixed: `${text}\n\nReview the suggested changes above.`,
+        suffixed: `${rewritten}\n\nReview the suggested changes above.`,
       };
     }
   }
+
+  // Rewrites fired but no residual leak — return the rewritten text.
+  if (rewroteSomething) {
+    return {
+      leaked: true,
+      matchedPhrase: firstRewriteMatch ?? undefined,
+      suffixed: rewritten,
+    };
+  }
+
   return { leaked: false };
 }

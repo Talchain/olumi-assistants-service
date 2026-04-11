@@ -16,6 +16,8 @@ import {
   registerPlay,
   registerCalibration,
   updateLastChipIds,
+  registerChipClick,
+  suppressedChipIds,
 } from "../../../../src/orchestrator/deterministic/session-state.js";
 import type { SessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
 import type { DeterministicTurnContext } from "../../../../src/orchestrator/deterministic/types.js";
@@ -285,5 +287,184 @@ describe("advanceSessionState — ActionOutcome", () => {
     const ctx = makeMinimalContext();
     const next = advanceSessionState(prev, null, ctx, { patch_dismissed: true });
     expect(next.dismissed_patches).toBe(1);
+  });
+});
+
+// ============================================================================
+// Chip tracking (2-turn suppression window)
+// ============================================================================
+
+describe("updateLastChipIds — 2-turn history shift", () => {
+  it("shifts last_chip_ids_shown into chip_ids_shown_prev_turn on each call", () => {
+    const state0 = defaultSessionState();
+    const state1 = updateLastChipIds(state0, ['chip_a', 'chip_b']);
+    expect(state1.last_chip_ids_shown).toEqual(['chip_a', 'chip_b']);
+    expect(state1.chip_ids_shown_prev_turn).toEqual([]);
+
+    const state2 = updateLastChipIds(state1, ['chip_c', 'chip_d']);
+    expect(state2.last_chip_ids_shown).toEqual(['chip_c', 'chip_d']);
+    expect(state2.chip_ids_shown_prev_turn).toEqual(['chip_a', 'chip_b']);
+
+    // Third shift: chip_a/chip_b fall out of the 2-turn window entirely.
+    const state3 = updateLastChipIds(state2, ['chip_e']);
+    expect(state3.last_chip_ids_shown).toEqual(['chip_e']);
+    expect(state3.chip_ids_shown_prev_turn).toEqual(['chip_c', 'chip_d']);
+  });
+
+  it("preserves other fields when shifting chip history", () => {
+    const state0 = {
+      ...defaultSessionState(),
+      calibrations_provided: ['f1'],
+      accepted_patches: 2,
+      convergence_signal: 'narrowing' as const,
+    };
+    const state1 = updateLastChipIds(state0, ['chip_a']);
+    expect(state1.calibrations_provided).toEqual(['f1']);
+    expect(state1.accepted_patches).toBe(2);
+    expect(state1.convergence_signal).toBe('narrowing');
+  });
+
+  it("does not mutate input state", () => {
+    const state0 = { ...defaultSessionState(), last_chip_ids_shown: ['chip_a'] };
+    updateLastChipIds(state0, ['chip_b']);
+    expect(state0.last_chip_ids_shown).toEqual(['chip_a']);
+    expect(state0.chip_ids_shown_prev_turn).toEqual([]);
+  });
+});
+
+describe("registerChipClick", () => {
+  it("adds a new chip_id to chip_ids_clicked", () => {
+    const state = defaultSessionState();
+    const next = registerChipClick(state, 'chip_calibrate_cost');
+    expect(next.chip_ids_clicked).toContain('chip_calibrate_cost');
+  });
+
+  it("deduplicates existing clicked chip IDs", () => {
+    const state = { ...defaultSessionState(), chip_ids_clicked: ['chip_a'] };
+    const next = registerChipClick(state, 'chip_a');
+    expect(next.chip_ids_clicked).toEqual(['chip_a']);
+    expect(next).toBe(state); // same reference when no change
+  });
+
+  it("does not mutate input state", () => {
+    const state = defaultSessionState();
+    registerChipClick(state, 'chip_new');
+    expect(state.chip_ids_clicked).toEqual([]);
+  });
+});
+
+describe("suppressedChipIds — 2-turn window with click exemption", () => {
+  it("returns empty set when no chips were shown", () => {
+    const state = defaultSessionState();
+    const result = suppressedChipIds(state);
+    expect(result.size).toBe(0);
+  });
+
+  it("returns the union of N-1 and N-2 shown chips", () => {
+    const state: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['chip_a', 'chip_b'],
+      chip_ids_shown_prev_turn: ['chip_c', 'chip_d'],
+    };
+    const result = suppressedChipIds(state);
+    expect(result.has('chip_a')).toBe(true);
+    expect(result.has('chip_b')).toBe(true);
+    expect(result.has('chip_c')).toBe(true);
+    expect(result.has('chip_d')).toBe(true);
+    expect(result.size).toBe(4);
+  });
+
+  it("exempts clicked chips from the suppression window", () => {
+    const state: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['chip_a', 'chip_b'],
+      chip_ids_shown_prev_turn: ['chip_c'],
+      chip_ids_clicked: ['chip_a', 'chip_c'],
+    };
+    const result = suppressedChipIds(state);
+    expect(result.has('chip_a')).toBe(false); // clicked → exempt
+    expect(result.has('chip_b')).toBe(true);  // shown but not clicked → suppressed
+    expect(result.has('chip_c')).toBe(false); // clicked → exempt
+    expect(result.size).toBe(1);
+  });
+
+  it("handles deduplication when a chip appears in both shown windows", () => {
+    const state: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['chip_a', 'chip_b'],
+      chip_ids_shown_prev_turn: ['chip_a'], // same chip in both windows
+    };
+    const result = suppressedChipIds(state);
+    expect(result.size).toBe(2);
+    expect(result.has('chip_a')).toBe(true);
+    expect(result.has('chip_b')).toBe(true);
+  });
+});
+
+// ============================================================================
+// Chip state preservation on advanceSessionState
+// ============================================================================
+
+describe("advanceSessionState — chip fields preserved", () => {
+  it("carries last_chip_ids_shown / chip_ids_shown_prev_turn / chip_ids_clicked across turns", () => {
+    const prev: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['chip_a'],
+      chip_ids_shown_prev_turn: ['chip_b'],
+      chip_ids_clicked: ['chip_a'],
+    };
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, null, ctx);
+    expect(next.last_chip_ids_shown).toEqual(['chip_a']);
+    expect(next.chip_ids_shown_prev_turn).toEqual(['chip_b']);
+    expect(next.chip_ids_clicked).toEqual(['chip_a']);
+  });
+
+  it("deep-copies chip arrays so mutation of `next` does not affect `prev`", () => {
+    const prev: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['chip_a'],
+    };
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, null, ctx);
+    next.last_chip_ids_shown.push('chip_z');
+    expect(prev.last_chip_ids_shown).toEqual(['chip_a']);
+  });
+});
+
+// ============================================================================
+// mergeSessionState — defensive copies (array mutation guard)
+// ============================================================================
+
+describe("mergeSessionState — defensive copies", () => {
+  it("deep-copies array fields so mutation of the result cannot reach the input", () => {
+    const input: Partial<SessionState> = {
+      calibrations_provided: ['f1'],
+      plays_fired: ['dominant_factor'],
+      last_chip_ids_shown: ['chip_a'],
+      chip_ids_shown_prev_turn: ['chip_b'],
+      chip_ids_clicked: ['chip_c'],
+    };
+    const result = mergeSessionState(input);
+    // Mutate every array field on the result.
+    result.calibrations_provided.push('f2');
+    result.plays_fired.push('pre_mortem');
+    result.last_chip_ids_shown.push('chip_z');
+    result.chip_ids_shown_prev_turn.push('chip_y');
+    result.chip_ids_clicked.push('chip_x');
+    // Input must be untouched.
+    expect(input.calibrations_provided).toEqual(['f1']);
+    expect(input.plays_fired).toEqual(['dominant_factor']);
+    expect(input.last_chip_ids_shown).toEqual(['chip_a']);
+    expect(input.chip_ids_shown_prev_turn).toEqual(['chip_b']);
+    expect(input.chip_ids_clicked).toEqual(['chip_c']);
+  });
+
+  it("merges partial chip state fields with defaults for missing ones", () => {
+    const input: Partial<SessionState> = { last_chip_ids_shown: ['chip_a'] };
+    const result = mergeSessionState(input);
+    expect(result.last_chip_ids_shown).toEqual(['chip_a']);
+    expect(result.chip_ids_shown_prev_turn).toEqual([]);
+    expect(result.chip_ids_clicked).toEqual([]);
   });
 });

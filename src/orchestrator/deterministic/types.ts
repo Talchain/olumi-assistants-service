@@ -193,6 +193,13 @@ export interface DeterministicTurnContext {
   request?: FastifyRequest;
   /** Abort signal — propagated from pipeline entry point for cancellation of long-running tools. */
   signal?: AbortSignal;
+  /**
+   * Currency code (e.g. "USD", "GBP", "EUR") detected in the user's raw
+   * message, when present. Used by set_factor_value to honour user-stated
+   * currency even when the LLM's tool params omit `unit`. Null when no
+   * currency was detected or the message is empty.
+   */
+  user_currency_hint?: string | null;
 }
 
 /**
@@ -368,6 +375,13 @@ export interface ActionResult {
    *   - Emits `v4.action_failed` telemetry.
    */
   failure?: ActionFailure;
+  /**
+   * WS2: Structured fact emitted by handlers for the response composer.
+   * When present, pipeline-v4 calls composeResponse(fact, coachingContext)
+   * to generate assistantText, replacing the handler's legacy string output.
+   * When absent, the handler's assistantText is used as-is (legacy path).
+   */
+  fact?: import("./response-composer.js").HandlerFact;
 }
 
 /** Structured action failure (T1 Phase A). */

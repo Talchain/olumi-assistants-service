@@ -385,8 +385,14 @@ describe("v4 Golden Path Integration", () => {
       const text = (envelope as unknown as { assistant_text: string | null }).assistant_text;
       expect(patchBlock!.data.auto_apply).toBe(false);
       expect(text).toBeDefined();
-      // The guard should have detected "Setting ... to ..." and appended review suffix
-      expect(text!.toLowerCase()).toContain('review');
+      // The guard rewrites handler completion phrases ("Setting X to Y",
+      // "Updated X to Y", "I'll add X") inline to proposal language. The
+      // response composer can also replace the text entirely via a fact.
+      // Either way, the final text must NOT contain banned completion idioms
+      // on a proposal turn.
+      expect(text!).not.toMatch(/^\s*Setting\s+/);
+      expect(text!).not.toMatch(/^\s*Updated\s+/);
+      expect(text!).not.toMatch(/\bI['’]ll add\b/);
 
       // Guard T3: mutation health gate is reachable (verify via telemetry)
       // The gate is advisory — check that the code path executed by looking

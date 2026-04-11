@@ -129,6 +129,9 @@ describe("enforceProposalLanguage — deterministic-handler leak styles (2026-04
       "set_factor_value",
     );
     expect(r.leaked).toBe(true);
+    // "Got it" remains as a residual leak (no inline rewrite for it), so the
+    // suffix is applied. The inner "setting …" phrase is NOT rewritten here
+    // because it sits mid-sentence after a comma, not at sentence start.
     expect(r.suffixed).toContain('Review the suggested changes above.');
   });
 
@@ -137,9 +140,10 @@ describe("enforceProposalLanguage — deterministic-handler leak styles (2026-04
     expect(r.leaked).toBe(true);
   });
 
-  it("flags 'Setting X to Y' at start of text", () => {
+  it("rewrites 'Setting X to Y' at start of text to proposal language", () => {
     const r = enforceProposalLanguage("Setting Market Size to 500.", "set_factor_value");
     expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe("Proposing to set Market Size to 500.");
   });
 
   it("flags 'I've set Market Size to 500'", () => {
@@ -147,22 +151,27 @@ describe("enforceProposalLanguage — deterministic-handler leak styles (2026-04
     expect(r.leaked).toBe(true);
   });
 
-  it("flags 'Updated Market Size to 500' at start", () => {
+  it("rewrites 'Updated Market Size to 500' at start to proposal language", () => {
     const r = enforceProposalLanguage("Updated Market Size to 500.", "set_factor_value");
     expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe("Proposing to update Market Size to 500.");
   });
 
-  it("flags 'Changed the cost to £2,000' at start", () => {
+  it("rewrites 'Changed the cost to £2,000' at start to proposal language", () => {
     const r = enforceProposalLanguage("Changed the cost to £2,000.", "set_factor_value");
     expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe("Proposing to change the cost to £2,000.");
   });
 
-  it("flags leak appearing after a proposal sentence (second-sentence leak)", () => {
+  it("rewrites a second-sentence 'Setting X to Y' leak", () => {
     const r = enforceProposalLanguage(
       "Here's what I'd suggest for your model. Setting the cost to £2,000.",
       "set_factor_value",
     );
     expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe(
+      "Here's what I'd suggest for your model. Proposing to set the cost to £2,000.",
+    );
   });
 });
 
@@ -191,6 +200,31 @@ describe("enforceProposalLanguage — deterministic-handler false-positive guard
     expect(r.leaked).toBe(false);
   });
 
+  it("does NOT rewrite 'Setting aside some margin' (idiomatic non-completion prose)", () => {
+    const r = enforceProposalLanguage(
+      "Setting aside some margin for uncertainty.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(false);
+    expect(r.suffixed).toBeUndefined();
+  });
+
+  it("does NOT rewrite 'Setting up the model' (idiomatic non-completion prose)", () => {
+    const r = enforceProposalLanguage(
+      "Setting up the model for analysis.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(false);
+  });
+
+  it("does NOT rewrite 'Setting out the key trade-offs' (idiomatic non-completion prose)", () => {
+    const r = enforceProposalLanguage(
+      "Setting out the key trade-offs between options.",
+      "set_factor_value",
+    );
+    expect(r.leaked).toBe(false);
+  });
+
   it("does NOT flag 'consider updating the threshold to 0.3' (recommendation)", () => {
     const r = enforceProposalLanguage(
       "You could consider updating the threshold to 0.3 here.",
@@ -200,29 +234,36 @@ describe("enforceProposalLanguage — deterministic-handler false-positive guard
   });
 });
 
-describe("enforceProposalLanguage — I'll <verb> leak patterns", () => {
-  it("flags \"I'll add Team Dynamics Risk as an observable factor. Please confirm.\"", () => {
+describe("enforceProposalLanguage — I'll <verb> rewrite to proposal language", () => {
+  it("rewrites \"I'll add Team Dynamics Risk as an observable factor. Please confirm.\"", () => {
     const r = enforceProposalLanguage(
       "I'll add Team Dynamics Risk as an observable factor. Please confirm.",
       "add_factor",
     );
     expect(r.leaked).toBe(true);
     expect(r.matchedPhrase?.toLowerCase()).toContain("i'll add");
+    expect(r.suffixed).toBe(
+      "Proposing to add Team Dynamics Risk as an observable factor. Please confirm.",
+    );
+    expect(r.suffixed).not.toContain("I'll add");
   });
 
-  it("flags \"I'll update the edge strength.\"", () => {
+  it("rewrites \"I'll update the edge strength.\"", () => {
     const r = enforceProposalLanguage("I'll update the edge strength.", "edit_graph");
     expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe("Proposing to update the edge strength.");
   });
 
-  it("flags \"I'll remove that option.\" with smart quote", () => {
+  it("rewrites \"I'll remove that option.\" with smart quote", () => {
     const r = enforceProposalLanguage("I\u2019ll remove that option.", "remove_option");
     expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe("Proposing to remove that option.");
   });
 
-  it("flags \"I'll change the category.\"", () => {
+  it("rewrites \"I'll change the category.\"", () => {
     const r = enforceProposalLanguage("I'll change the category.", "edit_graph");
     expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe("Proposing to change the category.");
   });
 
   it("does NOT flag 'If I add a factor' (no contraction)", () => {
@@ -232,10 +273,22 @@ describe("enforceProposalLanguage — I'll <verb> leak patterns", () => {
     );
     expect(r.leaked).toBe(false);
   });
+
+  it("rewrites the staging-bug example \"I'll add Onboarding Time as a risk factor. Please confirm.\"", () => {
+    const r = enforceProposalLanguage(
+      "I'll add Onboarding Time as a risk factor. Please confirm.",
+      "add_factor",
+    );
+    expect(r.leaked).toBe(true);
+    expect(r.suffixed).toBe("Proposing to add Onboarding Time as a risk factor. Please confirm.");
+    expect(r.suffixed).not.toContain("I'll");
+  });
 });
 
 describe("enforceProposalLanguage — suffix preserves original text", () => {
-  it("appends the suffix exactly once with the expected separator", () => {
+  it("appends the suffix exactly once for residual leaks (not rewritten)", () => {
+    // "I've added" has no inline rewrite rule, so it falls through to the
+    // residual leak path and gets the corrective suffix appended.
     const original = "I've added the option.";
     const r = enforceProposalLanguage(original, "add_option");
     expect(r.suffixed).toBe(`${original}\n\nReview the suggested changes above.`);

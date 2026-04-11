@@ -211,12 +211,42 @@ export function buildToolDefinitions(
   eligibleActions: ActionName[],
   ctx?: DeterministicTurnContext,
   bypassStaleness?: boolean,
+  /**
+   * Forcibly include these tools in the output even if they would otherwise
+   * be excluded by post-analysis suppression. Used by pipeline-v4's chip-click
+   * routing to guarantee that an "explain_result" / "compare_options" /
+   * "what_would_flip" chip actually lands on its target tool, satisfying the
+   * action-type-first routing contract.
+   *
+   * Note: hard prerequisites (empty graph, schema validity, entity ambiguity)
+   * still apply. Force-include only bypasses the post-analysis explanation
+   * suppression and run_analysis staleness suppression.
+   */
+  forceInclude?: ReadonlySet<ActionName>,
 ): ToolDefinition[] {
   const definitions: ToolDefinition[] = [];
-  const excluded = ctx ? computeContextExclusions(ctx, bypassStaleness === true) : new Set<ActionName>();
+  const rawExcluded = ctx ? computeContextExclusions(ctx, bypassStaleness === true) : new Set<ActionName>();
+  // Strip force-included tools from the exclusion set so they re-enter the
+  // tool list below.
+  const excluded = new Set(rawExcluded);
+  if (forceInclude) {
+    for (const name of forceInclude) {
+      excluded.delete(name);
+    }
+  }
   const ambiguousTargetIds = ctx ? detectAmbiguousEntities(ctx) : false;
 
-  for (const name of eligibleActions) {
+  // If the caller forced a tool that's not in eligible_actions (e.g. a post-
+  // analysis explanation chip where the stage policy normally excludes the
+  // action), merge it in so the loop below can emit it.
+  const iterable: ActionName[] = forceInclude
+    ? [
+        ...eligibleActions,
+        ...[...forceInclude].filter(a => !eligibleActions.includes(a)),
+      ]
+    : eligibleActions;
+
+  for (const name of iterable) {
     if (EXCLUDED_ACTIONS.has(name)) continue;
     if (excluded.has(name)) continue;
 

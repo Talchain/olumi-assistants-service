@@ -1,0 +1,407 @@
+/**
+ * Tests for the typed chip engine (WS5).
+ */
+
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("../../../../src/utils/telemetry.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+}));
+
+import { computeChips, getChipIdsForSession } from "../../../../src/orchestrator/deterministic/chip-engine.js";
+import type { CoachingContext } from "../../../../src/orchestrator/deterministic/coaching-context-builder.js";
+import type { SessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
+import type { DeterministicTurnContext } from "../../../../src/orchestrator/deterministic/types.js";
+import { defaultSessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
+
+// ============================================================================
+// Fixtures
+// ============================================================================
+
+function makeCoaching(overrides: Partial<CoachingContext> = {}): CoachingContext {
+  return {
+    coaching_mode: 'calibrate',
+    primary_move: 'surface_assumption',
+    ask_question_now: false,
+    challenge_now: false,
+    response_posture: 'exploratory',
+    headline: null,
+    tradeoff: null,
+    biggest_inference: null,
+    calibration_target: null,
+    ai_estimated_count: 0,
+    user_provided_count: 0,
+    total_factor_count: 0,
+    drivers: [],
+    top_fragile: null,
+    triggered_plays: [],
+    cta: null,
+    risk_factor_count: 0,
+    option_mechanism_overlap: false,
+    critical_gap: null,
+    prediction_state: 'none',
+    chip_inputs: {
+      stage: 'ideate',
+      has_analysis: false,
+      analysis_fresh: false,
+      top_uncalibrated_factor: null,
+      has_risk_factors: false,
+      option_mechanism_overlap: false,
+      stability_band: null,
+      dominant_factor_label: null,
+    },
+    ...overrides,
+  } as CoachingContext;
+}
+
+function makeTurnContext(overrides: Partial<DeterministicTurnContext> = {}): DeterministicTurnContext {
+  return {
+    stage: 'ideate',
+    entities: { nodes: new Map(), edges: [], option_ids: [], goal_id: null } as unknown as DeterministicTurnContext['entities'],
+    graph_summary: { node_count: 5, edge_count: 3, option_count: 2, goal_label: 'Goal', option_labels: ['A', 'B'], missing_structural: [] } as unknown as DeterministicTurnContext['graph_summary'],
+    analysis_summary: null,
+    capabilities: {} as DeterministicTurnContext['capabilities'],
+    blockers: [],
+    signals: { close_call: false, dominant_factor: null, default_value_count: 0, weak_edges: [], high_uncertainty_factors: [] } as unknown as DeterministicTurnContext['signals'],
+    conversation: { turn_count: 1, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null } as unknown as DeterministicTurnContext['conversation'],
+    eligible_actions: [],
+    disambiguation_hints: [],
+    graph: null,
+    analysis: null,
+    conversational_state: null,
+    scenario_id: 'test',
+    turn_id: 'test',
+    analysis_inputs: null,
+    ...overrides,
+  } as DeterministicTurnContext;
+}
+
+// ============================================================================
+// Shared assertions
+// ============================================================================
+
+function assertChipShape(chip: { label: string; prompt: string; action_type?: string }) {
+  const wordCount = chip.label.split(/\s+/).filter(Boolean).length;
+  expect(wordCount, `label "${chip.label}" is ${wordCount} words, max 6`).toBeLessThanOrEqual(6);
+  expect(chip.label).not.toMatch(/[\u2013\u2014]/);
+  expect(chip.prompt).not.toMatch(/[\u2013\u2014]/);
+  // Chip labels must NOT be tool-name strings like "Set factor value".
+  expect(chip.label).not.toBe('Set factor value');
+  expect(chip.label).not.toBe('Add factor');
+  expect(chip.label).not.toBe('Add option');
+  expect(chip.label).not.toBe('Add constraint');
+  expect(chip.label).not.toBe('Challenge assumption');
+  expect(chip.label).not.toBe('Explain results');
+  expect(chip.label).not.toBe('Compare options');
+}
+
+// ============================================================================
+// Post-draft contexts
+// ============================================================================
+
+describe("computeChips — post-draft, high AI-estimated", () => {
+  it("returns calibrate + challenge + progress", () => {
+    const coaching = makeCoaching({
+      ai_estimated_count: 3,
+      chip_inputs: {
+        stage: 'ideate',
+        has_analysis: false,
+        analysis_fresh: false,
+        top_uncalibrated_factor: null,
+        has_risk_factors: false,
+        option_mechanism_overlap: false,
+        stability_band: null,
+        dominant_factor_label: null,
+      },
+      calibration_target: {
+        source_label: 'Cost Per Developer',
+        target_label: 'Productivity',
+        factor_id: 'f_cost',
+      },
+    });
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext(), null, []);
+    expect(chips.length).toBeLessThanOrEqual(3);
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    for (const chip of chips) assertChipShape(chip);
+    // At least one progress chip.
+    expect(chips.some(c => c.action_type === 'run_analysis')).toBe(true);
+    // Calibrate chip references the calibration target.
+    expect(chips.some(c => c.label.includes('Calibrate'))).toBe(true);
+    // Challenge chip present.
+    expect(chips.some(c => c.label === 'What could go wrong?')).toBe(true);
+  });
+});
+
+describe("computeChips — post-draft, no risk factors", () => {
+  it("returns challenge + alternatives + progress", () => {
+    const coaching = makeCoaching({
+      risk_factor_count: 0,
+      ai_estimated_count: 0,
+    });
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext(), null, []);
+    expect(chips.some(c => c.label === 'What could go wrong?')).toBe(true);
+    expect(chips.some(c => c.action_type === 'run_analysis')).toBe(true);
+    for (const chip of chips) assertChipShape(chip);
+  });
+});
+
+// ============================================================================
+// Post-analysis contexts
+// ============================================================================
+
+describe("computeChips — post-analysis, fragile result", () => {
+  it("returns what-would-change + calibrate + compare", () => {
+    const coaching = makeCoaching({
+      drivers: [
+        { factor_label: 'Cost Per Developer', factor_id: 'f_cost', sensitivity: 0.42, is_ai_estimated: true, confidence_band: 'medium' },
+      ],
+      chip_inputs: {
+        stage: 'evaluate',
+        has_analysis: true,
+        analysis_fresh: true,
+        top_uncalibrated_factor: 'f_cost',
+        has_risk_factors: true,
+        option_mechanism_overlap: false,
+        stability_band: 'fragile',
+        dominant_factor_label: null,
+      },
+    });
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    expect(chips.length).toBeLessThanOrEqual(3);
+    expect(chips.some(c => c.label === 'What would change this?')).toBe(true);
+    expect(chips.some(c => c.label.startsWith('Calibrate'))).toBe(true);
+    expect(chips.some(c => c.label === 'Compare the options')).toBe(true);
+    for (const chip of chips) assertChipShape(chip);
+  });
+});
+
+describe("computeChips — post-analysis, dominant factor", () => {
+  it("returns confidence + flip + brief", () => {
+    const coaching = makeCoaching({
+      drivers: [
+        { factor_label: 'Cost Per Developer', factor_id: 'f_cost', sensitivity: 0.55, is_ai_estimated: false, confidence_band: 'high' },
+      ],
+      chip_inputs: {
+        stage: 'evaluate',
+        has_analysis: true,
+        analysis_fresh: true,
+        top_uncalibrated_factor: null,
+        has_risk_factors: true,
+        option_mechanism_overlap: false,
+        stability_band: 'stable',
+        dominant_factor_label: 'Cost Per Developer',
+      },
+    });
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    expect(chips.some(c => /How confident in/i.test(c.label))).toBe(true);
+    expect(chips.some(c => c.label === 'What would flip this?')).toBe(true);
+    expect(chips.some(c => c.label === 'Generate a decision brief')).toBe(true);
+    for (const chip of chips) assertChipShape(chip);
+  });
+});
+
+describe("computeChips — post-analysis, stable result (no dominant factor)", () => {
+  it("returns confidence + pre-mortem + brief", () => {
+    const coaching = makeCoaching({
+      drivers: [
+        { factor_label: 'Market Timing', factor_id: 'f_mkt', sensitivity: 0.25, is_ai_estimated: false, confidence_band: 'high' },
+      ],
+      chip_inputs: {
+        stage: 'evaluate',
+        has_analysis: true,
+        analysis_fresh: true,
+        top_uncalibrated_factor: null,
+        has_risk_factors: true,
+        option_mechanism_overlap: false,
+        stability_band: 'stable',
+        dominant_factor_label: null,
+      },
+    });
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    expect(chips.some(c => c.label === 'Run a pre-mortem')).toBe(true);
+    expect(chips.some(c => c.label === 'Generate a decision brief')).toBe(true);
+    for (const chip of chips) assertChipShape(chip);
+  });
+});
+
+// ============================================================================
+// Stale analysis context
+// ============================================================================
+
+describe("computeChips — stale analysis", () => {
+  it("returns re-run + review", () => {
+    const coaching = makeCoaching({
+      chip_inputs: {
+        stage: 'evaluate',
+        has_analysis: true,
+        analysis_fresh: false,
+        top_uncalibrated_factor: null,
+        has_risk_factors: true,
+        option_mechanism_overlap: false,
+        stability_band: null,
+        dominant_factor_label: null,
+      },
+    });
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    expect(chips.some(c => c.label === 'Re-run with updated model')).toBe(true);
+    for (const chip of chips) assertChipShape(chip);
+  });
+});
+
+// ============================================================================
+// Session suppression
+// ============================================================================
+
+describe("computeChips — session suppression (2-turn window)", () => {
+  it("drops chips whose chip_id is in last_chip_ids_shown (turn N-1)", () => {
+    const coaching = makeCoaching({
+      ai_estimated_count: 3,
+      calibration_target: {
+        source_label: 'Cost Per Developer',
+        target_label: 'Productivity',
+        factor_id: 'f_cost',
+      },
+    });
+    const session: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['calibrate_f_cost', 'challenge_risks'],
+    };
+    const chips = computeChips(coaching, session, makeTurnContext(), null, []);
+    expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(false);
+    expect(chips.some(c => c.parameters?.chip_id === 'challenge_risks')).toBe(false);
+  });
+
+  it("drops chips that were shown on the turn BEFORE last (turn N-2)", () => {
+    const coaching = makeCoaching({
+      ai_estimated_count: 3,
+      calibration_target: {
+        source_label: 'Cost Per Developer',
+        target_label: 'Productivity',
+        factor_id: 'f_cost',
+      },
+    });
+    // last_chip_ids_shown = N-1 (empty this time)
+    // chip_ids_shown_prev_turn = N-2 (the turn before)
+    const session: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: [],
+      chip_ids_shown_prev_turn: ['calibrate_f_cost', 'challenge_risks'],
+    };
+    const chips = computeChips(coaching, session, makeTurnContext(), null, []);
+    expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(false);
+    expect(chips.some(c => c.parameters?.chip_id === 'challenge_risks')).toBe(false);
+  });
+
+  it("drops chips shown on EITHER of the last 2 turns (union)", () => {
+    const coaching = makeCoaching({
+      ai_estimated_count: 3,
+      calibration_target: {
+        source_label: 'Cost Per Developer',
+        target_label: 'Productivity',
+        factor_id: 'f_cost',
+      },
+    });
+    const session: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['calibrate_f_cost'],
+      chip_ids_shown_prev_turn: ['challenge_risks'],
+    };
+    const chips = computeChips(coaching, session, makeTurnContext(), null, []);
+    expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(false);
+    expect(chips.some(c => c.parameters?.chip_id === 'challenge_risks')).toBe(false);
+  });
+
+  it("does NOT suppress chips that the user clicked (exempt from the 2-turn window)", () => {
+    const coaching = makeCoaching({
+      ai_estimated_count: 3,
+      calibration_target: {
+        source_label: 'Cost Per Developer',
+        target_label: 'Productivity',
+        factor_id: 'f_cost',
+      },
+    });
+    // Chip was shown AND clicked — should reappear if still relevant.
+    const session: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['calibrate_f_cost'],
+      chip_ids_clicked: ['calibrate_f_cost'],
+    };
+    // The test checks whether the suppressedChipIds set excludes clicked IDs.
+    // We verify at the suppression-set level because `calibrate_f_cost`
+    // would also be blocked by the recent-action filter (set_factor_value
+    // was just clicked), and we're only testing the session-window logic.
+    const turnContext = makeTurnContext();
+    // Don't mark set_factor_value as recently executed so the recent-action
+    // filter doesn't independently drop the chip.
+    turnContext.conversation.recent_actions_taken = [];
+    const chips = computeChips(coaching, session, turnContext, null, []);
+    // The calibrate chip should reappear since it was clicked.
+    expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(true);
+  });
+});
+
+// ============================================================================
+// Confirmation-state suppression of progress chips
+// ============================================================================
+
+describe("computeChips — pending confirmation suppresses progress chips", () => {
+  it("does NOT include a progress chip while awaiting confirmation", () => {
+    const coaching = makeCoaching({ ai_estimated_count: 3 });
+    const turnContext = makeTurnContext({
+      conversation: {
+        turn_count: 1,
+        recent_actions_taken: [],
+        recent_actions_declined: [],
+        pending_confirmation: 'add_factor',
+      } as unknown as DeterministicTurnContext['conversation'],
+    });
+    const chips = computeChips(coaching, defaultSessionState(), turnContext, null, []);
+    expect(chips.some(c => c.action_type === 'run_analysis')).toBe(false);
+  });
+});
+
+// ============================================================================
+// Deferred actions
+// ============================================================================
+
+describe("computeChips — deferred actions", () => {
+  it("promotes a deferred explain tool to a chip", () => {
+    const coaching = makeCoaching({
+      chip_inputs: {
+        stage: 'evaluate',
+        has_analysis: true,
+        analysis_fresh: true,
+        top_uncalibrated_factor: null,
+        has_risk_factors: true,
+        option_mechanism_overlap: false,
+        stability_band: 'stable',
+        dominant_factor_label: null,
+      },
+    });
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      makeTurnContext({ stage: 'evaluate' }),
+      null,
+      ['what_would_flip'],
+    );
+    // Deferred chip is promoted, so it should appear in output.
+    expect(chips.some(c => c.action_type === 'what_would_flip')).toBe(true);
+  });
+});
+
+// ============================================================================
+// getChipIdsForSession
+// ============================================================================
+
+describe("getChipIdsForSession", () => {
+  it("extracts chip_ids from parameters", () => {
+    const chips = [
+      { label: 'A', prompt: 'a', role: 'facilitator' as const, parameters: { chip_id: 'chip_1' } },
+      { label: 'B', prompt: 'b', role: 'challenger' as const, parameters: { chip_id: 'chip_2' } },
+      { label: 'C', prompt: 'c', role: 'scientist' as const, parameters: {} },
+    ];
+    expect(getChipIdsForSession(chips)).toEqual(['chip_1', 'chip_2']);
+  });
+});

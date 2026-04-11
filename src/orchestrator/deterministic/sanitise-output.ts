@@ -19,6 +19,24 @@ import { log } from "../../utils/telemetry.js";
 const BANNED_TERMS = /\b(interventions|graph_patch|patch|operation)\b/i;
 
 /**
+ * Pattern for inline quoted chip-like lines the LLM sometimes writes
+ * alongside the real chips:
+ *
+ *     "Challenge the Cost driver" (challenger)
+ *     "Calibrate market size" (facilitator)
+ *     "What would flip this?" (scientist)
+ *
+ * Must be a standalone line — we never strip mid-paragraph quotes or
+ * factor labels wrapped in quotes. The role tag is optional (some LLM
+ * outputs drop the parenthetical), but at least one of the role words
+ * must appear, OR the line must be a full-length single-quoted line
+ * with no other content. We stick to the stricter role-required variant
+ * here to avoid false positives.
+ */
+const INLINE_CHIP_LINE_PATTERN =
+  /^[ \t]*["“][^"”\n]{5,60}["”][ \t]*[-–—]?[ \t]*\(?(?:facilitator|challenger|scientist)\)?[ \t]*$/gim;
+
+/**
  * "node" in a non-technical context — skip when preceded by common technical
  * qualifiers that make it a legitimate graph-modelling term.
  */
@@ -103,6 +121,46 @@ export function sanitiseAssistantText(text: string, opts?: SanitiseOptions): str
 }
 
 /**
+ * Task 6 (Part B): strip standalone quoted chip-like lines from assistant text.
+ *
+ * The LLM occasionally writes suggestions as quoted lines with role tags
+ * (e.g. `"Challenge the Cost driver" (challenger)`), duplicating the real
+ * chips that the UI renders from `suggested_actions`. We strip only lines
+ * that match the full pattern above — standalone, on their own line, with
+ * a role tag. Mid-paragraph quotes, factor labels in quotes, and example
+ * questions stay untouched.
+ *
+ * Logs `v4.inline_chip_stripped` with the count.
+ */
+export function stripInlineChipLines(text: string): string {
+  if (!text) return text;
+  // Reset regex state (global flag retains lastIndex across calls).
+  INLINE_CHIP_LINE_PATTERN.lastIndex = 0;
+  const matches = text.match(INLINE_CHIP_LINE_PATTERN);
+  if (!matches || matches.length === 0) return text;
+
+  // Remove each matching line. Use a replace that drops the line AND the
+  // trailing newline so we don't leave blank gaps where chips used to be.
+  let result = text.replace(INLINE_CHIP_LINE_PATTERN, '');
+  // Collapse runs of 3+ newlines left by stripping into exactly 2
+  // (preserving paragraph boundaries without building empty stretches).
+  result = result.replace(/\n{3,}/g, '\n\n');
+  // Trim leading/trailing whitespace artefacts introduced by the strip.
+  result = result.replace(/^\s+|\s+$/g, (m) => (m.includes('\n') ? '\n' : ''));
+
+  log.warn(
+    {
+      event: 'v4.inline_chip_stripped',
+      count: matches.length,
+      sample: matches.slice(0, 2),
+    },
+    'Stripped inline quoted chip-like lines from assistant text',
+  );
+
+  return result;
+}
+
+/**
  * Belt-and-braces pass: sanitise all user-facing text fields on an assembled
  * response envelope. Catches em dashes, banned terms, or artefacts that
  * slipped through per-field sanitisation (e.g. text injected by normaliser,
@@ -111,9 +169,10 @@ export function sanitiseAssistantText(text: string, opts?: SanitiseOptions): str
  * Mutates the envelope in place — call after normaliseDeterministicResponse.
  */
 export function sanitiseEnvelopeText(envelope: Record<string, unknown>): void {
-  // assistant_text
+  // assistant_text: first strip inline chip lines, then run standard sanitiser.
   if (typeof envelope.assistant_text === 'string') {
-    envelope.assistant_text = sanitiseAssistantText(envelope.assistant_text);
+    const stripped = stripInlineChipLines(envelope.assistant_text);
+    envelope.assistant_text = sanitiseAssistantText(stripped);
   }
 
   // suggested_actions[].label and suggested_actions[].prompt

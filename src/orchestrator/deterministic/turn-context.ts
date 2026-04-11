@@ -87,6 +87,10 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
   // Disambiguation hints
   const disambiguationHints = computeDisambiguationHints(turnRequest.message, entities);
 
+  // Currency hint from raw user message — honoured by set_factor_value when
+  // the LLM's tool params omit `unit`. See detectCurrencyInMessage below.
+  const userCurrencyHint = detectCurrencyInMessage(turnRequest.message);
+
   // ── Phase B: analysis-derived (may fail on malformed analysis_state) ─
 
   let analysisSummary: AnalysisSummary | null = null;
@@ -143,7 +147,60 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
     scenario_id: ctx.scenario_id,
     turn_id: '', // Set by pipeline after context computation
     analysis_inputs: analysisInputs,
+    user_currency_hint: userCurrencyHint,
   };
+}
+
+// ============================================================================
+// Currency detection from user message
+// ============================================================================
+
+/**
+ * Detect a currency the user mentioned explicitly in their message.
+ * Returns a canonical code ("USD", "GBP", ...) or null when no currency
+ * is detectable.
+ *
+ * Rules (precedence):
+ *   1. Explicit symbol attached to a number ($100, £100, €100, ¥100, ₹100)
+ *   2. Symbol anywhere in the message
+ *   3. Uppercase 3-letter ISO code (USD, GBP, EUR, JPY, INR)
+ *   4. null
+ *
+ * Set_factor_value reads this via `ctx.user_currency_hint` and treats it as
+ * higher-precedence than the graph node's stored unit — the brief says we
+ * must not silently override the user's stated currency with the graph's
+ * default.
+ */
+export function detectCurrencyInMessage(message: string | null | undefined): string | null {
+  if (!message) return null;
+  const text = message;
+
+  const symbolToCode: Record<string, string> = {
+    '$': 'USD',
+    '£': 'GBP',
+    '€': 'EUR',
+    '¥': 'JPY',
+    '₹': 'INR',
+  };
+
+  // Prefer a symbol directly attached to a number, e.g. "$100,000".
+  const attached = text.match(/([$£€¥₹])\s?-?\s?\d/);
+  if (attached) {
+    return symbolToCode[attached[1]] ?? null;
+  }
+
+  // Fall through to bare symbol anywhere.
+  const bare = text.match(/[$£€¥₹]/);
+  if (bare) {
+    return symbolToCode[bare[0]] ?? null;
+  }
+
+  // ISO codes — require word boundaries to avoid matching fragments inside
+  // larger words ("USDA", "EURASIA" etc.).
+  const iso = text.match(/\b(USD|GBP|EUR|JPY|INR|CAD|AUD|CHF|CNY|SEK|NOK|DKK|NZD)\b/);
+  if (iso) return iso[1];
+
+  return null;
 }
 
 // ============================================================================

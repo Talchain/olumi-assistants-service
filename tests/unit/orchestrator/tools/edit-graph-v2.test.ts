@@ -610,7 +610,10 @@ describe("envelope and coaching wiring", () => {
     );
 
     expect(result.assistantText).not.toBeNull();
-    expect(result.assistantText).toContain("Added a competitor response factor");
+    // The proposal-language guard rewrites sentence-start "Added X" to
+    // "Proposing to add X" on proposal turns (auto_apply: false) so the user
+    // reads a coherent proposal frame instead of completion language.
+    expect(result.assistantText).toContain("Proposing to add a competitor response factor");
     expect(result.assistantText).toContain("Note:");
     expect(result.assistantText).toContain("fac_competitor added as external");
   });

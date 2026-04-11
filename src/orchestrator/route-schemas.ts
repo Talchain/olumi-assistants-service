@@ -146,6 +146,17 @@ const ConversationContextSchema = z.object({
 });
 
 /**
+ * Chip-click metadata — present when the user clicked a chip rather than
+ * typing a free-form message. `action_type` forces the target tool, and
+ * `parameters.chip_id` lets the pipeline exempt the clicked chip from the
+ * 2-turn suppression window.
+ */
+export const ChipMetadataSchema = z.object({
+  action_type: z.string().min(1).max(64),
+  parameters: z.record(z.unknown()).optional(),
+}).optional();
+
+/**
  * Session decision state schema — validates session_state round-tripped from the UI.
  * Permissive: accepts partial state and falls back to defaults in the pipeline.
  */
@@ -157,6 +168,8 @@ export const SessionStateSchema = z.object({
   accepted_patches: z.number().int().min(0).optional(),
   dismissed_patches: z.number().int().min(0).optional(),
   last_chip_ids_shown: z.array(z.string()).optional(),
+  chip_ids_shown_prev_turn: z.array(z.string()).optional(),
+  chip_ids_clicked: z.array(z.string()).optional(),
   last_question_turn: z.number().int().min(0).optional(),
   preferred_option: z.string().nullable().optional(),
   convergence_signal: z.enum(['exploring', 'narrowing', 'converging']).optional(),
@@ -181,6 +194,8 @@ export const TurnRequestSchema = z.object({
   explicit_generate: z.boolean().optional(),
   /** Session decision state — echoed from previous turn's updated_session_state. */
   session_state: SessionStateSchema,
+  /** Chip-click metadata — set by the UI when the user clicks a suggested action. */
+  chip_metadata: ChipMetadataSchema,
 });
 
 /** Maximum user message length (friendly limit below Zod's 10,000 cap). */
