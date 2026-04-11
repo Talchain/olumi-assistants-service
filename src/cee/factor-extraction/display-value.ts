@@ -180,20 +180,26 @@ export function synthesiseDisplayValue(data: DisplayValueInput): string | undefi
     }
   }
 
-  // ── Priority 5–6: fall back to normalised value ───────────────────────────
+  // ── Priority 5–7: fall back to normalised value ───────────────────────────
   if (result === undefined && value !== undefined && typeof value === "number" && !Number.isNaN(value)) {
     // Check for percentage unit with normalised value (e.g. value=0.03, unit="%")
     if (unit === "%") {
       // Normalised percentage: multiply by 100 if ≤ 1
       const pct = value <= 1 ? parseFloat((value * 100).toFixed(2)) : parseFloat(value.toFixed(2));
       result = `${pct}%`;
+    } else if (unit) {
+      // Priority 5: value with unit (e.g. "6 developers", "18 months").
+      // Covers cases where data.value holds a raw count/quantity rather than
+      // a 0-1 normalised score, and raw_value was not separately populated.
+      const display = formatPlainNumber(value);
+      result = `${display} ${unit}`;
     } else if (factorType) {
-      // Priority 5: qualitative band from factor_type
+      // Priority 6: qualitative band from factor_type
       const band = qualitativeBand(Math.min(1, Math.max(0, value)));
       const displayValue = parseFloat(value.toFixed(2));
       result = `${band} (${displayValue})`;
     } else {
-      // Priority 6: bare normalised value
+      // Priority 7: bare normalised value
       result = String(parseFloat(value.toFixed(2)));
     }
   }

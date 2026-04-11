@@ -40,7 +40,7 @@ import { runIntegrityChecks, detectStrengthDefaults, detectStrengthMeanDominant 
 import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD, EDGE_STRENGTH_NEGLIGIBLE_THRESHOLD } from "../constants.js";
 import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
-import { synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
+import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 
 // ============================================================================
 // V3 Types
@@ -298,26 +298,35 @@ export function transformNodeToV3(
     v3Node.display_value = dataDisplayValue;
   }
 
-  // Synthesise display_value for external factors from prior range (CEE-4).
-  // External factors have data.value stripped by the repair stage (EXTERNAL_HAS_DATA),
-  // so they have no observed_state and no data.display_value. Their numeric context
-  // lives in the prior distribution. Build a human-readable range string here so
-  // the UI has something to render without doing semantic transforms.
-  // Only applied when: category=external AND prior exists AND display_value not already set.
-  if (
-    v3Node.display_value === undefined &&
-    v3Node.kind === "factor" &&
-    (node as any).category === "external" &&
-    v3Node.prior
-  ) {
-    const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
-    const synthesised = synthesiseRangeDisplayValue(
-      v3Node.prior,
-      priorUnit,
-      v3Node.factor_type,
-    );
-    if (synthesised !== undefined) {
-      v3Node.display_value = synthesised;
+  // Synthesise display_value for factors that lack an LLM-provided value.
+  //
+  // Path A (external factors): use prior range via synthesiseRangeDisplayValue.
+  // Path B (controllable/observable factors): use observed_state fields via
+  //   synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
+  if (v3Node.display_value === undefined && v3Node.kind === "factor") {
+    if ((node as any).category === "external" && v3Node.prior) {
+      // Path A: external factor — synthesise from prior range
+      const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
+      const synthesised = synthesiseRangeDisplayValue(
+        v3Node.prior,
+        priorUnit,
+        v3Node.factor_type,
+      );
+      if (synthesised !== undefined) {
+        v3Node.display_value = synthesised;
+      }
+    } else if (v3Node.observed_state) {
+      // Path B: controllable/observable factor — synthesise from observed_state
+      const os = v3Node.observed_state;
+      const synthesised = synthesiseDisplayValue({
+        value: os.value,
+        raw_value: os.raw_value,
+        unit: os.unit,
+        factor_type: os.factor_type ?? v3Node.factor_type,
+      });
+      if (synthesised !== undefined) {
+        v3Node.display_value = synthesised;
+      }
     }
   }
 

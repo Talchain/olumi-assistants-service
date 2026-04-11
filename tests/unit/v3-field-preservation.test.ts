@@ -350,11 +350,12 @@ describe("V3 field preservation contract", () => {
       expect(optNode.display_value).toBeUndefined();
     });
 
-    it("does not set display_value when data.display_value is absent", () => {
+    it("synthesises display_value from observed_state when data.display_value is absent", () => {
       const v3 = transformResponseToV3(makeComprehensiveV1(), { requestId: "t-dv3" });
       const priceNode = (v3 as any).nodes.find((n: any) => n.id === "fac_price");
-      // Base fixture has no display_value
-      expect(priceNode.display_value).toBeUndefined();
+      // Base fixture has no data.display_value but has raw_value=49, unit="£"
+      // → synthesised as "£49" via observed_state fallback (Path B)
+      expect(priceNode.display_value).toBe("£49");
     });
   });
 

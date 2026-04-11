@@ -327,3 +327,35 @@ describe("synthesiseRangeDisplayValue — percentage edge cases", () => {
     ).toBe("10% to 25%");
   });
 });
+
+// ============================================================================
+// synthesiseDisplayValue — unit fallback without raw_value (Issue 1/4 fix)
+// ============================================================================
+
+describe("synthesiseDisplayValue — value + unit fallback (no raw_value)", () => {
+  it("uses unit when value and unit are available but raw_value is missing", () => {
+    // Observable factor: data.value=6, data.unit="developers", no data.raw_value
+    expect(synthesiseDisplayValue({ value: 6, unit: "developers" })).toBe("6 developers");
+  });
+
+  it("uses unit with zero value", () => {
+    expect(synthesiseDisplayValue({ value: 0, unit: "developers" })).toBe("0 developers");
+  });
+
+  it("formats large numbers with unit", () => {
+    expect(synthesiseDisplayValue({ value: 1500, unit: "units" })).toBe("1,500 units");
+  });
+
+  it("prefers raw_value path over value+unit fallback", () => {
+    // raw_value is available — should use Priority 1-4, not the new fallback
+    expect(synthesiseDisplayValue({ value: 0.5, raw_value: 6, unit: "developers" })).toBe("6 developers");
+  });
+
+  it("still uses qualitative band when unit is absent but factor_type is present", () => {
+    expect(synthesiseDisplayValue({ value: 0.15, factor_type: "quality" })).toBe("Low (0.15)");
+  });
+
+  it("still returns bare number when neither unit nor factor_type available", () => {
+    expect(synthesiseDisplayValue({ value: 0.72 })).toBe("0.72");
+  });
+});
