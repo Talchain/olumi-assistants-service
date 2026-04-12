@@ -183,7 +183,9 @@ describe("composeResponse — factor_added", () => {
       data: { value_label: 'value: 6 weeks', target_label: 'Delivery Capacity' },
     };
     const text = composeResponse(fact, null, true);
-    expect(text).toContain('Onboarding delays could push the launch window back');
+    // Entity grounding ensures label appears even when significance doesn't mention it
+    expect(text).toContain('Onboarding Time');
+    expect(text).toContain('onboarding delays could push the launch window back');
     expect(text).not.toContain('Confirm to apply');
     expect(text).not.toContain('Proposing to add');
     assertNoBannedTerms(text);

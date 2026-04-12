@@ -39,6 +39,7 @@ vi.mock("../../src/schemas/cee-v3.js", () => ({
   CEEGraphResponseV3: {
     safeParse: vi.fn((input: unknown) => ({ success: true, data: input })),
   },
+  warnOnUnknownV3Fields: vi.fn(),
 }));
 
 import { runStageBoundary } from "../../src/cee/unified-pipeline/stages/boundary.js";

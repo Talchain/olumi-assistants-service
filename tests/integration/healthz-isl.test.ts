@@ -124,12 +124,12 @@ describe('GET /healthz/detail (ISL integration)', () => {
     expect(isl.configured).toBe(true);
 
     // Values should match getISLConfig output
-    expect(isl.timeout_ms).toBe(30000);
+    expect(isl.timeout_ms).toBe(60000);
     expect(isl.max_retries).toBe(1);
 
     // Config sources should indicate clamped/default
     expect(isl.config_sources).toEqual({
-      timeout: 'clamped',     // Value was clamped from 999999 to 30000
+      timeout: 'clamped',     // Value was clamped from 999999 to 60000
       max_retries: 'default', // Invalid -5 fell back to default 1
     });
   });

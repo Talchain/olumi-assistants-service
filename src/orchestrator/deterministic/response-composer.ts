@@ -186,7 +186,7 @@ function composeFactorAdded(fact: HandlerFact, coaching: CoachingContext | null,
 
   if (hasPatchBlock) {
     // Orientation only — the patch card shows the structural detail.
-    if (significance) return ensureSentencePunctuation(significance);
+    if (significance) return ensureEntityGrounding(entity.label, significance);
     return `${entity.label} captures a ${kind} that could shift the balance of the decision.`;
   }
 
@@ -319,6 +319,20 @@ function ensureSentencePunctuation(text: string): string {
 function lowercaseFirst(text: string): string {
   if (!text) return text;
   return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+/**
+ * Ensure the entity label appears in the text. If the text already contains
+ * the label (case-insensitive), return it with sentence punctuation. If not,
+ * prepend the label as a prefix: "Label: lowercased text."
+ */
+function ensureEntityGrounding(label: string, text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.toLowerCase().includes(label.toLowerCase())) {
+    return ensureSentencePunctuation(trimmed);
+  }
+  return ensureSentencePunctuation(`${label}: ${lowercaseFirst(trimmed)}`);
 }
 
 function composePremortemRun(fact: HandlerFact): string {

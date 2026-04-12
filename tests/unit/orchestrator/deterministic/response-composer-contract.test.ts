@@ -333,6 +333,14 @@ describe("strict contract — migrated actions", () => {
       const hasEntity = fact.entities_affected.some(e => text.includes(e.label));
       expect(hasEntity, `Expected entity label in: "${text}"`).toBe(true);
     });
+
+    it("hasPatchBlock=true: output contains entity label when entities_affected is non-empty (draft_created exempt)", () => {
+      if (fact.entities_affected.length === 0) return;
+      if (fact.action === 'draft_created') return;
+      const text = composeResponse(fact, coaching, true);
+      const hasEntity = fact.entities_affected.some(e => text.includes(e.label));
+      expect(hasEntity, `Expected entity label in hasPatchBlock=true output: "${text}"`).toBe(true);
+    });
   });
 });
 

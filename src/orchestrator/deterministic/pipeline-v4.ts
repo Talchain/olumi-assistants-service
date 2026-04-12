@@ -133,7 +133,7 @@ export async function* executePipelineV4(
         event: 'v4.turn_sources',
         request_id: requestId,
         turn_id: turnId,
-        response_source: 'legacy_handler' as const,
+        response_source: 'system_event' as const,
         chip_source: 'none' as const,
         chip_count: 0,
         executed_action: null,
@@ -268,6 +268,9 @@ export async function* executePipelineV4(
           event: 'v4.turn_sources',
           request_id: requestId,
           turn_id: turnId,
+          // TODO(P2): Confirmation turns hardcode 'legacy_handler'. When the composer
+          // is wired into the confirmation path, update this to reflect the actual
+          // source. See ownership contract v1.1 transitional exceptions.
           response_source: 'legacy_handler' as const,
           chip_source: confirmChipSource,
           chip_count: envelope.suggested_actions?.length ?? 0,
