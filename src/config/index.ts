@@ -498,12 +498,12 @@ const ConfigSchema = z.object({
     validationPipelineEnabled: booleanString.default(false),
     // Post-assembly Zod schema verification pipeline (CEE_VERIFICATION_PIPELINE_ENABLED)
     verificationPipelineEnabled: booleanString.default(true),
-    // Coaching architecture kill switches (default true — disable to fall back to pre-coaching behaviour)
+    // Coaching architecture kill switches
     coachingContextEnabled: booleanString.default(true), // CEE_COACHING_CONTEXT_ENABLED — coaching policy engine + dynamic block enrichment (WS1 + WS8)
-    actionPolicyEnabled: booleanString.default(true), // CEE_ACTION_POLICY_ENABLED — deterministic intent classification (WS4)
+    actionPolicyEnabled: booleanString.default(false), // CEE_ACTION_POLICY_ENABLED — deterministic intent classification (WS4) — not wired
     chipEngineEnabled: booleanString.default(true), // CEE_CHIP_ENGINE_ENABLED — typed chip engine (WS5)
-    postFlightValidatorEnabled: booleanString.default(true), // CEE_POST_FLIGHT_VALIDATOR_ENABLED — post-flight response validation (WS7)
-    guidedIntakeEnabled: booleanString.default(true), // CEE_GUIDED_INTAKE_ENABLED — BIL wire-up for thin briefs (WS3)
+    postFlightValidatorEnabled: booleanString.default(false), // CEE_POST_FLIGHT_VALIDATOR_ENABLED — post-flight response validation (WS7) — not wired
+    guidedIntakeEnabled: booleanString.default(false), // CEE_GUIDED_INTAKE_ENABLED — BIL wire-up for thin briefs (WS3) — not wired
   }),
 
   // ISL (Inference Service Layer) Configuration

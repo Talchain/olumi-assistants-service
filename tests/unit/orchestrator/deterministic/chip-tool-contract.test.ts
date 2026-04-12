@@ -318,3 +318,63 @@ describe("generate_artefact chip regression", () => {
     expect(chips.some(c => c.action_type === 'generate_artefact')).toBe(false);
   });
 });
+
+describe("confirmation turn tool filtering", () => {
+  it("confirmation path uses buildToolDefinitions — generate_artefact excluded even when in eligible_actions", () => {
+    // Simulate a confirmation turn where eligible_actions includes
+    // generate_artefact (which buildToolDefinitions would exclude via
+    // EXCLUDED_ACTIONS). Previously the confirmation path passed
+    // eligible_actions directly, bypassing this filtering.
+    const turnContext = makeTurnContext({
+      eligible_actions: [
+        'run_analysis', 'explain_result', 'compare_options', 'what_would_flip',
+        'set_factor_value', 'generate_artefact',
+      ],
+    });
+
+    // Build tools the same way the confirmation path now does
+    const confirmToolDefs = buildToolDefinitions(
+      [...turnContext.eligible_actions] as ActionName[],
+      turnContext,
+    );
+    const confirmToolNames = confirmToolDefs.map(t => t.name);
+
+    // generate_artefact is in EXCLUDED_ACTIONS — must not appear
+    expect(confirmToolNames).not.toContain('generate_artefact');
+
+    // Explanation tools should still be present (not suppressed post-analysis)
+    expect(confirmToolNames).toContain('explain_result');
+
+    // Assemble envelope with the filtered tool names
+    const envelope = assembleV4Envelope({
+      turnContext,
+      turnId: 'test-confirm',
+      requestId: 'test-req',
+      executionClass: 'deterministic',
+      assistantText: 'Patch applied.',
+      actionResult: null,
+      routing: 'deterministic',
+      executedAction: 'add_factor',
+      contextFallbackUsed: false,
+      coachingContext: makeCoaching(),
+      sessionState: defaultSessionState(),
+      availableTools: confirmToolNames,
+    });
+
+    const chips = envelope.suggested_actions ?? [];
+    // No chip should reference generate_artefact
+    expect(chips.some(c => c.action_type === 'generate_artefact')).toBe(false);
+
+    // Contract: every chip maps to an available tool
+    const toolSet = new Set(confirmToolNames);
+    for (const chip of chips) {
+      const tool = chipActionToTool(chip.action_type!);
+      if (tool) {
+        expect(
+          toolSet.has(tool),
+          `confirmation chip action_type="${chip.action_type}" maps to tool "${tool}" not in confirmToolNames`,
+        ).toBe(true);
+      }
+    }
+  });
+});

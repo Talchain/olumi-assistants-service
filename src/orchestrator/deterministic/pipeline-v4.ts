@@ -133,7 +133,7 @@ export async function* executePipelineV4(
         event: 'v4.turn_sources',
         request_id: requestId,
         turn_id: turnId,
-        response_source: 'handler_text' as const,
+        response_source: 'legacy_handler' as const,
         chip_source: 'none' as const,
         chip_count: 0,
         executed_action: null,
@@ -225,9 +225,15 @@ export async function* executePipelineV4(
             )
           : sessionState;
 
-        // For confirmation turns (deterministic, no LLM), use eligible_actions
-        // as the available tool list since no tool filtering was applied.
-        const confirmToolNames = [...turnContext.eligible_actions] as string[];
+        // Resolve the tool set through buildToolDefinitions so confirmation
+        // turns use the same exclusions (EXCLUDED_ACTIONS, context filtering,
+        // entity disambiguation) as LLM turns. No bypassStaleness on
+        // confirmation — there is no chip click to bypass for.
+        const confirmToolDefs = buildToolDefinitions(
+          [...turnContext.eligible_actions] as ActionName[],
+          turnContext,
+        );
+        const confirmToolNames = confirmToolDefs.map(t => t.name);
         const envelope = assembleV4Envelope({
           turnContext,
           turnId,
@@ -254,15 +260,15 @@ export async function* executePipelineV4(
         }
 
         // Telemetry: confirmation turn sources
-        const confirmChipSource: 'chip_engine' | 'legacy_builder' | 'none' =
+        const confirmChipSource: 'chip_engine' | 'legacy' | 'none' =
           config.cee.chipEngineEnabled !== false && coachingContext != null && confirmSessionState != null
             ? 'chip_engine'
-            : (envelope.suggested_actions?.length ?? 0) > 0 ? 'legacy_builder' : 'none';
+            : (envelope.suggested_actions?.length ?? 0) > 0 ? 'legacy' : 'none';
         log.info({
           event: 'v4.turn_sources',
           request_id: requestId,
           turn_id: turnId,
-          response_source: 'handler_text' as const,
+          response_source: 'legacy_handler' as const,
           chip_source: confirmChipSource,
           chip_count: envelope.suggested_actions?.length ?? 0,
           executed_action: confirmedAction,
@@ -307,23 +313,21 @@ export async function* executePipelineV4(
     );
     const resolvedToolNames = toolDefs.map(t => t.name);
 
-    // Log filtering impact when tools were removed
-    const filteredCount = eligibleActions.length - toolDefs.length;
-    if (filteredCount > 0) {
-      const toolNameSet = new Set(resolvedToolNames);
-      const removed = eligibleActions.filter(a => !toolNameSet.has(a) && a !== 'generate_artefact');
-      log.info({
-        request_id: requestId,
-        eligible_count: eligibleActions.length,
-        tool_count: toolDefs.length,
-        removed_tools: removed,
-        kept_tools: resolvedToolNames,
-        has_analysis: !!turnContext.analysis_summary,
-        has_graph: !!turnContext.graph && turnContext.graph_summary.node_count > 0,
-        disambiguation_hints: turnContext.disambiguation_hints.length,
-        bypass_staleness: bypassStaleness,
-      }, 'v4.tool_filtering');
-    }
+    // Always log the resolved tool set for journey debugging.
+    const toolNameSet = new Set(resolvedToolNames);
+    const removed = eligibleActions.filter(a => !toolNameSet.has(a) && a !== 'generate_artefact');
+    log.info({
+      request_id: requestId,
+      eligible_count: eligibleActions.length,
+      tool_count: toolDefs.length,
+      resolved_tools: resolvedToolNames,
+      kept_tools: resolvedToolNames,
+      removed_tools: removed,
+      has_analysis: !!turnContext.analysis_summary,
+      has_graph: !!turnContext.graph && turnContext.graph_summary.node_count > 0,
+      disambiguation_hints: turnContext.disambiguation_hints.length,
+      bypass_staleness: bypassStaleness,
+    }, 'v4.tool_filtering');
 
     // WS5 (P1.2): precompute chip labels using the resolved tool list so
     // the LLM knows which suggestions the UI will render and avoids
@@ -565,7 +569,7 @@ export async function* executePipelineV4(
     // like `"\nActual headline."` once the chip pre-text is prepended.
     const rawAssistantText = streamResult.assistantText.trim();
     let assistantText: string | null = rawAssistantText.length > 0 ? rawAssistantText : null;
-    let responseSource: 'composer' | 'handler_text' | 'llm_only' = assistantText ? 'llm_only' : 'handler_text';
+    let responseSource: 'composer' | 'legacy_handler' | 'llm_only' = assistantText ? 'llm_only' : 'legacy_handler';
 
     // ── WS2: Response composer (replaces handler text when fact is present) ─
     // When the action handler emitted a structured HandlerFact, run the
@@ -610,7 +614,7 @@ export async function* executePipelineV4(
     // already been sent and a late delta would violate the event ordering
     // text_delta → block → tool_result.
     if ((!assistantText || !assistantText.trim()) && toolExecution && !failedToolCall) {
-      responseSource = 'handler_text';
+      responseSource = 'legacy_handler';
       if (toolExecution.result.assistantText) {
         assistantText = toolExecution.result.assistantText;
       } else {
@@ -716,9 +720,9 @@ export async function* executePipelineV4(
       config.cee.chipEngineEnabled !== false
       && coachingContext != null
       && (updatedSessionState ?? sessionState) != null;
-    const chipSource: 'chip_engine' | 'legacy_builder' | 'none' = useChipEngine
+    const chipSource: 'chip_engine' | 'legacy' | 'none' = useChipEngine
       ? 'chip_engine'
-      : (envelope.suggested_actions?.length ?? 0) > 0 ? 'legacy_builder' : 'none';
+      : (envelope.suggested_actions?.length ?? 0) > 0 ? 'legacy' : 'none';
     log.info({
       event: 'v4.turn_sources',
       request_id: requestId,
