@@ -129,6 +129,15 @@ export async function* executePipelineV4(
         event_type: turnRequest.system_event?.event_type,
         duration_ms: Date.now() - startTime,
       }, 'v4.turn_context');
+      log.info({
+        event: 'v4.turn_sources',
+        request_id: requestId,
+        turn_id: turnId,
+        response_source: 'handler_text' as const,
+        chip_source: 'none' as const,
+        chip_count: 0,
+        executed_action: null,
+      }, 'Turn response and chip sources');
       return;
     }
 
@@ -243,6 +252,21 @@ export async function* executePipelineV4(
             : confirmSessionState;
           (envelope as unknown as Record<string, unknown>).updated_session_state = stateForRoundTrip;
         }
+
+        // Telemetry: confirmation turn sources
+        const confirmChipSource: 'chip_engine' | 'legacy_builder' | 'none' =
+          config.cee.chipEngineEnabled !== false && coachingContext != null && confirmSessionState != null
+            ? 'chip_engine'
+            : (envelope.suggested_actions?.length ?? 0) > 0 ? 'legacy_builder' : 'none';
+        log.info({
+          event: 'v4.turn_sources',
+          request_id: requestId,
+          turn_id: turnId,
+          response_source: 'handler_text' as const,
+          chip_source: confirmChipSource,
+          chip_count: envelope.suggested_actions?.length ?? 0,
+          executed_action: confirmedAction,
+        }, 'Turn response and chip sources');
 
         yield { type: 'turn_complete', seq: seq++, envelope };
         return;

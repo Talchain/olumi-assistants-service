@@ -37,7 +37,8 @@ vi.mock("../../../../src/orchestrator/guidance/post-analysis.js", () => ({
 
 import { assembleV4Envelope } from "../../../../src/orchestrator/deterministic/pipeline-v4.js";
 import { buildToolDefinitions } from "../../../../src/orchestrator/deterministic/tool-builder.js";
-import { chipActionToTool } from "../../../../src/orchestrator/deterministic/action-tool-mapping.js";
+import { chipActionToTool, getMappedActionTypes } from "../../../../src/orchestrator/deterministic/action-tool-mapping.js";
+import { ACTION_NAMES } from "../../../../src/orchestrator/deterministic/actions/types.js";
 import type { DeterministicTurnContext, AnalysisSummary } from "../../../../src/orchestrator/deterministic/types.js";
 import type { CoachingContext } from "../../../../src/orchestrator/deterministic/coaching-context-builder.js";
 import { defaultSessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
@@ -230,5 +231,90 @@ describe("chip-tool availability contract (pipeline-level)", () => {
     expect(chips.some(c => c.action_type === 'what_would_flip')).toBe(true);
     // And it should be available
     expect(resolvedToolNames).toContain('what_would_flip');
+  });
+});
+
+describe("action-tool-mapping exhaustiveness", () => {
+  it("every key in the mapping is a valid ActionName", () => {
+    const validNames = new Set<string>(ACTION_NAMES);
+    const mappedTypes = getMappedActionTypes();
+    for (const key of mappedTypes) {
+      expect(
+        validNames.has(key),
+        `action-tool-mapping key "${key}" is not a valid ActionName — possible typo or renamed action`,
+      ).toBe(true);
+    }
+  });
+
+  it("every ActionName that appears as a chip action_type has a mapping entry", () => {
+    // These are the action_types used by chip factory functions in chip-engine.ts.
+    // If a new chip factory is added with a new action_type, add it here.
+    const chipActionTypes = [
+      'set_factor_value', 'challenge_assumption', 'add_option', 'run_analysis',
+      'what_would_flip', 'compare_options', 'run_premortem', 'generate_artefact',
+      'explain_result', 'adjust_edge_strength',
+    ];
+    const mappedTypes = getMappedActionTypes();
+    for (const actionType of chipActionTypes) {
+      expect(
+        mappedTypes.has(actionType),
+        `chip action_type "${actionType}" has no entry in action-tool-mapping — chips with this action will bypass availability filtering`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe("generate_artefact chip regression", () => {
+  it("generate_artefact maps to 'generate_artefact' tool (not generate_brief)", () => {
+    expect(chipActionToTool('generate_artefact')).toBe('generate_artefact');
+    // generate_brief is not a valid ActionName — must not exist in the mapping
+    expect(chipActionToTool('generate_brief')).toBeNull();
+  });
+
+  it("'Generate a decision brief' chip is filtered when generate_artefact is not in available tools", () => {
+    // generate_artefact is in EXCLUDED_ACTIONS and never in eligible_actions,
+    // so the chip engine should filter it out.
+    const turnContext = makeTurnContext();
+    const eligibleActions = [...turnContext.eligible_actions] as ActionName[];
+    const toolDefs = buildToolDefinitions(eligibleActions, turnContext, false);
+    const resolvedToolNames = toolDefs.map(t => t.name);
+
+    // generate_artefact should NOT be in the resolved tool names
+    expect(resolvedToolNames).not.toContain('generate_artefact');
+
+    // Use a coaching context that would produce a generate_artefact chip
+    // (stable result with dominant factor → confidence + flip + brief)
+    const stableCoaching = makeCoaching({
+      chip_inputs: {
+        stage: 'evaluate',
+        has_analysis: true,
+        analysis_fresh: true,
+        top_uncalibrated_factor: null,
+        has_risk_factors: true,
+        option_mechanism_overlap: false,
+        stability_band: 'stable',
+        dominant_factor_label: 'Cost',
+      },
+    });
+
+    const envelope = assembleV4Envelope({
+      turnContext,
+      turnId: 'test-turn',
+      requestId: 'test-req',
+      executionClass: 'llm',
+      assistantText: 'Analysis complete.',
+      actionResult: null,
+      routing: 'llm',
+      executedAction: null,
+      contextFallbackUsed: false,
+      coachingContext: stableCoaching,
+      sessionState: defaultSessionState(),
+      availableTools: resolvedToolNames,
+    });
+
+    const chips = envelope.suggested_actions ?? [];
+    // The "Generate a decision brief" chip must NOT appear since
+    // generate_artefact is not in the available tool set.
+    expect(chips.some(c => c.action_type === 'generate_artefact')).toBe(false);
   });
 });
