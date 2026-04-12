@@ -19,7 +19,7 @@ import type {
 export class EditGraphAdapter implements EvaluatorAdapter<EditGraphFixture> {
   async loadCases(dir: string): Promise<EditGraphFixture[]> {
     const files = await readdir(dir);
-    const jsonFiles = files.filter((f) => f.endsWith(".json")).sort();
+    const jsonFiles = files.filter((f) => f.endsWith(".json") && !/\s\d+\.json$/.test(f)).sort();
 
     const fixtures: EditGraphFixture[] = [];
     for (const file of jsonFiles) {

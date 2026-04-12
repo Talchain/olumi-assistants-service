@@ -28,7 +28,7 @@ export class OrchestratorAdapter
 {
   async loadCases(dir: string): Promise<OrchestratorFixture[]> {
     const files = await readdir(dir);
-    const jsonFiles = files.filter((f) => f.endsWith(".json")).sort();
+    const jsonFiles = files.filter((f) => f.endsWith(".json") && !/\s\d+\.json$/.test(f)).sort();
 
     const fixtures: OrchestratorFixture[] = [];
     for (const file of jsonFiles) {

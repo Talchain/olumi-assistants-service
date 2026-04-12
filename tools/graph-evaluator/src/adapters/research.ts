@@ -192,7 +192,7 @@ export async function callResearchAPI(
 export class ResearchAdapter implements EvaluatorAdapter<ResearchFixture> {
   async loadCases(dir: string): Promise<ResearchFixture[]> {
     const files = await readdir(dir);
-    const jsonFiles = files.filter((f) => f.endsWith(".json")).sort();
+    const jsonFiles = files.filter((f) => f.endsWith(".json") && !/\s\d+\.json$/.test(f)).sort();
 
     const fixtures: ResearchFixture[] = [];
     for (const file of jsonFiles) {
