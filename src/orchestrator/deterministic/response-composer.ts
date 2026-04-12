@@ -137,9 +137,7 @@ export function composeResponse(
 // ============================================================================
 
 function composeDraftCreated(fact: HandlerFact, coaching: CoachingContext | null, hasPatchBlock: boolean): string {
-  const optionCount = (fact.data?.option_count as number | undefined) ?? 0;
   const goalLabel = (fact.data?.goal_label as string | undefined) ?? 'your decision';
-  const optionWord = optionCount === 1 ? 'approach' : 'approaches';
   const parts: string[] = [];
 
   // Lead with the core trade-off when coaching context is available.
@@ -235,8 +233,9 @@ function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, ha
 
   if (hasPatchBlock) {
     // Orientation only — the patch card shows the calibration detail.
+    // Strictly 1 sentence.
     if (isTopDriver) return `At ${valueStr}, ${entity.label} is the factor the outcome is most sensitive to.`;
-    if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr}. ${fact.why_it_matters}`);
+    if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr} ${lowercaseFirst(fact.why_it_matters)}`);
     return `${entity.label} calibrated to ${valueStr}.`;
   }
 
@@ -248,7 +247,7 @@ function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, ha
   }
 
   // Proposal framing — no "Confirm to apply".
-  if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr} would ${fact.why_it_matters}`);
+  if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr} would ${lowercaseFirst(fact.why_it_matters)}`);
   return `${entity.label} at ${valueStr} would shift the balance of the decision.`;
 }
 
@@ -311,6 +310,15 @@ function ensureSentencePunctuation(text: string): string {
   const trimmed = text.trimEnd();
   if (!trimmed) return trimmed;
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+/**
+ * Lowercase the first character of a string. Used when splicing
+ * why_it_matters into mid-sentence position (e.g. "X at Y would {why}").
+ */
+function lowercaseFirst(text: string): string {
+  if (!text) return text;
+  return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
 function composePremortemRun(fact: HandlerFact): string {

@@ -398,6 +398,38 @@ describe("composeResponse — value_set", () => {
     assertNoBannedTerms(text);
   });
 
+  it("with patch block + why_it_matters: single sentence, lowercased splice", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sal', label: 'Salary', kind: 'factor' }],
+      what_changed: 'Salary to 85000 GBP',
+      why_it_matters: 'Makes the two-developer path significantly more expensive.',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 85000, unit: 'GBP' },
+    };
+    const text = composeResponse(fact, null, true);
+    // Should be 1 sentence with lowercased splice
+    expect(text).toBe('Salary at 85000 GBP makes the two-developer path significantly more expensive.');
+    expect(text).not.toContain('Makes');  // Capital M should be lowered
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + proposal + capitalised why: lowercases into sentence", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sal', label: 'Salary', kind: 'factor' }],
+      what_changed: 'Salary to 85000 GBP',
+      why_it_matters: 'Shift the balance toward the tech lead option',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { new_value: 85000, unit: 'GBP' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toContain('Salary at 85000 GBP would shift the balance toward the tech lead option');
+    assertNoBannedTerms(text);
+  });
+
   it("without patch block + proposal + no why: uses generic decision framing", () => {
     const fact: HandlerFact = {
       action: 'value_set',
