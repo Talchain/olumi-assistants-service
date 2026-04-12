@@ -1234,16 +1234,17 @@ describe("executePipelineV4", () => {
       } as unknown as Partial<OrchestratorTurnRequest>);
     }
 
-    function expectExplanationToolsAbsent(callArgs: { tools: Array<{ name: string }> }): void {
+    function expectExplanationToolsPresent(callArgs: { tools: Array<{ name: string }> }): void {
       const toolNames = callArgs.tools.map(t => t.name);
-      expect(toolNames).not.toContain('explain_result');
-      expect(toolNames).not.toContain('compare_options');
-      expect(toolNames).not.toContain('what_would_flip');
-      // run_analysis is also suppressed by the staleness contract
+      // Explanation tools are read-only and stay available post-analysis
+      expect(toolNames).toContain('explain_result');
+      expect(toolNames).toContain('compare_options');
+      expect(toolNames).toContain('what_would_flip');
+      // run_analysis is still suppressed by the staleness contract
       expect(toolNames).not.toContain('run_analysis');
     }
 
-    it('"Can you explain these results?" with analysis in context → explanation tools NOT in tool set', async () => {
+    it('"Can you explain these results?" with analysis in context → explanation tools in tool set, run_analysis suppressed', async () => {
       mockStreamChatWithTools.mockReturnValue(mockStream([
         { type: 'text_delta', delta: 'Expand Europe leads at 62% because Market Size carries the strongest positive signal toward your revenue goal.' },
         { type: 'message_complete', result: { content: [{ type: 'text', text: 'Expand Europe leads at 62% because Market Size carries the strongest positive signal toward your revenue goal.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
@@ -1254,10 +1255,10 @@ describe("executePipelineV4", () => {
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }> };
-      expectExplanationToolsAbsent(callArgs);
+      expectExplanationToolsPresent(callArgs);
     });
 
-    it('"Why does Option A lead?" with analysis in context → explanation tools NOT in tool set', async () => {
+    it('"Why does Option A lead?" with analysis in context → explanation tools in tool set, run_analysis suppressed', async () => {
       mockStreamChatWithTools.mockReturnValue(mockStream([
         { type: 'text_delta', delta: 'Option A leads because of...' },
         { type: 'message_complete', result: { content: [{ type: 'text', text: 'Option A leads because of...' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
@@ -1268,10 +1269,10 @@ describe("executePipelineV4", () => {
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }> };
-      expectExplanationToolsAbsent(callArgs);
+      expectExplanationToolsPresent(callArgs);
     });
 
-    it('"Compare the options for me" with analysis in context → explanation tools NOT in tool set', async () => {
+    it('"Compare the options for me" with analysis in context → explanation tools in tool set, run_analysis suppressed', async () => {
       mockStreamChatWithTools.mockReturnValue(mockStream([
         { type: 'text_delta', delta: 'Comparing the two options...' },
         { type: 'message_complete', result: { content: [{ type: 'text', text: 'Comparing the two options...' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
@@ -1282,16 +1283,13 @@ describe("executePipelineV4", () => {
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }> };
-      expectExplanationToolsAbsent(callArgs);
+      expectExplanationToolsPresent(callArgs);
     });
 
     it('chip click on explain_result with fresh analysis: action-type-first routing forces explain_result tool', async () => {
-      // P0.1 (2026-04-12): the "Explain results" chip must land on the
-      // explain_result tool deterministically. Previously the post-analysis
-      // suppression stripped the tool and the LLM could pick run_premortem
-      // or challenge_assumption under tool_choice: 'auto'. With the chip
-      // force-include, explain_result is re-added to the tool set when the
-      // click targets it and tool_choice is forced.
+      // Explanation tools are no longer suppressed post-analysis (P0 fix
+      // 2026-04-12), so explain_result is directly available in the tool
+      // set. tool_choice forces it deterministically on chip click.
       const llmResponse = 'Explaining the results.';
       mockStreamChatWithTools.mockReturnValue(mockStream([
         { type: 'text_delta', delta: llmResponse },
@@ -1329,8 +1327,8 @@ describe("executePipelineV4", () => {
 
       await collectEvents(executePipelineV4(req, 'req-explain-chip'));
 
-      // P0.1: the chip-click force-include puts explain_result back in the
-      // tool set, and tool_choice forces it deterministically.
+      // explain_result is available post-analysis (no longer suppressed),
+      // and tool_choice forces it deterministically on chip click.
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0] as { tools: Array<{ name: string }>; tool_choice?: { type: string; name?: string } };
       const toolNames = callArgs.tools.map(t => t.name);

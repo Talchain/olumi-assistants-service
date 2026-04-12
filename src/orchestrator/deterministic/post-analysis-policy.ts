@@ -1,27 +1,21 @@
 /**
  * Post-Analysis Policy
  *
- * Single source of truth for which actions are answered from Zone 2 data
- * (the dynamic prompt block) when fresh analysis is in context, instead of
- * being executed as tool calls.
+ * Single source of truth for which actions are read-only explanation tools
+ * that query existing analysis data without triggering new computation.
  *
- * Tool-builder strips these from the tool list when `analysis_summary` is
- * present so the LLM cannot call the handler templates — the handler would
- * intercept the response and the LLM would only emit a 40–60 char stub
- * instead of writing a coached response from the Zone 2 fields
- * (factor_sensitivity, fragile_edges, top_drivers, etc.).
+ * These tools (explain_result, compare_options, what_would_flip) remain
+ * available in the tool set when fresh analysis is present — they are NOT
+ * suppressed. They produce structured explanation responses from existing
+ * analysis data (factor_sensitivity, fragile_edges, top_drivers, etc.).
  *
- * NOT removed from chip-builder: chip clicks for these actions are routed
- * via pipeline-v4's Zone 2 path (see `isExplanationChipSuppressedByAnalysis`
- * in tool-builder.ts and its consumer in pipeline-v4.ts). The chip is a
- * conversation prompt, not a tool invocation — the click survives chip
- * generation, the tool is intentionally absent at LLM call time, and
- * pipeline-v4 detects this case to suppress the "tool not available"
- * downgrade and let the LLM respond from analysis_state directly.
+ * Only run_analysis is suppressed post-analysis (via tool-builder's
+ * staleness rule) to prevent redundant long-running calls. The staleness
+ * bypass in pipeline-v4 lets chip clicks override that suppression.
  *
- * Adding or removing entries from this set is a contract change — both
- * tool-builder and pipeline-v4 import from here. The shared-constant test
- * in `post-analysis-policy.test.ts` enforces single-sourcing.
+ * This set is used by:
+ * - chip-engine (via action-tool-mapping) for documenting explanation tools
+ * - tests for verifying the tool availability contract
  */
 
 import type { ActionName } from "./actions/types.js";

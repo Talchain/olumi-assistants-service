@@ -23,7 +23,7 @@ import { computeTurnContext } from "./turn-context.js";
 import { handleSystemEvent } from "./system-event-handler.js";
 import { handlePendingConfirmation } from "./confirmation-flow.js";
 import { buildDeterministicPromptV2 } from "./prompt-builder-v2.js";
-import { buildToolDefinitions, isExplanationChipSuppressedByAnalysis } from "./tool-builder.js";
+import { buildToolDefinitions } from "./tool-builder.js";
 import { buildDeterministicChips } from "./chip-builder-v4.js";
 import { processAdapterStream, PROGRESS_MESSAGES, PROGRESS_INTERVAL_MS } from "./stream-handler-v4.js";
 import type { StreamHandlerResult, ToolExecution } from "./stream-handler-v4.js";
@@ -216,6 +216,9 @@ export async function* executePipelineV4(
             )
           : sessionState;
 
+        // For confirmation turns (deterministic, no LLM), use eligible_actions
+        // as the available tool list since no tool filtering was applied.
+        const confirmToolNames = [...turnContext.eligible_actions] as string[];
         const envelope = assembleV4Envelope({
           turnContext,
           turnId,
@@ -228,6 +231,7 @@ export async function* executePipelineV4(
           contextFallbackUsed,
           coachingContext,
           sessionState: confirmSessionState,
+          availableTools: confirmToolNames,
         });
 
         // Capture chip_ids produced this turn so the next turn's 2-turn
@@ -251,29 +255,13 @@ export async function* executePipelineV4(
     const routing: 'deterministic' | 'llm' = 'llm';
     yield { type: 'turn_start', seq: seq++, turn_id: turnId, routing, stage };
 
-    // WS5 (P1.2): precompute the chip labels the user will see so we can
-    // inject them into the dynamic block's coaching section. The LLM then
-    // knows exactly which suggestions the UI will render and can avoid
-    // duplicating them as inline quoted prose. Pre-execution state (no
-    // executed action, no deferred actions yet) is used deliberately —
-    // the final envelope chips are recomputed after the LLM call.
-    let preComputedChipLabels: string[] = [];
-    if (coachingContext && config.cee.chipEngineEnabled !== false) {
-      try {
-        const preChips = computeChips(coachingContext, sessionState, turnContext, null, []);
-        preComputedChipLabels = preChips.map(c => c.label);
-      } catch (err) {
-        log.warn({ event: 'v4.precompute_chips_error', error: (err as Error).message }, 'Precomputing chip labels for prompt failed');
-      }
-    }
-
-    // Build prompt (async — loads from PMS with TTL cache)
-    // WS8: pass coaching context + chip labels for dynamic block enrichment
-    const prompt = await buildDeterministicPromptV2(turnContext, coachingContext, preComputedChipLabels);
-
-    // Build tool definitions — add draft_graph when generate_model or no usable graph
+    // Build tool definitions — add draft_graph when generate_model or no usable graph.
     // An empty graph ({ nodes: [], edges: [] }) is truthy but has no model content,
     // so treat zero-node graphs the same as null for draft_graph eligibility.
+    //
+    // Tool definitions are built BEFORE pre-computing chip labels so that
+    // both prompt injection and user-facing chips use the same resolved
+    // tool list — no availability mismatch.
     const eligibleActions = [...turnContext.eligible_actions];
     if (turnRequest.generate_model || !turnContext.graph || turnContext.graph_summary.node_count === 0) {
       if (!eligibleActions.includes('draft_graph')) {
@@ -286,39 +274,26 @@ export async function* executePipelineV4(
     // to override that, so set bypassStaleness when the chip targets
     // run_analysis. The hard prerequisites (graph required) still apply, so
     // a click without a graph still downgrades cleanly.
-    //
-    // Note: this hard-codes 'run_analysis' as the only staleness-bypass case.
-    // If we add another long-running tool with the same staleness pattern in
-    // future (e.g. regenerate_brief), generalise to a Set lookup here.
     const chipAction = turnRequest.chip_metadata?.action_type as ActionName | undefined;
     const bypassStaleness = chipAction === 'run_analysis';
-    // Task 1 (P0): action-type-first deterministic chip routing.
-    // When the chip click targets an explanation tool that post-analysis
-    // suppression would normally strip, force it back into the tool set.
-    // Combined with the `tool_choice: { type: 'tool', name }` below, this
-    // guarantees "Explain results" clicks execute `explain_result` (not
-    // run_premortem or challenge_assumption) regardless of the LLM's own
-    // preferences.
-    const chipForceInclude = chipAction && isExplanationChipSuppressedByAnalysis(chipAction, turnContext)
-      ? new Set<ActionName>([chipAction])
-      : undefined;
     const toolDefs = buildToolDefinitions(
       eligibleActions as ActionName[],
       turnContext,
       bypassStaleness,
-      chipForceInclude,
     );
+    const resolvedToolNames = toolDefs.map(t => t.name);
 
     // Log filtering impact when tools were removed
     const filteredCount = eligibleActions.length - toolDefs.length;
     if (filteredCount > 0) {
-      const toolNames = new Set(toolDefs.map(t => t.name));
-      const removed = eligibleActions.filter(a => !toolNames.has(a) && a !== 'generate_artefact');
+      const toolNameSet = new Set(resolvedToolNames);
+      const removed = eligibleActions.filter(a => !toolNameSet.has(a) && a !== 'generate_artefact');
       log.info({
         request_id: requestId,
         eligible_count: eligibleActions.length,
         tool_count: toolDefs.length,
         removed_tools: removed,
+        kept_tools: resolvedToolNames,
         has_analysis: !!turnContext.analysis_summary,
         has_graph: !!turnContext.graph && turnContext.graph_summary.node_count > 0,
         disambiguation_hints: turnContext.disambiguation_hints.length,
@@ -326,17 +301,30 @@ export async function* executePipelineV4(
       }, 'v4.tool_filtering');
     }
 
+    // WS5 (P1.2): precompute chip labels using the resolved tool list so
+    // the LLM knows which suggestions the UI will render and avoids
+    // duplicating them as inline quoted prose. Pre-execution state (no
+    // executed action, no deferred actions yet) is used deliberately —
+    // the final envelope chips are recomputed after the LLM call.
+    let preComputedChipLabels: string[] = [];
+    if (coachingContext && config.cee.chipEngineEnabled !== false) {
+      try {
+        const preChips = computeChips(coachingContext, sessionState, turnContext, null, [], resolvedToolNames);
+        preComputedChipLabels = preChips.map(c => c.label);
+      } catch (err) {
+        log.warn({ event: 'v4.precompute_chips_error', error: (err as Error).message }, 'Precomputing chip labels for prompt failed');
+      }
+    }
+
+    // Build prompt (async — loads from PMS with TTL cache)
+    // WS8: pass coaching context + chip labels for dynamic block enrichment
+    const prompt = await buildDeterministicPromptV2(turnContext, coachingContext, preComputedChipLabels);
+
     // Determine tool_choice.
     // Force the chip action when it survived all tool-builder filters
     // (data-availability, staleness with bypass, entity disambiguation, schema
     // validation). If any filter removed it, downgrade to 'auto' so the API
     // call stays valid and the LLM can pick something or respond conversationally.
-    //
-    // Task 1 (P0): post-analysis explanation chips are now force-included in
-    // the tool set above, so chipActionInTools will be true for them and the
-    // routing lands on the requested tool deterministically. The hijack-guard
-    // fallback for the 'auto' downgrade path remains in case some other
-    // filter (schema invalidity, hard prerequisite) removes the chip action.
     const chipActionInTools = chipAction && toolDefs.some(t => t.name === chipAction);
     const toolChoice = chipActionInTools
       ? { type: 'tool' as const, name: chipAction! }
@@ -553,6 +541,7 @@ export async function* executePipelineV4(
     // like `"\nActual headline."` once the chip pre-text is prepended.
     const rawAssistantText = streamResult.assistantText.trim();
     let assistantText: string | null = rawAssistantText.length > 0 ? rawAssistantText : null;
+    let responseSource: 'composer' | 'handler_text' | 'llm_only' = assistantText ? 'llm_only' : 'handler_text';
 
     // ── WS2: Response composer (replaces handler text when fact is present) ─
     // When the action handler emitted a structured HandlerFact, run the
@@ -573,6 +562,7 @@ export async function* executePipelineV4(
         const composed = composeResponse(actionResult.fact, coachingContext);
         if (composed && composed.trim().length > 0) {
           assistantText = composed;
+          responseSource = 'composer';
         }
       } catch (err) {
         log.warn(
@@ -596,6 +586,7 @@ export async function* executePipelineV4(
     // already been sent and a late delta would violate the event ordering
     // text_delta → block → tool_result.
     if ((!assistantText || !assistantText.trim()) && toolExecution && !failedToolCall) {
+      responseSource = 'handler_text';
       if (toolExecution.result.assistantText) {
         assistantText = toolExecution.result.assistantText;
       } else {
@@ -681,6 +672,7 @@ export async function* executePipelineV4(
       deferredActions,
       coachingContext,
       sessionState: updatedSessionState ?? sessionState,
+      availableTools: resolvedToolNames,
     });
 
     // WS6: Attach updated session state to envelope for UI round-trip.
@@ -694,6 +686,24 @@ export async function* executePipelineV4(
         : updatedSessionState;
       (envelope as unknown as Record<string, unknown>).updated_session_state = stateForRoundTrip;
     }
+
+    // Telemetry: response and chip source for debugging
+    const useChipEngine =
+      config.cee.chipEngineEnabled !== false
+      && coachingContext != null
+      && (updatedSessionState ?? sessionState) != null;
+    const chipSource: 'chip_engine' | 'legacy_builder' | 'none' = useChipEngine
+      ? 'chip_engine'
+      : (envelope.suggested_actions?.length ?? 0) > 0 ? 'legacy_builder' : 'none';
+    log.info({
+      event: 'v4.turn_sources',
+      request_id: requestId,
+      turn_id: turnId,
+      response_source: responseSource,
+      chip_source: chipSource,
+      chip_count: envelope.suggested_actions?.length ?? 0,
+      executed_action: executedAction,
+    }, 'Turn response and chip sources');
 
     yield { type: 'turn_complete', seq: seq++, envelope };
 
@@ -768,6 +778,8 @@ export interface AssembleInput {
   coachingContext?: CoachingContext | null;
   /** WS6/WS5: session state for chip suppression. */
   sessionState?: SessionState | null;
+  /** Resolved tool names for chip availability filtering. */
+  availableTools?: readonly string[];
 }
 
 /**
@@ -791,6 +803,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     deferredActions = [],
     coachingContext = null,
     sessionState = null,
+    availableTools = [],
   } = input;
 
   // T1 (Phase A): structured failure short-circuit. When the action handler
@@ -951,7 +964,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     && coachingContext != null
     && sessionState != null;
   const suggestedActions = useChipEngine
-    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions)
+    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools)
     : buildDeterministicChips(turnContext, executedAction, deferredActions);
 
   // Sanitise chip labels and prompts (belt-and-braces — engine already sanitises).

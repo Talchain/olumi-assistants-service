@@ -167,11 +167,11 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     expect(names).toContain('challenge_assumption');
   });
 
-  it("excludes explain_result, compare_options, what_would_flip when fresh analysis is in context; also suppresses run_analysis", () => {
-    // Single-pass v4 pipeline: when these tools are called, the handler
-    // template IS the response and the LLM only writes a 40-60 char stub.
-    // Removing them forces the LLM to produce a coached response from
-    // Zone 2 data (analysis_state) directly.
+  it("keeps explanation tools available when fresh analysis is in context; suppresses only run_analysis", () => {
+    // Explanation tools (explain_result, compare_options, what_would_flip)
+    // are read-only queries against existing analysis data — they stay
+    // available so the LLM can produce structured responses for typed
+    // messages and chip clicks.
     const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
     const allActions: ActionName[] = [
       'explain_result', 'compare_options', 'what_would_flip', 'run_analysis',
@@ -181,10 +181,11 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     const defs = buildToolDefinitions(allActions, ctx);
     const names = defs.map(d => d.name);
 
-    expect(names).not.toContain('explain_result');
-    expect(names).not.toContain('compare_options');
-    expect(names).not.toContain('what_would_flip');
-    // run_analysis is also suppressed (UI staleness contract guarantees
+    // Explanation tools remain available post-analysis
+    expect(names).toContain('explain_result');
+    expect(names).toContain('compare_options');
+    expect(names).toContain('what_would_flip');
+    // run_analysis is suppressed (UI staleness contract guarantees
     // results are fresh; chip clicks pass bypassStaleness=true to override).
     expect(names).not.toContain('run_analysis');
     // Always available regardless of analysis state
@@ -232,10 +233,10 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     expect(defsWithAnalysis.length).toBe(editTools.length);
   });
 
-  it("bypassStaleness re-includes run_analysis but does NOT re-include the explanation tools", () => {
-    // bypassStaleness is the chip-click escape hatch for run_analysis only.
-    // The explanation tools must stay suppressed even with bypassStaleness
-    // because their handlers would still intercept the LLM response.
+  it("bypassStaleness re-includes run_analysis; explanation tools are already available", () => {
+    // bypassStaleness is the chip-click escape hatch for run_analysis.
+    // Explanation tools are no longer suppressed post-analysis, so they
+    // are available regardless of bypassStaleness.
     const ctx = buildTestContext({ analysis_summary: buildAnalysisSummary() });
     const allActions: ActionName[] = [
       'explain_result', 'compare_options', 'what_would_flip', 'run_analysis',
@@ -245,9 +246,9 @@ describe("buildToolDefinitions — context-aware filtering", () => {
     const names = defs.map(d => d.name);
 
     expect(names).toContain('run_analysis');
-    expect(names).not.toContain('explain_result');
-    expect(names).not.toContain('compare_options');
-    expect(names).not.toContain('what_would_flip');
+    expect(names).toContain('explain_result');
+    expect(names).toContain('compare_options');
+    expect(names).toContain('what_would_flip');
   });
 
   it("bypassStaleness does NOT lift the no-graph hard prerequisite for run_analysis", () => {

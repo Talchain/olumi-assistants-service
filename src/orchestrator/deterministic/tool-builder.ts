@@ -15,7 +15,6 @@ import type { ToolDefinition } from "../../adapters/llm/types.js";
 import type { ActionName } from "./actions/types.js";
 import type { DeterministicTurnContext } from "./types.js";
 import { ACTION_CATALOGUE } from "./actions/registry.js";
-import { POST_ANALYSIS_EXPLANATION_ACTIONS } from "./post-analysis-policy.js";
 import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
@@ -24,24 +23,6 @@ import { log } from "../../utils/telemetry.js";
 
 /** Actions excluded from tool definitions (stubs or non-LLM-callable). */
 const EXCLUDED_ACTIONS: ReadonlySet<ActionName> = new Set(['generate_artefact']);
-
-/**
- * True when a chip click would have its tool stripped specifically by the
- * post-analysis explanation suppression. Pipeline-v4 uses this to skip the
- * "That action isn't available right now" downgrade text for these clicks:
- * the user's intent is still honoured, just by the LLM responding from
- * Zone 2 data instead of through a handler template.
- *
- * The predicate mirrors the conditions inside `computeContextExclusions`
- * exactly — both read `ctx.analysis_summary` so the two layers can never
- * disagree about whether suppression is in effect.
- */
-export function isExplanationChipSuppressedByAnalysis(
-  chipAction: ActionName,
-  ctx: DeterministicTurnContext,
-): boolean {
-  return POST_ANALYSIS_EXPLANATION_ACTIONS.has(chipAction) && !!ctx.analysis_summary;
-}
 
 /** Graph-editing actions that require a non-empty graph. */
 const GRAPH_EDIT_ACTIONS: ReadonlySet<ActionName> = new Set([
@@ -203,50 +184,20 @@ function isSchemaValid(name: string, schema: Record<string, unknown>): boolean {
  *
  * `bypassStaleness` is the narrow chip-click escape hatch for run_analysis:
  * when set, the staleness suppression that filters run_analysis whenever fresh
- * analysis results exist is skipped. The no-graph / no-analysis exclusions
- * still apply — clicking "Run analysis" with no graph still downgrades cleanly.
+ * analysis results exist is skipped. The no-graph exclusion still applies —
+ * clicking "Run analysis" with no graph still downgrades cleanly.
  * Schema validation and entity disambiguation also still apply.
  */
 export function buildToolDefinitions(
   eligibleActions: ActionName[],
   ctx?: DeterministicTurnContext,
   bypassStaleness?: boolean,
-  /**
-   * Forcibly include these tools in the output even if they would otherwise
-   * be excluded by post-analysis suppression. Used by pipeline-v4's chip-click
-   * routing to guarantee that an "explain_result" / "compare_options" /
-   * "what_would_flip" chip actually lands on its target tool, satisfying the
-   * action-type-first routing contract.
-   *
-   * Note: hard prerequisites (empty graph, schema validity, entity ambiguity)
-   * still apply. Force-include only bypasses the post-analysis explanation
-   * suppression and run_analysis staleness suppression.
-   */
-  forceInclude?: ReadonlySet<ActionName>,
 ): ToolDefinition[] {
   const definitions: ToolDefinition[] = [];
-  const rawExcluded = ctx ? computeContextExclusions(ctx, bypassStaleness === true) : new Set<ActionName>();
-  // Strip force-included tools from the exclusion set so they re-enter the
-  // tool list below.
-  const excluded = new Set(rawExcluded);
-  if (forceInclude) {
-    for (const name of forceInclude) {
-      excluded.delete(name);
-    }
-  }
+  const excluded = ctx ? computeContextExclusions(ctx, bypassStaleness === true) : new Set<ActionName>();
   const ambiguousTargetIds = ctx ? detectAmbiguousEntities(ctx) : false;
 
-  // If the caller forced a tool that's not in eligible_actions (e.g. a post-
-  // analysis explanation chip where the stage policy normally excludes the
-  // action), merge it in so the loop below can emit it.
-  const iterable: ActionName[] = forceInclude
-    ? [
-        ...eligibleActions,
-        ...[...forceInclude].filter(a => !eligibleActions.includes(a)),
-      ]
-    : eligibleActions;
-
-  for (const name of iterable) {
+  for (const name of eligibleActions) {
     if (EXCLUDED_ACTIONS.has(name)) continue;
     if (excluded.has(name)) continue;
 
@@ -285,9 +236,7 @@ export function buildToolDefinitions(
  * skip the run_analysis-when-fresh-results-exist suppression. The no-graph
  * exclusion is unaffected — that represents a hard precondition, not
  * staleness, and a chip click against missing prerequisites should still
- * downgrade with a clean message. The post-analysis explanation-tool
- * suppression is also unaffected by `bypassStaleness` — see the inline
- * rationale below.
+ * downgrade with a clean message.
  */
 function computeContextExclusions(
   ctx: DeterministicTurnContext,
@@ -297,33 +246,17 @@ function computeContextExclusions(
   const hasGraph = !!ctx.graph && ctx.graph_summary.node_count > 0;
   const hasAnalysis = !!ctx.analysis_summary;
 
-  // Analysis exists and is current → suppress the post-analysis explanation
-  // tools AND run_analysis.
+  // Analysis exists and is current → suppress run_analysis only.
   //
-  // Staleness contract (mirrors prompt-builder-v2.ts):
-  //   The UI sets analysis_state to undefined whenever store.graphEditedSinceLastRun
-  //   is true. So if `hasAnalysis` is true here, the analysis IS current — there is
-  //   no stale-but-present case for the v4 pipeline to worry about. Both filters
-  //   below read the same `ctx.analysis_summary` field for that reason.
+  // Explanation tools (explain_result, compare_options, what_would_flip) are
+  // read-only queries against existing analysis data. They remain available
+  // so the LLM can produce structured explanation responses for both typed
+  // messages and chip clicks. Previously these were suppressed to force
+  // Zone 2 prose, but that broke chip clicks and typed explanation requests.
   //
-  // Why suppress explain_result / compare_options / what_would_flip when
-  // analysis is current: the v4 pipeline is single-pass — when the LLM calls
-  // these tools, the handler template IS the response and the LLM only
-  // emits a 40-60 char stub. The full coached response from Zone 2 data
-  // (option_comparison, robustness, factor_sensitivity, drivers, fragile
-  // edges) never gets written. Removing the tools forces the LLM to answer
-  // from Zone 2 directly, which is what the prompt's coaching expects.
-  //
-  // Why suppress run_analysis when analysis is current: stops the LLM from
-  // wasting a long-running call on results that already exist. Chip clicks
-  // bypass this via `bypassStaleness` so users can re-run explicitly. The
-  // explanation-tool suppression intentionally does NOT honour bypassStaleness
-  // — there is no chip path that should reinstate those tools when fresh
-  // analysis is in context.
+  // run_analysis is still suppressed to prevent redundant long-running calls.
+  // Chip clicks bypass this via `bypassStaleness` so users can re-run explicitly.
   if (hasAnalysis) {
-    for (const action of POST_ANALYSIS_EXPLANATION_ACTIONS) {
-      excluded.add(action);
-    }
     if (!bypassStaleness) {
       excluded.add('run_analysis');
     }

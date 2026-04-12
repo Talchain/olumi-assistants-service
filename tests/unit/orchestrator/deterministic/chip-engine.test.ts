@@ -10,10 +10,23 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
 }));
 
 import { computeChips, getChipIdsForSession } from "../../../../src/orchestrator/deterministic/chip-engine.js";
+import { chipActionToTool } from "../../../../src/orchestrator/deterministic/action-tool-mapping.js";
 import type { CoachingContext } from "../../../../src/orchestrator/deterministic/coaching-context-builder.js";
 import type { SessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
 import type { DeterministicTurnContext } from "../../../../src/orchestrator/deterministic/types.js";
 import { defaultSessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
+
+/**
+ * Default tool list for tests — includes all tools that would typically be
+ * available. Tests that want to verify availability filtering pass a
+ * restricted list instead.
+ */
+const ALL_TOOLS = [
+  'run_analysis', 'explain_result', 'compare_options', 'what_would_flip',
+  'challenge_assumption', 'run_premortem', 'set_factor_value', 'add_factor',
+  'add_option', 'add_constraint', 'adjust_edge_strength', 'remove_factor',
+  'set_goal_target', 'generate_artefact', 'draft_graph',
+];
 
 // ============================================================================
 // Fixtures
@@ -120,7 +133,7 @@ describe("computeChips — post-draft, high AI-estimated", () => {
         factor_id: 'f_cost',
       },
     });
-    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext(), null, []);
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext(), null, [], ALL_TOOLS);
     expect(chips.length).toBeLessThanOrEqual(3);
     expect(chips.length).toBeGreaterThanOrEqual(2);
     for (const chip of chips) assertChipShape(chip);
@@ -139,7 +152,7 @@ describe("computeChips — post-draft, no risk factors", () => {
       risk_factor_count: 0,
       ai_estimated_count: 0,
     });
-    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext(), null, []);
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext(), null, [], ALL_TOOLS);
     expect(chips.some(c => c.label === 'What could go wrong?')).toBe(true);
     expect(chips.some(c => c.action_type === 'run_analysis')).toBe(true);
     for (const chip of chips) assertChipShape(chip);
@@ -167,7 +180,7 @@ describe("computeChips — post-analysis, fragile result", () => {
         dominant_factor_label: null,
       },
     });
-    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, [], ALL_TOOLS);
     expect(chips.length).toBeLessThanOrEqual(3);
     expect(chips.some(c => c.label === 'What would change this?')).toBe(true);
     expect(chips.some(c => c.label.startsWith('Calibrate'))).toBe(true);
@@ -193,7 +206,7 @@ describe("computeChips — post-analysis, dominant factor", () => {
         dominant_factor_label: 'Cost Per Developer',
       },
     });
-    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, [], ALL_TOOLS);
     expect(chips.some(c => /How confident in/i.test(c.label))).toBe(true);
     expect(chips.some(c => c.label === 'What would flip this?')).toBe(true);
     expect(chips.some(c => c.label === 'Generate a decision brief')).toBe(true);
@@ -218,7 +231,7 @@ describe("computeChips — post-analysis, stable result (no dominant factor)", (
         dominant_factor_label: null,
       },
     });
-    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, [], ALL_TOOLS);
     expect(chips.some(c => c.label === 'Run a pre-mortem')).toBe(true);
     expect(chips.some(c => c.label === 'Generate a decision brief')).toBe(true);
     for (const chip of chips) assertChipShape(chip);
@@ -243,7 +256,7 @@ describe("computeChips — stale analysis", () => {
         dominant_factor_label: null,
       },
     });
-    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, []);
+    const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, [], ALL_TOOLS);
     expect(chips.some(c => c.label === 'Re-run with updated model')).toBe(true);
     for (const chip of chips) assertChipShape(chip);
   });
@@ -267,7 +280,7 @@ describe("computeChips — session suppression (2-turn window)", () => {
       ...defaultSessionState(),
       last_chip_ids_shown: ['calibrate_f_cost', 'challenge_risks'],
     };
-    const chips = computeChips(coaching, session, makeTurnContext(), null, []);
+    const chips = computeChips(coaching, session, makeTurnContext(), null, [], ALL_TOOLS);
     expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(false);
     expect(chips.some(c => c.parameters?.chip_id === 'challenge_risks')).toBe(false);
   });
@@ -288,7 +301,7 @@ describe("computeChips — session suppression (2-turn window)", () => {
       last_chip_ids_shown: [],
       chip_ids_shown_prev_turn: ['calibrate_f_cost', 'challenge_risks'],
     };
-    const chips = computeChips(coaching, session, makeTurnContext(), null, []);
+    const chips = computeChips(coaching, session, makeTurnContext(), null, [], ALL_TOOLS);
     expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(false);
     expect(chips.some(c => c.parameters?.chip_id === 'challenge_risks')).toBe(false);
   });
@@ -307,7 +320,7 @@ describe("computeChips — session suppression (2-turn window)", () => {
       last_chip_ids_shown: ['calibrate_f_cost'],
       chip_ids_shown_prev_turn: ['challenge_risks'],
     };
-    const chips = computeChips(coaching, session, makeTurnContext(), null, []);
+    const chips = computeChips(coaching, session, makeTurnContext(), null, [], ALL_TOOLS);
     expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(false);
     expect(chips.some(c => c.parameters?.chip_id === 'challenge_risks')).toBe(false);
   });
@@ -335,7 +348,7 @@ describe("computeChips — session suppression (2-turn window)", () => {
     // Don't mark set_factor_value as recently executed so the recent-action
     // filter doesn't independently drop the chip.
     turnContext.conversation.recent_actions_taken = [];
-    const chips = computeChips(coaching, session, turnContext, null, []);
+    const chips = computeChips(coaching, session, turnContext, null, [], ALL_TOOLS);
     // The calibrate chip should reappear since it was clicked.
     expect(chips.some(c => c.parameters?.chip_id === 'calibrate_f_cost')).toBe(true);
   });
@@ -356,7 +369,7 @@ describe("computeChips — pending confirmation suppresses progress chips", () =
         pending_confirmation: 'add_factor',
       } as unknown as DeterministicTurnContext['conversation'],
     });
-    const chips = computeChips(coaching, defaultSessionState(), turnContext, null, []);
+    const chips = computeChips(coaching, defaultSessionState(), turnContext, null, [], ALL_TOOLS);
     expect(chips.some(c => c.action_type === 'run_analysis')).toBe(false);
   });
 });
@@ -385,6 +398,7 @@ describe("computeChips — deferred actions", () => {
       makeTurnContext({ stage: 'evaluate' }),
       null,
       ['what_would_flip'],
+      ['what_would_flip', 'explain_result', 'compare_options', 'run_premortem', 'challenge_assumption', 'set_factor_value'],
     );
     // Deferred chip is promoted, so it should appear in output.
     expect(chips.some(c => c.action_type === 'what_would_flip')).toBe(true);
@@ -403,5 +417,91 @@ describe("getChipIdsForSession", () => {
       { label: 'C', prompt: 'c', role: 'scientist' as const, parameters: {} },
     ];
     expect(getChipIdsForSession(chips)).toEqual(['chip_1', 'chip_2']);
+  });
+});
+
+// ============================================================================
+// Tool-availability filtering
+// ============================================================================
+
+describe("computeChips — tool-availability filtering", () => {
+  // Post-analysis fragile context produces explain_result, what_would_flip,
+  // compare_options, and set_factor_value chips.
+  const fragileCoaching = makeCoaching({
+    drivers: [
+      { factor_label: 'Cost Per Developer', factor_id: 'f_cost', sensitivity: 0.42, is_ai_estimated: true, confidence_band: 'medium' },
+    ],
+    chip_inputs: {
+      stage: 'evaluate',
+      has_analysis: true,
+      analysis_fresh: true,
+      top_uncalibrated_factor: 'f_cost',
+      has_risk_factors: true,
+      option_mechanism_overlap: false,
+      stability_band: 'fragile',
+      dominant_factor_label: null,
+    },
+  });
+
+  it("filters out chips whose action_type maps to a tool not in availableTools", () => {
+    // Only include set_factor_value — explanation tools are not available.
+    const chips = computeChips(
+      fragileCoaching,
+      defaultSessionState(),
+      makeTurnContext({ stage: 'evaluate' }),
+      null,
+      [],
+      ['set_factor_value', 'add_factor'],
+    );
+    for (const chip of chips) {
+      expect(chip.action_type).not.toBe('explain_result');
+      expect(chip.action_type).not.toBe('compare_options');
+      expect(chip.action_type).not.toBe('what_would_flip');
+    }
+  });
+
+  it("keeps chips when their mapped tool IS in availableTools", () => {
+    const chips = computeChips(
+      fragileCoaching,
+      defaultSessionState(),
+      makeTurnContext({ stage: 'evaluate' }),
+      null,
+      [],
+      ['what_would_flip', 'set_factor_value', 'compare_options'],
+    );
+    expect(chips.some(c => c.action_type === 'what_would_flip')).toBe(true);
+    expect(chips.some(c => c.action_type === 'compare_options')).toBe(true);
+  });
+
+  it("returns empty array (not legacy fallback) when all chips are filtered", () => {
+    // No tools available at all — every chip should be filtered.
+    const chips = computeChips(
+      fragileCoaching,
+      defaultSessionState(),
+      makeTurnContext({ stage: 'evaluate' }),
+      null,
+      [],
+      [], // empty tool list
+    );
+    expect(chips).toEqual([]);
+  });
+
+  it("invariant: no chip maps to a tool not in availableTools", () => {
+    const availableTools = ['what_would_flip', 'compare_options', 'set_factor_value', 'run_analysis'];
+    const chips = computeChips(
+      fragileCoaching,
+      defaultSessionState(),
+      makeTurnContext({ stage: 'evaluate' }),
+      null,
+      [],
+      availableTools,
+    );
+    const toolSet = new Set(availableTools);
+    for (const chip of chips) {
+      const tool = chipActionToTool(chip.action_type);
+      if (tool) {
+        expect(toolSet.has(tool), `chip ${chip.action_type} maps to tool ${tool} which is not in availableTools`).toBe(true);
+      }
+    }
   });
 });

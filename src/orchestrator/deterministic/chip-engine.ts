@@ -26,6 +26,7 @@ import type { CoachingContext } from "./coaching-context-builder.js";
 import type { SessionState } from "./session-state.js";
 import { suppressedChipIds } from "./session-state.js";
 import { sanitiseAssistantText } from "./sanitise-output.js";
+import { chipActionToTool } from "./action-tool-mapping.js";
 import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
@@ -69,7 +70,12 @@ const PROGRESS_TYPES: ReadonlySet<TypedChip['type']> = new Set(['analyse', 'deci
  *
  * The engine picks a chip bundle based on `chip_inputs` + `coaching_mode`
  * + graph/analysis signals, then applies session suppression, dedup,
- * sanitisation, and the max-3 cap.
+ * sanitisation, the max-3 cap, and tool-availability filtering.
+ *
+ * `availableTools` lists the tool names that survived pipeline filtering
+ * (stage policy + context exclusions). Any chip whose action_type maps
+ * to a tool not in this list is filtered out. Chips that don't map to
+ * a tool (virtual actions) always pass.
  */
 export function computeChips(
   coaching: CoachingContext,
@@ -77,6 +83,7 @@ export function computeChips(
   turnContext: DeterministicTurnContext,
   executedAction: ActionName | null,
   deferredActions: ActionName[],
+  availableTools: readonly string[] = [],
 ): SuggestedAction[] {
   const ci = coaching.chip_inputs;
   const inRecoverOrConfirm =
@@ -189,8 +196,25 @@ export function computeChips(
   // Step 6: cap at 3.
   const capped = filtered.slice(0, 3);
 
-  // Step 7: sanitise + flatten to SuggestedAction.
-  const result: SuggestedAction[] = capped.map(c => ({
+  // Step 7: filter by tool availability.
+  // Remove any chip whose action_type maps to a tool not in the resolved
+  // tool set. Chips that don't map to a tool (virtual actions) always pass.
+  const toolSet = new Set(availableTools);
+  const available = capped.filter(c => {
+    const tool = chipActionToTool(c.action_type);
+    if (!tool) return true; // Virtual action — always passes
+    if (toolSet.has(tool)) return true;
+    log.debug({
+      event: 'v4.chip_filtered_unavailable',
+      chip_id: c.chip_id,
+      action_type: c.action_type,
+      mapped_tool: tool,
+    }, 'Chip filtered: mapped tool not in available tools');
+    return false;
+  });
+
+  // Step 8: sanitise + flatten to SuggestedAction.
+  const result: SuggestedAction[] = available.map(c => ({
     label: sanitiseAssistantText(c.label),
     prompt: sanitiseAssistantText(c.message),
     role: c.role,
@@ -201,9 +225,10 @@ export function computeChips(
   log.debug({
     event: 'v4.chip_engine.computed',
     count: result.length,
-    types: capped.map(c => c.type),
-    action_types: capped.map(c => c.action_type),
+    types: available.map(c => c.type),
+    action_types: available.map(c => c.action_type),
     in_recover_or_confirm: inRecoverOrConfirm,
+    filtered_by_availability: capped.length - available.length,
   }, 'Chip engine computed chips');
 
   return result;
