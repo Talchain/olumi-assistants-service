@@ -153,8 +153,8 @@ describe("composeResponse — draft_created", () => {
       data: { option_count: 1, goal_label: 'a hiring decision' },
     };
     const text = composeResponse(fact, null, true);
-    expect(text).toContain('1 approach');
     expect(text).toContain('a hiring decision');
+    expect(text).toContain('ready to explore');
     assertNoBannedTerms(text);
   });
 
@@ -162,6 +162,7 @@ describe("composeResponse — draft_created", () => {
     const text = composeResponse(baseFact, null, true);
     expect(text).not.toContain('Your model captures');
     expect(text).not.toContain('option count');
+    expect(text).not.toMatch(/\d+\s+approach/);
     assertNoBannedTerms(text);
   });
 });
@@ -418,7 +419,7 @@ describe("composeResponse — value_set", () => {
 // ============================================================================
 
 describe("composeResponse — analysis_complete", () => {
-  it("uses headline from coaching context", () => {
+  it("produces single orientation sentence from headline", () => {
     const fact: HandlerFact = {
       action: 'analysis_complete',
       entities_affected: [],
@@ -448,9 +449,10 @@ describe("composeResponse — analysis_complete", () => {
       cta: { guidance: 'Calibrate the cost estimate to strengthen the result.', readiness: 'ready_with_caveats' },
     });
     const text = composeResponse(fact, coaching);
-    expect(text).toContain('Hire Tech Lead leads at 72%');
-    expect(text).toContain('Cost Per Developer drives 42% of the outcome');
-    expect(text).toContain('Calibrate the cost estimate');
+    // Single orientation sentence — results blocks carry driver/CTA detail
+    expect(text).toBe('Hire Tech Lead leads at 72%.');
+    expect(text).not.toContain('Cost Per Developer drives');
+    expect(text).not.toContain('Calibrate the cost estimate');
     assertNoBannedTerms(text);
   });
 

@@ -322,10 +322,12 @@ describe("strict contract — migrated actions", () => {
       expect(countSentences(text)).toBeLessThanOrEqual(3);
     });
 
-    it("contains at least one entity label when entities_affected is non-empty", () => {
+    it("contains at least one entity label when entities_affected is non-empty (draft_created exempt: uses coaching tradeoff benefits as decision-first content)", () => {
       if (fact.entities_affected.length === 0) return;
-      // draft_created uses coaching tradeoff benefits rather than option labels
-      // as entities — the tradeoff framing IS the decision-first language.
+      // draft_created entities are option labels, but the template uses
+      // coaching tradeoff benefits (benefit_a, benefit_b) which are the
+      // decision-relevant content. Forcing option labels into the template
+      // would be model-operation framing.
       if (fact.action === 'draft_created') return;
       const text = composeResponse(fact, coaching, false);
       const hasEntity = fact.entities_affected.some(e => text.includes(e.label));
@@ -415,6 +417,78 @@ describe("transitional-exception — unmigrated actions", () => {
     const { fact, coaching } = unmigratedFixtures.evidence_found;
     const text = composeResponse(fact, coaching);
     expect(text).toBe('Found 3 relevant pieces of evidence.');
+  });
+});
+
+// ============================================================================
+// analysis_complete — orientation-only regression gate
+// ============================================================================
+
+describe("analysis_complete — orientation-only (no results-block duplication)", () => {
+  it("produces exactly 1 sentence even with full coaching context", () => {
+    const fact: HandlerFact = {
+      action: 'analysis_complete',
+      entities_affected: [],
+      what_changed: 'analysis complete',
+      stale_analysis: false,
+      auto_apply: true,
+    };
+    const coaching = makeCoachingContext({
+      headline: {
+        leading_option: 'Hire Tech Lead',
+        leading_probability: 72,
+        runner_up: 'Hire Two Developers',
+        runner_up_probability: 28,
+        win_gap: 44,
+        stability_band: 'moderate',
+        stability_pct: 55,
+      },
+      drivers: [{
+        factor_label: 'Cost Per Developer',
+        factor_id: 'f_cost',
+        sensitivity: 0.42,
+        is_ai_estimated: true,
+        confidence_band: 'medium',
+      }],
+      cta: { guidance: 'Calibrate the cost estimate.', readiness: 'ready_with_caveats' },
+    });
+    const text = composeResponse(fact, coaching);
+    expect(countSentences(text)).toBe(1);
+    expect(text).toBe('Hire Tech Lead leads at 72%.');
+  });
+
+  it("does not restate driver percentage or CTA guidance", () => {
+    const fact: HandlerFact = {
+      action: 'analysis_complete',
+      entities_affected: [],
+      what_changed: 'analysis complete',
+      stale_analysis: false,
+      auto_apply: true,
+    };
+    const coaching = makeCoachingContext({
+      headline: {
+        leading_option: 'Expand Internationally',
+        leading_probability: 58,
+        runner_up: 'Focus Domestic',
+        runner_up_probability: 42,
+        win_gap: 16,
+        stability_band: 'tight',
+        stability_pct: 40,
+      },
+      drivers: [{
+        factor_label: 'Market Size',
+        factor_id: 'f_ms',
+        sensitivity: 0.65,
+        is_ai_estimated: false,
+        confidence_band: 'high',
+      }],
+      cta: { guidance: 'Consider adding regulatory risk.', readiness: 'ready' },
+    });
+    const text = composeResponse(fact, coaching);
+    expect(text).not.toContain('Market Size drives');
+    expect(text).not.toContain('65%');
+    expect(text).not.toContain('regulatory risk');
+    expect(text).not.toContain('Calibrate');
   });
 });
 

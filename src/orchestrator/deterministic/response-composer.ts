@@ -147,7 +147,7 @@ function composeDraftCreated(fact: HandlerFact, coaching: CoachingContext | null
     const t = coaching.tradeoff;
     parts.push(`Your ${goalLabel} trades ${t.benefit_a} against ${t.benefit_b}.`);
   } else {
-    parts.push(`Here is your ${goalLabel} model with ${optionCount} ${optionWord} to compare.`);
+    parts.push(`Your ${goalLabel} is ready to explore.`);
   }
 
   // Biggest inference — highlights what's estimated vs from brief.
@@ -293,30 +293,14 @@ function composeAnalysisStarted(fact: HandlerFact): string {
 }
 
 function composeAnalysisComplete(fact: HandlerFact, coaching: CoachingContext | null): string {
+  // One sentence of orientation only. The results blocks carry the
+  // headline, driver breakdown, and CTA detail.
   const h = coaching?.headline;
   if (!h) {
     return fact.what_changed || 'Analysis results are ready.';
   }
 
-  const parts: string[] = [];
-  parts.push(`${h.leading_option} leads at ${h.leading_probability}%.`);
-
-  const topDriver = coaching?.drivers?.[0];
-  if (topDriver) {
-    const influence = Math.round(topDriver.sensitivity * 100);
-    const calibrationNote = topDriver.is_ai_estimated
-      ? '. This estimate is worth calibrating'
-      : '';
-    parts.push(`${topDriver.factor_label} drives ${influence}% of the outcome${calibrationNote}.`);
-  }
-
-  if (coaching?.cta?.guidance) {
-    parts.push(ensureSentencePunctuation(coaching.cta.guidance));
-  }
-
-  // Each part already ends with sentence punctuation, so a single-space
-  // join produces a clean multi-sentence paragraph.
-  return parts.slice(0, 3).join(' ');
+  return `${h.leading_option} leads at ${h.leading_probability}%.`;
 }
 
 /**
