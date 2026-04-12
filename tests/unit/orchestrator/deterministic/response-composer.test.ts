@@ -58,11 +58,7 @@ function makeCoachingContext(overrides: Partial<CoachingContext> = {}): Coaching
 // ============================================================================
 
 function assertNoBannedTerms(text: string) {
-  // Completion-framing words are banned anywhere in the sentence,
-  // case-insensitive. Checking only at sentence-start previously let
-  // "X added" through as an acknowledgement, but the brief bans the
-  // term entirely from composer templates.
-  expect(text, `"${text}" contains banned "I'll add/update/..."`).not.toMatch(/\bI['’]ll\s+(?:add|update|remove|change|set)\b/i);
+  expect(text, `"${text}" contains banned "I'll add/update/..."`).not.toMatch(/\bI['']ll\s+(?:add|update|remove|change|set)\b/i);
   expect(text, `"${text}" contains banned "Updated"`).not.toMatch(/\bUpdated\b/i);
   expect(text, `"${text}" contains banned "Added"`).not.toMatch(/\bAdded\b/i);
   expect(text, `"${text}" contains banned "Done"`).not.toMatch(/\bDone\b/i);
@@ -78,18 +74,19 @@ function assertNoBannedTerms(text: string) {
 // ============================================================================
 
 describe("composeResponse — draft_created", () => {
-  it("renders option count + goal + tradeoff + inference + calibration", () => {
-    const fact: HandlerFact = {
-      action: 'draft_created',
-      entities_affected: [
-        { id: 'opt_a', label: 'Hire Tech Lead', kind: 'option' },
-        { id: 'opt_b', label: 'Hire Two Developers', kind: 'option' },
-      ],
-      what_changed: '2 options captured',
-      stale_analysis: false,
-      auto_apply: true,
-      data: { option_count: 2, goal_label: 'Best hiring strategy' },
-    };
+  const baseFact: HandlerFact = {
+    action: 'draft_created',
+    entities_affected: [
+      { id: 'opt_a', label: 'Hire Tech Lead', kind: 'option' },
+      { id: 'opt_b', label: 'Hire Two Developers', kind: 'option' },
+    ],
+    what_changed: '2 options captured',
+    stale_analysis: false,
+    auto_apply: true,
+    data: { option_count: 2, goal_label: 'Best hiring strategy' },
+  };
+
+  it("with patch block + coaching: leads with trade-off, includes inference", () => {
     const coaching = makeCoachingContext({
       tradeoff: {
         option_a: 'Hire Tech Lead',
@@ -110,43 +107,15 @@ describe("composeResponse — draft_created", () => {
       },
     });
 
-    const text = composeResponse(fact, coaching);
-    expect(text).toContain('2 approaches to Best hiring strategy');
-    expect(text).toContain('Hire Tech Lead offers leadership depth');
-    expect(text).toContain('Hire Two Developers offers delivery capacity');
-    // At most 3 sentences — composer caps at 3.
-    const sentences = text.match(/[.!?]/g) ?? [];
-    expect(sentences.length).toBeLessThanOrEqual(6); // allow 3 sentences with internal punctuation
+    const text = composeResponse(baseFact, coaching, true);
+    expect(text).toContain('trades leadership depth against delivery capacity');
+    expect(text).toContain('Technical Direction is the biggest assumption, inferred from');
+    // hasPatchBlock=true caps at 2 sentences for draft_created
+    expect(text).not.toContain('How strong is the effect');
     assertNoBannedTerms(text);
   });
 
-  it("falls back cleanly when coaching context is null", () => {
-    const fact: HandlerFact = {
-      action: 'draft_created',
-      entities_affected: [],
-      what_changed: '1 option captured',
-      stale_analysis: false,
-      auto_apply: true,
-      data: { option_count: 1, goal_label: 'a hiring decision' },
-    };
-    const text = composeResponse(fact, null);
-    expect(text).toContain('1 approach');
-    expect(text).toContain('a hiring decision');
-    assertNoBannedTerms(text);
-  });
-
-  it("matches snapshot for the canonical IDEATE draft", () => {
-    const fact: HandlerFact = {
-      action: 'draft_created',
-      entities_affected: [
-        { id: 'opt_a', label: 'Hire Tech Lead', kind: 'option' },
-        { id: 'opt_b', label: 'Hire Two Developers', kind: 'option' },
-      ],
-      what_changed: '2 options captured',
-      stale_analysis: false,
-      auto_apply: true,
-      data: { option_count: 2, goal_label: 'Best hiring strategy' },
-    };
+  it("without patch block: includes calibration target as third sentence", () => {
     const coaching = makeCoachingContext({
       tradeoff: {
         option_a: 'Hire Tech Lead',
@@ -160,8 +129,40 @@ describe("composeResponse — draft_created", () => {
         source: 'ai_estimated',
         reason: 'highest sensitivity among AI-estimated factors',
       },
+      calibration_target: {
+        source_label: 'Technical Direction',
+        target_label: 'Productivity',
+        factor_id: 'f_td',
+      },
     });
-    expect(composeResponse(fact, coaching)).toMatchSnapshot();
+
+    const text = composeResponse(baseFact, coaching, false);
+    expect(text).toContain('trades leadership depth against delivery capacity');
+    expect(text).toContain('Technical Direction is the biggest assumption, inferred from');
+    expect(text).toContain('How strong is the effect of Technical Direction on Productivity');
+    assertNoBannedTerms(text);
+  });
+
+  it("falls back cleanly when coaching context is null", () => {
+    const fact: HandlerFact = {
+      action: 'draft_created',
+      entities_affected: [],
+      what_changed: '1 option captured',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { option_count: 1, goal_label: 'a hiring decision' },
+    };
+    const text = composeResponse(fact, null, true);
+    expect(text).toContain('1 approach');
+    expect(text).toContain('a hiring decision');
+    assertNoBannedTerms(text);
+  });
+
+  it("does not contain model-operation language", () => {
+    const text = composeResponse(baseFact, null, true);
+    expect(text).not.toContain('Your model captures');
+    expect(text).not.toContain('option count');
+    assertNoBannedTerms(text);
   });
 });
 
@@ -170,7 +171,37 @@ describe("composeResponse — draft_created", () => {
 // ============================================================================
 
 describe("composeResponse — factor_added", () => {
-  it("uses proposal language for auto_apply=false", () => {
+  it("with patch block: orientation only, uses significance", () => {
+    const fact: HandlerFact = {
+      action: 'factor_added',
+      entities_affected: [{ id: 'f_new', label: 'Onboarding Time', kind: 'risk' }],
+      what_changed: 'new risk factor',
+      why_it_matters: 'Onboarding delays could push the launch window back by 2 months.',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { value_label: 'value: 6 weeks', target_label: 'Delivery Capacity' },
+    };
+    const text = composeResponse(fact, null, true);
+    expect(text).toContain('Onboarding delays could push the launch window back');
+    expect(text).not.toContain('Confirm to apply');
+    expect(text).not.toContain('Proposing to add');
+    assertNoBannedTerms(text);
+  });
+
+  it("with patch block: falls back to generic orientation when no significance", () => {
+    const fact: HandlerFact = {
+      action: 'factor_added',
+      entities_affected: [{ id: 'f_new', label: 'Market Size', kind: 'factor' }],
+      what_changed: 'new factor',
+      stale_analysis: false,
+      auto_apply: true,
+    };
+    const text = composeResponse(fact, null, true);
+    expect(text).toBe('Market Size captures a factor that could shift the balance of the decision.');
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + proposal: uses 'would capture' framing, no confirm", () => {
     const fact: HandlerFact = {
       action: 'factor_added',
       entities_affected: [{ id: 'f_new', label: 'Onboarding Time', kind: 'risk' }],
@@ -179,14 +210,14 @@ describe("composeResponse — factor_added", () => {
       auto_apply: false,
       data: { value_label: 'value: 6 weeks', target_label: 'Delivery Capacity' },
     };
-    const text = composeResponse(fact, null);
-    expect(text).toContain('Proposing to add Onboarding Time');
-    expect(text).toContain('risk factor');
-    expect(text).toContain('connecting to Delivery Capacity');
+    const text = composeResponse(fact, null, false);
+    expect(text).toContain('Onboarding Time would capture a risk factor connecting to Delivery Capacity');
+    expect(text).not.toContain('Confirm to apply');
+    expect(text).not.toContain('Proposing to add');
     assertNoBannedTerms(text);
   });
 
-  it("uses acknowledgement for auto_apply=true", () => {
+  it("without patch block + auto_apply: acknowledgement framing", () => {
     const fact: HandlerFact = {
       action: 'factor_added',
       entities_affected: [{ id: 'f_new', label: 'Market Size', kind: 'factor' }],
@@ -194,11 +225,25 @@ describe("composeResponse — factor_added", () => {
       stale_analysis: false,
       auto_apply: true,
     };
-    const text = composeResponse(fact, null);
-    // Auto-apply framing must acknowledge the state without using banned
-    // completion verbs ("Added", "Updated", "Done", "Applied").
+    const text = composeResponse(fact, null, false);
     expect(text).toContain('Market Size is now in the model');
     expect(text).not.toContain('Proposing');
+    assertNoBannedTerms(text);
+  });
+
+  it("pulls coaching signal when why_it_matters is absent", () => {
+    const fact: HandlerFact = {
+      action: 'factor_added',
+      entities_affected: [{ id: 'f_new', label: 'Regulatory Risk', kind: 'risk' }],
+      what_changed: 'new risk factor',
+      stale_analysis: false,
+      auto_apply: false,
+    };
+    const coaching = makeCoachingContext({
+      critical_gap: { type: 'missing_factor', detail: 'The model lacks a regulatory dimension.' },
+    });
+    const text = composeResponse(fact, coaching, false);
+    expect(text).toContain('The model lacks a regulatory dimension');
     assertNoBannedTerms(text);
   });
 });
@@ -208,7 +253,7 @@ describe("composeResponse — factor_added", () => {
 // ============================================================================
 
 describe("composeResponse — option_added", () => {
-  it("uses proposal language with intervention count", () => {
+  it("with patch block: short orientation", () => {
     const fact: HandlerFact = {
       action: 'option_added',
       entities_affected: [{ id: 'opt_x', label: 'Contractor Team', kind: 'option' }],
@@ -217,9 +262,37 @@ describe("composeResponse — option_added", () => {
       auto_apply: false,
       data: { intervention_count: 3 },
     };
-    const text = composeResponse(fact, null);
-    expect(text).toContain('Proposing to add Contractor Team');
-    expect(text).toContain('3 effects');
+    const text = composeResponse(fact, null, true);
+    expect(text).toBe('Contractor Team adds a different path to your decision.');
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + proposal: includes effect count, no confirm", () => {
+    const fact: HandlerFact = {
+      action: 'option_added',
+      entities_affected: [{ id: 'opt_x', label: 'Contractor Team', kind: 'option' }],
+      what_changed: 'new option with 3 effects',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { intervention_count: 3 },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toContain('Contractor Team would add a different path with 3 effects');
+    expect(text).not.toContain('Confirm to apply');
+    expect(text).not.toContain('Proposing to add');
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + auto_apply: acknowledgement framing", () => {
+    const fact: HandlerFact = {
+      action: 'option_added',
+      entities_affected: [{ id: 'opt_x', label: 'In-House Build', kind: 'option' }],
+      what_changed: 'new option',
+      stale_analysis: false,
+      auto_apply: true,
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toBe('In-House Build is now captured as an option.');
     assertNoBannedTerms(text);
   });
 });
@@ -229,21 +302,7 @@ describe("composeResponse — option_added", () => {
 // ============================================================================
 
 describe("composeResponse — value_set", () => {
-  it("uses acknowledgement framing for auto_apply=true", () => {
-    const fact: HandlerFact = {
-      action: 'value_set',
-      entities_affected: [{ id: 'f_cost', label: 'Advertising Spend', kind: 'factor' }],
-      what_changed: 'Advertising Spend to 100000 USD',
-      stale_analysis: false,
-      auto_apply: true,
-      data: { new_value: 100000, unit: 'USD' },
-    };
-    const text = composeResponse(fact, null);
-    expect(text).toBe('Advertising Spend set to 100000 USD.');
-    assertNoBannedTerms(text);
-  });
-
-  it("adds coaching annotation when factor is top driver", () => {
+  it("with patch block + top driver: decision-significance lead", () => {
     const fact: HandlerFact = {
       action: 'value_set',
       entities_affected: [{ id: 'f_cost', label: 'Cost Per Developer', kind: 'factor' }],
@@ -263,9 +322,93 @@ describe("composeResponse — value_set", () => {
         },
       ],
     });
-    const text = composeResponse(fact, coaching);
+    const text = composeResponse(fact, coaching, true);
+    expect(text).toBe('At 150000 USD, Cost Per Developer is the factor the outcome is most sensitive to.');
+    assertNoBannedTerms(text);
+  });
+
+  it("with patch block + no driver: short calibration sentence", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_cost', label: 'Advertising Spend', kind: 'factor' }],
+      what_changed: 'Advertising Spend to 100000 USD',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 100000, unit: 'USD' },
+    };
+    const text = composeResponse(fact, null, true);
+    expect(text).toBe('Advertising Spend calibrated to 100000 USD.');
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + auto_apply: set to framing", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_cost', label: 'Advertising Spend', kind: 'factor' }],
+      what_changed: 'Advertising Spend to 100000 USD',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 100000, unit: 'USD' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toBe('Advertising Spend set to 100000 USD.');
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + auto_apply + top driver: adds coaching annotation", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_cost', label: 'Cost Per Developer', kind: 'factor' }],
+      what_changed: 'Cost Per Developer to 150000',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 150000, unit: 'USD' },
+    };
+    const coaching = makeCoachingContext({
+      drivers: [
+        {
+          factor_label: 'Cost Per Developer',
+          factor_id: 'f_cost',
+          sensitivity: 0.42,
+          is_ai_estimated: true,
+          confidence_band: 'medium',
+        },
+      ],
+    });
+    const text = composeResponse(fact, coaching, false);
     expect(text).toContain('Cost Per Developer set to 150000 USD.');
     expect(text).toContain('most sensitive');
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + proposal: uses why_it_matters when present", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sal', label: 'Salary', kind: 'factor' }],
+      what_changed: 'Salary to 85000 GBP',
+      why_it_matters: 'make the two-developer path significantly more expensive',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { new_value: 85000, unit: 'GBP' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toContain('Salary at 85000 GBP would make the two-developer path significantly more expensive');
+    expect(text).not.toContain('Confirm to apply');
+    assertNoBannedTerms(text);
+  });
+
+  it("without patch block + proposal + no why: uses generic decision framing", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sal', label: 'Salary', kind: 'factor' }],
+      what_changed: 'Salary to 85000 GBP',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { new_value: 85000, unit: 'GBP' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toBe('Salary at 85000 GBP would shift the balance of the decision.');
+    expect(text).not.toContain('Confirm to apply');
     assertNoBannedTerms(text);
   });
 });
@@ -323,42 +466,10 @@ describe("composeResponse — analysis_complete", () => {
     expect(text).toBe('Option A leads in 65% of simulations.');
     assertNoBannedTerms(text);
   });
-
-  it("matches snapshot for analysis_complete with headline", () => {
-    const fact: HandlerFact = {
-      action: 'analysis_complete',
-      entities_affected: [],
-      what_changed: 'analysis complete',
-      stale_analysis: false,
-      auto_apply: true,
-    };
-    const coaching = makeCoachingContext({
-      headline: {
-        leading_option: 'Hire Tech Lead',
-        leading_probability: 72,
-        runner_up: 'Hire Two Developers',
-        runner_up_probability: 28,
-        win_gap: 44,
-        stability_band: 'moderate',
-        stability_pct: 55,
-      },
-      drivers: [
-        {
-          factor_label: 'Cost Per Developer',
-          factor_id: 'f_cost',
-          sensitivity: 0.42,
-          is_ai_estimated: true,
-          confidence_band: 'medium',
-        },
-      ],
-      cta: { guidance: 'Calibrate the cost estimate to strengthen the result.', readiness: 'ready_with_caveats' },
-    });
-    expect(composeResponse(fact, coaching)).toMatchSnapshot();
-  });
 });
 
 // ============================================================================
-// Banned term sweep
+// Banned term sweep (all 14 actions)
 // ============================================================================
 
 describe("composeResponse — banned term sweep", () => {

@@ -587,7 +587,13 @@ export async function* executePipelineV4(
       && !failedToolCall
     ) {
       try {
-        const composed = composeResponse(actionResult.fact, coachingContext);
+        // Detect whether this turn will emit a visible graph_patch card.
+        // Draft handler pre-creates blocks; edit actions populate operations
+        // (the block is created later at line ~884).
+        const hasPatchBlock =
+          (actionResult.blocks ?? []).some(b => b.block_type === 'graph_patch')
+          || (actionResult.operations?.length ?? 0) > 0;
+        const composed = composeResponse(actionResult.fact, coachingContext, hasPatchBlock);
         if (composed && composed.trim().length > 0) {
           assistantText = composed;
           responseSource = 'composer';

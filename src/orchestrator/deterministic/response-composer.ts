@@ -1,20 +1,43 @@
+// TEMPLATE AUDIT (12 April 2026)
+//
+// 6 migrated (handler emits HandlerFact → composer generates text):
+//   1. draft_created   — fact.data: option_count, goal_label.  Coaching: tradeoff, biggest_inference, calibration_target.  Handler: actions/draft-graph.ts
+//   2. factor_added    — fact.data: value_label, target_label, category.  Coaching: critical_gap.  Handler: actions/add-factor.ts
+//   3. option_added    — fact.data: intervention_count.  Coaching: (unused).  Handler: actions/add-option.ts
+//   4. value_set       — fact.data: new_value, unit.  Coaching: drivers[0].  Handler: actions/set-factor-value.ts
+//   5. analysis_complete — fact.data: (none).  Coaching: headline, drivers, cta.  Handler: actions/run-analysis.ts, actions/explain-result.ts
+//   6. analysis_started — fact.data: (none).  Coaching: (unused).  Handler: (pipeline internal)
+//
+// 8 unmigrated (legacy assistantText, composer templates are transitional placeholders):
+//   7. edge_adjusted        — actions/adjust-edge-strength.ts
+//   8. constraint_added     — actions/add-constraint.ts
+//   9. factor_removed       — actions/remove-factor.ts
+//  10. goal_target_set      — actions/set-goal-target.ts
+//  11. premortem_run        — actions/run-premortem.ts
+//  12. assumption_challenged — actions/challenge-assumption.ts
+//  13. brief_generated      — actions/generate-artefact.ts
+//  14. evidence_found       — actions/what-would-flip.ts
+//
+
 /**
  * Response Composer (WS2)
  *
  * Handlers emit a structured HandlerFact instead of a raw assistantText
- * string. The composer reads the fact + CoachingContext and produces the
- * user-facing text deterministically, using decision language, proposal
- * framing on auto_apply=false, and acknowledgement framing on auto_apply=true.
+ * string. The composer reads the fact + CoachingContext + hasPatchBlock
+ * flag and produces user-facing text deterministically.
  *
- * Output rules (enforced by tests):
- *   - 1 to 3 sentences
- *   - No banned terms: "I'll add", "Updated", "Added", "Done", "Applied",
- *     "interventions", "node", "patch", "graph_patch"
- *   - No em dashes
- *   - Proposal language for auto_apply=false ("Proposing to ...")
- *   - Acknowledgement for auto_apply=true ("{label} set to {value}")
- *   - References coaching_context fields (tradeoff, biggest_inference,
- *     calibration_target) on draft_created
+ * Design rules (enforced by contract tests):
+ *   - Decision-first: lead with decision significance, not model operations.
+ *   - When hasPatchBlock=true: 1 sentence orientation only (except
+ *     draft_created which allows up to 2). The patch card carries the
+ *     structural detail.
+ *   - When hasPatchBlock=false: 1-2 sentences maximum.
+ *   - No confirmation prose: "Confirm to apply", "Please confirm", and
+ *     similar are banned. Accept/Dismiss buttons handle this.
+ *   - No completion verbs: "I'll add", "Updated", "Added", "Done", "Applied".
+ *   - No internal jargon: "interventions", "patch", "graph_patch".
+ *   - No em dashes. British English. Sentence case.
+ *   - Entity labels from HandlerFact ground the text when available.
  *
  * Feature flag: CEE_COACHING_CONTEXT_ENABLED (shared with WS1/WS8).
  */
@@ -67,20 +90,25 @@ export interface HandlerFact {
  *
  * Pure function — no side effects. The caller (pipeline-v4.ts) replaces
  * assistantText with the return value when a fact is present on ActionResult.
+ *
+ * @param hasPatchBlock  True when the current turn will emit a visible
+ *   graph_patch card. When true, migrated templates produce a short
+ *   orientation sentence only (the card carries the structural detail).
  */
 export function composeResponse(
   fact: HandlerFact,
   coaching: CoachingContext | null,
+  hasPatchBlock: boolean = false,
 ): string {
   switch (fact.action) {
     case 'draft_created':
-      return composeDraftCreated(fact, coaching);
+      return composeDraftCreated(fact, coaching, hasPatchBlock);
     case 'factor_added':
-      return composeFactorAdded(fact, coaching);
+      return composeFactorAdded(fact, coaching, hasPatchBlock);
     case 'option_added':
-      return composeOptionAdded(fact, coaching);
+      return composeOptionAdded(fact, coaching, hasPatchBlock);
     case 'value_set':
-      return composeValueSet(fact, coaching);
+      return composeValueSet(fact, coaching, hasPatchBlock);
     case 'edge_adjusted':
       return composeEdgeAdjusted(fact);
     case 'constraint_added':
@@ -108,24 +136,30 @@ export function composeResponse(
 // Template implementations
 // ============================================================================
 
-function composeDraftCreated(fact: HandlerFact, coaching: CoachingContext | null): string {
+function composeDraftCreated(fact: HandlerFact, coaching: CoachingContext | null, hasPatchBlock: boolean): string {
   const optionCount = (fact.data?.option_count as number | undefined) ?? 0;
   const goalLabel = (fact.data?.goal_label as string | undefined) ?? 'your decision';
   const optionWord = optionCount === 1 ? 'approach' : 'approaches';
   const parts: string[] = [];
 
-  parts.push(`Your model captures ${optionCount} ${optionWord} to ${goalLabel}.`);
-
-  // Tradeoff framing from coaching context (precedence chain already applied in builder).
+  // Lead with the core trade-off when coaching context is available.
   if (coaching?.tradeoff) {
     const t = coaching.tradeoff;
-    parts.push(`${t.option_a} offers ${t.benefit_a}; ${t.option_b} offers ${t.benefit_b}.`);
+    parts.push(`Your ${goalLabel} trades ${t.benefit_a} against ${t.benefit_b}.`);
+  } else {
+    parts.push(`Here is your ${goalLabel} model with ${optionCount} ${optionWord} to compare.`);
   }
 
   // Biggest inference — highlights what's estimated vs from brief.
+  // Allowed as a second sentence even when hasPatchBlock=true (draft_created exception).
   if (coaching?.biggest_inference) {
     const bi = coaching.biggest_inference;
-    parts.push(`${bi.factor_label} is the biggest assumption here: it was ${bi.reason}.`);
+    parts.push(`${bi.factor_label} is the biggest assumption, inferred from ${bi.reason}.`);
+  }
+
+  if (hasPatchBlock) {
+    // Draft always has a patch card — cap at 2 sentences (orientation only).
+    return parts.slice(0, 2).join(' ');
   }
 
   // Calibration target — next question the user should think about.
@@ -139,31 +173,36 @@ function composeDraftCreated(fact: HandlerFact, coaching: CoachingContext | null
   return parts.slice(0, 3).join(' ');
 }
 
-function composeFactorAdded(fact: HandlerFact, coaching: CoachingContext | null): string {
+function composeFactorAdded(fact: HandlerFact, coaching: CoachingContext | null, hasPatchBlock: boolean): string {
   const entity = fact.entities_affected[0];
   if (!entity) return fact.what_changed;
   const kind = entity.kind === 'risk' ? 'risk factor' : 'factor';
-  const valueSegment = fact.data?.value_label ? ` (${fact.data.value_label})` : '';
   const connectionSegment = fact.data?.target_label
     ? ` connecting to ${fact.data.target_label}`
     : '';
 
-  if (fact.auto_apply) {
-    // Acknowledgement framing — neutral, no "Added/Updated/Done/Applied".
-    const base = `${entity.label} is now in the model as a ${kind}${connectionSegment}.`;
-    return fact.why_it_matters ? `${base} ${fact.why_it_matters}` : base;
-  }
-
-  // Proposal framing.
-  const base = `Proposing to add ${entity.label}${valueSegment} as a ${kind}${connectionSegment}. Confirm to apply.`;
-  // Pull why_it_matters from coaching context if the handler didn't set it.
-  const coachingSignal =
+  // Pull why_it_matters from handler or coaching context.
+  const significance =
     fact.why_it_matters
     ?? (coaching?.critical_gap?.type === 'missing_factor' ? coaching.critical_gap.detail : null);
-  return coachingSignal ? `${base} ${coachingSignal}` : base;
+
+  if (hasPatchBlock) {
+    // Orientation only — the patch card shows the structural detail.
+    if (significance) return ensureSentencePunctuation(significance);
+    return `${entity.label} captures a ${kind} that could shift the balance of the decision.`;
+  }
+
+  if (fact.auto_apply) {
+    const base = `${entity.label} is now in the model as a ${kind}${connectionSegment}.`;
+    return significance ? `${base} ${significance}` : base;
+  }
+
+  // Proposal framing — no "Confirm to apply".
+  const base = `${entity.label} would capture a ${kind}${connectionSegment}.`;
+  return significance ? `${base} ${significance}` : base;
 }
 
-function composeOptionAdded(fact: HandlerFact, coaching: CoachingContext | null): string {
+function composeOptionAdded(fact: HandlerFact, _coaching: CoachingContext | null, hasPatchBlock: boolean): string {
   const entity = fact.entities_affected[0];
   if (!entity) return fact.what_changed;
   const interventionCount = (fact.data?.intervention_count as number | undefined) ?? 0;
@@ -171,35 +210,46 @@ function composeOptionAdded(fact: HandlerFact, coaching: CoachingContext | null)
     ? ` with ${interventionCount} effect${interventionCount === 1 ? '' : 's'}`
     : '';
 
+  if (hasPatchBlock) {
+    // Orientation only — the patch card shows the option detail.
+    return `${entity.label} adds a different path to your decision.`;
+  }
+
   if (fact.auto_apply) {
     return `${entity.label} is now captured as an option${summary}.`;
   }
 
-  void coaching;
-  return `Proposing to add ${entity.label} as an option${summary}. Confirm to apply.`;
+  // Proposal framing — no "Confirm to apply".
+  return summary
+    ? `${entity.label} would add a different path${summary} to your decision.`
+    : `${entity.label} would add a different path to your decision.`;
 }
 
-function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null): string {
+function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, hasPatchBlock: boolean): string {
   const entity = fact.entities_affected[0];
   if (!entity) return fact.what_changed;
   const newValue = fact.data?.new_value;
   const unit = (fact.data?.unit as string | undefined) ?? '';
   const valueStr = newValue != null ? `${newValue}${unit ? ' ' + unit : ''}` : '?';
+  const isTopDriver = coaching?.drivers?.[0]?.factor_id === entity.id;
+
+  if (hasPatchBlock) {
+    // Orientation only — the patch card shows the calibration detail.
+    if (isTopDriver) return `At ${valueStr}, ${entity.label} is the factor the outcome is most sensitive to.`;
+    if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr}. ${fact.why_it_matters}`);
+    return `${entity.label} calibrated to ${valueStr}.`;
+  }
 
   if (fact.auto_apply) {
     const base = `${entity.label} set to ${valueStr}.`;
-    // Add coaching significance if this factor is the top driver.
-    if (coaching?.drivers?.[0]?.factor_id === entity.id) {
-      return `${base} This is the factor the outcome is most sensitive to.`;
-    }
-    if (fact.why_it_matters) {
-      return `${base} ${fact.why_it_matters}`;
-    }
+    if (isTopDriver) return `${base} This is the factor the outcome is most sensitive to.`;
+    if (fact.why_it_matters) return `${base} ${fact.why_it_matters}`;
     return base;
   }
 
-  // Proposal framing (rare for set_factor_value since it auto-applies, but kept for completeness).
-  return `Proposing to set ${entity.label} to ${valueStr}. Confirm to apply.`;
+  // Proposal framing — no "Confirm to apply".
+  if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr} would ${fact.why_it_matters}`);
+  return `${entity.label} at ${valueStr} would shift the balance of the decision.`;
 }
 
 function composeEdgeAdjusted(fact: HandlerFact): string {

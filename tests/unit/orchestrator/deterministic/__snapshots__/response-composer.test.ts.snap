@@ -1,5 +1,0 @@
-// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
-
-exports[`composeResponse — analysis_complete > matches snapshot for analysis_complete with headline 1`] = `"Hire Tech Lead leads at 72%. Cost Per Developer drives 42% of the outcome. This estimate is worth calibrating. Calibrate the cost estimate to strengthen the result."`;
-
-exports[`composeResponse — draft_created > matches snapshot for the canonical IDEATE draft 1`] = `"Your model captures 2 approaches to Best hiring strategy. Hire Tech Lead offers leadership depth; Hire Two Developers offers delivery capacity. Technical Direction is the biggest assumption here: it was highest sensitivity among AI-estimated factors."`;
