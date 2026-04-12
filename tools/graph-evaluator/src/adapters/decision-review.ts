@@ -50,7 +50,11 @@ export class DecisionReviewAdapter
 {
   async loadCases(dir: string): Promise<DecisionReviewFixture[]> {
     const files = await readdir(dir);
-    const jsonFiles = files.filter((f) => f.endsWith(".json")).sort();
+    // Exclude iCloud/system duplicates (e.g. "file 2.json") that can appear
+    // on macOS when iCloud Drive syncs the fixtures directory.
+    const jsonFiles = files
+      .filter((f) => f.endsWith(".json") && !/\s\d+\.json$/.test(f))
+      .sort();
 
     const fixtures: DecisionReviewFixture[] = [];
     for (const file of jsonFiles) {

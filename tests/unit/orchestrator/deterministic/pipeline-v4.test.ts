@@ -137,6 +137,21 @@ describe("executePipelineV4", () => {
       expect(complete.envelope).toHaveProperty('blocks');
     });
 
+    it("logs response_source: 'system_event' on system-event early-return", async () => {
+      const { log } = await import("../../../../src/utils/telemetry.js");
+      const req = makeTurnRequest({
+        system_event: makeEvent('patch_accepted'),
+      });
+
+      await collectEvents(executePipelineV4(req, 'req-sys-tel'));
+
+      const turnSourcesCalls = (log.info as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call: unknown[]) => (call[0] as Record<string, unknown>)?.event === 'v4.turn_sources',
+      );
+      expect(turnSourcesCalls.length).toBe(1);
+      expect((turnSourcesCalls[0][0] as Record<string, unknown>).response_source).toBe('system_event');
+    });
+
     it("graph-mutation system event with user message returns null assistant_text", async () => {
       const req = makeTurnRequest({
         message: 'Great, what now?',
