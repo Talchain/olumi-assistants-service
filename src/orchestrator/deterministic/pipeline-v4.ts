@@ -375,6 +375,7 @@ export async function* executePipelineV4(
     // Always log the resolved tool set for journey debugging.
     const toolNameSet = new Set(resolvedToolNames);
     const removed = eligibleActions.filter(a => !toolNameSet.has(a) && a !== 'generate_artefact');
+    const chipOnlyTools = chipToolNames.filter(t => !toolNameSet.has(t));
     log.info({
       request_id: requestId,
       eligible_count: eligibleActions.length,
@@ -382,6 +383,9 @@ export async function* executePipelineV4(
       resolved_tools: resolvedToolNames,
       kept_tools: resolvedToolNames,
       removed_tools: removed,
+      chip_tool_count: chipToolNames.length,
+      // Tools available to chips but not LLM (disambiguation-suppressed for LLM only)
+      chip_only_tools: chipOnlyTools,
       has_analysis: !!turnContext.analysis_summary,
       has_graph: !!turnContext.graph && turnContext.graph_summary.node_count > 0,
       disambiguation_hints: turnContext.disambiguation_hints.length,
@@ -680,6 +684,7 @@ export async function* executePipelineV4(
           post_draft_node_count: turnContext.graph_summary.node_count,
           post_draft_eligible_actions: turnContext.eligible_actions,
           post_draft_resolved_tools: resolvedToolNames,
+          post_draft_chip_tools: chipToolNames,
           coaching_tradeoff: !!coachingContext?.tradeoff,
           coaching_biggest_inference: !!coachingContext?.biggest_inference,
         }, 'v4.post_draft_recomputation');

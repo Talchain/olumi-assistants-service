@@ -325,12 +325,20 @@ function buildRequestBody(
   if (state.graph_state) body.graph_state = state.graph_state;
   if (state.analysis_state) body.analysis_state = state.analysis_state;
   if (state.session_state) body.session_state = state.session_state;
-  // Send analysis_inputs in context — required for run_analysis to fire.
-  // The real UI extracts this from the graph_patch block's analysis_ready data.
+  // Send analysis_inputs in context — required for run_analysis to fire
+  // (unless server-side derives it from graph.analysis_ready). The real UI
+  // extracts this from the graph_patch block's analysis_ready data.
+  // The context object requires all its own required fields to be present;
+  // we mirror the flat fields into it so the zod schema accepts the payload.
   if (state.analysis_inputs) {
-    const ctx = (body.context || {}) as Record<string, unknown>;
-    ctx.analysis_inputs = state.analysis_inputs;
-    body.context = ctx;
+    body.context = {
+      graph: state.graph_state ?? null,
+      analysis_response: state.analysis_state ?? null,
+      framing: null,
+      messages: state.history,
+      scenario_id: scenarioId,
+      analysis_inputs: state.analysis_inputs,
+    };
   }
   return body;
 }
