@@ -22,6 +22,8 @@ import { createOrchestratorRateLimitHook } from "../middleware/rate-limit.js";
 import { DailyBudgetExceededError } from "../adapters/llm/errors.js";
 import { TurnRequestSchema, MAX_MESSAGE_LENGTH } from "./route-schemas.js";
 import { ceeOrchestratorStreamRouteV1 } from "./route-stream.js";
+import { getIdempotentResponse, setIdempotentResponse } from "./idempotency.js";
+import { ORCHESTRATOR_TURN_BUDGET_MS, DRAFT_GRAPH_TURN_BUDGET_MS } from "../config/timeouts.js";
 import {
   normalizeContext,
   normalizeSystemEvent,
@@ -177,47 +179,77 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       // When enabled, ALL turns route to the V4 pipeline — no fall-through
       // to V2 or V1. Mirrors the streaming path (pipeline-stream.ts:109).
       if (config.features.pipelineV4Enabled) {
-        const { executePipelineV4 } = await import("./deterministic/pipeline-v4.js");
+        // Idempotency — return cached envelope on retry (parity with streaming path)
+        const cached = getIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id);
+        if (cached) {
+          log.info(
+            { request_id: requestId, client_turn_id: turnRequest.client_turn_id, pipeline: 'v4' },
+            "V4 idempotency cache hit",
+          );
+          reply.code(200);
+          return reply.send(cached);
+        }
 
-        let v4Envelope: import("./pipeline/types.js").OrchestratorResponseEnvelopeV2 | undefined;
-        for await (const event of executePipelineV4(turnRequest, requestId, undefined, req)) {
-          if (event.type === 'turn_complete') {
-            v4Envelope = event.envelope;
+        // Budget timeout — draft_graph turns get a longer budget (parity with streaming path)
+        const graphNodes = (turnRequest.context?.graph as Record<string, unknown> | null)?.nodes;
+        const hasGraph = turnRequest.context?.graph != null && Array.isArray(graphNodes) && (graphNodes as unknown[]).length > 0;
+        const likelyDraftGraph = turnRequest.generate_model || !hasGraph;
+        const effectiveBudgetMs = likelyDraftGraph ? DRAFT_GRAPH_TURN_BUDGET_MS : ORCHESTRATOR_TURN_BUDGET_MS;
+        const budgetController = new AbortController();
+        const budgetTimeout = setTimeout(() => budgetController.abort(), effectiveBudgetMs);
+
+        try {
+          const { executePipelineV4 } = await import("./deterministic/pipeline-v4.js");
+
+          let v4Envelope: import("./pipeline/types.js").OrchestratorResponseEnvelopeV2 | undefined;
+          for await (const event of executePipelineV4(turnRequest, requestId, budgetController.signal, req)) {
+            if (event.type === 'turn_complete') {
+              v4Envelope = event.envelope;
+            }
           }
+
+          if (!v4Envelope) {
+            log.error({ request_id: requestId }, 'V4 pipeline produced no turn_complete event');
+            reply.code(500);
+            return reply.send({
+              turn_id: 'error',
+              assistant_text: null,
+              blocks: [],
+              lineage: { context_hash: '' },
+              error: { code: 'UNKNOWN', message: 'Pipeline produced no response', recoverable: false },
+            });
+          }
+
+          // Cache for idempotency (parity with streaming path route-stream.ts:253)
+          setIdempotentResponse(
+            turnRequest.scenario_id,
+            turnRequest.client_turn_id,
+            v4Envelope as unknown as import("./types.js").OrchestratorResponseEnvelope,
+          );
+
+          const v4HttpStatus = v4Envelope.error
+            ? getHttpStatusForError(v4Envelope.error as import("./types.js").OrchestratorError)
+            : 200;
+
+          log.info(
+            {
+              request_id: requestId,
+              scenario_id: turnRequest.scenario_id,
+              elapsed_ms: Date.now() - startTime,
+              http_status: v4HttpStatus,
+              has_error: Boolean(v4Envelope.error),
+              pipeline: 'v4',
+            },
+            "Orchestrator V4 turn completed",
+          );
+
+          logAnalysisReadyDiagnostics(v4Envelope, requestId);
+
+          reply.code(v4HttpStatus);
+          return reply.send(v4Envelope);
+        } finally {
+          clearTimeout(budgetTimeout);
         }
-
-        if (!v4Envelope) {
-          log.error({ request_id: requestId }, 'V4 pipeline produced no turn_complete event');
-          reply.code(500);
-          return reply.send({
-            turn_id: 'error',
-            assistant_text: null,
-            blocks: [],
-            lineage: { context_hash: '' },
-            error: { code: 'UNKNOWN', message: 'Pipeline produced no response', recoverable: false },
-          });
-        }
-
-        const v4HttpStatus = v4Envelope.error
-          ? getHttpStatusForError(v4Envelope.error as import("./types.js").OrchestratorError)
-          : 200;
-
-        log.info(
-          {
-            request_id: requestId,
-            scenario_id: turnRequest.scenario_id,
-            elapsed_ms: Date.now() - startTime,
-            http_status: v4HttpStatus,
-            has_error: Boolean(v4Envelope.error),
-            pipeline: 'v4',
-          },
-          "Orchestrator V4 turn completed",
-        );
-
-        logAnalysisReadyDiagnostics(v4Envelope, requestId);
-
-        reply.code(v4HttpStatus);
-        return reply.send(v4Envelope);
       }
 
       // V1 parallel generate path — only used when V2 pipeline is NOT active.
