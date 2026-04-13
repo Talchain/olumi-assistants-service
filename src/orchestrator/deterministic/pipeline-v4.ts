@@ -693,6 +693,75 @@ export async function* executePipelineV4(
       }
     }
 
+    // ── Post-analysis state recomputation ──────────────────────────────
+    // After run_analysis produces an analysis_response, recompute pipeline
+    // state so the stage indicator, chip engine, and tool set see the
+    // post-analysis context.
+    // Pre-analysis: stage=ideate, can_explain_results=false, edit-only tools.
+    // Post-analysis: stage=evaluate, explanation tools available, chips
+    //   shift to interpret/decide bundles.
+    let postAnalysisRecomputed = false;
+    if (
+      actionResult?.fact?.action === 'analysis_complete'
+      && actionResult.analysis_response
+      && !actionResult.failure
+    ) {
+      try {
+        // Rebuild turn context with the post-analysis response on context.analysis_response
+        const postAnalysisRequest: OrchestratorTurnRequest = {
+          ...turnRequest,
+          context: {
+            ...turnRequest.context,
+            analysis_response: actionResult.analysis_response as import("../types.js").V2RunResponseEnvelope,
+          },
+        };
+        const postAnalysisContext = computeTurnContext(postAnalysisRequest);
+        postAnalysisContext.turn_id = turnId;
+        postAnalysisContext.request = fastifyRequest;
+        postAnalysisContext.signal = signal;
+
+        // Rebuild coaching context with post-analysis signals
+        if (config.cee.coachingContextEnabled) {
+          try {
+            coachingContext = buildCoachingContext(postAnalysisContext, sessionState);
+          } catch (err) {
+            log.warn({ event: 'v4.post_analysis_coaching_error', error: (err as Error).message }, 'Post-analysis coaching context rebuild failed');
+          }
+        }
+
+        // Rebuild tool set with post-analysis eligible actions
+        const postAnalysisEligible = [...postAnalysisContext.eligible_actions];
+        const postAnalysisToolDefs = buildToolDefinitions(postAnalysisEligible as ActionName[], postAnalysisContext);
+        resolvedToolNames.length = 0;
+        resolvedToolNames.push(...postAnalysisToolDefs.map(t => t.name));
+
+        // Rebuild chip tool set (pre-disambiguation) for chip engine
+        const postAnalysisChipToolDefs = buildToolDefinitions(
+          postAnalysisEligible as ActionName[],
+          postAnalysisContext,
+          { bypassDisambiguation: true },
+        );
+        chipToolNames.length = 0;
+        chipToolNames.push(...postAnalysisChipToolDefs.map(t => t.name));
+
+        // Update turnContext for downstream consumers (stage_indicator, chips, envelope)
+        Object.assign(turnContext, postAnalysisContext);
+        computedStage = turnContext.stage;
+        postAnalysisRecomputed = true;
+
+        log.info({
+          request_id: requestId,
+          post_analysis_stage: turnContext.stage,
+          post_analysis_eligible_actions: turnContext.eligible_actions,
+          post_analysis_resolved_tools: resolvedToolNames,
+          post_analysis_chip_tools: chipToolNames,
+        }, 'v4.post_analysis_recomputation');
+      } catch (err) {
+        log.warn({ event: 'v4.post_analysis_recompute_error', error: (err as Error).message }, 'Post-analysis recomputation failed — stage may stay at ideate');
+      }
+    }
+    void postAnalysisRecomputed; // reserved for downstream gating if needed
+
     // Surface tool failure in the envelope when no text was produced.
     // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
     // so failed tool turns are excluded from conversation history.
