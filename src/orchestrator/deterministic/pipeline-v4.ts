@@ -722,18 +722,25 @@ export async function* executePipelineV4(
     // Post-analysis: stage=evaluate, explanation tools available, chips
     //   shift to interpret/decide bundles.
     let postAnalysisRecomputed = false;
+    void postAnalysisRecomputed; // parity with postDraftRecomputed — reserved for downstream gating
     if (
       actionResult?.fact?.action === 'analysis_complete'
       && actionResult.analysis_response
       && !actionResult.failure
     ) {
       try {
-        // Rebuild turn context with the post-analysis response on context.analysis_response
+        // Rebuild turn context with the post-analysis response on context.analysis_response.
+        // Apply normalizeAnalysisEnvelope to match the entry-normalisation pattern —
+        // computeTurnContext expects the canonical shape (results/factor_sensitivity
+        // projected from evolving UI-forwarded shapes).
+        const normalisedAnalysis = normalizeAnalysisEnvelope(
+          actionResult.analysis_response as import("../types.js").V2RunResponseEnvelope,
+        );
         const postAnalysisRequest: OrchestratorTurnRequest = {
           ...turnRequest,
           context: {
             ...turnRequest.context,
-            analysis_response: actionResult.analysis_response as import("../types.js").V2RunResponseEnvelope,
+            analysis_response: normalisedAnalysis,
           },
         };
         const postAnalysisContext = computeTurnContext(postAnalysisRequest);
@@ -781,7 +788,6 @@ export async function* executePipelineV4(
         log.warn({ event: 'v4.post_analysis_recompute_error', error: (err as Error).message }, 'Post-analysis recomputation failed — stage may stay at ideate');
       }
     }
-    void postAnalysisRecomputed; // reserved for downstream gating if needed
 
     // Surface tool failure in the envelope when no text was produced.
     // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
