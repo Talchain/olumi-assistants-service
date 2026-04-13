@@ -173,6 +173,53 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     };
 
     try {
+      // ── Pipeline V4: native tool-use (highest priority) ──────────────
+      // When enabled, ALL turns route to the V4 pipeline — no fall-through
+      // to V2 or V1. Mirrors the streaming path (pipeline-stream.ts:109).
+      if (config.features.pipelineV4Enabled) {
+        const { executePipelineV4 } = await import("./deterministic/pipeline-v4.js");
+
+        let v4Envelope: import("./pipeline/types.js").OrchestratorResponseEnvelopeV2 | undefined;
+        for await (const event of executePipelineV4(turnRequest, requestId, undefined, req)) {
+          if (event.type === 'turn_complete') {
+            v4Envelope = event.envelope;
+          }
+        }
+
+        if (!v4Envelope) {
+          log.error({ request_id: requestId }, 'V4 pipeline produced no turn_complete event');
+          reply.code(500);
+          return reply.send({
+            turn_id: 'error',
+            assistant_text: null,
+            blocks: [],
+            lineage: { context_hash: '' },
+            error: { code: 'UNKNOWN', message: 'Pipeline produced no response', recoverable: false },
+          });
+        }
+
+        const v4HttpStatus = v4Envelope.error
+          ? getHttpStatusForError(v4Envelope.error as import("./types.js").OrchestratorError)
+          : 200;
+
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: turnRequest.scenario_id,
+            elapsed_ms: Date.now() - startTime,
+            http_status: v4HttpStatus,
+            has_error: Boolean(v4Envelope.error),
+            pipeline: 'v4',
+          },
+          "Orchestrator V4 turn completed",
+        );
+
+        logAnalysisReadyDiagnostics(v4Envelope, requestId);
+
+        reply.code(v4HttpStatus);
+        return reply.send(v4Envelope);
+      }
+
       // V1 parallel generate path — only used when V2 pipeline is NOT active.
       // When V2 is active, generate_model flows through the V2 pipeline via
       // intent gate override → buildExplicitGenerateRoute → draft_graph.
