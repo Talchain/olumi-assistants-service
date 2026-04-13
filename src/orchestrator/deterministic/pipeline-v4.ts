@@ -175,6 +175,23 @@ export async function* executePipelineV4(
     // Thread abort signal after try/catch so both normal and fallback contexts get it
     turnContext.signal = signal;
 
+    // [P3-DIAG] Post-computeTurnContext diagnostics
+    log.info({
+      event: '[P3-DIAG] post_computeTurnContext',
+      request_id: requestId,
+      stage: turnContext.stage,
+      can_run_analysis: turnContext.capabilities.can_run_analysis,
+      has_graph_summary: !!turnContext.graph_summary,
+      graph_summary_node_count: turnContext.graph_summary?.node_count,
+      graph_summary_option_count: turnContext.graph_summary?.option_count,
+      graph_summary_edge_count: turnContext.graph_summary?.edge_count,
+      has_graph: !!turnContext.graph,
+      eligible_actions: turnContext.eligible_actions,
+      context_fallback_used: contextFallbackUsed,
+      has_graph_state: !!turnRequest.graph_state,
+      has_context_graph: !!turnRequest.context?.graph,
+    }, '[P3-DIAG] TurnContext computed');
+
     const effectiveMessage = turnRequest.message?.trim() ?? '';
     const stage = turnContext.stage;
     computedStage = stage;
@@ -579,6 +596,21 @@ export async function* executePipelineV4(
     const executedAction = toolExecution?.toolName as ActionName ?? null;
     const actionResult = toolExecution?.result ?? null;
 
+    // [P3-DIAG] After tool handler returns
+    log.info({
+      event: '[P3-DIAG] post_tool_handler',
+      request_id: requestId,
+      executed_action: executedAction,
+      fact_action: actionResult?.fact?.action ?? null,
+      has_assistant_text: !!actionResult?.assistantText,
+      assistant_text_preview: actionResult?.assistantText?.substring(0, 80) ?? null,
+      blocks_length: actionResult?.blocks?.length ?? 0,
+      operations_length: actionResult?.operations?.length ?? 0,
+      has_fact: !!actionResult?.fact,
+      has_failure: !!actionResult?.failure,
+      has_applied_graph: !!actionResult?.applied_graph,
+    }, '[P3-DIAG] Tool handler result');
+
     // Surface tool failure in the envelope when no text was produced.
     // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
     // so failed tool turns are excluded from conversation history.
@@ -600,6 +632,19 @@ export async function* executePipelineV4(
     //
     // IMPORTANT: This runs BEFORE the empty-text injection below, so the
     // fallback-template path only fires when there is no fact AND no text.
+    // [P3-DIAG] Before composeResponse gate check
+    log.info({
+      event: '[P3-DIAG] pre_composeResponse',
+      request_id: requestId,
+      coaching_context_enabled: !!config.cee.coachingContextEnabled,
+      has_fact: !!actionResult?.fact,
+      fact_action: actionResult?.fact?.action ?? null,
+      has_failure: !!actionResult?.failure,
+      has_failed_tool_call: !!failedToolCall,
+      raw_llm_text_preview: rawAssistantText?.substring(0, 80) ?? null,
+      initial_response_source: responseSource,
+    }, '[P3-DIAG] composeResponse gate inputs');
+
     if (
       config.cee.coachingContextEnabled
       && actionResult?.fact
@@ -613,7 +658,30 @@ export async function* executePipelineV4(
         const hasPatchBlock =
           (actionResult.blocks ?? []).some(b => b.block_type === 'graph_patch')
           || (actionResult.operations?.length ?? 0) > 0;
+
+        // [P3-DIAG] composeResponse inputs
+        log.info({
+          event: '[P3-DIAG] composeResponse_call',
+          request_id: requestId,
+          fact_action: actionResult.fact.action,
+          has_coaching_context: !!coachingContext,
+          coaching_tradeoff: !!coachingContext?.tradeoff,
+          coaching_biggest_inference: !!coachingContext?.biggest_inference,
+          coaching_calibration_target: !!coachingContext?.calibration_target,
+          has_patch_block: hasPatchBlock,
+        }, '[P3-DIAG] composeResponse call inputs');
+
         const composed = composeResponse(actionResult.fact, coachingContext, hasPatchBlock);
+
+        // [P3-DIAG] composeResponse output
+        log.info({
+          event: '[P3-DIAG] composeResponse_result',
+          request_id: requestId,
+          composed_preview: composed?.substring(0, 80) ?? null,
+          composed_length: composed?.length ?? 0,
+          will_use: !!(composed && composed.trim().length > 0),
+        }, '[P3-DIAG] composeResponse result');
+
         if (composed && composed.trim().length > 0) {
           assistantText = composed;
           responseSource = 'composer';
@@ -703,6 +771,18 @@ export async function* executePipelineV4(
     if (assistantText) {
       assistantText = sanitiseAssistantText(assistantText);
     }
+
+    // [P3-DIAG] Final assistantText after all transformations
+    log.info({
+      event: '[P3-DIAG] final_assistant_text',
+      request_id: requestId,
+      response_source: responseSource,
+      text_preview: assistantText?.substring(0, 120) ?? null,
+      text_length: assistantText?.length ?? 0,
+      has_chip_pre_text: !!chipPreText,
+      has_chip_downgrade_text: !!chipDowngradeText,
+      has_failed_tool_call: !!failedToolCall,
+    }, '[P3-DIAG] Final assistant text');
 
     // WS6: Advance session state after action execution
     const actionOutcome = executedAction === 'set_factor_value' && streamResult.toolExecution?.input
@@ -1017,6 +1097,17 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     config.cee.chipEngineEnabled !== false
     && coachingContext != null
     && sessionState != null;
+
+  // [P3-DIAG] Chip engine gate
+  log.info({
+    event: '[P3-DIAG] chip_engine_gate',
+    chip_engine_enabled: config.cee.chipEngineEnabled,
+    has_coaching_context: coachingContext != null,
+    has_session_state: sessionState != null,
+    use_chip_engine: useChipEngine,
+    available_tools_count: availableTools.length,
+  }, '[P3-DIAG] Chip engine gate');
+
   const suggestedActions = useChipEngine
     ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools)
     : buildDeterministicChips(turnContext, executedAction, deferredActions);

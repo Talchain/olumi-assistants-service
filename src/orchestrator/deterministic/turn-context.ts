@@ -921,6 +921,20 @@ function computeEligibleActions(
     eligible.push(action);
   }
 
+  // [P3-DIAG] Stage action policy lookup
+  log.info({
+    event: '[P3-DIAG] stage_action_policy',
+    stage,
+    stage_policy_actions: [...stageActions],
+    blocked_actions: [...blockedActions],
+    eligible_result: eligible,
+    can_run_analysis: capabilities.can_run_analysis,
+    can_edit_graph: capabilities.can_edit_graph,
+    can_explain_results: capabilities.can_explain_results,
+    can_compare_options: capabilities.can_compare_options,
+    can_challenge: capabilities.can_challenge,
+  }, '[P3-DIAG] Stage action policy');
+
   return eligible;
 }
 
