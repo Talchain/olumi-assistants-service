@@ -102,12 +102,13 @@ interface SseEvent {
 interface ClientState {
   graph_state: any | null;
   analysis_state: any | null;
+  analysis_inputs: any | null;
   session_state: any | null;
   history: Array<{ role: string; content: string }>;
 }
 
 function freshState(): ClientState {
-  return { graph_state: null, analysis_state: null, session_state: null, history: [] };
+  return { graph_state: null, analysis_state: null, analysis_inputs: null, session_state: null, history: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +261,40 @@ function extractAnalysis(envelope: any): any | null {
   return envelope.analysis_state || envelope.analysis_response || null;
 }
 
+/**
+ * Extract analysis_inputs from the graph_patch block's analysis_ready data.
+ * The UI must send this as context.analysis_inputs for run_analysis to work.
+ */
+function extractAnalysisInputs(envelope: any): any | null {
+  const blocks: any[] = envelope.blocks || [];
+  for (const block of blocks) {
+    if ((block.type === "graph_patch" || block.block_type === "graph_patch") && block.data?.analysis_ready) {
+      const ar = block.data.analysis_ready;
+      if (ar.options && Array.isArray(ar.options) && ar.options.length > 0) {
+        return {
+          options: ar.options.map((opt: any) => ({
+            option_id: opt.option_id || opt.id,
+            label: opt.label,
+            interventions: opt.interventions || {},
+          })),
+        };
+      }
+    }
+  }
+  // Also check applied_graph.analysis_ready
+  const graph = extractGraph(envelope);
+  if (graph?.analysis_ready?.options) {
+    return {
+      options: graph.analysis_ready.options.map((opt: any) => ({
+        option_id: opt.option_id || opt.id,
+        label: opt.label,
+        interventions: opt.interventions || {},
+      })),
+    };
+  }
+  return null;
+}
+
 function getStage(env: any): string {
   const si = env.stage_indicator;
   if (!si) return "";
@@ -290,6 +325,13 @@ function buildRequestBody(
   if (state.graph_state) body.graph_state = state.graph_state;
   if (state.analysis_state) body.analysis_state = state.analysis_state;
   if (state.session_state) body.session_state = state.session_state;
+  // Send analysis_inputs in context — required for run_analysis to fire.
+  // The real UI extracts this from the graph_patch block's analysis_ready data.
+  if (state.analysis_inputs) {
+    const ctx = (body.context || {}) as Record<string, unknown>;
+    ctx.analysis_inputs = state.analysis_inputs;
+    body.context = ctx;
+  }
   return body;
 }
 
@@ -414,7 +456,7 @@ function buildTurnResult(
     blocks_count: (envelope.blocks || []).length,
     session_state_present: envelope.updated_session_state != null,
     graph_state_sent: !!requestBody.graph_state,
-    analysis_state_sent: !!requestBody.analysis_state,
+    analysis_state_sent: !!requestBody.analysis_state || !!(requestBody.context as any)?.analysis_inputs,
     latency_ms: time_ms,
     latency_warning: time_ms > 30_000,
     checks,
@@ -440,6 +482,10 @@ function updateState(state: ClientState, userMessage: string, envelope: any) {
   // Graph
   const graph = extractGraph(envelope);
   if (graph) state.graph_state = graph;
+
+  // Analysis inputs (from graph_patch block's analysis_ready)
+  const inputs = extractAnalysisInputs(envelope);
+  if (inputs) state.analysis_inputs = inputs;
 
   // Analysis
   const analysis = extractAnalysis(envelope);
@@ -655,7 +701,7 @@ async function journey2(endpoint: "stream" | "sync"): Promise<JourneyResult> {
   turns.push(buildTurnResult(1, msg1, endpoint, body1, envelope, events, time_ms, checks1,
     hasCountText1 ? investigate("Draft contains counts", "Response composer fallback", `text: "${text1.slice(0, 100)}"`, "Fix response-composer.ts", "moderate") : null));
   updateState(state, msg1, envelope);
-  console.log(`  [state] graph: ${state.graph_state ? "YES" : "no"}, session: ${state.session_state ? "YES" : "no"}`);
+  console.log(`  [state] graph: ${state.graph_state ? "YES" : "no"}, analysis_inputs: ${state.analysis_inputs ? "YES" : "no"}, session: ${state.session_state ? "YES" : "no"}`);
 
   // ---- Turn 2: Run analysis ----
   const msg2 = "Run the analysis";
@@ -694,7 +740,7 @@ async function journey2(endpoint: "stream" | "sync"): Promise<JourneyResult> {
   logChecks(checks2);
   turns.push(buildTurnResult(2, msg2, endpoint, body2, envelope, events, time_ms, checks2, inv2));
   updateState(state, msg2, envelope);
-  console.log(`  [state] graph: ${state.graph_state ? "YES" : "no"}, analysis: ${state.analysis_state ? "YES" : "no"}, session: ${state.session_state ? "YES" : "no"}, stage: ${stage2}`);
+  console.log(`  [state] graph: ${state.graph_state ? "YES" : "no"}, analysis: ${state.analysis_state ? "YES" : "no"}, analysis_inputs: ${state.analysis_inputs ? "YES" : "no"}, session: ${state.session_state ? "YES" : "no"}, stage: ${stage2}`);
 
   // ---- Turn 3: Explain results ----
   const msg3 = "Can you explain the analysis results to me?";
