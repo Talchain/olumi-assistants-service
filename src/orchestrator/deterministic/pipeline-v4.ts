@@ -168,6 +168,7 @@ export async function* executePipelineV4(
       const analysisReady = graph?.analysis_ready as { options?: Array<Record<string, unknown>> } | undefined;
       if (analysisReady?.options && Array.isArray(analysisReady.options) && analysisReady.options.length > 0) {
         const derived = analysisReady.options
+          .filter((opt): opt is Record<string, unknown> => opt != null && typeof opt === 'object')
           .map((opt) => ({
             option_id: (opt.option_id ?? opt.id) as string | undefined,
             label: opt.label as string | undefined,
