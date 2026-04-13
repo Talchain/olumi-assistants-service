@@ -49,7 +49,7 @@ const WEAK_EDGE_THRESHOLD = 0.3;
 // generate_artefact excluded: permanently blocked by prerequisite. Re-add when artefact pipeline is implemented.
 const STAGE_ACTION_POLICY: Record<DecisionStage, ReadonlySet<ActionName>> = {
   frame: new Set<ActionName>(['set_factor_value', 'add_factor', 'set_goal_target', 'add_constraint']),
-  ideate: new Set<ActionName>(['set_factor_value', 'add_constraint', 'add_factor', 'adjust_edge_strength', 'add_option', 'remove_factor', 'set_goal_target', 'run_analysis']),
+  ideate: new Set<ActionName>(['set_factor_value', 'add_constraint', 'add_factor', 'adjust_edge_strength', 'add_option', 'remove_factor', 'set_goal_target', 'run_analysis', 'challenge_assumption']),
   evaluate: new Set<ActionName>(['run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip', 'set_factor_value', 'adjust_edge_strength', 'add_constraint']),
   decide: new Set<ActionName>(['explain_result', 'compare_options', 'what_would_flip', 'challenge_assumption', 'run_premortem']),
   optimise: new Set<ActionName>(['set_factor_value', 'adjust_edge_strength', 'add_constraint', 'run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip']),
@@ -914,7 +914,10 @@ function computeEligibleActions(
     if (action === 'run_analysis' && !capabilities.can_run_analysis) continue;
     if (action === 'explain_result' && !capabilities.can_explain_results) continue;
     if (action === 'compare_options' && !capabilities.can_compare_options) continue;
-    if ((action === 'challenge_assumption' || action === 'run_premortem' || action === 'what_would_flip') && !capabilities.can_challenge) continue;
+    // challenge_assumption is coaching-oriented — it can operate on weak edges
+    // from the graph alone. Allow it when the graph exists, even pre-analysis.
+    if (action === 'challenge_assumption' && !capabilities.can_edit_graph) continue;
+    if ((action === 'run_premortem' || action === 'what_would_flip') && !capabilities.can_challenge) continue;
     if (action === 'generate_artefact' && !capabilities.can_generate_artefact) continue;
     if ((action === 'set_factor_value' || action === 'add_factor' || action === 'adjust_edge_strength' || action === 'add_option' || action === 'remove_factor' || action === 'set_goal_target' || action === 'add_constraint') && !capabilities.can_edit_graph) continue;
 

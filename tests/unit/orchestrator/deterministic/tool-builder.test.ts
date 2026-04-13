@@ -405,6 +405,79 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     expect(names).not.toContain('set_factor_value');
   });
 
+  it("bypassDisambiguation keeps target_id tools even when entities are ambiguous", () => {
+    // Same ambiguous setup as "removes target_id tools when two factors share 2+ significant words"
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: null });
+
+    // Without bypass — target_id tool removed
+    const withoutBypass = buildToolDefinitions(['set_factor_value', 'explain_result'], ctx);
+    expect(withoutBypass.map(d => d.name)).not.toContain('set_factor_value');
+
+    // With bypass — target_id tool survives
+    const withBypass = buildToolDefinitions(
+      ['set_factor_value', 'explain_result'],
+      ctx,
+      { bypassDisambiguation: true },
+    );
+    expect(withBypass.map(d => d.name)).toContain('set_factor_value');
+    expect(withBypass.map(d => d.name)).toContain('explain_result');
+  });
+
+  it("bypassDisambiguation still applies EXCLUDED_ACTIONS and schema validation", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: null });
+
+    // generate_artefact is in EXCLUDED_ACTIONS — should be removed even with bypass
+    const defs = buildToolDefinitions(
+      ['generate_artefact', 'set_factor_value'],
+      ctx,
+      { bypassDisambiguation: true },
+    );
+    const names = defs.map(d => d.name);
+    expect(names).not.toContain('generate_artefact');
+    // set_factor_value survives bypass
+    expect(names).toContain('set_factor_value');
+  });
+
+  it("options object accepts both bypassStaleness and bypassDisambiguation", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    // analysis present → run_analysis normally suppressed
+    const ctx = buildTestContext({
+      entities,
+      analysis_summary: { winner: 'A', winner_probability: 0.7, top_drivers: [] } as AnalysisSummary,
+    });
+
+    const defs = buildToolDefinitions(
+      ['set_factor_value', 'run_analysis'],
+      ctx,
+      { bypassStaleness: true, bypassDisambiguation: true },
+    );
+    const names = defs.map(d => d.name);
+    // Both flags respected
+    expect(names).toContain('run_analysis');
+    expect(names).toContain('set_factor_value');
+  });
+
+  it("positional boolean still works (backward compat)", () => {
+    const ctx = buildTestContext({
+      entities: new Map(),
+      analysis_summary: { winner: 'A', winner_probability: 0.7, top_drivers: [] } as AnalysisSummary,
+    });
+    // Legacy call style: third arg is bypassStaleness boolean
+    const defs = buildToolDefinitions(['run_analysis'], ctx, true);
+    expect(defs.map(d => d.name)).toContain('run_analysis');
+  });
+
   it("does not flag ambiguity between different entity kinds sharing a word", () => {
     // A factor and an option both containing "growth" — different kinds, not ambiguous
     const entities = new Map<string, EntityEntry>([

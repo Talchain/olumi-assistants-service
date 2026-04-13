@@ -109,6 +109,20 @@ describe('computeTurnContext', () => {
     expect(ctx.blockers.length).toBeGreaterThan(0);
   });
 
+  it('exposes challenge_assumption as eligible at ideate stage (graph-only, no analysis)', () => {
+    // challenge_assumption was previously evaluate-only and required analysis.
+    // It should now be available at ideate as soon as a graph exists, using
+    // weak_edges signals computed from graph structure.
+    const req = makeTurnRequest({ graph: makeGraph() });
+    const ctx = computeTurnContext(req);
+
+    expect(ctx.stage).toBe('ideate');
+    expect(ctx.eligible_actions).toContain('challenge_assumption');
+    // Sanity: analysis-dependent actions remain gated
+    expect(ctx.eligible_actions).not.toContain('explain_result');
+    expect(ctx.eligible_actions).not.toContain('compare_options');
+  });
+
   it('handles graph without analysis', () => {
     const req = makeTurnRequest({ graph: makeGraph() });
     const ctx = computeTurnContext(req);

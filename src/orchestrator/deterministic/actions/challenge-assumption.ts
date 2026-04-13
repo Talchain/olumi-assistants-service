@@ -12,7 +12,7 @@ import { resolveEntity } from "../entity-resolver.js";
 export const challengeAssumptionAction: ActionDefinition = {
   action_type: 'challenge_assumption',
   description: 'Challenge a specific assumption in the model with data and science.',
-  stage_eligibility: new Set(['evaluate', 'decide', 'optimise']),
+  stage_eligibility: new Set(['ideate', 'evaluate', 'decide', 'optimise']),
   requires_target: true,
   requires_confirmation: false,
   execution_risk: 'none',
@@ -30,7 +30,10 @@ export const challengeAssumptionAction: ActionDefinition = {
   },
 
   prerequisite_checks(ctx: DeterministicTurnContext): string | null {
-    if (!ctx.analysis_summary) return 'No analysis results to challenge. Run analysis first.';
+    // A graph is required — we challenge entities (factors, edges) in it.
+    // Analysis is not strictly required: with no analysis, we fall back to
+    // weak-edge signals computed from graph structure alone.
+    if (!ctx.graph) return 'No decision model available.';
     return null;
   },
 

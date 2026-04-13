@@ -158,6 +158,34 @@ export async function* executePipelineV4(
       turnRequest.context.graph = turnRequest.graph_state;
     }
 
+    // Derive analysis_inputs from graph.analysis_ready when the caller did not
+    // supply it. This matches the shape the run_analysis action requires
+    // (ctx.analysis_inputs) and eliminates a client-side payload dependency:
+    // any caller that sends the graph (with analysis_ready populated by draft)
+    // can run analysis without separately echoing the interventions payload.
+    if (!turnRequest.context.analysis_inputs) {
+      const graph = turnRequest.context.graph as Record<string, unknown> | null | undefined;
+      const analysisReady = graph?.analysis_ready as { options?: Array<Record<string, unknown>> } | undefined;
+      if (analysisReady?.options && Array.isArray(analysisReady.options) && analysisReady.options.length > 0) {
+        const derived = analysisReady.options
+          .map((opt) => ({
+            option_id: (opt.option_id ?? opt.id) as string | undefined,
+            label: opt.label as string | undefined,
+            interventions: (opt.interventions ?? {}) as Record<string, unknown>,
+          }))
+          .filter((opt): opt is { option_id: string; label: string; interventions: Record<string, unknown> } =>
+            typeof opt.option_id === 'string' && typeof opt.label === 'string',
+          );
+        if (derived.length > 0) {
+          turnRequest.context.analysis_inputs = { options: derived } as import("../types.js").AnalysisInputs;
+          log.debug({
+            event: 'v4.analysis_inputs_derived',
+            option_count: derived.length,
+          }, 'Derived analysis_inputs from graph.analysis_ready');
+        }
+      }
+    }
+
     // ── Compute TurnContext ──────────────────────────────────────────
     let turnContext: DeterministicTurnContext;
     let contextFallbackUsed = false;
@@ -242,13 +270,13 @@ export async function* executePipelineV4(
             )
           : sessionState;
 
-        // Resolve the tool set through buildToolDefinitions so confirmation
-        // turns use the same exclusions (EXCLUDED_ACTIONS, context filtering,
-        // entity disambiguation) as LLM turns. No bypassStaleness on
-        // confirmation — there is no chip click to bypass for.
+        // Resolve the chip tool set — chips carry explicit target_id, so
+        // bypass disambiguation (same rationale as the main path). Confirmation
+        // produces no LLM call, so we only need the chip-facing set here.
         const confirmToolDefs = buildToolDefinitions(
           [...turnContext.eligible_actions] as ActionName[],
           turnContext,
+          { bypassDisambiguation: true },
         );
         const confirmToolNames = confirmToolDefs.map(t => t.name);
         const envelope = assembleV4Envelope({
@@ -333,6 +361,17 @@ export async function* executePipelineV4(
     );
     const resolvedToolNames = toolDefs.map(t => t.name);
 
+    // Chip tool set: pre-disambiguation. Chips carry explicit target_id
+    // parameters (pre-computed by the chip engine), so LLM target-confusion
+    // protection does not apply. The chip engine's tool-availability filter
+    // should validate tool existence only — not LLM-safety mechanisms.
+    const chipToolDefs = buildToolDefinitions(
+      eligibleActions as ActionName[],
+      turnContext,
+      { bypassStaleness, bypassDisambiguation: true },
+    );
+    const chipToolNames: string[] = chipToolDefs.map(t => t.name);
+
     // Always log the resolved tool set for journey debugging.
     const toolNameSet = new Set(resolvedToolNames);
     const removed = eligibleActions.filter(a => !toolNameSet.has(a) && a !== 'generate_artefact');
@@ -357,7 +396,7 @@ export async function* executePipelineV4(
     let preComputedChipLabels: string[] = [];
     if (coachingContext && config.cee.chipEngineEnabled !== false) {
       try {
-        const preChips = computeChips(coachingContext, sessionState, turnContext, null, [], resolvedToolNames);
+        const preChips = computeChips(coachingContext, sessionState, turnContext, null, [], chipToolNames);
         preComputedChipLabels = preChips.map(c => c.label);
       } catch (err) {
         log.warn({ event: 'v4.precompute_chips_error', error: (err as Error).message }, 'Precomputing chip labels for prompt failed');
@@ -621,6 +660,15 @@ export async function* executePipelineV4(
         resolvedToolNames.length = 0;
         resolvedToolNames.push(...postDraftToolDefs.map(t => t.name));
 
+        // Rebuild chip tool set (pre-disambiguation) for chip engine
+        const postDraftChipToolDefs = buildToolDefinitions(
+          postDraftEligible as ActionName[],
+          postDraftContext,
+          { bypassDisambiguation: true },
+        );
+        chipToolNames.length = 0;
+        chipToolNames.push(...postDraftChipToolDefs.map(t => t.name));
+
         // Update turnContext for downstream consumers (stage_indicator, chips, envelope)
         Object.assign(turnContext, postDraftContext);
         computedStage = turnContext.stage;
@@ -788,7 +836,7 @@ export async function* executePipelineV4(
       deferredActions,
       coachingContext,
       sessionState: updatedSessionState ?? sessionState,
-      availableTools: resolvedToolNames,
+      availableTools: chipToolNames,
       responseSource,
     });
 

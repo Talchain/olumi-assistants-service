@@ -174,28 +174,50 @@ function isSchemaValid(name: string, schema: Record<string, unknown>): boolean {
 // ============================================================================
 
 /**
+ * Options for buildToolDefinitions.
+ *
+ * `bypassStaleness`: narrow chip-click escape hatch for run_analysis — when
+ * set, the staleness suppression that filters run_analysis whenever fresh
+ * analysis results exist is skipped. The no-graph exclusion still applies.
+ *
+ * `bypassDisambiguation`: skip the entity-disambiguation filter. Entity
+ * disambiguation exists to protect the LLM from picking the wrong target_id
+ * when same-kind entity labels overlap. Chips are pre-computed with explicit
+ * target_id parameters by the chip engine and do not suffer from LLM target
+ * confusion, so chip tool-availability checks can use the broader pre-
+ * disambiguation set. Schema validation, context exclusions, and
+ * EXCLUDED_ACTIONS still apply.
+ */
+export interface BuildToolDefinitionsOptions {
+  bypassStaleness?: boolean;
+  bypassDisambiguation?: boolean;
+}
+
+/**
  * Build Anthropic tool definitions from the action catalogue.
  *
  * Only includes actions in `eligibleActions` that have a valid input_schema
  * and are not in the exclusion list.
  *
  * When `ctx` is provided, applies data-availability filtering, entity
- * disambiguation, and dynamic description enrichment.
+ * disambiguation (unless bypassed), and dynamic description enrichment.
  *
- * `bypassStaleness` is the narrow chip-click escape hatch for run_analysis:
- * when set, the staleness suppression that filters run_analysis whenever fresh
- * analysis results exist is skipped. The no-graph exclusion still applies —
- * clicking "Run analysis" with no graph still downgrades cleanly.
- * Schema validation and entity disambiguation also still apply.
+ * Accepts a legacy positional `bypassStaleness` boolean for backward
+ * compatibility with existing callers, or an options object for the new
+ * bypassDisambiguation flag.
  */
 export function buildToolDefinitions(
   eligibleActions: ActionName[],
   ctx?: DeterministicTurnContext,
-  bypassStaleness?: boolean,
+  bypassStalenessOrOptions?: boolean | BuildToolDefinitionsOptions,
 ): ToolDefinition[] {
+  const options: BuildToolDefinitionsOptions =
+    typeof bypassStalenessOrOptions === 'boolean'
+      ? { bypassStaleness: bypassStalenessOrOptions }
+      : (bypassStalenessOrOptions ?? {});
   const definitions: ToolDefinition[] = [];
-  const excluded = ctx ? computeContextExclusions(ctx, bypassStaleness === true) : new Set<ActionName>();
-  const ambiguousTargetIds = ctx ? detectAmbiguousEntities(ctx) : false;
+  const excluded = ctx ? computeContextExclusions(ctx, options.bypassStaleness === true) : new Set<ActionName>();
+  const ambiguousTargetIds = ctx && !options.bypassDisambiguation ? detectAmbiguousEntities(ctx) : false;
 
   for (const name of eligibleActions) {
     if (EXCLUDED_ACTIONS.has(name)) continue;

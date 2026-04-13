@@ -94,6 +94,25 @@ function applyV4Normalisation(req: OrchestratorTurnRequest): void {
   if (req.graph_state) {
     req.context.graph = req.graph_state;
   }
+  // Mirror pipeline-v4.ts analysis_inputs derivation
+  if (!req.context.analysis_inputs) {
+    const graph = req.context.graph as Record<string, unknown> | null | undefined;
+    const analysisReady = graph?.analysis_ready as { options?: Array<Record<string, unknown>> } | undefined;
+    if (analysisReady?.options && Array.isArray(analysisReady.options) && analysisReady.options.length > 0) {
+      const derived = analysisReady.options
+        .map((opt) => ({
+          option_id: (opt.option_id ?? opt.id) as string | undefined,
+          label: opt.label as string | undefined,
+          interventions: (opt.interventions ?? {}) as Record<string, unknown>,
+        }))
+        .filter((opt): opt is { option_id: string; label: string; interventions: Record<string, unknown> } =>
+          typeof opt.option_id === 'string' && typeof opt.label === 'string',
+        );
+      if (derived.length > 0) {
+        req.context.analysis_inputs = { options: derived } as import("../../../../src/orchestrator/types.js").AnalysisInputs;
+      }
+    }
+  }
 }
 
 // ============================================================================
@@ -233,5 +252,118 @@ describe('pipeline-v4 normalisation: precedence and edge cases', () => {
     const ctx = computeTurnContext(req);
     expect(ctx.stage).toBe('frame');
     expect(ctx.graph_summary.node_count).toBe(0);
+  });
+});
+
+describe('pipeline-v4 normalisation: analysis_inputs derivation', () => {
+  function makeGraphWithAnalysisReady(): unknown {
+    const graph = makeGraph() as Record<string, unknown>;
+    graph.analysis_ready = {
+      options: [
+        {
+          id: 'option_a',
+          option_id: 'option_a',
+          label: 'Option A',
+          status: 'ready',
+          interventions: {
+            factor_revenue: 0.8,
+            factor_cost: 0.3,
+          },
+        },
+        {
+          id: 'option_b',
+          option_id: 'option_b',
+          label: 'Option B',
+          status: 'ready',
+          interventions: {
+            factor_revenue: 0.4,
+            factor_cost: 0.6,
+          },
+        },
+      ],
+    };
+    return graph;
+  }
+
+  it('derives analysis_inputs from graph.analysis_ready when caller did not supply it', () => {
+    const req = makeRequestWithTopLevelState({ graphState: makeGraphWithAnalysisReady() });
+    expect(req.context.analysis_inputs).toBeFalsy();
+
+    applyV4Normalisation(req);
+
+    expect(req.context.analysis_inputs).toBeTruthy();
+    expect(req.context.analysis_inputs!.options).toHaveLength(2);
+    expect(req.context.analysis_inputs!.options[0].option_id).toBe('option_a');
+    expect(req.context.analysis_inputs!.options[0].interventions).toEqual({
+      factor_revenue: 0.8,
+      factor_cost: 0.3,
+    });
+  });
+
+  it('preserves caller-supplied analysis_inputs (does not overwrite)', () => {
+    const customInputs = {
+      options: [{ option_id: 'custom', label: 'Custom', interventions: { x: 1 } }],
+    };
+    const req = makeRequestWithTopLevelState({ graphState: makeGraphWithAnalysisReady() });
+    req.context.analysis_inputs = customInputs as import("../../../../src/orchestrator/types.js").AnalysisInputs;
+
+    applyV4Normalisation(req);
+
+    expect(req.context.analysis_inputs).toBe(customInputs);
+    expect(req.context.analysis_inputs!.options[0].option_id).toBe('custom');
+  });
+
+  it('does nothing when graph has no analysis_ready field', () => {
+    const req = makeRequestWithTopLevelState({ graphState: makeGraph() });
+
+    applyV4Normalisation(req);
+
+    expect(req.context.analysis_inputs).toBeFalsy();
+  });
+
+  it('does nothing when analysis_ready.options is empty', () => {
+    const graph = makeGraph() as Record<string, unknown>;
+    graph.analysis_ready = { options: [] };
+    const req = makeRequestWithTopLevelState({ graphState: graph });
+
+    applyV4Normalisation(req);
+
+    expect(req.context.analysis_inputs).toBeFalsy();
+  });
+
+  it('accepts option_id or id (fallback)', () => {
+    const graph = makeGraph() as Record<string, unknown>;
+    graph.analysis_ready = {
+      options: [
+        // no option_id, has id only
+        { id: 'option_a', label: 'Option A', interventions: { a: 1 } },
+      ],
+    };
+    const req = makeRequestWithTopLevelState({ graphState: graph });
+
+    applyV4Normalisation(req);
+
+    expect(req.context.analysis_inputs).toBeTruthy();
+    expect(req.context.analysis_inputs!.options[0].option_id).toBe('option_a');
+  });
+
+  it('filters out options missing required fields (option_id and label)', () => {
+    const graph = makeGraph() as Record<string, unknown>;
+    graph.analysis_ready = {
+      options: [
+        { option_id: 'option_a', label: 'Option A', interventions: {} },
+        { option_id: 123, label: 'Bad', interventions: {} }, // bad id type
+        { label: 'No id', interventions: {} }, // missing id
+        { option_id: 'option_b', interventions: {} }, // missing label
+      ],
+    };
+    const req = makeRequestWithTopLevelState({ graphState: graph });
+
+    applyV4Normalisation(req);
+
+    // Only the first entry has both valid option_id and label
+    expect(req.context.analysis_inputs).toBeTruthy();
+    expect(req.context.analysis_inputs!.options).toHaveLength(1);
+    expect(req.context.analysis_inputs!.options[0].option_id).toBe('option_a');
   });
 });
