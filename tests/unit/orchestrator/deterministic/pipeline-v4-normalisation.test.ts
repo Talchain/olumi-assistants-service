@@ -368,3 +368,134 @@ describe('pipeline-v4 normalisation: analysis_inputs derivation', () => {
     expect(req.context.analysis_inputs!.options[0].option_id).toBe('option_a');
   });
 });
+
+// ============================================================================
+// Post-draft / post-analysis recomputation transitions
+// ============================================================================
+
+/**
+ * Mirrors the post-draft recomputation logic in pipeline-v4.ts:
+ * when a draft completes, rebuild context with the new graph and
+ * explicitly clear any prior analysis (it was computed against an older
+ * graph).
+ */
+function applyPostDraftRecomputation(
+  req: OrchestratorTurnRequest,
+  appliedGraph: unknown,
+): OrchestratorTurnRequest {
+  return {
+    ...req,
+    context: {
+      ...req.context,
+      graph: appliedGraph as GraphV3T,
+      analysis_response: null,
+      analysis_inputs: null,
+    },
+    analysis_state: null,
+  };
+}
+
+/**
+ * Mirrors the post-analysis recomputation logic in pipeline-v4.ts:
+ * when run_analysis completes, populate context.analysis_response so the
+ * next stage inference advances ideate → evaluate.
+ */
+function applyPostAnalysisRecomputation(
+  req: OrchestratorTurnRequest,
+  analysisResponse: V2RunResponseEnvelope,
+): OrchestratorTurnRequest {
+  return {
+    ...req,
+    context: {
+      ...req.context,
+      analysis_response: analysisResponse,
+    },
+  };
+}
+
+describe('post-draft recomputation: state transition', () => {
+  it('stage is ideate after draft completes with no prior analysis', () => {
+    // Pre-draft: empty context
+    const req = makeRequestWithTopLevelState({});
+    applyV4Normalisation(req);
+    let ctx = computeTurnContext(req);
+    expect(ctx.stage).toBe('frame');
+
+    // Post-draft: graph now applied
+    const postDraftReq = applyPostDraftRecomputation(req, makeGraph());
+    ctx = computeTurnContext(postDraftReq);
+    expect(ctx.stage).toBe('ideate');
+    expect(ctx.graph_summary.node_count).toBe(5);
+  });
+
+  it('stage is ideate (not evaluate) after re-draft with stale analysis present', () => {
+    // User had a graph + analysis (stage=evaluate). Then re-drafted from scratch.
+    // Stale analysis must NOT carry forward — a new draft invalidates it.
+    const staleAnalysis = makeAnalysis();
+    const req: OrchestratorTurnRequest = {
+      message: 'rebuild',
+      context: {
+        graph: makeGraph() as GraphV3T,
+        analysis_response: staleAnalysis,
+        framing: null,
+        messages: [],
+        scenario_id: 'test',
+      },
+      scenario_id: 'test',
+      client_turn_id: 'turn-1',
+    };
+    // Sanity: pre-recomputation would be evaluate
+    const preCtx = computeTurnContext(req);
+    expect(preCtx.stage).toBe('evaluate');
+
+    // Post-draft: new graph + cleared analysis
+    const freshGraph = makeGraph();
+    const postDraftReq = applyPostDraftRecomputation(req, freshGraph);
+    const ctx = computeTurnContext(postDraftReq);
+    expect(ctx.stage).toBe('ideate');
+    expect(ctx.analysis_summary).toBeNull();
+    // Request-level analysis_state is also cleared
+    expect(postDraftReq.analysis_state).toBeNull();
+    expect(postDraftReq.context.analysis_response).toBeNull();
+  });
+});
+
+describe('post-analysis recomputation: state transition', () => {
+  it('stage advances ideate → evaluate after analysis populated', () => {
+    // Pre-analysis: graph only
+    const req = makeRequestWithTopLevelState({ graphState: makeGraph() });
+    applyV4Normalisation(req);
+    let ctx = computeTurnContext(req);
+    expect(ctx.stage).toBe('ideate');
+    expect(ctx.capabilities.can_explain_results).toBe(false);
+
+    // Post-analysis: analysis_response populated
+    const postAnalysisReq = applyPostAnalysisRecomputation(req, makeAnalysis());
+    ctx = computeTurnContext(postAnalysisReq);
+    expect(ctx.stage).toBe('evaluate');
+    expect(ctx.capabilities.can_explain_results).toBe(true);
+    expect(ctx.capabilities.can_challenge).toBe(true);
+  });
+
+  it('post-analysis context exposes explanation tools as eligible', () => {
+    const req = makeRequestWithTopLevelState({ graphState: makeGraph() });
+    applyV4Normalisation(req);
+    const postAnalysisReq = applyPostAnalysisRecomputation(req, makeAnalysis());
+    const ctx = computeTurnContext(postAnalysisReq);
+
+    // At evaluate, explanation and analysis tools become eligible
+    expect(ctx.eligible_actions).toContain('explain_result');
+    expect(ctx.eligible_actions).toContain('compare_options');
+    expect(ctx.eligible_actions).toContain('run_analysis');
+  });
+
+  it('analysis_summary is populated after recomputation', () => {
+    const req = makeRequestWithTopLevelState({ graphState: makeGraph() });
+    applyV4Normalisation(req);
+    const postAnalysisReq = applyPostAnalysisRecomputation(req, makeAnalysis());
+    const ctx = computeTurnContext(postAnalysisReq);
+
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.winner).toBe('Option A');
+  });
+});

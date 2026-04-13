@@ -478,6 +478,43 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     expect(defs.map(d => d.name)).toContain('run_analysis');
   });
 
+  it("chip-click bypass: chip-visible tool is also LLM-executable", () => {
+    // Reproduces the chip visibility/execution divergence scenario.
+    // Ambiguous entities at ideate: chip set (pre-disambiguation) includes
+    // set_factor_value, but LLM set (post-disambiguation) excludes it.
+    // On chip click, pipeline-v4 applies bypassDisambiguation to the LLM
+    // set too — without it, the chip click would downgrade to "action not
+    // available".
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: null });
+
+    // Chip set: pre-disambiguation — set_factor_value survives
+    const chipSet = buildToolDefinitions(
+      ['set_factor_value', 'run_analysis'],
+      ctx,
+      { bypassDisambiguation: true },
+    );
+    expect(chipSet.map(d => d.name)).toContain('set_factor_value');
+
+    // LLM set without chip click: disambiguation strips set_factor_value
+    const typedMessageSet = buildToolDefinitions(
+      ['set_factor_value', 'run_analysis'],
+      ctx,
+    );
+    expect(typedMessageSet.map(d => d.name)).not.toContain('set_factor_value');
+
+    // LLM set on chip click (isChipClick → bypassDisambiguation): match chip set
+    const chipClickSet = buildToolDefinitions(
+      ['set_factor_value', 'run_analysis'],
+      ctx,
+      { bypassDisambiguation: true },
+    );
+    expect(chipClickSet.map(d => d.name)).toEqual(chipSet.map(d => d.name));
+  });
+
   it("does not flag ambiguity between different entity kinds sharing a word", () => {
     // A factor and an option both containing "growth" — different kinds, not ambiguous
     const entities = new Map<string, EntityEntry>([

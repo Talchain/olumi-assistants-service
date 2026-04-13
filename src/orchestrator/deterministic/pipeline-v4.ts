@@ -355,10 +355,18 @@ export async function* executePipelineV4(
     // a click without a graph still downgrades cleanly.
     const chipAction = turnRequest.chip_metadata?.action_type as ActionName | undefined;
     const bypassStaleness = chipAction === 'run_analysis';
+    // On a chip click (forced tool execution), bypass entity disambiguation
+    // for the LLM tool set too. The user has already selected a specific
+    // action+target via the chip, so LLM target-confusion protection is moot
+    // for this turn — and without the bypass, a chip may be visible in the
+    // chip set (pre-disambiguation) yet absent from the LLM set, which
+    // downgrades the click to "action not available" and breaks the chip
+    // contract.
+    const isChipClick = !!chipAction;
     const toolDefs = buildToolDefinitions(
       eligibleActions as ActionName[],
       turnContext,
-      bypassStaleness,
+      { bypassStaleness, bypassDisambiguation: isChipClick },
     );
     const resolvedToolNames = toolDefs.map(t => t.name);
 
@@ -637,10 +645,22 @@ export async function* executePipelineV4(
       && !actionResult.failure
     ) {
       try {
-        // Rebuild turn context with the post-draft graph on context.graph
+        // Rebuild turn context with the post-draft graph on context.graph.
+        // A new draft invalidates any prior analysis — the analysis was
+        // computed against a previous graph structure, so carrying it
+        // forward would mis-infer the stage as 'evaluate' when the user
+        // has just rebuilt their model (should be 'ideate'). Clear both
+        // analysis_response and analysis_inputs; they must be recomputed
+        // against the new graph via a fresh run_analysis.
         const postDraftRequest: OrchestratorTurnRequest = {
           ...turnRequest,
-          context: { ...turnRequest.context, graph: actionResult.applied_graph },
+          context: {
+            ...turnRequest.context,
+            graph: actionResult.applied_graph,
+            analysis_response: null,
+            analysis_inputs: null,
+          },
+          analysis_state: null,
         };
         const postDraftContext = computeTurnContext(postDraftRequest);
         postDraftContext.turn_id = turnId;
