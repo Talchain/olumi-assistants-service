@@ -170,7 +170,7 @@ export const addOptionAction: ActionDefinition = {
 
     return {
       blocks: [],
-      assistantText: `Proposing to add option **${label}**${summary}. Confirm to apply.`,
+      assistantText: `Option **${label}**${summary} would be added.`,
       guidance_items: [],
       operations,
       ...(analysisReady ? { analysis_ready: analysisReady } : {}),
@@ -432,7 +432,7 @@ function buildOptionConfigurationResult(
 
   return {
     blocks: [],
-    assistantText: `Proposing to update **${existingOption.label}**'s effects on ${effectsPhrase}. Confirm to apply.`,
+    assistantText: `**${existingOption.label}**'s effects on ${effectsPhrase} would be updated.`,
     guidance_items: [],
     operations,
     ...(analysisReady ? { analysis_ready: analysisReady } : {}),

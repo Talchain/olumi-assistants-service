@@ -87,7 +87,7 @@ export function handleSystemEvent(
       turn_id: turnId,
       assistant_text: assistantText,
       blocks: [],
-      suggested_actions: undefined,
+      suggested_actions: [],
       analysis_response: undefined,
       lineage: { context_hash: '' },
       turn_plan: {
@@ -97,7 +97,11 @@ export function handleSystemEvent(
         executed_tools: [],
         deferred_tools: [],
       },
-      stage_indicator: turnRequest.context?.framing?.stage ?? 'frame',
+      stage_indicator: {
+        stage: turnRequest.context?.framing?.stage ?? 'frame',
+        confidence: 'high' as const,
+        source: 'explicit_event' as const,
+      } as unknown as import("../types.js").DecisionStage,
       response_version: 2,
     },
     httpStatus: 200,

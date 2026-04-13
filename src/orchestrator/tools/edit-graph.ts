@@ -1393,7 +1393,7 @@ export async function handleEditGraph(
         },
         turnId,
       )],
-      assistantText: `I'd like to add a constraint: **${constraintLabel}**${constraintMatch.newConstraint.threshold != null ? ` (threshold: ${constraintMatch.newConstraint.threshold})` : ''}. Please confirm to apply.`,
+      assistantText: `Constraint **${constraintLabel}**${constraintMatch.newConstraint.threshold != null ? ` (threshold: ${constraintMatch.newConstraint.threshold})` : ''} would be added.`,
       latencyMs: Date.now() - startTime,
       appliedGraph: null,
       wasRejected: false,

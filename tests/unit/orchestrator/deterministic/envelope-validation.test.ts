@@ -151,18 +151,12 @@ describe("validateEnvelope", () => {
     );
   });
 
-  it("warns on non-string stage_indicator", () => {
+  it("accepts structured stage_indicator object", () => {
     const env = buildValidEnvelope();
-    env.stage_indicator = { stage: 'evaluate', confidence: 'high' };
+    env.stage_indicator = { stage: 'evaluate', confidence: 'high', source: 'inferred' };
     validateEnvelope(env, 'turn-123');
-    expect(logWarn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        violations: expect.arrayContaining([
-          expect.stringContaining('stage_indicator is object'),
-        ]),
-      }),
-      'v4.envelope_validation_warnings',
-    );
+    // Structured stage_indicator with valid stage should not warn
+    expect(logWarn).not.toHaveBeenCalled();
   });
 
   it("warns on invalid stage name", () => {

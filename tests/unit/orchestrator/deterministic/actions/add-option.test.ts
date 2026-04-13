@@ -427,7 +427,7 @@ describe("add_option action — duplicate detection (no interventions → nudge)
     expect(result.operations).toBeDefined();
     expect(result.operations!.length).toBeGreaterThan(0);
     expect(result.assistantText).toContain('Hire Tech Lead');
-    expect(result.assistantText).toContain("Proposing to add option");
+    expect(result.assistantText).toContain("would be added");
   });
 
   it("does not match a factor with the same label as the requested option", async () => {
@@ -512,7 +512,7 @@ describe("add_option action — repair redirect on existing option", () => {
     expect(updateOp!.path).toBe('option_hire_contractor');
     // No add_node — proves we didn't fall to the new-option path.
     expect(result.operations!.find((op) => op.op === 'add_node')).toBeUndefined();
-    expect(result.assistantText).toContain('Proposing to update');
+    expect(result.assistantText).toContain('would be updated');
     expect(result.assistantText).toContain('Hire Contractor');
   });
 

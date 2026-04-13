@@ -49,7 +49,7 @@ const WEAK_EDGE_THRESHOLD = 0.3;
 // generate_artefact excluded: permanently blocked by prerequisite. Re-add when artefact pipeline is implemented.
 const STAGE_ACTION_POLICY: Record<DecisionStage, ReadonlySet<ActionName>> = {
   frame: new Set<ActionName>(['set_factor_value', 'add_factor', 'set_goal_target', 'add_constraint']),
-  ideate: new Set<ActionName>(['set_factor_value', 'add_constraint', 'add_factor', 'adjust_edge_strength', 'add_option', 'remove_factor', 'set_goal_target']),
+  ideate: new Set<ActionName>(['set_factor_value', 'add_constraint', 'add_factor', 'adjust_edge_strength', 'add_option', 'remove_factor', 'set_goal_target', 'run_analysis']),
   evaluate: new Set<ActionName>(['run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip', 'set_factor_value', 'adjust_edge_strength', 'add_constraint']),
   decide: new Set<ActionName>(['explain_result', 'compare_options', 'what_would_flip', 'challenge_assumption', 'run_premortem']),
   optimise: new Set<ActionName>(['set_factor_value', 'adjust_edge_strength', 'add_constraint', 'run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip']),
@@ -920,20 +920,6 @@ function computeEligibleActions(
 
     eligible.push(action);
   }
-
-  // [P3-DIAG] Stage action policy lookup
-  log.info({
-    event: '[P3-DIAG] stage_action_policy',
-    stage,
-    stage_policy_actions: [...stageActions],
-    blocked_actions: [...blockedActions],
-    eligible_result: eligible,
-    can_run_analysis: capabilities.can_run_analysis,
-    can_edit_graph: capabilities.can_edit_graph,
-    can_explain_results: capabilities.can_explain_results,
-    can_compare_options: capabilities.can_compare_options,
-    can_challenge: capabilities.can_challenge,
-  }, '[P3-DIAG] Stage action policy');
 
   return eligible;
 }

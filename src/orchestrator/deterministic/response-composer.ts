@@ -255,7 +255,7 @@ function composeEdgeAdjusted(fact: HandlerFact): string {
   if (fact.auto_apply) {
     return `Edge strength is now ${fact.what_changed}.`;
   }
-  return `Proposing to adjust edge strength: ${fact.what_changed}. Confirm to apply.`;
+  return `Edge strength would change to ${fact.what_changed}.`;
 }
 
 function composeConstraintAdded(fact: HandlerFact): string {
@@ -264,7 +264,7 @@ function composeConstraintAdded(fact: HandlerFact): string {
   if (fact.auto_apply) {
     return `${label} is now captured as a constraint.`;
   }
-  return `Proposing to add ${label} as a constraint. Confirm to apply.`;
+  return `${label} would be added as a constraint.`;
 }
 
 function composeFactorRemoved(fact: HandlerFact): string {
@@ -273,7 +273,7 @@ function composeFactorRemoved(fact: HandlerFact): string {
   if (fact.auto_apply) {
     return `${label} is no longer in the model.`;
   }
-  return `Proposing to remove ${label} from the model. Confirm to apply.`;
+  return `${label} would be removed from the model.`;
 }
 
 function composeGoalTargetSet(fact: HandlerFact): string {
@@ -283,7 +283,7 @@ function composeGoalTargetSet(fact: HandlerFact): string {
   if (fact.auto_apply) {
     return `${label} target is now ${target ?? 'the new value'}.`;
   }
-  return `Proposing to set ${label} target to ${target ?? 'the new value'}. Confirm to apply.`;
+  return `${label} target would change to ${target ?? 'the new value'}.`;
 }
 
 function composeAnalysisStarted(fact: HandlerFact): string {

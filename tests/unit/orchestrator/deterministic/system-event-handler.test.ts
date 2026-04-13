@@ -210,7 +210,8 @@ describe("handleSystemEvent", () => {
       },
     });
     const result = handleSystemEvent(req, 'turn-1', 'req-1');
-    expect(result!.envelope.stage_indicator).toBe('evaluate');
+    const si = result!.envelope.stage_indicator as unknown as Record<string, unknown>;
+    expect(si).toHaveProperty('stage', 'evaluate');
   });
 
   // ── Logging ───────────────────────────────────────────────────────────────

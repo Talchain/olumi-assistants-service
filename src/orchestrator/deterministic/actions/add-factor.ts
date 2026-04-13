@@ -96,7 +96,7 @@ export const addFactorAction: ActionDefinition = {
       const effectiveUnit = unit ?? nodeEntry?.unit;
       const valueStr = value != null ? ` to ${value}${effectiveUnit ? ` ${effectiveUnit}` : ''}` : '';
       const actionText = operations.length > 0
-        ? `Found existing factor **${existingFactor.label}**. Proposing to update its value${valueStr} instead of creating a duplicate. Confirm to apply.`
+        ? `Found existing factor **${existingFactor.label}**. Its value would be updated${valueStr} instead of creating a duplicate.`
         : `**${existingFactor.label}** already exists in the model. If you'd like to update its value, please specify a new value.`;
       return {
         blocks: [],
@@ -157,7 +157,7 @@ export const addFactorAction: ActionDefinition = {
 
     return {
       blocks: [],
-      assistantText: `Proposing to add **${label}**${valueStr} as a ${kind === 'risk' ? 'risk factor' : `${category} factor`}. Confirm to apply.`,
+      assistantText: `**${label}**${valueStr} would be added as a ${kind === 'risk' ? 'risk factor' : `${category} factor`}.`,
       guidance_items: [],
       operations,
       fact: {

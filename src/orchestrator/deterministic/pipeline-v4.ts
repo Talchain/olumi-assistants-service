@@ -175,23 +175,6 @@ export async function* executePipelineV4(
     // Thread abort signal after try/catch so both normal and fallback contexts get it
     turnContext.signal = signal;
 
-    // [P3-DIAG] Post-computeTurnContext diagnostics
-    log.info({
-      event: '[P3-DIAG] post_computeTurnContext',
-      request_id: requestId,
-      stage: turnContext.stage,
-      can_run_analysis: turnContext.capabilities.can_run_analysis,
-      has_graph_summary: !!turnContext.graph_summary,
-      graph_summary_node_count: turnContext.graph_summary?.node_count,
-      graph_summary_option_count: turnContext.graph_summary?.option_count,
-      graph_summary_edge_count: turnContext.graph_summary?.edge_count,
-      has_graph: !!turnContext.graph,
-      eligible_actions: turnContext.eligible_actions,
-      context_fallback_used: contextFallbackUsed,
-      has_graph_state: !!turnRequest.graph_state,
-      has_context_graph: !!turnRequest.context?.graph,
-    }, '[P3-DIAG] TurnContext computed');
-
     const effectiveMessage = turnRequest.message?.trim() ?? '';
     const stage = turnContext.stage;
     computedStage = stage;
@@ -596,20 +579,66 @@ export async function* executePipelineV4(
     const executedAction = toolExecution?.toolName as ActionName ?? null;
     const actionResult = toolExecution?.result ?? null;
 
-    // [P3-DIAG] After tool handler returns
-    log.info({
-      event: '[P3-DIAG] post_tool_handler',
-      request_id: requestId,
-      executed_action: executedAction,
-      fact_action: actionResult?.fact?.action ?? null,
-      has_assistant_text: !!actionResult?.assistantText,
-      assistant_text_preview: actionResult?.assistantText?.substring(0, 80) ?? null,
-      blocks_length: actionResult?.blocks?.length ?? 0,
-      operations_length: actionResult?.operations?.length ?? 0,
-      has_fact: !!actionResult?.fact,
-      has_failure: !!actionResult?.failure,
-      has_applied_graph: !!actionResult?.applied_graph,
-    }, '[P3-DIAG] Tool handler result');
+    // ── Post-draft state recomputation ─────────────────────────────
+    // After draft_graph produces a graph, recompute pipeline state so the
+    // composer, chip engine, and stage indicator see the post-draft graph.
+    // Pre-draft: stage=frame, coaching_mode=orient, eligible_actions=[],
+    //   resolvedToolNames=["draft_graph"], coaching signals all null.
+    // Post-draft: stage=ideate, coaching has tradeoff/inference signals,
+    //   eligible_actions includes edit actions, chips can pass tool filter.
+    let postDraftRecomputed = false;
+    if (
+      actionResult?.fact?.action === 'draft_created'
+      && actionResult.applied_graph
+      && !actionResult.failure
+    ) {
+      try {
+        // Rebuild turn context with the post-draft graph on context.graph
+        const postDraftRequest: OrchestratorTurnRequest = {
+          ...turnRequest,
+          context: { ...turnRequest.context, graph: actionResult.applied_graph },
+        };
+        const postDraftContext = computeTurnContext(postDraftRequest);
+        postDraftContext.turn_id = turnId;
+        postDraftContext.request = fastifyRequest;
+        postDraftContext.signal = signal;
+
+        // Rebuild coaching context with post-draft graph signals
+        if (config.cee.coachingContextEnabled) {
+          try {
+            coachingContext = buildCoachingContext(postDraftContext, sessionState);
+          } catch (err) {
+            log.warn({ event: 'v4.post_draft_coaching_error', error: (err as Error).message }, 'Post-draft coaching context rebuild failed');
+          }
+        }
+
+        // Rebuild tool set with post-draft eligible actions
+        const postDraftEligible = [...postDraftContext.eligible_actions];
+        if (!postDraftEligible.includes('draft_graph')) {
+          postDraftEligible.push('draft_graph');
+        }
+        const postDraftToolDefs = buildToolDefinitions(postDraftEligible as ActionName[], postDraftContext);
+        resolvedToolNames.length = 0;
+        resolvedToolNames.push(...postDraftToolDefs.map(t => t.name));
+
+        // Update turnContext for downstream consumers (stage_indicator, chips, envelope)
+        Object.assign(turnContext, postDraftContext);
+        computedStage = turnContext.stage;
+        postDraftRecomputed = true;
+
+        log.info({
+          request_id: requestId,
+          post_draft_stage: turnContext.stage,
+          post_draft_node_count: turnContext.graph_summary.node_count,
+          post_draft_eligible_actions: turnContext.eligible_actions,
+          post_draft_resolved_tools: resolvedToolNames,
+          coaching_tradeoff: !!coachingContext?.tradeoff,
+          coaching_biggest_inference: !!coachingContext?.biggest_inference,
+        }, 'v4.post_draft_recomputation');
+      } catch (err) {
+        log.warn({ event: 'v4.post_draft_recompute_error', error: (err as Error).message }, 'Post-draft recomputation failed — using pre-draft state');
+      }
+    }
 
     // Surface tool failure in the envelope when no text was produced.
     // NOTE: This text intentionally matches ERROR_PATTERNS in history-filter-v4.ts
@@ -632,19 +661,6 @@ export async function* executePipelineV4(
     //
     // IMPORTANT: This runs BEFORE the empty-text injection below, so the
     // fallback-template path only fires when there is no fact AND no text.
-    // [P3-DIAG] Before composeResponse gate check
-    log.info({
-      event: '[P3-DIAG] pre_composeResponse',
-      request_id: requestId,
-      coaching_context_enabled: !!config.cee.coachingContextEnabled,
-      has_fact: !!actionResult?.fact,
-      fact_action: actionResult?.fact?.action ?? null,
-      has_failure: !!actionResult?.failure,
-      has_failed_tool_call: !!failedToolCall,
-      raw_llm_text_preview: rawAssistantText?.substring(0, 80) ?? null,
-      initial_response_source: responseSource,
-    }, '[P3-DIAG] composeResponse gate inputs');
-
     if (
       config.cee.coachingContextEnabled
       && actionResult?.fact
@@ -659,29 +675,7 @@ export async function* executePipelineV4(
           (actionResult.blocks ?? []).some(b => b.block_type === 'graph_patch')
           || (actionResult.operations?.length ?? 0) > 0;
 
-        // [P3-DIAG] composeResponse inputs
-        log.info({
-          event: '[P3-DIAG] composeResponse_call',
-          request_id: requestId,
-          fact_action: actionResult.fact.action,
-          has_coaching_context: !!coachingContext,
-          coaching_tradeoff: !!coachingContext?.tradeoff,
-          coaching_biggest_inference: !!coachingContext?.biggest_inference,
-          coaching_calibration_target: !!coachingContext?.calibration_target,
-          has_patch_block: hasPatchBlock,
-        }, '[P3-DIAG] composeResponse call inputs');
-
         const composed = composeResponse(actionResult.fact, coachingContext, hasPatchBlock);
-
-        // [P3-DIAG] composeResponse output
-        log.info({
-          event: '[P3-DIAG] composeResponse_result',
-          request_id: requestId,
-          composed_preview: composed?.substring(0, 80) ?? null,
-          composed_length: composed?.length ?? 0,
-          will_use: !!(composed && composed.trim().length > 0),
-        }, '[P3-DIAG] composeResponse result');
-
         if (composed && composed.trim().length > 0) {
           assistantText = composed;
           responseSource = 'composer';
@@ -772,18 +766,6 @@ export async function* executePipelineV4(
       assistantText = sanitiseAssistantText(assistantText);
     }
 
-    // [P3-DIAG] Final assistantText after all transformations
-    log.info({
-      event: '[P3-DIAG] final_assistant_text',
-      request_id: requestId,
-      response_source: responseSource,
-      text_preview: assistantText?.substring(0, 120) ?? null,
-      text_length: assistantText?.length ?? 0,
-      has_chip_pre_text: !!chipPreText,
-      has_chip_downgrade_text: !!chipDowngradeText,
-      has_failed_tool_call: !!failedToolCall,
-    }, '[P3-DIAG] Final assistant text');
-
     // WS6: Advance session state after action execution
     const actionOutcome = executedAction === 'set_factor_value' && streamResult.toolExecution?.input
       ? { calibrated_factor_id: streamResult.toolExecution.input.target_id as string | undefined }
@@ -807,6 +789,7 @@ export async function* executePipelineV4(
       coachingContext,
       sessionState: updatedSessionState ?? sessionState,
       availableTools: resolvedToolNames,
+      responseSource,
     });
 
     // WS6: Attach updated session state to envelope for UI round-trip.
@@ -877,7 +860,8 @@ export async function* executePipelineV4(
       blocks: [],
       lineage: { context_hash: '' },
       turn_plan: { selected_tool: null, routing: 'llm' as const, long_running: false },
-      stage_indicator: errorStage,
+      stage_indicator: { stage: errorStage, confidence: 'low' as const, source: 'inferred' as const },
+      suggested_actions: [],
       response_version: 2,
       guidance_items: [],
       error: {
@@ -914,6 +898,9 @@ export interface AssembleInput {
   sessionState?: SessionState | null;
   /** Resolved tool names for chip availability filtering. */
   availableTools?: readonly string[];
+  /** When 'composer', the assistantText was produced by the response composer
+   *  and should NOT be concatenated with actionResult.assistantText. */
+  responseSource?: 'composer' | 'legacy_handler' | 'llm_only';
 }
 
 /**
@@ -938,6 +925,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     coachingContext = null,
     sessionState = null,
     availableTools = [],
+    responseSource,
   } = input;
 
   // T1 (Phase A): structured failure short-circuit. When the action handler
@@ -960,14 +948,15 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     );
   }
 
-  // Combine assistant text: failure user_message wins; otherwise action
-  // confirmation first, raw LLM text second. Guard: when the pipeline
-  // injected actionResult.assistantText as rawAssistantText (Task 3
-  // empty-LLM-text injection) or prepended chip pre-text, skip the prefix
-  // to avoid duplication.
+  // Combine assistant text: failure user_message wins; composer text is
+  // authoritative when present; otherwise action confirmation first, raw
+  // LLM text second.
   let assistantText: string | null;
   if (actionResult?.failure) {
     assistantText = actionResult.failure.user_message;
+  } else if (responseSource === 'composer') {
+    // Composer text is authoritative — do not prepend handler count text.
+    assistantText = rawAssistantText;
   } else {
     assistantText = rawAssistantText;
     if (actionResult?.assistantText && rawAssistantText) {
@@ -1098,16 +1087,6 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     && coachingContext != null
     && sessionState != null;
 
-  // [P3-DIAG] Chip engine gate
-  log.info({
-    event: '[P3-DIAG] chip_engine_gate',
-    chip_engine_enabled: config.cee.chipEngineEnabled,
-    has_coaching_context: coachingContext != null,
-    has_session_state: sessionState != null,
-    use_chip_engine: useChipEngine,
-    available_tools_count: availableTools.length,
-  }, '[P3-DIAG] Chip engine gate');
-
   const suggestedActions = useChipEngine
     ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools)
     : buildDeterministicChips(turnContext, executedAction, deferredActions);
@@ -1174,7 +1153,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     turn_id: turnId,
     assistant_text: assistantText,
     blocks,
-    suggested_actions: suggestedActions.length > 0 ? suggestedActions : undefined,
+    suggested_actions: suggestedActions,
     analysis_response: actionResult?.analysis_response,
     // Mirror analysis_ready at the top-level envelope as well as on the
     // graph_patch block above. Some UI consumers read it from the envelope,
@@ -1185,15 +1164,19 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
       : {}),
     lineage,
     turn_plan: turnPlan,
-    stage_indicator: turnContext.stage,
+    stage_indicator: {
+      stage: turnContext.stage,
+      confidence: 'high' as const,
+      source: 'inferred' as const,
+    },
     response_version: 2 as const,
     guidance_items: guidanceItems,
     ...(failureCode ? { failure_code: failureCode } : {}),
     ...(failureRecoveryHint ? { failure_recovery_hint: failureRecoveryHint } : {}),
   };
 
-  // Apply normaliser
-  const normalised = normaliseDeterministicResponse(envelope, {
+  // Apply normaliser (cast: V4 envelope uses structured stage_indicator, normaliser expects V1 type)
+  const normalised = normaliseDeterministicResponse(envelope as unknown as import("../types.js").OrchestratorResponseEnvelope, {
     v4Context: { request_id: requestId, turn_id: turnId, execution_class: executionClass },
   });
 
@@ -1259,14 +1242,22 @@ export function validateEnvelope(envelope: Record<string, unknown>, turnId: stri
     }
   }
 
-  // stage_indicator: must be a valid DecisionStage string
-  const stage = envelope.stage_indicator;
-  if (stage === undefined || stage === null) {
+  // stage_indicator: must be an object with a valid stage field
+  const stageInd = envelope.stage_indicator;
+  if (stageInd === undefined || stageInd === null) {
     warnings.push('stage_indicator is missing');
-  } else if (typeof stage !== 'string') {
-    warnings.push(`stage_indicator is ${typeof stage}, expected a stage string`);
-  } else if (!VALID_STAGES.has(stage)) {
-    warnings.push(`stage_indicator is "${stage}", expected one of: ${[...VALID_STAGES].join(', ')}`);
+  } else if (typeof stageInd === 'object' && 'stage' in stageInd) {
+    const stageVal = (stageInd as Record<string, unknown>).stage;
+    if (typeof stageVal !== 'string' || !VALID_STAGES.has(stageVal)) {
+      warnings.push(`stage_indicator.stage is "${String(stageVal)}", expected one of: ${[...VALID_STAGES].join(', ')}`);
+    }
+  } else if (typeof stageInd === 'string') {
+    // Backwards-compatible: accept bare string but warn
+    if (!VALID_STAGES.has(stageInd)) {
+      warnings.push(`stage_indicator is "${stageInd}", expected one of: ${[...VALID_STAGES].join(', ')}`);
+    }
+  } else {
+    warnings.push(`stage_indicator is ${typeof stageInd}, expected an object with stage field`);
   }
 
   // response_version is 2

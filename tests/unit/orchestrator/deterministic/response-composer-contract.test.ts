@@ -383,11 +383,12 @@ describe("transitional-exception — unmigrated actions", () => {
     expect(text).toBe('Edge strength is now strength from 0.20 to 0.75.');
   });
 
-  it("constraint_added proposal: contains 'Confirm to apply' (transitional)", () => {
+  it("constraint_added proposal: uses conditional language (DS v5)", () => {
     const { fact, coaching } = unmigratedFixtures.constraint_added;
     const text = composeResponse(fact, coaching);
-    expect(text).toContain('Confirm to apply');
+    expect(text).not.toContain('Confirm to apply');
     expect(text).toContain('Budget Cap');
+    expect(text).toContain('would be added');
   });
 
   it("factor_removed auto_apply: 'Brand Perception is no longer in the model.'", () => {
@@ -396,11 +397,12 @@ describe("transitional-exception — unmigrated actions", () => {
     expect(text).toBe('Brand Perception is no longer in the model.');
   });
 
-  it("goal_target_set proposal: contains 'Confirm to apply' (transitional)", () => {
+  it("goal_target_set proposal: uses conditional language (DS v5)", () => {
     const { fact, coaching } = unmigratedFixtures.goal_target_set;
     const text = composeResponse(fact, coaching);
-    expect(text).toContain('Confirm to apply');
+    expect(text).not.toContain('Confirm to apply');
     expect(text).toContain('Revenue Growth');
+    expect(text).toContain('would change');
   });
 
   it("premortem_run: static text", () => {

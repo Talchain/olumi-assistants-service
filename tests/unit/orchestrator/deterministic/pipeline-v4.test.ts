@@ -784,11 +784,11 @@ describe("executePipelineV4", () => {
         { type: 'message_complete', result: { content: [{ type: 'text', text: 'Let me help you with your model.' }], stop_reason: 'end_turn', model: 'claude-sonnet-4-6', latencyMs: 200, usage: {} } },
       ]));
 
-      // run_analysis chip click during ideate stage with a graph that has options
-      // (so can_run_analysis is true, but run_analysis is not in ideate stage policy)
+      // compare_options chip click during ideate stage with a graph that has options
+      // (compare_options is not in ideate stage policy — only in evaluate/decide/optimise)
       const req = makeTurnRequest({
-        message: 'Run the analysis',
-        chip_metadata: { action_type: 'run_analysis' },
+        message: 'Compare the options',
+        chip_metadata: { action_type: 'compare_options' },
         context: {
           graph: {
             nodes: [
@@ -1153,8 +1153,10 @@ describe("executePipelineV4", () => {
       const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
 
       // TurnContext computes stage from graph state — should NOT fall back to 'frame'
-      expect(complete.envelope.stage_indicator).toBeDefined();
-      expect(complete.envelope.stage_indicator).not.toBe('frame');
+      const si = complete.envelope.stage_indicator as unknown as Record<string, unknown>;
+      expect(si).toBeDefined();
+      expect(si).toHaveProperty('stage');
+      expect(si.stage).not.toBe('frame');
     });
 
     it("error before TurnContext computation returns stage_indicator: 'frame'", async () => {
@@ -1177,7 +1179,8 @@ describe("executePipelineV4", () => {
       const events = await collectEvents(executePipelineV4(req, 'req-early-error'));
       const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
 
-      expect(complete.envelope.stage_indicator).toBe('frame');
+      const si = complete.envelope.stage_indicator as unknown as Record<string, unknown>;
+      expect(si).toHaveProperty('stage', 'frame');
     });
   });
 

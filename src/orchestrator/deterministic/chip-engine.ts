@@ -136,24 +136,6 @@ export function computeChips(
     candidates.push(chipReviewChangesFirst());
   }
 
-  // [P3-DIAG] Chip engine initial state
-  log.info({
-    event: '[P3-DIAG] chip_engine_inputs',
-    has_analysis: ci.has_analysis,
-    analysis_fresh: ci.analysis_fresh,
-    ai_estimated_count: coaching.ai_estimated_count,
-    risk_factor_count: coaching.risk_factor_count,
-    coaching_mode: coaching.coaching_mode,
-    total_factor_count: coaching.total_factor_count,
-    in_recover_or_confirm: inRecoverOrConfirm,
-    candidates_after_bundle: candidates.length,
-    candidate_actions: candidates.map(c => c.action_type),
-    available_tools_count: availableTools.length,
-    available_tools_list: [...availableTools],
-    executed_action: executedAction,
-    deferred_actions_count: deferredActions.length,
-  }, '[P3-DIAG] Chip engine inputs');
-
   // Step 2: add deferred chips at the front (compound tool calls the LLM
   // emitted but the pipeline discarded per one-tool-per-turn).
   for (const deferred of deferredActions) {
@@ -228,17 +210,6 @@ export function computeChips(
     }, 'Chip filtered: mapped tool not in available tools');
     return false;
   });
-
-  // [P3-DIAG] Chip engine filtering results
-  log.info({
-    event: '[P3-DIAG] chip_engine_filtering',
-    candidates_after_session_filter: filtered.length,
-    filtered_actions: filtered.map(c => c.action_type),
-    available_after_tool_filter: available.length,
-    available_actions: available.map(c => c.action_type),
-    tool_set_contents: [...toolSet],
-    tool_filter_removed: filtered.length - available.length,
-  }, '[P3-DIAG] Chip engine filtering');
 
   // Step 7: cap at 3.
   const capped = available.slice(0, 3);

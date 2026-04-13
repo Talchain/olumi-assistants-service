@@ -221,7 +221,7 @@ export const removeFactorAction: ActionDefinition = {
 
     return {
       blocks: [],
-      assistantText: `I'll remove **${entity.label}** and its ${connectedEdges.length} connected edge${connectedEdges.length !== 1 ? 's' : ''}. This can't be undone. Please confirm.`,
+      assistantText: `**${entity.label}** and its ${connectedEdges.length} connected edge${connectedEdges.length !== 1 ? 's' : ''} would be removed.`,
       guidance_items: [],
       operations,
       ...(analysisReady ? { analysis_ready: analysisReady } : {}),
