@@ -52,6 +52,7 @@ import { mergeSessionState, advanceSessionState, updateLastChipIds, registerChip
 import type { SessionState } from "./session-state.js";
 import { composeResponse } from "./response-composer.js";
 import { computeChips, getChipIdsForSession } from "./chip-engine.js";
+import { normalizeAnalysisEnvelope } from "../analysis-state.js";
 
 // ============================================================================
 // Chip-Click Text Templates (Task 5)
@@ -139,6 +140,22 @@ export async function* executePipelineV4(
         executed_action: null,
       }, 'Turn response and chip sources');
       return;
+    }
+
+    // ── Normalise top-level state fields into context ────────────────
+    // Mirrors pipeline-stream.ts:93-102. The UI sends the latest graph
+    // and analysis via top-level fields (graph_state, analysis_state);
+    // computeTurnContext and inferStage read context.*, so we merge here.
+    // Top-level fields win over potentially stale context fields.
+    if (turnRequest.analysis_state) {
+      turnRequest.context.analysis_response = normalizeAnalysisEnvelope(turnRequest.analysis_state);
+    } else if (turnRequest.context.analysis_response) {
+      turnRequest.context.analysis_response = normalizeAnalysisEnvelope(
+        turnRequest.context.analysis_response as import("../types.js").V2RunResponseEnvelope,
+      );
+    }
+    if (turnRequest.graph_state) {
+      turnRequest.context.graph = turnRequest.graph_state;
     }
 
     // ── Compute TurnContext ──────────────────────────────────────────

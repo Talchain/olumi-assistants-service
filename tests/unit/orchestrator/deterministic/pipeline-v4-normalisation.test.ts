@@ -1,0 +1,237 @@
+/**
+ * Pipeline V4 — graph_state / analysis_state normalisation tests
+ *
+ * Validates that executePipelineV4's pre-computeTurnContext normalisation
+ * mirrors the streaming path (pipeline-stream.ts:93-102). The normalisation
+ * folds request-level graph_state and analysis_state into context.graph and
+ * context.analysis_response so that inferStage() and computeTurnContext()
+ * see the correct state.
+ *
+ * These tests exercise the normalisation logic in isolation by calling
+ * computeTurnContext and inferStage directly on pre-normalised requests,
+ * matching the exact mutation pattern used in pipeline-v4.ts.
+ */
+
+import { describe, it, expect } from "vitest";
+import { computeTurnContext } from "../../../../src/orchestrator/deterministic/turn-context.js";
+import { inferStage } from "../../../../src/orchestrator/pipeline/phase1-enrichment/stage-inference.js";
+import { normalizeAnalysisEnvelope } from "../../../../src/orchestrator/analysis-state.js";
+import type { OrchestratorTurnRequest, V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
+import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
+
+// ============================================================================
+// Fixtures
+// ============================================================================
+
+function makeGraph(): unknown {
+  return {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Maximise ROI' },
+      { id: 'factor_revenue', kind: 'factor', label: 'Revenue', observed_state: { value: 100000, unit: 'GBP', extractionType: 'explicit' } },
+      { id: 'factor_cost', kind: 'factor', label: 'Cost', observed_state: { value: 50000, unit: 'GBP', extractionType: 'inferred' } },
+      { id: 'option_a', kind: 'option', label: 'Option A' },
+      { id: 'option_b', kind: 'option', label: 'Option B' },
+    ],
+    edges: [
+      { from: 'factor_revenue', to: 'goal_1', strength: { mean: 0.8, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+      { from: 'factor_cost', to: 'goal_1', strength: { mean: -0.5, std: 0.15 }, exists_probability: 0.8, effect_direction: 'negative' },
+      { from: 'option_a', to: 'goal_1', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' },
+      { from: 'option_b', to: 'goal_1', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' },
+    ],
+    options: [],
+    goal_node_id: 'goal_1',
+  };
+}
+
+function makeAnalysis(): V2RunResponseEnvelope {
+  return {
+    meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc123' },
+    results: [
+      { option_label: 'Option A', win_probability: 0.62 },
+      { option_label: 'Option B', win_probability: 0.38 },
+    ],
+    robustness: { level: 'moderate' },
+    factor_sensitivity: [
+      { label: 'Revenue', factor_id: 'factor_revenue', elasticity: 0.8, direction: 'positive' },
+      { label: 'Cost', factor_id: 'factor_cost', elasticity: 0.3, direction: 'negative' },
+    ],
+  } as V2RunResponseEnvelope;
+}
+
+/** Build a turn request with empty context — graph/analysis only via top-level fields. */
+function makeRequestWithTopLevelState(opts: {
+  graphState?: unknown;
+  analysisState?: unknown;
+}): OrchestratorTurnRequest {
+  return {
+    message: 'What should I do?',
+    context: {
+      graph: null,
+      analysis_response: null,
+      framing: null,
+      messages: [],
+      scenario_id: 'test-scenario',
+    },
+    scenario_id: 'test-scenario',
+    client_turn_id: 'test-turn-1',
+    graph_state: (opts.graphState as GraphV3T) ?? undefined,
+    analysis_state: (opts.analysisState as V2RunResponseEnvelope) ?? undefined,
+  };
+}
+
+/**
+ * Apply the same normalisation that pipeline-v4.ts performs before
+ * calling computeTurnContext. This mirrors the exact mutation pattern.
+ */
+function applyV4Normalisation(req: OrchestratorTurnRequest): void {
+  if (req.analysis_state) {
+    req.context.analysis_response = normalizeAnalysisEnvelope(req.analysis_state);
+  } else if (req.context.analysis_response) {
+    req.context.analysis_response = normalizeAnalysisEnvelope(
+      req.context.analysis_response as V2RunResponseEnvelope,
+    );
+  }
+  if (req.graph_state) {
+    req.context.graph = req.graph_state;
+  }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe('pipeline-v4 normalisation: graph_state → context.graph', () => {
+  it('graph_state is folded into context.graph before computeTurnContext', () => {
+    const req = makeRequestWithTopLevelState({ graphState: makeGraph() });
+    expect(req.context.graph).toBeNull();
+
+    applyV4Normalisation(req);
+
+    expect(req.context.graph).not.toBeNull();
+    expect((req.context.graph as GraphV3T).nodes).toHaveLength(5);
+  });
+
+  it('inferStage returns ideate (not frame) after graph normalisation', () => {
+    const req = makeRequestWithTopLevelState({ graphState: makeGraph() });
+    applyV4Normalisation(req);
+
+    const stage = inferStage(req.context);
+    expect(stage.stage).toBe('ideate');
+  });
+
+  it('computeTurnContext sees the graph after normalisation', () => {
+    const req = makeRequestWithTopLevelState({ graphState: makeGraph() });
+    applyV4Normalisation(req);
+
+    const ctx = computeTurnContext(req);
+    expect(ctx.graph_summary.node_count).toBe(5);
+    expect(ctx.graph_summary.option_count).toBe(2);
+    expect(ctx.stage).toBe('ideate');
+  });
+});
+
+describe('pipeline-v4 normalisation: analysis_state → context.analysis_response', () => {
+  it('analysis_state is folded into context.analysis_response', () => {
+    const req = makeRequestWithTopLevelState({
+      graphState: makeGraph(),
+      analysisState: makeAnalysis(),
+    });
+    expect(req.context.analysis_response).toBeNull();
+
+    applyV4Normalisation(req);
+
+    expect(req.context.analysis_response).not.toBeNull();
+  });
+
+  it('inferStage returns evaluate when both graph and analysis are present', () => {
+    const req = makeRequestWithTopLevelState({
+      graphState: makeGraph(),
+      analysisState: makeAnalysis(),
+    });
+    applyV4Normalisation(req);
+
+    const stage = inferStage(req.context);
+    expect(stage.stage).toBe('evaluate');
+  });
+
+  it('computeTurnContext has analysis_summary after normalisation', () => {
+    const req = makeRequestWithTopLevelState({
+      graphState: makeGraph(),
+      analysisState: makeAnalysis(),
+    });
+    applyV4Normalisation(req);
+
+    const ctx = computeTurnContext(req);
+    expect(ctx.stage).toBe('evaluate');
+    expect(ctx.analysis_summary).not.toBeNull();
+    expect(ctx.analysis_summary!.winner).toBe('Option A');
+  });
+});
+
+describe('pipeline-v4 normalisation: precedence and edge cases', () => {
+  it('graph_state overwrites context.graph when both present', () => {
+    // Streaming path behaviour: graph_state wins (pipeline-stream.ts:100-102, comment at line 85-86)
+    const staleGraph = makeGraph() as Record<string, unknown>;
+    staleGraph.nodes = [
+      { id: 'goal_1', kind: 'goal', label: 'Stale Goal' },
+    ];
+
+    const freshGraph = makeGraph();
+
+    const req: OrchestratorTurnRequest = {
+      message: 'What should I do?',
+      context: {
+        graph: staleGraph as unknown as GraphV3T,
+        analysis_response: null,
+        framing: null,
+        messages: [],
+        scenario_id: 'test-scenario',
+      },
+      scenario_id: 'test-scenario',
+      client_turn_id: 'test-turn-1',
+      graph_state: freshGraph as GraphV3T,
+    };
+
+    applyV4Normalisation(req);
+
+    // Fresh graph_state should win
+    expect((req.context.graph as GraphV3T).nodes).toHaveLength(5);
+  });
+
+  it('context.graph is preserved when graph_state is absent', () => {
+    const existingGraph = makeGraph();
+
+    const req: OrchestratorTurnRequest = {
+      message: 'What should I do?',
+      context: {
+        graph: existingGraph as unknown as GraphV3T,
+        analysis_response: null,
+        framing: null,
+        messages: [],
+        scenario_id: 'test-scenario',
+      },
+      scenario_id: 'test-scenario',
+      client_turn_id: 'test-turn-1',
+      // No graph_state
+    };
+
+    applyV4Normalisation(req);
+
+    // Original context.graph should be untouched
+    expect(req.context.graph).toBe(existingGraph);
+    expect((req.context.graph as GraphV3T).nodes).toHaveLength(5);
+  });
+
+  it('no crash when neither graph_state nor context.graph is present', () => {
+    const req = makeRequestWithTopLevelState({});
+
+    applyV4Normalisation(req);
+
+    expect(req.context.graph).toBeNull();
+    expect(req.context.analysis_response).toBeNull();
+
+    const ctx = computeTurnContext(req);
+    expect(ctx.stage).toBe('frame');
+    expect(ctx.graph_summary.node_count).toBe(0);
+  });
+});
