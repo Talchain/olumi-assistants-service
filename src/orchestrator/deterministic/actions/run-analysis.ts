@@ -7,8 +7,21 @@
 
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
-import type { ConversationContext } from "../../types.js";
+import type { ConversationContext, OrchestratorError } from "../../types.js";
 import { log } from "../../../utils/telemetry.js";
+
+function friendlyOrchestratorMessage(err: OrchestratorError): string {
+  switch (err.code) {
+    case 'INTERNAL_PAYLOAD_ERROR':
+      return "Analysis couldn't run because one of the option interventions is in an unexpected shape. Check that each intervention value is a number and try again.";
+    case 'MISSING_GRAPH_STATE':
+      return 'Analysis needs a decision model. Build one first, then run the analysis.';
+    case 'VALIDATION_REJECTED':
+      return 'The model has a validation error that blocks analysis. Fix the flagged issue and retry.';
+    default:
+      return `The analysis couldn't run: ${err.message}`;
+  }
+}
 
 export const runAnalysisAction: ActionDefinition = {
   action_type: 'run_analysis',
@@ -126,6 +139,12 @@ export const runAnalysisAction: ActionDefinition = {
           blocks: [],
           assistantText: 'The analysis service timed out. Your model is unchanged; try again.',
           guidance_items: [],
+          failure: {
+            code: 'RUN_ANALYSIS_TIMEOUT',
+            message: err instanceof Error ? err.message : String(err),
+            user_message: 'The analysis service timed out. Your model is unchanged; try again.',
+            recovery_hint: 'Retry the analysis.',
+          },
         };
       }
 
@@ -133,19 +152,57 @@ export const runAnalysisAction: ActionDefinition = {
         const v2 = err.v2RunError;
         const reason = v2.status_reason ?? 'Unknown analysis error';
         const critiqueDetail = v2.critiques?.map((c) => c.message).filter(Boolean).join('; ');
+        const userMessage = `Analysis failed: ${reason}${critiqueDetail ? `: ${critiqueDetail}` : ''}`;
         log.error({ err, turn_id: ctx.turn_id, analysis_status: v2.analysis_status }, 'deterministic.run_analysis.plot_error');
         return {
           blocks: [],
-          assistantText: `Analysis failed: ${reason}${critiqueDetail ? `: ${critiqueDetail}` : ''}`,
+          assistantText: userMessage,
           guidance_items: [],
+          failure: {
+            code: 'RUN_ANALYSIS_PLOT_ERROR',
+            message: err.message,
+            user_message: userMessage,
+          },
+        };
+      }
+
+      // OrchestratorError path: normaliser failures, missing graph, etc.
+      // handleRunAnalysis attaches `.orchestratorError` to thrown errors so
+      // downstream consumers can surface the structured code instead of a
+      // generic "Something went wrong." fallback.
+      const orchestratorErr = (err as { orchestratorError?: OrchestratorError }).orchestratorError;
+      if (orchestratorErr) {
+        log.error(
+          { err, turn_id: ctx.turn_id, error_code: orchestratorErr.code },
+          'deterministic.run_analysis.orchestrator_error',
+        );
+        const userMessage = friendlyOrchestratorMessage(orchestratorErr);
+        return {
+          blocks: [],
+          assistantText: userMessage,
+          guidance_items: [],
+          failure: {
+            code: `RUN_ANALYSIS_${orchestratorErr.code}`,
+            message: orchestratorErr.message,
+            user_message: userMessage,
+            recovery_hint: orchestratorErr.code === 'INTERNAL_PAYLOAD_ERROR'
+              ? 'Check each option\'s intervention values are numbers.'
+              : undefined,
+          },
         };
       }
 
       log.error({ err, turn_id: ctx.turn_id }, 'deterministic.run_analysis.failed');
+      const genericMessage = 'The analysis service returned an error. Your model is unchanged.';
       return {
         blocks: [],
-        assistantText: 'The analysis service returned an error. Your model is unchanged.',
+        assistantText: genericMessage,
         guidance_items: [],
+        failure: {
+          code: 'RUN_ANALYSIS_UNKNOWN',
+          message: err instanceof Error ? err.message : String(err),
+          user_message: genericMessage,
+        },
       };
     }
   },

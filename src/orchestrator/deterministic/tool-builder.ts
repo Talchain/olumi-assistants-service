@@ -219,9 +219,22 @@ export function buildToolDefinitions(
   const excluded = ctx ? computeContextExclusions(ctx, options.bypassStaleness === true) : new Set<ActionName>();
   const ambiguousTargetIds = ctx && !options.bypassDisambiguation ? detectAmbiguousEntities(ctx) : false;
 
+  // Structural-intent bias: when the user's message implies a structural
+  // edit (connect/disconnect/rewire/missing connection/…), suppress
+  // adjust_edge_strength so the LLM prefers edit_graph for this turn. Not
+  // a hard override — edit_graph and other actions remain eligible. Soft
+  // bias, applies only when edit_graph itself is in the eligible set.
+  const structuralBiasActive =
+    ctx?.structural_intent_detected === true
+    && eligibleActions.includes('edit_graph' as ActionName);
+
   for (const name of eligibleActions) {
     if (EXCLUDED_ACTIONS.has(name)) continue;
     if (excluded.has(name)) continue;
+
+    if (structuralBiasActive && name === 'adjust_edge_strength') {
+      continue;
+    }
 
     const action = ACTION_CATALOGUE.get(name);
     if (!action) continue;

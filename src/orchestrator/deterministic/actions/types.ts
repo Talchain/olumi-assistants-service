@@ -27,6 +27,7 @@ export const ACTION_NAMES = [
   'what_would_flip',
   'generate_artefact',
   'draft_graph',
+  'edit_graph',
 ] as const;
 
 export type ActionName = (typeof ACTION_NAMES)[number];

@@ -7,7 +7,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { DecisionStage, V2RunResponseEnvelope, SuggestedAction, TypedConversationBlock, PatchOperation, ConversationalState, AnalysisInputs } from "../types.js";
+import type { DecisionStage, V2RunResponseEnvelope, SuggestedAction, TypedConversationBlock, PatchOperation, ConversationalState, AnalysisInputs, ConversationMessage } from "../types.js";
 import type { GraphV3T, NodeKindV3T } from "../../schemas/cee-v3.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
 import type { ActionName } from "./actions/types.js";
@@ -183,6 +183,13 @@ export interface DeterministicTurnContext {
   analysis: V2RunResponseEnvelope | null;
   /** Conversational state from the turn request. */
   conversational_state: ConversationalState | null;
+  /**
+   * Conversation messages from the turn request. Threaded through so
+   * action handlers that reuse V2 tool handlers (e.g. the edit_graph V4
+   * adapter) can build a faithful ConversationContext. Empty array when
+   * the turn request carried no messages.
+   */
+  messages: ConversationMessage[];
   /** Scenario ID. */
   scenario_id: string;
   /** Turn ID — unique per pipeline invocation; used for block provenance. */
@@ -200,6 +207,13 @@ export interface DeterministicTurnContext {
    * currency was detected or the message is empty.
    */
   user_currency_hint?: string | null;
+  /**
+   * True when the raw user message matches structural-edit patterns
+   * (connect, disconnect, rewire, missing connection, etc.). Tool-builder
+   * uses this to suppress adjust_edge_strength from the resolved LLM tool
+   * set, biasing toward edit_graph without hard-coding the choice.
+   */
+  structural_intent_detected?: boolean;
 }
 
 /**

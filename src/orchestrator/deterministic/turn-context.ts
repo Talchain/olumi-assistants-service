@@ -28,6 +28,7 @@ import { ACTION_NAMES } from "./actions/types.js";
 import { inferStage } from "../pipeline/phase1-enrichment/stage-inference.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "../context/constants.js";
 import { log } from "../../utils/telemetry.js";
+import { messageImpliesStructuralEdit } from "./actions/edit-graph.js";
 
 // ============================================================================
 // Constants
@@ -49,7 +50,7 @@ const WEAK_EDGE_THRESHOLD = 0.3;
 // generate_artefact excluded: permanently blocked by prerequisite. Re-add when artefact pipeline is implemented.
 const STAGE_ACTION_POLICY: Record<DecisionStage, ReadonlySet<ActionName>> = {
   frame: new Set<ActionName>(['set_factor_value', 'add_factor', 'set_goal_target', 'add_constraint']),
-  ideate: new Set<ActionName>(['set_factor_value', 'add_constraint', 'add_factor', 'adjust_edge_strength', 'add_option', 'remove_factor', 'set_goal_target', 'run_analysis', 'challenge_assumption']),
+  ideate: new Set<ActionName>(['set_factor_value', 'add_constraint', 'add_factor', 'adjust_edge_strength', 'add_option', 'remove_factor', 'set_goal_target', 'run_analysis', 'challenge_assumption', 'edit_graph']),
   evaluate: new Set<ActionName>(['run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip', 'set_factor_value', 'adjust_edge_strength', 'add_constraint']),
   decide: new Set<ActionName>(['explain_result', 'compare_options', 'what_would_flip', 'challenge_assumption', 'run_premortem']),
   optimise: new Set<ActionName>(['set_factor_value', 'adjust_edge_strength', 'add_constraint', 'run_analysis', 'explain_result', 'compare_options', 'challenge_assumption', 'run_premortem', 'what_would_flip']),
@@ -144,10 +145,12 @@ export function computeTurnContext(turnRequest: OrchestratorTurnRequest): Determ
     graph,
     analysis,
     conversational_state: ctx.conversational_state ?? null,
+    messages: Array.isArray(ctx.messages) ? ctx.messages : [],
     scenario_id: ctx.scenario_id,
     turn_id: '', // Set by pipeline after context computation
     analysis_inputs: analysisInputs,
     user_currency_hint: userCurrencyHint,
+    structural_intent_detected: messageImpliesStructuralEdit(turnRequest.message),
   };
 }
 
@@ -919,7 +922,7 @@ function computeEligibleActions(
     if (action === 'challenge_assumption' && !capabilities.can_edit_graph) continue;
     if ((action === 'run_premortem' || action === 'what_would_flip') && !capabilities.can_challenge) continue;
     if (action === 'generate_artefact' && !capabilities.can_generate_artefact) continue;
-    if ((action === 'set_factor_value' || action === 'add_factor' || action === 'adjust_edge_strength' || action === 'add_option' || action === 'remove_factor' || action === 'set_goal_target' || action === 'add_constraint') && !capabilities.can_edit_graph) continue;
+    if ((action === 'set_factor_value' || action === 'add_factor' || action === 'adjust_edge_strength' || action === 'add_option' || action === 'remove_factor' || action === 'set_goal_target' || action === 'add_constraint' || action === 'edit_graph') && !capabilities.can_edit_graph) continue;
 
     eligible.push(action);
   }

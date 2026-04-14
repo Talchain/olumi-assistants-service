@@ -26,6 +26,7 @@ import type { PLoTClient, PLoTClientRunOpts } from "../plot-client.js";
 import { PLoTError, PLoTTimeoutError } from "../plot-client.js";
 import { createFactBlock, createReviewCardBlock } from "../blocks/factory.js";
 import { isAnalysisRunnable } from "../analysis-state.js";
+import { flattenInterventions } from "../utils/flatten-interventions.js";
 
 /**
  * Build a synthetic V2RunResponseEnvelope for blocked/failed analysis results.
@@ -139,7 +140,7 @@ export async function handleRunAnalysis(
   // Normalize interventions to { factor_id: number } — PLoT expects flat
   // numeric maps. CEE V3 schema uses { factor_id: { value, source, ... } }.
   const plotOptions = inputs.options.map((opt, idx) => {
-    const normalizedInterventions = normalizeInterventions(opt.interventions, opt.option_id, idx);
+    const normalizedInterventions = flattenInterventions(opt.interventions, opt.option_id, idx);
     return {
       id: (opt as unknown as Record<string, unknown>).id ?? opt.option_id,
       option_id: opt.option_id,
@@ -248,65 +249,6 @@ export async function handleRunAnalysis(
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/**
- * Normalize interventions to PLoT's expected { factor_id: number } map.
- *
- * CEE V3 schema uses { factor_id: { value: number, source: ..., ... } }.
- * Analysis-ready helper produces { factor_id: number } directly.
- * Accept both, extracting the numeric value from either shape.
- *
- * Throws OrchestratorError if any intervention value cannot be resolved
- * to a finite number — this is a hard fail to prevent silent bad data.
- */
-function normalizeInterventions(
-  raw: Record<string, unknown>,
-  optionId: string,
-  optionIndex: number,
-): Record<string, number> {
-  const result: Record<string, number> = {};
-
-  for (const [factorId, value] of Object.entries(raw)) {
-    let numeric: number;
-
-    if (typeof value === 'number') {
-      numeric = value;
-    } else if (value != null && typeof value === 'object' && 'value' in value) {
-      // V3 InterventionV3 shape: { value: number, source: ..., ... }
-      const inner = (value as { value: unknown }).value;
-      if (typeof inner === 'number') {
-        numeric = inner;
-      } else {
-        throwInterventionError(optionId, optionIndex, factorId, value);
-      }
-    } else {
-      throwInterventionError(optionId, optionIndex, factorId, value);
-    }
-
-    if (!Number.isFinite(numeric!)) {
-      throwInterventionError(optionId, optionIndex, factorId, value);
-    }
-
-    result[factorId] = numeric!;
-  }
-
-  return result;
-}
-
-function throwInterventionError(
-  optionId: string,
-  optionIndex: number,
-  factorId: string,
-  value: unknown,
-): never {
-  const err: OrchestratorError = {
-    code: 'INTERNAL_PAYLOAD_ERROR',
-    message: `Cannot normalize intervention for option "${optionId}" (index ${optionIndex}), factor "${factorId}": expected number or { value: number }, got ${JSON.stringify(value)?.slice(0, 100)}`,
-    tool: 'run_analysis',
-    recoverable: false,
-  };
-  throw Object.assign(new Error(err.message), { orchestratorError: err });
-}
 
 /**
  * Group fact_objects by fact_type.
