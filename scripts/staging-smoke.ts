@@ -258,7 +258,21 @@ function extractGraph(envelope: any): any | null {
 }
 
 function extractAnalysis(envelope: any): any | null {
-  return envelope.analysis_state || envelope.analysis_response || null;
+  const src = envelope.analysis_state || envelope.analysis_response || null;
+  if (!src) return null;
+  // The envelope places response_hash at the top level of analysis_response,
+  // but the turn contract expects meta.response_hash on the client → server
+  // round-trip. Mirror top-level response_hash into meta so "Explain" turns
+  // satisfy the contract.
+  const rh = (src as any).response_hash ?? (src as any).meta?.response_hash;
+  if (rh) {
+    const meta = ((src as any).meta && typeof (src as any).meta === 'object')
+      ? { ...(src as any).meta }
+      : {};
+    if (!meta.response_hash) meta.response_hash = rh;
+    return { ...(src as any), meta };
+  }
+  return src;
 }
 
 /**
