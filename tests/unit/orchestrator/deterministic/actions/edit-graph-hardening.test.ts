@@ -19,7 +19,7 @@ vi.mock("../../../../../src/utils/telemetry.js", () => ({
 
 import {
   messageImpliesStructuralEdit,
-  snapshotOptionInterventionCounts,
+  snapshotOptionInterventions,
   validateEdgeEndpoints,
   sanitiseNodeIdsInText,
   detectCalibrationOnlyArtefact,
@@ -56,27 +56,33 @@ describe("messageImpliesStructuralEdit", () => {
   });
 });
 
-describe("snapshotOptionInterventionCounts", () => {
-  it("counts inbound edges per option", () => {
-    const graph = {
-      nodes: [
-        { id: 'opt_a', kind: 'option', label: 'A' },
-        { id: 'opt_b', kind: 'option', label: 'B' },
-        { id: 'fac_x', kind: 'factor', label: 'X' },
+describe("snapshotOptionInterventions", () => {
+  it("returns flattened intervention maps from a supplied readiness computer", () => {
+    const graph = { nodes: [], edges: [] } as unknown as GraphV3T;
+    const stubReadiness = (_g: GraphV3T) => ({
+      options: [
+        { option_id: 'opt_a', interventions: { fac_x: 0.5 } },
+        { option_id: 'opt_b', interventions: { fac_x: { value: 0.3 } as unknown as number, fac_y: 1.1 } },
       ],
-      edges: [
-        { from: 'fac_x', to: 'opt_a' },
-        { from: 'fac_x', to: 'opt_b' },
-        { from: 'fac_x', to: 'opt_b' },
-      ],
-    } as unknown as GraphV3T;
-    const counts = snapshotOptionInterventionCounts(graph);
-    expect(counts.get('opt_a')).toBe(1);
-    expect(counts.get('opt_b')).toBe(2);
+    });
+    const snap = snapshotOptionInterventions(graph, stubReadiness);
+    expect(snap.get('opt_a')).toEqual({ fac_x: 0.5 });
+    // Rich V3 shape flattens via the shared normaliser.
+    expect(snap.get('opt_b')).toEqual({ fac_x: 0.3, fac_y: 1.1 });
   });
 
   it("returns empty map for null graph", () => {
-    expect(snapshotOptionInterventionCounts(null).size).toBe(0);
+    expect(snapshotOptionInterventions(null, () => ({ options: [] })).size).toBe(0);
+  });
+
+  it("degrades gracefully when an option's interventions can't be flattened", () => {
+    const graph = { nodes: [], edges: [] } as unknown as GraphV3T;
+    const stubReadiness = () => ({
+      options: [{ option_id: 'opt_a', interventions: { fac_x: 'bad' as unknown as number } }],
+    });
+    const snap = snapshotOptionInterventions(graph, stubReadiness);
+    // Still records an entry (empty) rather than throwing — detection is advisory.
+    expect(snap.get('opt_a')).toEqual({});
   });
 });
 
@@ -115,6 +121,32 @@ describe("validateEdgeEndpoints", () => {
     const { kept, stripped } = validateEdgeEndpoints(baseGraph, ops);
     expect(kept).toHaveLength(2);
     expect(stripped).toHaveLength(0);
+  });
+
+  it("ORDER-SENSITIVE: rejects add_edge that references a node created LATER in the same patch", () => {
+    // Sequential check: the patch-applier runs ops in order, so add_edge
+    // appearing before its target's add_node would fail at apply time.
+    const ops: PatchOperation[] = [
+      { op: 'add_edge', path: 'fac_a->fac_c', value: { from: 'fac_a', to: 'fac_c' } },
+      { op: 'add_node', path: 'fac_c', value: { id: 'fac_c', kind: 'factor', label: 'C' } },
+    ];
+    const { kept, stripped } = validateEdgeEndpoints(baseGraph, ops);
+    expect(stripped).toHaveLength(1);
+    expect(stripped[0].op).toBe('add_edge');
+    // The add_node is preserved; only the mis-ordered add_edge is dropped.
+    expect(kept).toHaveLength(1);
+    expect(kept[0].op).toBe('add_node');
+  });
+
+  it("ORDER-SENSITIVE: rejects add_edge whose endpoint was removed by an earlier op", () => {
+    const ops: PatchOperation[] = [
+      { op: 'remove_node', path: 'fac_b' },
+      { op: 'add_edge', path: 'fac_a->fac_b', value: { from: 'fac_a', to: 'fac_b' } },
+    ];
+    const { kept, stripped } = validateEdgeEndpoints(baseGraph, ops);
+    expect(stripped).toHaveLength(1);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].op).toBe('remove_node');
   });
 
   it("passes non-edge ops through unchanged", () => {

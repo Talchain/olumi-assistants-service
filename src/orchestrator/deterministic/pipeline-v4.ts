@@ -1489,7 +1489,7 @@ function buildFallbackContext(turnRequest: OrchestratorTurnRequest, turnId: stri
     disambiguation_hints: [],
     graph: turnRequest.context?.graph ?? null,
     analysis: turnRequest.context?.analysis_response ?? null,
-    conversational_state: null,
+    conversational_state: turnRequest.context?.conversational_state ?? null,
     messages: Array.isArray(turnRequest.context?.messages) ? turnRequest.context.messages : [],
     scenario_id: turnRequest.scenario_id ?? '',
     turn_id: turnId,

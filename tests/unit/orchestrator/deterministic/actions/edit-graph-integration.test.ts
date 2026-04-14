@@ -148,8 +148,10 @@ describe("edit_graph V4 integration", () => {
     expect(result.operations).toHaveLength(1);
     expect(result.operations![0].op).toBe('add_edge');
     expect(result.applied_graph_hash).toBe('abc123');
-    expect(result.blocks).toHaveLength(1);
-    expect(result.blocks[0].block_type).toBe('graph_patch');
+    // Adapter MUST strip V2 graph_patch blocks so envelope assembly emits
+    // exactly one (hardened) graph_patch. Leaking the V2 block would cause
+    // double-emit + dedup retaining pre-hardening operations.
+    expect(result.blocks.find((b) => b.block_type === 'graph_patch')).toBeUndefined();
     expect(result.assistantText).toBe('Connected X to A.');
   });
 
@@ -218,5 +220,80 @@ describe("edit_graph V4 integration", () => {
     const result = await editGraphAction.execute({ edit_description: '' }, ctx);
     expect(result.assistantText).toMatch(/wasn'?t able/);
     expect(handleEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  it("pipeline emits EXACTLY ONE graph_patch block containing the hardened operations", async () => {
+    const { assembleV4Envelope } = await import(
+      "../../../../../src/orchestrator/deterministic/pipeline-v4.js"
+    );
+
+    const graph = makeGraph();
+    // V2 returns TWO operations: one valid structural op + one with an
+    // unknown endpoint. The adapter must strip the bad op and re-emit the
+    // patch; the envelope must NOT leak the V2 block alongside.
+    const v2Ops = [
+      {
+        op: 'add_edge',
+        path: 'fac_x->opt_a',
+        value: { from: 'fac_x', to: 'opt_a', strength: { mean: 0.5, std: 0.1 } },
+      },
+      {
+        op: 'add_edge',
+        path: 'fac_ghost->opt_a',
+        value: { from: 'fac_ghost', to: 'opt_a' },
+      },
+    ];
+    const v2Block = {
+      block_id: 'blk-v2',
+      turn_id: 'tu-test',
+      block_type: 'graph_patch',
+      data: {
+        patch_type: 'edit',
+        status: 'proposed',
+        operations: v2Ops,
+        applied_graph_hash: 'hash-v2',
+        auto_apply: false,
+      },
+    } as unknown as TypedConversationBlock;
+
+    handleEditGraphMock.mockResolvedValue({
+      blocks: [v2Block],
+      assistantText: 'Connected X to A.',
+      latencyMs: 1,
+      appliedGraph: graph,
+      wasRejected: false,
+    });
+
+    const ctx = makeContext();
+    const actionResult = await editGraphAction.execute(
+      { edit_description: 'connect fac_x to opt_a' },
+      ctx,
+    );
+
+    // Adapter must not pass the V2 graph_patch block back.
+    expect(actionResult.blocks.find((b) => b.block_type === 'graph_patch')).toBeUndefined();
+    // Adapter keeps only the valid op for the envelope re-emit.
+    expect(actionResult.operations).toHaveLength(1);
+    expect((actionResult.operations![0].value as { from: string }).from).toBe('fac_x');
+
+    const envelope = assembleV4Envelope({
+      turnContext: ctx,
+      turnId: 'tu-test',
+      requestId: 'req-test',
+      executionClass: 'standard_turn',
+      assistantText: actionResult.assistantText ?? '',
+      actionResult,
+      routing: 'deterministic',
+      executedAction: 'edit_graph' as never,
+      contextFallbackUsed: false,
+      availableTools: [],
+    });
+
+    const patchBlocks = (envelope.blocks ?? []).filter((b) => b.block_type === 'graph_patch');
+    expect(patchBlocks).toHaveLength(1);
+    const emittedOps = (patchBlocks[0].data as { operations: unknown[] }).operations;
+    // Emitted ops match the hardened set (one op, not two).
+    expect(emittedOps).toHaveLength(1);
+    expect((emittedOps[0] as { value: { from: string } }).value.from).toBe('fac_x');
   });
 });

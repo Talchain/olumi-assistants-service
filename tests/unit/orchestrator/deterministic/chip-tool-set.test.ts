@@ -70,13 +70,30 @@ describe("chip tool-set on conversation-reply turns", () => {
     expect(chipToolDefs).toEqual([]);
   });
 
-  it("suppresses adjust_edge_strength when structural intent is detected", () => {
+  it("suppresses adjust_edge_strength from LLM tools when structural intent is detected", () => {
     const turnRequest = makeRequest(true, 'the option is not connected to the goal, fix it');
     const ctx = computeTurnContext(turnRequest);
     expect(ctx.structural_intent_detected).toBe(true);
     const toolDefs = buildToolDefinitions(ctx.eligible_actions, ctx);
     const names = toolDefs.map((t) => t.name);
     expect(names).not.toContain('adjust_edge_strength');
+    expect(names).toContain('edit_graph');
+  });
+
+  it("does NOT suppress adjust_edge_strength from chip tools on structural intent", () => {
+    // Chip construction uses bypassDisambiguation: true. Structural-intent
+    // bias is LLM-only — chips carry explicit targets and shouldn't be
+    // narrowed by LLM-safety filters.
+    const turnRequest = makeRequest(true, 'the option is not connected to the goal, fix it');
+    const ctx = computeTurnContext(turnRequest);
+    expect(ctx.structural_intent_detected).toBe(true);
+    const chipToolDefs = buildToolDefinitions(
+      ctx.eligible_actions,
+      ctx,
+      { bypassDisambiguation: true },
+    );
+    const names = chipToolDefs.map((t) => t.name);
+    expect(names).toContain('adjust_edge_strength');
     expect(names).toContain('edit_graph');
   });
 

@@ -222,10 +222,16 @@ export function buildToolDefinitions(
   // Structural-intent bias: when the user's message implies a structural
   // edit (connect/disconnect/rewire/missing connection/…), suppress
   // adjust_edge_strength so the LLM prefers edit_graph for this turn. Not
-  // a hard override — edit_graph and other actions remain eligible. Soft
-  // bias, applies only when edit_graph itself is in the eligible set.
+  // a hard override — edit_graph and other actions remain eligible.
+  //
+  // Scoped to LLM tool resolution ONLY. Chip construction passes
+  // bypassDisambiguation: true (chips carry explicit targets and do not
+  // need LLM-safety filtering), so we gate the bias on that same flag to
+  // avoid narrowing chip availability on conversational turns — the user
+  // may still want to click "Adjust edge strength" directly.
   const structuralBiasActive =
     ctx?.structural_intent_detected === true
+    && options.bypassDisambiguation !== true
     && eligibleActions.includes('edit_graph' as ActionName);
 
   for (const name of eligibleActions) {

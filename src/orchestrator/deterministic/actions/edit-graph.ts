@@ -32,6 +32,7 @@ import type {
 import type { GraphV3T } from "../../../schemas/cee-v3.js";
 import type { EditGraphResult } from "../../tools/edit-graph.js";
 import { log } from "../../../utils/telemetry.js";
+import { flattenInterventions } from "../../utils/flatten-interventions.js";
 
 const STRUCTURAL_INTENT_RE =
   /\b(connect|disconnect|fix|wire|link|rewire|add.*connection|remove.*connection|isn'?t connected|not connected|missing connection)\b/i;
@@ -47,59 +48,97 @@ export function messageImpliesStructuralEdit(message: string | null | undefined)
   return STRUCTURAL_INTENT_RE.test(message);
 }
 
-/** Extracted for testing — snapshot option-intervention counts by option id. */
-export function snapshotOptionInterventionCounts(
+/**
+ * Snapshot per-option intervention maps by passing the graph through
+ * computeStructuralReadiness and running each option's intervention record
+ * through the shared flattenInterventions normaliser. This is the canonical
+ * intervention payload — what analysis_ready exposes to downstream consumers
+ * — so detection tracks real intervention loss (including value-only
+ * removals), not just inbound-edge count proxies.
+ *
+ * Returns Map<option_id, flat Record<factor_id, number>>. Options whose
+ * interventions can't be flattened (malformed values) are skipped with a
+ * warning; detection is advisory, so we degrade rather than throw.
+ */
+export function snapshotOptionInterventions(
   graph: GraphV3T | null,
-): Map<string, number> {
-  const counts = new Map<string, number>();
-  if (!graph) return counts;
-  for (const node of graph.nodes ?? []) {
-    if (node.kind !== 'option') continue;
-    // Count inbound edges from factors to this option (interventions).
-    const inbound = (graph.edges ?? []).filter((e) => e.to === node.id).length;
-    counts.set(node.id, inbound);
+  computeReadiness: (g: GraphV3T) => { options: Array<{ option_id: string; interventions: Record<string, number> }> } | undefined,
+): Map<string, Record<string, number>> {
+  const snapshots = new Map<string, Record<string, number>>();
+  if (!graph) return snapshots;
+  const ready = computeReadiness(graph);
+  if (!ready) return snapshots;
+  for (const opt of ready.options) {
+    try {
+      snapshots.set(opt.option_id, flattenInterventions(opt.interventions, opt.option_id, 0));
+    } catch (err) {
+      log.warn(
+        { err, option_id: opt.option_id },
+        'v4.edit_graph_snapshot_flatten_failed',
+      );
+      snapshots.set(opt.option_id, {});
+    }
   }
-  return counts;
+  return snapshots;
+}
+
+/** Extract the id an add_node op creates. */
+function addNodeId(op: PatchOperation): string | null {
+  if (op.op !== 'add_node') return null;
+  if (typeof op.path === 'string' && op.path.length > 0) return op.path;
+  if (op.value && typeof op.value === 'object') {
+    const id = (op.value as { id?: unknown }).id;
+    if (typeof id === 'string') return id;
+  }
+  return null;
+}
+
+/** Extract the id an remove_node op removes. */
+function removeNodeId(op: PatchOperation): string | null {
+  if (op.op !== 'remove_node') return null;
+  if (typeof op.path === 'string' && op.path.length > 0) return op.path;
+  return null;
 }
 
 /**
- * Validate every add_edge op against the post-patch node set. Returns the
- * operations that passed and the list of stripped ones (for telemetry /
- * failure escalation).
+ * Validate every add_edge op sequentially against a rolling id set: each
+ * add_edge may reference base-graph nodes and nodes created by EARLIER
+ * operations in the same patch, not later ones. The V2 patch-applier runs
+ * operations in order, so an edge referencing a not-yet-added node would
+ * fail at apply time. Validation must match apply semantics.
  */
 export function validateEdgeEndpoints(
   baseGraph: GraphV3T | null,
   operations: PatchOperation[],
 ): { kept: PatchOperation[]; stripped: PatchOperation[] } {
-  const existingIds = new Set<string>();
-  for (const n of baseGraph?.nodes ?? []) existingIds.add(n.id);
-
-  // Include node ids created by earlier operations in the same patch so an
-  // edge to a just-added node isn't stripped.
-  for (const op of operations) {
-    if (op.op === 'add_node' && typeof op.path === 'string' && op.path.length > 0) {
-      existingIds.add(op.path);
-    } else if (op.op === 'add_node' && op.value && typeof op.value === 'object') {
-      const id = (op.value as { id?: unknown }).id;
-      if (typeof id === 'string') existingIds.add(id);
-    }
-  }
+  const rollingIds = new Set<string>();
+  for (const n of baseGraph?.nodes ?? []) rollingIds.add(n.id);
 
   const kept: PatchOperation[] = [];
   const stripped: PatchOperation[] = [];
+
   for (const op of operations) {
     if (op.op === 'add_edge' && op.value && typeof op.value === 'object') {
       const from = (op.value as { from?: unknown }).from;
       const to = (op.value as { to?: unknown }).to;
-      const fromOk = typeof from === 'string' && existingIds.has(from);
-      const toOk = typeof to === 'string' && existingIds.has(to);
+      const fromOk = typeof from === 'string' && rollingIds.has(from);
+      const toOk = typeof to === 'string' && rollingIds.has(to);
       if (!fromOk || !toOk) {
         stripped.push(op);
         continue;
       }
+      kept.push(op);
+      continue;
     }
+
+    // Mutate the rolling id set AFTER the op's own endpoint check.
     kept.push(op);
+    const added = addNodeId(op);
+    if (added) rollingIds.add(added);
+    const removed = removeNodeId(op);
+    if (removed) rollingIds.delete(removed);
   }
+
   return { kept, stripped };
 }
 
@@ -159,13 +198,8 @@ export function findOrphans(
 function extractAddedNodeIds(operations: PatchOperation[]): string[] {
   const ids: string[] = [];
   for (const op of operations) {
-    if (op.op !== 'add_node') continue;
-    if (typeof op.path === 'string' && op.path.length > 0) {
-      ids.push(op.path);
-    } else if (op.value && typeof op.value === 'object') {
-      const id = (op.value as { id?: unknown }).id;
-      if (typeof id === 'string') ids.push(id);
-    }
+    const id = addNodeId(op);
+    if (id) ids.push(id);
   }
   return ids;
 }
@@ -220,6 +254,7 @@ export const editGraphAction: ActionDefinition = {
     const { createPLoTClient } = await import("../../plot-client.js");
     const { getAdapter } = await import("../../../adapters/llm/router.js");
     const { generatePostDraftGuidance } = await import("../../guidance/post-draft.js");
+    const { computeStructuralReadiness } = await import("../../tools/analysis-ready-helper.js");
 
     const adapter = getAdapter('edit_graph');
     const plotClient = createPLoTClient();
@@ -236,8 +271,11 @@ export const editGraphAction: ActionDefinition = {
 
     const requestId = `v4-edit-${ctx.turn_id}`;
 
-    // Snapshot intervention counts BEFORE edit (detect-only, no auto-restore in v1).
-    const preCounts = snapshotOptionInterventionCounts(ctx.graph);
+    // Snapshot canonical per-option intervention maps BEFORE edit (detect-only,
+    // no auto-restore in v1). Uses computeStructuralReadiness + shared
+    // flattenInterventions so detection reflects the payload analysis_ready
+    // exposes, not an inbound-edge-count proxy.
+    const preSnapshots = snapshotOptionInterventions(ctx.graph, computeStructuralReadiness);
 
     let result: EditGraphResult;
     try {
@@ -371,7 +409,7 @@ export const editGraphAction: ActionDefinition = {
 
     // ── Intervention preservation: detect only (no auto-restore) ─────────
     if (appliedGraphPreview) {
-      const postCounts = snapshotOptionInterventionCounts(appliedGraphPreview);
+      const postSnapshots = snapshotOptionInterventions(appliedGraphPreview, computeStructuralReadiness);
       const directlyTouchedOptionIds = new Set<string>();
       for (const op of operations) {
         if (typeof op.path === 'string' && op.path.startsWith('opt_')) {
@@ -384,11 +422,17 @@ export const editGraphAction: ActionDefinition = {
           }
         }
       }
-      const lostForUntouched: string[] = [];
-      for (const [optionId, beforeCount] of preCounts.entries()) {
+      const lostForUntouched: Array<{ option_id: string; lost_factors: string[] }> = [];
+      for (const [optionId, before] of preSnapshots.entries()) {
         if (directlyTouchedOptionIds.has(optionId)) continue;
-        const afterCount = postCounts.get(optionId) ?? 0;
-        if (afterCount < beforeCount) lostForUntouched.push(optionId);
+        const after = postSnapshots.get(optionId) ?? {};
+        const lostFactors: string[] = [];
+        for (const factorId of Object.keys(before)) {
+          if (!(factorId in after)) lostFactors.push(factorId);
+        }
+        if (lostFactors.length > 0) {
+          lostForUntouched.push({ option_id: optionId, lost_factors: lostFactors });
+        }
       }
       if (lostForUntouched.length > 0) {
         log.warn(
@@ -427,8 +471,16 @@ export const editGraphAction: ActionDefinition = {
         ? generatePostDraftGuidance(result.appliedGraph, [], context.framing ?? null)
         : [];
 
+    // Strip the V2 graph_patch block: pipeline-v4's envelope assembler
+    // re-emits a graph_patch from the returned `operations` array (which is
+    // the HARDENED set — invalid-edge ops already stripped). Keeping the
+    // inbound V2 block would cause double-emission of graph_patch, and the
+    // response-normaliser dedup keeps the first block (V2's pre-hardening
+    // operations), which would leak un-hardened patches to the UI.
+    const nonPatchBlocks = result.blocks.filter((b) => b.block_type !== 'graph_patch');
+
     return {
-      blocks: result.blocks,
+      blocks: nonPatchBlocks,
       assistantText: assistantText || null,
       guidance_items: guidanceItems,
       operations: operations.length > 0 ? operations : undefined,
