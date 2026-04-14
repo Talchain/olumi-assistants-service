@@ -93,12 +93,20 @@ const FramingSchema = z.object({
   options: z.array(z.string().max(200)).max(20).optional(),
 }).nullable();
 
+// The UI's buildRunAnalysisTurnRequest emits options with `id`; CEE's
+// historical shape uses `option_id`. Accept either, normalise downstream.
 const AnalysisInputsSchema = z.object({
-  options: z.array(z.object({
-    option_id: z.string(),
-    label: z.string(),
-    interventions: z.record(z.unknown()),
-  }).passthrough()),
+  options: z.array(
+    z.object({
+      option_id: z.string().optional(),
+      id: z.string().optional(),
+      label: z.string(),
+      interventions: z.record(z.unknown()),
+    }).passthrough().refine(
+      (o) => typeof o.option_id === 'string' || typeof o.id === 'string',
+      { message: 'option must have option_id or id' },
+    ),
+  ),
   constraints: z.array(z.unknown()).optional(),
   seed: z.number().optional(),
   n_samples: z.number().optional(),
@@ -188,6 +196,13 @@ export const TurnRequestSchema = z.object({
   analysis_state: AnalysisStateSchema.optional(),
   /** Flat conversation history from UI — mapped to context.messages when context is absent. */
   conversation_history: z.array(ConversationMessageSchema).optional(),
+  /**
+   * Top-level analysis_inputs — the UI's buildRunAnalysisTurnRequest emits
+   * this shape (see DecisionGuideAI/src/services/turn-request-builder.ts).
+   * Normalised into context.analysis_inputs by normalizeContext. Presence
+   * implies a forced run_analysis turn even when `message` is empty.
+   */
+  analysis_inputs: AnalysisInputsSchema,
   /** When true, fires draft_graph and orchestrator coaching in parallel. */
   generate_model: z.boolean().optional().default(false),
   /** UI alias for generate_model — accepted for backward compatibility. */

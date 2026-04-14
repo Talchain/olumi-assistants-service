@@ -127,8 +127,42 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
       // Boundary diagnostic for direct_analysis_run
       warnDirectAnalysisRunDetails(systemEvent, requestId);
 
+      // Forced-tool synthesis for empty-message run_analysis turns.
+      // The UI's buildRunAnalysisTurnRequest emits { analysis_inputs, ... }
+      // with no `message` and no explicit forcing signal. Without this,
+      // the LLM would be called with empty user content and Anthropic
+      // would reject the request, surfacing a generic PIPELINE_ERROR.
+      // When we see analysis_inputs on top level AND no message AND no
+      // existing forcing signal (chip_metadata / system_event), synthesise
+      // chip_metadata.action_type='run_analysis' so the V4 pipeline routes
+      // to the run_analysis action deterministically.
+      let chipMetadata = parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'];
+      let effectiveTurnMessage: string = parsed.data.message ?? '';
+      const effectiveMessage = effectiveTurnMessage.trim();
+      const hasTopLevelAnalysisInputs = !!parsed.data.analysis_inputs;
+      const noExistingForce = !chipMetadata && !systemEvent;
+      if (hasTopLevelAnalysisInputs && effectiveMessage === '' && noExistingForce) {
+        chipMetadata = { action_type: 'run_analysis' };
+        // Anthropic's API requires non-empty user content on the last
+        // message. Without a synthesised message the LLM call 400s at the
+        // adapter boundary even though chip_metadata forces the tool.
+        effectiveTurnMessage = 'Run the analysis.';
+        log.info(
+          { request_id: requestId, client_turn_id: parsed.data.client_turn_id },
+          'Stream: synthesised chip_metadata:run_analysis for empty-message + analysis_inputs turn',
+        );
+      } else if (effectiveMessage === '' && noExistingForce && !hasTopLevelAnalysisInputs) {
+        // Empty-message turn with NO intent signal at all — diagnosable
+        // silent-failure class. Log explicitly before we descend into the
+        // LLM path (which will fail at the adapter boundary).
+        log.warn(
+          { request_id: requestId, client_turn_id: parsed.data.client_turn_id },
+          'Stream: empty-message turn with no chip_metadata, system_event, or analysis_inputs — LLM path will reject',
+        );
+      }
+
       const turnRequest: OrchestratorTurnRequest = {
-        message: parsed.data.message,
+        message: effectiveTurnMessage,
         context,
         scenario_id: parsed.data.scenario_id,
         system_event: systemEvent,
@@ -137,7 +171,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
         generate_model: normalizeGenerateModel(parsed.data),
         session_state: parsed.data.session_state ?? undefined,
-        chip_metadata: parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'],
+        chip_metadata: chipMetadata,
       };
 
       // Idempotency check — cache hit returns JSON, not SSE

@@ -36,6 +36,7 @@ import { computeContextHash } from "../context/context-hash.js";
 import { computeStructuralReadiness } from "../tools/analysis-ready-helper.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
+import { generatePostDraftGuidance } from "../guidance/post-draft.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { enforceProposalLanguage } from "./proposal-language-guard.js";
 import { sanitiseAssistantText, sanitiseEnvelopeText } from "./sanitise-output.js";
@@ -1276,8 +1277,59 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     extractAnalysisReadyStatusFromResult(actionResult)
     ?? deriveAnalysisReadyStatusFallback(turnContext);
 
+  // Collect guidance items BEFORE computing chips — the chip engine reads
+  // them to widen the candidate pool (Fix 1 Layer 1) so the 2-turn session
+  // window has fresh candidates to promote instead of starving after 3
+  // hardcoded bundle chips. Includes action-result guidance, post-analysis
+  // guidance for run_analysis/explain_result, and a cheap structural fallback
+  // on every turn with a graph so conversational turns also have candidates.
+  const executedToolsEarly = executedAction ? [executedAction] : [];
+  let guidanceItemsForEnvelope: GuidanceItem[] = [...(actionResult?.guidance_items ?? [])];
+  if (
+    (executedToolsEarly.includes('run_analysis') || executedToolsEarly.includes('explain_result')) &&
+    turnContext.analysis &&
+    guidanceItemsForEnvelope.length === 0
+  ) {
+    try {
+      const postAnalysis = generatePostAnalysisGuidance(turnContext.analysis, turnContext.graph);
+      if (postAnalysis.length > 0) {
+        guidanceItemsForEnvelope = [...guidanceItemsForEnvelope, ...postAnalysis];
+      }
+    } catch (error) {
+      const analysisStatus = typeof (turnContext.analysis as Record<string, unknown> | null)?.analysis_status === 'string'
+        ? (turnContext.analysis as Record<string, unknown>).analysis_status
+        : null;
+      log.warn({
+        request_id: requestId,
+        turn_id: turnId,
+        stage: turnContext.stage,
+        analysis_status: analysisStatus,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'v4.post_analysis_guidance_failed');
+    }
+  }
+  // Structural fallback for non-draft / non-analysis turns: inspect the
+  // current graph for default-confidence factors, missing framing, etc.
+  // These are per-graph-state signals, so they naturally diversify the
+  // chip candidate pool across turns without duplicating anything the
+  // action-path guidance already produced.
+  if (guidanceItemsForEnvelope.length === 0 && turnContext.graph != null) {
+    try {
+      const structural = generatePostDraftGuidance(turnContext.graph, [], null);
+      if (structural.length > 0) {
+        guidanceItemsForEnvelope = [...structural];
+      }
+    } catch (error) {
+      log.debug({
+        request_id: requestId,
+        turn_id: turnId,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'v4.turn_start_guidance_failed');
+    }
+  }
+
   const suggestedActions = useChipEngine
-    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools, analysisReadyStatus)
+    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools, analysisReadyStatus, guidanceItemsForEnvelope)
     : buildDeterministicChips(turnContext, executedAction, deferredActions);
 
   // Sanitise chip labels and prompts (belt-and-braces — engine already sanitises).
@@ -1307,33 +1359,8 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     deferred_tools: deferredActions as string[],
   };
 
-  // Collect guidance items
-  let guidanceItems: GuidanceItem[] = [...(actionResult?.guidance_items ?? [])];
-  if (
-    (executedTools.includes('run_analysis') || executedTools.includes('explain_result')) &&
-    turnContext.analysis &&
-    guidanceItems.length === 0
-  ) {
-    try {
-      const postAnalysis = generatePostAnalysisGuidance(turnContext.analysis, turnContext.graph);
-      if (postAnalysis.length > 0) {
-        guidanceItems = [...guidanceItems, ...postAnalysis];
-      }
-    } catch (error) {
-      // Non-fatal — guidance items are nice-to-have, not required for the turn.
-      // Log so silent regressions in generatePostAnalysisGuidance are visible.
-      const analysisStatus = typeof (turnContext.analysis as Record<string, unknown> | null)?.analysis_status === 'string'
-        ? (turnContext.analysis as Record<string, unknown>).analysis_status
-        : null;
-      log.warn({
-        request_id: requestId,
-        turn_id: turnId,
-        stage: turnContext.stage,
-        analysis_status: analysisStatus,
-        error: error instanceof Error ? error.message : String(error),
-      }, 'v4.post_analysis_guidance_failed');
-    }
-  }
+  // Guidance items already computed above (before chip computation).
+  const guidanceItems: GuidanceItem[] = guidanceItemsForEnvelope;
 
   // Assemble envelope. Mirror failure_code / failure_recovery_hint onto the
   // envelope so future history threading and UI hint surfaces can read them

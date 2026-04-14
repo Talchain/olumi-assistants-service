@@ -24,6 +24,8 @@ import type { ActionName } from "./actions/types.js";
 import type { DeterministicTurnContext } from "./types.js";
 import type { CoachingContext } from "./coaching-context-builder.js";
 import type { SessionState } from "./session-state.js";
+import type { GuidanceItem } from "../types/guidance-item.js";
+import { SIGNAL_CODES } from "../types/guidance-item.js";
 import { suppressedChipIds } from "./session-state.js";
 import { sanitiseAssistantText } from "./sanitise-output.js";
 import { chipActionToTool } from "./action-tool-mapping.js";
@@ -92,6 +94,7 @@ export function computeChips(
   deferredActions: ActionName[],
   availableTools: readonly string[] = [],
   analysisReadyStatus?: string | null,
+  guidanceItems: readonly GuidanceItem[] = [],
 ): SuggestedAction[] {
   const ci = coaching.chip_inputs;
   const inRecoverOrConfirm =
@@ -186,6 +189,24 @@ export function computeChips(
     }
   }
 
+  // Step 2b (Fix 1 Layer 1): widen the candidate pool with guidance-derived
+  // chips. Hardcoded bundles produce 3 candidates — a 2-turn session window
+  // exhausts them on T2 and starves the user of chips. Guidance items are
+  // structurally grounded (DEFAULT_NODE_CONFIDENCE on node X, MISSING_FRAMING
+  // on goal Y, …) so they vary by graph state and give the session window
+  // fresh candidates to promote instead of suppressing everything.
+  //
+  // Priority 10 puts these below every bundle chip (priority 1-4), so bundle
+  // wins when unsuppressed. chip_id uses the guidance item_id (already hashed
+  // on signal_code + target_id + source) so they're naturally deterministic
+  // and unique, and suppression tracks them correctly turn-to-turn.
+  for (const g of guidanceItems) {
+    const candidate = chipFromGuidance(g);
+    if (!candidate) continue;
+    if (candidates.some(c => c.chip_id === candidate.chip_id)) continue;
+    candidates.push(candidate);
+  }
+
   // Step 3: filter by session suppression + recent execution.
   // Suppression covers chips shown on the last 2 turns (last_chip_ids_shown
   // + chip_ids_shown_prev_turn), except ones the user explicitly clicked —
@@ -194,8 +215,14 @@ export function computeChips(
   const recentActions = new Set(turnContext.conversation.recent_actions_taken ?? []);
   if (executedAction) recentActions.add(executedAction);
 
+  // Track chips suppressed ONLY by the session window (not by recent
+  // execution or downstream gates) so Layer 2 can promote one through the
+  // floor if everything else is exhausted. Chips filtered by recentActions
+  // are NOT in this list — we never force an action we just executed.
+  const sessionSuppressed: TypedChip[] = [];
   let filtered = candidates.filter(c => {
     if (suppressedIds.has(c.chip_id)) {
+      sessionSuppressed.push(c);
       log.debug({ event: 'v4.chip_engine.suppressed_by_session', chip_id: c.chip_id }, 'Chip suppressed by 2-turn session window');
       return false;
     }
@@ -206,8 +233,19 @@ export function computeChips(
   });
 
   // Step 4: deduplicate by action_type (keep first occurrence).
+  //
+  // Guidance-derived chips (chip_id prefix `gi_`) are exempt: they represent
+  // target-specific actions (calibrate THIS factor, flip FROM this driver)
+  // and shouldn't be squashed by a generic bundle chip with the same
+  // action_type but a different target. A separate chip_id dedup below
+  // prevents duplicate IDs.
   const seenTypes = new Set<ActionName>();
+  const seenChipIds = new Set<string>();
   filtered = filtered.filter(c => {
+    if (seenChipIds.has(c.chip_id)) return false;
+    seenChipIds.add(c.chip_id);
+    const isGuidance = c.chip_id.startsWith('gi_');
+    if (isGuidance) return true;
     if (seenTypes.has(c.action_type)) return false;
     seenTypes.add(c.action_type);
     return true;
@@ -256,6 +294,48 @@ export function computeChips(
     }, 'Chip filtered: mapped tool not in available tools');
     return false;
   });
+
+  // Step 6b (Fix 1 Layer 2): chip floor. If Layer 1 + filtering still leaves
+  // us with zero chips AND a graph exists AND at least one availability-valid
+  // chip was suppressed ONLY by the session window, bypass session-window
+  // suppression for the single highest-priority suppressed chip.
+  //
+  // Scope of the bypass — deliberately narrow:
+  //   - Does NOT bypass tool availability (chipActionToTool must map to an
+  //     available tool, OR be virtual).
+  //   - Does NOT bypass readiness gate (run_analysis already filtered above
+  //     via canRunAnalysis).
+  //   - Does NOT bypass recent-action filter (recent executions still
+  //     exclude the chip from sessionSuppressed — see Step 3).
+  //
+  // When no graph exists OR no suppressed chip survives availability, return
+  // zero chips — that's the correct behaviour (no actionable next step).
+  if (
+    available.length === 0
+    && turnContext.graph != null
+    && sessionSuppressed.length > 0
+  ) {
+    const toolSetFloor = new Set(availableTools);
+    const floorCandidate = sessionSuppressed
+      .slice()
+      .sort((a, b) => a.priority - b.priority)
+      .find((c) => {
+        const tool = chipActionToTool(c.action_type);
+        return !tool || toolSetFloor.has(tool);
+      });
+    if (floorCandidate) {
+      available.push(floorCandidate);
+      log.info(
+        {
+          event: 'v4.chip_floor_activated',
+          forced_chip_id: floorCandidate.chip_id,
+          forced_action_type: floorCandidate.action_type,
+          bypass_reason: 'session_window_exhaustion',
+        },
+        'Chip floor activated — session window exhausted all candidates, promoting highest-priority suppressed chip',
+      );
+    }
+  }
 
   // Step 7: cap at 3.
   const capped = available.slice(0, 3);
@@ -463,6 +543,95 @@ function chipReviewChangesFirst(): TypedChip {
     message: 'Walk me through what has changed since the last analysis.',
     priority: 2,
   };
+}
+
+/**
+ * Map a GuidanceItem to a TypedChip candidate. Guidance items come from
+ * generatePostDraftGuidance / generatePostAnalysisGuidance and encode
+ * structural + analysis-derived next steps. Mapping is signal-driven so the
+ * chip_id (= guidance.item_id) is already deterministic, grounded, and
+ * naturally varies with graph state — exactly what the session window needs
+ * to avoid exhausting the candidate pool.
+ *
+ * Returns null when a signal doesn't have a clean chip framing (e.g.
+ * STRUCTURAL_VALIDATION_ERROR, ProposalCard variants handled elsewhere, or
+ * technique signals that need their own surfacing).
+ */
+function chipFromGuidance(g: GuidanceItem): TypedChip | null {
+  const targetId = g.target_object?.id;
+  const targetLabel = g.target_object?.label ?? targetId ?? 'this factor';
+  const baseId = g.item_id;
+  const basePriority = 10;
+
+  switch (g.signal_code) {
+    case SIGNAL_CODES.DEFAULT_NODE_CONFIDENCE:
+    case SIGNAL_CODES.MISSING_OBSERVED_VALUE:
+    case SIGNAL_CODES.MISSING_BASE_RATE:
+    case SIGNAL_CODES.HIGH_INFLUENCE_LOW_CONFIDENCE:
+    case SIGNAL_CODES.DOMINANT_FACTOR:
+      return {
+        chip_id: baseId,
+        type: 'calibrate',
+        action_type: 'set_factor_value',
+        role: 'facilitator',
+        label: truncateLabel(`Calibrate ${targetLabel}`),
+        message: `Help me calibrate ${targetLabel}. What value would you expect?`,
+        priority: basePriority,
+      };
+    case SIGNAL_CODES.DEFAULT_EDGE_STRENGTH:
+      return {
+        chip_id: baseId,
+        type: 'calibrate',
+        action_type: 'adjust_edge_strength',
+        role: 'facilitator',
+        label: truncateLabel(`Tune ${targetLabel}`),
+        message: `Walk me through calibrating ${targetLabel}'s influence.`,
+        priority: basePriority,
+      };
+    case SIGNAL_CODES.LOW_OPTION_COUNT:
+      return {
+        chip_id: baseId,
+        type: 'restructure',
+        action_type: 'add_option',
+        role: 'challenger',
+        label: 'Add another option',
+        message: 'What alternative option should I consider adding?',
+        priority: basePriority,
+      };
+    case SIGNAL_CODES.MISSING_FRAMING_ELEMENT:
+      return {
+        chip_id: baseId,
+        type: 'challenge',
+        action_type: 'challenge_assumption',
+        role: 'challenger',
+        label: 'Check the framing',
+        message: g.title ?? 'Walk me through the framing gaps in this model.',
+        priority: basePriority,
+      };
+    case SIGNAL_CODES.FRAGILE_RESULT:
+    case SIGNAL_CODES.CONSTRAINT_VIOLATION:
+      return {
+        chip_id: baseId,
+        type: 'challenge',
+        action_type: 'what_would_flip',
+        role: 'challenger',
+        label: 'What would flip this?',
+        message: 'Show me what would flip this result.',
+        priority: basePriority,
+      };
+    case SIGNAL_CODES.STRUCTURAL_CYCLE:
+      return {
+        chip_id: baseId,
+        type: 'challenge',
+        action_type: 'challenge_assumption',
+        role: 'challenger',
+        label: 'Explain this cycle',
+        message: g.title ?? 'Walk me through the cycle in this model.',
+        priority: basePriority,
+      };
+    default:
+      return null;
+  }
 }
 
 /**

@@ -22,16 +22,49 @@ export function normalizeContext(parsed: {
   graph_state?: unknown;
   analysis_state?: unknown;
   conversation_history?: unknown[];
+  analysis_inputs?: unknown;
   scenario_id: string;
 }): ConversationContext {
-  return (parsed.context ?? {
+  if (parsed.context) {
+    // Prefer nested context.analysis_inputs; fall back to top-level if the
+    // nested one is absent (the UI sends analysis_inputs at top level for
+    // run_analysis turns — see DecisionGuideAI/src/services/turn-request-builder.ts).
+    const ctx = parsed.context as ConversationContext;
+    if (!ctx.analysis_inputs && parsed.analysis_inputs) {
+      return {
+        ...ctx,
+        analysis_inputs: normaliseAnalysisInputs(parsed.analysis_inputs),
+      };
+    }
+    return ctx;
+  }
+  return {
     graph: parsed.graph_state ?? null,
     analysis_response: parsed.analysis_state ?? null,
     framing: null,
     messages: (parsed.conversation_history ?? []),
     scenario_id: parsed.scenario_id,
-    analysis_inputs: null,
-  }) as ConversationContext;
+    analysis_inputs: normaliseAnalysisInputs(parsed.analysis_inputs),
+  } as ConversationContext;
+}
+
+/**
+ * Normalise the UI's analysis_inputs shape: the UI emits options with `id`,
+ * CEE's historical code expects `option_id`. Mirror id → option_id so every
+ * downstream consumer sees the canonical key.
+ */
+function normaliseAnalysisInputs(raw: unknown): ConversationContext['analysis_inputs'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const options = Array.isArray(r.options) ? r.options : [];
+  const normalisedOptions = options.map((opt) => {
+    if (!opt || typeof opt !== 'object') return opt;
+    const o = opt as Record<string, unknown>;
+    if (typeof o.option_id === 'string') return o;
+    if (typeof o.id === 'string') return { ...o, option_id: o.id };
+    return o;
+  });
+  return { ...r, options: normalisedOptions } as ConversationContext['analysis_inputs'];
 }
 
 /**

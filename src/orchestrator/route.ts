@@ -161,8 +161,33 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
 
     // Map validated data to turn request
     const generateModel = normalizeGenerateModel(parsed.data);
+
+    // Forced-tool synthesis for empty-message run_analysis turns. Keep
+    // parity with the streaming route so both transports handle the UI's
+    // buildRunAnalysisTurnRequest shape (analysis_inputs at top level, no
+    // message, no chip_metadata). Without this the LLM path is called with
+    // empty user content and Anthropic rejects the request.
+    let chipMetadata = parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'];
+    let effectiveTurnMessage: string = parsed.data.message ?? '';
+    const effectiveMessage = effectiveTurnMessage.trim();
+    const hasTopLevelAnalysisInputs = !!parsed.data.analysis_inputs;
+    const noExistingForce = !chipMetadata && !systemEvent;
+    if (hasTopLevelAnalysisInputs && effectiveMessage === '' && noExistingForce) {
+      chipMetadata = { action_type: 'run_analysis' };
+      effectiveTurnMessage = 'Run the analysis.';
+      log.info(
+        { request_id: requestId, client_turn_id: parsed.data.client_turn_id },
+        'Route: synthesised chip_metadata:run_analysis for empty-message + analysis_inputs turn',
+      );
+    } else if (effectiveMessage === '' && noExistingForce && !hasTopLevelAnalysisInputs) {
+      log.warn(
+        { request_id: requestId, client_turn_id: parsed.data.client_turn_id },
+        'Route: empty-message turn with no chip_metadata, system_event, or analysis_inputs — LLM path will reject',
+      );
+    }
+
     const turnRequest: OrchestratorTurnRequest = {
-      message: parsed.data.message,
+      message: effectiveTurnMessage,
       context,
       scenario_id: parsed.data.scenario_id,
       system_event: systemEvent,
@@ -171,7 +196,7 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       analysis_state: parsed.data.analysis_state as OrchestratorTurnRequest['analysis_state'],
       generate_model: generateModel,
       session_state: parsed.data.session_state ?? undefined,
-      chip_metadata: parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'],
+      chip_metadata: chipMetadata,
     };
 
     try {
