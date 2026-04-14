@@ -163,13 +163,13 @@ function makeLargeDraftOps(): PatchOperation[] {
 }
 
 describe("buildPatchSummary — large patch", () => {
-  it("emits a summary with node kind counts, not raw op names", () => {
+  it("emits a summary with no raw op names and no count-jargon (Fix 6)", () => {
     const ops = makeLargeDraftOps();
     const summary = buildPatchSummary(ops, null, 'full_draft');
     expect(summary).not.toMatch(/add_node|add_edge|update_node/i);
     expect(summary).not.toMatch(/\bop\b/);
-    // Should mention something about what was added
-    expect(summary).toMatch(/factor|option|goal|connection/i);
+    // Fix 6: full_draft without graph no longer leaks "Added N factors...".
+    expect(summary).not.toMatch(/\b\d+\s+(factors?|nodes?|edges?|connections?)\b/i);
   });
 
   it("ends with a period", () => {
@@ -183,6 +183,56 @@ describe("buildPatchSummary — large patch", () => {
     const coaching = "Created an initial pricing decision model with 5 factors and 2 options.";
     const summary = buildPatchSummary(ops, coaching, 'full_draft');
     expect(summary).toBe(coaching);
+  });
+});
+
+// Fix 6 — decision-framed full_draft fallback
+describe("buildPatchSummary — full_draft decision-framed fallback", () => {
+  it("uses goal + option labels from the graph when semantic resolution fails", () => {
+    // Degenerate ops that don't produce a semantic summary (add_node with no
+    // new node label) but a graph with goal + options is provided.
+    const ops: PatchOperation[] = [
+      { op: 'add_node', path: 'stray', value: { id: 'stray', kind: 'factor' /* no label */ } },
+    ];
+    const graph = {
+      nodes: [
+        { id: 'g1', kind: 'goal', label: 'Hire for a new feature' },
+        { id: 'o1', kind: 'option', label: 'Tech Lead' },
+        { id: 'o2', kind: 'option', label: 'Two Developers' },
+        { id: 'o3', kind: 'option', label: 'Status Quo' },
+      ],
+      edges: [],
+    } as unknown as Parameters<typeof buildPatchSummary>[3];
+    const summary = buildPatchSummary(ops, null, 'full_draft', graph);
+    expect(summary).toContain('Hire for a new feature');
+    expect(summary).toContain('Tech Lead');
+    expect(summary).toContain('Two Developers');
+    expect(summary).not.toMatch(/\b\d+\s+(factors?|nodes?|edges?|connections?)\b/i);
+  });
+
+  it("returns 'Review the proposed model.' when no graph available", () => {
+    const ops: PatchOperation[] = [
+      { op: 'add_node', path: 'stray', value: { id: 'stray', kind: 'factor' } },
+    ];
+    const summary = buildPatchSummary(ops, null, 'full_draft');
+    expect(summary).toBe('Review the proposed model.');
+  });
+
+  it("uses options-only phrasing when goal label is missing", () => {
+    const ops: PatchOperation[] = [
+      { op: 'add_node', path: 'stray', value: { id: 'stray', kind: 'factor' } },
+    ];
+    const graph = {
+      nodes: [
+        { id: 'o1', kind: 'option', label: 'Option Alpha' },
+        { id: 'o2', kind: 'option', label: 'Option Beta' },
+      ],
+      edges: [],
+    } as unknown as Parameters<typeof buildPatchSummary>[3];
+    const summary = buildPatchSummary(ops, null, 'full_draft', graph);
+    expect(summary).toContain('Option Alpha');
+    expect(summary).toContain('Option Beta');
+    expect(summary).not.toMatch(/\b\d+\s+(factors?|nodes?|edges?|connections?)\b/i);
   });
 });
 

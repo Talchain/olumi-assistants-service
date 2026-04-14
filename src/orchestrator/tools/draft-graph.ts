@@ -18,6 +18,28 @@ import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
+import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
+
+/**
+ * Convert an ISO currency code (e.g. "GBP") to a CurrencySignal.
+ * Returns null for unknown codes or null input.
+ *
+ * Used to bridge turn-context's `user_currency_hint` (which stores the ISO
+ * code from `detectCurrencyInMessage`) into the same shape that
+ * `detectCurrency(brief)` produces, so `buildCurrencyInstruction` receives a
+ * uniform input regardless of which source supplied the signal.
+ */
+function signalFromCurrencyCode(code: string | null | undefined): CurrencySignal | null {
+  if (!code) return null;
+  const map: Record<string, CurrencySignal> = {
+    GBP: { symbol: '£', code: 'GBP' },
+    USD: { symbol: '$', code: 'USD' },
+    EUR: { symbol: '€', code: 'EUR' },
+    AUD: { symbol: 'A$', code: 'AUD' },
+    CAD: { symbol: 'C$', code: 'CAD' },
+  };
+  return map[code.toUpperCase()] ?? null;
+}
 
 // ============================================================================
 // Types
@@ -76,18 +98,34 @@ export interface DraftGraphResult {
  * @param brief - User's decision brief text (min 30 chars)
  * @param request - Fastify request (needed by unified pipeline)
  * @param turnId - Turn ID for block provenance
+ * @param draftOpts.userCurrencyHint - ISO code (e.g. "GBP") detected by
+ *   `detectCurrencyInMessage` on the full user message. Prefers this over
+ *   brief-only detection — the message catches "£100k" even when the brief
+ *   itself omits the symbol.
  * @returns Graph patch block + optional assistant text with warnings
  */
 export async function handleDraftGraph(
   brief: string,
   request: FastifyRequest,
   turnId: string,
-  draftOpts?: { briefSignalsHeader?: string; signal?: AbortSignal },
+  draftOpts?: { briefSignalsHeader?: string; signal?: AbortSignal; userCurrencyHint?: string | null },
 ): Promise<DraftGraphResult> {
   const startTime = Date.now();
 
-  // Build pipeline input — compose briefSignalsHeader with any existing value (fix #10)
-  const currencySignal = detectCurrency(brief);
+  // Currency precedence: turn-context hint (full message) → brief-level detection.
+  // The full-message hint is stronger because the brief may omit the symbol
+  // the user wrote elsewhere in their request.
+  const hintSignal = signalFromCurrencyCode(draftOpts?.userCurrencyHint ?? null);
+  const currencySignal = hintSignal ?? detectCurrency(brief);
+  log.debug(
+    {
+      event: 'v4.draft_currency_resolution',
+      hint_code: draftOpts?.userCurrencyHint ?? null,
+      brief_detected: currencySignal?.code ?? null,
+      source: hintSignal ? 'message_hint' : (currencySignal ? 'brief_detection' : 'none'),
+    },
+    'draft_graph: currency signal resolved for prompt injection',
+  );
   const input: DraftInputWithCeeExtras = {
     brief,
     ...(draftOpts?.briefSignalsHeader ? { briefSignalsHeader: draftOpts.briefSignalsHeader } : {}),
@@ -190,14 +228,15 @@ export async function handleDraftGraph(
   // Build narration_hint from coaching data (for Phase 3 LLM context)
   const narrationHint = coachingSummary ?? undefined;
 
-  // Build assistantText: warnings take priority; then a short headline from the summary.
-  // The full coaching text lives in the block's coaching.summary field — the card interior.
-  // assistant_text should be a short headline to avoid duplicating the coaching content.
+  // Build assistantText: warnings take priority. Otherwise leave null — the
+  // response composer (driven by the post-draft CoachingContext) or the LLM
+  // text produces assistant_text downstream. Deliberately NOT falling back to
+  // `extractFirstSentence(patchData.summary)` — that path pushed patch-count
+  // jargon ("Added 5 factors, 3 options, and 24 connections") into the user's
+  // first turn whenever coaching signals were weak.
   let assistantText: string | null = null;
   if (warnings.length > 0) {
     assistantText = `The draft graph has ${warnings.length} validation warning${warnings.length > 1 ? 's' : ''}:\n${warnings.map((w) => `- ${w}`).join('\n')}`;
-  } else if (patchData.summary) {
-    assistantText = extractFirstSentence(patchData.summary);
   }
 
   const block = createGraphPatchBlock(patchData, turnId);

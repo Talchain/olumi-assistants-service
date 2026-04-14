@@ -118,10 +118,15 @@ function formatPlainNumber(n: number): string {
 // ============================================================================
 
 /**
- * Map a normalised value (0–1) to a qualitative band label.
+ * Map a normalised value (0–1) to a qualitative band label (title case).
  * Bands: 0–0.25 = Low, 0.25–0.5 = Moderate, 0.5–0.75 = High, 0.75–1 = Very high.
+ *
+ * Exported so orchestrator surfaces (response composer, chip engine) can
+ * render a qualitative label for unitless 0–1 factors without reimplementing
+ * the banding rule. Callers that want sentence case should call `.toLowerCase()`
+ * on the result.
  */
-function qualitativeBand(value: number): string {
+export function qualitativeBand(value: number): string {
   if (value <= 0.25) return "Low";
   if (value <= 0.5) return "Moderate";
   if (value <= 0.75) return "High";

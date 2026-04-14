@@ -59,7 +59,10 @@ export const draftGraphAction: ActionDefinition = {
     const startTime = Date.now();
 
     try {
-      const result = await handleDraftGraph(brief, ctx.request, ctx.turn_id, { signal: ctx.signal });
+      const result = await handleDraftGraph(brief, ctx.request, ctx.turn_id, {
+        signal: ctx.signal,
+        userCurrencyHint: ctx.user_currency_hint ?? null,
+      });
       const durationMs = Date.now() - startTime;
 
       log.info({

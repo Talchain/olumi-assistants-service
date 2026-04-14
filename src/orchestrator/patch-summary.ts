@@ -467,6 +467,16 @@ export function buildPatchSummary(
     }
   }
 
+  // ── full_draft: decision-framed fallback (never leak counts) ────────────
+  // On a draft turn, if we couldn't produce a semantic summary, we refuse to
+  // emit patch-machinery counts ("Added 5 factors, 3 options, 24 connections").
+  // Instead, build a decision-language sentence from the goal label + option
+  // labels on the post-mutation graph. If neither is available, fall back to
+  // a neutral orientation string.
+  if (patchContext === 'full_draft') {
+    return buildFullDraftFallback(graph);
+  }
+
   const a = analyseOperations(operations);
   const isLarge = a.totalOps > SMALL_PATCH_THRESHOLD;
   const parts: string[] = [];
@@ -537,10 +547,8 @@ export function buildPatchSummary(
   }
 
   if (parts.length === 0) {
-    // Edge-only updates or unhandled mix
-    return patchContext === 'full_draft'
-      ? 'Created a new decision model.'
-      : 'Applied graph changes.';
+    // Edge-only updates or unhandled mix (edit / accepted only).
+    return patchContext === 'edit' ? 'Review the proposed change.' : 'Applied changes.';
   }
 
   // Capitalise first letter of first sentence; join with "; "
@@ -553,12 +561,48 @@ export function buildPatchSummary(
   // (in EITHER the underscore form OR the friendly space-separated form),
   // collapse to a fully generic message rather than leaking the id.
   if (ENTITY_ID_LEAK_RE.test(finalText) || /\bdata\/interventions\b/.test(finalText)) {
-    return patchContext === 'full_draft'
-      ? 'Created a new decision model.'
-      : 'Applied graph changes.';
+    return patchContext === 'edit' ? 'Review the proposed change.' : 'Applied changes.';
   }
 
   return finalText;
+}
+
+/**
+ * Build a decision-framed fallback summary for full_draft patches when
+ * semantic resolution fails. Extracts goal + option labels from the graph
+ * instead of leaking counts ("Added 5 factors, 3 options, and 24 connections").
+ *
+ * Returns "Review the proposed model." only when no graph or no recognisable
+ * structure is available.
+ */
+function buildFullDraftFallback(graph: GraphV3T | null | undefined): string {
+  if (!graph) return 'Review the proposed model.';
+
+  const goal = graph.nodes.find((n) => (n as { kind?: string }).kind === 'goal');
+  const options = graph.nodes
+    .filter((n) => (n as { kind?: string }).kind === 'option')
+    .map((n) => (n as { label?: string }).label)
+    .filter((l): l is string => typeof l === 'string' && l.length > 0);
+
+  const goalLabel = typeof (goal as { label?: string } | undefined)?.label === 'string'
+    ? (goal as { label?: string }).label!
+    : null;
+
+  if (goalLabel && options.length > 0) {
+    const shown = options.slice(0, 3);
+    return `${goalLabel}: ${joinList(shown)}.`;
+  }
+
+  if (options.length > 0) {
+    const shown = options.slice(0, 3);
+    return `A decision model comparing ${joinList(shown)}.`;
+  }
+
+  if (goalLabel) {
+    return `${goalLabel}: proposed model ready for review.`;
+  }
+
+  return 'Review the proposed model.';
 }
 
 // ============================================================================

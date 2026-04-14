@@ -76,6 +76,13 @@ const PROGRESS_TYPES: ReadonlySet<TypedChip['type']> = new Set(['analyse', 'deci
  * (stage policy + context exclusions). Any chip whose action_type maps
  * to a tool not in this list is filtered out. Chips that don't map to
  * a tool (virtual actions) always pass.
+ *
+ * `analysisReadyStatus` is the per-turn readiness gate. When it's a
+ * defined non-'ready' value (e.g. 'needs_encoding', 'needs_user_input',
+ * 'blocked'), the 'Run analysis' chip is suppressed before dedup/slot
+ * logic — we never offer a progress chip the tool can't honour.
+ * Undefined/null means "unknown" and the gate does not fire (backwards
+ * compatible with callers that don't pass it).
  */
 export function computeChips(
   coaching: CoachingContext,
@@ -84,11 +91,17 @@ export function computeChips(
   executedAction: ActionName | null,
   deferredActions: ActionName[],
   availableTools: readonly string[] = [],
+  analysisReadyStatus?: string | null,
 ): SuggestedAction[] {
   const ci = coaching.chip_inputs;
   const inRecoverOrConfirm =
     coaching.coaching_mode === 'recover'
     || turnContext.conversation.pending_confirmation != null;
+
+  // Readiness gate: suppress 'Run analysis' when we have an explicit status
+  // that is not 'ready'. Unknown status (undefined/null) does not fire the
+  // gate — matches pre-v5 behaviour so callers without the hint still work.
+  const canRunAnalysis = analysisReadyStatus == null || analysisReadyStatus === 'ready';
 
   // Step 1: select the chip bundle for this context.
   const candidates: TypedChip[] = [];
@@ -99,17 +112,27 @@ export function computeChips(
       // High AI-estimated — calibrate + challenge + progress.
       candidates.push(chipHelpCalibrate(coaching));
       candidates.push(chipWhatCouldGoWrong());
-      candidates.push(chipRunAnalysis(turnContext));
+      if (canRunAnalysis) candidates.push(chipRunAnalysis(turnContext));
     } else if (coaching.risk_factor_count === 0) {
       // No risk factors modelled — challenge frame.
       candidates.push(chipWhatCouldGoWrong());
       candidates.push(chipOtherApproaches());
-      candidates.push(chipRunAnalysis(turnContext));
+      if (canRunAnalysis) candidates.push(chipRunAnalysis(turnContext));
     } else {
       // Generic post-draft — progress + calibrate + challenge.
-      candidates.push(chipRunAnalysis(turnContext));
+      if (canRunAnalysis) candidates.push(chipRunAnalysis(turnContext));
       candidates.push(chipHelpCalibrate(coaching));
       candidates.push(chipWhatCouldGoWrong());
+    }
+
+    if (!canRunAnalysis) {
+      log.info(
+        {
+          event: 'v4.chip_run_analysis_suppressed',
+          analysis_ready_status: analysisReadyStatus,
+        },
+        'chipRunAnalysis suppressed: analysis_ready.status is not "ready"',
+      );
     }
   } else if (ci.analysis_fresh) {
     // Post-analysis path.
@@ -178,7 +201,7 @@ export function computeChips(
   // least one progress chip is present in the first 3. Post-analysis bundles
   // already encode forward motion (compare / pre-mortem / generate brief)
   // so we do not force-insert an additional progress chip there.
-  if (!inRecoverOrConfirm && !ci.has_analysis) {
+  if (!inRecoverOrConfirm && !ci.has_analysis && canRunAnalysis) {
     const top3 = filtered.slice(0, 3);
     const hasProgress = top3.some(c => PROGRESS_TYPES.has(c.type));
     if (!hasProgress) {

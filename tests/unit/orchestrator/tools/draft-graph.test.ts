@@ -112,10 +112,11 @@ describe("handleDraftGraph", () => {
     // Edge paths use /edges/{from}->{to}
     expect(addEdgeOps[0].path).toBe("/edges/goal_1->opt_1");
 
-    // assistantText populated from patch summary when no warnings
-    expect(result.assistantText).not.toBeNull();
-    expect(typeof result.assistantText).toBe("string");
-    expect(result.assistantText!.length).toBeGreaterThan(0);
+    // Fix 3: assistantText stays null when there are no warnings. The summary
+    // lives on patchData.summary (on the block), the composer / LLM produce
+    // user-facing text downstream.
+    expect(result.assistantText).toBeNull();
+    expect(data.summary).toBeTruthy();
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
   });
 
@@ -258,7 +259,7 @@ describe("handleDraftGraph", () => {
     expect(data.applied_graph).toEqual(draftedGraph);
   });
 
-  it("surfaces coaching summary as assistantText when no warnings", async () => {
+  it("leaves assistantText null when there are no warnings (Fix 3)", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce({
       statusCode: 200,
       body: {
@@ -267,7 +268,7 @@ describe("handleDraftGraph", () => {
           edges: [],
         },
         coaching: {
-          summary: "I've drafted a model capturing the core trade-off between price and volume.",
+          summary: "A strong model capturing the core trade-off between price and volume.",
           strengthen_items: [],
         },
       },
@@ -275,9 +276,10 @@ describe("handleDraftGraph", () => {
 
     const result = await handleDraftGraph("Should I raise prices?", mockRequest, "turn-summary");
 
-    // Coaching summary should appear as assistantText
-    expect(result.assistantText).toBe("I've drafted a model capturing the core trade-off between price and volume.");
-    // Warnings should NOT be present
+    // Fix 3: the handler no longer copies the first sentence of patchData.summary
+    // into assistantText — the composer / LLM produces user-facing text downstream.
+    // The coaching text still lives on the block's summary and narrationHint.
+    expect(result.assistantText).toBeNull();
     expect(result.draftWarnings).toHaveLength(0);
   });
 
@@ -305,7 +307,7 @@ describe("handleDraftGraph", () => {
     expect(result.assistantText).not.toContain("Good structure");
   });
 
-  it("surfaces operation-derived summary as assistantText when no coaching and no warnings", async () => {
+  it("leaves assistantText null when no coaching and no warnings (Fix 3)", async () => {
     mockRunUnifiedPipeline.mockResolvedValueOnce(
       makePipelineSuccess({
         nodes: [
@@ -320,9 +322,12 @@ describe("handleDraftGraph", () => {
 
     const result = await handleDraftGraph("Test brief", mockRequest, "turn-op-summary");
 
-    // Should have a non-null summary derived from operations
-    expect(result.assistantText).not.toBeNull();
-    expect(result.assistantText!.length).toBeGreaterThan(0);
+    // Fix 3: the handler no longer turns patchData.summary into assistantText.
+    // The graph_patch block still carries patchData.summary on block.data.summary;
+    // what the user reads comes from the composer / LLM layer instead.
+    expect(result.assistantText).toBeNull();
+    const patchData = result.blocks[0]?.data as { summary?: string } | undefined;
+    expect(patchData?.summary).toBeTruthy();
   });
 
   it("extracts coaching.summary into narrationHint", async () => {

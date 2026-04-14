@@ -446,6 +446,85 @@ describe("composeResponse — value_set", () => {
     expect(text).not.toContain('Confirm to apply');
     assertNoBannedTerms(text);
   });
+
+  // ── display_value: qualitative band for unitless 0-1 factors ──────────────
+  // Fix 1 wiring — handler emits fact.data.display_value, composer prefers it
+  // over the raw numeric so the user reads "is low" instead of "calibrated to 0.25".
+
+  it("display_value qualitative (patch block, no driver): reads naturally with 'is'", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sen', label: 'Existing Team Seniority', kind: 'factor' }],
+      what_changed: 'Existing Team Seniority to low',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 0.25, display_value: 'low' },
+    };
+    const text = composeResponse(fact, null, true);
+    expect(text).toBe('Existing Team Seniority is low.');
+    expect(text).not.toContain('0.25');
+    expect(text).not.toContain('calibrated to');
+    assertNoBannedTerms(text);
+  });
+
+  it("display_value qualitative (no patch block, auto_apply): uses 'is low' framing", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sen', label: 'Existing Team Seniority', kind: 'factor' }],
+      what_changed: 'Existing Team Seniority to low',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 0.25, display_value: 'low' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toBe('Existing Team Seniority is low.');
+    expect(text).not.toContain('set to 0.25');
+    assertNoBannedTerms(text);
+  });
+
+  it("display_value qualitative + top driver: inlines sensitivity framing", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sen', label: 'Existing Team Seniority', kind: 'factor' }],
+      what_changed: 'Existing Team Seniority to high',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 0.8, display_value: 'high' },
+    };
+    const coaching = makeCoachingContext({
+      drivers: [
+        {
+          factor_label: 'Existing Team Seniority',
+          factor_id: 'f_sen',
+          sensitivity: 0.5,
+          is_ai_estimated: false,
+          confidence_band: 'medium',
+        },
+      ],
+    });
+    const text = composeResponse(fact, coaching, true);
+    expect(text).toBe('Existing Team Seniority is high, the factor the outcome is most sensitive to.');
+    expect(text).not.toContain('0.8');
+    assertNoBannedTerms(text);
+  });
+
+  it("display_value with real unit (numeric): unchanged legacy behaviour", () => {
+    // When the handler emits a numeric+unit display_value (e.g. "£75,000"),
+    // the composer uses "at" framing, not "is" framing — the value has a
+    // scale so "is" would read oddly.
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sal', label: 'Salary', kind: 'factor' }],
+      what_changed: 'Salary to 75000 GBP',
+      stale_analysis: false,
+      auto_apply: true,
+      data: { new_value: 75000, unit: 'GBP', display_value: '75000 GBP' },
+    };
+    const text = composeResponse(fact, null, true);
+    // Falls back to 'at' framing because display_value isn't a qualitative band.
+    expect(text).toBe('Salary calibrated to 75000 GBP.');
+    assertNoBannedTerms(text);
+  });
 });
 
 // ============================================================================

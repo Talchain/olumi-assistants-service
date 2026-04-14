@@ -1060,8 +1060,13 @@ describe('handleTurn — stage inference override', () => {
     expect(result.httpStatus).toBe(200);
     expect(result.envelope.turn_plan!.selected_tool).toBe('draft_graph');
     expect(result.envelope.turn_plan!.routing).toBe('deterministic');
-    expect(result.envelope.assistant_text).not.toBeNull();
-    expect(typeof result.envelope.assistant_text).toBe('string');
+    // Fix 3: the draft handler no longer copies patchData.summary into
+    // assistant_text. On V1 (no composer) this produces null; on V4 the
+    // composer fills it in. Either way the patch block still carries the
+    // summary — the test focuses on routing, not text rendering.
+    const block = result.envelope.blocks?.[0] as { block_type?: string; data?: { summary?: string } } | undefined;
+    expect(block?.block_type).toBe('graph_patch');
+    expect(block?.data?.summary).toBeTruthy();
     // Must not fall through to LLM — the whole point is deterministic routing
     expect(mockChatWithTools).not.toHaveBeenCalled();
     expect(mockChat).not.toHaveBeenCalled();

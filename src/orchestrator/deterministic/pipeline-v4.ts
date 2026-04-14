@@ -709,6 +709,21 @@ export async function* executePipelineV4(
           coaching_tradeoff: !!coachingContext?.tradeoff,
           coaching_biggest_inference: !!coachingContext?.biggest_inference,
         }, 'v4.post_draft_recomputation');
+
+        // Override block.data.summary on the graph_patch block using the
+        // deterministic post-draft CoachingContext when available. The draft
+        // handler runs BEFORE recomputation, so block.data.summary was built
+        // from LLM coaching or fell back to count jargon. We only overwrite
+        // when the existing summary is degraded (empty, count-jargon, or the
+        // generic fallback) — never replace a good LLM coaching summary.
+        try {
+          maybeOverridePatchSummary(actionResult, coachingContext);
+        } catch (err) {
+          log.warn(
+            { event: 'v4.post_draft_summary_override_error', error: (err as Error).message },
+            'Post-draft summary override threw — leaving block summary unchanged',
+          );
+        }
       } catch (err) {
         log.warn({ event: 'v4.post_draft_recompute_error', error: (err as Error).message }, 'Post-draft recomputation failed — using pre-draft state');
       }
@@ -1236,8 +1251,13 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     && coachingContext != null
     && sessionState != null;
 
+  // Extract analysis_ready.status from the current turn's graph_patch block
+  // (set on draft_graph / edit_graph) so the chip engine can suppress
+  // 'Run analysis' when the model isn't ready to run.
+  const analysisReadyStatus = extractAnalysisReadyStatusFromResult(actionResult);
+
   const suggestedActions = useChipEngine
-    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools)
+    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools, analysisReadyStatus)
     : buildDeterministicChips(turnContext, executedAction, deferredActions);
 
   // Sanitise chip labels and prompts (belt-and-braces — engine already sanitises).
@@ -1501,4 +1521,147 @@ function getUserFacingErrorMessage(errorCode: string, isDraftGraph?: boolean): s
     default:
       return 'Something went wrong while processing your request. Please try again.';
   }
+}
+
+// ============================================================================
+// Post-draft summary override
+// ============================================================================
+
+/**
+ * Matches count-jargon summaries like:
+ *   "Added 5 factors, 3 options, and 24 connections."
+ *   "Created 2 goals and 1 option."
+ * — i.e. any user-facing string that leads with a number + bare model-element
+ * noun. These leak patch machinery to users; the override replaces them with
+ * a decision-framed sentence when coaching context is available.
+ */
+const COUNT_JARGON_RE = /\b\d+\s*(factors?|nodes?|edges?|connections?|options?|goals?|outcomes?|risks?|constraints?)\b/i;
+
+/** Generic fallback strings emitted by buildPatchSummary when it had nothing else to say. */
+const GENERIC_SUMMARY_FALLBACKS = new Set<string>([
+  'Created a new decision model.',
+  'Applied graph changes.',
+  'No changes were applied.',
+  'Review the proposed model.',
+]);
+
+/**
+ * Replace the graph_patch block's `data.summary` with a coaching-derived
+ * sentence when the existing summary is degraded (empty / count-jargon /
+ * generic fallback). Always preserves a substantive LLM coaching summary.
+ *
+ * Emits `v4.post_draft_summary_override` with original/replacement/reason
+ * whenever it rewrites. Emits nothing when it leaves the summary alone.
+ */
+function maybeOverridePatchSummary(
+  actionResult: ActionResult,
+  coachingContext: CoachingContext | null,
+): void {
+  const block = (actionResult.blocks ?? []).find((b) => b.block_type === 'graph_patch');
+  if (!block || block.block_type !== 'graph_patch') return;
+
+  const existing = (block.data.summary ?? '').trim();
+  const existingIsEmpty = existing.length === 0;
+  const existingIsJargon = COUNT_JARGON_RE.test(existing);
+  const existingIsGeneric = GENERIC_SUMMARY_FALLBACKS.has(existing);
+
+  const shouldOverwrite = existingIsEmpty || existingIsJargon || existingIsGeneric;
+  if (!shouldOverwrite) return;
+
+  const goalLabel = coachingContext?.tradeoff
+    // tradeoff doesn't carry goal label — look it up from the applied graph
+    ? getGoalLabelFromResult(actionResult)
+    : getGoalLabelFromResult(actionResult);
+  const optionLabels = getOptionLabelsFromResult(actionResult);
+
+  const replacement = buildCoachingSummary(coachingContext, goalLabel, optionLabels);
+  if (!replacement || replacement === existing) return;
+
+  block.data.summary = replacement;
+  log.info(
+    {
+      event: 'v4.post_draft_summary_override',
+      original: existing,
+      replacement,
+      reason: existingIsEmpty ? 'empty' : existingIsJargon ? 'count_jargon' : 'generic_fallback',
+    },
+    'Post-draft summary overridden with coaching-derived sentence',
+  );
+}
+
+function getGoalLabelFromResult(actionResult: ActionResult): string | null {
+  const graph = actionResult.applied_graph;
+  if (!graph) return null;
+  const goal = graph.nodes.find((n) => n.kind === 'goal');
+  return goal?.label ?? null;
+}
+
+function getOptionLabelsFromResult(actionResult: ActionResult): string[] {
+  const graph = actionResult.applied_graph;
+  if (!graph) return [];
+  return graph.nodes.filter((n) => n.kind === 'option').map((n) => n.label);
+}
+
+/**
+ * Read `analysis_ready.status` from the first `graph_patch` block on an
+ * ActionResult, if any. Returns null when no block carries a readiness
+ * payload (e.g. non-graph actions, errors, or pre-draft turns).
+ */
+function extractAnalysisReadyStatusFromResult(
+  actionResult: ActionResult | null,
+): string | null {
+  if (!actionResult) return null;
+  const block = (actionResult.blocks ?? []).find((b) => b.block_type === 'graph_patch');
+  if (!block || block.block_type !== 'graph_patch') return null;
+  const status = block.data.analysis_ready?.status;
+  return typeof status === 'string' ? status : null;
+}
+
+// Test-only exports for unit testing the post-draft summary override helpers
+// without spinning up the full streaming pipeline.
+export const __test_only = {
+  maybeOverridePatchSummary,
+  extractAnalysisReadyStatusFromResult,
+  buildCoachingSummary,
+  COUNT_JARGON_RE,
+};
+
+/**
+ * Build a decision-framed summary from coaching signals and graph structure.
+ * Returns null when we have nothing better than what the caller already had.
+ */
+function buildCoachingSummary(
+  coachingContext: CoachingContext | null,
+  goalLabel: string | null,
+  optionLabels: string[],
+): string | null {
+  // Best: coaching context gives us the core trade-off.
+  if (coachingContext?.tradeoff && goalLabel) {
+    const t = coachingContext.tradeoff;
+    return `Your ${goalLabel} trades ${t.benefit_a} against ${t.benefit_b}.`;
+  }
+
+  // Next: goal + option names grounds the summary in decision language.
+  if (goalLabel && optionLabels.length > 0) {
+    const shown = optionLabels.slice(0, 3);
+    const joined = shown.length === 1
+      ? shown[0]
+      : shown.length === 2
+        ? `${shown[0]} or ${shown[1]}`
+        : `${shown.slice(0, -1).join(', ')}, or ${shown[shown.length - 1]}`;
+    return `${goalLabel}: ${joined}.`;
+  }
+
+  // Options alone — still decision-framed, just no goal anchor.
+  if (optionLabels.length > 0) {
+    const shown = optionLabels.slice(0, 3);
+    const joined = shown.length === 1
+      ? shown[0]
+      : shown.length === 2
+        ? `${shown[0]} or ${shown[1]}`
+        : `${shown.slice(0, -1).join(', ')}, or ${shown[shown.length - 1]}`;
+    return `A decision model comparing ${joined}.`;
+  }
+
+  return null;
 }

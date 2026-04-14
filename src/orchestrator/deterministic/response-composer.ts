@@ -228,27 +228,51 @@ function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, ha
   if (!entity) return fact.what_changed;
   const newValue = fact.data?.new_value;
   const unit = (fact.data?.unit as string | undefined) ?? '';
-  const valueStr = newValue != null ? `${newValue}${unit ? ' ' + unit : ''}` : '?';
+  // Prefer display_value (qualitative for unitless 0-1 factors, formatted for
+  // real units) over the raw numeric. Falls back to numeric+unit when the
+  // handler didn't produce a display_value — defence in depth.
+  const displayValue = fact.data?.display_value as string | undefined;
+  const valueStr = displayValue
+    ?? (newValue != null ? `${newValue}${unit ? ' ' + unit : ''}` : '?');
+  // Qualitative bands are sentence fragments ("low", "high") and read
+  // naturally with the copula "is"; numeric values read naturally with "at".
+  const isQualitative = displayValue != null && /^(low|moderate|high|very high)$/i.test(displayValue);
   const isTopDriver = coaching?.drivers?.[0]?.factor_id === entity.id;
 
   if (hasPatchBlock) {
     // Orientation only — the patch card shows the calibration detail.
     // Strictly 1 sentence.
-    if (isTopDriver) return `At ${valueStr}, ${entity.label} is the factor the outcome is most sensitive to.`;
-    if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr} ${lowercaseFirst(fact.why_it_matters)}`);
-    return `${entity.label} calibrated to ${valueStr}.`;
+    if (isTopDriver) {
+      return isQualitative
+        ? `${entity.label} is ${valueStr}, the factor the outcome is most sensitive to.`
+        : `At ${valueStr}, ${entity.label} is the factor the outcome is most sensitive to.`;
+    }
+    if (fact.why_it_matters) {
+      const lead = isQualitative
+        ? `${entity.label} is ${valueStr}`
+        : `${entity.label} at ${valueStr}`;
+      return ensureSentencePunctuation(`${lead} ${lowercaseFirst(fact.why_it_matters)}`);
+    }
+    return isQualitative
+      ? `${entity.label} is ${valueStr}.`
+      : `${entity.label} calibrated to ${valueStr}.`;
   }
 
   if (fact.auto_apply) {
-    const base = `${entity.label} set to ${valueStr}.`;
+    const base = isQualitative
+      ? `${entity.label} is ${valueStr}.`
+      : `${entity.label} set to ${valueStr}.`;
     if (isTopDriver) return `${base} This is the factor the outcome is most sensitive to.`;
     if (fact.why_it_matters) return `${base} ${fact.why_it_matters}`;
     return base;
   }
 
   // Proposal framing — no "Confirm to apply".
-  if (fact.why_it_matters) return ensureSentencePunctuation(`${entity.label} at ${valueStr} would ${lowercaseFirst(fact.why_it_matters)}`);
-  return `${entity.label} at ${valueStr} would shift the balance of the decision.`;
+  const lead = isQualitative
+    ? `${entity.label} at ${valueStr}`
+    : `${entity.label} at ${valueStr}`;
+  if (fact.why_it_matters) return ensureSentencePunctuation(`${lead} would ${lowercaseFirst(fact.why_it_matters)}`);
+  return `${lead} would shift the balance of the decision.`;
 }
 
 function composeEdgeAdjusted(fact: HandlerFact): string {

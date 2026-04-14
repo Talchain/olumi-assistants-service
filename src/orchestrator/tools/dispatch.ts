@@ -96,6 +96,13 @@ export interface ToolDispatchOpts {
    * explain_results is automatically chained after run_analysis completes.
    */
   intentClassification?: string;
+  /**
+   * ISO currency code (e.g. "GBP", "USD") detected by `detectCurrencyInMessage`
+   * on the user's raw message, or null when no signal was present. When set,
+   * draft_graph prefers this over brief-only detection — the full message
+   * catches "the budget is £100k" even when the brief text omits the symbol.
+   */
+  userCurrencyHint?: string | null;
 }
 
 // ============================================================================
@@ -249,7 +256,9 @@ export async function dispatchToolHandler(
           } satisfies OrchestratorError,
         });
       }
-      const result = await handleDraftGraph(brief, opts.request, turnId);
+      const result = await handleDraftGraph(brief, opts.request, turnId, {
+        userCurrencyHint: opts.userCurrencyHint ?? null,
+      });
       const draftGuidance = result.graphOutput
         ? generatePostDraftGuidance(result.graphOutput, result.draftWarnings, context.framing ?? null)
         : [];

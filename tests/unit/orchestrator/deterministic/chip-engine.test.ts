@@ -505,3 +505,99 @@ describe("computeChips — tool-availability filtering", () => {
     }
   });
 });
+
+// ============================================================================
+// Analysis-readiness gate (Fix 5)
+// ============================================================================
+
+describe("computeChips — analysis_ready.status gate", () => {
+  it("suppresses Run analysis chip when status is 'needs_encoding'", () => {
+    const coaching = makeCoaching({
+      ai_estimated_count: 3,
+      chip_inputs: {
+        stage: 'ideate',
+        has_analysis: false,
+        analysis_fresh: false,
+        top_uncalibrated_factor: null,
+        has_risk_factors: false,
+        option_mechanism_overlap: false,
+        stability_band: null,
+        dominant_factor_label: null,
+      },
+    });
+    const turnContext = makeTurnContext();
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      turnContext,
+      null,
+      [],
+      ALL_TOOLS,
+      'needs_encoding',
+    );
+    const actionTypes = chips.map(c => c.action_type);
+    expect(actionTypes).not.toContain('run_analysis');
+  });
+
+  it("suppresses Run analysis chip when status is 'needs_user_input'", () => {
+    const coaching = makeCoaching({ ai_estimated_count: 3 });
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      makeTurnContext(),
+      null,
+      [],
+      ALL_TOOLS,
+      'needs_user_input',
+    );
+    expect(chips.map(c => c.action_type)).not.toContain('run_analysis');
+  });
+
+  it("includes Run analysis chip when status is 'ready'", () => {
+    const coaching = makeCoaching({ ai_estimated_count: 3 });
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      makeTurnContext(),
+      null,
+      [],
+      ALL_TOOLS,
+      'ready',
+    );
+    expect(chips.map(c => c.action_type)).toContain('run_analysis');
+  });
+
+  it("includes Run analysis chip when status is null (unknown — backward compatible)", () => {
+    const coaching = makeCoaching({ ai_estimated_count: 3 });
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      makeTurnContext(),
+      null,
+      [],
+      ALL_TOOLS,
+      null,
+    );
+    expect(chips.map(c => c.action_type)).toContain('run_analysis');
+  });
+
+  it("does NOT backfill a progress chip via the slot rule when status is non-ready", () => {
+    // Scenario: post-draft with no risk factors → chipWhatCouldGoWrong + chipOtherApproaches
+    // Normally the slot rule would force-insert chipRunAnalysis. With a non-ready
+    // status it must not.
+    const coaching = makeCoaching({
+      ai_estimated_count: 0,
+      risk_factor_count: 0,
+    });
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      makeTurnContext(),
+      null,
+      [],
+      ALL_TOOLS,
+      'needs_encoding',
+    );
+    expect(chips.map(c => c.action_type)).not.toContain('run_analysis');
+  });
+});

@@ -8,6 +8,7 @@ import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
 import { resolveEntity } from "../entity-resolver.js";
 import { log } from "../../../utils/telemetry.js";
+import { qualitativeBand } from "../../../cee/factor-extraction/display-value.js";
 
 /**
  * Map a raw currency signal (symbol or short code) to a canonical unit label.
@@ -202,20 +203,27 @@ export const setFactorValueAction: ActionDefinition = {
       },
     }];
 
+    // Compute display_value for the composer to render instead of the raw
+    // numeric. Qualitative bands only apply to unitless 0-1 factors
+    // (no unit OR unit === 'scale'); factors with real units (£, %, months,
+    // etc.) keep the numeric + unit form.
+    const displayValue = computeDisplayValue(value, effectiveUnit);
+
     return {
       blocks: [],
-      assistantText: `Updated **${entity.label}** to ${value}${effectiveUnit ? ' ' + effectiveUnit : ''}.`,
+      assistantText: `Updated **${entity.label}** to ${displayValue}.`,
       guidance_items: [],
       operations,
       fact: {
         action: 'value_set',
         entities_affected: [{ id: entity.id, label: entity.label, kind: 'factor' }],
-        what_changed: `${entity.label} to ${value}${effectiveUnit ? ' ' + effectiveUnit : ''}`,
+        what_changed: `${entity.label} to ${displayValue}`,
         stale_analysis: ctx.analysis_summary != null,
         auto_apply: true,
         data: {
           new_value: value,
           unit: effectiveUnit,
+          display_value: displayValue,
         },
       },
     };
@@ -231,3 +239,38 @@ export const setFactorValueAction: ActionDefinition = {
       : 'Set a factor value';
   },
 };
+
+/**
+ * Produce the user-facing display value for a factor.
+ *
+ * Decision tree (matches the DS v5 "no raw 0-1 values" rule):
+ *   - Unitless 0-1 factor (no unit OR unit === 'scale') → qualitative band
+ *     e.g. 0.25 → "low", 0.75 → "high". Logged under
+ *     `v4.display_value_qualitative` so staging can see how often this path
+ *     fires and whether it's the dominant display mode.
+ *   - Any real unit (£, $, %, months, etc.) → numeric + unit form
+ *     ("75,000 £", "3 %", "18 months"). This matches existing surfaces and
+ *     avoids inventing qualitative labels for quantities that have a natural
+ *     scale.
+ *   - Out-of-range numeric (outside 0-1) with no unit → plain numeric.
+ */
+function computeDisplayValue(value: number, unit?: string): string {
+  const hasRealUnit =
+    !!unit && unit.toLowerCase() !== 'scale';
+
+  if (!hasRealUnit && value >= 0 && value <= 1) {
+    const band = qualitativeBand(value).toLowerCase();
+    log.debug(
+      {
+        event: 'v4.display_value_qualitative',
+        value,
+        unit: unit ?? null,
+        band,
+      },
+      'set_factor_value: rendered qualitative band for unitless 0-1 factor',
+    );
+    return band;
+  }
+
+  return unit ? `${value} ${unit}` : `${value}`;
+}
