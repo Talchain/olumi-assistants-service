@@ -26,6 +26,7 @@ import type { DeterministicTurnContext, ActionResult, ActionFailure } from "../t
 import type {
   ConversationContext,
   GraphPatchBlockData,
+  OrchestratorError,
   PatchOperation,
   TypedConversationBlock,
 } from "../../types.js";
@@ -288,6 +289,34 @@ export const editGraphAction: ActionDefinition = {
         { plotClient, invocationInput: params },
       );
     } catch (err) {
+      // V2 handleEditGraph attaches .orchestratorError to thrown errors
+      // (missing graph, LLM failure, parse failure, etc.). Mirror
+      // run-analysis.ts: branch on orchestratorError.code to produce
+      // structured failure codes and friendlier user text instead of a
+      // single generic EDIT_GRAPH_HANDLER_ERROR, so telemetry and the
+      // eventual UI can distinguish recoverable vs fatal outcomes.
+      const orchestratorErr = (err as { orchestratorError?: OrchestratorError }).orchestratorError;
+      if (orchestratorErr) {
+        log.error(
+          { err, turn_id: ctx.turn_id, error_code: orchestratorErr.code },
+          'v4.edit_graph_orchestrator_error',
+        );
+        const userMessage = friendlyEditGraphError(orchestratorErr);
+        return {
+          blocks: [],
+          assistantText: userMessage,
+          guidance_items: [],
+          failure: {
+            code: `EDIT_GRAPH_${orchestratorErr.code}`,
+            message: orchestratorErr.message,
+            user_message: userMessage,
+            recovery_hint: orchestratorErr.recoverable
+              ? 'Try rephrasing the edit.'
+              : undefined,
+          },
+        };
+      }
+
       log.error(
         { err, turn_id: ctx.turn_id },
         'v4.edit_graph_handler_threw',
@@ -345,30 +374,44 @@ export const editGraphAction: ActionDefinition = {
     let operations: PatchOperation[] = blockData?.operations ?? [];
     const appliedGraphHash = blockData?.applied_graph_hash;
 
-    // ── Edge endpoint validation ─────────────────────────────────────────
-    const { kept, stripped } = validateEdgeEndpoints(ctx.graph, operations);
-    if (stripped.length > 0) {
-      log.warn(
-        { turn_id: ctx.turn_id, stripped_count: stripped.length },
-        'v4.edit_graph_invalid_edge_rejected',
-      );
-      operations = kept;
-      if (operations.length === 0) {
-        return {
-          blocks: [],
-          assistantText: "I couldn't place an edge between those nodes — one of them doesn't exist in the current model.",
-          guidance_items: [],
-          failure: {
-            code: 'EDIT_GRAPH_INVALID_EDGE',
-            message: `Stripped ${stripped.length} add_edge operation(s) referencing unknown endpoints.`,
-            user_message: "I couldn't place an edge between those nodes — one of them doesn't exist in the current model.",
-            recovery_hint: 'Name the specific existing factors or options to connect.',
-          },
-        };
+    // PLoT-certified path: when V2 ran PLoT and returned a non-null
+    // applied_graph without rejection, the patch has already cleared
+    // Zod + referential + structural + semantic validation. Re-running our
+    // belt-and-braces checks here risks wrongly stripping a valid op
+    // (operations represent the LLM proposal; PLoT's applied_graph may
+    // reflect silent repairs not re-applied to the operations array), which
+    // would leave `operations` inconsistent with `applied_graph`.
+    //
+    // The hardening layers act as a SAFETY NET for the PLoT-not-configured
+    // case (dev/test) — we still run them when applied_graph is null.
+    const plotCertified = result.appliedGraph != null;
+
+    // ── Edge endpoint validation (safety net for non-certified path) ─────
+    if (!plotCertified) {
+      const { kept, stripped } = validateEdgeEndpoints(ctx.graph, operations);
+      if (stripped.length > 0) {
+        log.warn(
+          { turn_id: ctx.turn_id, stripped_count: stripped.length },
+          'v4.edit_graph_invalid_edge_rejected',
+        );
+        operations = kept;
+        if (operations.length === 0) {
+          return {
+            blocks: [],
+            assistantText: "I couldn't place an edge between those nodes — one of them doesn't exist in the current model.",
+            guidance_items: [],
+            failure: {
+              code: 'EDIT_GRAPH_INVALID_EDGE',
+              message: `Stripped ${stripped.length} add_edge operation(s) referencing unknown endpoints.`,
+              user_message: "I couldn't place an edge between those nodes — one of them doesn't exist in the current model.",
+              recovery_hint: 'Name the specific existing factors or options to connect.',
+            },
+          };
+        }
       }
     }
 
-    // ── Orphan check on fully-applied preview graph ──────────────────────
+    // ── Orphan check (safety net for non-certified path) ─────────────────
     const addedNodeIds = extractAddedNodeIds(operations);
     let appliedGraphPreview: GraphV3T | null = result.appliedGraph;
     if (!appliedGraphPreview && ctx.graph && operations.length > 0) {
@@ -384,7 +427,7 @@ export const editGraphAction: ActionDefinition = {
       }
     }
 
-    if (addedNodeIds.length > 0 && appliedGraphPreview) {
+    if (!plotCertified && addedNodeIds.length > 0 && appliedGraphPreview) {
       const orphans = findOrphans(appliedGraphPreview, addedNodeIds);
       if (orphans.length > 0) {
         log.warn(
@@ -499,6 +542,21 @@ export const editGraphAction: ActionDefinition = {
     return desc || 'Edit the model';
   },
 };
+
+function friendlyEditGraphError(err: OrchestratorError): string {
+  switch (err.code) {
+    case 'TOOL_EXECUTION_FAILED':
+      return "I couldn't apply that edit. Could you try rephrasing it?";
+    case 'MISSING_GRAPH_STATE':
+      return 'There is no decision model to edit yet. Build one first.';
+    case 'LLM_TIMEOUT':
+      return 'The edit took too long. Your model is unchanged; try again.';
+    case 'VALIDATION_REJECTED':
+      return "I couldn't validate that edit. Describe the change more concretely.";
+    default:
+      return "I couldn't apply that edit. Could you try rephrasing it?";
+  }
+}
 
 function extractClarificationText(result: EditGraphResult): string {
   const pc = result.pendingClarification as unknown as { question?: unknown; prompt?: unknown } | undefined;

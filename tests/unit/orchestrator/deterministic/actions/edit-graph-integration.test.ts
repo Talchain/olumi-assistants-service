@@ -175,8 +175,10 @@ describe("edit_graph V4 integration", () => {
     expect(result.operations).toBeUndefined();
   });
 
-  it("strips add_edge ops referencing unknown endpoints", async () => {
-    const graph = makeGraph();
+  it("strips add_edge ops referencing unknown endpoints (safety-net path, PLoT not configured)", async () => {
+    // Safety-net path: when V2 returns no applied_graph (PLoT not configured,
+    // dev/test), the adapter runs edge validation as a fallback. PLoT-
+    // certified patches bypass this — see the next test.
     const patchData: GraphPatchBlockData = {
       patch_type: 'edit',
       status: 'proposed',
@@ -201,7 +203,7 @@ describe("edit_graph V4 integration", () => {
       blocks: [block],
       assistantText: 'Added an edge.',
       latencyMs: 1,
-      appliedGraph: graph,
+      appliedGraph: null, // PLoT not configured → safety net runs
       wasRejected: false,
     });
 
@@ -213,6 +215,74 @@ describe("edit_graph V4 integration", () => {
 
     expect(result.failure).toBeDefined();
     expect(result.failure?.code).toBe('EDIT_GRAPH_INVALID_EDGE');
+  });
+
+  it("does NOT re-validate operations when PLoT certified the patch", async () => {
+    // When V2 returns a non-null applied_graph, PLoT has already validated
+    // the patch. The adapter must trust that certification and skip the
+    // safety-net edge/orphan checks — re-validating could wrongly strip
+    // ops inconsistent with applied_graph (e.g. after silent PLoT repairs).
+    const graph = makeGraph();
+    const patchData: GraphPatchBlockData = {
+      patch_type: 'edit',
+      status: 'proposed',
+      operations: [
+        // Referentially "bad" against base graph, but imagine PLoT already
+        // blessed it (repaired elsewhere). We trust PLoT; the adapter MUST
+        // NOT fail here.
+        {
+          op: 'add_edge',
+          path: 'fac_ghost->opt_a',
+          value: { from: 'fac_ghost', to: 'opt_a' },
+        },
+      ],
+      applied_graph_hash: 'hash',
+      auto_apply: false,
+    };
+    const block: TypedConversationBlock = {
+      block_id: 'blk',
+      turn_id: 'tu-test',
+      block_type: 'graph_patch',
+      data: patchData,
+    } as unknown as TypedConversationBlock;
+
+    handleEditGraphMock.mockResolvedValue({
+      blocks: [block],
+      assistantText: 'Edit applied.',
+      latencyMs: 1,
+      appliedGraph: graph, // PLoT certified
+      wasRejected: false,
+    });
+
+    const ctx = makeContext();
+    const result = await editGraphAction.execute(
+      { edit_description: 'something PLoT blessed' },
+      ctx,
+    );
+
+    expect(result.failure).toBeUndefined();
+    expect(result.operations).toBeDefined();
+    expect(result.operations).toHaveLength(1);
+  });
+
+  it("maps orchestratorError to a structured EDIT_GRAPH_* failure code", async () => {
+    handleEditGraphMock.mockRejectedValue(
+      Object.assign(new Error('LLM timed out'), {
+        orchestratorError: {
+          code: 'LLM_TIMEOUT',
+          message: 'LLM timed out',
+          tool: 'edit_graph',
+          recoverable: true,
+        },
+      }),
+    );
+    const ctx = makeContext();
+    const result = await editGraphAction.execute(
+      { edit_description: 'anything' },
+      ctx,
+    );
+    expect(result.failure?.code).toBe('EDIT_GRAPH_LLM_TIMEOUT');
+    expect(result.failure?.user_message).toMatch(/took too long/i);
   });
 
   it("returns unsupported fallback on empty edit_description", async () => {
@@ -227,10 +297,10 @@ describe("edit_graph V4 integration", () => {
       "../../../../../src/orchestrator/deterministic/pipeline-v4.js"
     );
 
-    const graph = makeGraph();
-    // V2 returns TWO operations: one valid structural op + one with an
-    // unknown endpoint. The adapter must strip the bad op and re-emit the
-    // patch; the envelope must NOT leak the V2 block alongside.
+    // Use the safety-net path (appliedGraph: null) so the adapter runs edge
+    // validation. V2 returns TWO operations: one valid structural op + one
+    // with an unknown endpoint. The adapter must strip the bad op and
+    // re-emit a single graph_patch; the envelope must NOT leak the V2 block.
     const v2Ops = [
       {
         op: 'add_edge',
@@ -260,7 +330,7 @@ describe("edit_graph V4 integration", () => {
       blocks: [v2Block],
       assistantText: 'Connected X to A.',
       latencyMs: 1,
-      appliedGraph: graph,
+      appliedGraph: null, // safety-net path → adapter validates
       wasRejected: false,
     });
 
