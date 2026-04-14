@@ -525,6 +525,55 @@ describe("composeResponse — value_set", () => {
     expect(text).toBe('Salary calibrated to 75000 GBP.');
     assertNoBannedTerms(text);
   });
+
+  // ── Qualitative proposal phrasing (Pattern A follow-up, Fix P1 #6) ───
+  // Proposal mode with a qualitative display_value must use "is" framing
+  // joined by ", which" so the why_it_matters clause reads naturally —
+  // the previous "at low" form was ungrammatical.
+
+  it("proposal (no patch block) + qualitative + why_it_matters: uses 'is ..., which would ...'", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sen', label: 'Seniority', kind: 'factor' }],
+      what_changed: 'Seniority to low',
+      why_it_matters: 'slow delivery more than expected',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { new_value: 0.2, display_value: 'low' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toBe('Seniority is low, which would slow delivery more than expected.');
+    expect(text).not.toContain('at low');
+    assertNoBannedTerms(text);
+  });
+
+  it("proposal + qualitative + no why: falls back to 'is ..., which would shift the balance'", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sen', label: 'Seniority', kind: 'factor' }],
+      what_changed: 'Seniority to high',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { new_value: 0.8, display_value: 'high' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toBe('Seniority is high, which would shift the balance of the decision.');
+    assertNoBannedTerms(text);
+  });
+
+  it("proposal + numeric real unit: keeps legacy 'at ... would ...' framing unchanged", () => {
+    const fact: HandlerFact = {
+      action: 'value_set',
+      entities_affected: [{ id: 'f_sal', label: 'Salary', kind: 'factor' }],
+      what_changed: 'Salary to 85000 GBP',
+      stale_analysis: false,
+      auto_apply: false,
+      data: { new_value: 85000, unit: 'GBP', display_value: '85000 GBP' },
+    };
+    const text = composeResponse(fact, null, false);
+    expect(text).toBe('Salary at 85000 GBP would shift the balance of the decision.');
+    assertNoBannedTerms(text);
+  });
 });
 
 // ============================================================================

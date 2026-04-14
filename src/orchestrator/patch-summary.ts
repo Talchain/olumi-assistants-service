@@ -13,6 +13,7 @@
  */
 
 import type { PatchOperation, GraphV3T } from './types.js';
+import { log } from '../utils/telemetry.js';
 
 // ============================================================================
 // Label resolution helpers (T4)
@@ -574,9 +575,25 @@ export function buildPatchSummary(
  *
  * Returns "Review the proposed model." only when no graph or no recognisable
  * structure is available.
+ *
+ * Emits `v4.patch_summary_full_draft_fallback` with a `reason` code so the
+ * fallback path is observable in telemetry — lets staging surface cases
+ * where semantic resolution is regressing vs. genuinely low-information
+ * drafts.
  */
 function buildFullDraftFallback(graph: GraphV3T | null | undefined): string {
-  if (!graph) return 'Review the proposed model.';
+  const logFallback = (
+    reason: 'no_graph' | 'goal_and_options' | 'options_only' | 'goal_only' | 'empty',
+    summary: string,
+  ): string => {
+    log.info(
+      { event: 'v4.patch_summary_full_draft_fallback', reason, summary },
+      'buildPatchSummary: full_draft semantic path unavailable — using decision-framed fallback',
+    );
+    return summary;
+  };
+
+  if (!graph) return logFallback('no_graph', 'Review the proposed model.');
 
   const goal = graph.nodes.find((n) => (n as { kind?: string }).kind === 'goal');
   const options = graph.nodes
@@ -590,19 +607,19 @@ function buildFullDraftFallback(graph: GraphV3T | null | undefined): string {
 
   if (goalLabel && options.length > 0) {
     const shown = options.slice(0, 3);
-    return `${goalLabel}: ${joinList(shown)}.`;
+    return logFallback('goal_and_options', `${goalLabel}: ${joinList(shown)}.`);
   }
 
   if (options.length > 0) {
     const shown = options.slice(0, 3);
-    return `A decision model comparing ${joinList(shown)}.`;
+    return logFallback('options_only', `A decision model comparing ${joinList(shown)}.`);
   }
 
   if (goalLabel) {
-    return `${goalLabel}: proposed model ready for review.`;
+    return logFallback('goal_only', `${goalLabel}: proposed model ready for review.`);
   }
 
-  return 'Review the proposed model.';
+  return logFallback('empty', 'Review the proposed model.');
 }
 
 // ============================================================================

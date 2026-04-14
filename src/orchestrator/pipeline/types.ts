@@ -662,7 +662,15 @@ export interface ToolDispatcher {
     context: ConversationContext,
     turnId: string,
     requestId: string,
-    options?: { plotOpts?: PLoTClientRunOpts; request?: FastifyRequest; intentClassification?: string },
+    options?: {
+      plotOpts?: PLoTClientRunOpts;
+      request?: FastifyRequest;
+      intentClassification?: string;
+      /** ISO currency code (e.g. "GBP") detected from the user message. Thread
+       *  through so draft_graph gets consistent instruction behaviour on the
+       *  V2 path, matching the deterministic action path. */
+      userCurrencyHint?: string | null;
+    },
   ): Promise<ToolResult>;
 }
 

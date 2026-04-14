@@ -106,6 +106,24 @@ export function computeChips(
   // Step 1: select the chip bundle for this context.
   const candidates: TypedChip[] = [];
 
+  // Track whether the gate actually prevented a run_analysis chip from being
+  // surfaced this turn (bundle push, deferred promotion, or slot-rule
+  // backfill). We log the suppression event at most once per turn regardless
+  // of how many insertion points the gate fired on.
+  let runAnalysisSuppressed = false;
+  const suppressRunAnalysis = (source: 'bundle' | 'deferred' | 'slot_rule'): void => {
+    if (runAnalysisSuppressed) return;
+    runAnalysisSuppressed = true;
+    log.info(
+      {
+        event: 'v4.chip_run_analysis_suppressed',
+        analysis_ready_status: analysisReadyStatus,
+        source,
+      },
+      'chipRunAnalysis suppressed: analysis_ready.status is not "ready"',
+    );
+  };
+
   if (!ci.has_analysis) {
     // Post-draft / IDEATE path.
     if (coaching.ai_estimated_count > 0) {
@@ -113,26 +131,19 @@ export function computeChips(
       candidates.push(chipHelpCalibrate(coaching));
       candidates.push(chipWhatCouldGoWrong());
       if (canRunAnalysis) candidates.push(chipRunAnalysis(turnContext));
+      else suppressRunAnalysis('bundle');
     } else if (coaching.risk_factor_count === 0) {
       // No risk factors modelled — challenge frame.
       candidates.push(chipWhatCouldGoWrong());
       candidates.push(chipOtherApproaches());
       if (canRunAnalysis) candidates.push(chipRunAnalysis(turnContext));
+      else suppressRunAnalysis('bundle');
     } else {
       // Generic post-draft — progress + calibrate + challenge.
       if (canRunAnalysis) candidates.push(chipRunAnalysis(turnContext));
+      else suppressRunAnalysis('bundle');
       candidates.push(chipHelpCalibrate(coaching));
       candidates.push(chipWhatCouldGoWrong());
-    }
-
-    if (!canRunAnalysis) {
-      log.info(
-        {
-          event: 'v4.chip_run_analysis_suppressed',
-          analysis_ready_status: analysisReadyStatus,
-        },
-        'chipRunAnalysis suppressed: analysis_ready.status is not "ready"',
-      );
     }
   } else if (ci.analysis_fresh) {
     // Post-analysis path.
@@ -160,9 +171,15 @@ export function computeChips(
   }
 
   // Step 2: add deferred chips at the front (compound tool calls the LLM
-  // emitted but the pipeline discarded per one-tool-per-turn).
+  // emitted but the pipeline discarded per one-tool-per-turn). Honour the
+  // readiness gate here too — a deferred `run_analysis` must not bypass the
+  // non-ready state. Promotes gate-aware behaviour to every insertion path.
   for (const deferred of deferredActions) {
     if (candidates.some(c => c.action_type === deferred)) continue;
+    if (deferred === 'run_analysis' && !canRunAnalysis) {
+      suppressRunAnalysis('deferred');
+      continue;
+    }
     const deferredChip = chipFromDeferredAction(deferred);
     if (deferredChip) {
       candidates.unshift(deferredChip);
@@ -201,14 +218,20 @@ export function computeChips(
   // least one progress chip is present in the first 3. Post-analysis bundles
   // already encode forward motion (compare / pre-mortem / generate brief)
   // so we do not force-insert an additional progress chip there.
-  if (!inRecoverOrConfirm && !ci.has_analysis && canRunAnalysis) {
+  if (!inRecoverOrConfirm && !ci.has_analysis) {
     const top3 = filtered.slice(0, 3);
     const hasProgress = top3.some(c => PROGRESS_TYPES.has(c.type));
     if (!hasProgress) {
-      const progressChip = chipRunAnalysis(turnContext);
-      // Only add if its action isn't recently executed and it's not already present.
-      if (!recentActions.has(progressChip.action_type) && !seenTypes.has(progressChip.action_type)) {
-        filtered = [progressChip, ...filtered];
+      if (canRunAnalysis) {
+        const progressChip = chipRunAnalysis(turnContext);
+        // Only add if its action isn't recently executed and it's not already present.
+        if (!recentActions.has(progressChip.action_type) && !seenTypes.has(progressChip.action_type)) {
+          filtered = [progressChip, ...filtered];
+        }
+      } else {
+        // Slot rule would normally force-insert run_analysis; the readiness
+        // gate blocks that. Record the suppression so chip telemetry reflects it.
+        suppressRunAnalysis('slot_rule');
       }
     }
   } else if (inRecoverOrConfirm) {

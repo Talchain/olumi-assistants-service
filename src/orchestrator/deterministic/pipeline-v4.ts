@@ -1528,20 +1528,22 @@ function getUserFacingErrorMessage(errorCode: string, isDraftGraph?: boolean): s
 // ============================================================================
 
 /**
- * Matches count-jargon summaries like:
- *   "Added 5 factors, 3 options, and 24 connections."
- *   "Created 2 goals and 1 option."
- * — i.e. any user-facing string that leads with a number + bare model-element
- * noun. These leak patch machinery to users; the override replaces them with
- * a decision-framed sentence when coaching context is available.
+ * Matches count-jargon summaries of the form "N factors" / "N nodes" /
+ * "N edges" / "N connections" (e.g. "Added 5 factors, 3 options, and 24
+ * connections"). Spec-scoped per the Pattern A correction brief: the
+ * override must not rewrite summaries that merely mention option / goal /
+ * outcome / risk / constraint counts without also leaking patch-machinery
+ * terms, so those nouns are intentionally excluded from this regex.
  */
-const COUNT_JARGON_RE = /\b\d+\s*(factors?|nodes?|edges?|connections?|options?|goals?|outcomes?|risks?|constraints?)\b/i;
+const COUNT_JARGON_RE = /\d+\s*(factors?|nodes?|edges?|connections?)/i;
 
-/** Generic fallback strings emitted by buildPatchSummary when it had nothing else to say. */
+/**
+ * Single generic fallback string that the override is allowed to replace.
+ * Spec-scoped: the override never rewrites "Created a new decision model."
+ * or "Applied graph changes." — those belong to edit/accepted contexts and
+ * are handled by Fix 6 in buildPatchSummary.
+ */
 const GENERIC_SUMMARY_FALLBACKS = new Set<string>([
-  'Created a new decision model.',
-  'Applied graph changes.',
-  'No changes were applied.',
   'Review the proposed model.',
 ]);
 

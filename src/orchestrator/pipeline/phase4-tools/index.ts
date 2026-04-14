@@ -32,6 +32,7 @@ import { convertExtractedBlocks } from "../../turn-handler.js";
 import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import type { FastifyRequest } from "fastify";
 import type { PLoTClientRunOpts } from "../../plot-client.js";
+import { detectCurrencyInMessage } from "../../deterministic/turn-context.js";
 
 // ============================================================================
 // Execution result shape extended with multi-tool tracking
@@ -157,13 +158,21 @@ export async function phase4Execute(
       continue;
     }
 
+    // Detect user currency from the raw message so draft_graph (and any
+    // currency-sensitive tool) can prefer the full-message hint over
+    // brief-only detection — matches the v4 deterministic action path.
+    const userCurrencyHint = detectCurrencyInMessage(enrichedContext.user_message ?? null);
+
     const result = await toolDispatcher.dispatch(
       invocation.name,
       invocation.input,
       currentContext,
       enrichedContext.turn_id,
       requestId,
-      { intentClassification: enrichedContext.intent_classification },
+      {
+        intentClassification: enrichedContext.intent_classification,
+        userCurrencyHint,
+      },
     );
 
     allBlocks.push(...result.blocks);
@@ -329,6 +338,7 @@ export function createProductionToolDispatcher(
         plotOpts,
         request,
         intentClassification: options?.intentClassification,
+        userCurrencyHint: options?.userCurrencyHint ?? null,
       };
       const result = await dispatchToolHandler(
         toolName,

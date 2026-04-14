@@ -268,9 +268,15 @@ function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, ha
   }
 
   // Proposal framing — no "Confirm to apply".
-  const lead = isQualitative
-    ? `${entity.label} at ${valueStr}`
-    : `${entity.label} at ${valueStr}`;
+  // Qualitative values read naturally with "is" framing, joined by ", which"
+  // so the why_it_matters clause parses as a consequence rather than a
+  // dangling fragment. Numeric values keep the legacy "at" framing.
+  if (isQualitative) {
+    const lead = `${entity.label} is ${valueStr}`;
+    if (fact.why_it_matters) return ensureSentencePunctuation(`${lead}, which would ${lowercaseFirst(fact.why_it_matters)}`);
+    return `${lead}, which would shift the balance of the decision.`;
+  }
+  const lead = `${entity.label} at ${valueStr}`;
   if (fact.why_it_matters) return ensureSentencePunctuation(`${lead} would ${lowercaseFirst(fact.why_it_matters)}`);
   return `${lead} would shift the balance of the decision.`;
 }

@@ -600,4 +600,38 @@ describe("computeChips — analysis_ready.status gate", () => {
     );
     expect(chips.map(c => c.action_type)).not.toContain('run_analysis');
   });
+
+  it("suppresses deferred run_analysis when status is non-ready (Pattern A follow-up P0 #2)", () => {
+    // Scenario: the LLM emitted a compound tool call and run_analysis was
+    // deferred by the one-tool-per-turn policy. The deferred-chip loop must
+    // honour the readiness gate and NOT promote run_analysis to the top of
+    // the chip list when analysis_ready.status is non-ready.
+    const coaching = makeCoaching({ ai_estimated_count: 3 });
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      makeTurnContext(),
+      null,
+      ['run_analysis'],
+      ALL_TOOLS,
+      'needs_encoding',
+    );
+    expect(chips.map(c => c.action_type)).not.toContain('run_analysis');
+  });
+
+  it("allows deferred run_analysis when status is ready", () => {
+    const coaching = makeCoaching({ ai_estimated_count: 3 });
+    const chips = computeChips(
+      coaching,
+      defaultSessionState(),
+      makeTurnContext(),
+      null,
+      ['run_analysis'],
+      ALL_TOOLS,
+      'ready',
+    );
+    // Deferred run_analysis is unshifted to the front of candidates, so it
+    // should appear among the top 3 chips.
+    expect(chips.map(c => c.action_type)).toContain('run_analysis');
+  });
 });

@@ -196,3 +196,102 @@ describe("set_factor_value — currency precedence", () => {
     expect((op.value as Record<string, unknown>).observed_state).toMatchObject({ unit: 'USD' });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// display_value branch coverage (Fix 1 — Pattern A follow-up)
+//
+// computeDisplayValue in set-factor-value.ts renders:
+//   - unitless 0-1 factor (no unit OR unit === 'scale') → qualitative band
+//   - any real unit (£, $, %, months, etc.) → "${value} ${unit}"
+//   - out-of-range unitless → "${value}" raw
+// The qualitative path is the only one that fires v4.display_value_qualitative.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("set_factor_value — display_value branch coverage", () => {
+  const debugSpy = vi.mocked(log.debug);
+
+  beforeEach(() => {
+    debugSpy.mockClear();
+  });
+
+  it("unitless 0-1 value produces a qualitative band and logs v4.display_value_qualitative", async () => {
+    const ctx = makeContext({ nodeUnit: undefined });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 0.25 },
+      ctx,
+    );
+    expect(result.fact?.data?.display_value).toBe('low');
+    expect(result.assistantText).toContain('low');
+    expect(result.assistantText).not.toContain('0.25');
+
+    const qualitativeLog = debugSpy.mock.calls.find(
+      (c) => (c[0] as { event?: string })?.event === 'v4.display_value_qualitative',
+    );
+    expect(qualitativeLog).toBeDefined();
+    expect((qualitativeLog![0] as { band?: string }).band).toBe('low');
+  });
+
+  it("unit='scale' is treated as unitless and maps to a qualitative band", async () => {
+    const ctx = makeContext({ nodeUnit: 'scale' });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 0.8 },
+      ctx,
+    );
+    expect(result.fact?.data?.display_value).toBe('very high');
+    expect(result.assistantText).not.toContain('0.8');
+  });
+
+  it("percentage (real unit) keeps numeric formatting, does NOT emit qualitative telemetry", async () => {
+    const ctx = makeContext({ nodeUnit: '%' });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 3, unit: '%' },
+      ctx,
+    );
+    expect(result.fact?.data?.display_value).toBe('3 %');
+    expect(result.assistantText).toContain('3 %');
+    const qualitativeLog = debugSpy.mock.calls.find(
+      (c) => (c[0] as { event?: string })?.event === 'v4.display_value_qualitative',
+    );
+    expect(qualitativeLog).toBeUndefined();
+  });
+
+  it("currency (real unit) keeps numeric+unit form", async () => {
+    const ctx = makeContext({ nodeUnit: undefined });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 75000, unit: 'GBP' },
+      ctx,
+    );
+    expect(result.fact?.data?.display_value).toBe('75000 GBP');
+  });
+
+  it("out-of-range unitless numeric (>1) is rendered raw, not qualitative", async () => {
+    const ctx = makeContext({ nodeUnit: undefined });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 150000 },
+      ctx,
+    );
+    expect(result.fact?.data?.display_value).toBe('150000');
+    const qualitativeLog = debugSpy.mock.calls.find(
+      (c) => (c[0] as { event?: string })?.event === 'v4.display_value_qualitative',
+    );
+    expect(qualitativeLog).toBeUndefined();
+  });
+
+  it("boundary: value === 0 with no unit maps to 'low' (inclusive of lower band edge)", async () => {
+    const ctx = makeContext({ nodeUnit: undefined });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 0 },
+      ctx,
+    );
+    expect(result.fact?.data?.display_value).toBe('low');
+  });
+
+  it("boundary: value === 1 with no unit maps to 'very high' (inclusive of upper band edge)", async () => {
+    const ctx = makeContext({ nodeUnit: undefined });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 1 },
+      ctx,
+    );
+    expect(result.fact?.data?.display_value).toBe('very high');
+  });
+});

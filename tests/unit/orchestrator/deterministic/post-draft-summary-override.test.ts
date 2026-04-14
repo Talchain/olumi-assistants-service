@@ -101,10 +101,17 @@ function makeCoaching(overrides: Partial<CoachingContext> = {}): CoachingContext
 }
 
 describe("COUNT_JARGON_RE", () => {
-  it("matches common count-jargon phrasings", () => {
+  it("matches patch-machinery count-jargon (factors / nodes / edges / connections)", () => {
     expect(COUNT_JARGON_RE.test('Added 5 factors, 3 options, and 24 connections.')).toBe(true);
-    expect(COUNT_JARGON_RE.test('Created 2 goals and 1 option.')).toBe(true);
     expect(COUNT_JARGON_RE.test('Added 24 connections.')).toBe(true);
+    expect(COUNT_JARGON_RE.test('Updated 2 nodes and 3 edges.')).toBe(true);
+  });
+
+  it("does NOT match option/goal/outcome/risk/constraint counts — spec-scoped to patch-machinery nouns", () => {
+    // These nouns are part of the decision domain; the override must not
+    // rewrite summaries that mention them without also leaking patch terms.
+    expect(COUNT_JARGON_RE.test('Created 2 goals and 1 option.')).toBe(false);
+    expect(COUNT_JARGON_RE.test('Decision with 3 options.')).toBe(false);
     expect(COUNT_JARGON_RE.test('Hire for a new feature: Tech Lead or Two Developers.')).toBe(false);
   });
 });
@@ -148,13 +155,40 @@ describe("maybeOverridePatchSummary — overwrite conditions", () => {
     expect(block.data.summary).toContain('Hire for a new feature');
   });
 
-  it("replaces generic 'Created a new decision model.' fallback", () => {
+  it("replaces generic 'Review the proposed model.' fallback", () => {
+    const actionResult = makeActionResultWithSummary('Review the proposed model.');
+    maybeOverridePatchSummary(actionResult, null);
+    const block = actionResult.blocks[0];
+    if (block.block_type !== 'graph_patch') return;
+    expect(block.data.summary).not.toBe('Review the proposed model.');
+    expect(block.data.summary).toContain('Tech Lead');
+  });
+
+  it("does NOT replace 'Created a new decision model.' — spec-scoped to 'Review the proposed model.'", () => {
+    // Pattern A correction: only 'Review the proposed model.' is in the
+    // generic-fallback allowlist for overwrite. Legacy strings from the
+    // edit/accepted paths are preserved untouched.
     const actionResult = makeActionResultWithSummary('Created a new decision model.');
     maybeOverridePatchSummary(actionResult, null);
     const block = actionResult.blocks[0];
     if (block.block_type !== 'graph_patch') return;
-    expect(block.data.summary).not.toBe('Created a new decision model.');
-    expect(block.data.summary).toContain('Tech Lead');
+    expect(block.data.summary).toBe('Created a new decision model.');
+  });
+
+  it("does NOT replace 'Applied graph changes.' fallback", () => {
+    const actionResult = makeActionResultWithSummary('Applied graph changes.');
+    maybeOverridePatchSummary(actionResult, null);
+    const block = actionResult.blocks[0];
+    if (block.block_type !== 'graph_patch') return;
+    expect(block.data.summary).toBe('Applied graph changes.');
+  });
+
+  it("does NOT replace option/goal count strings (non-patch-machinery nouns)", () => {
+    const actionResult = makeActionResultWithSummary('Created 2 goals and 1 option.');
+    maybeOverridePatchSummary(actionResult, null);
+    const block = actionResult.blocks[0];
+    if (block.block_type !== 'graph_patch') return;
+    expect(block.data.summary).toBe('Created 2 goals and 1 option.');
   });
 
   it("preserves substantive LLM coaching summary — no overwrite", () => {
