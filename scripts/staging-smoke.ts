@@ -315,6 +315,7 @@ function buildRequestBody(
   scenarioId: string,
   message: string,
   state: ClientState,
+  opts: { chipMetadata?: Record<string, unknown> } = {},
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     scenario_id: scenarioId,
@@ -325,6 +326,7 @@ function buildRequestBody(
   if (state.graph_state) body.graph_state = state.graph_state;
   if (state.analysis_state) body.analysis_state = state.analysis_state;
   if (state.session_state) body.session_state = state.session_state;
+  if (opts.chipMetadata) body.chip_metadata = opts.chipMetadata;
   // Send analysis_inputs in context — required for run_analysis to fire
   // (unless server-side derives it from graph.analysis_ready). The real UI
   // extracts this from the graph_patch block's analysis_ready data.
@@ -970,6 +972,330 @@ async function journey4(endpoint: "stream" | "sync"): Promise<JourneyResult> {
 }
 
 // ============================================================================
+// Journey 5: Chip-click simulation — verifies chip-click bypass end-to-end
+// ============================================================================
+
+/**
+ * After a draft produces 2+ chips, simulate a click on each one by sending a
+ * follow-up turn with chip_metadata and the chip's prompt as the message.
+ * The click must NOT be downgraded ("action not available"). Only runs on
+ * turns with 2+ chips to make the test meaningful.
+ */
+async function journey5(endpoint: "stream" | "sync"): Promise<JourneyResult> {
+  const sid = randomUUID();
+  const state = freshState();
+  const turns: TurnResult[] = [];
+  const label = `J5-${endpoint}`;
+
+  // Turn 1: Draft
+  const msg1 = "Should I hire a tech lead or two junior developers for my startup? We have 18 months of runway and need to ship a product rewrite.";
+  console.log(`\n--- ${label} / Turn 1: Draft (to harvest chips) ---`);
+  const body1 = buildRequestBody(sid, msg1, state);
+  let envelope: any, events: SseEvent[], time_ms: number;
+  try {
+    ({ envelope, events, time_ms } = await sendTurn(endpoint, body1));
+  } catch (err: any) {
+    turns.push({ turn: 1, message: msg1, endpoint, request_payload_keys: Object.keys(body1), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: false, analysis_state_sent: false, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+    console.error("  FATAL:", err.message);
+    return { journey: "5", endpoint, turns };
+  }
+
+  const harvestedChips: Array<{ action_type: string; label: string; prompt: string; parameters: Record<string, unknown> }> =
+    (envelope.suggested_actions || []).map((c: any) => ({
+      action_type: c.action_type,
+      label: c.label || "",
+      prompt: c.prompt || c.message || c.label || "",
+      parameters: c.parameters || {},
+    }));
+
+  const checks1: Check[] = [
+    ...sseChecks(events, time_ms),
+    chk("Draft produced chips to click", harvestedChips.length >= 1, `${harvestedChips.length} chips: ${harvestedChips.map((c) => c.action_type).join(", ")}`),
+    ...bannedChecks(envelope.assistant_text || ""),
+  ];
+  logChecks(checks1);
+  turns.push(buildTurnResult(1, msg1, endpoint, body1, envelope, events, time_ms, checks1, null));
+  updateState(state, msg1, envelope);
+
+  // For each chip (up to 3), simulate a click on a fresh branch of state
+  // so clicks don't interfere with each other. We snapshot state after T1
+  // and reuse it for every click simulation.
+  const snapshot: ClientState = {
+    graph_state: state.graph_state,
+    analysis_state: state.analysis_state,
+    analysis_inputs: state.analysis_inputs,
+    session_state: state.session_state,
+    history: [...state.history],
+  };
+
+  let turnCounter = 2;
+  for (const chip of harvestedChips) {
+    console.log(`\n--- ${label} / Turn ${turnCounter}: Click chip "${chip.label}" (${chip.action_type}) ---`);
+    const clickState: ClientState = {
+      graph_state: snapshot.graph_state,
+      analysis_state: snapshot.analysis_state,
+      analysis_inputs: snapshot.analysis_inputs,
+      session_state: snapshot.session_state,
+      history: [...snapshot.history],
+    };
+    const clickBody = buildRequestBody(sid, chip.prompt, clickState, {
+      chipMetadata: {
+        action_type: chip.action_type,
+        parameters: chip.parameters,
+      },
+    });
+    try {
+      ({ envelope, events, time_ms } = await sendTurn(endpoint, clickBody));
+    } catch (err: any) {
+      turns.push({ turn: turnCounter, message: `click:${chip.action_type}`, endpoint, request_payload_keys: Object.keys(clickBody), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: true, analysis_state_sent: false, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+      console.error(`  FATAL on click ${chip.action_type}:`, err.message);
+      turnCounter++;
+      continue;
+    }
+
+    const clickText = envelope.assistant_text || "";
+    const hasUnavailable = /action.*not available|isn't available|isn't currently available/i.test(clickText);
+
+    let inv: Investigation | null = null;
+    const checks: Check[] = [
+      ...sseChecks(events, time_ms),
+      chk(`Click ${chip.action_type}: no "action unavailable"`, !hasUnavailable, clickText.slice(0, 200)),
+      chk(`Click ${chip.action_type}: has response`, clickText.length > 0, `${clickText.length} chars`),
+      ...bannedChecks(clickText),
+    ];
+
+    if (hasUnavailable) {
+      const tp = envelope.turn_plan || {};
+      inv = investigate(
+        `Chip "${chip.label}" (${chip.action_type}) click downgraded to "action not available"`,
+        `turn_plan.selected_tool=${tp.selected_tool}, turn_plan.routing=${tp.routing}. Chip was visible but not executable — the chip-click bypass in pipeline-v4 may not be applied, or the tool was filtered by a different path (stage policy, capability, prerequisite).`,
+        `clicked chip_metadata.action_type=${chip.action_type}. Response: "${clickText.slice(0, 200)}"`,
+        "Verify isChipClick branch in pipeline-v4 passes bypassDisambiguation and that the action is in STAGE_ACTION_POLICY for the current stage.",
+        "moderate",
+      );
+    }
+
+    logChecks(checks);
+    turns.push(buildTurnResult(turnCounter, `click:${chip.action_type}`, endpoint, clickBody, envelope, events, time_ms, checks, inv));
+    turnCounter++;
+  }
+
+  return { journey: "5", endpoint, turns };
+}
+
+// ============================================================================
+// Journey 6: Post-analysis depth — explain / flip / compare
+// ============================================================================
+
+async function journey6(endpoint: "stream" | "sync"): Promise<JourneyResult> {
+  const sid = randomUUID();
+  const state = freshState();
+  const turns: TurnResult[] = [];
+  const label = `J6-${endpoint}`;
+
+  // Turn 1: Draft
+  const msg1 = "Should I hire a marketing manager or use an AI marketing tool for our product launch? Budget is about \u00a350,000.";
+  console.log(`\n--- ${label} / Turn 1: Draft ---`);
+  const body1 = buildRequestBody(sid, msg1, state);
+  let envelope: any, events: SseEvent[], time_ms: number;
+  try {
+    ({ envelope, events, time_ms } = await sendTurn(endpoint, body1));
+  } catch (err: any) {
+    turns.push({ turn: 1, message: msg1, endpoint, request_payload_keys: Object.keys(body1), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: false, analysis_state_sent: false, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+    console.error("  FATAL:", err.message);
+    return { journey: "6", endpoint, turns };
+  }
+  logChecks([...sseChecks(events, time_ms)]);
+  turns.push(buildTurnResult(1, msg1, endpoint, body1, envelope, events, time_ms, [...sseChecks(events, time_ms)], null));
+  updateState(state, msg1, envelope);
+
+  // Turn 2: Run analysis
+  const msg2 = "Run the analysis";
+  console.log(`\n--- ${label} / Turn 2: Run analysis ---`);
+  const body2 = buildRequestBody(sid, msg2, state);
+  try {
+    ({ envelope, events, time_ms } = await sendTurn(endpoint, body2));
+  } catch (err: any) {
+    turns.push({ turn: 2, message: msg2, endpoint, request_payload_keys: Object.keys(body2), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: true, analysis_state_sent: false, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+    console.error("  FATAL:", err.message);
+    return { journey: "6", endpoint, turns };
+  }
+  const stage2 = getStage(envelope);
+  const checks2: Check[] = [
+    ...sseChecks(events, time_ms),
+    chk("Stage is evaluate after analysis", stage2 === "evaluate", `stage=${stage2}`),
+    ...bannedChecks(envelope.assistant_text || ""),
+  ];
+  logChecks(checks2);
+  turns.push(buildTurnResult(2, msg2, endpoint, body2, envelope, events, time_ms, checks2, null));
+  updateState(state, msg2, envelope);
+
+  // If analysis didn't complete (stage didn't advance), skip the depth checks
+  if (stage2 !== "evaluate") {
+    console.log(`  [skip] stage=${stage2} — skipping depth checks that require evaluate`);
+    return { journey: "6", endpoint, turns };
+  }
+
+  // Depth checks: three explanation tools in sequence
+  const depthChecks: Array<{ message: string; expectedPatterns: RegExp; label: string }> = [
+    { message: "Explain the results", expectedPatterns: /%|leads|probability|driver|sensitive|factor|likely|outcome|winner|higher|lower/i, label: "Explain results" },
+    { message: "What would flip this?", expectedPatterns: /flip|change|threshold|swing|reversal|shift|sensitive|adjust|break|reverse/i, label: "Flip question" },
+    { message: "Compare the options", expectedPatterns: /compare|comparison|versus|vs\.?|option|each|difference|trade|higher|lower|stronger/i, label: "Compare options" },
+  ];
+
+  let turnNum = 3;
+  for (const depth of depthChecks) {
+    console.log(`\n--- ${label} / Turn ${turnNum}: ${depth.label} ---`);
+    const body = buildRequestBody(sid, depth.message, state);
+    try {
+      ({ envelope, events, time_ms } = await sendTurn(endpoint, body));
+    } catch (err: any) {
+      turns.push({ turn: turnNum, message: depth.message, endpoint, request_payload_keys: Object.keys(body), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: true, analysis_state_sent: !!state.analysis_state, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+      console.error("  FATAL:", err.message);
+      turnNum++;
+      continue;
+    }
+
+    const txt = envelope.assistant_text || "";
+    const stageN = getStage(envelope);
+    const hasUnavailable = /action.*not available|isn't available/i.test(txt);
+
+    let inv: Investigation | null = null;
+    const checks: Check[] = [
+      ...sseChecks(events, time_ms),
+      chk(`${depth.label}: no "action unavailable"`, !hasUnavailable, txt.slice(0, 200)),
+      chk(`${depth.label}: contains analytical content`, depth.expectedPatterns.test(txt), txt.slice(0, 200)),
+      chk(`${depth.label}: stage stays evaluate`, stageN === "evaluate", `stage=${stageN}`),
+      ...bannedChecks(txt),
+    ];
+
+    if (hasUnavailable) {
+      const tp = envelope.turn_plan || {};
+      inv = investigate(
+        `${depth.label}: "${depth.message}" returned "action not available"`,
+        `Stage is ${stageN}. turn_plan.selected_tool=${tp.selected_tool}. The explanation tool appears to be filtered from the evaluate tool set.`,
+        `response text: "${txt.slice(0, 200)}". turn_plan: ${JSON.stringify(tp).slice(0, 200)}`,
+        "Verify STAGE_ACTION_POLICY.evaluate includes the expected tool (explain_result, what_would_flip, compare_options).",
+        "moderate",
+      );
+    }
+
+    logChecks(checks);
+    turns.push(buildTurnResult(turnNum, depth.message, endpoint, body, envelope, events, time_ms, checks, inv));
+    updateState(state, depth.message, envelope);
+    turnNum++;
+  }
+
+  return { journey: "6", endpoint, turns };
+}
+
+// ============================================================================
+// Journey 7: Re-draft — after a full flow, start over and verify stage resets
+// ============================================================================
+
+async function journey7(endpoint: "stream" | "sync"): Promise<JourneyResult> {
+  const sid = randomUUID();
+  const state = freshState();
+  const turns: TurnResult[] = [];
+  const label = `J7-${endpoint}`;
+
+  // Turn 1: Draft
+  const msg1 = "Should I hire a marketing manager or use an AI marketing tool for our product launch? Budget is about \u00a350,000.";
+  console.log(`\n--- ${label} / Turn 1: Draft ---`);
+  const body1 = buildRequestBody(sid, msg1, state);
+  let envelope: any, events: SseEvent[], time_ms: number;
+  try {
+    ({ envelope, events, time_ms } = await sendTurn(endpoint, body1));
+  } catch (err: any) {
+    turns.push({ turn: 1, message: msg1, endpoint, request_payload_keys: Object.keys(body1), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: false, analysis_state_sent: false, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+    console.error("  FATAL:", err.message);
+    return { journey: "7", endpoint, turns };
+  }
+  turns.push(buildTurnResult(1, msg1, endpoint, body1, envelope, events, time_ms, [...sseChecks(events, time_ms)], null));
+  updateState(state, msg1, envelope);
+  const firstGoalLabel: string | undefined = state.graph_state?.nodes?.find((n: any) => n.kind === "goal")?.label;
+
+  // Turn 2: Run analysis
+  const msg2 = "Run the analysis";
+  console.log(`\n--- ${label} / Turn 2: Run analysis ---`);
+  const body2 = buildRequestBody(sid, msg2, state);
+  try {
+    ({ envelope, events, time_ms } = await sendTurn(endpoint, body2));
+  } catch (err: any) {
+    turns.push({ turn: 2, message: msg2, endpoint, request_payload_keys: Object.keys(body2), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: true, analysis_state_sent: false, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+    console.error("  FATAL:", err.message);
+    return { journey: "7", endpoint, turns };
+  }
+  const stage2 = getStage(envelope);
+  turns.push(buildTurnResult(2, msg2, endpoint, body2, envelope, events, time_ms, [...sseChecks(events, time_ms), chk("Stage evaluate", stage2 === "evaluate", stage2)], null));
+  updateState(state, msg2, envelope);
+
+  // Turn 3: Explain (if we reached evaluate)
+  if (stage2 === "evaluate") {
+    const msg3 = "Explain the results";
+    console.log(`\n--- ${label} / Turn 3: Explain ---`);
+    const body3 = buildRequestBody(sid, msg3, state);
+    try {
+      ({ envelope, events, time_ms } = await sendTurn(endpoint, body3));
+      turns.push(buildTurnResult(3, msg3, endpoint, body3, envelope, events, time_ms, [...sseChecks(events, time_ms)], null));
+      updateState(state, msg3, envelope);
+    } catch (err: any) {
+      console.error("  FATAL on explain:", err.message);
+    }
+  }
+
+  // Turn 4: Re-draft (the critical test)
+  const msg4 = "Actually, let me start over. I'm deciding whether to outsource the whole project instead.";
+  console.log(`\n--- ${label} / Turn 4: Re-draft ---`);
+  const body4 = buildRequestBody(sid, msg4, state);
+  try {
+    ({ envelope, events, time_ms } = await sendTurn(endpoint, body4));
+  } catch (err: any) {
+    turns.push({ turn: 4, message: msg4, endpoint, request_payload_keys: Object.keys(body4), response_envelope_keys: [], assistant_text_preview: "", stage: "", chips_count: 0, blocks_count: 0, session_state_present: false, graph_state_sent: true, analysis_state_sent: !!state.analysis_state, latency_ms: 0, latency_warning: false, checks: [], investigation: null, raw_response: {}, error: err.message });
+    console.error("  FATAL:", err.message);
+    return { journey: "7", endpoint, turns };
+  }
+
+  const stage4 = getStage(envelope);
+  const text4 = envelope.assistant_text || "";
+  const blocks4 = envelope.blocks || [];
+  const hasNewDraftPatch = blocks4.some((b: any) => {
+    const bt = b.type || b.block_type;
+    const pt = b.data?.patch_type;
+    return bt === "graph_patch" && pt === "full_draft";
+  });
+  const newGraph = extractGraph(envelope);
+  const newGoalLabel: string | undefined = newGraph?.nodes?.find((n: any) => n.kind === "goal")?.label;
+  const goalChanged = !!firstGoalLabel && !!newGoalLabel && firstGoalLabel !== newGoalLabel;
+  const outsourceMentioned = /outsource/i.test(text4) || /outsource/i.test(newGoalLabel || "") || (newGraph?.nodes || []).some((n: any) => /outsource/i.test(n.label || ""));
+
+  let inv: Investigation | null = null;
+  const checks4: Check[] = [
+    ...sseChecks(events, time_ms),
+    chk("Re-draft: stage resets to frame or ideate (not evaluate)", stage4 === "frame" || stage4 === "ideate", `stage=${stage4}`),
+    chk("Re-draft: new graph_patch emitted", hasNewDraftPatch || !!newGraph, `hasPatch=${hasNewDraftPatch}, newGraph=${!!newGraph}`),
+    chk("Re-draft: goal or nodes reflect new brief (outsource)", outsourceMentioned || goalChanged, `first goal: "${firstGoalLabel}", new goal: "${newGoalLabel}", outsource in response: ${/outsource/i.test(text4)}`),
+    chk("Re-draft: no stale analysis leaked in text", !/(Option A wins|previous analysis|earlier result|previous model)/i.test(text4), text4.slice(0, 200)),
+    ...bannedChecks(text4),
+  ];
+
+  if (stage4 === "evaluate") {
+    inv = investigate(
+      "Re-draft did not reset stage — stale analysis leaked through",
+      `stage=${stage4} after re-draft. Expected frame or ideate. The post-draft recomputation should clear analysis_response when a new graph is applied.`,
+      `first goal: "${firstGoalLabel}", new goal: "${newGoalLabel}", re-draft text: "${text4.slice(0, 200)}"`,
+      "Verify post-draft recomputation in pipeline-v4 nulls context.analysis_response and analysis_inputs on re-draft.",
+      "moderate",
+    );
+  }
+
+  logChecks(checks4);
+  turns.push(buildTurnResult(4, msg4, endpoint, body4, envelope, events, time_ms, checks4, inv));
+
+  return { journey: "7", endpoint, turns };
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -992,6 +1318,9 @@ async function main() {
     journeys.push(await journey2(ep));
     journeys.push(await journey3(ep));
     journeys.push(await journey4(ep));
+    journeys.push(await journey5(ep));
+    journeys.push(await journey6(ep));
+    journeys.push(await journey7(ep));
   }
 
   // Aggregate
@@ -1014,6 +1343,32 @@ async function main() {
   const sync = byEndpoint("sync");
   console.log(`SSE:     ${sse.passed} passed, ${sse.failed} failed out of ${sse.count}`);
   console.log(`Sync:    ${sync.passed} passed, ${sync.failed} failed out of ${sync.count}\n`);
+
+  // Chip variety — unique action_types produced across all turns
+  const chipActionTypes = new Set<string>();
+  const chipBreakdown: Record<string, number> = {};
+  for (const j of journeys) {
+    for (const t of j.turns) {
+      const chips = ((t.raw_response as any).suggested_actions || []) as Array<{ action_type?: string }>;
+      for (const c of chips) {
+        if (c.action_type) {
+          chipActionTypes.add(c.action_type);
+          chipBreakdown[c.action_type] = (chipBreakdown[c.action_type] ?? 0) + 1;
+        }
+      }
+    }
+  }
+  const expectedChips = ["run_analysis", "set_factor_value", "challenge_assumption"];
+  const missingExpected = expectedChips.filter((t) => !chipActionTypes.has(t));
+  console.log(`Chip variety: ${chipActionTypes.size} unique action_types across all turns`);
+  for (const [k, v] of Object.entries(chipBreakdown).sort((a, b) => b[1] - a[1])) {
+    const expected = expectedChips.includes(k) ? " [expected]" : "";
+    console.log(`  ${k}: ${v} occurrences${expected}`);
+  }
+  if (missingExpected.length > 0) {
+    console.log(`  \u26A0 Missing expected chips: ${missingExpected.join(", ")}`);
+  }
+  console.log();
 
   // Latency report
   const allTurns = journeys.flatMap((j) => j.turns).filter((t) => !t.error);
@@ -1074,6 +1429,11 @@ async function main() {
           total: allChecks.length,
           sse: byEndpoint("stream"),
           sync: byEndpoint("sync"),
+          chip_variety: {
+            unique: [...chipActionTypes].sort(),
+            breakdown: chipBreakdown,
+            missing_expected: missingExpected,
+          },
         },
         journeys,
       },
