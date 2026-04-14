@@ -33,6 +33,7 @@ import { assembleMessages } from "../prompt-assembly.js";
 import { sanitiseAssistantHistory } from "./history-sanitiser.js";
 import { filterHistoryV4 } from "./history-filter-v4.js";
 import { computeContextHash } from "../context/context-hash.js";
+import { computeStructuralReadiness } from "../tools/analysis-ready-helper.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import { buildPatchSummary } from "../patch-summary.js";
@@ -1149,6 +1150,14 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
       'edit',
       turnContext.graph ?? null,
     ), { preserveBold: true });
+    // Fix 5: emit the past-tense variant so the UI can render the accepted
+    // card without a patch_accepted round-trip. Optional and additive.
+    const patchAppliedSummary = sanitiseAssistantText(buildPatchSummary(
+      actionResult.operations,
+      null,
+      'accepted',
+      turnContext.graph ?? null,
+    ), { preserveBold: true });
     const patchBlock = createGraphPatchBlock(
       {
         patch_type: 'edit',
@@ -1158,6 +1167,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
         applied_graph_hash: actionResult.applied_graph_hash,
         applied_graph: actionResult.applied_graph,
         summary: patchSummary,
+        applied_summary: patchAppliedSummary,
         // Propagate recomputed analysis_ready from the action handler.
         // Without this, downstream consumers (UI / next-turn run_analysis)
         // see the previous turn's stale view and PLoT rejects with
@@ -1254,7 +1264,17 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   // Extract analysis_ready.status from the current turn's graph_patch block
   // (set on draft_graph / edit_graph) so the chip engine can suppress
   // 'Run analysis' when the model isn't ready to run.
-  const analysisReadyStatus = extractAnalysisReadyStatusFromResult(actionResult);
+  //
+  // Fix 4: on conversational turns (no graph-mutating action), the action
+  // result carries no readiness block. Without a fallback the gate reads
+  // null → chip engine treats it as "no constraint" and surfaces the
+  // Run Analysis chip on un-ready graphs. Fall back to the prior graph
+  // state: prefer analysis_ready carried on turnRequest.context.graph,
+  // then recompute structural readiness from the current graph. The
+  // fallback preserves null only when no graph exists.
+  const analysisReadyStatus =
+    extractAnalysisReadyStatusFromResult(actionResult)
+    ?? deriveAnalysisReadyStatusFallback(turnContext);
 
   const suggestedActions = useChipEngine
     ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools, analysisReadyStatus)
@@ -1618,11 +1638,49 @@ function extractAnalysisReadyStatusFromResult(
   return typeof status === 'string' ? status : null;
 }
 
+/**
+ * Fix 4: fallback source for analysis_ready.status on turns where the action
+ * result carries no graph_patch block (conversational turns, info-only
+ * actions, etc.).
+ *
+ * Lookup order:
+ *   1. `turnRequest.context.graph.analysis_ready.status` — caller-provided,
+ *      freshest authoritative view when the caller passes graph_state with
+ *      an up-to-date payload.
+ *   2. `computeStructuralReadiness(turnContext.graph)` — recompute from the
+ *      current graph. Authoritative when the caller didn't carry a payload.
+ *   3. null — only when no graph exists.
+ *
+ * The gate (chip-engine `canRunAnalysis`) must not receive null on any turn
+ * where a graph exists, or the Run Analysis chip will appear on un-ready
+ * graphs.
+ */
+function deriveAnalysisReadyStatusFallback(
+  turnContext: DeterministicTurnContext,
+): string | null {
+  if (!turnContext.graph) return null;
+
+  // Source 1: analysis_ready carried on the caller-provided graph object.
+  // The field is a sibling of nodes/edges on turnRequest.context.graph and
+  // survives onto turnContext.graph by reference; it's not in the static
+  // GraphV3T schema, so access via an object cast.
+  const graphAsAny = turnContext.graph as unknown as Record<string, unknown>;
+  const contextReady = graphAsAny.analysis_ready as { status?: unknown } | undefined;
+  const contextStatus = contextReady?.status;
+  if (typeof contextStatus === 'string' && contextStatus.length > 0) return contextStatus;
+
+  // Source 2: recompute from the current graph structure.
+  const recomputed = computeStructuralReadiness(turnContext.graph);
+  if (recomputed?.status && typeof recomputed.status === 'string') return recomputed.status;
+  return null;
+}
+
 // Test-only exports for unit testing the post-draft summary override helpers
 // without spinning up the full streaming pipeline.
 export const __test_only = {
   maybeOverridePatchSummary,
   extractAnalysisReadyStatusFromResult,
+  deriveAnalysisReadyStatusFallback,
   buildCoachingSummary,
   COUNT_JARGON_RE,
 };

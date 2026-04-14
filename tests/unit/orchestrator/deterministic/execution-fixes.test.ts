@@ -125,6 +125,7 @@ describe('Block factory — brief fixture shapes', () => {
         flip_threshold: 0.8,
         direction: 'increase',
         alternative_winner: 'Option B',
+        flip_status: 'concrete',
       }],
       narrative: 'Cost increase flips result.',
     };
@@ -255,7 +256,7 @@ describe('run_analysis delegation', () => {
   it('returns blocker when analysis_inputs is null', async () => {
     const ctx = makeCtx({ analysis_inputs: null });
     const result = await runAnalysisAction.execute({}, ctx);
-    expect(result.assistantText).toContain("can't run yet");
+    expect(result.assistantText).toContain("Check the analysis panel");
     expect(result.blocks).toHaveLength(0);
   });
 
@@ -537,7 +538,7 @@ describe('what_would_flip — flip thresholds from analysis', () => {
     expect(data.narrative).toContain('0.85');
   });
 
-  it('falls back to 0 when no flip_threshold in analysis', async () => {
+  it('uses null flip_threshold with insufficient_data status when raw analysis omits it', async () => {
     const ctx = makeCtx({
       analysis: {
         meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },
@@ -549,7 +550,70 @@ describe('what_would_flip — flip thresholds from analysis', () => {
     });
     const result = await whatWouldFlipAction.execute({}, ctx);
     const data = result.blocks[0].data as FlipAnalysisBlockData;
-    expect(data.flip_conditions[0].flip_threshold).toBe(0);
+    expect(data.flip_conditions[0].flip_threshold).toBeNull();
+    expect(data.flip_conditions[0].flip_status).toBe('insufficient_data');
+  });
+
+  it('uses honest copy when all top drivers report no_effect_within_bounds', async () => {
+    const ctx = makeCtx({
+      analysis: {
+        meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },
+        results: [
+          {
+            option_id: 'opt_aggressive',
+            option_label: 'Aggressive Pricing',
+            win_probability: 0.65,
+            factor_sensitivity: [
+              { factor_id: 'fac_price', label: 'Price Sensitivity', elasticity: 0.42, flip_threshold: null, current_value: 0.6, unit: '%', flip_reason: 'no_effect_within_bounds' },
+              { factor_id: 'fac_market', label: 'Market Size', elasticity: 0.31, flip_threshold: null, current_value: 1000, unit: 'units', flip_reason: 'no_effect_within_bounds' },
+            ],
+          },
+          { option_id: 'opt_conservative', option_label: 'Conservative Pricing', win_probability: 0.35 },
+        ],
+      } as unknown as V2RunResponseEnvelope,
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    const data = result.blocks[0].data as FlipAnalysisBlockData;
+    expect(result.assistantText).toContain('No realistic single-factor shift');
+    expect(result.assistantText).not.toContain('would need to shift');
+    for (const cond of data.flip_conditions) {
+      expect(cond.flip_status).toBe('no_practical_flip');
+      expect(cond.flip_threshold).toBeNull();
+      expect(cond.flip_reason).toBe('no_effect_within_bounds');
+    }
+  });
+
+  it('uses concrete copy for concrete drivers even when another is no_practical_flip', async () => {
+    const ctx = makeCtx({
+      analysis: {
+        meta: { seed_used: 42, n_samples: 10000, response_hash: 'abc' },
+        results: [
+          {
+            option_id: 'opt_aggressive',
+            option_label: 'Aggressive Pricing',
+            win_probability: 0.65,
+            factor_sensitivity: [
+              { factor_id: 'fac_price', label: 'Price Sensitivity', elasticity: 0.42, flip_threshold: 0.85, current_value: 0.6, unit: '%' },
+              { factor_id: 'fac_market', label: 'Market Size', elasticity: 0.31, flip_threshold: null, current_value: 1000, unit: 'units', flip_reason: 'no_effect_within_bounds' },
+            ],
+          },
+          { option_id: 'opt_conservative', option_label: 'Conservative Pricing', win_probability: 0.35 },
+        ],
+      } as unknown as V2RunResponseEnvelope,
+    });
+    const result = await whatWouldFlipAction.execute({}, ctx);
+    const data = result.blocks[0].data as FlipAnalysisBlockData;
+    expect(result.assistantText).toContain('would need to shift to flip away from');
+    expect(result.assistantText).toContain('Price Sensitivity');
+    const price = data.flip_conditions.find((c) => c.assumption === 'Price Sensitivity');
+    const market = data.flip_conditions.find((c) => c.assumption === 'Market Size');
+    expect(price!.flip_status).toBe('concrete');
+    expect(price!.flip_threshold).toBe(0.85);
+    expect(market!.flip_status).toBe('no_practical_flip');
+    expect(market!.flip_threshold).toBeNull();
+    // The no_practical_flip driver must NOT be named under the
+    // "would need to shift" headline frame — that verb contradicts its status.
+    expect(result.assistantText).not.toContain('Market Size');
   });
 });
 
@@ -698,7 +762,7 @@ describe('run_analysis — failure classification', () => {
   it('returns blocker when analysis_inputs is null', async () => {
     const ctx = makeCtx({ analysis_inputs: null });
     const result = await runAnalysisAction.execute({}, ctx);
-    expect(result.assistantText).toContain("can't run yet");
+    expect(result.assistantText).toContain("Check the analysis panel");
   });
 
   it('returns service not configured when PLoT client is null', async () => {

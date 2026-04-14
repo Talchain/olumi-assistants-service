@@ -328,17 +328,26 @@ function buildSmallSemanticSummary(
       const fields = v ? Object.keys(v).filter((k) => k !== 'id') : [];
       if (fields.length === 1) {
         const rawField = fields[0];
-        // Defence-in-depth: bail to count fallback if the raw field name OR
-        // the friendly form contains an internal token. Check the raw form
-        // first because friendlyFieldName converts `_` → ` `, which would
-        // otherwise hide an `id_with_underscores` slug from the regex.
-        // Slash-keyed fields (e.g. "data/interventions/factor_x") are never
-        // user-facing — reject them outright.
         if (rawField.includes('/')) return null;
         if (ENTITY_ID_LEAK_RE.test(rawField)) return null;
         const friendly = friendlyFieldName(rawField);
         if (ENTITY_ID_LEAK_RE.test(friendly)) return null;
-        sentences.push(`${verbFor(patchContext, 'update')} **${label}**: ${friendly}`);
+        const newValueDisplay = formatUpdateValueForDisplay(rawField, v![rawField], graph, op.path);
+        const verb = verbFor(patchContext, 'update');
+        // For value/data fields the label already names the quantity being
+        // set, so "Updated X value to Y" reads redundantly. Elide the field
+        // word in that case → "Updated X to Y". Other fields (strength,
+        // category, label) carry real information and keep the field word.
+        const fieldWordRedundant = rawField === 'value' || rawField === 'data';
+        if (newValueDisplay) {
+          if (fieldWordRedundant) {
+            sentences.push(`${verb} **${label}** to ${newValueDisplay}`);
+          } else {
+            sentences.push(`${verb} **${label}** ${friendly} to ${newValueDisplay}`);
+          }
+        } else {
+          sentences.push(`${verb} **${label}** ${friendly}`);
+        }
       } else {
         sentences.push(`${verbFor(patchContext, 'update')} **${label}**`);
       }
@@ -530,11 +539,24 @@ export function buildPatchSummary(
   // ---- Updates (small patch: specific; large patch: grouped) ----
   if (a.updatedNodes.length > 0 || a.edgesUpdated.length > 0) {
     if (!isLarge && a.updatedNodes.length === 1 && a.edgesUpdated.length === 0) {
-      // Single update: specific
+      // Single update: specific. Prefer "label field to new_value" over
+      // "label: field" which reads as "Updated X: value." and was the origin
+      // of the bug where the literal word "value" appeared in user-facing text.
       const u = a.updatedNodes[0];
       if (u.fields.length === 1) {
-        const field = friendlyFieldName(u.fields[0]);
-        parts.push(`Updated ${u.label}: ${field}`);
+        const rawField = u.fields[0];
+        const field = friendlyFieldName(rawField);
+        const updateOp = operations.find((op) => op.op === 'update_node' && (op.value as { id?: string } | undefined)?.id === (a.updatedNodes[0] as { id?: string }).id) ?? operations.find((op) => op.op === 'update_node');
+        const v = (updateOp?.value ?? {}) as Record<string, unknown>;
+        const newValueDisplay = formatUpdateValueForDisplay(rawField, v[rawField], graph ?? null, updateOp?.path ?? '');
+        const fieldWordRedundant = rawField === 'value' || rawField === 'data';
+        if (newValueDisplay) {
+          parts.push(fieldWordRedundant
+            ? `Updated ${u.label} to ${newValueDisplay}`
+            : `Updated ${u.label} ${field} to ${newValueDisplay}`);
+        } else {
+          parts.push(`Updated ${u.label} ${field}`);
+        }
       } else {
         parts.push(`Updated ${u.label}`);
       }
@@ -749,6 +771,58 @@ export function buildPatchDetailItems(operations: PatchOperation[]): PatchDetail
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Format the *new* value of an update_node field for user-facing display.
+ *
+ * Returns null when the value cannot be rendered safely — caller then falls
+ * back to the field-name-only form. This exists because the old template
+ * `"Proposing to update X: value."` was interpolating the field key name
+ * (e.g. "value") in place of the actual new value.
+ */
+function formatUpdateValueForDisplay(
+  rawField: string,
+  newValue: unknown,
+  graph: GraphV3T | null | undefined,
+  nodeId: string,
+): string | null {
+  if (newValue === null || newValue === undefined) return null;
+
+  if (rawField === 'value' || rawField === 'data') {
+    if (typeof newValue === 'number' && Number.isFinite(newValue)) {
+      const unit = resolveNodeUnit(graph, nodeId);
+      return unit ? `${newValue} ${unit}` : String(newValue);
+    }
+    return null;
+  }
+
+  if (rawField === 'strength_mean' || rawField === 'strength_std') {
+    return typeof newValue === 'number' && Number.isFinite(newValue) ? String(newValue) : null;
+  }
+
+  if (rawField === 'label' || rawField === 'category') {
+    if (typeof newValue === 'string' && newValue.length > 0 && !ENTITY_ID_LEAK_RE.test(newValue)) {
+      return `"${newValue}"`;
+    }
+    return null;
+  }
+
+  if (typeof newValue === 'number' && Number.isFinite(newValue)) return String(newValue);
+  if (typeof newValue === 'string' && newValue.length > 0 && !ENTITY_ID_LEAK_RE.test(newValue)) {
+    return `"${newValue}"`;
+  }
+  return null;
+}
+
+function resolveNodeUnit(graph: GraphV3T | null | undefined, nodeId: string): string | null {
+  if (!graph) return null;
+  for (const node of graph.nodes) {
+    if ((node as { id?: string }).id !== nodeId) continue;
+    const unit = (node as { unit?: string }).unit;
+    return typeof unit === 'string' && unit.length > 0 ? unit : null;
+  }
+  return null;
+}
 
 /** Map internal field names to friendly labels. */
 function friendlyFieldName(field: string): string {

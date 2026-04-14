@@ -454,6 +454,13 @@ export interface GraphPatchBlockData {
   /** Semantic repairs applied by PLoT (surfaced as-is, never rewritten into operations) */
   repairs_applied?: RepairEntry[];
   summary?: string;
+  /**
+   * Past-tense summary for proposal blocks. Lets the UI render the accepted
+   * card without waiting for a patch_accepted round-trip. Populated alongside
+   * `summary` on `'proposed'`/`'previewed'` blocks; omitted on blocks whose
+   * `status` is already `'accepted'` (use `summary` directly there).
+   */
+  applied_summary?: string;
   rejection?: {
     reason: string;
     message?: string;

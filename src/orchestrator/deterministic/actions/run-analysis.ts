@@ -38,7 +38,7 @@ export const runAnalysisAction: ActionDefinition = {
     if (!ctx.analysis_inputs) {
       return {
         blocks: [],
-        assistantText: "Analysis can't run yet: the graph needs option interventions encoded. Check the analysis panel for specific requirements.",
+        assistantText: "Each option needs its effects on the key factors defined before the analysis can run. Check the analysis panel to see what's missing.",
         guidance_items: [],
       };
     }

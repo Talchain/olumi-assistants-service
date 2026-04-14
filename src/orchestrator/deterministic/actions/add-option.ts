@@ -168,12 +168,27 @@ export const addOptionAction: ActionDefinition = {
         })
       : undefined;
 
+    // Fix 3: preserve prior readiness status for any pre-existing option whose
+    // structure and intervention sources were NOT touched by this add_option.
+    // add_option only adds a new option and new edges FROM it, so for every
+    // existing option neither structurally_touched nor intervention_sources
+    // changes. Recomputing readiness for them can still report a regression
+    // because the synthetic recompute is a fresh view, not a diff — so we
+    // overlay the prior status when appropriate.
+    const preservedAnalysisReady = ctx.graph && analysisReady
+      ? preservePriorOptionReadiness({
+          baseGraph: ctx.graph,
+          recomputedReady: analysisReady,
+          touchedOptionId: nodeId,
+        })
+      : analysisReady;
+
     return {
       blocks: [],
       assistantText: `Option **${label}**${summary} would be added.`,
       guidance_items: [],
       operations,
-      ...(analysisReady ? { analysis_ready: analysisReady } : {}),
+      ...(preservedAnalysisReady ? { analysis_ready: preservedAnalysisReady } : {}),
       fact: {
         action: 'option_added',
         entities_affected: [{ id: nodeId, label, kind: 'option' }],
@@ -386,13 +401,24 @@ function buildOptionConfigurationResult(
   }
 
   // 3. Compute analysis_ready against a synthetic post-patch graph.
-  const analysisReady = graph
+  const rawAnalysisReady = graph
     ? computeSyntheticOptionReadiness(graph, {
         id: existingOption.id,
         label: existingOption.label,
         interventions,
       })
     : undefined;
+  // Fix 3 (P0 #2): preserve un-touched options' statuses on the repair-redirect
+  // path too. The targeted option is `existingOption.id` — every other option
+  // should keep its prior status unless its own structure or interventions
+  // genuinely changed (they won't on this path, but the helper computes it).
+  const analysisReady = graph && rawAnalysisReady
+    ? preservePriorOptionReadiness({
+        baseGraph: graph,
+        recomputedReady: rawAnalysisReady,
+        touchedOptionId: existingOption.id,
+      })
+    : rawAnalysisReady;
 
   // 4. Human-facing assistant text describing the change in decision terms.
   // F5: drop unresolvable factor ids rather than leaking raw `factor_x` /
@@ -437,4 +463,107 @@ function buildOptionConfigurationResult(
     operations,
     ...(analysisReady ? { analysis_ready: analysisReady } : {}),
   };
+}
+
+/**
+ * Fix 3: overlay prior-graph option readiness on top of the synthetic recompute.
+ *
+ * Used by both add_option branches:
+ *   - new-option path: touchedOptionId is the freshly-added option's id.
+ *   - repair-redirect path: touchedOptionId is the existing option being
+ *     updated (the only option whose structure / intervention sources can
+ *     legitimately change on this turn).
+ *
+ * For every option OTHER than the touched one, compute whether its structure
+ * (connected-factor set) or intervention sources actually changed. If not,
+ * preserve its prior readiness status — the synthetic recompute can otherwise
+ * regress un-touched options because it is a fresh view, not a diff.
+ *
+ * Emits `v4.add_option_readiness_impact` per pre-existing option with
+ * authoritative before/after counts and computed touch flags so staging can
+ * verify the invariant.
+ */
+function preservePriorOptionReadiness(args: {
+  baseGraph: GraphV3T;
+  recomputedReady: NonNullable<ActionResult['analysis_ready']>;
+  touchedOptionId: string;
+}): NonNullable<ActionResult['analysis_ready']> {
+  const { baseGraph, recomputedReady, touchedOptionId } = args;
+  const priorReady = computeStructuralReadiness(baseGraph);
+  if (!priorReady) return recomputedReady;
+
+  const priorByOptionId = new Map<string, typeof priorReady.options[number]>();
+  for (const opt of priorReady.options) priorByOptionId.set(opt.option_id, opt);
+
+  const baseConnectedFactors = buildOptionToFactorMap(baseGraph);
+
+  const preservedOptions = recomputedReady.options.map((opt) => {
+    if (opt.option_id === touchedOptionId) return opt;
+
+    const prior = priorByOptionId.get(opt.option_id);
+    if (!prior) return opt;
+
+    // For un-touched options, add_option never modifies their edges or
+    // intervention payloads — both branches only write to the touched option
+    // and add new structural edges FROM the new/updated option. So the
+    // authoritative post-state connected-factor set is the prior set.
+    const priorFactorKeys = [...(baseConnectedFactors.get(opt.option_id) ?? new Set<string>())].sort();
+    const postFactorKeys = priorFactorKeys;
+    const structurallyTouched = false;
+
+    const priorInterventionKeys = Object.keys(prior.interventions ?? {}).sort();
+    const newInterventionKeys = Object.keys(opt.interventions ?? {}).sort();
+    const interventionSourcesChanged =
+      priorInterventionKeys.length !== newInterventionKeys.length
+      || priorInterventionKeys.some((k, i) => k !== newInterventionKeys[i])
+      || priorInterventionKeys.some((k) => (prior.interventions as Record<string, number>)[k] !== (opt.interventions as Record<string, number>)[k]);
+
+    log.info(
+      {
+        event: 'v4.add_option_readiness_impact',
+        option_id: opt.option_id,
+        touched_option_id: touchedOptionId,
+        status_before: prior.status,
+        status_after: opt.status,
+        connected_factor_count_before: priorFactorKeys.length,
+        connected_factor_count_after: postFactorKeys.length,
+        structurally_touched: structurallyTouched,
+        intervention_sources_changed: interventionSourcesChanged,
+      },
+      'add_option: readiness impact on pre-existing option',
+    );
+
+    if (!structurallyTouched && !interventionSourcesChanged && prior.status !== opt.status) {
+      return { ...opt, status: prior.status };
+    }
+    return opt;
+  });
+
+  const statuses = preservedOptions.map((o) => o.status);
+  let payloadStatus: string;
+  if (preservedOptions.length < 2) payloadStatus = 'needs_user_input';
+  else if (statuses.some((s) => s === 'needs_user_mapping')) payloadStatus = 'needs_user_mapping';
+  else if (statuses.some((s) => s === 'needs_encoding')) payloadStatus = 'needs_encoding';
+  else payloadStatus = 'ready';
+
+  return {
+    ...recomputedReady,
+    options: preservedOptions,
+    status: payloadStatus as typeof recomputedReady.status,
+  };
+}
+
+function buildOptionToFactorMap(graph: GraphV3T): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  const nodeById = new Map<string, { kind?: string }>();
+  for (const n of graph.nodes) nodeById.set((n as { id?: string }).id ?? '', n as { kind?: string });
+  for (const edge of graph.edges) {
+    const from = (edge as { from?: string }).from;
+    const to = (edge as { to?: string }).to;
+    if (!from || !to) continue;
+    if (nodeById.get(from)?.kind !== 'option') continue;
+    if (!map.has(from)) map.set(from, new Set());
+    map.get(from)!.add(to);
+  }
+  return map;
 }

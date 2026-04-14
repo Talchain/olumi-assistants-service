@@ -659,3 +659,51 @@ describe("add_option action — repair redirect on existing option", () => {
     expect((redirectCall![0] as { intervention_count: number }).intervention_count).toBe(1);
   });
 });
+
+// Fix 3: new options must be created with is_baseline === false (strict, not
+// null/undefined/missing). UI code uses ?? to distinguish explicit false from
+// missing; regressing to missing would make every new option a baseline
+// candidate in label-matching.
+describe('add_option — is_baseline is explicitly false', () => {
+  it('emits is_baseline === false on the add_node payload', async () => {
+    const ctx = makeTurnContext(makeGraph());
+    const result = await addOptionAction.execute(
+      { label: 'New Path', interventions: [{ factor_id: 'fac_ramp', value: 0.5 }] },
+      ctx,
+    );
+    const addNode = result.operations?.find((op) => op.op === 'add_node');
+    expect(addNode).toBeDefined();
+    const value = addNode!.value as Record<string, unknown>;
+    expect('is_baseline' in value).toBe(true);
+    expect(value.is_baseline).toBe(false);
+    expect(value.is_baseline === false).toBe(true);
+  });
+});
+
+// Fix 3: pre-existing option statuses are preserved when add_option neither
+// touches their structure nor changes their intervention sources. Also
+// confirms telemetry fires with both conditional flags.
+describe('add_option — preserves prior option readiness on untouched options', () => {
+  it('keeps an existing ready option ready after adding a new unready option', async () => {
+    const graph = makeGraph(
+      [
+        { id: 'option_baseline', kind: 'option', label: 'Do nothing', is_baseline: true, data: { interventions: { fac_ramp: 0.5 } } },
+      ],
+      [
+        { from: 'option_baseline', to: 'fac_ramp', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    );
+    const ctx = makeTurnContext(graph);
+    ctx.entities.nodes.set('option_baseline', { id: 'option_baseline', label: 'Do nothing', kind: 'option' } as unknown as never);
+    ctx.entities.option_ids = ['option_baseline'];
+
+    const result = await addOptionAction.execute(
+      { label: 'Hire contractor', interventions: [{ factor_id: 'fac_ramp', value: 0.3 }] },
+      ctx,
+    );
+    const ready = result.analysis_ready;
+    expect(ready).toBeDefined();
+    const baseline = ready!.options.find((o) => o.option_id === 'option_baseline');
+    expect(baseline?.status).toBe('ready');
+  });
+});

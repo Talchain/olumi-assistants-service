@@ -711,4 +711,83 @@ describe("buildPatchSummary — T4 semantic summaries (graph-aware)", () => {
     expect(summary).toContain('Ship on time');
     expect(summary).toMatch(/Proposing to connect/i);
   });
+
+  // Fix 2B: update_node summary must interpolate the new value, not the
+  // field-key name. Regression: "Proposing to update X: value." where the
+  // literal word "value" came from friendlyFieldName of the `value` key.
+  it("update_node with numeric value renders the new value, not the field-key name", () => {
+    const graph = makeGraphForSemantic([
+      { id: 'fac_price', kind: 'factor', label: 'Price', unit: '%' },
+    ]);
+    const ops: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'fac_price',
+        value: { value: 12 },
+      },
+    ];
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Price');
+    expect(summary).toContain('12');
+    expect(summary).toMatch(/to 12( %)?/);
+    expect(summary).not.toMatch(/: value\.?$/);
+    expect(summary).not.toMatch(/Price: value/);
+    // Fix C: no leaked field-word for `value` updates — the label says it.
+    expect(summary).not.toMatch(/Price value to/);
+    expect(summary.toLowerCase()).not.toContain(' value ');
+  });
+
+  it("update_node with data field renders new numeric value without 'value' field-word", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'fac_cost',
+        value: { data: 0.4 },
+      },
+    ];
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Cost');
+    expect(summary).toContain('0.4');
+    expect(summary).toMatch(/to 0\.4/);
+    expect(summary).not.toMatch(/Cost: value/);
+    expect(summary.toLowerCase()).not.toContain(' value ');
+  });
+
+  it("update_node with strength_mean keeps the field word — it carries information", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'update_node',
+        path: 'fac_cost',
+        value: { strength_mean: 0.7 },
+      },
+    ];
+    const summary = buildPatchSummary(ops, null, 'edit', graph);
+    expect(summary).toContain('Cost');
+    expect(summary).toContain('strength');
+    expect(summary).toContain('0.7');
+  });
+
+  // Fix 5: same operations rendered with accepted context → past tense.
+  it("accepted context yields past-tense verb for the same ops", () => {
+    const graph = makeGraphForSemantic();
+    const ops: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'option_baseline',
+        value: { id: 'option_baseline', kind: 'option', label: 'Baseline' },
+      },
+      {
+        op: 'add_edge',
+        path: 'option_baseline->fac_dev_capacity',
+        value: { from: 'option_baseline', to: 'fac_dev_capacity', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      },
+    ];
+    const proposal = buildPatchSummary(ops, null, 'edit', graph);
+    const applied = buildPatchSummary(ops, null, 'accepted', graph);
+    expect(proposal).toMatch(/^Proposing to add/);
+    expect(applied).toMatch(/^Added/);
+    expect(applied).not.toMatch(/Proposing to/);
+  });
 });

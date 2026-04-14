@@ -298,9 +298,11 @@ export interface FlipAnalysisBlockData {
   flip_conditions: Array<{
     assumption: string;
     current_value: number;
-    flip_threshold: number;
+    flip_threshold: number | null;
     direction: string;
     alternative_winner: string;
+    flip_status: 'concrete' | 'no_practical_flip' | 'insufficient_data';
+    flip_reason?: string;
   }>;
   narrative: string;
 }

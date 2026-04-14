@@ -67,12 +67,15 @@ export const whatWouldFlipAction: ActionDefinition = {
     const flipConditions: FlipAnalysisBlockData['flip_conditions'] = drivers.slice(0, 3).map((driver) => {
       const node = ctx.entities.nodes.get(driver.factor_id);
       const threshold = flipMap.get(driver.factor_id);
+      const flipStatus = threshold?.flip_status ?? 'insufficient_data';
       return {
         assumption: driver.label,
         current_value: threshold?.current_value ?? node?.value ?? 0,
-        flip_threshold: threshold?.flip_value ?? 0,
+        flip_threshold: threshold?.flip_value ?? null,
         direction: driver.sensitivity > 1 ? 'small change needed' : 'moderate change needed',
         alternative_winner: summary.runner_up ?? 'alternative',
+        flip_status: flipStatus,
+        ...(threshold?.flip_reason ? { flip_reason: threshold.flip_reason } : {}),
       };
     });
 
@@ -82,10 +85,22 @@ export const whatWouldFlipAction: ActionDefinition = {
       const node = ctx.entities.nodes.get(driver.factor_id);
       const threshold = flipMap.get(driver.factor_id);
       const valueStr = node?.value != null ? ` (current: ${node.value}${node.unit ? ' ' + node.unit : ''})` : '';
-      const flipStr = threshold ? `; flips at ${threshold.flip_value}${threshold.unit ? ' ' + threshold.unit : ''}` : '';
-      narrativeParts.push(
-        `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}${flipStr}${!flipStr ? `; a ${driver.sensitivity > 1 ? 'small' : 'moderate'} change here could shift the leading option` : ''}.`,
-      );
+      if (threshold?.flip_status === 'concrete' && threshold.flip_value !== null) {
+        const flipStr = `; flips at ${threshold.flip_value}${threshold.unit ? ' ' + threshold.unit : ''}`;
+        narrativeParts.push(
+          `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}${flipStr}.`,
+        );
+      } else if (threshold?.flip_status === 'no_practical_flip') {
+        narrativeParts.push(
+          `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}. No realistic single-factor shift in ${driver.label} would change this result within the current bounds.`,
+        );
+      } else {
+        // insufficient_data — no threshold data from PLoT; keep the prior
+        // sensitivity-only phrasing without claiming a flip will or won't happen.
+        narrativeParts.push(
+          `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}; a ${driver.sensitivity > 1 ? 'small' : 'moderate'} change here could shift the leading option.`,
+        );
+      }
     }
 
     if (summary.runner_up && summary.winner_probability != null && summary.runner_up_probability != null) {
@@ -120,30 +135,65 @@ export const whatWouldFlipAction: ActionDefinition = {
 
     const block = createFlipAnalysisBlock(blockData, ctx.turn_id);
 
-    // Fix 5: assistantText must name the top 1-2 factors when drivers exist.
-    // Include current value + flip threshold per factor when we have them,
-    // otherwise fall back to the factor label alone. This is the headline
-    // users see in the delta stream; the block narrative still carries the
-    // full sensitivity breakdown.
-    const topDrivers = drivers.slice(0, 2);
-    const factorPhrases = topDrivers.map((driver) => {
-      const node = ctx.entities.nodes.get(driver.factor_id);
-      const threshold = flipMap.get(driver.factor_id);
-      if (threshold) {
-        const unit = threshold.unit ? ` ${threshold.unit}` : '';
-        return `${driver.label} (currently ${formatFlipValue(threshold.current_value)}${unit}, flips at ${formatFlipValue(threshold.flip_value)}${unit})`;
-      }
-      if (node?.value != null) {
-        const unit = node.unit ? ` ${node.unit}` : '';
-        return `${driver.label} (currently ${formatFlipValue(node.value)}${unit})`;
-      }
-      return driver.label;
-    });
+    // Headline policy:
+    //
+    // - When EVERY top driver is `no_practical_flip` (PLoT definitively told
+    //   us no realistic single-factor shift would flip the result), emit the
+    //   honest copy naming the drivers as decision-relevant but declining to
+    //   claim a shift "would" flip anything.
+    // - Otherwise, name up to two concrete drivers with their thresholds; if
+    //   no concrete thresholds are available (PLoT didn't return any — the
+    //   `insufficient_data` state), fall back to the driver label + current
+    //   value from the node, matching prior behaviour.
+    const topDrivers = drivers.slice(0, 3);
+    const thresholdFor = (driver: typeof topDrivers[number]) => flipMap.get(driver.factor_id);
+    const allNoPracticalFlip = topDrivers.length > 0 && topDrivers.every((d) => thresholdFor(d)?.flip_status === 'no_practical_flip');
 
-    const factorList = factorPhrases.length === 2
-      ? `${factorPhrases[0]} or ${factorPhrases[1]}`
-      : factorPhrases[0];
-    const assistantText = `${factorList} would need to shift to flip away from ${summary.winner}.`;
+    let assistantText: string;
+    if (allNoPracticalFlip) {
+      const labels = topDrivers.map((d) => d.label);
+      const factorList = labels.length === 1
+        ? labels[0]
+        : labels.length === 2
+          ? `${labels[0]} and ${labels[1]}`
+          : `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+      assistantText = `No realistic single-factor shift in the strongest sensitivities would change this result within the current bounds. The most decision-relevant factors are ${factorList}. Stress-testing combinations or recalibrating these would be the most valuable next step.`;
+    } else {
+      // Exclude no_practical_flip drivers from the "would need to shift" frame —
+      // that verb implies a flip is possible and contradicts their status.
+      // Fall back to remaining drivers (concrete or insufficient_data); if
+      // none remain, use the honest all-null copy.
+      const eligibleDrivers = topDrivers.filter((d) => thresholdFor(d)?.flip_status !== 'no_practical_flip');
+
+      if (eligibleDrivers.length === 0) {
+        const labels = topDrivers.map((d) => d.label);
+        const factorList = labels.length === 1
+          ? labels[0]
+          : labels.length === 2
+            ? `${labels[0]} and ${labels[1]}`
+            : `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+        assistantText = `No realistic single-factor shift in the strongest sensitivities would change this result within the current bounds. The most decision-relevant factors are ${factorList}. Stress-testing combinations or recalibrating these would be the most valuable next step.`;
+      } else {
+        const headlineDrivers = eligibleDrivers.slice(0, 2);
+        const factorPhrases = headlineDrivers.map((driver) => {
+          const threshold = thresholdFor(driver);
+          if (threshold?.flip_status === 'concrete' && threshold.flip_value !== null) {
+            const unit = threshold.unit ? ` ${threshold.unit}` : '';
+            return `${driver.label} (currently ${formatFlipValue(threshold.current_value)}${unit}, flips at ${formatFlipValue(threshold.flip_value as number)}${unit})`;
+          }
+          const node = ctx.entities.nodes.get(driver.factor_id);
+          if (node?.value != null) {
+            const unit = node.unit ? ` ${node.unit}` : '';
+            return `${driver.label} (currently ${formatFlipValue(node.value)}${unit})`;
+          }
+          return driver.label;
+        });
+        const factorList = factorPhrases.length === 2
+          ? `${factorPhrases[0]} or ${factorPhrases[1]}`
+          : factorPhrases[0];
+        assistantText = `${factorList} would need to shift to flip away from ${summary.winner}.`;
+      }
+    }
 
     return {
       blocks: [block],
@@ -160,10 +210,14 @@ export const whatWouldFlipAction: ActionDefinition = {
 // Helpers
 // ============================================================================
 
+type FlipStatus = 'concrete' | 'no_practical_flip' | 'insufficient_data';
+
 interface FlipThresholdEntry {
   current_value: number;
-  flip_value: number;
+  flip_value: number | null;
   unit: string | null;
+  flip_reason?: string;
+  flip_status: FlipStatus;
 }
 
 /**
@@ -207,12 +261,21 @@ function extractFlipThresholds(ctx: DeterministicTurnContext): Map<string, FlipT
       const currentValue = typeof factor.current_value === 'number' ? factor.current_value
         : typeof factor.value === 'number' ? factor.value
         : null;
-      if (flipValue === null || currentValue === null) continue;
+      if (currentValue === null) continue;
+
+      const flipReason = typeof factor.flip_reason === 'string' ? factor.flip_reason : undefined;
+      const flipStatus: FlipStatus = flipValue !== null
+        ? 'concrete'
+        : flipReason === 'no_effect_within_bounds'
+          ? 'no_practical_flip'
+          : 'insufficient_data';
 
       map.set(factorId, {
         current_value: currentValue,
         flip_value: flipValue,
         unit: typeof factor.unit === 'string' ? factor.unit : null,
+        flip_reason: flipReason,
+        flip_status: flipStatus,
       });
     }
   }

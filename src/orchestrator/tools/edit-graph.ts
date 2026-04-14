@@ -2209,6 +2209,9 @@ export async function handleEditGraph(
       // labels for add_edge ops (the new option's intervention targets are
       // existing factors). Falls back to count-based summary on resolution failure.
       summary: buildPatchSummary(operations, llmResult.coaching?.summary, 'edit', context.graph ?? null),
+      // Fix 5: past-tense summary so the UI can render the accepted card
+      // without a patch_accepted round-trip. Optional and additive.
+      applied_summary: buildPatchSummary(operations, llmResult.coaching?.summary, 'accepted', context.graph ?? null),
       ...(appliedGraph && { applied_graph: appliedGraph }),
       ...(appliedGraphHash && { applied_graph_hash: appliedGraphHash }),
       ...(repairsApplied && repairsApplied.length > 0 && { repairs_applied: repairsApplied }),
