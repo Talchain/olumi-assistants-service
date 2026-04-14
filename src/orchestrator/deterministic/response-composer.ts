@@ -236,6 +236,10 @@ function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, ha
     ?? (newValue != null ? `${newValue}${unit ? ' ' + unit : ''}` : '?');
   // Qualitative bands are sentence fragments ("low", "high") and read
   // naturally with the copula "is"; numeric values read naturally with "at".
+  // Keep this regex in sync with `qualitativeBand()` in
+  // src/cee/factor-extraction/display-value.ts — it enumerates the four
+  // bands that exist today (low / moderate / high / very high). Drift here
+  // would silently demote qualitative values to the numeric "at" template.
   const isQualitative = displayValue != null && /^(low|moderate|high|very high)$/i.test(displayValue);
   const isTopDriver = coaching?.drivers?.[0]?.factor_id === entity.id;
 

@@ -1570,10 +1570,9 @@ function maybeOverridePatchSummary(
   const shouldOverwrite = existingIsEmpty || existingIsJargon || existingIsGeneric;
   if (!shouldOverwrite) return;
 
-  const goalLabel = coachingContext?.tradeoff
-    // tradeoff doesn't carry goal label — look it up from the applied graph
-    ? getGoalLabelFromResult(actionResult)
-    : getGoalLabelFromResult(actionResult);
+  // tradeoff doesn't carry the goal label — look it up from the applied graph.
+  // Same lookup regardless of whether coaching is present, so no branching.
+  const goalLabel = getGoalLabelFromResult(actionResult);
   const optionLabels = getOptionLabelsFromResult(actionResult);
 
   const replacement = buildCoachingSummary(coachingContext, goalLabel, optionLabels);
@@ -1637,10 +1636,14 @@ function buildCoachingSummary(
   goalLabel: string | null,
   optionLabels: string[],
 ): string | null {
-  // Best: coaching context gives us the core trade-off.
-  if (coachingContext?.tradeoff && goalLabel) {
+  // Best: coaching context gives us the core trade-off. We preserve the
+  // tradeoff even when the applied graph has no resolvable goal label —
+  // losing the tradeoff to the generic fallback would be a strict regression.
+  if (coachingContext?.tradeoff) {
     const t = coachingContext.tradeoff;
-    return `Your ${goalLabel} trades ${t.benefit_a} against ${t.benefit_b}.`;
+    return goalLabel
+      ? `Your ${goalLabel} trades ${t.benefit_a} against ${t.benefit_b}.`
+      : `This decision trades ${t.benefit_a} against ${t.benefit_b}.`;
   }
 
   // Next: goal + option names grounds the summary in decision language.

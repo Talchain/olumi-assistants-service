@@ -12,6 +12,7 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
 import { composeResponse } from "../../../../src/orchestrator/deterministic/response-composer.js";
 import type { HandlerFact } from "../../../../src/orchestrator/deterministic/response-composer.js";
 import type { CoachingContext } from "../../../../src/orchestrator/deterministic/coaching-context-builder.js";
+import { qualitativeBand } from "../../../../src/cee/factor-extraction/display-value.js";
 
 // ============================================================================
 // Minimal coaching context fixture
@@ -573,6 +574,29 @@ describe("composeResponse — value_set", () => {
     const text = composeResponse(fact, null, false);
     expect(text).toBe('Salary at 85000 GBP would shift the balance of the decision.');
     assertNoBannedTerms(text);
+  });
+
+  // Coupling guard: every output that qualitativeBand can produce must be
+  // recognised by composeValueSet as qualitative (so it uses the "is ..."
+  // framing rather than the numeric "at ..." framing). If qualitativeBand
+  // gains a new band, this test fails until the composer's regex is updated.
+  it("coupling guard: composer recognises every qualitativeBand output", () => {
+    const samples = [0, 0.1, 0.25, 0.3, 0.5, 0.6, 0.75, 0.8, 1];
+    for (const v of samples) {
+      const band = qualitativeBand(v).toLowerCase();
+      const fact: HandlerFact = {
+        action: 'value_set',
+        entities_affected: [{ id: 'f', label: 'Factor', kind: 'factor' }],
+        what_changed: `Factor to ${band}`,
+        stale_analysis: false,
+        auto_apply: true,
+        data: { new_value: v, display_value: band },
+      };
+      const text = composeResponse(fact, null, false);
+      // Must use "is <band>" framing — never the numeric "set to" form.
+      expect(text, `band "${band}" (value=${v}) should be recognised as qualitative`).toContain(`is ${band}`);
+      expect(text).not.toMatch(/set to \d/);
+    }
   });
 });
 

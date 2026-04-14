@@ -239,6 +239,23 @@ describe("buildCoachingSummary — standalone", () => {
     expect(text).toBe('A decision model comparing A or B.');
   });
 
+  it("preserves tradeoff phrasing even when goal label is missing (robustness)", () => {
+    // Edge case: post-draft recompute produced a tradeoff but the applied
+    // graph has no resolvable goal node. Losing the tradeoff to the generic
+    // options-only fallback would be a strict regression — use a neutral
+    // subject instead.
+    const coaching = makeCoaching({
+      tradeoff: {
+        option_a: 'A',
+        benefit_a: 'speed',
+        option_b: 'B',
+        benefit_b: 'quality',
+      },
+    });
+    const text = buildCoachingSummary(coaching, null, ['A', 'B']);
+    expect(text).toBe('This decision trades speed against quality.');
+  });
+
   it("returns null when neither goal nor options available", () => {
     expect(buildCoachingSummary(null, null, [])).toBeNull();
   });
