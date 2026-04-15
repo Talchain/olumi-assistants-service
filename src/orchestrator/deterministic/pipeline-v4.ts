@@ -47,6 +47,7 @@ import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { log } from "../../utils/telemetry.js";
 import { STREAM_ERROR_CODES } from "../pipeline/stream-events.js";
 import type { GuidanceItem } from "../types/guidance-item.js";
+import { SIGNAL_CODES, computeGuidanceItemId } from "../types/guidance-item.js";
 import { config } from "../../config/index.js";
 import { buildCoachingContext } from "./coaching-context-builder.js";
 import type { CoachingContext } from "./coaching-context-builder.js";
@@ -173,8 +174,24 @@ export async function* executePipelineV4(
     // on every turn. The warn-log below makes it visible when the
     // safety net fires so the underlying UI continuity issue can be
     // addressed separately.
+    //
+    // Stage gate: rehydration only makes sense for evaluate-intent turns.
+    // Stage isn't known pre-context, so use a cheap message regex plus the
+    // direct_analysis_run system event as the signal. Pure ideate/frame
+    // turns (e.g. graph edits, factor calibrations) do not need analysis
+    // context and are skipped to avoid unnecessary cache reads and log
+    // noise.
+    const EVAL_INTENT_RE =
+      /\b(results?|explain|which option|why does|how confident|what.?driv|compare|stronger|winner|leading)\b/i;
+    const messageImpliesEvaluate =
+      typeof turnRequest.message === 'string' && EVAL_INTENT_RE.test(turnRequest.message);
+    const systemEventImpliesEvaluate =
+      turnRequest.system_event?.event_type === 'direct_analysis_run';
+    const rehydrationInScope = messageImpliesEvaluate || systemEventImpliesEvaluate;
+
     if (
-      !turnRequest.analysis_state
+      rehydrationInScope
+      && !turnRequest.analysis_state
       && !turnRequest.context.analysis_response
       && turnRequest.session_state
     ) {
@@ -1042,6 +1059,24 @@ export async function* executePipelineV4(
             envelope_bytes: envelopeSize,
             limit_bytes: MAX_CACHE_ENVELOPE_BYTES,
           }, 'Analysis envelope too large to cache in session_state — rehydration safety net disabled for this turn');
+          // Surface a low-priority informational guidance_item so the UI can
+          // hint the user to ask result questions immediately. Cache is a
+          // safety net, not a blocker — the turn still completes normally.
+          const cacheGuidance: GuidanceItem = {
+            item_id: computeGuidanceItemId(SIGNAL_CODES.ANALYSIS_CACHE_SKIPPED, undefined, 'structural'),
+            signal_code: SIGNAL_CODES.ANALYSIS_CACHE_SKIPPED,
+            category: 'could_fix',
+            source: 'structural',
+            title: 'Analysis results are too large to cache between turns',
+            detail: 'For the best explanation quality, ask about results immediately after running the analysis.',
+            primary_action: { type: 'discuss', prompt: 'What drove this result?' },
+            target_object: { type: 'graph' },
+            priority: 20,
+          };
+          actionResult.guidance_items = [
+            ...(actionResult.guidance_items ?? []),
+            cacheGuidance,
+          ];
         }
       }
     }

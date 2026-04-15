@@ -121,9 +121,14 @@ describe("Task 2A: Factor value fallback in analysis_ready", () => {
 
     const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
 
-    // Fallback should have filled the intervention from observed_state.value
+    // Fallback should have filled the intervention from observed_state.value.
+    // With unit='GBP' the transform produces a meaningful display_value
+    // ("59 GBP") and upgrades the intervention to the rich form, so assert
+    // via the numeric projection.
     expect(payload.options[0].interventions).toHaveProperty("fac_price");
-    expect(payload.options[0].interventions["fac_price"]).toBe(59);
+    const entry = payload.options[0].interventions["fac_price"];
+    const numeric = typeof entry === 'number' ? entry : (entry as { value: number }).value;
+    expect(numeric).toBe(59);
   });
 
   it("fills intervention from data.value (V1 passthrough) when observed_state absent", () => {

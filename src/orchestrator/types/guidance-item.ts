@@ -62,6 +62,10 @@ export const SIGNAL_CODES = {
   // Structural: risk/outcome node with no inbound causal edges. Surfaced
   // at draft-time to prevent OPTION_NO_GOAL_PATH-class failures later.
   WEAKLY_CONNECTED_NODE: 'WEAKLY_CONNECTED_NODE',
+  // Informational: analysis envelope exceeded the session_state cache
+  // size guard and was not persisted across turns. UI is encouraged to
+  // ask result questions immediately after run_analysis completes.
+  ANALYSIS_CACHE_SKIPPED: 'ANALYSIS_CACHE_SKIPPED',
 } as const;
 
 export type SignalCode = typeof SIGNAL_CODES[keyof typeof SIGNAL_CODES];

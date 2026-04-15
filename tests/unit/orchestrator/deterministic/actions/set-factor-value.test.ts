@@ -35,7 +35,17 @@ function makeContext(overrides: {
   nodeUnit?: string | undefined;
   userCurrencyHint?: string | null;
   nodeCap?: number;
+  /** Populate data.raw_value on the graph factor node (S3 Case B gate). */
+  nodeRawValue?: number;
 } = {}): DeterministicTurnContext {
+  const graphFactorNode: Record<string, unknown> = {
+    id: 'fac_ad_spend',
+    kind: 'factor',
+    label: 'Advertising Spend',
+  };
+  if (overrides.nodeRawValue !== undefined) {
+    graphFactorNode.data = { raw_value: overrides.nodeRawValue };
+  }
   return {
     stage: 'ideate',
     entities: {
@@ -62,7 +72,7 @@ function makeContext(overrides: {
     conversation: { turn_count: 1, recent_actions_taken: [], recent_actions_declined: [], pending_confirmation: null } as unknown as DeterministicTurnContext['conversation'],
     eligible_actions: [],
     disambiguation_hints: [],
-    graph: { nodes: [], edges: [] } as unknown as DeterministicTurnContext['graph'],
+    graph: { nodes: [graphFactorNode], edges: [] } as unknown as DeterministicTurnContext['graph'],
     analysis: null,
     conversational_state: null,
     scenario_id: 'test',
@@ -332,7 +342,7 @@ describe('set_factor_value — S3 CAP_EXCEEDED recovery', () => {
   });
 
   it('Case B: value above real-world cap offers range-increase and snap-to-max chips', async () => {
-    const ctx = makeContext({ nodeUnit: 'GBP', nodeCap: 85000 });
+    const ctx = makeContext({ nodeUnit: 'GBP', nodeCap: 85000, nodeRawValue: 60000 });
     const result = await setFactorValueAction.execute(
       { target_id: 'fac_ad_spend', value: 95000 },
       ctx,
@@ -354,7 +364,7 @@ describe('set_factor_value — S3 CAP_EXCEEDED recovery', () => {
   });
 
   it('Case B: extreme value far above real-world cap still uses Case B (range-increase)', async () => {
-    const ctx = makeContext({ nodeUnit: 'GBP', nodeCap: 85000 });
+    const ctx = makeContext({ nodeUnit: 'GBP', nodeCap: 85000, nodeRawValue: 60000 });
     const result = await setFactorValueAction.execute(
       { target_id: 'fac_ad_spend', value: 150000 },
       ctx,
@@ -363,6 +373,24 @@ describe('set_factor_value — S3 CAP_EXCEEDED recovery', () => {
     const chips = result.suggested_actions_override ?? [];
     expect(chips[0].action_type).toBe('edit_graph');
     expect((chips[0].parameters as Record<string, unknown>).edit_description).toContain('Increase the range');
+  });
+
+  it('Case B heuristic: unit + cap>1 but no raw_value → falls back to Case A (not trustworthy real-world metadata)', async () => {
+    // Cosmetic unit label on a factor that never had real-world data.
+    // Without data.raw_value, we cannot trust the unit/cap to mean anything.
+    const ctx = makeContext({ nodeUnit: 'GBP', nodeCap: 85000 /* no nodeRawValue */ });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 95000 },
+      ctx,
+    );
+    expect(result.failure).toBeUndefined();
+    expect(result.suggested_actions_override).toHaveLength(3);
+    const labels = (result.suggested_actions_override ?? []).map((c) => c.label);
+    expect(labels).toEqual(['Set to moderate', 'Set to high', 'Set to very high']);
+    const recoveryLog = infoSpy.mock.calls.find(
+      (c) => (c[0] as { event?: string })?.event === 'v4.set_factor_value_absolute_recovery',
+    );
+    expect((recoveryLog![0] as { case: string }).case).toBe('wrong_representation');
   });
 
   it('preserves CAP_EXCEEDED failure for slightly-over values (1.01–10)', async () => {

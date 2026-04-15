@@ -253,7 +253,7 @@ describe("intervention_details construction", () => {
     expect(payload.options[0].intervention_details).toBeUndefined();
   });
 
-  it("preserves existing interventions field unchanged", () => {
+  it("preserves intervention numeric value through optional upgrade to rich form", () => {
     const factorNode = makeFactorNode("fac_price", "Pricing", {
       observed_state: { value: 0.6, raw_value: 59, unit: "£", source: "brief_extraction" },
     });
@@ -262,8 +262,13 @@ describe("intervention_details construction", () => {
 
     const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
 
-    // Original interventions field must be unchanged
-    expect(payload.options[0].interventions["fac_price"]).toBe(0.6);
+    // Factor has unit + raw_value → meaningful display_value synthesised →
+    // interventions upgraded to { value, display_value }. Numeric value
+    // is preserved; inference downstream still flattens via
+    // flattenInterventions().
+    const entry = payload.options[0].interventions["fac_price"];
+    const numeric = typeof entry === 'number' ? entry : (entry as { value: number }).value;
+    expect(numeric).toBe(0.6);
   });
 
   it("does not strip display_value when factor label is empty (Finding 1 regression)", () => {

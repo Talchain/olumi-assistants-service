@@ -325,10 +325,17 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
         expect(opt).toHaveProperty("label");
         expect(opt).toHaveProperty("interventions");
 
-        // Interventions must be Record<string, number> - plain numbers, not objects
+        // Interventions may be a bare number OR the rich { value, display_value? }
+        // form when a meaningful display string is available. The numeric value
+        // is always accessible; PLoT consumption goes through flattenInterventions.
         expect(typeof opt.interventions).toBe("object");
-        for (const [_factorId, value] of Object.entries(opt.interventions)) {
-          expect(typeof value).toBe("number");
+        for (const [_factorId, entry] of Object.entries(opt.interventions)) {
+          if (typeof entry === 'number') {
+            expect(Number.isFinite(entry)).toBe(true);
+          } else {
+            expect(entry).toHaveProperty("value");
+            expect(typeof (entry as { value: unknown }).value).toBe("number");
+          }
         }
 
         // extraction_metadata is optional but if present, has correct structure

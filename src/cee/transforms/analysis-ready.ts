@@ -519,15 +519,61 @@ export function buildAnalysisReadyPayload(
     if (interventionEntries.length === 0) continue;
 
     const details: Record<string, InterventionDetail> = {};
-    for (const [factorId, normalisedValue] of interventionEntries) {
+    for (const [factorId, interventionEntry] of interventionEntries) {
       const factorNode = factorNodeMap.get(factorId);
+      // Interventions may be a bare number or a rich { value, ... } object
+      // (from upstream transforms or a prior upgrade pass). Unwrap for
+      // detail building; the raw entry is kept as-is until the upgrade step.
+      const numericValue = typeof interventionEntry === 'number'
+        ? interventionEntry
+        : (interventionEntry as { value?: unknown })?.value;
+      if (typeof numericValue !== 'number') continue;
       const v3Intervention = v3Option?.interventions?.[factorId];
       const llmDisplayValue = v3Intervention && typeof (v3Intervention as { display_value?: unknown }).display_value === 'string'
         ? (v3Intervention as { display_value: string }).display_value
         : undefined;
-      details[factorId] = buildInterventionDetail(factorId, normalisedValue, factorNode, llmDisplayValue);
+      details[factorId] = buildInterventionDetail(factorId, numericValue, factorNode, llmDisplayValue);
     }
     analysisOpt.intervention_details = details;
+
+    // Upgrade pass: attach display_value directly onto each intervention
+    // object in the flat map, but ONLY when the display_value is materially
+    // different from the bare numeric representation. UI consumers read
+    // from analysis_ready.options[].interventions (unwrapping via
+    // unwrapInterventionValue); having display_value there avoids a
+    // separate intervention_details lookup. flattenInterventions on the
+    // CEE side (pre-PLoT) strips the wrapper back to a bare number, so
+    // inference is unaffected.
+    //
+    // Contract preservation: when buildInterventionDetail only has the
+    // numeric fallback to show (`String(parseFloat(n.toFixed(2)))`), the
+    // intervention stays a bare number. This keeps the common case (plain
+    // normalised factors without unit / LLM display_value) flat and
+    // preserves backward compatibility with callers that expect
+    // `interventions[factorId]` to be a number.
+    for (const [factorId, detail] of Object.entries(details)) {
+      if (!detail.display_value) continue;
+      const current = analysisOpt.interventions[factorId];
+      const numericValue = typeof current === 'number'
+        ? current
+        : typeof (current as { value?: unknown })?.value === 'number'
+          ? (current as { value: number }).value
+          : null;
+      if (numericValue == null) continue;
+      const bareFallback = String(parseFloat(numericValue.toFixed(2)));
+      // Skip upgrade when display_value is just the numeric fallback — no
+      // meaningful human-readable string was produced.
+      if (detail.display_value === bareFallback) continue;
+      const v3Intervention = v3Option?.interventions?.[factorId];
+      const source = v3Intervention && typeof (v3Intervention as { source?: unknown }).source === 'string'
+        ? (v3Intervention as { source: string }).source
+        : undefined;
+      (analysisOpt.interventions as Record<string, unknown>)[factorId] = {
+        value: numericValue,
+        ...(source ? { source } : {}),
+        display_value: detail.display_value,
+      };
+    }
   }
   // === End intervention_details ===
 
@@ -817,20 +863,31 @@ export function validateAnalysisReadyPayload(
     }
   }
 
-  // Rule 4: Intervention values must be numbers
+  // Rule 4: Intervention values must resolve to finite numbers.
+  //
+  // Interventions may be bare numbers (legacy shape) or rich
+  // { value, display_value?, source? } objects (presentation upgrade).
+  // Both resolve to the same numeric value for PLoT; we validate the
+  // resolved number rather than the wrapping shape.
   for (const option of payload.options) {
-    for (const [factorId, value] of Object.entries(option.interventions ?? {})) {
-      if (typeof value !== "number") {
+    for (const [factorId, entry] of Object.entries(option.interventions ?? {})) {
+      const numeric = typeof entry === 'number'
+        ? entry
+        : entry != null && typeof entry === 'object' && typeof (entry as { value?: unknown }).value === 'number'
+          ? (entry as { value: number }).value
+          : undefined;
+      if (numeric === undefined) {
         errors.push({
           code: "INTERVENTION_NOT_NUMBER",
-          message: `Intervention "${factorId}" in option "${option.id}" is not a number: ${typeof value}`,
+          message: `Intervention "${factorId}" in option "${option.id}" is not a number: ${typeof entry}`,
           field: `options[${option.id}].interventions.${factorId}`,
         });
+        continue;
       }
-      if (value === null || value === undefined || Number.isNaN(value)) {
+      if (!Number.isFinite(numeric)) {
         errors.push({
           code: "INTERVENTION_INVALID_NUMBER",
-          message: `Intervention "${factorId}" in option "${option.id}" has invalid number: ${value}`,
+          message: `Intervention "${factorId}" in option "${option.id}" has invalid number: ${numeric}`,
           field: `options[${option.id}].interventions.${factorId}`,
         });
       }

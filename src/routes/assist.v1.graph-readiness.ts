@@ -121,8 +121,17 @@ function assessV3Readiness(
     // run_analysis will accept. Non-numeric or non-finite values would be
     // rejected by PLoT (INVALID_INTERVENTION_VALUE) so they're hard blockers
     // here, regardless of the option's status field.
+    // Interventions may be bare numbers or rich { value, display_value? }
+    // objects; resolve to numeric before checking.
     const nonNumeric = interventionEntries
-      .filter(([, v]) => typeof v !== 'number' || !Number.isFinite(v))
+      .filter(([, v]) => {
+        const n = typeof v === 'number'
+          ? v
+          : v != null && typeof v === 'object' && typeof (v as { value?: unknown }).value === 'number'
+            ? (v as { value: number }).value
+            : NaN;
+        return !Number.isFinite(n);
+      })
       .map(([k]) => k);
     if (nonNumeric.length > 0) {
       issues.push(

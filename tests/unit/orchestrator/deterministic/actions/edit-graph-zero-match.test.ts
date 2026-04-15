@@ -62,7 +62,10 @@ function makeGraphWithRisks(): GraphV3T {
   } as unknown as GraphV3T;
 }
 
-function makeContextForGraph(graph: GraphV3T): DeterministicTurnContext {
+function makeContextForGraph(graph: GraphV3T, userMessage?: string): DeterministicTurnContext {
+  const messages = userMessage
+    ? [{ role: 'user', content: userMessage }]
+    : [];
   return {
     stage: 'ideate',
     graph,
@@ -80,7 +83,7 @@ function makeContextForGraph(graph: GraphV3T): DeterministicTurnContext {
     eligible_actions: [],
     disambiguation_hints: [],
     conversational_state: null,
-    messages: [],
+    messages,
   } as unknown as DeterministicTurnContext;
 }
 
@@ -242,6 +245,52 @@ describe('edit_graph zero-match clarification', () => {
     );
     expect(result.suggested_actions_override).toBeDefined();
     expect(result.suggested_actions_override).toEqual([]);
+  });
+
+  it('chip prompt preserves full user intent with only entity reference substituted', async () => {
+    handleEditGraphMock.mockResolvedValue({
+      blocks: [],
+      assistantText: 'Could you clarify which element you mean?',
+      latencyMs: 1,
+      appliedGraph: null,
+      wasRejected: true,
+      pendingClarification: {
+        tool: 'edit_graph',
+        original_edit_request: 'connect the pricing risk to the revenue outcome',
+        candidate_labels: [],
+      },
+    });
+    const graph = {
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'Goal' },
+        { id: 'opt_a', kind: 'option', label: 'Option A' },
+        { id: 'out_revenue', kind: 'outcome', label: 'Revenue' },
+        { id: 'risk_pricing', kind: 'risk', label: 'Market Pricing Risk' },
+        { id: 'risk_churn', kind: 'risk', label: 'Customer Churn' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+    const userMessage = 'connect the pricing risk to the revenue outcome';
+    const ctx = makeContextForGraph(graph, userMessage);
+    const result = await editGraphAction.execute(
+      { edit_description: 'connect the pricing risk to the revenue outcome' },
+      ctx,
+    );
+    expect(result.suggested_actions_override).toBeDefined();
+    const chips = result.suggested_actions_override!;
+    expect(chips.length).toBeGreaterThan(0);
+    // Chip label is the short form.
+    expect(chips[0].label).toMatch(/^(Connect|Edit)\s/);
+    // Chip prompt preserves the user's "to the revenue outcome" tail and
+    // substitutes the chosen candidate for the unresolved "the pricing risk".
+    const firstPrompt = chips[0].prompt;
+    expect(firstPrompt).toContain('to the revenue outcome');
+    // At least one chip substitutes to a concrete risk label.
+    const anyPreserved = chips.some((c) =>
+      (c.prompt.includes('Market Pricing Risk') || c.prompt.includes('Customer Churn'))
+        && c.prompt.includes('to the revenue outcome'),
+    );
+    expect(anyPreserved).toBe(true);
   });
 
   it('chip labels are constructed explicitly, not substring of user phrase', async () => {

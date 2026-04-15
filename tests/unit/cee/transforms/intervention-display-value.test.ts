@@ -76,14 +76,48 @@ describe('intervention display_value', () => {
     expect(details!['fac_spend'].normalised_value).toBeCloseTo(0.7125, 4);
   });
 
-  it('interventions map remains Record<string, number> — unaffected by display_value', () => {
+  it('flat interventions map carries display_value on the intervention object (UI path)', () => {
     const graph = makeGraph({ unit: '£', observed_state: { unit: '£' } as unknown });
     const option = makeOption({ display_value: '£71,250', value: 0.7125 });
     const payload = buildAnalysisReadyPayload([option], 'goal_g', graph, {});
-    const interventions = payload.options[0].interventions;
-    expect(interventions['fac_spend']).toBe(0.7125);
-    // Numeric-only map; no additional properties.
-    expect(typeof interventions['fac_spend']).toBe('number');
+    const entry = payload.options[0].interventions['fac_spend'];
+    // Rich form: object with value + display_value (UI unwraps via unwrapInterventionValue).
+    expect(typeof entry).toBe('object');
+    expect((entry as { value: number }).value).toBeCloseTo(0.7125, 4);
+    expect((entry as { display_value: string }).display_value).toBe('£71,250');
+  });
+
+  it('flat interventions stays a bare number when no meaningful display_value can be synthesised', () => {
+    // Plain normalised factor — no unit, no raw_value, no factor_type, no
+    // LLM-provided display_value. synthesiseDisplayValue produces only a
+    // numeric fallback, and the upgrade pass skips it to preserve backward
+    // compatibility with consumers that expect flat numbers.
+    const graph = {
+      schema_version: 'v3',
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'Goal' },
+        { id: 'opt_a', kind: 'option', label: 'A' },
+        { id: 'fac_plain', kind: 'factor', label: 'Ad Spend' },
+      ],
+      edges: [
+        { from: 'opt_a', to: 'fac_plain', strength: { mean: 0.5, std: 0.1 } },
+      ],
+    } as unknown as import("../../../../src/schemas/cee-v3.js").GraphV3T;
+    const option = {
+      id: 'opt_a',
+      label: 'Option A',
+      interventions: {
+        fac_plain: {
+          value: 0.4,
+          source: 'brief_extraction',
+          target_match: { confidence: 'high' },
+        },
+      },
+    } as unknown as import("../../../../src/schemas/cee-v3.js").OptionV3T;
+    const payload = buildAnalysisReadyPayload([option], 'goal_g', graph, {});
+    const entry = payload.options[0].interventions['fac_plain'];
+    expect(typeof entry).toBe('number');
+    expect(entry).toBeCloseTo(0.4, 4);
   });
 
   it('LLM display_value that echoes the factor label is suppressed', () => {

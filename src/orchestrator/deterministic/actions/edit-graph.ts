@@ -118,6 +118,40 @@ function topSimilarNodes(
 }
 
 /**
+ * Substitute the unresolved entity phrase in the user's message with a
+ * concrete candidate label, preserving the rest of the message verbatim.
+ *
+ * Example: "connect the pricing risk to the revenue outcome" with
+ * inferredKind='risk' and candidate='Market Pricing Risk' →
+ * "connect Market Pricing Risk to the revenue outcome".
+ *
+ * Matches up to 3 words preceding the kind keyword (optional article),
+ * replaces the whole span with the candidate label. When no kind-bearing
+ * phrase is found, appends the candidate so the edit instruction still
+ * references it.
+ */
+function substituteEntityInMessage(
+  userMessage: string,
+  inferredKind: NodeKindV3T | null,
+  candidateLabel: string,
+): string {
+  const trimmed = userMessage.trim();
+  if (!trimmed) return candidateLabel;
+  if (!inferredKind) return trimmed;
+  // Pattern matches optional article + up to 3 descriptor words + kind noun.
+  // Anchored on word boundaries; case-insensitive. The non-capturing groups
+  // keep the replacement clean.
+  const kindPattern = new RegExp(
+    `\\b(?:the\\s+|a\\s+|an\\s+|some\\s+|this\\s+|that\\s+)?(?:\\w+\\s+){0,3}${inferredKind}\\b`,
+    'i',
+  );
+  if (kindPattern.test(trimmed)) {
+    return trimmed.replace(kindPattern, candidateLabel);
+  }
+  return trimmed;
+}
+
+/**
  * Build the clarification response for a zero-match edit_graph turn.
  * Returns an ActionResult with assistantText + suggestedActions (chips
  * capped at 3 per DS v5). When no grounded candidates can be found,
@@ -127,20 +161,34 @@ function buildZeroMatchClarification(
   editDescription: string,
   graph: GraphV3T,
   turnId: string,
+  userMessage?: string | null,
 ): ActionResult {
   const inferredKind = inferEditKind(editDescription);
   const structural = STRUCTURAL_INTENT_RE.test(editDescription);
   const actionVerb = structural ? 'Connect' : 'Edit';
+  // Canonical phrase to substitute into: prefer the user's raw turn message,
+  // fall back to the edit_description passed to the tool.
+  const sourceMessage = (userMessage ?? '').trim() || editDescription;
 
   const makeChip = (node: NodeV3T, index: number): SuggestedAction => {
-    const phrase = `${actionVerb} ${node.label ?? node.id}`;
+    const candidateLabel = node.label ?? node.id;
+    // Preserve the user's full intent (e.g. "connect X to the revenue
+    // outcome") with the entity reference swapped to the concrete label.
+    // Falls back to the explicit "Connect/Edit <label>" phrasing when no
+    // kind-bearing noun phrase was found in the user's message.
+    const preservedPrompt = substituteEntityInMessage(
+      sourceMessage,
+      inferredKind,
+      candidateLabel,
+    );
+    const chipLabel = `${actionVerb} ${candidateLabel}`;
     return {
-      label: phrase,
-      prompt: phrase,
+      label: chipLabel,
+      prompt: preservedPrompt,
       role: 'facilitator',
       action_type: 'edit_graph',
       parameters: {
-        edit_description: phrase,
+        edit_description: preservedPrompt,
         target_id: node.id,
         chip_id: `edit_zero_match_${index}_${node.id}`,
       },
@@ -535,7 +583,14 @@ export const editGraphAction: ActionDefinition = {
       // nodes of the inferred kind (or falls back to label similarity).
       const candidateLabels = result.pendingClarification.candidate_labels ?? [];
       if (candidateLabels.length === 0 && ctx.graph) {
-        return buildZeroMatchClarification(editDescription, ctx.graph, ctx.turn_id);
+        // Pull the latest user message from conversation history so chip
+        // prompts can preserve full intent (verb, target, relationship)
+        // with only the entity reference substituted.
+        const lastUserMessage = (ctx.messages ?? [])
+          .filter((m) => m.role === 'user' && typeof m.content === 'string')
+          .map((m) => m.content as string)
+          .pop() ?? null;
+        return buildZeroMatchClarification(editDescription, ctx.graph, ctx.turn_id, lastUserMessage);
       }
       const text = extractClarificationText(result);
       return {

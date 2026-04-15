@@ -89,8 +89,27 @@ export const OptionForAnalysis = z.object({
   status: OptionForAnalysisStatus,
   /** Reason for status determination (for debugging/transparency) */
   status_reason: z.string().optional(),
-  /** Interventions: factor_id -> numeric value (ALWAYS numeric for PLoT) */
-  interventions: z.record(z.string(), z.number()),
+  /**
+   * Interventions: factor_id -> numeric value (flat shape) OR rich object
+   * { value, source?, display_value? } when a human-readable display string
+   * is available. PLoT always receives the flat numeric form — callers that
+   * forward to PLoT MUST flatten via flattenInterventions() first. The rich
+   * form lets the UI render unit-aware display strings without a separate
+   * intervention_details lookup.
+   */
+  interventions: z.record(
+    z.string(),
+    z.union([
+      z.number(),
+      z
+        .object({
+          value: z.number(),
+          source: z.string().optional(),
+          display_value: z.string().optional(),
+        })
+        .passthrough(),
+    ]),
+  ),
   // --- Raw+Encoded pattern: parallel raw values (additive field) ---
   /** Raw intervention values before encoding (for categorical/boolean) */
   raw_interventions: z.record(z.string(), RawInterventionValue).optional(),

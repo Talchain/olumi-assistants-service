@@ -109,7 +109,19 @@ export const setFactorValueAction: ActionDefinition = {
     const nodeEntry = ctx.entities.nodes.get(entity.id);
     if (nodeEntry?.cap != null && value > nodeEntry.cap) {
       if (value > 10) {
-        const hasRealCap = nodeEntry.cap > 1 && typeof nodeEntry.unit === 'string' && nodeEntry.unit.length > 0;
+        // hasRealCap requires a real-world raw_value on the graph node to
+        // confirm the factor had genuine real-world metadata at draft time,
+        // not just a cosmetic unit label on an otherwise normalised factor.
+        // Without that evidence, treat as Case A (wrong representation).
+        const graphNode = ctx.graph?.nodes.find((n) => n.id === entity.id);
+        const hasRawValue =
+          (graphNode as { data?: { raw_value?: unknown } } | undefined)?.data?.raw_value != null
+          || (graphNode as { observed_state?: { raw_value?: unknown } } | undefined)?.observed_state?.raw_value != null;
+        const hasRealCap =
+          nodeEntry.cap > 1
+          && typeof nodeEntry.unit === 'string'
+          && nodeEntry.unit.length > 0
+          && hasRawValue;
         if (hasRealCap) {
           return buildAboveRealCapRecovery(entity, nodeEntry, value);
         }
