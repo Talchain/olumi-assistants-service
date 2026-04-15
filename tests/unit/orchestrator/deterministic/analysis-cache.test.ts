@@ -156,12 +156,23 @@ describe('isRehydrationInScope (S6 gating)', () => {
     })).toBe(false);
   });
 
-  it('does NOT fire on frame turns with non-evaluate message', () => {
+  it('fires on frame-stage turn whose message contains an evaluate keyword', () => {
+    // Demonstrates the OR semantics: any of { framing, message, event }
+    // triggering evaluate-intent is sufficient. "compare" matches the
+    // regex even though framing.stage is 'frame'.
     expect(isRehydrationInScope({
-      message: 'I want to compare the framing of my decision',
+      message: 'Compare the framing of my decision',
       framingStage: 'frame',
       systemEventType: null,
-    })).toBe(true); // NOTE: "compare" matches EVAL_INTENT_RE — expected behaviour
+    })).toBe(true);
+  });
+
+  it('does NOT fire on frame-stage turn with non-evaluate message', () => {
+    expect(isRehydrationInScope({
+      message: 'Rename the goal to Grow revenue',
+      framingStage: 'frame',
+      systemEventType: null,
+    })).toBe(false);
   });
 
   it('does NOT fire on a pure edit turn with no evaluate signals', () => {

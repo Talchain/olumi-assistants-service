@@ -170,8 +170,9 @@ function substituteEntityInMessage(
   }
   // Fallback: no kind noun in the message (or no inferred kind). Append a
   // disambiguation suffix so the chip prompt can't re-trigger the same
-  // zero-match path on click.
-  return `${trimmed} — referring to "${candidateLabel}"`;
+  // zero-match path on click. House style forbids em-dashes in user-facing
+  // copy; use a comma-led clause instead.
+  return `${trimmed}, referring to "${candidateLabel}"`;
 }
 
 /**
