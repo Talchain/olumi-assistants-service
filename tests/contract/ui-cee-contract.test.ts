@@ -165,5 +165,39 @@ describe("UI → CEE contract validation", () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it("preserves analysis-cache session_state fields on round-trip (S6)", () => {
+      const envelope = { scenario_id: "scn-1", winner: "opt_a" };
+      const result = TurnRequestSchema.parse({
+        message: "Why did A win?",
+        scenario_id: "scn-1",
+        client_turn_id: "ct-rehydrate",
+        session_state: {
+          prediction: null,
+          analysis_graph_hash: "abc123deadbeef",
+          analysis_scenario_id: "scn-1",
+          prior_analysis_envelope: envelope,
+        },
+      });
+      expect(result.session_state).toBeDefined();
+      expect(result.session_state!.analysis_graph_hash).toBe("abc123deadbeef");
+      expect(result.session_state!.analysis_scenario_id).toBe("scn-1");
+      expect(result.session_state!.prior_analysis_envelope).toEqual(envelope);
+    });
+
+    it("accepts null for analysis-cache fields (initial turn, no cache yet)", () => {
+      const result = TurnRequestSchema.parse({
+        message: "hello",
+        scenario_id: "scn-1",
+        client_turn_id: "ct-initial",
+        session_state: {
+          analysis_graph_hash: null,
+          analysis_scenario_id: null,
+          prior_analysis_envelope: null,
+        },
+      });
+      expect(result.session_state!.analysis_graph_hash).toBeNull();
+      expect(result.session_state!.prior_analysis_envelope).toBeNull();
+    });
   });
 });

@@ -181,6 +181,13 @@ export const SessionStateSchema = z.object({
   last_question_turn: z.number().int().min(0).optional(),
   preferred_option: z.string().nullable().optional(),
   convergence_signal: z.enum(['exploring', 'narrowing', 'converging']).optional(),
+  // Analysis-rehydration cache (S6). Cleared by the pipeline on graph-
+  // mutating actions; populated after successful run_analysis so a
+  // follow-up evaluate turn that drops analysis_state can be backfilled.
+  // Envelope validated permissively — consumer normalises it.
+  analysis_graph_hash: z.string().nullable().optional(),
+  analysis_scenario_id: z.string().nullable().optional(),
+  prior_analysis_envelope: z.object({}).passthrough().nullable().optional(),
 }).optional();
 
 export const TurnRequestSchema = z.object({

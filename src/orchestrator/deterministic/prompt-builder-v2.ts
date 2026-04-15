@@ -233,6 +233,19 @@ function buildStateSection(ctx: DeterministicTurnContext): string {
   //     say "not yet run", "no results available", or "stale" — the prompt itself
   //     (v32a+) owns the rules for what to do when analysis data is absent. The
   //     dynamic block must not contradict or pre-empt those rules.
+  // Diagnostic: visibility into analysis presence on every evaluate-stage
+  // turn. When the client drops analysis_state on an explain turn, this log
+  // shows `has_analysis_summary: false` and the post-rehydration path can be
+  // verified via the paired `v4.analysis_state_rehydrated_from_session` log.
+  if (ctx.stage === 'evaluate') {
+    log.info({
+      event: 'v4.prompt_builder_analysis_presence',
+      has_analysis_summary: ctx.analysis_summary != null,
+      factor_sensitivity_count: ctx.analysis_summary?.factor_sensitivity?.length ?? 0,
+      top_drivers_count: ctx.analysis_summary?.top_drivers?.length ?? 0,
+    }, 'prompt-builder analysis presence on evaluate-stage turn');
+  }
+
   if (ctx.analysis_summary) {
     const a = ctx.analysis_summary;
     parts.push('\n**Analysis Results:**');

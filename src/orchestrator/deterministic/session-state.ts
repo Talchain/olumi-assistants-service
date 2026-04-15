@@ -11,6 +11,7 @@
 
 import type { ActionName } from "./actions/types.js";
 import type { DeterministicTurnContext } from "./types.js";
+import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 
 // ============================================================================
@@ -43,6 +44,31 @@ export interface SessionState {
   preferred_option: string | null;
   /** Convergence signal for coaching mode selection */
   convergence_signal: 'exploring' | 'narrowing' | 'converging';
+  /**
+   * Hash of graph + scenario at the point the most recent successful
+   * run_analysis produced prior_analysis_envelope. Used as a freshness
+   * gate before rehydrating analysis state on evaluate-stage turns.
+   * Cleared whenever a graph-mutating action runs.
+   */
+  analysis_graph_hash: string | null;
+  /**
+   * Scenario the cached analysis envelope was produced for. Rehydration
+   * requires both graph hash AND scenario_id to match.
+   */
+  analysis_scenario_id: string | null;
+  /**
+   * Cached analysis envelope from the most recent successful run_analysis.
+   * Cleared on any graph-mutating action so stale numeric results cannot
+   * survive structural edits. Presentation-only safety net: the canonical
+   * path is the client forwarding analysis_state on every evaluate turn.
+   *
+   * Typed loosely because the schema layer (SessionStateSchema) validates
+   * via object-passthrough — the pipeline runs normalizeAnalysisEnvelope
+   * before the cached payload is used, so strict typing at this layer
+   * would over-constrain the round-trip. Structurally this is a
+   * V2RunResponseEnvelope.
+   */
+  prior_analysis_envelope: Record<string, unknown> | V2RunResponseEnvelope | null;
 }
 
 // ============================================================================
@@ -75,6 +101,11 @@ export function mergeSessionState(input: Partial<SessionState> | null | undefine
     convergence_signal: input.convergence_signal === 'exploring' || input.convergence_signal === 'narrowing' || input.convergence_signal === 'converging'
       ? input.convergence_signal
       : defaults.convergence_signal,
+    analysis_graph_hash: typeof input.analysis_graph_hash === 'string' ? input.analysis_graph_hash : defaults.analysis_graph_hash,
+    analysis_scenario_id: typeof input.analysis_scenario_id === 'string' ? input.analysis_scenario_id : defaults.analysis_scenario_id,
+    prior_analysis_envelope: input.prior_analysis_envelope && typeof input.prior_analysis_envelope === 'object'
+      ? (input.prior_analysis_envelope as V2RunResponseEnvelope)
+      : defaults.prior_analysis_envelope,
   };
 }
 
@@ -93,6 +124,9 @@ export function defaultSessionState(): SessionState {
     last_question_turn: 0,
     preferred_option: null,
     convergence_signal: 'exploring',
+    analysis_graph_hash: null,
+    analysis_scenario_id: null,
+    prior_analysis_envelope: null,
   };
 }
 
@@ -135,7 +169,25 @@ export function advanceSessionState(
     last_question_turn: prev.last_question_turn,
     preferred_option: prev.preferred_option,
     convergence_signal: prev.convergence_signal,
+    analysis_graph_hash: prev.analysis_graph_hash,
+    analysis_scenario_id: prev.analysis_scenario_id,
+    prior_analysis_envelope: prev.prior_analysis_envelope,
   };
+
+  // Graph-mutating actions invalidate any cached analysis. Clear before
+  // the turn's envelope is written so a subsequent evaluate turn on the
+  // modified graph will not rehydrate stale numeric results.
+  const GRAPH_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
+    'edit_graph', 'draft_graph',
+    'add_factor', 'add_option', 'remove_factor', 'remove_option',
+    'adjust_edge_strength', 'set_factor_value', 'set_goal_target',
+    'add_constraint',
+  ]);
+  if (executedAction && GRAPH_MUTATING_ACTIONS.has(executedAction)) {
+    next.analysis_graph_hash = null;
+    next.analysis_scenario_id = null;
+    next.prior_analysis_envelope = null;
+  }
 
   // Track calibrations from set_factor_value
   if (executedAction === 'set_factor_value' && outcome?.calibrated_factor_id) {

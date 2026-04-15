@@ -469,9 +469,11 @@ describe("assembleV4Envelope — T1 Phase A structured failure wiring", () => {
 
 describe("assembleV4Envelope — set_factor_value cap-exceeded real handler integration", () => {
   it("real handler failure flows through v4 assembler and produces a failure envelope", async () => {
-    const ctx = makeCtx(10);
+    // Use a slight-overflow case (value 1.01–10) so we stay on the
+    // CAP_EXCEEDED failure path rather than the new S3 recovery branches.
+    const ctx = makeCtx(3);
     const actionResult = await setFactorValueAction.execute(
-      { target_id: 'fac_capacity', value: 25 },
+      { target_id: 'fac_capacity', value: 5 },
       ctx,
     );
     expect(actionResult.failure).toBeDefined();

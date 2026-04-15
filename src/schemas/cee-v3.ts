@@ -267,6 +267,14 @@ export const InterventionV3 = z.object({
   value_type: InterventionValueType.optional(),
   /** Encoding map for categorical values: raw_value -> encoded integer */
   encoding_map: z.record(z.string(), z.number()).optional(),
+  /**
+   * Presentation-only human-readable string for the intervention value.
+   * Populated either by the LLM/draft prompt or deterministically by the
+   * analysis-ready transformer via synthesiseDisplayValue(). Must NEVER
+   * be read by inference, readiness, or flattening logic — those paths
+   * read `value` (and optionally `raw_value`) only.
+   */
+  display_value: z.string().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type InterventionV3T = z.infer<typeof InterventionV3>;
 

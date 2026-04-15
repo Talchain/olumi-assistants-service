@@ -6,9 +6,10 @@
 
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
+import type { SuggestedAction } from "../../types.js";
 import { resolveEntity } from "../entity-resolver.js";
 import { log } from "../../../utils/telemetry.js";
-import { qualitativeBand } from "../../../cee/factor-extraction/display-value.js";
+import { qualitativeBand, synthesiseDisplayValue } from "../../../cee/factor-extraction/display-value.js";
 
 /**
  * Map a raw currency signal (symbol or short code) to a canonical unit label.
@@ -97,8 +98,23 @@ export const setFactorValueAction: ActionDefinition = {
     // assistant text so the response assembler can route through the
     // failure_code / recovery_hint envelope path AND so future Phase B can
     // thread the failure into next-turn LLM context.
+    //
+    // S3 recovery branches: when the user passed an absolute real-world
+    // number (value > 10) for a factor whose normalised cap is 1, distinguish
+    //   A) wrong representation — no real-world metadata on the node →
+    //      qualitative chips (moderate / high / very high).
+    //   B) above real-world cap — node has unit and a real-world cap > 1 →
+    //      offer range-increase (via edit_graph) or set-to-maximum chips.
+    // Values in 1.01–10 fall through to the existing CAP_EXCEEDED failure.
     const nodeEntry = ctx.entities.nodes.get(entity.id);
     if (nodeEntry?.cap != null && value > nodeEntry.cap) {
+      if (value > 10) {
+        const hasRealCap = nodeEntry.cap > 1 && typeof nodeEntry.unit === 'string' && nodeEntry.unit.length > 0;
+        if (hasRealCap) {
+          return buildAboveRealCapRecovery(entity, nodeEntry, value);
+        }
+        return buildWrongRepresentationRecovery(entity, nodeEntry, value);
+      }
       return {
         blocks: [],
         assistantText: '',
@@ -273,4 +289,140 @@ function computeDisplayValue(value: number, unit?: string): string {
   }
 
   return unit ? `${value} ${unit}` : `${value}`;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// S3 recovery builders
+// ──────────────────────────────────────────────────────────────────────
+
+interface EntityShape { id: string; label: string }
+interface NodeEntryShape { cap?: number; unit?: string }
+
+/**
+ * Case A — wrong representation. Factor is normalised (cap ≤ 1) with no
+ * trustworthy real-world metadata, and the user passed a real-world value.
+ * Offer qualitative chips only — chip labels contain no normalised values;
+ * the payload carries the normalised target.
+ */
+function buildWrongRepresentationRecovery(
+  entity: EntityShape,
+  _nodeEntry: NodeEntryShape,
+  value: number,
+): ActionResult {
+  const displayValue = synthesiseDisplayValue({
+    value,
+    raw_value: value,
+    unit: _nodeEntry.unit,
+  }) ?? String(value);
+
+  const makeChip = (bandLabel: string, normValue: number, index: number): SuggestedAction => {
+    const phrase = `Set to ${bandLabel}`;
+    return {
+      label: phrase,
+      prompt: `Set ${entity.label} to ${normValue}`,
+      role: 'facilitator',
+      action_type: 'set_factor_value',
+      parameters: {
+        target_id: entity.id,
+        value: normValue,
+        chip_id: `set_factor_value_qualitative_${index}`,
+      },
+    };
+  };
+
+  const chips: SuggestedAction[] = [
+    makeChip('moderate', 0.5, 0),
+    makeChip('high', 0.8, 1),
+    makeChip('very high', 0.95, 2),
+  ];
+
+  log.info({
+    event: 'v4.set_factor_value_absolute_recovery',
+    factor_id: entity.id,
+    raw_value: value,
+    case: 'wrong_representation',
+    has_metadata: false,
+    offered_options: chips.map((c) => c.label),
+  }, 'set_factor_value: qualitative recovery for normalised-only factor');
+
+  return {
+    blocks: [],
+    assistantText: `${entity.label} uses a relative scale. Would you describe ${displayValue} as moderate, high, or very high for this decision?`,
+    guidance_items: [],
+    suggested_actions_override: chips,
+  };
+}
+
+/**
+ * Case B — above real-world cap. Factor has unit + real-world cap > 1; the
+ * user's value exceeds the cap. Offer to raise the range (via edit_graph)
+ * or snap to the current maximum.
+ */
+function buildAboveRealCapRecovery(
+  entity: EntityShape,
+  nodeEntry: NodeEntryShape,
+  value: number,
+): ActionResult {
+  const unit = nodeEntry.unit;
+  const cap = nodeEntry.cap ?? 0;
+  const rounded = Math.ceil(value / Math.pow(10, Math.max(0, String(Math.round(value)).length - 2)))
+    * Math.pow(10, Math.max(0, String(Math.round(value)).length - 2));
+  const newRange = rounded > value ? rounded : value;
+
+  const capDisplay = synthesiseDisplayValue({
+    value: cap,
+    raw_value: cap,
+    unit,
+  }) ?? (unit ? `${cap} ${unit}` : String(cap));
+  const valueDisplay = synthesiseDisplayValue({
+    value,
+    raw_value: value,
+    unit,
+  }) ?? (unit ? `${value} ${unit}` : String(value));
+  const rangeDisplay = synthesiseDisplayValue({
+    value: newRange,
+    raw_value: newRange,
+    unit,
+  }) ?? (unit ? `${newRange} ${unit}` : String(newRange));
+
+  const chips: SuggestedAction[] = [
+    {
+      label: `Increase range to ${rangeDisplay}`,
+      prompt: `Increase the range of ${entity.label} to ${newRange}${unit ? ' ' + unit : ''}`,
+      role: 'facilitator',
+      action_type: 'edit_graph',
+      parameters: {
+        edit_description: `Increase the range of ${entity.label} to ${newRange}${unit ? ' ' + unit : ''}`,
+        target_id: entity.id,
+        chip_id: 'set_factor_value_range_increase',
+      },
+    },
+    {
+      label: 'Set to current maximum',
+      prompt: `Set ${entity.label} to ${cap}`,
+      role: 'facilitator',
+      action_type: 'set_factor_value',
+      parameters: {
+        target_id: entity.id,
+        value: cap,
+        chip_id: 'set_factor_value_snap_to_cap',
+      },
+    },
+  ];
+
+  log.info({
+    event: 'v4.set_factor_value_absolute_recovery',
+    factor_id: entity.id,
+    raw_value: value,
+    case: 'above_real_cap',
+    has_metadata: true,
+    offered_options: chips.map((c) => c.label),
+  }, 'set_factor_value: range-adjust recovery for real-world factor above cap');
+
+  return {
+    blocks: [],
+    assistantText: `${entity.label} currently has a maximum of ${capDisplay}. ${valueDisplay} is above that range. Would you like to increase the range, or set it to the current maximum?`,
+    guidance_items: [],
+    suggested_actions_override: chips,
+  };
 }

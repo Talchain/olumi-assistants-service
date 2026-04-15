@@ -273,7 +273,31 @@ function buildInterventionDetail(
   factorId: string,
   normalisedValue: number,
   factorNode: NodeV3T | undefined,
+  interventionDisplayValue?: string,
 ): InterventionDetail {
+  // Highest priority: display_value on the intervention itself (LLM/enricher-
+  // supplied). This lets the draft prompt provide per-intervention display
+  // strings without having to mutate factor node state.
+  if (interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
+    const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
+    const candidate = interventionDisplayValue.toLowerCase().trim();
+    const isEcho =
+      factorLabel !== "" &&
+      (candidate === factorLabel || candidate.includes(factorLabel));
+    if (!isEcho) {
+      return {
+        display_value: interventionDisplayValue,
+        normalised_value: normalisedValue,
+        ...(factorNode?.observed_state?.raw_value !== undefined && {
+          raw_value: factorNode.observed_state.raw_value,
+        }),
+        ...(factorNode?.observed_state?.unit !== undefined && {
+          unit: factorNode.observed_state.unit,
+        }),
+      };
+    }
+  }
+
   // Prefer LLM/enricher-provided display_value on the factor node
   if (factorNode?.display_value) {
     const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
@@ -490,13 +514,18 @@ export function buildAnalysisReadyPayload(
   // CEE-6 echo stripping is applied inside buildInterventionDetail.
   for (let i = 0; i < analysisOptions.length; i++) {
     const analysisOpt = analysisOptions[i];
+    const v3Option = options[i];
     const interventionEntries = Object.entries(analysisOpt.interventions);
     if (interventionEntries.length === 0) continue;
 
     const details: Record<string, InterventionDetail> = {};
     for (const [factorId, normalisedValue] of interventionEntries) {
       const factorNode = factorNodeMap.get(factorId);
-      details[factorId] = buildInterventionDetail(factorId, normalisedValue, factorNode);
+      const v3Intervention = v3Option?.interventions?.[factorId];
+      const llmDisplayValue = v3Intervention && typeof (v3Intervention as { display_value?: unknown }).display_value === 'string'
+        ? (v3Intervention as { display_value: string }).display_value
+        : undefined;
+      details[factorId] = buildInterventionDetail(factorId, normalisedValue, factorNode, llmDisplayValue);
     }
     analysisOpt.intervention_details = details;
   }

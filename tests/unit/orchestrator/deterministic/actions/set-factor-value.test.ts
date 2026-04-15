@@ -34,6 +34,7 @@ beforeEach(() => {
 function makeContext(overrides: {
   nodeUnit?: string | undefined;
   userCurrencyHint?: string | null;
+  nodeCap?: number;
 } = {}): DeterministicTurnContext {
   return {
     stage: 'ideate',
@@ -46,6 +47,7 @@ function makeContext(overrides: {
           aliases: [],
           is_action_target: false,
           unit: overrides.nodeUnit,
+          ...(overrides.nodeCap != null ? { cap: overrides.nodeCap } : {}),
         }],
       ]),
       edges: [],
@@ -293,5 +295,83 @@ describe("set_factor_value — display_value branch coverage", () => {
       ctx,
     );
     expect(result.fact?.data?.display_value).toBe('very high');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// S3 recovery branches — Case A (wrong representation), Case B (above real cap)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('set_factor_value — S3 CAP_EXCEEDED recovery', () => {
+  const infoSpy = vi.mocked(log.info);
+
+  beforeEach(() => {
+    infoSpy.mockClear();
+  });
+
+  it('Case A: absolute value on normalised factor offers qualitative chips (no numeric in labels)', async () => {
+    const ctx = makeContext({ nodeUnit: undefined, nodeCap: 1 });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 95000 },
+      ctx,
+    );
+    expect(result.failure).toBeUndefined();
+    expect(result.suggested_actions_override).toHaveLength(3);
+    const labels = (result.suggested_actions_override ?? []).map((c) => c.label);
+    expect(labels).toEqual(['Set to moderate', 'Set to high', 'Set to very high']);
+    for (const l of labels) {
+      expect(l).not.toMatch(/0\.\d/);
+    }
+    expect(result.assistantText).toContain('relative scale');
+
+    const recoveryLog = infoSpy.mock.calls.find(
+      (c) => (c[0] as { event?: string })?.event === 'v4.set_factor_value_absolute_recovery',
+    );
+    expect(recoveryLog).toBeDefined();
+    expect((recoveryLog![0] as { case: string }).case).toBe('wrong_representation');
+  });
+
+  it('Case B: value above real-world cap offers range-increase and snap-to-max chips', async () => {
+    const ctx = makeContext({ nodeUnit: 'GBP', nodeCap: 85000 });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 95000 },
+      ctx,
+    );
+    expect(result.failure).toBeUndefined();
+    expect(result.suggested_actions_override).toHaveLength(2);
+    const chips = result.suggested_actions_override ?? [];
+    expect(chips[0].label).toMatch(/^Increase range to/);
+    expect(chips[0].action_type).toBe('edit_graph');
+    expect(chips[1].label).toBe('Set to current maximum');
+    expect(chips[1].action_type).toBe('set_factor_value');
+    expect(chips[1].parameters?.value).toBe(85000);
+
+    const recoveryLog = infoSpy.mock.calls.find(
+      (c) => (c[0] as { event?: string })?.event === 'v4.set_factor_value_absolute_recovery',
+    );
+    expect(recoveryLog).toBeDefined();
+    expect((recoveryLog![0] as { case: string }).case).toBe('above_real_cap');
+  });
+
+  it('Case B: extreme value far above real-world cap still uses Case B (range-increase)', async () => {
+    const ctx = makeContext({ nodeUnit: 'GBP', nodeCap: 85000 });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 150000 },
+      ctx,
+    );
+    expect(result.suggested_actions_override).toHaveLength(2);
+    const chips = result.suggested_actions_override ?? [];
+    expect(chips[0].action_type).toBe('edit_graph');
+    expect((chips[0].parameters as Record<string, unknown>).edit_description).toContain('Increase the range');
+  });
+
+  it('preserves CAP_EXCEEDED failure for slightly-over values (1.01–10)', async () => {
+    const ctx = makeContext({ nodeUnit: undefined, nodeCap: 1 });
+    const result = await setFactorValueAction.execute(
+      { target_id: 'fac_ad_spend', value: 1.2 },
+      ctx,
+    );
+    expect(result.failure?.code).toBe('CAP_EXCEEDED');
+    expect(result.suggested_actions_override).toBeUndefined();
   });
 });

@@ -398,6 +398,16 @@ export interface ActionResult {
    * When absent, the handler's assistantText is used as-is (legacy path).
    */
   fact?: import("./response-composer.js").HandlerFact;
+  /**
+   * Optional override for the envelope's suggested_actions array. When
+   * populated, the V4 envelope assembler uses these chips instead of the
+   * chip engine output. Used by action handlers that need to surface
+   * targeted recovery chips alongside a clarification response (e.g.
+   * edit_graph zero-match kind-inferred candidates, set_factor_value
+   * CAP_EXCEEDED recovery). Capped to 3 by DS v5 before the envelope is
+   * assembled; callers should respect the cap.
+   */
+  suggested_actions_override?: SuggestedAction[];
 }
 
 /** Structured action failure (T1 Phase A). */

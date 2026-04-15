@@ -28,15 +28,209 @@ import type {
   GraphPatchBlockData,
   OrchestratorError,
   PatchOperation,
+  SuggestedAction,
   TypedConversationBlock,
 } from "../../types.js";
-import type { GraphV3T } from "../../../schemas/cee-v3.js";
+import type { GraphV3T, NodeV3T, NodeKindV3T } from "../../../schemas/cee-v3.js";
 import type { EditGraphResult } from "../../tools/edit-graph.js";
 import { log } from "../../../utils/telemetry.js";
 import { flattenInterventions } from "../../utils/flatten-interventions.js";
+import { TOKEN_OVERLAP_STOPWORDS } from "../../tools/token-overlap.js";
 
 const STRUCTURAL_INTENT_RE =
   /\b(connect|disconnect|fix|wire|link|rewire|add.*connection|remove.*connection|isn'?t connected|not connected|missing connection)\b/i;
+
+// ──────────────────────────────────────────────────────────────────────
+// Zero-match kind inference + similarity (S2 fix)
+//
+// When handleEditGraph returns a pendingClarification with empty
+// candidate_labels (match_type='none'), the V2 path hands back a generic
+// "which one did you mean?" question with no visible graph entities.
+// This block intercepts before the V4 clarification return and builds a
+// grounded response using nodes of the inferred kind, falling back to
+// global label similarity when the inferred kind has no nodes.
+// ──────────────────────────────────────────────────────────────────────
+
+/** Map keyword hits in the user's message to a NodeKindV3T. */
+function inferEditKind(message: string): NodeKindV3T | null {
+  if (!message) return null;
+  const lower = message.toLowerCase();
+  if (/\b(risk|danger|threat)\b/.test(lower)) return 'risk';
+  if (/\b(factor|cost|budget|capacity)\b/.test(lower)) return 'factor';
+  if (/\b(outcome|result)\b/.test(lower)) return 'outcome';
+  if (/\b(option|alternative)\b/.test(lower)) return 'option';
+  if (/\b(goal|objective)\b/.test(lower)) return 'goal';
+  return null;
+}
+
+function tokeniseForSimilarity(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 2 && !TOKEN_OVERLAP_STOPWORDS.has(t));
+}
+
+/**
+ * Score a node label against the user's phrase using simple token-overlap
+ * ratio. Returns 0 when no significant tokens overlap.
+ */
+function labelSimilarity(phraseTokens: string[], label: string): number {
+  if (phraseTokens.length === 0) return 0;
+  const labelTokens = tokeniseForSimilarity(label);
+  if (labelTokens.length === 0) return 0;
+  const phraseSet = new Set(phraseTokens);
+  let overlap = 0;
+  for (const lt of labelTokens) {
+    if (phraseSet.has(lt)) {
+      overlap++;
+      continue;
+    }
+    for (const pt of phraseTokens) {
+      const shorter = lt.length <= pt.length ? lt : pt;
+      const longer = lt.length <= pt.length ? pt : lt;
+      if (longer.includes(shorter) && shorter.length / longer.length >= 0.6) {
+        overlap++;
+        break;
+      }
+    }
+  }
+  return overlap / labelTokens.length;
+}
+
+function topSimilarNodes(
+  phrase: string,
+  nodes: ReadonlyArray<NodeV3T>,
+  limit: number,
+): Array<{ node: NodeV3T; score: number }> {
+  const tokens = tokeniseForSimilarity(phrase);
+  const scored: Array<{ node: NodeV3T; score: number }> = [];
+  for (const node of nodes) {
+    if (!node.label) continue;
+    const score = labelSimilarity(tokens, node.label);
+    if (score > 0) scored.push({ node, score });
+  }
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.node.id.localeCompare(b.node.id);
+  });
+  return scored.slice(0, limit);
+}
+
+/**
+ * Build the clarification response for a zero-match edit_graph turn.
+ * Returns an ActionResult with assistantText + suggestedActions (chips
+ * capped at 3 per DS v5). When no grounded candidates can be found,
+ * returns a short text-only response with no chips.
+ */
+function buildZeroMatchClarification(
+  editDescription: string,
+  graph: GraphV3T,
+  turnId: string,
+): ActionResult {
+  const inferredKind = inferEditKind(editDescription);
+  const structural = STRUCTURAL_INTENT_RE.test(editDescription);
+  const actionVerb = structural ? 'Connect' : 'Edit';
+
+  const makeChip = (node: NodeV3T, index: number): SuggestedAction => {
+    const phrase = `${actionVerb} ${node.label ?? node.id}`;
+    return {
+      label: phrase,
+      prompt: phrase,
+      role: 'facilitator',
+      action_type: 'edit_graph',
+      parameters: {
+        edit_description: phrase,
+        target_id: node.id,
+        chip_id: `edit_zero_match_${index}_${node.id}`,
+      },
+    };
+  };
+
+  // Try kind-inferred matches first.
+  if (inferredKind) {
+    const sameKind = graph.nodes.filter((n) => n.kind === inferredKind);
+    if (sameKind.length > 0) {
+      // Rank by similarity to phrase; if >5, cap the shown set at 5 for
+      // the assistant text, then cap chips at 3. If similarity returns zero
+      // ranked candidates (no token overlap), fall back to the deterministic
+      // first 5 by id — clarification must never list no nodes.
+      let ranked: NodeV3T[];
+      if (sameKind.length <= 5) {
+        ranked = sameKind.slice();
+      } else {
+        const scored = topSimilarNodes(editDescription, sameKind, 5).map((s) => s.node);
+        ranked = scored.length > 0
+          ? scored
+          : sameKind.slice().sort((a, b) => a.id.localeCompare(b.id)).slice(0, 5);
+      }
+      const labels = ranked.map((n) => n.label ?? n.id);
+      const assistantText = `I couldn't find that exact element. Your model has these ${inferredKind} nodes: ${labels.join(', ')}. Which did you mean?`;
+      const chips = ranked.slice(0, 3).map((n, i) => makeChip(n, i));
+
+      log.info({
+        event: 'v4.edit_graph_zero_match_clarification',
+        turn_id: turnId,
+        inferred_kind: inferredKind,
+        candidates_shown: labels.length,
+        user_phrase: editDescription.slice(0, 120),
+        fallback_used: false,
+      }, 'Zero-match clarification with kind-inferred candidates');
+
+      return {
+        blocks: [],
+        assistantText,
+        guidance_items: [],
+        suggested_actions_override: chips,
+      };
+    }
+  }
+
+  // Global similarity fallback.
+  const top = topSimilarNodes(editDescription, graph.nodes, 5);
+  const abovethreshold = top.filter((s) => s.score >= 0.3);
+  if (abovethreshold.length > 0) {
+    const labels = abovethreshold.map((s) => s.node.label ?? s.node.id);
+    const assistantText = `I couldn't find that exact element. Your model has these similar nodes: ${labels.join(', ')}. Which did you mean?`;
+    const chips = abovethreshold.slice(0, 3).map((s, i) => makeChip(s.node, i));
+
+    log.info({
+      event: 'v4.edit_graph_zero_match_clarification',
+      turn_id: turnId,
+      inferred_kind: inferredKind,
+      candidates_shown: labels.length,
+      user_phrase: editDescription.slice(0, 120),
+      fallback_used: true,
+    }, 'Zero-match clarification via global similarity fallback');
+
+    return {
+      blocks: [],
+      assistantText,
+      guidance_items: [],
+      suggested_actions_override: chips,
+    };
+  }
+
+  // No grounded candidates. Text-only response, no chips (v1 safety: do
+  // not auto-offer an add path until it is validated).
+  log.info({
+    event: 'v4.edit_graph_zero_match_clarification',
+    turn_id: turnId,
+    inferred_kind: inferredKind,
+    candidates_shown: 0,
+    user_phrase: editDescription.slice(0, 120),
+    fallback_used: inferredKind === null,
+  }, 'Zero-match clarification — no grounded candidates');
+
+  // Explicit empty override: authoritative "no chips" signal to the envelope
+  // assembler, which would otherwise fall through to the chip engine.
+  return {
+    blocks: [],
+    assistantText: "Your model doesn't include an element matching that description.",
+    guidance_items: [],
+    suggested_actions_override: [],
+  };
+}
 
 /**
  * Exported for use by tool-builder: returns true if the user's raw message
@@ -335,6 +529,14 @@ export const editGraphAction: ActionDefinition = {
 
     // ── Pending clarification: surface as assistantText question ─────────
     if (result.pendingClarification) {
+      // S2 intercept: V2 returns pendingClarification with empty
+      // candidate_labels when resolveEditTarget hit match_type='none'.
+      // Replace the generic question with a grounded response that names
+      // nodes of the inferred kind (or falls back to label similarity).
+      const candidateLabels = result.pendingClarification.candidate_labels ?? [];
+      if (candidateLabels.length === 0 && ctx.graph) {
+        return buildZeroMatchClarification(editDescription, ctx.graph, ctx.turn_id);
+      }
       const text = extractClarificationText(result);
       return {
         blocks: [],

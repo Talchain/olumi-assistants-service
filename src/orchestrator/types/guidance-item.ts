@@ -59,6 +59,9 @@ export const SIGNAL_CODES = {
   // Pre-analysis gap detection
   MISSING_OBSERVED_VALUE: 'MISSING_OBSERVED_VALUE',
   MISSING_BASE_RATE: 'MISSING_BASE_RATE',
+  // Structural: risk/outcome node with no inbound causal edges. Surfaced
+  // at draft-time to prevent OPTION_NO_GOAL_PATH-class failures later.
+  WEAKLY_CONNECTED_NODE: 'WEAKLY_CONNECTED_NODE',
 } as const;
 
 export type SignalCode = typeof SIGNAL_CODES[keyof typeof SIGNAL_CODES];

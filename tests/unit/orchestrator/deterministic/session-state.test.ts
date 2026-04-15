@@ -468,3 +468,77 @@ describe("mergeSessionState — defensive copies", () => {
     expect(result.chip_ids_clicked).toEqual([]);
   });
 });
+
+// ============================================================================
+// Analysis-cache lifecycle (S6 fix)
+// ============================================================================
+
+describe('analysis cache lifecycle', () => {
+  it('defaults to null for all analysis-cache fields', () => {
+    const state = defaultSessionState();
+    expect(state.analysis_graph_hash).toBeNull();
+    expect(state.analysis_scenario_id).toBeNull();
+    expect(state.prior_analysis_envelope).toBeNull();
+  });
+
+  it('mergeSessionState preserves analysis-cache fields from input', () => {
+    const envelope = { scenario_id: 's1' } as unknown as SessionState['prior_analysis_envelope'];
+    const merged = mergeSessionState({
+      analysis_graph_hash: 'abc123',
+      analysis_scenario_id: 's1',
+      prior_analysis_envelope: envelope,
+    });
+    expect(merged.analysis_graph_hash).toBe('abc123');
+    expect(merged.analysis_scenario_id).toBe('s1');
+    expect(merged.prior_analysis_envelope).toBe(envelope);
+  });
+
+  it('advanceSessionState carries cache through for non-mutating actions', () => {
+    const prev = mergeSessionState({
+      analysis_graph_hash: 'abc',
+      analysis_scenario_id: 's1',
+      prior_analysis_envelope: { ok: true } as unknown as SessionState['prior_analysis_envelope'],
+    });
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, 'explain_result', ctx);
+    expect(next.analysis_graph_hash).toBe('abc');
+    expect(next.analysis_scenario_id).toBe('s1');
+    expect(next.prior_analysis_envelope).toBeTruthy();
+  });
+
+  it('advanceSessionState clears cache on edit_graph', () => {
+    const prev = mergeSessionState({
+      analysis_graph_hash: 'abc',
+      analysis_scenario_id: 's1',
+      prior_analysis_envelope: { ok: true } as unknown as SessionState['prior_analysis_envelope'],
+    });
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, 'edit_graph', ctx);
+    expect(next.analysis_graph_hash).toBeNull();
+    expect(next.analysis_scenario_id).toBeNull();
+    expect(next.prior_analysis_envelope).toBeNull();
+  });
+
+  it('advanceSessionState clears cache on set_factor_value', () => {
+    const prev = mergeSessionState({
+      analysis_graph_hash: 'abc',
+      analysis_scenario_id: 's1',
+      prior_analysis_envelope: { ok: true } as unknown as SessionState['prior_analysis_envelope'],
+    });
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, 'set_factor_value', ctx);
+    expect(next.analysis_graph_hash).toBeNull();
+    expect(next.prior_analysis_envelope).toBeNull();
+  });
+
+  it('advanceSessionState does not clear cache on null action', () => {
+    const prev = mergeSessionState({
+      analysis_graph_hash: 'abc',
+      analysis_scenario_id: 's1',
+      prior_analysis_envelope: { ok: true } as unknown as SessionState['prior_analysis_envelope'],
+    });
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, null, ctx);
+    expect(next.analysis_graph_hash).toBe('abc');
+  });
+});

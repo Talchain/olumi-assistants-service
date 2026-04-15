@@ -55,6 +55,7 @@ import type { SessionState } from "./session-state.js";
 import { composeResponse } from "./response-composer.js";
 import { computeChips, getChipIdsForSession } from "./chip-engine.js";
 import { normalizeAnalysisEnvelope } from "../analysis-state.js";
+import { computeAnalysisGraphHash } from "./analysis-cache.js";
 
 // ============================================================================
 // Chip-Click Text Templates (Task 5)
@@ -158,6 +159,58 @@ export async function* executePipelineV4(
     }
     if (turnRequest.graph_state) {
       turnRequest.context.graph = turnRequest.graph_state;
+    }
+
+    // ── Analysis rehydration safety net ──────────────────────────────
+    // When the client does not forward analysis_state on an evaluate
+    // turn (e.g. explain turns where the UI dropped the field), the LLM
+    // receives a prompt with no numbers and produces narrative. Fall
+    // back to the envelope cached in session_state only when BOTH the
+    // graph hash AND scenario_id match — either mismatch means the
+    // cache is stale and must not be rehydrated.
+    //
+    // The canonical path is still the client forwarding analysis_state
+    // on every turn. The warn-log below makes it visible when the
+    // safety net fires so the underlying UI continuity issue can be
+    // addressed separately.
+    if (
+      !turnRequest.analysis_state
+      && !turnRequest.context.analysis_response
+      && turnRequest.session_state
+    ) {
+      const cachedEnvelope = (turnRequest.session_state as { prior_analysis_envelope?: unknown }).prior_analysis_envelope;
+      const cachedHash = (turnRequest.session_state as { analysis_graph_hash?: unknown }).analysis_graph_hash;
+      const cachedScenario = (turnRequest.session_state as { analysis_scenario_id?: unknown }).analysis_scenario_id;
+      if (cachedEnvelope && typeof cachedEnvelope === 'object') {
+        const currentGraph = turnRequest.context.graph as import("../../schemas/cee-v3.js").GraphV3T | null | undefined;
+        const currentHash = computeAnalysisGraphHash(currentGraph ?? null);
+        const currentScenario = turnRequest.scenario_id ?? null;
+        // Both gates must pass. Null on either side is treated as a mismatch
+        // to prevent permissive rehydration when the UI drops scenario_id or
+        // the cache was written without one (should not happen for real turns).
+        const hashesMatch = currentHash != null && cachedHash === currentHash;
+        const scenariosMatch = cachedScenario != null && currentScenario != null && cachedScenario === currentScenario;
+        if (hashesMatch && scenariosMatch) {
+          turnRequest.context.analysis_response = normalizeAnalysisEnvelope(
+            cachedEnvelope as import("../types.js").V2RunResponseEnvelope,
+          );
+          log.info({
+            event: 'v4.analysis_state_rehydrated_from_session',
+            turn_id: turnId,
+            graph_hash: currentHash,
+          }, 'Rehydrated analysis_state from session_state cache — client did not forward');
+        } else {
+          log.warn({
+            event: 'v4.analysis_state_rehydration_blocked_stale',
+            turn_id: turnId,
+            stored_hash: cachedHash,
+            current_hash: currentHash,
+            stored_scenario: cachedScenario,
+            current_scenario: currentScenario,
+            reason: !hashesMatch ? 'graph_hash_mismatch' : 'scenario_mismatch',
+          }, 'Analysis rehydration blocked — cache is stale');
+        }
+      }
     }
 
     // Derive analysis_inputs from graph.analysis_ready when the caller did not
@@ -936,9 +989,62 @@ export async function* executePipelineV4(
     const actionOutcome = executedAction === 'set_factor_value' && streamResult.toolExecution?.input
       ? { calibrated_factor_id: streamResult.toolExecution.input.target_id as string | undefined }
       : undefined;
-    const updatedSessionState = config.cee.coachingContextEnabled
+    let updatedSessionState = config.cee.coachingContextEnabled
       ? advanceSessionState(sessionState, executedAction, turnContext, actionOutcome)
       : null;
+
+    // Analysis rehydration cache write.
+    // After a successful run_analysis, persist the envelope + hash so the
+    // next evaluate turn can rehydrate when the client drops analysis_state.
+    // The cache is keyed by (graph_hash, scenario_id). advanceSessionState
+    // clears the cache on graph-mutating actions, so run_analysis is the
+    // only place it is populated.
+    //
+    // Size-guard: session_state round-trips on every turn. For large graphs
+    // the envelope can push the request payload over reasonable limits.
+    // Skip the cache (and warn) when the serialised envelope would exceed
+    // 128KB — clients that forward analysis_state directly are unaffected;
+    // only the safety-net rehydration path is sacrificed.
+    if (
+      updatedSessionState
+      && actionResult?.fact?.action === 'analysis_complete'
+      && actionResult.analysis_response
+      && !actionResult.failure
+    ) {
+      const cacheGraph = (turnRequest.context.graph as import("../../schemas/cee-v3.js").GraphV3T | null | undefined) ?? null;
+      const cacheHash = computeAnalysisGraphHash(cacheGraph);
+      if (cacheHash) {
+        const envelopeForCache = actionResult.analysis_response as import("../types.js").V2RunResponseEnvelope;
+        let envelopeSize = 0;
+        try {
+          envelopeSize = JSON.stringify(envelopeForCache).length;
+        } catch {
+          envelopeSize = Number.MAX_SAFE_INTEGER;
+        }
+        const MAX_CACHE_ENVELOPE_BYTES = 128 * 1024;
+        if (envelopeSize <= MAX_CACHE_ENVELOPE_BYTES) {
+          updatedSessionState = {
+            ...updatedSessionState,
+            analysis_graph_hash: cacheHash,
+            analysis_scenario_id: turnRequest.scenario_id ?? null,
+            prior_analysis_envelope: envelopeForCache,
+          };
+          log.debug({
+            event: 'v4.analysis_cache_written',
+            turn_id: turnId,
+            graph_hash: cacheHash,
+            envelope_bytes: envelopeSize,
+          }, 'Cached analysis envelope for future rehydration');
+        } else {
+          log.warn({
+            event: 'v4.analysis_cache_skipped_oversize',
+            turn_id: turnId,
+            envelope_bytes: envelopeSize,
+            limit_bytes: MAX_CACHE_ENVELOPE_BYTES,
+          }, 'Analysis envelope too large to cache in session_state — rehydration safety net disabled for this turn');
+        }
+      }
+    }
 
     const envelope = assembleV4Envelope({
       turnContext,
@@ -1342,9 +1448,15 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     }
   }
 
-  const suggestedActions = useChipEngine
-    ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools, analysisReadyStatus, guidanceItemsForEnvelope)
-    : buildDeterministicChips(turnContext, executedAction, deferredActions);
+  // suggested_actions_override: undefined → fall through to chip engine.
+  // suggested_actions_override: [] → authoritative empty (suppress chips).
+  // suggested_actions_override: [c...] → use it, capped at 3.
+  const override = actionResult?.suggested_actions_override;
+  const suggestedActions = override !== undefined
+    ? override.slice(0, 3)
+    : useChipEngine
+      ? computeChips(coachingContext!, sessionState!, turnContext, executedAction, deferredActions, availableTools, analysisReadyStatus, guidanceItemsForEnvelope)
+      : buildDeterministicChips(turnContext, executedAction, deferredActions);
 
   // Sanitise chip labels and prompts (belt-and-braces — engine already sanitises).
   for (const chip of suggestedActions) {

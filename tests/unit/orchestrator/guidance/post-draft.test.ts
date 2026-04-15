@@ -278,4 +278,77 @@ describe("generatePostDraftGuidance", () => {
       expect(item).toBeUndefined();
     });
   });
+
+  describe("WEAKLY_CONNECTED_NODE detector", () => {
+    it("emits guidance for a risk node with zero inbound causal edges", () => {
+      const graph = {
+        schema_version: 'v3',
+        nodes: [
+          { id: 'opt_a', kind: 'option', label: 'Option A' },
+          { id: 'opt_b', kind: 'option', label: 'Option B' },
+          { id: 'fac_cost', kind: 'factor', label: 'Cost' },
+          { id: 'risk_orphan', kind: 'risk', label: 'Orphan Risk' },
+        ],
+        edges: [
+          { from: 'opt_a', to: 'fac_cost', strength: { mean: 0.5, std: 0.1 } },
+          { from: 'opt_b', to: 'fac_cost', strength: { mean: 0.4, std: 0.1 } },
+        ],
+      } as unknown as GraphV3T;
+      const items = generatePostDraftGuidance(graph, [], null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.WEAKLY_CONNECTED_NODE);
+      expect(item).toBeDefined();
+      expect(item?.target_object?.id).toBe('risk_orphan');
+      expect(item?.target_object?.label).toBe('Orphan Risk');
+    });
+
+    it("emits guidance for an outcome node with zero inbound causal edges", () => {
+      const graph = {
+        schema_version: 'v3',
+        nodes: [
+          { id: 'opt_a', kind: 'option', label: 'Option A' },
+          { id: 'out_revenue', kind: 'outcome', label: 'Revenue' },
+        ],
+        edges: [],
+      } as unknown as GraphV3T;
+      const items = generatePostDraftGuidance(graph, [], null);
+      const item = items.find(
+        (i) => i.signal_code === SIGNAL_CODES.WEAKLY_CONNECTED_NODE && i.target_object?.id === 'out_revenue',
+      );
+      expect(item).toBeDefined();
+    });
+
+    it("does NOT emit guidance when risk has a factor-driven inbound edge", () => {
+      const graph = {
+        schema_version: 'v3',
+        nodes: [
+          { id: 'opt_a', kind: 'option', label: 'Option A' },
+          { id: 'fac_price', kind: 'factor', label: 'Price' },
+          { id: 'risk_churn', kind: 'risk', label: 'Churn' },
+        ],
+        edges: [
+          { from: 'opt_a', to: 'fac_price', strength: { mean: 0.5, std: 0.1 } },
+          { from: 'fac_price', to: 'risk_churn', strength: { mean: 0.6, std: 0.1 } },
+        ],
+      } as unknown as GraphV3T;
+      const items = generatePostDraftGuidance(graph, [], null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.WEAKLY_CONNECTED_NODE);
+      expect(item).toBeUndefined();
+    });
+
+    it("treats decision→risk edges as structural (still emits weakly-connected)", () => {
+      const graph = {
+        schema_version: 'v3',
+        nodes: [
+          { id: 'dec_root', kind: 'decision', label: 'Root' },
+          { id: 'risk_x', kind: 'risk', label: 'Risk X' },
+        ],
+        edges: [
+          { from: 'dec_root', to: 'risk_x', strength: { mean: 0.5, std: 0.1 } },
+        ],
+      } as unknown as GraphV3T;
+      const items = generatePostDraftGuidance(graph, [], null);
+      const item = items.find((i) => i.signal_code === SIGNAL_CODES.WEAKLY_CONNECTED_NODE);
+      expect(item).toBeDefined();
+    });
+  });
 });

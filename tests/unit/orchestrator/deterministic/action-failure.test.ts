@@ -79,10 +79,12 @@ function makeCtxWithCap(cap: number): DeterministicTurnContext {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe("set_factor_value — structured CAP_EXCEEDED failure (T1)", () => {
-  it("returns failure object when value exceeds cap", async () => {
-    const ctx = makeCtxWithCap(10);
+  it("returns failure object when value exceeds cap (slight overflow)", async () => {
+    // S3 recovery only kicks in when value > 10 (absolute real-world overflow).
+    // Slightly-over-cap values (1.01–10) preserve the original CAP_EXCEEDED path.
+    const ctx = makeCtxWithCap(3);
     const result = await setFactorValueAction.execute(
-      { target_id: 'fac_capacity', value: 25 },
+      { target_id: 'fac_capacity', value: 5 },
       ctx,
     );
 

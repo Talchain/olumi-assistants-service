@@ -334,6 +334,43 @@ export function generatePostDraftGuidance(
     }
   }
 
-  // ── 6. Deduplicate, sort, cap ─────────────────────────────────────────────
+  // ── 6. Structural: WEAKLY_CONNECTED_NODE ──────────────────────────────────
+  // Risk/outcome nodes that have no inbound causal edge can't participate in
+  // option→goal paths, which produces OPTION_NO_GOAL_PATH failures downstream.
+  // Flag via guidance; never auto-connect or auto-remove.
+  const nodeKindById = new Map<string, string>();
+  for (const n of graph.nodes) nodeKindById.set(n.id, n.kind);
+  const inboundCausalCount = new Map<string, number>();
+  for (const n of graph.nodes) inboundCausalCount.set(n.id, 0);
+  for (const edge of graph.edges) {
+    const sourceKind = nodeKindById.get(edge.from);
+    // Treat edges from decision nodes as structural; all other inbound edges
+    // are considered causal for this check.
+    if (sourceKind === 'decision') continue;
+    inboundCausalCount.set(edge.to, (inboundCausalCount.get(edge.to) ?? 0) + 1);
+  }
+  const weaklyConnected: Array<{ id: string; label: string; kind: string }> = [];
+  for (const node of graph.nodes) {
+    if (node.kind !== 'risk' && node.kind !== 'outcome') continue;
+    if ((inboundCausalCount.get(node.id) ?? 0) === 0) {
+      weaklyConnected.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
+    }
+  }
+  for (const wc of weaklyConnected) {
+    const item_id = computeGuidanceItemId(SIGNAL_CODES.WEAKLY_CONNECTED_NODE, wc.id, 'structural');
+    items.push({
+      item_id,
+      signal_code: SIGNAL_CODES.WEAKLY_CONNECTED_NODE,
+      category: 'could_fix',
+      source: 'structural',
+      title: `"${wc.label}" has no causal inputs`,
+      detail: `This ${wc.kind} node has no inbound causal edge, so no option can influence it. Add a connection from the factor or option that drives it.`,
+      primary_action: { type: 'open_inspector', node_id: wc.id },
+      target_object: { type: 'node', id: wc.id, label: wc.label },
+      priority: 40,
+    });
+  }
+
+  // ── 7. Deduplicate, sort, cap ─────────────────────────────────────────────
   return sortGuidanceItems(deduplicateGuidanceItems(items)).slice(0, MAX_ITEMS);
 }
