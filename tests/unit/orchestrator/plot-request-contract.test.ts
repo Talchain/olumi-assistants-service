@@ -59,11 +59,15 @@ function makePLoTClientCapture(): { client: PLoTClient; capturedPayload: () => R
   return { client, capturedPayload: () => captured };
 }
 
-/** Minimal valid graph with a goal node and a factor node connected by an edge. */
+/** Minimal valid graph with a goal node, a factor node, and the two option nodes
+ * referenced by MINIMAL_ANALYSIS_INPUTS. The option-count invariant in
+ * handleRunAnalysis requires graph option nodes === analysis_inputs options. */
 const MINIMAL_GRAPH: ConversationContext["graph"] = {
   nodes: [
     { id: "goal_1", kind: "goal", label: "Maximise Revenue" },
     { id: "fac_price", kind: "factor", label: "Price" },
+    { id: "opt_a", kind: "option", label: "Option A" },
+    { id: "opt_b", kind: "option", label: "Option B" },
   ],
   edges: [
     {
@@ -344,9 +348,17 @@ describe("PLoT request contract — intervention normalisation", () => {
       ],
       goal_node_id: "goal_1",
     };
+    const oneOptionGraph = {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "fac_price", kind: "factor", label: "Price" },
+        { id: "opt_a", kind: "option", label: "Option A" },
+      ],
+      edges: [],
+    } as unknown as ConversationContext["graph"];
 
     const { client, capturedPayload } = makePLoTClientCapture();
-    await handleRunAnalysis(makeContext({ analysis_inputs: v3Inputs }), client, "req-9", "turn-9");
+    await handleRunAnalysis(makeContext({ analysis_inputs: v3Inputs, graph: oneOptionGraph }), client, "req-9", "turn-9");
     const payload = capturedPayload();
 
     const options = payload.options as Array<Record<string, unknown>>;

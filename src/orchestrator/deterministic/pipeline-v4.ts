@@ -39,6 +39,7 @@ import { generatePostAnalysisGuidance } from "../guidance/post-analysis.js";
 import { generatePostDraftGuidance } from "../guidance/post-draft.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { enforceProposalLanguage } from "./proposal-language-guard.js";
+import { applyUniversalHonestyGate } from "./universal-honesty-gate.js";
 import { sanitiseAssistantText, sanitiseEnvelopeText } from "./sanitise-output.js";
 import { assessMutationHealth } from "./mutation-health.js";
 import { applyPatchOperations } from "../patch-applier.js";
@@ -96,6 +97,37 @@ const TOOL_RESULT_TEXT_TEMPLATES: Record<string, string> = {
   set_goal_target: 'The goal target is now set.',
   challenge_assumption: 'Examining that assumption.',
 };
+
+// ============================================================================
+// Analysis inputs derivation
+// ============================================================================
+
+interface DerivedAnalysisOption {
+  option_id: string;
+  label: string;
+  interventions: Record<string, unknown>;
+}
+
+/**
+ * Project an analysis_ready.options payload into the AnalysisInputs.options
+ * shape the run_analysis action expects. Skips malformed entries.
+ * Shared by the start-of-turn derivation and the mid-turn refresh.
+ */
+function deriveAnalysisInputsFromReady(
+  analysisReady: { options?: Array<Record<string, unknown>> } | undefined | null,
+): DerivedAnalysisOption[] {
+  if (!analysisReady?.options || !Array.isArray(analysisReady.options)) return [];
+  return analysisReady.options
+    .filter((opt): opt is Record<string, unknown> => opt != null && typeof opt === 'object')
+    .map((opt) => ({
+      option_id: (opt.option_id ?? opt.id) as string | undefined,
+      label: opt.label as string | undefined,
+      interventions: (opt.interventions ?? {}) as Record<string, unknown>,
+    }))
+    .filter((opt): opt is DerivedAnalysisOption =>
+      typeof opt.option_id === 'string' && typeof opt.label === 'string',
+    );
+}
 
 // ============================================================================
 // Public API
@@ -227,31 +259,46 @@ export async function* executePipelineV4(
     }
 
     // Derive analysis_inputs from graph.analysis_ready when the caller did not
-    // supply it. This matches the shape the run_analysis action requires
-    // (ctx.analysis_inputs) and eliminates a client-side payload dependency:
-    // any caller that sends the graph (with analysis_ready populated by draft)
-    // can run analysis without separately echoing the interventions payload.
+    // supply it. Falls back to computing authoritative analysis_ready from the
+    // current graph via computeStructuralReadiness (same routine add_option
+    // uses) when the serialised analysis_ready is missing or has no options
+    // but the graph clearly carries option nodes. We never synthesise empty
+    // interventions — if the graph can't produce a ready payload, we skip
+    // derivation and let run_analysis report the blocker honestly.
     if (!turnRequest.context.analysis_inputs) {
       const graph = turnRequest.context.graph as Record<string, unknown> | null | undefined;
       const analysisReady = graph?.analysis_ready as { options?: Array<Record<string, unknown>> } | undefined;
-      if (analysisReady?.options && Array.isArray(analysisReady.options) && analysisReady.options.length > 0) {
-        const derived = analysisReady.options
-          .filter((opt): opt is Record<string, unknown> => opt != null && typeof opt === 'object')
-          .map((opt) => ({
-            option_id: (opt.option_id ?? opt.id) as string | undefined,
-            label: opt.label as string | undefined,
-            interventions: (opt.interventions ?? {}) as Record<string, unknown>,
-          }))
-          .filter((opt): opt is { option_id: string; label: string; interventions: Record<string, unknown> } =>
-            typeof opt.option_id === 'string' && typeof opt.label === 'string',
-          );
-        if (derived.length > 0) {
-          turnRequest.context.analysis_inputs = { options: derived } as import("../types.js").AnalysisInputs;
-          log.debug({
-            event: 'v4.analysis_inputs_derived',
-            option_count: derived.length,
-          }, 'Derived analysis_inputs from graph.analysis_ready');
+
+      let derived = deriveAnalysisInputsFromReady(analysisReady);
+
+      if (derived.length === 0 && graph && Array.isArray((graph as { nodes?: unknown[] }).nodes)) {
+        const nodes = (graph as { nodes: Array<Record<string, unknown>> }).nodes;
+        const hasOptionNodes = nodes.some((n) => n?.kind === 'option');
+        if (hasOptionNodes) {
+          try {
+            const rebuilt = computeStructuralReadiness(graph as unknown as import("../../schemas/cee-v3.js").GraphV3T);
+            if (rebuilt?.options) {
+              derived = deriveAnalysisInputsFromReady({ options: rebuilt.options as Array<Record<string, unknown>> });
+              log.info({
+                event: 'v4.analysis_inputs_rebuilt_from_graph',
+                option_count: derived.length,
+              }, 'Rebuilt analysis_inputs from current graph via computeStructuralReadiness');
+            }
+          } catch (err) {
+            log.warn({
+              event: 'v4.analysis_inputs_rebuild_failed',
+              error: err instanceof Error ? err.message : String(err),
+            }, 'computeStructuralReadiness failed during fallback derivation');
+          }
         }
+      }
+
+      if (derived.length > 0) {
+        turnRequest.context.analysis_inputs = { options: derived } as import("../types.js").AnalysisInputs;
+        log.debug({
+          event: 'v4.analysis_inputs_derived',
+          option_count: derived.length,
+        }, 'Derived analysis_inputs from graph.analysis_ready');
       }
     }
 
@@ -698,6 +745,26 @@ export async function* executePipelineV4(
     // ── Assemble response ─────────────────────────────────────────────
     const executedAction = toolExecution?.toolName as ActionName ?? null;
     const actionResult = toolExecution?.result ?? null;
+
+    // ── Mid-turn analysis_inputs refresh ──────────────────────────────
+    // When an action mutates options and emits a fresh analysis_ready,
+    // rebuild turnContext.analysis_inputs from it. Without this, any
+    // downstream consumer reading analysis_inputs in the same turn sees
+    // the pre-action snapshot. The cross-turn case is handled by the
+    // start-of-turn derivation + computeStructuralReadiness fallback.
+    if (actionResult?.analysis_ready && !actionResult.failure) {
+      const refreshed = deriveAnalysisInputsFromReady(
+        actionResult.analysis_ready as { options?: Array<Record<string, unknown>> },
+      );
+      if (refreshed.length > 0) {
+        turnContext.analysis_inputs = { options: refreshed } as unknown as import("../types.js").AnalysisInputs;
+        log.info({
+          event: 'v4.analysis_inputs_refreshed',
+          trigger_action: executedAction,
+          option_count: refreshed.length,
+        }, 'Refreshed analysis_inputs from post-action analysis_ready');
+      }
+    }
 
     // ── Post-draft state recomputation ─────────────────────────────
     // After draft_graph produces a graph, recompute pipeline state so the
@@ -1524,6 +1591,41 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
 
   // Guidance items already computed above (before chip computation).
   const guidanceItems: GuidanceItem[] = guidanceItemsForEnvelope;
+
+  // ── Universal artefact-truth gate ─────────────────────────────────
+  // Last defence before SSE emission. If a tool executed but produced no
+  // visible mutation (no graph_patch, no ops), strip sentences that claim
+  // the change happened — even when recovery chips are being offered. A
+  // recovery path is correct; "Updating X to Y" alongside the chip is a lie.
+  if (assistantText != null) {
+    const mutationEffect =
+      blocks.some((b) => (b as { type?: string }).type === 'graph_patch')
+      || ((actionResult?.operations?.length ?? 0) > 0);
+    const recoveryEffect = suggestedActions.length > 0;
+    const gate = applyUniversalHonestyGate({
+      executedAction,
+      assistantText,
+      mutationEffect,
+      recoveryEffect,
+    });
+    if (gate.changed) {
+      const original: string = assistantText;
+      assistantText = gate.assistantText;
+      log.warn({
+        event: 'v4.universal_honesty_gate_fired',
+        request_id: requestId,
+        turn_id: turnId,
+        executed_action: executedAction,
+        ops_count: actionResult?.operations?.length ?? 0,
+        blocks_count: blocks.length,
+        override_count: actionResult?.suggested_actions_override?.length ?? 0,
+        recovery_effect: recoveryEffect,
+        stripped_count: gate.strippedCount,
+        used_fallback: gate.usedFallback,
+        text_preview: original.slice(0, 100),
+      }, 'Universal honesty gate rewrote assistant text');
+    }
+  }
 
   // Assemble envelope. Mirror failure_code / failure_recovery_hint onto the
   // envelope so future history threading and UI hint surfaces can read them

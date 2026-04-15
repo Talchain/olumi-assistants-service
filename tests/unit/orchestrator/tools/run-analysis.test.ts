@@ -5,7 +5,16 @@ import type { PLoTClient } from "../../../../src/orchestrator/plot-client.js";
 
 function makeContext(overrides?: Partial<ConversationContext>): ConversationContext {
   return {
-    graph: { nodes: [], edges: [], version: "3.0" } as unknown as ConversationContext["graph"],
+    graph: {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Goal" },
+        { id: "fac_price", kind: "factor", label: "Price" },
+        { id: "opt_a", kind: "option", label: "Option A" },
+        { id: "opt_b", kind: "option", label: "Option B" },
+      ],
+      edges: [],
+      version: "3.0",
+    } as unknown as ConversationContext["graph"],
     analysis_response: null,
     framing: { stage: "evaluate" },
     messages: [],
@@ -410,5 +419,57 @@ describe("run_analysis Tool Handler", () => {
 
     const payload = (client.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
     expect(payload.goal_node_id).toBe("g1");
+  });
+
+  describe("option count invariant", () => {
+    it("blocks dispatch when graph has 3 option nodes but analysis_inputs has 2", async () => {
+      const response = makePLoTResponse();
+      const client = makeMockClient(response);
+      const ctx = makeContext({
+        graph: {
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Goal" },
+            { id: "fac_price", kind: "factor", label: "Price" },
+            { id: "opt_a", kind: "option", label: "Option A" },
+            { id: "opt_b", kind: "option", label: "Option B" },
+            { id: "opt_c", kind: "option", label: "Option C" },
+          ],
+          edges: [],
+          version: "3.0",
+        } as unknown as ConversationContext["graph"],
+      });
+      const result = await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+      expect(client.run).not.toHaveBeenCalled();
+      // Blocked result contains the reason; PLoT was not called
+      expect(JSON.stringify(result.analysisResponse)).toContain("out of sync");
+    });
+
+    it("blocks dispatch when graph.analysis_ready.options count differs from graph option nodes", async () => {
+      const response = makePLoTResponse();
+      const client = makeMockClient(response);
+      const ctx = makeContext({
+        graph: {
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Goal" },
+            { id: "fac_price", kind: "factor", label: "Price" },
+            { id: "opt_a", kind: "option", label: "Option A" },
+            { id: "opt_b", kind: "option", label: "Option B" },
+          ],
+          edges: [],
+          version: "3.0",
+          analysis_ready: { options: [{ option_id: "opt_a" }] },
+        } as unknown as ConversationContext["graph"],
+      });
+      const result = await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+      expect(client.run).not.toHaveBeenCalled();
+      expect(JSON.stringify(result.analysisResponse)).toContain("out of sync");
+    });
+
+    it("proceeds when graph option count === analysis_inputs option count", async () => {
+      const response = makePLoTResponse();
+      const client = makeMockClient(response);
+      await handleRunAnalysis(makeContext(), client, "req-1", "turn-1");
+      expect(client.run).toHaveBeenCalledOnce();
+    });
   });
 });

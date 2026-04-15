@@ -93,7 +93,7 @@ interface V3ReadinessResult {
  * - "needs_user_mapping": Option is missing factor matches or values
  *   (treated as hard blocker - analysis cannot run)
  */
-function assessV3Readiness(
+export function assessV3Readiness(
   graph: GraphV1,
   analysisReady: AnalysisReadyPayloadT,
 ): V3ReadinessResult {
@@ -193,12 +193,32 @@ function assessV3Readiness(
   // intervention keys are identical AND every value differs by less than
   // 0.01. Surfaces the PLoT preflight "identical options" failure earlier
   // so the run path can return a clean blocker instead of a terse PLoT error.
+  //
+  // Baseline detection priority:
+  //   1. Explicit `is_baseline === true` on the option (propagated from the
+  //      graph node or draft — authoritative).
+  //   2. Exact label / id-suffix heuristics (fallback only, and only when no
+  //      option has an explicit is_baseline flag). Substring matching was
+  //      too aggressive — "Status quo with bridge financing" got excluded.
+  //   3. When every option would be classified as baseline by the heuristic,
+  //      compare all of them — do not silently skip the check.
   const critiques: ReadinessCritique[] = [];
-  const nonBaselineOptions = options.filter((o) => {
+  const anyExplicitBaseline = options.some(
+    (o) => (o as { is_baseline?: boolean }).is_baseline === true,
+  );
+  const BASELINE_LABELS = new Set(['status quo', 'baseline', 'do nothing', 'no change']);
+  const BASELINE_ID_SUFFIXES = ['_status_quo', '_baseline'];
+  const isBaseline = (o: { id?: string; label?: string; is_baseline?: boolean }): boolean => {
+    if (anyExplicitBaseline) return o.is_baseline === true;
     const id = (o.id ?? '').toLowerCase();
-    const label = (o.label ?? '').toLowerCase();
-    return !id.includes('status_quo') && !label.includes('status quo') && !label.includes('baseline');
-  });
+    const label = (o.label ?? '').toLowerCase().trim();
+    if (BASELINE_LABELS.has(label)) return true;
+    return BASELINE_ID_SUFFIXES.some((s) => id.endsWith(s));
+  };
+  let nonBaselineOptions = options.filter((o) => !isBaseline(o));
+  if (nonBaselineOptions.length === 0 && options.length > 0) {
+    nonBaselineOptions = options;
+  }
   type NumericMap = Record<string, number>;
   const toNumericMap = (opt: (typeof options)[number]): NumericMap => {
     const out: NumericMap = {};

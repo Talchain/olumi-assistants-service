@@ -123,6 +123,42 @@ export async function handleRunAnalysis(
     );
   }
 
+  // Option count invariant: graph option nodes === analysis_ready options ===
+  // analysis_inputs options. Drift here means a downstream action mutated one
+  // source of truth without refreshing the others; we must fail fast with a
+  // structured error rather than quietly sending stale data to PLoT.
+  {
+    const graphOptionCount = context.graph.nodes.filter((n) => n.kind === 'option').length;
+    const inputsOptionCount = context.analysis_inputs.options.length;
+    const graphAny = context.graph as unknown as { analysis_ready?: { options?: unknown[] } };
+    const readyOptionCount = Array.isArray(graphAny.analysis_ready?.options)
+      ? graphAny.analysis_ready!.options!.length
+      : null;
+    const mismatch =
+      inputsOptionCount !== graphOptionCount
+      || (readyOptionCount != null && readyOptionCount !== graphOptionCount);
+    if (mismatch) {
+      log.warn(
+        {
+          event: 'v4.option_count_mismatch',
+          turn_id: turnId,
+          request_id: requestId,
+          graph_option_count: graphOptionCount,
+          analysis_ready_option_count: readyOptionCount,
+          analysis_inputs_option_count: inputsOptionCount,
+        },
+        'run_analysis: option count mismatch between graph, analysis_ready, and analysis_inputs — refusing to dispatch stale data',
+      );
+      return buildBlockedAnalysisResult(
+        requestId,
+        startTimedReason(
+          "Your model's options and the analysis inputs are out of sync. Try again in a moment, or reopen this decision — I'll rebuild the analysis inputs from the current graph.",
+          'option_count_mismatch',
+        ),
+      );
+    }
+  }
+
   // Build PLoT payload: only fields in PLoT's allowlist.
   // PLoT has strict unknown-field rejection at the top level — any field
   // not in the allowlist returns 400. Spread would leak disallowed fields.
