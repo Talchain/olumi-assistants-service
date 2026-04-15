@@ -209,6 +209,68 @@ describe("Task 1: Factor scale consistency", () => {
       expect(incRepair!.after).toBeCloseTo(59 / 59, 3);
     });
 
+    it("repairs rich intervention shape { value, source, display_value } without producing NaN", () => {
+      // When the analysis-ready presentation-upgrade pass has wrapped the
+      // flat intervention in rich form, scale-repair must unwrap to read,
+      // apply the correction, and write back in the same shape. Preserve
+      // `source`; drop stale `display_value` (no longer matches new value).
+      const factorNode = makeNode({
+        observed_state: { value: 0.49, raw_value: 49, cap: 59 },
+      });
+      const richOption = {
+        id: "opt_status_quo",
+        label: "Keep Price at £49",
+        interventions: {
+          fac_price: {
+            value: 0.49,
+            source: "brief_extraction",
+            display_value: "£49",
+          },
+        },
+      };
+
+      const v3 = makeV3Body({
+        nodes: [factorNode],
+        analysis_ready: { options: [richOption] },
+      });
+
+      const result = runGraphDataIntegrityChecks(v3);
+
+      // Repair logged as expected.
+      const sqRepair = result.scale_consistency_repairs.find((r) => r.node_id === "option:opt_status_quo");
+      expect(sqRepair).toBeDefined();
+      expect(sqRepair!.before).toBe(0.49);
+      expect(sqRepair!.after).toBeCloseTo(49 / 59, 4);
+
+      // Shape preserved — still a rich object, not a bare number.
+      const intervention = richOption.interventions.fac_price as Record<string, unknown>;
+      expect(typeof intervention).toBe("object");
+      expect(intervention.value).toBeCloseTo(49 / 59, 4);
+      expect(Number.isFinite(intervention.value as number)).toBe(true);
+      // source preserved through repair.
+      expect(intervention.source).toBe("brief_extraction");
+      // display_value dropped — it was a snapshot of the pre-repair value.
+      expect(intervention.display_value).toBeUndefined();
+    });
+
+    it("bare-number interventions still produce bare-number repairs (backward compat)", () => {
+      const factorNode = makeNode({
+        observed_state: { value: 0.49, raw_value: 49, cap: 59 },
+      });
+      const bareOption = {
+        id: "opt_status_quo",
+        label: "Keep Price",
+        interventions: { fac_price: 0.49 },
+      };
+      const v3 = makeV3Body({
+        nodes: [factorNode],
+        analysis_ready: { options: [bareOption] },
+      });
+      runGraphDataIntegrityChecks(v3);
+      expect(typeof bareOption.interventions.fac_price).toBe("number");
+      expect(bareOption.interventions.fac_price).toBeCloseTo(49 / 59, 4);
+    });
+
     it("clamps corrected intervention to [0, 1] if ratio would exceed 1", () => {
       const factorNode = makeNode({
         id: "fac_x",

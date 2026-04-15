@@ -242,15 +242,25 @@ function repairFactorScaleConsistency(v3Body: any, requestId?: string): ScaleCon
   //
   // Guard: clamp corrected interventions to [0, 1] since factor values are normalised.
   for (const option of analysisOptions) {
-    const interventions: Record<string, number> = option?.interventions ?? {};
-    for (const [factorId, interventionValue] of Object.entries(interventions)) {
+    // Interventions may be bare numbers or rich { value, display_value?, source? }
+    // objects after the presentation-upgrade pass. Unwrap to read, then
+    // write back in the same shape so display_value/source are preserved
+    // through scale-repair.
+    const interventions: Record<string, unknown> = option?.interventions ?? {};
+    for (const [factorId, interventionEntry] of Object.entries(interventions)) {
       const correctionRatio = factorCorrectionRatioMap.get(factorId);
       if (correctionRatio === undefined) continue;
 
       const factorRepair = repairs.find((r) => r.node_id === factorId);
       if (!factorRepair) continue;
 
-      const rawInterventionValue = interventionValue as number;
+      const rawInterventionValue = typeof interventionEntry === 'number'
+        ? interventionEntry
+        : interventionEntry != null && typeof interventionEntry === 'object' && typeof (interventionEntry as { value?: unknown }).value === 'number'
+          ? (interventionEntry as { value: number }).value
+          : NaN;
+      if (!Number.isFinite(rawInterventionValue)) continue;
+
       const correctedIntervention = Number(
         Math.max(0, Math.min(1, rawInterventionValue * correctionRatio)).toFixed(6)
       );
@@ -258,8 +268,22 @@ function repairFactorScaleConsistency(v3Body: any, requestId?: string): ScaleCon
       // Skip if already correct (ratio effectively 1.0 — shouldn't happen but guard)
       if (isWithinTolerance(rawInterventionValue, correctedIntervention)) continue;
 
-      interventions[factorId] = correctedIntervention;
-      option.interventions = interventions;
+      // Preserve the wrapping shape (rich object keeps display_value/source).
+      // display_value is a snapshot of the pre-repair value; it will no
+      // longer match the new numeric after a scale correction, so drop it
+      // to avoid misleading the UI. source (provenance) is preserved.
+      if (typeof interventionEntry === 'number') {
+        interventions[factorId] = correctedIntervention;
+      } else {
+        const prior = interventionEntry as { value: number; source?: string; display_value?: string };
+        const replacement: Record<string, unknown> = {
+          ...prior,
+          value: correctedIntervention,
+        };
+        if (replacement.display_value !== undefined) delete replacement.display_value;
+        interventions[factorId] = replacement;
+      }
+      option.interventions = interventions as typeof option.interventions;
 
       repairs.push({
         node_id: `option:${option.id}`,

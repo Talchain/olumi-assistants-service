@@ -20,6 +20,33 @@ import { stableStringify } from "../context/stable-stringify.js";
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 
 /**
+ * Evaluate-intent signals used to gate analysis-state rehydration.
+ *
+ * Any one of the following is sufficient:
+ *   - framing.stage === 'evaluate' (UI-declared stage on the request)
+ *   - message matches evaluate-intent keywords (results/explain/driver/
+ *     which option/why/compare/winner/leading)
+ *   - system_event.event_type === 'direct_analysis_run' (fresh analysis
+ *     coming through, rehydration may supply cached envelope until the
+ *     fresh one lands)
+ */
+export const EVAL_INTENT_RE =
+  /\b(results?|explain|which option|why does|how confident|what.?driv|compare|stronger|winner|leading)\b/i;
+
+export interface RehydrationGateInput {
+  message?: string | null;
+  framingStage?: string | null;
+  systemEventType?: string | null;
+}
+
+export function isRehydrationInScope(input: RehydrationGateInput): boolean {
+  if (input.framingStage === 'evaluate') return true;
+  if (input.systemEventType === 'direct_analysis_run') return true;
+  if (typeof input.message === 'string' && EVAL_INTENT_RE.test(input.message)) return true;
+  return false;
+}
+
+/**
  * Hash version sentinel. Bump whenever the canonicalisation changes; cached
  * envelopes hashed with an older version will silently mismatch, which is
  * the desired behaviour (old cache treated as stale).

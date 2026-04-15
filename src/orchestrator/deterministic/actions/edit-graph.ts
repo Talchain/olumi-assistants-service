@@ -51,15 +51,27 @@ const STRUCTURAL_INTENT_RE =
 // global label similarity when the inferred kind has no nodes.
 // ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Synonyms grouped by inferred kind. Shared between inferEditKind and
+ * substituteEntityInMessage so the substitution can find whichever synonym
+ * the user actually wrote (e.g. "danger" instead of "risk").
+ */
+const KIND_SYNONYMS: Record<Exclude<NodeKindV3T, 'action' | 'decision'>, readonly string[]> = {
+  risk: ['risk', 'danger', 'threat'],
+  factor: ['factor', 'cost', 'budget', 'capacity'],
+  outcome: ['outcome', 'result'],
+  option: ['option', 'alternative'],
+  goal: ['goal', 'objective'],
+} as const;
+
 /** Map keyword hits in the user's message to a NodeKindV3T. */
 function inferEditKind(message: string): NodeKindV3T | null {
   if (!message) return null;
   const lower = message.toLowerCase();
-  if (/\b(risk|danger|threat)\b/.test(lower)) return 'risk';
-  if (/\b(factor|cost|budget|capacity)\b/.test(lower)) return 'factor';
-  if (/\b(outcome|result)\b/.test(lower)) return 'outcome';
-  if (/\b(option|alternative)\b/.test(lower)) return 'option';
-  if (/\b(goal|objective)\b/.test(lower)) return 'goal';
+  for (const [kind, synonyms] of Object.entries(KIND_SYNONYMS)) {
+    const pattern = new RegExp(`\\b(?:${synonyms.join('|')})\\b`, 'i');
+    if (pattern.test(lower)) return kind as NodeKindV3T;
+  }
   return null;
 }
 
@@ -126,9 +138,15 @@ function topSimilarNodes(
  * "connect Market Pricing Risk to the revenue outcome".
  *
  * Matches up to 3 words preceding the kind keyword (optional article),
- * replaces the whole span with the candidate label. When no kind-bearing
- * phrase is found, appends the candidate so the edit instruction still
- * references it.
+ * replaces the whole span with the candidate label. When the inferred kind
+ * was detected via a synonym (e.g. "danger" → risk), the synonym pattern
+ * matches so substitution still works.
+ *
+ * If no kind noun can be found in the message (generic input, no kind
+ * inference), a disambiguation suffix is appended so the chip's
+ * edit_description ALWAYS references the selected candidate — otherwise
+ * clicking the chip re-submits the same ambiguous text and V2 rebounds to
+ * clarify again.
  */
 function substituteEntityInMessage(
   userMessage: string,
@@ -137,18 +155,23 @@ function substituteEntityInMessage(
 ): string {
   const trimmed = userMessage.trim();
   if (!trimmed) return candidateLabel;
-  if (!inferredKind) return trimmed;
-  // Pattern matches optional article + up to 3 descriptor words + kind noun.
-  // Anchored on word boundaries; case-insensitive. The non-capturing groups
-  // keep the replacement clean.
-  const kindPattern = new RegExp(
-    `\\b(?:the\\s+|a\\s+|an\\s+|some\\s+|this\\s+|that\\s+)?(?:\\w+\\s+){0,3}${inferredKind}\\b`,
-    'i',
-  );
-  if (kindPattern.test(trimmed)) {
-    return trimmed.replace(kindPattern, candidateLabel);
+  if (inferredKind && inferredKind in KIND_SYNONYMS) {
+    const synonyms = KIND_SYNONYMS[inferredKind as keyof typeof KIND_SYNONYMS];
+    // Match optional article + up to 3 descriptor words + any synonym for
+    // this kind. Use word boundaries so we don't cut inside longer words.
+    const synonymAlternation = synonyms.join('|');
+    const kindPattern = new RegExp(
+      `\\b(?:the\\s+|a\\s+|an\\s+|some\\s+|this\\s+|that\\s+)?(?:\\w+\\s+){0,3}(?:${synonymAlternation})\\b`,
+      'i',
+    );
+    if (kindPattern.test(trimmed)) {
+      return trimmed.replace(kindPattern, candidateLabel);
+    }
   }
-  return trimmed;
+  // Fallback: no kind noun in the message (or no inferred kind). Append a
+  // disambiguation suffix so the chip prompt can't re-trigger the same
+  // zero-match path on click.
+  return `${trimmed} — referring to "${candidateLabel}"`;
 }
 
 /**

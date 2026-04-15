@@ -293,6 +293,79 @@ describe('edit_graph zero-match clarification', () => {
     expect(anyPreserved).toBe(true);
   });
 
+  it('chip prompt substitutes candidate even when user used a synonym ("danger")', async () => {
+    handleEditGraphMock.mockResolvedValue({
+      blocks: [],
+      assistantText: 'Could you clarify which element you mean?',
+      latencyMs: 1,
+      appliedGraph: null,
+      wasRejected: true,
+      pendingClarification: {
+        tool: 'edit_graph',
+        original_edit_request: 'connect the pricing danger to the revenue outcome',
+        candidate_labels: [],
+      },
+    });
+    const graph = {
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'Goal' },
+        { id: 'out_revenue', kind: 'outcome', label: 'Revenue' },
+        { id: 'risk_pricing', kind: 'risk', label: 'Market Pricing Risk' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+    const userMessage = 'connect the pricing danger to the revenue outcome';
+    const ctx = makeContextForGraph(graph, userMessage);
+    const result = await editGraphAction.execute(
+      { edit_description: userMessage },
+      ctx,
+    );
+    const chips = result.suggested_actions_override ?? [];
+    expect(chips.length).toBeGreaterThan(0);
+    // Synonym "danger" triggers kind='risk'; substitution should replace
+    // "the pricing danger" with the candidate label and preserve the tail.
+    for (const chip of chips) {
+      const desc = chip.parameters?.edit_description as string;
+      expect(desc).toContain('Market Pricing Risk');
+      expect(desc).toContain('to the revenue outcome');
+    }
+  });
+
+  it('chip prompt always references candidate when no kind keyword is present (fallback)', async () => {
+    handleEditGraphMock.mockResolvedValue({
+      blocks: [],
+      assistantText: 'Could you clarify which element you mean?',
+      latencyMs: 1,
+      appliedGraph: null,
+      wasRejected: true,
+      pendingClarification: {
+        tool: 'edit_graph',
+        original_edit_request: 'competitive pressure',
+        candidate_labels: [],
+      },
+    });
+    const graph = {
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'Goal' },
+        { id: 'fac_comp', kind: 'factor', label: 'Competitive Pressure' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+    const ctx = makeContextForGraph(graph, 'competitive pressure');
+    const result = await editGraphAction.execute(
+      { edit_description: 'competitive pressure' },
+      ctx,
+    );
+    const chips = result.suggested_actions_override ?? [];
+    expect(chips.length).toBeGreaterThan(0);
+    // No kind keyword in the message — fallback must append the candidate
+    // so clicking the chip can't re-trigger the same zero-match path.
+    for (const chip of chips) {
+      const desc = chip.parameters?.edit_description as string;
+      expect(desc).toContain('Competitive Pressure');
+    }
+  });
+
   it('chip labels are constructed explicitly, not substring of user phrase', async () => {
     handleEditGraphMock.mockResolvedValue({
       blocks: [],

@@ -3,7 +3,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeAnalysisGraphHash } from "../../../../src/orchestrator/deterministic/analysis-cache.js";
+import {
+  computeAnalysisGraphHash,
+  isRehydrationInScope,
+} from "../../../../src/orchestrator/deterministic/analysis-cache.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 
 function makeGraph(overrides?: Partial<GraphV3T>): GraphV3T {
@@ -117,5 +120,55 @@ describe('computeAnalysisGraphHash', () => {
       ] as unknown as GraphV3T['nodes'],
     });
     expect(computeAnalysisGraphHash(g1)).not.toBe(computeAnalysisGraphHash(g2));
+  });
+});
+
+describe('isRehydrationInScope (S6 gating)', () => {
+  it('fires when framing.stage is evaluate, even with a generic message', () => {
+    expect(isRehydrationInScope({
+      message: 'ok',
+      framingStage: 'evaluate',
+      systemEventType: null,
+    })).toBe(true);
+  });
+
+  it('fires when the user message matches an evaluate-intent pattern', () => {
+    expect(isRehydrationInScope({
+      message: 'Why does option A win?',
+      framingStage: 'ideate',
+      systemEventType: null,
+    })).toBe(true);
+  });
+
+  it('fires on direct_analysis_run system event', () => {
+    expect(isRehydrationInScope({
+      message: '',
+      framingStage: null,
+      systemEventType: 'direct_analysis_run',
+    })).toBe(true);
+  });
+
+  it('does NOT fire on ideate turns with non-evaluate message', () => {
+    expect(isRehydrationInScope({
+      message: 'Add a new option for subscription pricing',
+      framingStage: 'ideate',
+      systemEventType: null,
+    })).toBe(false);
+  });
+
+  it('does NOT fire on frame turns with non-evaluate message', () => {
+    expect(isRehydrationInScope({
+      message: 'I want to compare the framing of my decision',
+      framingStage: 'frame',
+      systemEventType: null,
+    })).toBe(true); // NOTE: "compare" matches EVAL_INTENT_RE — expected behaviour
+  });
+
+  it('does NOT fire on a pure edit turn with no evaluate signals', () => {
+    expect(isRehydrationInScope({
+      message: 'Connect factor X to option A',
+      framingStage: 'ideate',
+      systemEventType: 'patch_accepted',
+    })).toBe(false);
   });
 });
