@@ -24,6 +24,16 @@ export const MATCH_ACTION_LANGUAGE =
 export const HONESTY_FALLBACK_TEXT =
   "I wasn't able to make that change. Tell me what you'd like to change, and I'll try a different route.";
 
+/**
+ * Used when every sentence got stripped BUT recovery chips exist. Must be
+ * non-empty (response-normaliser replaces empty assistant_text with a generic
+ * greeting that discards context) AND must not contradict the chips by
+ * claiming the change happened or wasn't possible — the chips ARE the path
+ * forward, so we acknowledge them without pre-empting the user's choice.
+ */
+export const HONESTY_CHIP_FALLBACK_TEXT =
+  "I couldn't apply that change directly. Pick one of the options below to proceed.";
+
 export function matchesActionLanguage(text: string): boolean {
   return MATCH_ACTION_LANGUAGE.test(text);
 }
@@ -100,10 +110,13 @@ export function applyUniversalHonestyGate(input: GateInput): GateOutput {
   if (strippedCount === 0) {
     return { changed: false, assistantText: input.assistantText, strippedCount: 0, usedFallback: false };
   }
-  if (allStripped && !input.recoveryEffect) {
+  if (allStripped) {
+    // With chips: emit a short contextual fallback that acknowledges the
+    // chips and survives response-normaliser's empty-text guard. Without
+    // chips: full fallback text.
     return {
       changed: true,
-      assistantText: HONESTY_FALLBACK_TEXT,
+      assistantText: input.recoveryEffect ? HONESTY_CHIP_FALLBACK_TEXT : HONESTY_FALLBACK_TEXT,
       strippedCount,
       usedFallback: true,
     };

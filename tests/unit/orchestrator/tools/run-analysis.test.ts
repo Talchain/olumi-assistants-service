@@ -465,6 +465,32 @@ describe("run_analysis Tool Handler", () => {
       expect(JSON.stringify(result.analysisResponse)).toContain("out of sync");
     });
 
+    it("blocks dispatch when option counts match but ids differ (graph {a,b} vs inputs {a,c})", async () => {
+      const response = makePLoTResponse();
+      const client = makeMockClient(response);
+      const ctx = makeContext({
+        graph: {
+          nodes: [
+            { id: "goal_1", kind: "goal", label: "Goal" },
+            { id: "fac_price", kind: "factor", label: "Price" },
+            { id: "opt_a", kind: "option", label: "Option A" },
+            { id: "opt_b", kind: "option", label: "Option B" },
+          ],
+          edges: [],
+          version: "3.0",
+        } as unknown as ConversationContext["graph"],
+        analysis_inputs: {
+          options: [
+            { option_id: "opt_a", label: "Option A", interventions: { fac_price: { value: 1 } } },
+            { option_id: "opt_c", label: "Option C", interventions: { fac_price: { value: 2 } } },
+          ],
+        },
+      });
+      const result = await handleRunAnalysis(ctx, client, "req-1", "turn-1");
+      expect(client.run).not.toHaveBeenCalled();
+      expect(JSON.stringify(result.analysisResponse)).toContain("out of sync");
+    });
+
     it("proceeds when graph option count === analysis_inputs option count", async () => {
       const response = makePLoTResponse();
       const client = makeMockClient(response);

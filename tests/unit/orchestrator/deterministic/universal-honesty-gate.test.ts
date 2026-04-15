@@ -4,6 +4,7 @@ import {
   stripActionClaims,
   matchesActionLanguage,
   HONESTY_FALLBACK_TEXT,
+  HONESTY_CHIP_FALLBACK_TEXT,
 } from "../../../../src/orchestrator/deterministic/universal-honesty-gate.js";
 
 describe("matchesActionLanguage", () => {
@@ -67,7 +68,9 @@ describe("applyUniversalHonestyGate", () => {
     expect(r.strippedCount).toBe(1);
   });
 
-  it("strips mutation claims but leaves empty text (not fallback) when recovery chips exist", () => {
+  it("strips mutation claims and emits contextual chip fallback when all sentences removed and chips exist", () => {
+    // Must not be empty — response-normaliser replaces empty assistant_text
+    // with a generic greeting, discarding the context the chips relate to.
     const r = applyUniversalHonestyGate({
       executedAction: "set_factor_value",
       assistantText: "Updating Annual Hiring Cost to £95,000.",
@@ -75,8 +78,9 @@ describe("applyUniversalHonestyGate", () => {
       recoveryEffect: true,
     });
     expect(r.changed).toBe(true);
-    expect(r.assistantText).toBe("");
-    expect(r.usedFallback).toBe(false);
+    expect(r.assistantText).toBe(HONESTY_CHIP_FALLBACK_TEXT);
+    expect(r.assistantText.length).toBeGreaterThan(0);
+    expect(r.usedFallback).toBe(true);
     expect(r.strippedCount).toBe(1);
   });
 

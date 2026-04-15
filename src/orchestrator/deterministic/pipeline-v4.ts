@@ -271,17 +271,34 @@ export async function* executePipelineV4(
 
       let derived = deriveAnalysisInputsFromReady(analysisReady);
 
-      if (derived.length === 0 && graph && Array.isArray((graph as { nodes?: unknown[] }).nodes)) {
+      // Rebuild from the current graph whenever the derived options disagree
+      // with the graph's option nodes — not only when empty. A stale but
+      // non-empty analysis_ready (e.g. {opt_a, opt_b} while the graph now
+      // has {opt_a, opt_c}) would otherwise survive derivation and only get
+      // caught later by the run_analysis invariant. Rebuilding here keeps
+      // non-dispatching consumers (composer, chip engine, health checks)
+      // aligned with the live graph.
+      if (graph && Array.isArray((graph as { nodes?: unknown[] }).nodes)) {
         const nodes = (graph as { nodes: Array<Record<string, unknown>> }).nodes;
-        const hasOptionNodes = nodes.some((n) => n?.kind === 'option');
-        if (hasOptionNodes) {
+        const graphOptionIds = new Set(
+          nodes.filter((n) => n?.kind === 'option').map((n) => n.id as string),
+        );
+        const derivedIds = new Set(derived.map((o) => o.option_id));
+        const idsAgree =
+          graphOptionIds.size === derivedIds.size
+          && [...graphOptionIds].every((id) => derivedIds.has(id));
+        const shouldRebuild =
+          graphOptionIds.size > 0 && (derived.length === 0 || !idsAgree);
+        if (shouldRebuild) {
           try {
             const rebuilt = computeStructuralReadiness(graph as unknown as import("../../schemas/cee-v3.js").GraphV3T);
             if (rebuilt?.options) {
               derived = deriveAnalysisInputsFromReady({ options: rebuilt.options as Array<Record<string, unknown>> });
               log.info({
                 event: 'v4.analysis_inputs_rebuilt_from_graph',
-                option_count: derived.length,
+                reason: derived.length === 0 ? 'empty_analysis_ready' : 'stale_id_mismatch',
+                graph_option_count: graphOptionIds.size,
+                rebuilt_option_count: derived.length,
               }, 'Rebuilt analysis_inputs from current graph via computeStructuralReadiness');
             }
           } catch (err) {
@@ -1598,8 +1615,11 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
   // the change happened — even when recovery chips are being offered. A
   // recovery path is correct; "Updating X to Y" alongside the chip is a lie.
   if (assistantText != null) {
+    // IMPORTANT: blocks use `block_type`, not `type` — see blocks/factory.ts
+    // and envelope.ts. Using `.type` here would never match and quietly
+    // reduce this to an ops-only check.
     const mutationEffect =
-      blocks.some((b) => (b as { type?: string }).type === 'graph_patch')
+      blocks.some((b) => (b as { block_type?: string }).block_type === 'graph_patch')
       || ((actionResult?.operations?.length ?? 0) > 0);
     const recoveryEffect = suggestedActions.length > 0;
     const gate = applyUniversalHonestyGate({

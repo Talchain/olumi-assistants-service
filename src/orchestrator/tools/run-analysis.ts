@@ -123,31 +123,53 @@ export async function handleRunAnalysis(
     );
   }
 
-  // Option count invariant: graph option nodes === analysis_ready options ===
-  // analysis_inputs options. Drift here means a downstream action mutated one
-  // source of truth without refreshing the others; we must fail fast with a
-  // structured error rather than quietly sending stale data to PLoT.
+  // Option identity invariant: graph option nodes, analysis_ready.options,
+  // and analysis_inputs.options must represent the SAME set of options — not
+  // just the same count. Two options {opt_a, opt_b} in the graph but
+  // {opt_a, opt_c} in analysis_inputs would pass a count check while
+  // dispatching wrong identities to PLoT. Compare normalised id sets.
   {
-    const graphOptionCount = context.graph.nodes.filter((n) => n.kind === 'option').length;
-    const inputsOptionCount = context.analysis_inputs.options.length;
-    const graphAny = context.graph as unknown as { analysis_ready?: { options?: unknown[] } };
-    const readyOptionCount = Array.isArray(graphAny.analysis_ready?.options)
-      ? graphAny.analysis_ready!.options!.length
+    const graphOptionIds = new Set(
+      context.graph.nodes.filter((n) => n.kind === 'option').map((n) => n.id),
+    );
+    const inputsOptionIds = new Set(context.analysis_inputs.options.map((o) => o.option_id));
+    const graphAny = context.graph as unknown as { analysis_ready?: { options?: Array<Record<string, unknown>> } };
+    const readyOptions = Array.isArray(graphAny.analysis_ready?.options)
+      ? graphAny.analysis_ready!.options!
       : null;
+    const readyOptionIds = readyOptions
+      ? new Set(
+          readyOptions
+            .map((o) => (o?.option_id ?? o?.id) as string | undefined)
+            .filter((id): id is string => typeof id === 'string'),
+        )
+      : null;
+
+    const sameSet = (a: Set<string>, b: Set<string>): boolean => {
+      if (a.size !== b.size) return false;
+      for (const id of a) if (!b.has(id)) return false;
+      return true;
+    };
+
     const mismatch =
-      inputsOptionCount !== graphOptionCount
-      || (readyOptionCount != null && readyOptionCount !== graphOptionCount);
+      !sameSet(graphOptionIds, inputsOptionIds)
+      || (readyOptionIds != null && !sameSet(graphOptionIds, readyOptionIds));
+
     if (mismatch) {
+      const sortedIds = (s: Set<string>) => [...s].sort();
       log.warn(
         {
           event: 'v4.option_count_mismatch',
           turn_id: turnId,
           request_id: requestId,
-          graph_option_count: graphOptionCount,
-          analysis_ready_option_count: readyOptionCount,
-          analysis_inputs_option_count: inputsOptionCount,
+          graph_option_count: graphOptionIds.size,
+          analysis_ready_option_count: readyOptionIds?.size ?? null,
+          analysis_inputs_option_count: inputsOptionIds.size,
+          graph_option_ids: sortedIds(graphOptionIds),
+          analysis_ready_option_ids: readyOptionIds ? sortedIds(readyOptionIds) : null,
+          analysis_inputs_option_ids: sortedIds(inputsOptionIds),
         },
-        'run_analysis: option count mismatch between graph, analysis_ready, and analysis_inputs — refusing to dispatch stale data',
+        'run_analysis: option identity mismatch between graph, analysis_ready, and analysis_inputs — refusing to dispatch stale data',
       );
       return buildBlockedAnalysisResult(
         requestId,
