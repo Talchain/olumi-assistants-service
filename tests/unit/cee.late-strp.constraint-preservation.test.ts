@@ -50,7 +50,7 @@ describe("runLateStrp — goalConstraints preservation", () => {
     vi.clearAllMocks();
   });
 
-  it("does NOT pass goalConstraints to reconcileStructuralTruth (skips redundant Rule 3)", () => {
+  it("passes prior constraints into reconcileStructuralTruth (so Rule 3b still runs)", () => {
     const priorConstraints = [
       { constraint_id: "c1", node_id: "fac_churn", operator: "<=", value: 0.05 },
     ];
@@ -59,14 +59,14 @@ describe("runLateStrp — goalConstraints preservation", () => {
     (reconcileStructuralTruth as any).mockReturnValue({
       graph: ctx.graph,
       mutations: [],
-      goalConstraints: undefined,
+      goalConstraints: priorConstraints,
       fieldDeletions: [],
     });
 
     runLateStrp(ctx);
 
     const call = (reconcileStructuralTruth as any).mock.calls[0];
-    expect(call[1].goalConstraints).toBeUndefined();
+    expect(call[1].goalConstraints).toEqual(priorConstraints);
   });
 
   it("preserves ctx.goalConstraints when reconcileStructuralTruth returns undefined", () => {
