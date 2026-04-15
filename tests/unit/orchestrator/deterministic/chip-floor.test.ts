@@ -315,8 +315,8 @@ describe("(f) chip session-suppressed AND recently executed — floor must NOT f
       (args) => (args[0] as Record<string, unknown>)?.event === 'v4.chip_floor_activated',
     );
     expect(activated).toBe(false);
-    // No chip with set_factor_value should appear.
-    const chipActionTypes = chips.map(c => c.parameters?.action_type);
+    // No chip with set_factor_value should appear — action_type is top-level on SuggestedAction.
+    const chipActionTypes = chips.map(c => c.action_type);
     expect(chipActionTypes).not.toContain('set_factor_value');
   });
 });
