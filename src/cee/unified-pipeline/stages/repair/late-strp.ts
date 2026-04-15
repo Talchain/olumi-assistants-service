@@ -9,6 +9,7 @@
 import type { StageContext } from "../../types.js";
 import { reconcileStructuralTruth } from "../../../../validators/structural-reconciliation.js";
 import { recordFieldDeletions } from "../../utils/field-deletion-audit.js";
+import { log } from "../../../../utils/telemetry.js";
 
 export function runLateStrp(ctx: StageContext): void {
   if (!ctx.graph) return;
@@ -19,8 +20,11 @@ export function runLateStrp(ctx: StageContext): void {
     if (node.label) nodeLabels.set(node.id, node.label);
   }
 
+  // Constraints were already remapped against the final graph by compound-goals.
+  // Re-running Rule 3 here re-normalises against node IDs that may have shifted
+  // during intermediate repairs, and any miss zeroes ctx.goalConstraints to [].
+  // Skip by omitting goalConstraints; Rules 1,2,4,5 still run.
   const result = reconcileStructuralTruth(ctx.graph as any, {
-    goalConstraints: ctx.goalConstraints?.length ? ctx.goalConstraints : undefined,
     requestId: ctx.requestId,
     fillControllableData: true,
     nodeLabels,
@@ -35,7 +39,22 @@ export function runLateStrp(ctx: StageContext): void {
     recordFieldDeletions(ctx, 'structural-reconciliation', result.fieldDeletions);
   }
 
-  if (result.goalConstraints) {
+  // Belt-and-braces: even with goalConstraints omitted above, guard any future
+  // path where result.goalConstraints is defined-but-empty against clobbering
+  // a good array from compound-goals.
+  if (result.goalConstraints && result.goalConstraints.length > 0) {
     ctx.goalConstraints = result.goalConstraints;
+  } else if (
+    result.goalConstraints &&
+    result.goalConstraints.length === 0 &&
+    ctx.goalConstraints &&
+    ctx.goalConstraints.length > 0
+  ) {
+    log.info({
+      event: 'cee.late_strp.constraint_overwrite_prevented',
+      request_id: ctx.requestId,
+      existing_count: ctx.goalConstraints.length,
+      strp_count: result.goalConstraints.length,
+    }, 'Prevented late-STRP from overwriting non-empty goalConstraints with []');
   }
 }
