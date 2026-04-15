@@ -771,7 +771,23 @@ export const editGraphAction: ActionDefinition = {
 
     // ── Matching-artefact honesty guard ──────────────────────────────────
     let assistantText = result.assistantText ?? '';
-    if (detectCalibrationOnlyArtefact(assistantText, operations)) {
+    const structuralLanguage = /\b(connecting|adding|removing|rewiring|connected|added|removed|rewired)\b/i;
+    const hasStructuralLanguage = structuralLanguage.test(assistantText);
+    const hasStructuralOps = operations.some((op) => op.op !== 'update_edge');
+    const guardFired = detectCalibrationOnlyArtefact(assistantText, operations);
+    log.info(
+      {
+        event: 'v4.edit_graph_honesty_guard',
+        turn_id: ctx.turn_id,
+        has_structural_language: hasStructuralLanguage,
+        has_structural_ops: hasStructuralOps,
+        ops_count: operations.length,
+        guard_fired: guardFired,
+        text_preview: assistantText?.slice(0, 100),
+      },
+      'Honesty guard evaluated',
+    );
+    if (guardFired) {
       log.info({ turn_id: ctx.turn_id }, 'v4.edit_graph_honesty_guard_triggered');
       assistantText =
         "I adjusted the strength of an existing connection but couldn't make the structural change you asked for. Could you describe exactly what you'd like to connect or modify?";

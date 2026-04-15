@@ -61,6 +61,12 @@ type GraphReadinessInputT = z.infer<typeof GraphReadinessInput>;
 // V3 Analysis-Ready Assessment
 // ============================================================================
 
+interface ReadinessCritique {
+  code: string;
+  severity: "warn" | "error";
+  message: string;
+}
+
 interface V3ReadinessResult {
   ready: boolean;
   readiness_score: number;
@@ -73,6 +79,7 @@ interface V3ReadinessResult {
   issues: string[];
   can_run_analysis: boolean;
   blocker_reason?: string;
+  critiques?: ReadinessCritique[];
 }
 
 /**
@@ -181,13 +188,82 @@ function assessV3Readiness(
     }
   }
 
+  // Option distinctiveness check: compare intervention maps across all
+  // non-baseline options. An option pair is "identical" when their
+  // intervention keys are identical AND every value differs by less than
+  // 0.01. Surfaces the PLoT preflight "identical options" failure earlier
+  // so the run path can return a clean blocker instead of a terse PLoT error.
+  const critiques: ReadinessCritique[] = [];
+  const nonBaselineOptions = options.filter((o) => {
+    const id = (o.id ?? '').toLowerCase();
+    const label = (o.label ?? '').toLowerCase();
+    return !id.includes('status_quo') && !label.includes('status quo') && !label.includes('baseline');
+  });
+  type NumericMap = Record<string, number>;
+  const toNumericMap = (opt: (typeof options)[number]): NumericMap => {
+    const out: NumericMap = {};
+    for (const [k, v] of Object.entries(opt.interventions ?? {})) {
+      const n = typeof v === 'number'
+        ? v
+        : v != null && typeof v === 'object' && typeof (v as { value?: unknown }).value === 'number'
+          ? (v as { value: number }).value
+          : NaN;
+      if (Number.isFinite(n)) out[k] = n;
+    }
+    return out;
+  };
+  const sameKeys = (a: NumericMap, b: NumericMap): boolean => {
+    const ka = Object.keys(a).sort();
+    const kb = Object.keys(b).sort();
+    if (ka.length !== kb.length) return false;
+    for (let i = 0; i < ka.length; i += 1) if (ka[i] !== kb[i]) return false;
+    return true;
+  };
+  const sameValues = (a: NumericMap, b: NumericMap): boolean => {
+    for (const k of Object.keys(a)) if (Math.abs(a[k] - b[k]) >= 0.01) return false;
+    return true;
+  };
+  const identicalPairs: Array<[string, string]> = [];
+  let pairsChecked = 0;
+  if (nonBaselineOptions.length >= 2) {
+    const maps = nonBaselineOptions.map((o) => ({ id: o.id, map: toNumericMap(o) }));
+    for (let i = 0; i < maps.length; i += 1) {
+      for (let j = i + 1; j < maps.length; j += 1) {
+        pairsChecked += 1;
+        if (sameKeys(maps[i].map, maps[j].map) && sameValues(maps[i].map, maps[j].map)) {
+          identicalPairs.push([maps[i].id, maps[j].id]);
+        }
+      }
+    }
+  }
+  const totalNonBaselinePairs = pairsChecked;
+  const allIdentical = totalNonBaselinePairs > 0 && identicalPairs.length === totalNonBaselinePairs;
+  if (identicalPairs.length > 0) {
+    critiques.push({
+      code: 'IDENTICAL_OPTION_INTERVENTIONS',
+      severity: 'warn',
+      message: 'Options have identical intervention profiles and cannot be meaningfully distinguished by analysis.',
+    });
+  }
+  log.info(
+    {
+      event: 'v4.graph_readiness.option_distinctiveness',
+      pairs_checked: pairsChecked,
+      identical_pairs: identicalPairs.length,
+      all_identical: allIdentical,
+    },
+    'Option distinctiveness check',
+  );
+
   // Determine overall readiness
   const optionsReady = readyOptions.length;
   const optionsTotal = options.length;
   const hasEnoughOptions = optionsReady >= 2;
 
   // Analysis can run only when every option is fully ready and goal is valid.
-  const isReady = hasEnoughOptions && goalNodeValid && blockedOptions.length === 0;
+  // When all non-baseline options are intervention-identical, downgrade to
+  // blocker — PLoT would reject with "identical options" anyway.
+  const isReady = hasEnoughOptions && goalNodeValid && blockedOptions.length === 0 && !allIdentical;
 
   // Calculate readiness score (0-100). Only fully-ready options count.
   let readinessScore = 0;
@@ -200,7 +276,10 @@ function assessV3Readiness(
 
   // Determine readiness level
   let readinessLevel: "ready" | "fair" | "needs_work";
-  if (readinessScore >= 80) {
+  if (allIdentical) {
+    // Hard blocker: PLoT preflight will reject indistinguishable options.
+    readinessLevel = "needs_work";
+  } else if (readinessScore >= 80) {
     readinessLevel = "ready";
   } else if (readinessScore >= 50) {
     readinessLevel = "fair";
@@ -227,6 +306,8 @@ function assessV3Readiness(
       blockerReason = `Only ${optionsReady} options ready (need at least 2)`;
     } else if (blockedOptions.length > 0) {
       blockerReason = `${blockedOptions.length} option(s) blocked: ${blockedOptions.slice(0, 3).join(", ")}`;
+    } else if (allIdentical) {
+      blockerReason = 'All non-baseline options have identical intervention profiles';
     } else if (issues.length > 0) {
       blockerReason = issues[0];
     }
@@ -252,6 +333,7 @@ function assessV3Readiness(
     issues,
     can_run_analysis: isReady,
     blocker_reason: blockerReason,
+    critiques: critiques.length > 0 ? critiques : undefined,
   };
 }
 
@@ -445,6 +527,7 @@ export default async function route(app: FastifyInstance) {
           options_total: v3Result.options_total,
           goal_node_valid: v3Result.goal_node_valid,
           issues: v3Result.issues,
+          critiques: v3Result.critiques,
           // DEPRECATED: use total_factor_count and user_question_count. Remove after next release.
           factor_count: 0,
           total_factor_count: totalFactorCount,

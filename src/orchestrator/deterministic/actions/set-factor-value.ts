@@ -122,11 +122,37 @@ export const setFactorValueAction: ActionDefinition = {
           && typeof nodeEntry.unit === 'string'
           && nodeEntry.unit.length > 0
           && hasRawValue;
+        const branch = hasRealCap ? 'above_real_cap' : 'wrong_representation';
+        log.info(
+          {
+            event: 'v4.set_factor_value_cap_hit',
+            factor_id: entity.id,
+            requested_value: value,
+            cap: nodeEntry.cap,
+            has_unit: !!nodeEntry.unit,
+            has_raw_value: !!(graphNode as { data?: { raw_value?: unknown } } | undefined)?.data?.raw_value,
+            branch,
+          },
+          'CAP_EXCEEDED recovery branch selected',
+        );
         if (hasRealCap) {
           return buildAboveRealCapRecovery(entity, nodeEntry, value);
         }
         return buildWrongRepresentationRecovery(entity, nodeEntry, value);
       }
+      const graphNode = ctx.graph?.nodes.find((n) => n.id === entity.id);
+      log.info(
+        {
+          event: 'v4.set_factor_value_cap_hit',
+          factor_id: entity.id,
+          requested_value: value,
+          cap: nodeEntry.cap,
+          has_unit: !!nodeEntry.unit,
+          has_raw_value: !!(graphNode as { data?: { raw_value?: unknown } } | undefined)?.data?.raw_value,
+          branch: 'bare_cap_exceeded',
+        },
+        'CAP_EXCEEDED recovery branch selected',
+      );
       return {
         blocks: [],
         assistantText: '',
