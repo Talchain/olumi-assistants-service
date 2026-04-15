@@ -1308,16 +1308,30 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
       }, 'v4.post_analysis_guidance_failed');
     }
   }
-  // Structural fallback for non-draft / non-analysis turns: inspect the
-  // current graph for default-confidence factors, missing framing, etc.
-  // These are per-graph-state signals, so they naturally diversify the
-  // chip candidate pool across turns without duplicating anything the
-  // action-path guidance already produced.
-  if (guidanceItemsForEnvelope.length === 0 && turnContext.graph != null) {
+  // Structural augmentation: always add per-graph-state signals (default-
+  // confidence factors, missing framing, etc.) to the guidance pool and
+  // deduplicate by item_id. Running this unconditionally — not only when
+  // guidanceItemsForEnvelope is empty — ensures Layer 1 (guidance widening)
+  // reliably diversifies the chip candidate pool even when action-path
+  // guidance produces only 1–2 items, reducing unnecessary reliance on the
+  // Layer 2 floor. Dedup is O(n) and items are typically <10.
+  if (turnContext.graph != null) {
     try {
       const structural = generatePostDraftGuidance(turnContext.graph, [], null);
       if (structural.length > 0) {
-        guidanceItemsForEnvelope = [...structural];
+        const existingIds = new Set(guidanceItemsForEnvelope.map(g => g.item_id));
+        const fresh = structural.filter(g => !existingIds.has(g.item_id));
+        if (fresh.length > 0) {
+          guidanceItemsForEnvelope = [...guidanceItemsForEnvelope, ...fresh];
+          log.info(
+            {
+              event: 'v4.guidance_pool_expansion_used',
+              added_count: fresh.length,
+              total_guidance_count: guidanceItemsForEnvelope.length,
+            },
+            'Structural guidance expanded chip candidate pool (Layer 1)',
+          );
+        }
       }
     } catch (error) {
       log.debug({

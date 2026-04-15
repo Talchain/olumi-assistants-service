@@ -170,16 +170,19 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     let chipMetadata = parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'];
     let effectiveTurnMessage: string = parsed.data.message ?? '';
     const effectiveMessage = effectiveTurnMessage.trim();
-    const hasTopLevelAnalysisInputs = !!parsed.data.analysis_inputs;
+    // Detect analysis_inputs from either top-level field OR nested context
+    // (after normaliseAnalysisInputs runs on both paths — P1a fix ensures
+    // context.analysis_inputs is always normalised).
+    const hasAnalysisInputs = !!parsed.data.analysis_inputs || !!context.analysis_inputs;
     const noExistingForce = !chipMetadata && !systemEvent;
-    if (hasTopLevelAnalysisInputs && effectiveMessage === '' && noExistingForce) {
+    if (hasAnalysisInputs && effectiveMessage === '' && noExistingForce) {
       chipMetadata = { action_type: 'run_analysis' };
       effectiveTurnMessage = 'Run the analysis.';
       log.info(
         { request_id: requestId, client_turn_id: parsed.data.client_turn_id },
         'Route: synthesised chip_metadata:run_analysis for empty-message + analysis_inputs turn',
       );
-    } else if (effectiveMessage === '' && noExistingForce && !hasTopLevelAnalysisInputs) {
+    } else if (effectiveMessage === '' && noExistingForce && !hasAnalysisInputs) {
       log.warn(
         { request_id: requestId, client_turn_id: parsed.data.client_turn_id },
         'Route: empty-message turn with no chip_metadata, system_event, or analysis_inputs — LLM path will reject',

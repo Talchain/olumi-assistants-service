@@ -55,6 +55,27 @@ describe("normalizeContext — top-level analysis_inputs", () => {
     expect(ctx.analysis_inputs?.options[0].option_id).toBe('opt_nested');
   });
 
+  it("normalises id → option_id on nested context.analysis_inputs (P1a regression)", () => {
+    // When the UI sends analysis_inputs nested inside `context` with `id`
+    // (not `option_id`), normaliseAnalysisInputs must still run so downstream
+    // run_analysis consumers always see the canonical key.
+    const ctx = normalizeContext({
+      scenario_id: 's',
+      context: {
+        graph: null,
+        analysis_response: null,
+        framing: null,
+        messages: [],
+        scenario_id: 's',
+        // id-only shape, no option_id — same as Zod-validated top-level UI payload
+        analysis_inputs: {
+          options: [{ id: 'opt_nested_id_only', label: 'Nested ID only', interventions: {} }],
+        },
+      } as unknown as import("../../../src/orchestrator/types.js").ConversationContext,
+    });
+    expect(ctx.analysis_inputs?.options[0].option_id).toBe('opt_nested_id_only');
+  });
+
   it("falls back to top-level analysis_inputs when context present but analysis_inputs absent", () => {
     const topLevel = { options: [{ id: 'opt_top', label: 'Top', status: 'ready', interventions: {} }] };
     const ctx = normalizeContext({

@@ -139,9 +139,12 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
       let chipMetadata = parsed.data.chip_metadata as OrchestratorTurnRequest['chip_metadata'];
       let effectiveTurnMessage: string = parsed.data.message ?? '';
       const effectiveMessage = effectiveTurnMessage.trim();
-      const hasTopLevelAnalysisInputs = !!parsed.data.analysis_inputs;
+      // Detect analysis_inputs from either top-level field OR nested context
+      // (after normaliseAnalysisInputs runs on both paths — P1a fix ensures
+      // context.analysis_inputs is always normalised).
+      const hasAnalysisInputs = !!parsed.data.analysis_inputs || !!context.analysis_inputs;
       const noExistingForce = !chipMetadata && !systemEvent;
-      if (hasTopLevelAnalysisInputs && effectiveMessage === '' && noExistingForce) {
+      if (hasAnalysisInputs && effectiveMessage === '' && noExistingForce) {
         chipMetadata = { action_type: 'run_analysis' };
         // Anthropic's API requires non-empty user content on the last
         // message. Without a synthesised message the LLM call 400s at the
@@ -151,7 +154,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
           { request_id: requestId, client_turn_id: parsed.data.client_turn_id },
           'Stream: synthesised chip_metadata:run_analysis for empty-message + analysis_inputs turn',
         );
-      } else if (effectiveMessage === '' && noExistingForce && !hasTopLevelAnalysisInputs) {
+      } else if (effectiveMessage === '' && noExistingForce && !hasAnalysisInputs) {
         // Empty-message turn with NO intent signal at all — diagnosable
         // silent-failure class. Log explicitly before we descend into the
         // LLM path (which will fail at the adapter boundary).

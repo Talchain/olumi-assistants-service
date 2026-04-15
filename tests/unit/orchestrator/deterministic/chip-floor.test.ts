@@ -266,3 +266,57 @@ describe("(e) availability-only filtering — floor does NOT force unavailable a
     expect(activated).toBe(false);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Scenario (f): chip is both session-suppressed AND recently executed —
+//               floor must NOT force it through (P0 regression guard).
+//
+// Root-cause: before the fix, the filter checked suppressedIds before
+// recentActions. A chip in BOTH sets entered sessionSuppressed at the
+// suppressedIds branch and never hit the recentActions branch, so the floor
+// could promote an action the user had just executed.
+//
+// Setup: use a guidance-only chip pool (no bundle chips survive) where the
+// sole guidance chip_id is session-suppressed AND its action_type matches
+// executedAction. No other candidates → floor would activate IFF the fix
+// is absent.
+// ────────────────────────────────────────────────────────────────────────────
+describe("(f) chip session-suppressed AND recently executed — floor must NOT force it", () => {
+  it("does not promote a session-suppressed chip whose action was recently executed", () => {
+    // Coaching: ai_estimated_count = 0 so no calibrate bundle chip generated,
+    // challenge/progress also suppressed. We'll control exactly which chips
+    // are candidates by using an empty tool list except for set_factor_value.
+    const coaching = makeCoaching({ ai_estimated_count: 0, risk_factor_count: 0 });
+    const ctx = makeCtx();
+    const guidance: GuidanceItem[] = [
+      makeGuidance('DEFAULT_NODE_CONFIDENCE', 'fac_arch', 'gi_arch_cal'),
+    ];
+    // Session window suppresses the guidance chip.
+    const sessionState: SessionState = {
+      ...defaultSessionState(),
+      last_chip_ids_shown: ['gi_arch_cal'],
+      chip_ids_shown_prev_turn: [],
+    };
+    // The guidance chip maps to set_factor_value, which was just executed.
+    // Only expose set_factor_value as available so no other chip can survive.
+    const chips = computeChips(
+      coaching,
+      sessionState,
+      ctx,
+      'set_factor_value' as import("../../../../src/orchestrator/deterministic/actions/types.js").ActionName,
+      [],
+      ['set_factor_value'],
+      'needs_encoding',
+      guidance,
+    );
+    // Floor must NOT activate — the only suppressed candidate was also recently
+    // executed, so promoting it would repeat an action just taken.
+    const activated = infoSpy.mock.calls.some(
+      (args) => (args[0] as Record<string, unknown>)?.event === 'v4.chip_floor_activated',
+    );
+    expect(activated).toBe(false);
+    // No chip with set_factor_value should appear.
+    const chipActionTypes = chips.map(c => c.parameters?.action_type);
+    expect(chipActionTypes).not.toContain('set_factor_value');
+  });
+});

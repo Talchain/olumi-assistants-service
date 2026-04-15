@@ -29,14 +29,19 @@ export function normalizeContext(parsed: {
     // Prefer nested context.analysis_inputs; fall back to top-level if the
     // nested one is absent (the UI sends analysis_inputs at top level for
     // run_analysis turns — see DecisionGuideAI/src/services/turn-request-builder.ts).
+    //
+    // Always run normaliseAnalysisInputs when analysis_inputs is present —
+    // even for the nested path — so that options carrying `id` without
+    // `option_id` (valid Zod shape) are canonicalised for every downstream
+    // consumer. When both nested and top-level are absent, return ctx
+    // directly to preserve object identity for callers that rely on it.
     const ctx = parsed.context as ConversationContext;
-    if (!ctx.analysis_inputs && parsed.analysis_inputs) {
-      return {
-        ...ctx,
-        analysis_inputs: normaliseAnalysisInputs(parsed.analysis_inputs),
-      };
-    }
-    return ctx;
+    const rawAnalysisInputs = ctx.analysis_inputs ?? parsed.analysis_inputs ?? null;
+    if (rawAnalysisInputs == null) return ctx;
+    return {
+      ...ctx,
+      analysis_inputs: normaliseAnalysisInputs(rawAnalysisInputs),
+    };
   }
   return {
     graph: parsed.graph_state ?? null,

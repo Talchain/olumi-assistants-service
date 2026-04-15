@@ -219,14 +219,20 @@ export function computeChips(
   // execution or downstream gates) so Layer 2 can promote one through the
   // floor if everything else is exhausted. Chips filtered by recentActions
   // are NOT in this list — we never force an action we just executed.
+  //
+  // IMPORTANT: recentActions is checked FIRST. A chip whose action_type was
+  // just executed must never enter sessionSuppressed — otherwise the floor
+  // could bypass the recent-action protection and force that action again.
+  // The comment in 6b ("recent executions still exclude the chip from
+  // sessionSuppressed") is only valid when this ordering is respected.
   const sessionSuppressed: TypedChip[] = [];
   let filtered = candidates.filter(c => {
+    if (recentActions.has(c.action_type)) {
+      return false;
+    }
     if (suppressedIds.has(c.chip_id)) {
       sessionSuppressed.push(c);
       log.debug({ event: 'v4.chip_engine.suppressed_by_session', chip_id: c.chip_id }, 'Chip suppressed by 2-turn session window');
-      return false;
-    }
-    if (recentActions.has(c.action_type)) {
       return false;
     }
     return true;
@@ -320,6 +326,9 @@ export function computeChips(
       .slice()
       .sort((a, b) => a.priority - b.priority)
       .find((c) => {
+        // Belt-and-braces: never force an action that was recently executed,
+        // even if somehow it entered sessionSuppressed (e.g. ordering edge cases).
+        if (recentActions.has(c.action_type)) return false;
         const tool = chipActionToTool(c.action_type);
         return !tool || toolSetFloor.has(tool);
       });
