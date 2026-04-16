@@ -38,6 +38,9 @@ export const CeeTaskIdSchema = z.enum([
   'repair_edit_graph',
   'orchestrator',
   'validate_graph',
+  // V5 slice A1 — narrate-mode prompt for direct_answer turns on
+  // /orchestrate/v2/turn. Additive; existing callers unaffected.
+  'direct_answer_narrate',
 ]);
 export type CeeTaskId = z.infer<typeof CeeTaskIdSchema>;
 

@@ -85,6 +85,26 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
   };
 });
 
+// A1: TurnExecutor calls getAdapter + getSystemPrompt. Mock at the seam so
+// the A0 boundary tests still exercise B1 ingress + egress without touching
+// a real provider. The valid-turn-payload fixture declares its expected
+// narrate output in `mock_narrate_output`.
+let mockNarrateOutput = '';
+vi.mock('../../src/adapters/llm/router.js', () => ({
+  getAdapter: () => ({
+    name: 'a0-test-mock',
+    chat: async () => ({
+      content: mockNarrateOutput,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'a0-test-mock',
+      latencyMs: 0,
+    }),
+  }),
+}));
+vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
+  getSystemPrompt: async () => 'test system prompt',
+}));
+
 // Import AFTER the mock is set up.
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
 
@@ -131,8 +151,10 @@ describe('POST /orchestrate/v2/turn (V5 flag ON)', () => {
     events = [];
   });
 
-  it('fixture 1: valid payload → 200 + feature-unavailable envelope + 2 boundary.validation events', async () => {
+  it('fixture 1: valid payload → 200 + direct_answer success envelope + 2 boundary.validation events', async () => {
     const fx = loadFixture('valid-turn-payload.json');
+    // A1: feed the mocked narrate adapter the fixture's declared output.
+    mockNarrateOutput = (fx as unknown as { mock_narrate_output: string }).mock_narrate_output;
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',

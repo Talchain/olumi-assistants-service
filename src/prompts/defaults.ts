@@ -2117,6 +2117,21 @@ Return a single JSON object. No markdown fences, no preamble.
 When needs_user_input is true, still provide your best estimate but flag that the user's domain knowledge would meaningfully improve this parameter.`;
 
 // ============================================================================
+// V5 slice A1 — Direct-answer narrate mode
+// ============================================================================
+//
+// Minimal placeholder. Paul is sole prompt author (per A1 brief "Do not edit
+// LLM prompts — Paul is sole prompt author"). This default is intentionally
+// short so the prompt store can override without code changes.
+const DIRECT_ANSWER_NARRATE_PROMPT = `You are a concise decision coach.
+Respond to the user's message in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Two or three short paragraphs is plenty.
+- Do not fabricate numbers, citations, or analysis results.
+- If the question asks for something requiring analysis, say so plainly.`;
+
+// ============================================================================
 // Registration Function
 // ============================================================================
 
@@ -2202,6 +2217,11 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
   registerDefaultPrompt('orchestrator', getOrchestratorPromptV28());
   registerDefaultPrompt('validate_graph', VALIDATE_GRAPH_PROMPT);
+  // V5 slice A1 — narrate-mode placeholder. Paul is sole author of the final
+  // fragment; this default is intentionally minimal so the prompt store / Paul
+  // can override it without code changes. Additive entry; pre-existing callers
+  // unaffected.
+  registerDefaultPrompt('direct_answer_narrate', DIRECT_ANSWER_NARRATE_PROMPT);
 
   // Log prompt versions at registration (read from actually-registered content)
   log.info({

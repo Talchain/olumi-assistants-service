@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "fixture_id": "A1-DIRECT-ANSWER-CONTAMINATION",
+    "boundary": "B1",
+    "source_environment": "synthetic",
+    "contract_version": "0.4.0",
+    "capture_date": "2026-04-16",
+    "scenario_tags": ["a1", "direct_answer", "sanitise", "contamination"],
+    "expected_result_class": "pass",
+    "replay_suite": "N/A",
+    "original_failure_mode": "N/A - synthetic",
+    "expected_v5_outcome_class": "direct_answer_success"
+  },
+  "request": {
+    "turn_id": "a1111111-1111-4111-8111-111111111114",
+    "scenario_id": "a2222222-2222-4222-8222-222222222225",
+    "message": "Narrate with contaminated output containing XML tags and em-dashes.",
+    "turn_class": "frame",
+    "stage": "frame"
+  },
+  "mock": {
+    "narrate_output": "<thinking>This is an inner reflection</thinking>The decision comes down to two forces \u2014 cost and speed. <summary>Pick carefully.</summary>"
+  },
+  "expected": {
+    "status": 200,
+    "body_shape": {
+      "response_version": 2,
+      "assistant_text_contains": "The decision comes down to two forces",
+      "assistant_text_excludes_tags": true,
+      "assistant_text_no_em_dash": true,
+      "blocks_length": 0,
+      "stage_indicator": "frame"
+    },
+    "telemetry": {
+      "turn_executor_started_count": 1,
+      "turn_executor_completed_count": 1,
+      "response_emitted": true,
+      "llm_calls_used": 1,
+      "commit_performed": true,
+      "failure_type": null,
+      "contamination_detected": true
+    }
+  }
+}

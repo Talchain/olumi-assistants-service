@@ -1,0 +1,47 @@
+{
+  "_meta": {
+    "fixture_id": "A1-DIRECT-ANSWER-BUDGET-EXCEEDED",
+    "boundary": "B1",
+    "source_environment": "synthetic",
+    "contract_version": "0.4.0",
+    "capture_date": "2026-04-16",
+    "scenario_tags": ["a1", "direct_answer", "failure", "budget_exceeded"],
+    "expected_result_class": "pass",
+    "replay_suite": "N/A",
+    "original_failure_mode": "N/A - synthetic",
+    "expected_v5_outcome_class": "typed_error"
+  },
+  "request": {
+    "turn_id": "a1111111-1111-4111-8111-111111111113",
+    "scenario_id": "a2222222-2222-4222-8222-222222222224",
+    "message": "Narrate; tests trigger TURN_BUDGET_MS=1 to force outer abort.",
+    "turn_class": "frame",
+    "stage": "frame"
+  },
+  "mock": {
+    "env": {
+      "TURN_BUDGET_MS": "1",
+      "LLM_BUDGET_NARRATE_MS": "60000"
+    },
+    "narrate_delay_ms": 100,
+    "narrate_output": "This output never reaches the envelope because the outer wall-clock aborts first."
+  },
+  "expected": {
+    "status": 200,
+    "body_shape": {
+      "response_version": 2,
+      "blocks_contains_error_code": "TURN_BUDGET_EXCEEDED",
+      "blocks_severity": "error",
+      "stage_indicator": "frame"
+    },
+    "telemetry": {
+      "turn_executor_started_count": 1,
+      "turn_executor_completed_count": 1,
+      "response_emitted": true,
+      "llm_calls_used": 0,
+      "commit_performed": false,
+      "failure_type": "TURN_BUDGET_EXCEEDED",
+      "budget_exceeded_wins_over_llm_timeout": true
+    }
+  }
+}

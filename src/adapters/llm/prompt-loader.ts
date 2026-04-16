@@ -112,6 +112,8 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   repair_edit_graph: 'repair_edit_graph',
   orchestrator: 'orchestrator',
   validate_graph: 'validate_graph',
+  // V5 slice A1 — narrate-mode operation on /orchestrate/v2/turn.
+  direct_answer_narrate: 'direct_answer_narrate',
   // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 };
 

@@ -438,6 +438,14 @@ export const TelemetryEvents = {
   // Emitted by B1 ingress/egress validators on /orchestrate/v2/turn (slice A0).
   // Fields per §4.4: boundary, direction, validator, contract_version, pass, error_code?, request_id
   BoundaryValidation: "boundary.validation",
+
+  // V5 TurnExecutor lifecycle (slice A1, addendum §2.1.9).
+  // Started emits when runTurnExecutor enters. Completed emits in `finally`.
+  // Exactly-one-response invariant: every started MUST have a matching completed
+  // with response_emitted=true. ContaminationNarrate is informational only.
+  TurnExecutorStarted: "turn_executor.started",
+  TurnExecutorCompleted: "turn_executor.completed",
+  TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 } as const;
 
 /**

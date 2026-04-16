@@ -1,0 +1,30 @@
+/**
+ * Budget resolution for V5 TurnExecutor.
+ *
+ * Defaults come from Implementation Plan v2.2. Observed-latency values
+ * (~7–22 s for direct_answer narrate turns) inform test fixture bounds, not
+ * production defaults. Per Paul's constraint 5.
+ *
+ * Reads `process.env` on every call so env overrides at runtime (e.g. in
+ * integration tests) are honoured. Binding at module load would freeze the
+ * reference before tests can mutate the process env.
+ */
+
+import type { Budgets } from '@talchain/schemas/orchestrator';
+
+const DEFAULT_TURN_BUDGET_MS = 180_000; // 3 minutes — outer bound
+const DEFAULT_LLM_NARRATE_BUDGET_MS = 60_000; // 1 minute — inner bound
+
+function parseMs(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) return fallback;
+  return n;
+}
+
+export function getTurnExecutorBudgets(): Budgets {
+  return {
+    turn_ms: parseMs(process.env.TURN_BUDGET_MS, DEFAULT_TURN_BUDGET_MS),
+    llm_narrate_ms: parseMs(process.env.LLM_BUDGET_NARRATE_MS, DEFAULT_LLM_NARRATE_BUDGET_MS),
+  };
+}

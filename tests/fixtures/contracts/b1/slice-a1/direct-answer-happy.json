@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "fixture_id": "A1-DIRECT-ANSWER-HAPPY",
+    "boundary": "B1",
+    "source_environment": "synthetic",
+    "contract_version": "0.4.0",
+    "capture_date": "2026-04-16",
+    "scenario_tags": ["a1", "direct_answer", "happy", "narrate"],
+    "expected_result_class": "pass",
+    "replay_suite": "N/A",
+    "original_failure_mode": "N/A - synthetic",
+    "expected_v5_outcome_class": "direct_answer_success"
+  },
+  "request": {
+    "turn_id": "a1111111-1111-4111-8111-111111111111",
+    "scenario_id": "a2222222-2222-4222-8222-222222222222",
+    "message": "Give me a short framing for this decision.",
+    "turn_class": "frame",
+    "stage": "frame"
+  },
+  "mock": {
+    "narrate_output": "Framing the decision means naming the choice, the goal it serves, and the key uncertainty. Start with one sentence for each."
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "response_version": 2,
+      "assistant_text": "Framing the decision means naming the choice, the goal it serves, and the key uncertainty. Start with one sentence for each.",
+      "blocks": [],
+      "suggested_actions": [],
+      "insights": [],
+      "stage_indicator": "frame"
+    },
+    "telemetry": {
+      "turn_executor_started_count": 1,
+      "turn_executor_completed_count": 1,
+      "response_emitted": true,
+      "llm_calls_used": 1,
+      "commit_performed": true,
+      "failure_type": null,
+      "contamination_detected": false
+    }
+  }
+}

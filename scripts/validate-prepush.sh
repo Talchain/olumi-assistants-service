@@ -126,16 +126,46 @@ check_stale_js() {
 
 # ---------------------------------------------------------------------------
 # 6. Dependency audit — check for file: references in package.json
+#
+# A1: `@talchain/schemas` is legitimately vendored via `file:./vendor/...`.
+# Exclude it from the audit (the tarball-sha-manifest check below covers
+# drift for this specific dependency). Any OTHER file: reference still fails.
 # ---------------------------------------------------------------------------
 check_dependency_audit() {
   local hits
-  hits=$(grep -n '"file:' package.json 2>/dev/null || true)
+  hits=$(grep -n '"file:' package.json 2>/dev/null | grep -v '"@talchain/schemas"' || true)
   if [ -z "$hits" ]; then
     print_check "dependency-audit" "OK"
   else
     print_check "dependency-audit" "FAIL"
-    echo "    package.json contains file: references:"
+    echo "    package.json contains non-allowlisted file: references:"
     echo "$hits" | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 7. V5 tarball SHA manifest — drift blocks push.
+# ---------------------------------------------------------------------------
+check_tarball_sha() {
+  if bash scripts/validate-tarball-sha.sh > /dev/null 2>&1; then
+    print_check "tarball-sha" "OK"
+  else
+    print_check "tarball-sha" "FAIL"
+    bash scripts/validate-tarball-sha.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 8. V5 transport invariants — no raw stream writes / SSE in orchestrator-v5.
+# ---------------------------------------------------------------------------
+check_transport_invariants() {
+  if bash scripts/validate-transport-invariants.sh > /dev/null 2>&1; then
+    print_check "transport-invariants" "OK"
+  else
+    print_check "transport-invariants" "FAIL"
+    bash scripts/validate-transport-invariants.sh 2>&1 | sed 's/^/      /'
     FAILURES=$((FAILURES + 1))
   fi
 }
@@ -153,6 +183,8 @@ check_lint_changed
 check_smoke_tests
 check_stale_js
 check_dependency_audit
+check_tarball_sha
+check_transport_invariants
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
