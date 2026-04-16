@@ -1,22 +1,23 @@
-// TEMPLATE AUDIT (12 April 2026)
+// TEMPLATE AUDIT (16 April 2026)
 //
-// 6 migrated (handler emits HandlerFact → composer generates text):
+// 7 migrated (handler emits HandlerFact -> composer generates text):
 //   1. draft_created   — fact.data: option_count, goal_label.  Coaching: tradeoff, biggest_inference, calibration_target.  Handler: actions/draft-graph.ts
 //   2. factor_added    — fact.data: value_label, target_label, category.  Coaching: critical_gap.  Handler: actions/add-factor.ts
 //   3. option_added    — fact.data: intervention_count.  Coaching: (unused).  Handler: actions/add-option.ts
 //   4. value_set       — fact.data: new_value, unit.  Coaching: drivers[0].  Handler: actions/set-factor-value.ts
 //   5. analysis_complete — fact.data: (none).  Coaching: headline, drivers, cta.  Handler: actions/run-analysis.ts, actions/explain-result.ts
 //   6. analysis_started — fact.data: (none).  Coaching: (unused).  Handler: (pipeline internal)
+//   7. graph_edited    — fact.data: (none).  Coaching: (unused).  Handler: actions/edit-graph.ts
 //
-// 8 unmigrated (legacy assistantText, composer templates are transitional placeholders):
-//   7. edge_adjusted        — actions/adjust-edge-strength.ts
-//   8. constraint_added     — actions/add-constraint.ts
-//   9. factor_removed       — actions/remove-factor.ts
-//  10. goal_target_set      — actions/set-goal-target.ts
-//  11. premortem_run        — actions/run-premortem.ts
-//  12. assumption_challenged — actions/challenge-assumption.ts
-//  13. brief_generated      — actions/generate-artefact.ts
-//  14. evidence_found       — actions/what-would-flip.ts
+// 7 unmigrated (legacy assistantText, composer templates are transitional placeholders):
+//   8. edge_adjusted        — actions/adjust-edge-strength.ts
+//   9. constraint_added     — actions/add-constraint.ts
+//  10. factor_removed       — actions/remove-factor.ts
+//  11. goal_target_set      — actions/set-goal-target.ts
+//  12. premortem_run        — actions/run-premortem.ts
+//  13. assumption_challenged — actions/challenge-assumption.ts
+//  14. brief_generated      — actions/generate-artefact.ts
+//  15. evidence_found       — actions/what-would-flip.ts
 //
 
 /**
@@ -57,6 +58,7 @@ export type HandlerAction =
   | 'constraint_added'
   | 'factor_removed'
   | 'goal_target_set'
+  | 'graph_edited'
   | 'analysis_started'
   | 'analysis_complete'
   | 'premortem_run'
@@ -117,6 +119,8 @@ export function composeResponse(
       return composeFactorRemoved(fact);
     case 'goal_target_set':
       return composeGoalTargetSet(fact);
+    case 'graph_edited':
+      return composeGraphEdited(fact, hasPatchBlock);
     case 'analysis_started':
       return composeAnalysisStarted(fact);
     case 'analysis_complete':
@@ -410,4 +414,22 @@ function composeEvidenceFound(fact: HandlerFact): string {
   return count > 0
     ? `Found ${count} relevant piece${count === 1 ? '' : 's'} of evidence.`
     : 'No directly relevant evidence was found for this question.';
+}
+
+function composeGraphEdited(fact: HandlerFact, hasPatchBlock: boolean): string {
+  const entity = fact.entities_affected[0];
+  const label = entity?.label ?? 'the model';
+
+  if (hasPatchBlock) {
+    // Patch card carries structural detail; keep prose to one sentence.
+    if (fact.auto_apply) {
+      return `${label} has been updated.`;
+    }
+    return `${fact.what_changed ?? `Changes to ${label}`} would restructure the model.`;
+  }
+
+  if (fact.auto_apply) {
+    return `The model has been updated: ${fact.what_changed ?? 'structural changes applied'}.`;
+  }
+  return `${fact.what_changed ?? `Changes to ${label}`} would restructure the model.`;
 }

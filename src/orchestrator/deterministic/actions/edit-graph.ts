@@ -23,6 +23,7 @@
 
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult, ActionFailure } from "../types.js";
+import type { HandlerFact } from "../response-composer.js";
 import type {
   ConversationContext,
   GraphPatchBlockData,
@@ -819,6 +820,12 @@ export const editGraphAction: ActionDefinition = {
     // operations), which would leak un-hardened patches to the UI.
     const nonPatchBlocks = result.blocks.filter((b) => b.block_type !== 'graph_patch');
 
+    // WS2: Build HandlerFact so the response composer produces
+    // decision-language text with correct proposal/applied tense.
+    const editFact = operations.length > 0
+      ? buildEditGraphFact(operations, ctx)
+      : undefined;
+
     return {
       blocks: nonPatchBlocks,
       assistantText: assistantText || null,
@@ -827,6 +834,7 @@ export const editGraphAction: ActionDefinition = {
       applied_graph_hash: appliedGraphHash,
       applied_graph: result.appliedGraph ?? undefined,
       analysis_ready: blockData?.analysis_ready,
+      ...(editFact ? { fact: editFact } : {}),
     };
   },
 
@@ -868,5 +876,45 @@ function unsupportedFallback(): ActionResult {
     assistantText:
       "I wasn't able to make that change to the model. Could you describe specifically what you'd like to add, remove, or connect?",
     guidance_items: [],
+  };
+}
+
+/**
+ * Build a HandlerFact from edit_graph operations so the response composer
+ * can produce decision-language text with correct proposal tense.
+ */
+function buildEditGraphFact(
+  operations: PatchOperation[],
+  ctx: DeterministicTurnContext,
+): HandlerFact {
+  // Collect affected entities from operations
+  const entities: Array<{ id: string; label: string; kind: string }> = [];
+  const seen = new Set<string>();
+  for (const op of operations) {
+    const id = typeof op.path === 'string' ? op.path : null;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const entry = ctx.entities.nodes.get(id);
+    if (entry) {
+      entities.push({ id: entry.id, label: entry.label, kind: entry.kind });
+    }
+  }
+
+  // Summarise what changed
+  const adds = operations.filter((o) => o.op === 'add_node' || o.op === 'add_edge').length;
+  const updates = operations.filter((o) => o.op === 'update_node' || o.op === 'update_edge').length;
+  const removes = operations.filter((o) => o.op === 'remove_node' || o.op === 'remove_edge').length;
+  const parts: string[] = [];
+  if (adds > 0) parts.push(`${adds} addition${adds > 1 ? 's' : ''}`);
+  if (updates > 0) parts.push(`${updates} update${updates > 1 ? 's' : ''}`);
+  if (removes > 0) parts.push(`${removes} removal${removes > 1 ? 's' : ''}`);
+  const whatChanged = parts.length > 0 ? parts.join(', ') : 'structural changes';
+
+  return {
+    action: 'graph_edited',
+    entities_affected: entities.length > 0 ? entities : [{ id: '', label: 'the model', kind: 'graph' }],
+    what_changed: whatChanged,
+    stale_analysis: ctx.analysis_summary != null,
+    auto_apply: false,
   };
 }

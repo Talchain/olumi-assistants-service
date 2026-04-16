@@ -1619,7 +1619,20 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     guidanceItemsForEnvelope.length === 0
   ) {
     try {
-      const postAnalysis = generatePostAnalysisGuidance(turnContext.analysis, turnContext.graph);
+      // Extract node IDs from review_card blocks to suppress duplicate
+      // PROPOSAL_CARD_* guidance items for cards already visible as blocks.
+      const reviewCardNodeIds = new Set<string>();
+      for (const block of actionResult?.blocks ?? []) {
+        if (block.block_type === 'review_card') {
+          const card = (block.data as { card?: Record<string, unknown> })?.card;
+          if (card && typeof card.node_id === 'string') {
+            reviewCardNodeIds.add(card.node_id);
+          }
+        }
+      }
+      const postAnalysis = generatePostAnalysisGuidance(turnContext.analysis, turnContext.graph, {
+        emittedReviewCardNodeIds: reviewCardNodeIds.size > 0 ? reviewCardNodeIds : undefined,
+      });
       if (postAnalysis.length > 0) {
         guidanceItemsForEnvelope = [...guidanceItemsForEnvelope, ...postAnalysis];
       }
