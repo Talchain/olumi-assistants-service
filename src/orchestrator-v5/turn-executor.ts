@@ -1,41 +1,53 @@
 /**
- * V5 TurnExecutor (slice A1).
+ * V5 TurnExecutor (slice A2).
  *
- * Single class implementing addendum §2.1.2 and the invocation order in §2.1.3,
- * scoped to `direct_answer`. Everything else → UNHANDLED per Paul's constraint 1.
+ * Single class implementing addendum §2.1.2 and the invocation order in §2.1.3.
+ * A1 scoped to `direct_answer`; A2 extends with `clarify`. Everything else
+ * → UNHANDLED per Paul's constraint 1.
  *
- * Ordering (A1):
+ * Ordering (A2):
  *   1. buildTurnContext       — minimal V5 TurnContext
- *   2. dispatch               — direct_answer exclusively; else UnhandledTurnClassError
- *   3. sanitise               — runs inside dispatch for A1
- *   4. compose                — OlumiResponse assembly
+ *   2. dispatch               — classify → direct_answer | clarify; else
+ *                               UnhandledTurnClassError
+ *   3. sanitise               — runs inside each handler branch
+ *   4. compose                — OlumiResponse assembly (per turn_class)
  *   5. commit                 — no-op per constraint 11
  *   6. egress validate (caller's route-v2)
  *
  * Budget enforcement: TurnExecutor owns an outer wall-clock AbortSignal with
- * `budgets.turn_ms`. Narrate gets an inner budget via `invokeNarrate`. Per
- * Paul's constraint 7: BUDGET_EXCEEDED wins over LLM_TIMEOUT when both could
- * apply — the wall-clock bound is inspected before mapping inner timeouts.
+ * `budgets.turn_ms`. Classifier and narrate each get a fresh
+ * `budgets.llm_narrate_ms` inner bound (documented in budgets.ts per Paul's
+ * correction 4). Paul's constraint 7: BUDGET_EXCEEDED wins over LLM_TIMEOUT
+ * when both could apply — the wall-clock bound is inspected before mapping
+ * inner timeouts.
  *
  * Exactly-one-response invariant (BI-01): the top-level try/finally guarantees
  * every `turn_executor.started` telemetry event has a matching `.completed`
  * with `response_emitted=true`. No exceptions.
+ *
+ * Telemetry: `stages_completed` is now order-tolerant. A2 emits `classify`
+ * before `dispatch` on every successful classification. Tests should assert
+ * presence, not exact sequence.
  */
 
 import type { OrchestratorTurnPayload, OlumiResponse, FailureTypeLiteral } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import {
-  dispatchDirectAnswer,
+  dispatch,
   UnhandledTurnClassError,
   type DispatchResult,
 } from './dispatch.js';
+import { ClassifierSchemaViolationError } from './classify.js';
 import { NarrateEmptyOutputError, NarrateTimeoutError } from './llm-adapter.js';
-import { composeDirectAnswerResponse } from './compose.js';
+import {
+  composeDirectAnswerResponse,
+  composeClarifyResponse,
+} from './compose.js';
 import { commitDirectAnswer } from './commit.js';
 import { buildTurnContext } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
-import { INTERNAL_TO_WIRE, type InternalFailure } from './types.js';
+import { INTERNAL_TO_WIRE, type InternalFailure, type A2TurnClass } from './types.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -46,10 +58,14 @@ export interface TurnExecutorRunResult {
     commit_performed: boolean;
     failure_type: FailureTypeLiteral | null;
     wall_clock_ms: number;
+    turn_class: A2TurnClass;
   };
 }
 
-const TURN_CLASS_A1 = 'direct_answer' as const;
+// Until classify succeeds we don't know the turn class. Telemetry needs a
+// placeholder value so the `started` event can fire with a default. After
+// classify resolves, `completed` carries the actual class.
+const TURN_CLASS_PENDING = 'direct_answer' as const satisfies A2TurnClass;
 
 /**
  * Run a single V5 turn end-to-end. Always returns a well-formed OlumiResponse;
@@ -64,8 +80,6 @@ export async function runTurnExecutor(
   const startedAt = Date.now();
   const stagesCompleted: string[] = [];
 
-  // Build TurnContext up-front so the telemetry `started` event can carry
-  // stage + session info even if later stages fail.
   const context = buildTurnContext(payload, requestId);
   stagesCompleted.push('build_turn_context');
 
@@ -73,13 +87,11 @@ export async function runTurnExecutor(
     request_id: requestId,
     session_id: context.session_id,
     stage: context.stage,
-    turn_class: TURN_CLASS_A1,
+    // Provisional: classifier decides the actual class. The `completed` event
+    // carries the resolved value.
+    turn_class: TURN_CLASS_PENDING,
   });
 
-  // Wall-clock outer bound. AbortController signals dispatch to give up if
-  // the whole turn exceeds `turn_ms`. Used for BUDGET_EXCEEDED precedence:
-  // the controller fires before the narrate adapter's inner timeout, so we
-  // can detect "the outer budget tripped" and classify correctly.
   const turnAbort = new AbortController();
   const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
 
@@ -87,19 +99,27 @@ export async function runTurnExecutor(
   let llmCallsUsed = 0;
   let commitPerformed = false;
   let failureType: FailureTypeLiteral | null = null;
+  let resolvedTurnClass: A2TurnClass = TURN_CLASS_PENDING;
 
   try {
     let dispatchResult: DispatchResult;
     try {
-      dispatchResult = await dispatchDirectAnswer(TURN_CLASS_A1, context, {
+      dispatchResult = await dispatch(context, {
         signal: turnAbort.signal,
+        // A2: capture classifier outcome even if narrate later throws — so
+        // `turn_executor.completed` telemetry reports the true resolved class.
+        onClassified: (cls) => {
+          resolvedTurnClass = cls;
+          stagesCompleted.push('classify');
+        },
       });
       llmCallsUsed = dispatchResult.llm_calls_used;
+      resolvedTurnClass = dispatchResult.turn_class;
       stagesCompleted.push('dispatch');
     } catch (error) {
       // Timeout precedence (Paul's constraint 7): if the outer wall-clock
-      // abort fired, classify as BUDGET_EXCEEDED regardless of whether the
-      // inner narrate adapter saw its own timeout.
+      // abort fired, classify as BUDGET_EXCEEDED regardless of whether an
+      // inner adapter saw its own timeout.
       if (turnAbort.signal.aborted) {
         failureType = INTERNAL_TO_WIRE.BUDGET_EXCEEDED;
         response = buildFailureResponse('BUDGET_EXCEEDED', context.stage, {
@@ -114,9 +134,20 @@ export async function runTurnExecutor(
         });
         return finalizeRun();
       }
+      if (error instanceof ClassifierSchemaViolationError) {
+        // Paul's correction 3: classifier parse failure is a recoverable LLM
+        // fault (mirrors narrate-mode failures). Not UNHANDLED.
+        log.warn(
+          { request_id: requestId, kind: error.kind, message: error.message },
+          'V5 TurnExecutor classifier schema violation',
+        );
+        failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
+        response = buildFailureResponse('LLM_SCHEMA_VIOLATION', context.stage, {
+          phase: 'classify',
+        });
+        return finalizeRun();
+      }
       if (error instanceof NarrateEmptyOutputError) {
-        // Empty output counts as internal — sanitiser consumed everything or
-        // provider returned nothing. Surfaces as INTERNAL_ERROR.
         failureType = INTERNAL_TO_WIRE.UNHANDLED;
         response = buildFailureResponse('UNHANDLED', context.stage, {
           reason: 'empty_narrate_output',
@@ -124,7 +155,7 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
       if (error instanceof UnhandledTurnClassError) {
-        // Paul's constraint 1: any non-direct_answer class → UNHANDLED.
+        // Paul's constraint 1: any non-A2TurnClass class → UNHANDLED P0.
         log.error(
           { request_id: requestId, reason: error.reason, message: error.message },
           'V5 TurnExecutor unhandled turn class — invariant violation',
@@ -154,15 +185,21 @@ export async function runTurnExecutor(
         request_id: requestId,
         raw_length: dispatchResult.raw_text_length,
         sanitised_length: dispatchResult.sanitised.output.length,
+        turn_class: dispatchResult.turn_class,
       });
     }
 
     // Compose + commit. Either throwing means STATE_COMMIT_FAILED → INTERNAL_ERROR.
     try {
-      const composed = composeDirectAnswerResponse({
-        assistant_text: dispatchResult.sanitised.output,
-        stage: context.stage,
-      });
+      const composed = dispatchResult.turn_class === 'clarify'
+        ? composeClarifyResponse({
+            assistant_text: dispatchResult.sanitised.output,
+            stage: context.stage,
+          })
+        : composeDirectAnswerResponse({
+            assistant_text: dispatchResult.sanitised.output,
+            stage: context.stage,
+          });
       stagesCompleted.push('compose');
 
       const committed = commitDirectAnswer(composed);
@@ -190,7 +227,7 @@ export async function runTurnExecutor(
       request_id: requestId,
       session_id: context.session_id,
       stage: context.stage,
-      turn_class: TURN_CLASS_A1,
+      turn_class: resolvedTurnClass,
       stages_completed: stagesCompleted,
       response_emitted: true,
       llm_calls_used: llmCallsUsed,
@@ -210,6 +247,7 @@ export async function runTurnExecutor(
         commit_performed: commitPerformed,
         failure_type: failureType,
         wall_clock_ms: Date.now() - startedAt,
+        turn_class: resolvedTurnClass,
       },
     };
   }
@@ -220,6 +258,4 @@ function serialiseError(err: unknown): { name?: string; message?: string } {
   return { message: String(err) };
 }
 
-// Re-exports for callers / tests.
-export { TURN_CLASS_A1 };
 export type { InternalFailure } from './types.js';

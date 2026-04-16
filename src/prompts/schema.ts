@@ -41,6 +41,11 @@ export const CeeTaskIdSchema = z.enum([
   // V5 slice A1 — narrate-mode prompt for direct_answer turns on
   // /orchestrate/v2/turn. Additive; existing callers unaffected.
   'direct_answer_narrate',
+  // V5 slice A2 — clarification narrate-mode fragment + pre-narrate turn
+  // classifier. Additive; existing callers unaffected. Paul is sole author of
+  // both fragments (placeholder defaults in defaults.ts).
+  'clarify_narrate',
+  'turn_classifier',
 ]);
 export type CeeTaskId = z.infer<typeof CeeTaskIdSchema>;
 

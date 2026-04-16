@@ -1,31 +1,32 @@
 {
   "_meta": {
-    "fixture_id": "A1-DIRECT-ANSWER-CONTAMINATION",
+    "fixture_id": "A2-CLARIFY-CONTAMINATION",
     "boundary": "B1",
     "source_environment": "synthetic",
     "contract_version": "0.4.0",
-    "capture_date": "2026-04-16",
-    "scenario_tags": ["a1", "direct_answer", "sanitise", "contamination"],
+    "capture_date": "2026-04-17",
+    "scenario_tags": ["a2", "clarify", "sanitise", "contamination"],
     "expected_result_class": "pass",
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
-    "expected_v5_outcome_class": "direct_answer_success"
+    "expected_v5_outcome_class": "clarify_success"
   },
   "request": {
-    "turn_id": "a1111111-1111-4111-8111-111111111114",
-    "scenario_id": "a2222222-2222-4222-8222-222222222225",
-    "message": "Narrate with contaminated output containing XML tags and em-dashes.",
+    "turn_id": "b1111111-1111-4111-8111-111111111113",
+    "scenario_id": "b2222222-2222-4222-8222-222222222224",
+    "message": "not sure",
     "turn_class": "frame",
     "stage": "frame"
   },
   "mock": {
-    "narrate_output": "<thinking>This is an inner reflection</thinking>The decision comes down to two forces \u2014 cost and speed. <summary>Pick carefully.</summary>"
+    "classify_output": "{\"turn_class\":\"clarify\"}",
+    "narrate_output": "<thinking>They're vague</thinking>What is the decision you're weighing \u2014 and why now?"
   },
   "expected": {
     "status": 200,
     "body_shape": {
       "response_version": 2,
-      "assistant_text_contains": "The decision comes down to two forces",
+      "assistant_text_contains": "What is the decision you're weighing",
       "assistant_text_excludes_tags": true,
       "assistant_text_no_em_dash": true,
       "blocks_length": 0,
@@ -39,8 +40,7 @@
       "commit_performed": true,
       "failure_type": null,
       "contamination_detected": true,
-      "turn_class": "direct_answer",
-      "note_a2_update": "llm_calls_used bumped 1 -> 2 in A2 (classify + narrate)."
+      "turn_class": "clarify"
     }
   }
 }

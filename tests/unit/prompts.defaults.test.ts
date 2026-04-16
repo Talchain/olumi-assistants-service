@@ -172,11 +172,18 @@ describe('Prompt Content Quality', () => {
     registerAllDefaultPrompts();
   });
 
-  it('all task prompts (except orchestrator) contain JSON-related instruction', () => {
+  it('all task prompts (except orchestrator and narrate-mode) contain JSON-related instruction', () => {
     const defaults = getDefaultPrompts();
 
-    // orchestrator uses XML envelope output, not JSON
-    const JSON_EXEMPT_TASKS = new Set(['orchestrator']);
+    // orchestrator uses XML envelope output, not JSON.
+    // V5 narrate-mode prompts (direct_answer_narrate, clarify_narrate) output
+    // plain prose for the OlumiResponse.assistant_text field — structured output
+    // is not applicable. turn_classifier DOES use JSON and remains checked.
+    const JSON_EXEMPT_TASKS = new Set([
+      'orchestrator',
+      'direct_answer_narrate',
+      'clarify_narrate',
+    ]);
 
     for (const [task, prompt] of Object.entries(defaults)) {
       if (!prompt || JSON_EXEMPT_TASKS.has(task)) continue;

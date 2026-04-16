@@ -35,10 +35,12 @@
       "turn_executor_started_count": 1,
       "turn_executor_completed_count": 1,
       "response_emitted": true,
-      "llm_calls_used": 1,
+      "llm_calls_used": 2,
       "commit_performed": true,
       "failure_type": null,
-      "contamination_detected": false
+      "contamination_detected": false,
+      "turn_class": "direct_answer",
+      "note_a2_update": "llm_calls_used bumped from 1 to 2 in A2: classify + narrate. Turn_class resolved post-classification."
     }
   }
 }

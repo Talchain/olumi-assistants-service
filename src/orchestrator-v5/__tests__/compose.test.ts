@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import { composeDirectAnswerResponse } from '../compose.js';
+import {
+  composeDirectAnswerResponse,
+  composeClarifyResponse,
+} from '../compose.js';
 
 describe('composeDirectAnswerResponse', () => {
   it('produces an OlumiResponseSchema-valid success envelope', () => {
@@ -30,5 +33,27 @@ describe('composeDirectAnswerResponse', () => {
         'suggested_actions',
       ].sort(),
     );
+  });
+});
+
+describe('composeClarifyResponse (A2)', () => {
+  it('produces an OlumiResponseSchema-valid clarify envelope', () => {
+    const env = composeClarifyResponse({
+      assistant_text: 'What decision are you weighing?',
+      stage: 'frame',
+    });
+    const parsed = OlumiResponseSchema.parse(env);
+    expect(parsed.response_version).toBe(2);
+    expect(parsed.assistant_text).toBe('What decision are you weighing?');
+    expect(parsed.blocks).toEqual([]);
+    expect(parsed.suggested_actions).toEqual([]);
+    expect(parsed.insights).toEqual([]);
+    expect(parsed.stage_indicator).toBe('frame');
+  });
+
+  it('produces the same field set as direct_answer (structural parity)', () => {
+    const ans = composeDirectAnswerResponse({ assistant_text: 'a', stage: 'frame' });
+    const clar = composeClarifyResponse({ assistant_text: 'c', stage: 'frame' });
+    expect(Object.keys(ans).sort()).toEqual(Object.keys(clar).sort());
   });
 });

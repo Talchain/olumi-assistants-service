@@ -2131,6 +2131,27 @@ Respond to the user's message in plain prose.
 - Do not fabricate numbers, citations, or analysis results.
 - If the question asks for something requiring analysis, say so plainly.`;
 
+// V5 slice A2 — clarification narrate placeholder. Paul is sole prompt
+// author. Used when the pre-narrate classifier returns turn_class=clarify.
+// Fragment is intentionally short so the prompt store can override without
+// code changes.
+const CLARIFY_NARRATE_PROMPT = `You are a concise decision coach.
+The user's message is ambiguous. Ask one short clarifying question in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- One or two sentences is plenty.
+- Do not answer the original question, only ask the follow-up.
+- Do not fabricate numbers, citations, or analysis results.`;
+
+// V5 slice A2 — pre-narrate turn classifier placeholder. Paul is sole prompt
+// author. Returns a single JSON object: {"turn_class": "direct_answer"} or
+// {"turn_class": "clarify"}. No other keys, no prose outside the JSON object.
+const TURN_CLASSIFIER_PROMPT = `You classify a user's message into one of two turn classes.
+Output a single JSON object with exactly one key \`turn_class\`. Allowed values:
+  - "direct_answer" — the user's intent is clear enough to answer without a follow-up.
+  - "clarify" — the user's intent is unclear; a short follow-up question is needed first.
+Do not output any prose outside the JSON object. Do not include markdown fences.`;
+
 // ============================================================================
 // Registration Function
 // ============================================================================
@@ -2222,6 +2243,10 @@ export function registerAllDefaultPrompts(): void {
   // can override it without code changes. Additive entry; pre-existing callers
   // unaffected.
   registerDefaultPrompt('direct_answer_narrate', DIRECT_ANSWER_NARRATE_PROMPT);
+  // V5 slice A2 — clarification narrate + pre-narrate turn classifier.
+  // Both placeholders; Paul authors final content. Additive entries.
+  registerDefaultPrompt('clarify_narrate', CLARIFY_NARRATE_PROMPT);
+  registerDefaultPrompt('turn_classifier', TURN_CLASSIFIER_PROMPT);
 
   // Log prompt versions at registration (read from actually-registered content)
   log.info({

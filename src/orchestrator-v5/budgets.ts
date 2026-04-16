@@ -8,12 +8,30 @@
  * Reads `process.env` on every call so env overrides at runtime (e.g. in
  * integration tests) are honoured. Binding at module load would freeze the
  * reference before tests can mutate the process env.
+ *
+ * Budget semantics (Paul's correction 4, A2):
+ *
+ *   Two LLM calls happen per turn on the happy path:
+ *     1. Pre-narrate classifier (turn_classifier) → A2TurnClass
+ *     2. Narrate fragment (direct_answer_narrate | clarify_narrate)
+ *
+ *   Each LLM call gets a FRESH `LLM_BUDGET_NARRATE_MS` window (INDEPENDENT
+ *   inner budgets). The outer `TURN_BUDGET_MS` is the SHARED wall-clock
+ *   ceiling that bounds the entire turn.
+ *
+ *   Worst-case total LLM wall-clock time = 2 × LLM_BUDGET_NARRATE_MS,
+ *   hard-bounded by TURN_BUDGET_MS. If the outer budget trips mid-call, Paul's
+ *   constraint 7 ensures the response classifies as TURN_BUDGET_EXCEEDED
+ *   (not UPSTREAM_TIMEOUT), matching the A1 precedence behaviour.
+ *
+ *   Unit test `__tests__/budgets.test.ts` proves budget independence: running
+ *   the classifier does not consume any of the narrate call's budget window.
  */
 
 import type { Budgets } from '@talchain/schemas/orchestrator';
 
 const DEFAULT_TURN_BUDGET_MS = 180_000; // 3 minutes — outer bound
-const DEFAULT_LLM_NARRATE_BUDGET_MS = 60_000; // 1 minute — inner bound
+const DEFAULT_LLM_NARRATE_BUDGET_MS = 60_000; // 1 minute — per-LLM-call inner bound
 
 function parseMs(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;

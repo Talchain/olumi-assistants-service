@@ -1,24 +1,25 @@
 {
   "_meta": {
-    "fixture_id": "A1-DIRECT-ANSWER-LLM-TIMEOUT",
+    "fixture_id": "A2-CLARIFY-LLM-TIMEOUT",
     "boundary": "B1",
     "source_environment": "synthetic",
     "contract_version": "0.4.0",
-    "capture_date": "2026-04-16",
-    "scenario_tags": ["a1", "direct_answer", "failure", "llm_timeout"],
+    "capture_date": "2026-04-17",
+    "scenario_tags": ["a2", "clarify", "failure", "llm_timeout"],
     "expected_result_class": "pass",
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
     "expected_v5_outcome_class": "typed_error"
   },
   "request": {
-    "turn_id": "a1111111-1111-4111-8111-111111111112",
-    "scenario_id": "a2222222-2222-4222-8222-222222222223",
-    "message": "Narrate a long-running answer.",
+    "turn_id": "b1111111-1111-4111-8111-111111111112",
+    "scenario_id": "b2222222-2222-4222-8222-222222222223",
+    "message": "can you?",
     "turn_class": "frame",
     "stage": "frame"
   },
   "mock": {
+    "classify_output": "{\"turn_class\":\"clarify\"}",
     "narrate_throws": "NarrateTimeoutError",
     "narrate_throws_message": "Upstream timeout during narrate: test-injected"
   },
@@ -34,10 +35,9 @@
       "turn_executor_started_count": 1,
       "turn_executor_completed_count": 1,
       "response_emitted": true,
-      "llm_calls_used": 0,
       "commit_performed": false,
       "failure_type": "UPSTREAM_TIMEOUT",
-      "note_a2_update": "A2 mock routes the timeout into the narrate phase after successful classify; replay-level assertion on llm_calls_used is not made in the integration test."
+      "turn_class": "clarify"
     }
   }
 }

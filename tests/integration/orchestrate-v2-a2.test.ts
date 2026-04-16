@@ -1,23 +1,21 @@
 /**
- * V5 slice A1 — integration tests for POST /orchestrate/v2/turn.
+ * V5 slice A2 — integration tests for POST /orchestrate/v2/turn (clarify).
  *
- * Replays the 4 A1 fixtures under tests/fixtures/contracts/b1/slice-a1/ through
- * the real route handler with the LLM adapter mocked at the `getAdapter` seam
- * (Paul's constraint 9 — no live provider calls in the acceptance pack).
- *
- * A2 update: a classifier LLM call now runs before narrate. The mock
- * distinguishes classify calls (`args.responseFormat === 'json_object'`) from
- * narrate calls. A1 fixtures were all direct_answer, so the classifier mock
- * always returns `{"turn_class":"direct_answer"}` here — fixture intent is
- * unchanged. `llm_calls_used` expectation is updated from 1 → 2 (classify +
- * narrate), which is semantically accurate post-A2.
+ * Replays the 3 A2 fixtures under tests/fixtures/contracts/b1/slice-a2/ through
+ * the real route handler with the LLM adapter mocked at the `getAdapter` seam.
+ * The mock distinguishes classifier calls (`args.responseFormat === 'json_object'`)
+ * from narrate calls.
  *
  * Verifies for each fixture:
  *   - HTTP 200
  *   - OlumiResponse parses against @talchain/schemas/boundary
  *   - turn_executor.started / .completed events fire exactly once each
  *   - response_emitted is always true (BI-01)
+ *   - completed.data.turn_class = 'clarify' (A2 telemetry)
  *   - failure_type matches the fixture expectation
+ *
+ * No V4 baseline for clarify (Paul's correction on Target 6). Coverage is
+ * fixture-based only.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -30,20 +28,17 @@ import { fileURLToPath } from 'node:url';
 import { setTestSink } from '../../src/utils/telemetry.js';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 
-// ---------------------------------------------------------------------------
-// Fixture loading
-// ---------------------------------------------------------------------------
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIX_DIR = join(__dirname, '..', 'fixtures', 'contracts', 'b1', 'slice-a1');
+const FIX_DIR = join(__dirname, '..', 'fixtures', 'contracts', 'b1', 'slice-a2');
 
-interface A1Fixture {
+interface A2Fixture {
   _meta: { fixture_id: string; expected_result_class: string };
   request: Record<string, unknown>;
   mock: {
+    classify_output?: string;
     narrate_output?: string;
     narrate_throws?: string;
-    narrate_delay_ms?: number;
+    classify_throws?: string;
     env?: Record<string, string>;
   };
   expected: {
@@ -54,63 +49,41 @@ interface A1Fixture {
   };
 }
 
-function loadFixture(name: string): A1Fixture {
-  return JSON.parse(readFileSync(join(FIX_DIR, name), 'utf8')) as A1Fixture;
+function loadFixture(name: string): A2Fixture {
+  return JSON.parse(readFileSync(join(FIX_DIR, name), 'utf8')) as A2Fixture;
 }
 
 // ---------------------------------------------------------------------------
-// Mock LLM adapter + prompt loader at module seam.
-//
-// A2: the same mock serves both classify (JSON mode) and narrate. The
-// classify path always returns the direct_answer turn class for A1 fixtures —
-// A1 was direct-answer-only so that's the intended routing.
+// Phase-aware mock: classify vs narrate routed by responseFormat
 // ---------------------------------------------------------------------------
 
 type Phase = 'classify' | 'narrate';
 interface PhaseState {
   output: string;
   throws?: 'NarrateTimeoutError' | 'generic';
-  delayMs: number;
 }
 const phaseState: Record<Phase, PhaseState> = {
-  classify: { output: '{"turn_class":"direct_answer"}', delayMs: 0 },
-  narrate: { output: '', delayMs: 0 },
+  classify: { output: '{"turn_class":"clarify"}' },
+  narrate: { output: '' },
 };
 
 vi.mock('../../src/adapters/llm/router.js', () => ({
   getAdapter: () => ({
-    name: 'test-a1-mock',
-    chat: async (
-      args: { responseFormat?: string },
-      opts: { signal?: AbortSignal },
-    ) => {
+    name: 'test-a2-mock',
+    chat: async (args: { responseFormat?: string }) => {
       const phase: Phase = args.responseFormat === 'json_object' ? 'classify' : 'narrate';
       const m = phaseState[phase];
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (m.throws === 'NarrateTimeoutError') {
-            import('../../src/adapters/llm/errors.js').then((errs) => {
-              reject(new errs.UpstreamTimeoutError('test timeout', phase, 1));
-            });
-            return;
-          }
-          if (m.throws === 'generic') {
-            reject(new Error('test generic error'));
-            return;
-          }
-          resolve();
-        }, m.delayMs);
-        opts.signal?.addEventListener('abort', () => {
-          clearTimeout(timer);
-          const abort = new Error('abort');
-          (abort as Error & { name: string }).name = 'AbortError';
-          reject(abort);
-        });
-      });
+      if (m.throws === 'NarrateTimeoutError') {
+        const errs = await import('../../src/adapters/llm/errors.js');
+        throw new errs.UpstreamTimeoutError('test timeout', phase, 1);
+      }
+      if (m.throws === 'generic') {
+        throw new Error('test generic error');
+      }
       return {
         content: m.output,
         usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'test-a1-mock',
+        model: 'test-a2-mock',
         latencyMs: 0,
       };
     },
@@ -144,10 +117,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
 
-// ---------------------------------------------------------------------------
-// Telemetry sink
-// ---------------------------------------------------------------------------
-
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 function installSink(): void {
@@ -161,15 +130,11 @@ function turnExecutorEvents(kind: 'started' | 'completed'): Event[] {
 }
 
 function resetPhases(): void {
-  phaseState.classify = { output: '{"turn_class":"direct_answer"}', delayMs: 0 };
-  phaseState.narrate = { output: '', delayMs: 0 };
+  phaseState.classify = { output: '{"turn_class":"clarify"}' };
+  phaseState.narrate = { output: '' };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
+describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
   let app: FastifyInstance;
   const originalEnv = { ...process.env };
 
@@ -190,9 +155,11 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     resetPhases();
   });
 
-  it('happy path: fixture emits a valid OlumiResponse + exactly-one completed event', async () => {
-    const fx = loadFixture('direct-answer-happy.json');
+  it('clarify-happy: ambiguous input → 200 + clarify envelope, commit performed', async () => {
+    const fx = loadFixture('clarify-happy.json');
+    phaseState.classify.output = fx.mock.classify_output!;
     phaseState.narrate.output = fx.mock.narrate_output!;
+
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -213,14 +180,20 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     expect(completed[0]!.data.response_emitted).toBe(true);
     expect(completed[0]!.data.failure_type).toBeNull();
     expect(completed[0]!.data.commit_performed).toBe(true);
-    // A2: classifier + narrate = 2 LLM calls on happy path
     expect(completed[0]!.data.llm_calls_used).toBe(2);
-    expect(completed[0]!.data.turn_class).toBe('direct_answer');
+    expect(completed[0]!.data.turn_class).toBe('clarify');
+    const stages = completed[0]!.data.stages_completed as string[];
+    expect(stages).toContain('classify');
+    expect(stages).toContain('dispatch');
+    expect(stages).toContain('compose');
+    expect(stages).toContain('commit');
   });
 
-  it('llm-timeout fixture: UPSTREAM_TIMEOUT envelope, commit not performed', async () => {
-    const fx = loadFixture('direct-answer-llm-timeout.json');
+  it('clarify-llm-timeout: narrate timeout → UPSTREAM_TIMEOUT envelope, turn_class=clarify', async () => {
+    const fx = loadFixture('clarify-llm-timeout.json');
+    phaseState.classify.output = fx.mock.classify_output!;
     phaseState.narrate.throws = 'NarrateTimeoutError';
+
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -242,18 +215,14 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     expect(completed[0]!.data.response_emitted).toBe(true);
     expect(completed[0]!.data.failure_type).toBe('UPSTREAM_TIMEOUT');
     expect(completed[0]!.data.commit_performed).toBe(false);
+    // turn_class reflects the classifier decision even when narrate fails.
+    expect(completed[0]!.data.turn_class).toBe('clarify');
   });
 
-  it('budget-exceeded fixture: BUDGET_EXCEEDED wins over any inner timeout', async () => {
-    const fx = loadFixture('direct-answer-budget-exceeded.json');
-    for (const [k, v] of Object.entries(fx.mock.env ?? {})) {
-      process.env[k] = v;
-    }
+  it('clarify-contamination: sanitiser strips tags + em-dashes, response succeeds', async () => {
+    const fx = loadFixture('clarify-contamination.json');
+    phaseState.classify.output = fx.mock.classify_output!;
     phaseState.narrate.output = fx.mock.narrate_output!;
-    // A2: classifier is the first LLM call — make it the slow one so the
-    // outer budget trips while classifier waits. Fixture already sets an
-    // aggressive TURN_BUDGET_MS.
-    phaseState.classify.delayMs = fx.mock.narrate_delay_ms ?? 100;
 
     const res = await app.inject({
       method: 'POST',
@@ -263,59 +232,41 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     const parsed = OlumiResponseSchema.parse(body);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('TURN_BUDGET_EXCEEDED');
-    }
-    const completed = turnExecutorEvents('completed');
-    expect(completed).toHaveLength(1);
-    expect(completed[0]!.data.failure_type).toBe('TURN_BUDGET_EXCEEDED');
-    expect(completed[0]!.data.commit_performed).toBe(false);
-  });
-
-  it('contamination fixture: sanitised text, response stays a success', async () => {
-    const fx = loadFixture('direct-answer-contamination.json');
-    phaseState.narrate.output = fx.mock.narrate_output!;
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: fx.request,
-    });
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-    // Text was contaminated; sanitiser stripped tags + em-dashes.
     expect(parsed.assistant_text).not.toMatch(/<[a-zA-Z]|\u2014/);
-    expect(parsed.assistant_text).toContain('two forces');
+    expect(parsed.assistant_text).toContain("What is the decision you're weighing");
     expect(parsed.blocks).toEqual([]);
 
-    const contam = events.filter(
-      (e) => e.event === 'turn_executor.contamination_narrate',
-    );
+    const contam = events.filter((e) => e.event === 'turn_executor.contamination_narrate');
     expect(contam).toHaveLength(1);
+    expect(contam[0]!.data.turn_class).toBe('clarify');
 
     const completed = turnExecutorEvents('completed');
     expect(completed).toHaveLength(1);
     expect(completed[0]!.data.failure_type).toBeNull();
     expect(completed[0]!.data.commit_performed).toBe(true);
+    expect(completed[0]!.data.turn_class).toBe('clarify');
   });
 
-  // Missing-owner detector: every `started` has a matching `completed` with
-  // response_emitted=true across the whole fixture replay.
-  it('BI-01 missing-owner detector: every started has a matching completed', async () => {
-    const fixtures = [
-      'direct-answer-happy.json',
-      'direct-answer-llm-timeout.json',
-      'direct-answer-contamination.json',
+  // BI-01 across the A2 fixture set — every started has a matching completed.
+  it('BI-01 missing-owner detector: all A2 clarify fixtures', async () => {
+    const fixtures: Array<[string, () => void]> = [
+      ['clarify-happy.json', () => {
+        phaseState.classify.output = '{"turn_class":"clarify"}';
+        phaseState.narrate.output = 'What decision?';
+      }],
+      ['clarify-llm-timeout.json', () => {
+        phaseState.classify.output = '{"turn_class":"clarify"}';
+        phaseState.narrate.throws = 'NarrateTimeoutError';
+      }],
+      ['clarify-contamination.json', () => {
+        phaseState.classify.output = '{"turn_class":"clarify"}';
+        phaseState.narrate.output = '<t>x</t>What are you deciding?';
+      }],
     ];
-    for (const name of fixtures) {
-      const fx = loadFixture(name);
+    for (const [name, setup] of fixtures) {
       resetPhases();
-      phaseState.narrate.output = fx.mock.narrate_output ?? '';
-      phaseState.narrate.throws = fx.mock.narrate_throws === 'NarrateTimeoutError'
-        ? 'NarrateTimeoutError'
-        : undefined;
+      setup();
+      const fx = loadFixture(name);
       await app.inject({
         method: 'POST',
         url: '/orchestrate/v2/turn',

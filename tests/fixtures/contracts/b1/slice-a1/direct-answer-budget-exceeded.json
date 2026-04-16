@@ -41,7 +41,8 @@
       "llm_calls_used": 0,
       "commit_performed": false,
       "failure_type": "TURN_BUDGET_EXCEEDED",
-      "budget_exceeded_wins_over_llm_timeout": true
+      "budget_exceeded_wins_over_llm_timeout": true,
+      "note_a2_update": "A2 routes the slow call onto the classifier so the outer TURN_BUDGET_MS trips before narrate runs. Precedence invariant unchanged: BUDGET_EXCEEDED wins."
     }
   }
 }

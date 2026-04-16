@@ -89,16 +89,26 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 // the A0 boundary tests still exercise B1 ingress + egress without touching
 // a real provider. The valid-turn-payload fixture declares its expected
 // narrate output in `mock_narrate_output`.
+//
+// A2: a classifier LLM call now precedes narrate. The mock distinguishes
+// classify (responseFormat='json_object') from narrate and always returns a
+// direct_answer classification — the A0 valid-turn-payload fixture is
+// direct_answer-shaped, matching the A1 replacement envelope.
 let mockNarrateOutput = '';
 vi.mock('../../src/adapters/llm/router.js', () => ({
   getAdapter: () => ({
     name: 'a0-test-mock',
-    chat: async () => ({
-      content: mockNarrateOutput,
-      usage: { input_tokens: 1, output_tokens: 1 },
-      model: 'a0-test-mock',
-      latencyMs: 0,
-    }),
+    chat: async (args: { responseFormat?: string }) => {
+      const content = args.responseFormat === 'json_object'
+        ? '{"turn_class":"direct_answer"}'
+        : mockNarrateOutput;
+      return {
+        content,
+        usage: { input_tokens: 1, output_tokens: 1 },
+        model: 'a0-test-mock',
+        latencyMs: 0,
+      };
+    },
   }),
 }));
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({

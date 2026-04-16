@@ -1,0 +1,47 @@
+{
+  "_meta": {
+    "fixture_id": "A2-CLARIFY-HAPPY",
+    "boundary": "B1",
+    "source_environment": "synthetic",
+    "contract_version": "0.4.0",
+    "capture_date": "2026-04-17",
+    "scenario_tags": ["a2", "clarify", "happy", "narrate"],
+    "expected_result_class": "pass",
+    "replay_suite": "N/A",
+    "original_failure_mode": "N/A - synthetic",
+    "expected_v5_outcome_class": "clarify_success",
+    "note_a2": "No V4 behavioural baseline exists for clarification: none of the 7 A1 candidate bundles contained a clarify-style turn. A2 coverage is fixture-based only — documented in slice-a2-implementation.md."
+  },
+  "request": {
+    "turn_id": "b1111111-1111-4111-8111-111111111111",
+    "scenario_id": "b2222222-2222-4222-8222-222222222222",
+    "message": "help me",
+    "turn_class": "frame",
+    "stage": "frame"
+  },
+  "mock": {
+    "classify_output": "{\"turn_class\":\"clarify\"}",
+    "narrate_output": "What decision are you weighing right now?"
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "response_version": 2,
+      "assistant_text": "What decision are you weighing right now?",
+      "blocks": [],
+      "suggested_actions": [],
+      "insights": [],
+      "stage_indicator": "frame"
+    },
+    "telemetry": {
+      "turn_executor_started_count": 1,
+      "turn_executor_completed_count": 1,
+      "response_emitted": true,
+      "llm_calls_used": 2,
+      "commit_performed": true,
+      "failure_type": null,
+      "contamination_detected": false,
+      "turn_class": "clarify"
+    }
+  }
+}

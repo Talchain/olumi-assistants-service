@@ -1,16 +1,20 @@
 /**
- * TurnExecutor unit tests.
+ * TurnExecutor unit tests (A1 + A2).
  *
  * Covers:
  *   - BI-01 exactly-one-response (every `started` has a matching `completed`
  *     with response_emitted=true across every outcome path)
  *   - BI-02 contamination is handled in-band (response stays a success)
  *   - Paul's constraint 7: BUDGET_EXCEEDED wins over LLM_TIMEOUT when both apply
- *   - Paul's constraint 1: non-direct_answer turn classes → UNHANDLED
+ *   - A2: `turn_class` in completed telemetry reflects classifier outcome
+ *   - A2: classify stage appears in `stages_completed`
+ *   - A2: classifier schema violation → LLM_UNAVAILABLE envelope
+ *   - A2: llm_calls_used == 2 on success (classify + narrate)
  *   - Zod-validity of every returned envelope (happy + failure paths)
  *
- * The LLM adapter is mocked at the `getAdapter(...).chat` seam. No live
- * provider calls (Paul's constraint 9).
+ * The LLM adapter is mocked at the `getAdapter(...).chat` seam. The mock
+ * distinguishes classify calls (`args.responseFormat === 'json_object'`) from
+ * narrate calls. No live provider calls (Paul's constraint 9).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
@@ -19,32 +23,39 @@ import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import { setTestSink } from '../../utils/telemetry.js';
 
 // ---------------------------------------------------------------------------
-// Mock surface
+// Mock surface (shared classify + narrate via responseFormat routing)
 // ---------------------------------------------------------------------------
 
-// These are controlled per-test via `mockState`.
-type MockState = {
-  behaviour: 'success' | 'upstream_timeout' | 'abort' | 'throw' | 'empty_output';
-  output?: string;
-  delayMs?: number;
-};
-const mockState: MockState = { behaviour: 'success', output: 'hello world' };
+type Phase = 'classify' | 'narrate';
+type PhaseBehaviour =
+  | { kind: 'success'; output: string; delayMs?: number }
+  | { kind: 'upstream_timeout'; delayMs?: number }
+  | { kind: 'abort'; delayMs?: number }
+  | { kind: 'throw'; delayMs?: number };
 
-// Mock the LLM router BEFORE importing the executor (vi.mock is hoisted).
+const phaseState: Record<Phase, PhaseBehaviour> = {
+  classify: { kind: 'success', output: '{"turn_class":"direct_answer"}' },
+  narrate: { kind: 'success', output: 'hello world' },
+};
+
 vi.mock('../../adapters/llm/router.js', () => {
   return {
     getAdapter: () => ({
       name: 'test-mock',
-      chat: async (_args: unknown, opts: { signal?: AbortSignal }) => {
+      chat: async (
+        args: { responseFormat?: string },
+        opts: { signal?: AbortSignal },
+      ) => {
+        const phase: Phase = args.responseFormat === 'json_object' ? 'classify' : 'narrate';
+        const behaviour = phaseState[phase];
         await new Promise<void>((resolve, reject) => {
-          const { delayMs = 0 } = mockState;
           const timer = setTimeout(() => {
             try {
-              dispatchBehaviour(resolve, reject);
+              dispatchBehaviour(phase, resolve, reject);
             } catch (e) {
               reject(e as Error);
             }
-          }, delayMs);
+          }, behaviour.delayMs ?? 0);
           opts.signal?.addEventListener('abort', () => {
             clearTimeout(timer);
             const abortError = new Error('aborted');
@@ -52,8 +63,9 @@ vi.mock('../../adapters/llm/router.js', () => {
             reject(abortError);
           });
         });
+        const output = behaviour.kind === 'success' ? behaviour.output : '';
         return {
-          content: mockState.output ?? '',
+          content: output,
           usage: { input_tokens: 1, output_tokens: 1 },
           model: 'test-mock',
           latencyMs: 0,
@@ -67,31 +79,33 @@ vi.mock('../../adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'You are a test narrator.',
 }));
 
-// Import ONLY after the mocks are set up so the executor binds to the mocks.
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { UpstreamTimeoutError } = await import('../../adapters/llm/errors.js');
 
 function dispatchBehaviour(
+  phase: Phase,
   resolve: () => void,
   reject: (err: Error) => void,
 ): void {
-  switch (mockState.behaviour) {
+  const b = phaseState[phase];
+  switch (b.kind) {
     case 'success':
       return resolve();
     case 'upstream_timeout':
-      return reject(new UpstreamTimeoutError('test timeout', 'narrate', 100));
+      return reject(new UpstreamTimeoutError('test timeout', phase, 100));
     case 'throw':
       return reject(new Error('test-injected generic failure'));
-    case 'empty_output':
-      // Trigger empty output by emptying before resolution
-      mockState.output = '';
-      return resolve();
     case 'abort': {
       const abortError = new Error('abort');
       (abortError as Error & { name: string }).name = 'AbortError';
       return reject(abortError);
     }
   }
+}
+
+function resetPhases(): void {
+  phaseState.classify = { kind: 'success', output: '{"turn_class":"direct_answer"}' };
+  phaseState.narrate = { kind: 'success', output: 'hello world' };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +140,6 @@ function completedEvents(): Event[] {
   return events.filter((e) => e.event === 'turn_executor.completed');
 }
 function expectExactlyOneResponseInvariant(): void {
-  // BI-01: every started has exactly one completed, and every completed has
-  // response_emitted=true.
   const started = startedCount();
   const completed = completedEvents();
   expect(started).toBe(1);
@@ -144,9 +156,7 @@ describe('runTurnExecutor', () => {
   beforeEach(() => {
     events = [];
     installSink();
-    mockState.behaviour = 'success';
-    mockState.output = 'hello world';
-    mockState.delayMs = 0;
+    resetPhases();
     delete process.env.TURN_BUDGET_MS;
     delete process.env.LLM_BUDGET_NARRATE_MS;
   });
@@ -157,7 +167,7 @@ describe('runTurnExecutor', () => {
 
   describe('happy path (direct_answer success)', () => {
     it('returns a Zod-valid OlumiResponse with the LLM text', async () => {
-      mockState.output = 'The framing.';
+      phaseState.narrate = { kind: 'success', output: 'The framing.' };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       const parsed = OlumiResponseSchema.parse(response);
       expect(parsed.assistant_text).toBe('The framing.');
@@ -167,11 +177,21 @@ describe('runTurnExecutor', () => {
       expect(parsed.stage_indicator).toBe('frame');
       expect(telemetry.failure_type).toBeNull();
       expect(telemetry.commit_performed).toBe(true);
-      expect(telemetry.llm_calls_used).toBe(1);
+      // A2: classify + narrate = 2 LLM calls on success
+      expect(telemetry.llm_calls_used).toBe(2);
+      expect(telemetry.turn_class).toBe('direct_answer');
       expectExactlyOneResponseInvariant();
       const completed = completedEvents()[0]!;
       expect(completed.data.failure_type).toBeNull();
       expect(completed.data.commit_performed).toBe(true);
+      expect(completed.data.turn_class).toBe('direct_answer');
+      expect(completed.data.llm_calls_used).toBe(2);
+      // stages_completed: presence-based (order-tolerant per Correction 2)
+      const stages = completed.data.stages_completed as string[];
+      expect(stages).toContain('classify');
+      expect(stages).toContain('dispatch');
+      expect(stages).toContain('compose');
+      expect(stages).toContain('commit');
     });
 
     it('omits updated_session_state (constraint 6 — not in schema)', async () => {
@@ -180,9 +200,32 @@ describe('runTurnExecutor', () => {
     });
   });
 
+  describe('happy path (clarify success, A2)', () => {
+    it('classifier=clarify → clarify envelope + turn_class telemetry', async () => {
+      phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
+      phaseState.narrate = { kind: 'success', output: 'What decision are you weighing?' };
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.assistant_text).toBe('What decision are you weighing?');
+      expect(parsed.blocks).toEqual([]);
+      expect(parsed.suggested_actions).toEqual([]);
+      expect(parsed.insights).toEqual([]);
+      expect(telemetry.failure_type).toBeNull();
+      expect(telemetry.commit_performed).toBe(true);
+      expect(telemetry.llm_calls_used).toBe(2);
+      expect(telemetry.turn_class).toBe('clarify');
+      expectExactlyOneResponseInvariant();
+      const completed = completedEvents()[0]!;
+      expect(completed.data.turn_class).toBe('clarify');
+    });
+  });
+
   describe('BI-02 contamination (sanitiser in-band)', () => {
     it('strips tags and em-dashes, response stays a success', async () => {
-      mockState.output = '<thinking>inner</thinking>Two forces \u2014 cost and speed.';
+      phaseState.narrate = {
+        kind: 'success',
+        output: '<thinking>inner</thinking>Two forces \u2014 cost and speed.',
+      };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       OlumiResponseSchema.parse(response);
       expect(response.assistant_text).not.toMatch(/<[a-zA-Z]|\u2014/);
@@ -194,12 +237,28 @@ describe('runTurnExecutor', () => {
         (e) => e.event === 'turn_executor.contamination_narrate',
       );
       expect(contam).toHaveLength(1);
+      // A2: contamination telemetry carries the resolved turn_class
+      expect(contam[0]!.data.turn_class).toBe('direct_answer');
+    });
+
+    it('clarify-branch contamination also emits the telemetry event', async () => {
+      phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
+      phaseState.narrate = {
+        kind: 'success',
+        output: '<thinking>x</thinking>Which vendor are you comparing?',
+      };
+      await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      const contam = events.filter(
+        (e) => e.event === 'turn_executor.contamination_narrate',
+      );
+      expect(contam).toHaveLength(1);
+      expect(contam[0]!.data.turn_class).toBe('clarify');
     });
   });
 
   describe('LLM_TIMEOUT', () => {
-    it('maps upstream timeout to UPSTREAM_TIMEOUT wire code', async () => {
-      mockState.behaviour = 'upstream_timeout';
+    it('maps narrate upstream timeout to UPSTREAM_TIMEOUT wire code', async () => {
+      phaseState.narrate = { kind: 'upstream_timeout' };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       OlumiResponseSchema.parse(response);
       expect(response.blocks).toHaveLength(1);
@@ -212,14 +271,51 @@ describe('runTurnExecutor', () => {
       expect(telemetry.commit_performed).toBe(false);
       expectExactlyOneResponseInvariant();
     });
+
+    it('maps classify upstream timeout to UPSTREAM_TIMEOUT wire code', async () => {
+      phaseState.classify = { kind: 'upstream_timeout' };
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      OlumiResponseSchema.parse(response);
+      const block = response.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
+      }
+      expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
+    });
+  });
+
+  describe('LLM_SCHEMA_VIOLATION (A2)', () => {
+    it('classifier returns non-JSON → LLM_UNAVAILABLE envelope', async () => {
+      phaseState.classify = { kind: 'success', output: 'not json at all' };
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      OlumiResponseSchema.parse(response);
+      const block = response.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('LLM_UNAVAILABLE');
+        expect(block.details).toMatchObject({ phase: 'classify' });
+      }
+      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+      expect(telemetry.commit_performed).toBe(false);
+      expectExactlyOneResponseInvariant();
+    });
+
+    it('classifier returns out-of-union value → LLM_UNAVAILABLE envelope', async () => {
+      phaseState.classify = { kind: 'success', output: '{"turn_class":"propose"}' };
+      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+    });
   });
 
   describe("Paul's constraint 7 — BUDGET_EXCEEDED wins over LLM_TIMEOUT", () => {
     it('when outer budget aborts during a slow LLM call, classifies as BUDGET_EXCEEDED', async () => {
       process.env.TURN_BUDGET_MS = '10';
       process.env.LLM_BUDGET_NARRATE_MS = '60000';
-      mockState.behaviour = 'success';
-      mockState.delayMs = 200; // ensures outer abort fires first
+      phaseState.classify = {
+        kind: 'success',
+        output: '{"turn_class":"direct_answer"}',
+        delayMs: 200,
+      };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       OlumiResponseSchema.parse(response);
       const block = response.blocks[0]!;
@@ -235,7 +331,7 @@ describe('runTurnExecutor', () => {
 
   describe('empty narrate output', () => {
     it('maps to UNHANDLED/INTERNAL_ERROR envelope', async () => {
-      mockState.output = '';
+      phaseState.narrate = { kind: 'success', output: '' };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       OlumiResponseSchema.parse(response);
       const block = response.blocks[0]!;
@@ -250,7 +346,7 @@ describe('runTurnExecutor', () => {
 
   describe('generic unexpected error', () => {
     it('maps to UNHANDLED/INTERNAL_ERROR envelope', async () => {
-      mockState.behaviour = 'throw';
+      phaseState.narrate = { kind: 'throw' };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       OlumiResponseSchema.parse(response);
       const block = response.blocks[0]!;
@@ -265,15 +361,53 @@ describe('runTurnExecutor', () => {
 
   describe("response_emitted=false is impossible (addendum §2.1.9)", () => {
     const cases: Array<{ name: string; setup: () => void }> = [
-      { name: 'success', setup: () => { mockState.behaviour = 'success'; } },
-      { name: 'contamination', setup: () => { mockState.output = '<x>y</x>contam'; } },
-      { name: 'upstream_timeout', setup: () => { mockState.behaviour = 'upstream_timeout'; } },
-      { name: 'budget_exceeded', setup: () => {
+      { name: 'success_direct_answer', setup: () => { /* default */ } },
+      {
+        name: 'success_clarify',
+        setup: () => {
+          phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
+          phaseState.narrate = { kind: 'success', output: 'what are you deciding?' };
+        },
+      },
+      {
+        name: 'contamination',
+        setup: () => {
+          phaseState.narrate = { kind: 'success', output: '<x>y</x>contam' };
+        },
+      },
+      {
+        name: 'upstream_timeout_classify',
+        setup: () => { phaseState.classify = { kind: 'upstream_timeout' }; },
+      },
+      {
+        name: 'upstream_timeout_narrate',
+        setup: () => { phaseState.narrate = { kind: 'upstream_timeout' }; },
+      },
+      {
+        name: 'budget_exceeded',
+        setup: () => {
           process.env.TURN_BUDGET_MS = '5';
-          mockState.delayMs = 200;
-      }},
-      { name: 'empty_output', setup: () => { mockState.output = ''; } },
-      { name: 'generic_throw', setup: () => { mockState.behaviour = 'throw'; } },
+          phaseState.classify = {
+            kind: 'success',
+            output: '{"turn_class":"direct_answer"}',
+            delayMs: 200,
+          };
+        },
+      },
+      {
+        name: 'empty_output',
+        setup: () => { phaseState.narrate = { kind: 'success', output: '' }; },
+      },
+      {
+        name: 'generic_throw',
+        setup: () => { phaseState.narrate = { kind: 'throw' }; },
+      },
+      {
+        name: 'classifier_schema_violation',
+        setup: () => {
+          phaseState.classify = { kind: 'success', output: 'not json' };
+        },
+      },
     ];
 
     it.each(cases)('every outcome emits response_emitted=true: $name', async ({ setup }) => {
