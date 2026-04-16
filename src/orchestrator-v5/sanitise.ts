@@ -1,11 +1,16 @@
 /**
  * Narrate-mode output sanitiser (addendum §2.1.4).
  *
- * Strips XML-like tags, a fixed set of banned terms, and em-dashes before the
- * text reaches the OlumiResponse. The sanitiser is non-fatal: contamination is
- * stripped in-band and the response is still a success (BI-02). A telemetry
- * event is emitted so we can track contamination rate without surfacing it to
+ * Strips XML-like tags and em-dashes; flags (does not rewrite) banned internal
+ * terms. The sanitiser is non-fatal: contamination is stripped or flagged
+ * in-band and the response is still a success (BI-02). A telemetry event is
+ * emitted upstream so we can track contamination rate without surfacing it to
  * the user.
+ *
+ * Banned-term behaviour mirrors V4 `src/orchestrator/deterministic/
+ * sanitise-output.ts` (log + flag, do NOT rewrite): rewriting risks mangled
+ * sentences where a word like "patch" is a legitimate noun. Flag-only keeps
+ * text integrity while giving us observability.
  */
 
 // Match anything that looks like an XML / pseudo-XML tag. Conservative — we
@@ -13,10 +18,14 @@
 // Example: "<thinking>hidden</thinking>" → "hidden".
 const TAG_PATTERN = /<\/?[a-zA-Z][^>]*>/g;
 
-// Banned phrases per house style. Extend additively if Paul adds more.
-const BANNED_SUBSTRINGS: string[] = [
-  // no-op today; kept as the hook for future deterministic scrubs
-];
+// Ported from V4 `sanitise-output.ts:19`. Narrow list targeting user-facing
+// prose leaks; broader internal-jargon scanning lives in V4's
+// response-normaliser and is out of A1 scope (A1 only emits assistant_text).
+const BANNED_TERMS = /\b(interventions|graph_patch|patch|operation)\b/i;
+
+// "node" in non-technical context — only flag when NOT preceded by a
+// graph-modelling qualifier that makes it legitimate. Mirrors V4 precedent.
+const NODE_TERM = /(?<!\bfactor |option |goal |decision |risk )(\bnode\b)/i;
 
 const EM_DASH = '\u2014'; // —
 const EN_DASH = '\u2013'; // –
@@ -36,13 +45,10 @@ export function sanitiseNarrateOutput(input: string): SanitiseResult {
     output = output.replace(TAG_PATTERN, '');
   }
 
-  // 2. Banned substrings (case-insensitive whole-word-ish match)
-  for (const banned of BANNED_SUBSTRINGS) {
-    const pattern = new RegExp(banned, 'gi');
-    if (pattern.test(output)) {
-      contamination = true;
-      output = output.replace(pattern, '');
-    }
+  // 2. Flag banned terms (V4 parity — no rewrite). Test on the already-stripped
+  //    text so XML tag names like <patch> don't double-count.
+  if (BANNED_TERMS.test(output) || NODE_TERM.test(output)) {
+    contamination = true;
   }
 
   // 3. Replace em-dashes with a comma + space per house style, en-dashes with

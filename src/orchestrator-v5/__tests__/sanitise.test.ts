@@ -57,4 +57,15 @@ describe('sanitiseNarrateOutput', () => {
     const { output } = sanitiseNarrateOutput(input);
     expect(output).not.toMatch(/ {2,}/);
   });
+
+  // V4 parity: banned internal terms are logged via contamination flag but
+  // text is preserved verbatim — rewriting risks mangled sentences where a
+  // word is a legitimate noun. Mirrors src/orchestrator/deterministic/
+  // sanitise-output.ts behaviour (log + flag, no rewrite).
+  it('flags banned internal term without rewriting user-facing text', () => {
+    const input = 'We will apply a graph_patch to the model now.';
+    const { output, contamination_detected } = sanitiseNarrateOutput(input);
+    expect(output).toBe(input); // text preserved verbatim
+    expect(contamination_detected).toBe(true);
+  });
 });

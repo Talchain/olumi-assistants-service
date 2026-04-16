@@ -22,11 +22,11 @@ Landed: 2026-04-16. Three repos, local commits only, no push, no registry publis
 - [build-turn-context.ts](../../src/orchestrator-v5/build-turn-context.ts) — skeletal A1 TurnContext (capabilities all false).
 - [dispatch.ts](../../src/orchestrator-v5/dispatch.ts) — direct_answer **exclusively** (Paul constraint 1). Any other class → `UnhandledTurnClassError` → UNHANDLED.
 - [llm-adapter.ts](../../src/orchestrator-v5/llm-adapter.ts) — thin wrapper over `getAdapter('direct_answer_narrate').chat(...)`. Maps `UpstreamTimeoutError` / abort → `NarrateTimeoutError`.
-- [sanitise.ts](../../src/orchestrator-v5/sanitise.ts) — strips XML tags + em-dashes; flags contamination but keeps the response as a success (**BI-02**).
+- [sanitise.ts](../../src/orchestrator-v5/sanitise.ts) — strips XML tags + em-dashes; flags banned internal terms (V4 parity: `interventions|graph_patch|patch|operation` + contextual `node`) via `contamination_detected` without rewriting the text (avoids mangled sentences where a word is a legitimate noun); keeps the response as a success (**BI-02**).
 - [compose.ts](../../src/orchestrator-v5/compose.ts) — OlumiResponse assembly with strictly the 6 schema fields.
 - [commit.ts](../../src/orchestrator-v5/commit.ts) — A1 no-op per Paul constraint 11 (no writes, no mutation).
 - [failure-response.ts](../../src/orchestrator-v5/failure-response.ts) — FailureType → ErrorBlock envelope using `FAILURE_USER_TEXT`.
-- [budgets.ts](../../src/orchestrator-v5/budgets.ts) — env-driven `TURN_BUDGET_MS` (default 180000) + `LLM_BUDGET_NARRATE_MS` (default 60000) per Implementation Plan v2.2 (Paul constraint 5). Reads `process.env` on every call so runtime overrides take effect.
+- [budgets.ts](../../src/orchestrator-v5/budgets.ts) — env-driven `TURN_BUDGET_MS` (default 180000) + `LLM_BUDGET_NARRATE_MS` (default 60000) per Implementation Plan v2.2 (Paul constraint 5). Reads `process.env` on every call so runtime overrides take effect. Invalid values (undefined, empty, non-numeric, 0, negative, non-integer) fall back to defaults deterministically — covered by [budgets.test.ts](../../src/orchestrator-v5/__tests__/budgets.test.ts) so a typo in a staging env file can never silently run with a 0 ms budget.
 - [types.ts](../../src/orchestrator-v5/types.ts) — internal `InternalFailure` ↔ `BoundaryErrorCode` mapping.
 
 **Timeout precedence** (Paul constraint 7): `turn-executor.ts` inspects `turnAbort.signal.aborted` **before** mapping inner `NarrateTimeoutError`. If the outer wall-clock aborted during an in-flight narrate call, the outcome is `TURN_BUDGET_EXCEEDED`, not `UPSTREAM_TIMEOUT`. Covered by a dedicated unit test.
@@ -121,6 +121,25 @@ Landed: 2026-04-16. Three repos, local commits only, no push, no registry publis
 - **Stage mapping** — A1 always sets `stage: 'frame'` on the wire. Full graph-state-aware stage routing lands in later slices.
 - **Handler facts** — `HandlerFactSchema = z.never()`. A1 has zero handlers. C+ slices populate the union.
 - **scenario_id bootstrap in V5 UI branch** — if `currentScenarioId` is null, the V5 branch falls through to V4 (which allocates). Later slices will let V5 handle scenario creation without round-tripping.
+
+### V5 UI eligibility predicate (narrowed to A1's supported surface)
+
+[src/v5/eligibility.ts](../../../../DecisionGuideAI/src/v5/eligibility.ts) gates the V5 branch in `useConversation.ts`. Any fail → silent fall-through to V4 (no V5 loading UX, no typed-error bubble, no user-visible V5 artefact). A2+ will widen each condition as the corresponding turn class or stage lands.
+
+| # | Condition | Reason |
+|---|-----------|--------|
+| 1 | `VITE_ENABLE_V5_ORCHESTRATOR === 'true'` | Flag gate — V5 is off by default. |
+| 2 | `mode === 'user'` | A1 handles only user-initiated turns. System events run distinct CEE paths (`resultsStart`, graph edits, etc.) that V5 hasn't wired. |
+| 3 | No `chipMeta` | Chip clicks carry deterministic `action_type` (e.g. `set_factor_value`, `run_analysis`) that V5 A1 has no handler for — CEE would return UNHANDLED. |
+| 4 | No `turnType` hint | A non-default `turnType` opt-in means the caller already routed to a specific tool path (e.g. analysis, draft graph). Don't intercept those. |
+| 5 | `source !== 'chip' \| 'chip_click'` | Defensive — some chip surfaces set `source` without `chipMeta`. Treat as out-of-scope for A1. |
+| 6 | `source !== 'retry'` | Retry replays a previously-failed turn with the same envelope shape it originally used; forcing retries through V5 changes that contract. |
+| 7 | `!analysisStateReady && resultsStatus !== 'complete'` | A1 hardcodes `stage: 'frame'` on the wire. Post-analysis scenarios are structurally past `frame`; routing them through V5 would mislabel stage and miss the `analysis_state` payload V4 attaches. |
+| 8 | No prior assistant message has `blocks.length > 0` | Prior blocks = V4 tool output in this session (graph_patch, premortem, exercise, etc.). The conversation is past pure direct-answer territory; A1 can't produce the block shapes CEE has already emitted. |
+
+Addresses three latent concerns from the brief in one change: (a) non-direct-answer turns never surface `UNHANDLED` to the user, (b) A1's hardcoded `stage: 'frame'` only emits when stage really is frame, (c) unsupported turn classes never reach CEE V5. Ineligible turns are visually indistinguishable from the flag-off path.
+
+Tests: [src/v5/__tests__/eligibility.test.ts](../../../../DecisionGuideAI/src/v5/__tests__/eligibility.test.ts) — 14 cases (every reason + evaluation-order guard + eligible-path smoke).
 
 ## A1 brief line items (carried forward)
 
