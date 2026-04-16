@@ -10,7 +10,7 @@ import type { SuggestedAction } from "../../types.js";
 import { resolveEntity } from "../entity-resolver.js";
 import { log } from "../../../utils/telemetry.js";
 import { qualitativeBand, synthesiseDisplayValue } from "../../../cee/factor-extraction/display-value.js";
-import { formatNodeValue, extractRawValue } from "../format-node-value.js";
+import { formatNodeValue } from "../format-node-value.js";
 
 /**
  * Map a raw currency signal (symbol or short code) to a canonical unit label.
@@ -261,10 +261,13 @@ export const setFactorValueAction: ActionDefinition = {
     // Compute display_value for the composer to render instead of the raw
     // numeric. Delegates to the shared formatting utility which handles
     // currency shorthand, percentages, time units, and qualitative bands.
-    const graphNode = ctx.graph?.nodes.find((n) => n.id === entity.id);
+    //
+    // Do NOT pass raw_value here: `value` is the proposed new normalised
+    // number (0-1 scale), not a pre-normalisation raw amount. Passing the
+    // existing node's raw_value would cause synthesiseDisplayValue to
+    // display the old currency value instead of the new one.
     const displayValue = computeDisplayValue(value, effectiveUnit, {
       cap: nodeEntry?.cap,
-      raw_value: extractRawValue(graphNode),
       kind: entity.kind,
     });
 

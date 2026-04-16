@@ -14,7 +14,7 @@
 
 import type { PatchOperation, GraphV3T } from './types.js';
 import { log } from '../utils/telemetry.js';
-import { formatNodeValue, extractRawValue } from './deterministic/format-node-value.js';
+import { formatNodeValue } from './deterministic/format-node-value.js';
 
 // ============================================================================
 // Label resolution helpers (T4)
@@ -799,10 +799,12 @@ function formatUpdateValueForDisplay(
     if (typeof newValue === 'number' && Number.isFinite(newValue)) {
       const unit = resolveNodeUnit(graph, nodeId);
       const graphNode = graph?.nodes.find((n) => (n as { id?: string }).id === nodeId);
+      // Do NOT pass raw_value: newValue is the proposed new normalised number
+      // (0-1 scale). Passing the existing node's raw_value would cause
+      // synthesiseDisplayValue to display the old currency amount instead.
       const formatted = formatNodeValue({
         value: newValue,
         unit: unit ?? undefined,
-        raw_value: extractRawValue(graphNode),
         kind: (graphNode as { kind?: string } | undefined)?.kind,
       });
       return formatted ?? (unit ? `${newValue} ${unit}` : String(newValue));

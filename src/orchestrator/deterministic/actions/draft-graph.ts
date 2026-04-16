@@ -146,7 +146,7 @@ function convertStrengthenToGuidance(items: StrengthenItem[]): GuidanceItem[] {
         type: 'discuss' as const,
         prompt: `Tell me more about: ${item.label}`,
       },
-      target_object: { type: 'graph' as const },
+      target_object: { type: 'graph' as const, id: item.id },
       priority: 35,
     };
   });

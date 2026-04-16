@@ -887,16 +887,32 @@ function buildEditGraphFact(
   operations: PatchOperation[],
   ctx: DeterministicTurnContext,
 ): HandlerFact {
-  // Collect affected entities from operations
+  // Collect affected entities from operations.
+  // For node ops (add_node, update_node, remove_node), op.path is the node ID.
+  // For edge ops, op.path is an edge ID and not a valid node lookup key.
+  // add_edge carries from/to node IDs in op.value — extract both.
   const entities: Array<{ id: string; label: string; kind: string }> = [];
   const seen = new Set<string>();
-  for (const op of operations) {
-    const id = typeof op.path === 'string' ? op.path : null;
-    if (!id || seen.has(id)) continue;
+
+  function addEntityById(id: string): void {
+    if (!id || seen.has(id)) return;
     seen.add(id);
     const entry = ctx.entities.nodes.get(id);
-    if (entry) {
-      entities.push({ id: entry.id, label: entry.label, kind: entry.kind });
+    if (entry) entities.push({ id: entry.id, label: entry.label, kind: entry.kind });
+  }
+
+  for (const op of operations) {
+    if (op.op === 'add_edge' || op.op === 'update_edge' || op.op === 'remove_edge') {
+      // Edge ops: resolve from/to node IDs from op.value when available
+      const v = op.value as Record<string, unknown> | undefined;
+      const fromId = typeof v?.from === 'string' ? v.from : null;
+      const toId = typeof v?.to === 'string' ? v.to : null;
+      if (fromId) addEntityById(fromId);
+      if (toId) addEntityById(toId);
+      // If no from/to available (remove_edge), skip — generic fallback covers it
+    } else {
+      // Node ops: op.path is the node ID
+      addEntityById(op.path);
     }
   }
 

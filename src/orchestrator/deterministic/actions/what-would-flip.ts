@@ -190,14 +190,15 @@ export const whatWouldFlipAction: ActionDefinition = {
         const headlineDrivers = eligibleDrivers.slice(0, 2);
         const factorPhrases = headlineDrivers.map((driver) => {
           const threshold = thresholdFor(driver);
-          if (threshold?.flip_status === 'concrete' && threshold.flip_value !== null) {
-            const unit = threshold.unit ? ` ${threshold.unit}` : '';
-            return `${driver.label} (currently ${formatFlipValue(threshold.current_value)}${unit}, flips at ${formatFlipValue(threshold.flip_value as number)}${unit})`;
-          }
           const node = ctx.entities.nodes.get(driver.factor_id);
+          if (threshold?.flip_status === 'concrete' && threshold.flip_value !== null) {
+            const currentFormatted = formatFlipValueWithUnit(threshold.current_value, threshold.unit ?? undefined, node);
+            const flipFormatted = formatFlipValueWithUnit(threshold.flip_value as number, threshold.unit ?? undefined, node);
+            return `${driver.label} (currently ${currentFormatted}, flips at ${flipFormatted})`;
+          }
           if (node?.value != null) {
-            const unit = node.unit ? ` ${node.unit}` : '';
-            return `${driver.label} (currently ${formatFlipValue(node.value)}${unit})`;
+            const currentFormatted = formatFlipValueWithUnit(node.value, node.unit ?? undefined, node);
+            return `${driver.label} (currently ${currentFormatted})`;
           }
           return driver.label;
         });
