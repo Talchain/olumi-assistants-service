@@ -903,13 +903,13 @@ function buildEditGraphFact(
 
   for (const op of operations) {
     if (op.op === 'add_edge' || op.op === 'update_edge' || op.op === 'remove_edge') {
-      // Edge ops: resolve from/to node IDs from op.value when available
-      const v = op.value as Record<string, unknown> | undefined;
-      const fromId = typeof v?.from === 'string' ? v.from : null;
-      const toId = typeof v?.to === 'string' ? v.to : null;
+      // Edge ops: resolve from/to node IDs from op.value (add_edge, update_edge)
+      // or op.old_value (remove_edge, which carries the full prior edge object).
+      const payload = (op.value ?? op.old_value) as Record<string, unknown> | undefined;
+      const fromId = typeof payload?.from === 'string' ? payload.from : null;
+      const toId = typeof payload?.to === 'string' ? payload.to : null;
       if (fromId) addEntityById(fromId);
       if (toId) addEntityById(toId);
-      // If no from/to available (remove_edge), skip — generic fallback covers it
     } else {
       // Node ops: op.path is the node ID
       addEntityById(op.path);

@@ -192,12 +192,18 @@ export const whatWouldFlipAction: ActionDefinition = {
           const threshold = thresholdFor(driver);
           const node = ctx.entities.nodes.get(driver.factor_id);
           if (threshold?.flip_status === 'concrete' && threshold.flip_value !== null) {
+            // threshold.current_value and flip_value are raw pre-normalisation amounts
+            // (from the analysis response), so formatFlipValueWithUnit is correct here.
             const currentFormatted = formatFlipValueWithUnit(threshold.current_value, threshold.unit ?? undefined, node);
             const flipFormatted = formatFlipValueWithUnit(threshold.flip_value as number, threshold.unit ?? undefined, node);
             return `${driver.label} (currently ${currentFormatted}, flips at ${flipFormatted})`;
           }
           if (node?.value != null) {
-            const currentFormatted = formatFlipValueWithUnit(node.value, node.unit ?? undefined, node);
+            // node.value is the normalised (0-1) EntityEntry value — pass as `value`
+            // not `raw_value`, so synthesiseDisplayValue uses the qualitative-band /
+            // normalised path rather than the currency-shorthand path.
+            const currentFormatted = formatNodeValue({ value: node.value, unit: node.unit, cap: node.cap, kind: node.kind })
+              ?? formatFlipValue(node.value);
             return `${driver.label} (currently ${currentFormatted})`;
           }
           return driver.label;

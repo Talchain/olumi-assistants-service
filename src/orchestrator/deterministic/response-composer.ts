@@ -417,19 +417,27 @@ function composeEvidenceFound(fact: HandlerFact): string {
 }
 
 function composeGraphEdited(fact: HandlerFact, hasPatchBlock: boolean): string {
-  const entity = fact.entities_affected[0];
-  const label = entity?.label ?? 'the model';
+  const entities = fact.entities_affected;
+  // Use entity label only when a single specific entity was affected; otherwise
+  // use "the model" to avoid naming one node from a multi-node edit.
+  const singleLabel = entities.length === 1 && entities[0].label !== 'the model'
+    ? entities[0].label
+    : null;
 
   if (hasPatchBlock) {
     // Patch card carries structural detail; keep prose to one sentence.
     if (fact.auto_apply) {
-      return `${label} has been updated.`;
+      return singleLabel ? `${singleLabel} has been updated.` : 'The model has been updated.';
     }
-    return `${fact.what_changed ?? `Changes to ${label}`} would restructure the model.`;
+    return singleLabel
+      ? `Changes to ${singleLabel} would restructure the model.`
+      : `${fact.what_changed ?? 'These changes'} would restructure the model.`;
   }
 
   if (fact.auto_apply) {
     return `The model has been updated: ${fact.what_changed ?? 'structural changes applied'}.`;
   }
-  return `${fact.what_changed ?? `Changes to ${label}`} would restructure the model.`;
+  return singleLabel
+    ? `Changes to ${singleLabel} would restructure the model.`
+    : `${fact.what_changed ?? 'These changes'} would restructure the model.`;
 }
