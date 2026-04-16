@@ -60,6 +60,7 @@ import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAF
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { ceeOrchestratorRouteV1 } from "./orchestrator/route.js";
+import { ceeOrchestratorRouteV2 } from "./orchestrator/route-v2.js";
 import ceeEditGraphRouteV1 from "./routes/assist.v1.edit-graph.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { publicPromptRoutes } from "./routes/v1.prompts.js";
@@ -945,6 +946,12 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     await ceeOrchestratorRouteV1(app);
     await ceeEditGraphRouteV1(app);
     app.log.info({}, 'Orchestrator routes registered (POST /orchestrate/v1/turn, POST /assist/v1/edit-graph)');
+  }
+
+  // V5 orchestrator scaffold (slice A0). Route returns 404 when flag is off.
+  if (config.features.orchestratorV5) {
+    await ceeOrchestratorRouteV2(app);
+    app.log.info({}, 'V5 orchestrator scaffold registered (POST /orchestrate/v2/turn)');
   }
 
   // Public prompt routes (cache warming and status)

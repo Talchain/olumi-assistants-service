@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "fixture_id": "B1-INGRESS-INVALID-WRONG-TYPES-001",
+    "boundary": "B1",
+    "source_environment": "synthetic",
+    "contract_version": "0.3.0",
+    "capture_date": "2026-04-16",
+    "scenario_tags": ["a0", "ingress", "invalid", "type-mismatch"],
+    "expected_result_class": "ingress_contract_violation",
+    "replay_suite": "INGRESS_INVALID",
+    "original_failure_mode": "N/A - synthetic",
+    "expected_v5_outcome_class": "typed_boundary_error"
+  },
+  "request": {
+    "turn_id": 12345,
+    "scenario_id": "22222222-2222-4222-8222-222222222222",
+    "message": ["this", "should", "be", "a", "string"],
+    "turn_class": "not_a_real_class",
+    "stage": "frame"
+  },
+  "expected": {
+    "status": 422,
+    "body": {
+      "error": "INGRESS_CONTRACT_VIOLATION",
+      "boundary": "B1",
+      "direction": "ingress",
+      "validator": "OrchestratorTurnPayload",
+      "retryable": false,
+      "details_issues_min_count": 3,
+      "details_issues_contains_paths": ["turn_id", "message", "turn_class"]
+    },
+    "telemetry": {
+      "boundary_validation_event_count": 1,
+      "ingress_pass": false
+    }
+  }
+}

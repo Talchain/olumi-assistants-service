@@ -433,6 +433,11 @@ export const TelemetryEvents = {
   OrchestratorModeDisagreement: "orchestrator.turn.mode_disagreement",
   OrchestratorToolSuppressed: "orchestrator.turn.tool_suppressed",
   OrchestratorContractViolation: "orchestrator.turn.contract_violation",
+
+  // V5 boundary validation (Boundary Contract v1.1 §4.4).
+  // Emitted by B1 ingress/egress validators on /orchestrate/v2/turn (slice A0).
+  // Fields per §4.4: boundary, direction, validator, contract_version, pass, error_code?, request_id
+  BoundaryValidation: "boundary.validation",
 } as const;
 
 /**

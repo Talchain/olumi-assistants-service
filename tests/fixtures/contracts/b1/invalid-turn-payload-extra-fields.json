@@ -1,0 +1,39 @@
+{
+  "_meta": {
+    "fixture_id": "B1-INGRESS-INVALID-EXTRA-FIELDS-001",
+    "boundary": "B1",
+    "source_environment": "synthetic",
+    "contract_version": "0.3.0",
+    "capture_date": "2026-04-16",
+    "scenario_tags": ["a0", "ingress", "invalid", "strict-mode", "unknown-keys"],
+    "expected_result_class": "ingress_contract_violation",
+    "replay_suite": "INGRESS_INVALID",
+    "original_failure_mode": "N/A - synthetic",
+    "expected_v5_outcome_class": "typed_boundary_error"
+  },
+  "request": {
+    "turn_id": "11111111-1111-4111-8111-111111111111",
+    "scenario_id": "22222222-2222-4222-8222-222222222222",
+    "message": "Should we expand into Germany next quarter?",
+    "turn_class": "frame",
+    "stage": "frame",
+    "unexpected_field": "rejected by strict mode",
+    "another_unknown": 42
+  },
+  "expected": {
+    "status": 422,
+    "body": {
+      "error": "INGRESS_CONTRACT_VIOLATION",
+      "boundary": "B1",
+      "direction": "ingress",
+      "validator": "OrchestratorTurnPayload",
+      "retryable": false,
+      "details_issues_min_count": 1,
+      "details_issues_any_code": "unrecognized_keys"
+    },
+    "telemetry": {
+      "boundary_validation_event_count": 1,
+      "ingress_pass": false
+    }
+  }
+}
