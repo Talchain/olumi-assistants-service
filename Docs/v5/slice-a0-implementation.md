@@ -92,6 +92,54 @@ edit to `netlify/edge-functions/orchestrator-proxy.ts` required.
   `"boundary":"B1"`, `INGRESS_CONTRACT_VIOLATION`) appear in any V1
   response, and `/orchestrate/v2/turn` is 404 with the flag off.
 
+## Known gaps carried to A1
+
+- **V5 adapter has zero production callers in A0.** A1 wires
+  `useConversation.ts` entry branch as part of the TurnExecutor slice when
+  the endpoint produces renderable content. V4 regression smoke
+  (`fall_through_v4`) pins V4 behaviour until then.
+- **No server-level register/unregister test yet.** Deferred to A1; depends
+  on TurnExecutor shell producing meaningful content to assert against.
+- **No full flag-on UI integration test.** Deferred to A1 for the same
+  reason — A0's FEATURE_NOT_ENABLED envelope is too thin to be worth a full
+  `useConversation → callV5Turn → route → render` integration harness.
+
+## A1 brief line items (carried forward)
+
+1. Wire `useConversation.ts` V5 branch: single guard at the top of the
+   turn dispatcher; on flag-on, call `callV5Turn`; on `fall_through_v4`
+   continue to the existing V4 path; otherwise hand off to `routeV5Response`
+   + the typed-error / blocks / text renderers.
+2. Add server-level CEE test booting `server.ts` and verifying
+   `/orchestrate/v2/turn` registration/404 behaviour keyed off
+   `ENABLE_V5_ORCHESTRATOR`.
+3. Add UI integration test driving the full flag-on path through
+   `useConversation` → adapter → `routeV5Response` → `TypedErrorRenderer`
+   against a recorded V5 fixture.
+
+## A0 follow-up commit — triage actions landed
+
+- **P0.2 vendored tarball.** Both consuming repos now pin
+  `@talchain/schemas` via `file:./vendor/talchain-schemas-0.3.0.tgz`
+  plus a checked-in `vendor/README.md` documenting update/removal
+  procedure. Removes the worktree-fragile relative path.
+- **P1.3 b1.ts drift safety.** `validateIngress` no longer calls
+  `BoundaryErrorSchema.parse()`; it uses `safeParse` and, on drift, emits
+  `boundary.validation` with `failure_class: 'schema_drift'` and returns a
+  typed hardcoded fallback. Unit test at
+  [tests/unit/validators/b1-drift.test.ts](../../tests/unit/validators/b1-drift.test.ts)
+  proves corrupted drift input produces a typed 422, never 500.
+- **P1.4 schema-valid block shape in UI tests.** `responseRouter.test.ts`
+  uses `{ type: 'text', content: 'hi' }` (canonical) and the test now
+  parses the full response through `OlumiResponseSchema` before asserting
+  routing, so any future shape mismatch fails loudly at the test boundary.
+- **#3 CEE env.example.** `ENABLE_V5_ORCHESTRATOR=false` documented under
+  a dedicated V5 section.
+- **#4 RenderTarget narrowed.** `RenderTarget.typed_error.code` is
+  `FailureTypeLiteral`; `TypedErrorRenderer` routes via an exhaustive
+  switch with a `never` guard, so adding a new `FailureType` member is a
+  compile error at the renderer.
+
 ## Verification summary
 
 - `npm test` in `olumi-schemas`: **173/173 pass** (27 new + 146 existing).

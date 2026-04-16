@@ -41,6 +41,23 @@ export interface IngressOk { ok: true; value: OrchestratorTurnPayload }
 export interface IngressFail { ok: false; error: BoundaryError }
 export type IngressResult = IngressOk | IngressFail;
 
+// Known-good BoundaryError literal, returned when our own error construction
+// no longer satisfies §6.4 (i.e. a future schema tightening drifted past our
+// factory). Fully typed so a compile-time change to BoundaryError will
+// surface here, not at runtime. Must stay construction-free — no dynamic
+// fields — so it cannot itself fail BoundaryErrorSchema.
+function buildDriftFallbackError(request_id: string): BoundaryError {
+  return {
+    error: 'INTERNAL_ERROR',
+    boundary: 'B1',
+    direction: 'ingress',
+    validator: INGRESS_VALIDATOR_NAME,
+    details: { reason: 'boundary_error_schema_drift' },
+    request_id,
+    retryable: false,
+  };
+}
+
 export function validateIngress(payload: unknown, request_id: string): IngressResult {
   const parsed = OrchestratorTurnPayloadSchema.safeParse(payload);
   if (parsed.success) {
@@ -56,7 +73,7 @@ export function validateIngress(payload: unknown, request_id: string): IngressRe
   }
 
   const issues = trimIssues(parsed.error.issues);
-  const error: BoundaryError = {
+  const candidate: BoundaryError = {
     error: 'INGRESS_CONTRACT_VIOLATION',
     boundary: 'B1',
     direction: 'ingress',
@@ -66,8 +83,24 @@ export function validateIngress(payload: unknown, request_id: string): IngressRe
     retryable: false,
   };
   // Defensive: prove we emit a shape the BoundaryError schema itself accepts.
-  // This catches drift between §6.4 and our construction.
-  BoundaryErrorSchema.parse(error);
+  // This catches drift between §6.4 and our construction. Fail-closed per
+  // §3.2 — we must never throw past this boundary; on drift, emit a
+  // drift-detection event and return a hardcoded fallback instead.
+  const driftCheck = BoundaryErrorSchema.safeParse(candidate);
+  if (!driftCheck.success) {
+    emit(TelemetryEvents.BoundaryValidation, {
+      boundary: 'B1',
+      direction: 'ingress',
+      validator: INGRESS_VALIDATOR_NAME,
+      contract_version: CONTRACT_VERSION,
+      pass: false,
+      failure_class: 'schema_drift',
+      error_code: 'INTERNAL_ERROR',
+      drift_issue_count: driftCheck.error.issues.length,
+      request_id,
+    });
+    return { ok: false, error: buildDriftFallbackError(request_id) };
+  }
 
   emit(TelemetryEvents.BoundaryValidation, {
     boundary: 'B1',
@@ -75,11 +108,11 @@ export function validateIngress(payload: unknown, request_id: string): IngressRe
     validator: INGRESS_VALIDATOR_NAME,
     contract_version: CONTRACT_VERSION,
     pass: false,
-    error_code: error.error,
+    error_code: candidate.error,
     issue_count: issues.length,
     request_id,
   });
-  return { ok: false, error };
+  return { ok: false, error: candidate };
 }
 
 export interface EgressOk { ok: true; value: OlumiResponse }
