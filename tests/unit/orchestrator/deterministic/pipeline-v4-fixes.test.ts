@@ -220,3 +220,88 @@ describe('Fix 5: suggested_actions always present', () => {
     expect(envelope.suggested_actions).toBeDefined();
   });
 });
+
+// ============================================================================
+// Fix 1: speculative turns gate top-level analysis_ready
+// ============================================================================
+
+describe('assembleV4Envelope — isSpeculative gate (Fix 1)', () => {
+  const mockAnalysisReady = {
+    options: [{ option_id: 'opt_a', label: 'A', status: 'ready', interventions: { f: 0.5 } }],
+    goal_node_id: 'goal_1',
+    status: 'ready',
+  };
+
+  it('non-speculative: mirrors analysis_ready to top-level envelope', () => {
+    const ctx = computeTurnContext(makePostDraftRequest());
+    const envelope = assembleV4Envelope({
+      turnContext: ctx,
+      turnId: 'turn-1',
+      requestId: 'req-1',
+      executionClass: 'standard_turn',
+      assistantText: 'Set.',
+      actionResult: {
+        blocks: [],
+        assistantText: 'Set.',
+        guidance_items: [],
+        operations: [{ op: 'update_node', path: 'f1', value: {} }],
+        analysis_ready: mockAnalysisReady,
+      },
+      routing: 'llm',
+      executedAction: 'set_factor_value',
+      contextFallbackUsed: false,
+      isSpeculative: false,
+    });
+    expect((envelope as Record<string, unknown>).analysis_ready).toBeDefined();
+  });
+
+  it('speculative: does NOT mirror analysis_ready to top-level envelope', () => {
+    const ctx = computeTurnContext(makePostDraftRequest());
+    const envelope = assembleV4Envelope({
+      turnContext: ctx,
+      turnId: 'turn-1',
+      requestId: 'req-1',
+      executionClass: 'standard_turn',
+      assistantText: 'Would set.',
+      actionResult: {
+        blocks: [],
+        assistantText: 'Would set.',
+        guidance_items: [],
+        operations: [{ op: 'update_node', path: 'f1', value: {} }],
+        analysis_ready: mockAnalysisReady,
+        fact: { action: 'value_set', entities_affected: [], what_changed: 'x', stale_analysis: false, auto_apply: false },
+      },
+      routing: 'llm',
+      executedAction: 'set_factor_value',
+      contextFallbackUsed: false,
+      isSpeculative: true,
+    });
+    expect((envelope as Record<string, unknown>).analysis_ready).toBeUndefined();
+  });
+
+  it('speculative with fact-less handler (edit_graph): analysis_ready still gated', () => {
+    const ctx = computeTurnContext(makePostDraftRequest());
+    const envelope = assembleV4Envelope({
+      turnContext: ctx,
+      turnId: 'turn-1',
+      requestId: 'req-1',
+      executionClass: 'standard_turn',
+      assistantText: 'Would edit.',
+      actionResult: {
+        blocks: [],
+        assistantText: 'Would edit.',
+        guidance_items: [],
+        operations: [{ op: 'add_node', path: 'n1', value: { id: 'n1' } }],
+        analysis_ready: mockAnalysisReady,
+        // No fact — edit_graph path. isSpeculative should be true via fallback.
+      },
+      routing: 'llm',
+      executedAction: 'edit_graph',
+      contextFallbackUsed: false,
+      // The caller (pipeline generator) computes isSpeculative with fallback:
+      // operations present + no fact.auto_apply === true → speculative
+      isSpeculative: true,
+    });
+    expect((envelope as Record<string, unknown>).analysis_ready).toBeUndefined();
+  });
+});

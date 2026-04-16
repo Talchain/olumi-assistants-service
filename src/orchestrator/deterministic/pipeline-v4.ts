@@ -798,17 +798,26 @@ export async function* executePipelineV4(
     const executedAction = toolExecution?.toolName as ActionName ?? null;
     const actionResult = toolExecution?.result ?? null;
 
-    // Proposal integrity: when the handler's fact explicitly declares
-    // auto_apply: false, the edit is speculative — a proposal patch the
-    // user has not yet accepted. Downstream state-advancing side-effects
-    // (analysis cache, calibrations, convergence, top-level analysis_ready)
-    // must not fire until acceptance.
+    // Proposal integrity: single source of truth for speculative state.
+    // All guards (session-state, analysis_inputs, envelope analysis_ready)
+    // reference this flag.
     //
-    // This is the single source of truth for speculative state. All guards
-    // (Fix 0A session-state, Fix 0B analysis_inputs, Fix 1 envelope
-    // analysis_ready) reference this flag rather than deriving from
-    // operations.length independently.
-    const isSpeculative = actionResult?.fact?.auto_apply === false;
+    // Precedence:
+    //   1. Explicit fact.auto_apply === false → speculative (migrated handlers)
+    //   2. Operations present + no fact or fact.auto_apply undefined →
+    //      speculative (fallback for fact-less handlers like edit_graph,
+    //      add-option repair-redirect, add-factor duplicate-update)
+    //   3. fact.auto_apply === true → NOT speculative (future auto-applied
+    //      mutations, e.g. draft_graph if it ever used operations)
+    //   4. No operations → NOT speculative (draft, analysis, conversational)
+    //
+    // The fallback at (2) ensures fact-less legacy paths are still treated
+    // as speculative. Without it, edit_graph proposals would bypass all
+    // guards — a regression introduced when we moved from operations-based
+    // to fact-based detection.
+    const hasOperations = (actionResult?.operations?.length ?? 0) > 0;
+    const isSpeculative = actionResult?.fact?.auto_apply === false
+      || (hasOperations && actionResult?.fact?.auto_apply !== true);
 
     // ── Mid-turn analysis_inputs refresh ──────────────────────────────
     // When an action mutates options and emits a fresh analysis_ready,
