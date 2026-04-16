@@ -39,7 +39,7 @@ function normaliseCurrency(raw: string | undefined): string | null {
 
 export const setFactorValueAction: ActionDefinition = {
   action_type: 'set_factor_value',
-  description: 'Set or update the observed value of a factor in the model.',
+  description: 'Set or update the numeric or categorical value of an existing factor. Use when the user provides a specific value (e.g. "set salary to £95k", "team size is 12", "cost = 300k"). Requires the factor to already exist in the model.',
   stage_eligibility: new Set(['frame', 'ideate', 'evaluate', 'optimise']),
   requires_target: true,
   requires_confirmation: false,
@@ -273,7 +273,10 @@ export const setFactorValueAction: ActionDefinition = {
         entities_affected: [{ id: entity.id, label: entity.label, kind: 'factor' }],
         what_changed: `${entity.label} to ${displayValue}`,
         stale_analysis: ctx.analysis_summary != null,
-        auto_apply: true,
+        // Operations are present → pipeline emits as a proposal patch
+        // (status: 'proposed', auto_apply: false on the block). The fact
+        // must agree so the response composer uses proposal language.
+        auto_apply: false,
         data: {
           new_value: value,
           unit: effectiveUnit,

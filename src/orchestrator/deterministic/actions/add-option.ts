@@ -18,7 +18,7 @@ import { config } from "../../../config/index.js";
 export const addOptionAction: ActionDefinition = {
   action_type: 'add_option',
   description:
-    'Add a NEW option to the decision model. Do not use for options that already exist — to update an existing option\'s effects on factors (intervention mapping), use edit_graph instead.',
+    'Add a new option (alternative / path / approach) to the decision model. Use when the user wants to consider a new option. Do not use to update an existing option — use edit_graph for that.',
   stage_eligibility: new Set(['ideate']),
   requires_target: false,
   requires_confirmation: true,
@@ -518,6 +518,26 @@ function preservePriorOptionReadiness(args: {
       || priorInterventionKeys.some((k, i) => k !== newInterventionKeys[i])
       || priorInterventionKeys.some((k) => (prior.interventions as Record<string, number>)[k] !== (opt.interventions as Record<string, number>)[k]);
 
+    // Fix 1B: defensive restore for re-derivation regressions.
+    //
+    // When the recomputed view shows a pre-existing, un-touched option with
+    // interventions that emptied to `{}` while prior had non-empty
+    // interventions AND its connected-factor set is unchanged, treat the
+    // empty view as a spurious re-derivation loss — not a legitimate edit.
+    // Restore both interventions and status from prior.
+    //
+    // This is a belt-and-braces guard. The primary fix (1A) makes all
+    // intervention read sources unconditional, but this ensures any future
+    // regression in the merge/read path cannot silently wipe existing
+    // options' intervention data for un-touched options.
+    const priorInterventionsObj = (prior.interventions ?? {}) as Record<string, number>;
+    const newInterventionsObj = (opt.interventions ?? {}) as Record<string, number>;
+    const priorHadInterventions = Object.keys(priorInterventionsObj).length > 0;
+    const newIsEmpty = Object.keys(newInterventionsObj).length === 0;
+    const connectedSetUnchanged = !structurallyTouched;
+    const regressedEmpty =
+      connectedSetUnchanged && priorHadInterventions && newIsEmpty;
+
     log.info(
       {
         event: 'v4.add_option_readiness_impact',
@@ -529,9 +549,27 @@ function preservePriorOptionReadiness(args: {
         connected_factor_count_after: postFactorKeys.length,
         structurally_touched: structurallyTouched,
         intervention_sources_changed: interventionSourcesChanged,
+        regressed_empty: regressedEmpty,
       },
       'add_option: readiness impact on pre-existing option',
     );
+
+    if (regressedEmpty) {
+      log.warn(
+        {
+          event: 'v4.add_option_intervention_wipe_guarded',
+          option_id: opt.option_id,
+          touched_option_id: touchedOptionId,
+          prior_intervention_count: Object.keys(priorInterventionsObj).length,
+        },
+        'add_option: restored prior interventions — recompute returned empty for un-touched option',
+      );
+      return {
+        ...opt,
+        interventions: priorInterventionsObj,
+        status: prior.status,
+      };
+    }
 
     if (!structurallyTouched && !interventionSourcesChanged && prior.status !== opt.status) {
       return { ...opt, status: prior.status };

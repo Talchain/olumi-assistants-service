@@ -35,6 +35,21 @@ const GRAPH_EDIT_ACTIONS: ReadonlySet<ActionName> = new Set([
   'set_goal_target',
 ]);
 
+/**
+ * Fix 2A: actions whose handlers run their own entity resolution (resolveEntity)
+ * and return a clean ambiguous / not_found response. These actions MUST remain
+ * callable by the LLM even when graph-wide label ambiguity is detected —
+ * suppressing them forced users' typed "set X to Y" messages to silently
+ * downgrade, leaving set_factor_value / add_constraint / remove_factor
+ * effectively chip-only. The handler's resolution path gives better errors
+ * than tool-suppression.
+ */
+const HANDLER_RESOLVES_ENTITY: ReadonlySet<ActionName> = new Set([
+  'set_factor_value',
+  'add_constraint',
+  'remove_factor',
+]);
+
 /** Stop words excluded from entity ambiguity detection. */
 export const AMBIGUITY_STOP_WORDS: ReadonlySet<string> = new Set([
   'the', 'and', 'or', 'of', 'a', 'an', 'in', 'on', 'to', 'for', 'by',
@@ -245,8 +260,16 @@ export function buildToolDefinitions(
     const action = ACTION_CATALOGUE.get(name);
     if (!action) continue;
 
-    // Entity disambiguation: remove tools with target_id when ambiguous
-    if (ambiguousTargetIds && hasTargetIdParam(action.input_schema)) continue;
+    // Entity disambiguation: remove tools with target_id when ambiguous.
+    // Actions with handler-side resolution (HANDLER_RESOLVES_ENTITY) are
+    // exempt — their handlers call resolveEntity and return a structured
+    // ambiguous / not_found response that is strictly better UX than
+    // silently suppressing the tool.
+    if (
+      ambiguousTargetIds
+      && hasTargetIdParam(action.input_schema)
+      && !HANDLER_RESOLVES_ENTITY.has(name)
+    ) continue;
 
     // Schema validation gate: exclude tools with invalid schemas (cached after first check)
     if (!isSchemaValid(name, action.input_schema)) continue;

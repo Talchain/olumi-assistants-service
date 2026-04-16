@@ -24,6 +24,7 @@ import { handleSystemEvent } from "./system-event-handler.js";
 import { handlePendingConfirmation } from "./confirmation-flow.js";
 import { buildDeterministicPromptV2 } from "./prompt-builder-v2.js";
 import { buildToolDefinitions } from "./tool-builder.js";
+import { computeIntentGates } from "./intent-gates.js";
 import { buildDeterministicChips } from "./chip-builder-v4.js";
 import { processAdapterStream, PROGRESS_MESSAGES, PROGRESS_INTERVAL_MS } from "./stream-handler-v4.js";
 import type { StreamHandlerResult, ToolExecution } from "./stream-handler-v4.js";
@@ -391,6 +392,13 @@ export async function* executePipelineV4(
         // chips are computed against the stale pre-confirmation state and
         // the updated counters are visible only on the next turn.
         const confirmedAction = confirmResult.executedProposal?.action_type as ActionName ?? null;
+        // Accepting a set_factor_value proposal here is rare (it has
+        // requires_confirmation: false, so its patch is typically accepted
+        // via the patch_accepted system event instead) but cover it for
+        // correctness. The proposal's first change target is the factor id.
+        const acceptedFactorId = confirmedAction === 'set_factor_value'
+          ? confirmResult.executedProposal?.changes?.[0]?.target
+          : undefined;
         const confirmSessionState = config.cee.coachingContextEnabled
           ? advanceSessionState(
               sessionState,
@@ -399,7 +407,9 @@ export async function* executePipelineV4(
               {
                 patch_accepted: !!confirmResult.executedProposal,
                 patch_dismissed: !!confirmResult.cleared,
+                ...(acceptedFactorId ? { calibrated_factor_id: acceptedFactorId } : {}),
               },
+              { speculative: false },
             )
           : sessionState;
 
@@ -553,14 +563,39 @@ export async function* executePipelineV4(
     const prompt = await buildDeterministicPromptV2(turnContext, coachingContext, preComputedChipLabels);
 
     // Determine tool_choice.
-    // Force the chip action when it survived all tool-builder filters
-    // (data-availability, staleness with bypass, entity disambiguation, schema
-    // validation). If any filter removed it, downgrade to 'auto' so the API
-    // call stays valid and the LLM can pick something or respond conversationally.
+    // Precedence:
+    //   1. Chip click — if the chip action survived all filters, force it.
+    //   2. Intent gate (Fix 2B) — if the user's typed message unambiguously
+    //      implies a specific tool (value-set with concrete factor, or a
+    //      structural-edit phrase) and that tool survived filters, force it.
+    //   3. Otherwise 'auto' — let the LLM choose from the resolved tool set.
+    //
+    // The intent gate never invents tool availability: it only upgrades
+    // 'auto' to forced when the target tool is already in toolDefs. If a
+    // prerequisite check removed it, we fall back to 'auto' rather than
+    // producing a tool_choice the API would reject.
     const chipActionInTools = chipAction && toolDefs.some(t => t.name === chipAction);
+    const intentGate = chipActionInTools
+      ? {}
+      : computeIntentGates(effectiveMessage, turnContext);
+    const intentForcedToolInTools =
+      intentGate.force_tool && toolDefs.some(t => t.name === intentGate.force_tool)
+        ? intentGate.force_tool
+        : undefined;
     const toolChoice = chipActionInTools
       ? { type: 'tool' as const, name: chipAction! }
-      : { type: 'auto' as const };
+      : intentForcedToolInTools
+        ? { type: 'tool' as const, name: intentForcedToolInTools }
+        : { type: 'auto' as const };
+    if (intentForcedToolInTools) {
+      log.info({
+        event: 'v4.intent_gate_forced',
+        request_id: requestId,
+        reason: intentGate.reason,
+        forced_tool: intentForcedToolInTools,
+        matched_factor_id: intentGate.matched_factor_id,
+      }, 'Intent gate upgraded tool_choice from auto to forced');
+    }
     let chipDowngradeText: string | null = null;
     if (chipAction && !chipActionInTools) {
       chipDowngradeText = `That action isn't available right now. ${getDowngradeReason(chipAction, turnContext)}`;
@@ -763,13 +798,30 @@ export async function* executePipelineV4(
     const executedAction = toolExecution?.toolName as ActionName ?? null;
     const actionResult = toolExecution?.result ?? null;
 
+    // Proposal integrity (Fix 0A/0B): when the action emits operations, the
+    // envelope assembler will render a graph_patch block with status:'proposed'
+    // and auto_apply:false. Treat the turn as speculative — downstream
+    // state-advancing side-effects must not fire until the user accepts.
+    const emitsProposal = (actionResult?.operations?.length ?? 0) > 0;
+
     // ── Mid-turn analysis_inputs refresh ──────────────────────────────
     // When an action mutates options and emits a fresh analysis_ready,
     // rebuild turnContext.analysis_inputs from it. Without this, any
     // downstream consumer reading analysis_inputs in the same turn sees
     // the pre-action snapshot. The cross-turn case is handled by the
     // start-of-turn derivation + computeStructuralReadiness fallback.
-    if (actionResult?.analysis_ready && !actionResult.failure) {
+    //
+    // Proposal integrity (Fix 0B): skip the refresh when this turn emitted a
+    // proposal patch — the user has not accepted the edit yet, so downstream
+    // consumers (coaching context rebuilds, chip gating) must continue to
+    // see the pre-proposal analysis_inputs. The refreshed view is only
+    // canonical once acceptance lands.
+    const refreshedAnalysisInputsSkipped = emitsProposal;
+    if (
+      actionResult?.analysis_ready
+      && !actionResult.failure
+      && !refreshedAnalysisInputsSkipped
+    ) {
       const refreshed = deriveAnalysisInputsFromReady(
         actionResult.analysis_ready as { options?: Array<Record<string, unknown>> },
       );
@@ -1082,12 +1134,24 @@ export async function* executePipelineV4(
       assistantText = sanitiseAssistantText(assistantText);
     }
 
-    // WS6: Advance session state after action execution
+    // WS6: Advance session state after action execution.
+    //
+    // Proposal integrity (Fix 0A): `emitsProposal` (computed earlier) signals
+    // that the envelope will render a status:'proposed' / auto_apply:false
+    // patch block. Pass `speculative: true` so advanceSessionState does not
+    // clear the analysis cache, push calibrations_provided, or treat the edit
+    // as a convergence commit until acceptance.
     const actionOutcome = executedAction === 'set_factor_value' && streamResult.toolExecution?.input
       ? { calibrated_factor_id: streamResult.toolExecution.input.target_id as string | undefined }
       : undefined;
     let updatedSessionState = config.cee.coachingContextEnabled
-      ? advanceSessionState(sessionState, executedAction, turnContext, actionOutcome)
+      ? advanceSessionState(
+          sessionState,
+          executedAction,
+          turnContext,
+          actionOutcome,
+          { speculative: emitsProposal },
+        )
       : null;
 
     // Analysis rehydration cache write.
@@ -1403,6 +1467,14 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
         ...(actionResult.analysis_ready ? { analysis_ready: actionResult.analysis_ready } : {}),
       },
       turnId,
+      undefined,
+      undefined,
+      // Fix 0C: attribute the patch to the originating tool so audit trails
+      // and telemetry can distinguish add_option / set_factor_value / etc.
+      // from draft_graph. Falls back to 'tool:unknown' if executedAction
+      // is null (should not happen on this branch — operations require a
+      // tool call — but guarded for safety).
+      executedAction ? `tool:${executedAction}` : 'tool:unknown',
     );
     blocks.push(patchBlock);
     // Track for the T5 proposal-language guard. Gates on the actual emitted

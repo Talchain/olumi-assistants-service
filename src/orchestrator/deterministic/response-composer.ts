@@ -243,9 +243,9 @@ function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, ha
   const isQualitative = displayValue != null && /^(low|moderate|high|very high)$/i.test(displayValue);
   const isTopDriver = coaching?.drivers?.[0]?.factor_id === entity.id;
 
-  if (hasPatchBlock) {
-    // Orientation only — the patch card shows the calibration detail.
-    // Strictly 1 sentence.
+  if (hasPatchBlock && fact.auto_apply) {
+    // Auto-applied patch card (e.g. draft_graph). Orientation only — the
+    // patch card shows the detail. Strictly 1 sentence, applied wording.
     if (isTopDriver) {
       return isQualitative
         ? `${entity.label} is ${valueStr}, the factor the outcome is most sensitive to.`
@@ -260,6 +260,24 @@ function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, ha
     return isQualitative
       ? `${entity.label} is ${valueStr}.`
       : `${entity.label} calibrated to ${valueStr}.`;
+  }
+
+  if (hasPatchBlock && !fact.auto_apply) {
+    // Proposal patch card (e.g. set_factor_value, add_option). Brief
+    // proposal wording — the card is labelled "Proposed" and shows the
+    // detail. Must NOT use "calibrated" / "set to" / "done" phrasing.
+    // Qualitative uses "is" ("Salary is high"), numeric uses "at"
+    // ("Salary at £95k"), matching the full-form proposal section below.
+    const lead = isQualitative
+      ? `${entity.label} is ${valueStr}`
+      : `${entity.label} at ${valueStr}`;
+    if (isTopDriver) {
+      return `${lead} would be the factor the outcome is most sensitive to.`;
+    }
+    if (fact.why_it_matters) {
+      return ensureSentencePunctuation(`${lead} would ${lowercaseFirst(fact.why_it_matters)}`);
+    }
+    return `${lead} would shift the balance of the decision.`;
   }
 
   if (fact.auto_apply) {

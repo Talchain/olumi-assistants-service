@@ -190,4 +190,36 @@ describe("Block Factory", () => {
       expect(block1.block_id).toBe(block2.block_id);
     });
   });
+
+  // =========================================================================
+  // Fix 0C — originating trigger attribution on graph_patch
+  // =========================================================================
+  describe("graph_patch provenance trigger (Fix 0C)", () => {
+    const data = {
+      patch_type: "edit" as const,
+      operations: [{ op: "add_node" as const, path: "/nodes/n1", value: { id: "n1" } }],
+      status: "proposed" as const,
+    };
+
+    it("defaults to 'tool:draft_graph' when no trigger is passed", () => {
+      const block = createGraphPatchBlock(data, turnId);
+      expect(block.provenance.trigger).toBe('tool:draft_graph');
+    });
+
+    it("uses the explicit originating trigger when passed", () => {
+      const block = createGraphPatchBlock(data, turnId, undefined, undefined, 'tool:set_factor_value');
+      expect(block.provenance.trigger).toBe('tool:set_factor_value');
+    });
+
+    it("attributes accepted patches via system trigger", () => {
+      const block = createGraphPatchBlock(data, turnId, undefined, undefined, 'system:patch_accepted');
+      expect(block.provenance.trigger).toBe('system:patch_accepted');
+    });
+
+    it("trigger is NOT part of the deterministic block_id (id stable across triggers)", () => {
+      const b1 = createGraphPatchBlock(data, turnId, undefined, undefined, 'tool:add_option');
+      const b2 = createGraphPatchBlock(data, turnId, undefined, undefined, 'tool:edit_graph');
+      expect(b1.block_id).toBe(b2.block_id);
+    });
+  });
 });

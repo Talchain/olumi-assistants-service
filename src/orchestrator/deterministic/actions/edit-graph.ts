@@ -485,7 +485,7 @@ function liftGraphPatchBlockData(
 export const editGraphAction: ActionDefinition = {
   action_type: 'edit_graph',
   description:
-    'Make a free-form structural edit to the decision model (add/remove/connect/rename nodes and edges). Use when the narrow structural actions do not cover the request.',
+    'Make structural changes to the decision model: add or remove factors and options, create or remove connections between nodes, rename nodes, or fix disconnected nodes. Use for anything that is not a simple value update (set_factor_value) or adding a new option (add_option).',
   stage_eligibility: new Set(['ideate']),
   requires_target: false,
   requires_confirmation: false,

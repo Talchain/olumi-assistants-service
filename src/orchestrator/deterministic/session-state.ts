@@ -145,6 +145,22 @@ export interface ActionOutcome {
 }
 
 /**
+ * Call-site options for advanceSessionState.
+ *
+ * `speculative`: when true, the turn emitted an unaccepted proposal patch
+ * (status: 'proposed', auto_apply: false). In that case the user has not
+ * yet committed to the edit, so session state must NOT:
+ *   - register calibrations_provided (they haven't confirmed the value)
+ *   - clear the analysis cache (the accepted graph hasn't changed)
+ *   - recompute convergence as though they edited (they haven't yet)
+ * The chip-suppression window and played-plays still advance because
+ * those track what was SHOWN, not what was committed.
+ */
+export interface AdvanceOptions {
+  speculative?: boolean;
+}
+
+/**
  * Advance session state after a turn completes.
  *
  * Pure function — returns a new SessionState without mutating `prev`.
@@ -155,6 +171,7 @@ export function advanceSessionState(
   executedAction: ActionName | null,
   turnContext: DeterministicTurnContext,
   outcome?: ActionOutcome,
+  options?: AdvanceOptions,
 ): SessionState {
   const next: SessionState = {
     prediction: prev.prediction,
@@ -174,23 +191,29 @@ export function advanceSessionState(
     prior_analysis_envelope: prev.prior_analysis_envelope,
   };
 
+  // Speculative turns (proposal patch emitted, not yet accepted) must not
+  // advance calibrations, clear the analysis cache, or mark the edit as
+  // committed for convergence. The accepted graph has not actually changed.
+  const speculative = options?.speculative === true;
+
   // Graph-mutating actions invalidate any cached analysis. Clear before
   // the turn's envelope is written so a subsequent evaluate turn on the
-  // modified graph will not rehydrate stale numeric results.
+  // modified graph will not rehydrate stale numeric results. Skip on
+  // speculative turns — the cache is still valid against the accepted graph.
   const GRAPH_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
     'edit_graph', 'draft_graph',
     'add_factor', 'add_option', 'remove_factor', 'remove_option',
     'adjust_edge_strength', 'set_factor_value', 'set_goal_target',
     'add_constraint',
   ]);
-  if (executedAction && GRAPH_MUTATING_ACTIONS.has(executedAction)) {
+  if (!speculative && executedAction && GRAPH_MUTATING_ACTIONS.has(executedAction)) {
     next.analysis_graph_hash = null;
     next.analysis_scenario_id = null;
     next.prior_analysis_envelope = null;
   }
 
-  // Track calibrations from set_factor_value
-  if (executedAction === 'set_factor_value' && outcome?.calibrated_factor_id) {
+  // Track calibrations from set_factor_value — accepted edits only.
+  if (!speculative && executedAction === 'set_factor_value' && outcome?.calibrated_factor_id) {
     if (!next.calibrations_provided.includes(outcome.calibrated_factor_id)) {
       next.calibrations_provided.push(outcome.calibrated_factor_id);
     }
@@ -206,10 +229,17 @@ export function advanceSessionState(
 
   // Compute convergence signal — use `next` so freshly incremented
   // accepted_patches / dismissed_patches are visible to the convergence check.
-  next.convergence_signal = computeConvergence(next, executedAction, turnContext);
+  // On speculative turns, pass null for executedAction so convergence does
+  // not treat the unaccepted edit as a commit signal.
+  next.convergence_signal = computeConvergence(
+    next,
+    speculative ? null : executedAction,
+    turnContext,
+  );
 
   log.debug({
     event: 'v4.session_state',
+    speculative,
     convergence_signal: next.convergence_signal,
     calibrations_count: next.calibrations_provided.length,
     plays_fired_count: next.plays_fired.length,

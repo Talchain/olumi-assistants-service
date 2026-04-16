@@ -82,12 +82,19 @@ function makeProvenance(trigger: string, turnId: string): BlockProvenance {
  * Deterministic ID from: patch_type + canonicalised operations + applied_graph_hash.
  * Sort keys within each operation, but preserve array order.
  * Excludes: status, summary, rejection.message, timestamps.
+ *
+ * `originatingTrigger` identifies the tool or system event that produced the
+ * patch (e.g. "tool:add_option", "tool:set_factor_value",
+ * "system:patch_accepted"). Defaults to "tool:draft_graph" for callers that
+ * haven't been migrated yet; every new call site should pass an explicit
+ * trigger so audit trails and telemetry can attribute patches accurately.
  */
 export function createGraphPatchBlock(
   data: GraphPatchBlockData,
   turnId: string,
   relatedElements?: { node_ids?: string[]; edge_ids?: string[] },
   actions?: BlockAction[],
+  originatingTrigger: string = 'tool:draft_graph',
 ): TypedConversationBlock {
   // Hash input: patch_type + operations (sorted keys, preserved order) + graph hash
   const opsForHash = data.operations.map((op) => ({
@@ -108,7 +115,7 @@ export function createGraphPatchBlock(
     block_id: blockId,
     block_type: 'graph_patch',
     data,
-    provenance: makeProvenance('tool:draft_graph', turnId),
+    provenance: makeProvenance(originatingTrigger, turnId),
     ...(relatedElements && { related_elements: relatedElements }),
     ...(actions && { actions }),
   };

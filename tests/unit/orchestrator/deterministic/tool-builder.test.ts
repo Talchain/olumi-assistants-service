@@ -335,16 +335,21 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     // in context). The disambiguation behaviour we want to verify is that
     // target_id tools are stripped while a non-target_id explanation tool
     // survives.
+    //
+    // Fix 2A: set_factor_value / add_constraint / remove_factor are now
+    // exempt from disambiguation (their handlers resolve entities and emit
+    // structured ambiguous/not_found responses). Use challenge_assumption as
+    // the test vehicle — it has target_id and is NOT exempted.
     const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(
-      ['set_factor_value', 'explain_result'],
+      ['challenge_assumption', 'explain_result'],
       ctx,
     );
     const names = defs.map(d => d.name);
 
-    // set_factor_value has target_id — should be removed (q3 + sales shared)
-    expect(names).not.toContain('set_factor_value');
+    // challenge_assumption has target_id — should be removed (q3 + sales shared)
+    expect(names).not.toContain('challenge_assumption');
     // explain_result has no target_id as required — should remain
     expect(names).toContain('explain_result');
   });
@@ -392,7 +397,7 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     const ctx = buildTestContext({ entities, analysis_summary: null });
 
     const defs = buildToolDefinitions(
-      ['compare_options', 'what_would_flip', 'run_analysis', 'set_factor_value'],
+      ['compare_options', 'what_would_flip', 'run_analysis', 'challenge_assumption'],
       ctx,
     );
     const names = defs.map(d => d.name);
@@ -401,12 +406,14 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     expect(names).toContain('compare_options');
     expect(names).toContain('what_would_flip');
     expect(names).toContain('run_analysis');
-    // set_factor_value has target_id — disambiguation strips it
-    expect(names).not.toContain('set_factor_value');
+    // challenge_assumption has target_id and is NOT exempt — stripped.
+    expect(names).not.toContain('challenge_assumption');
   });
 
   it("bypassDisambiguation keeps target_id tools even when entities are ambiguous", () => {
-    // Same ambiguous setup as "removes target_id tools when two factors share 2+ significant words"
+    // Same ambiguous setup as "removes target_id tools when two factors share 2+ significant words".
+    // Using challenge_assumption as the probe tool (Fix 2A exempts
+    // set_factor_value / add_constraint / remove_factor from disambiguation).
     const entities = new Map<string, EntityEntry>([
       ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
@@ -414,16 +421,16 @@ describe("buildToolDefinitions — entity disambiguation", () => {
     const ctx = buildTestContext({ entities, analysis_summary: null });
 
     // Without bypass — target_id tool removed
-    const withoutBypass = buildToolDefinitions(['set_factor_value', 'explain_result'], ctx);
-    expect(withoutBypass.map(d => d.name)).not.toContain('set_factor_value');
+    const withoutBypass = buildToolDefinitions(['challenge_assumption', 'explain_result'], ctx);
+    expect(withoutBypass.map(d => d.name)).not.toContain('challenge_assumption');
 
     // With bypass — target_id tool survives
     const withBypass = buildToolDefinitions(
-      ['set_factor_value', 'explain_result'],
+      ['challenge_assumption', 'explain_result'],
       ctx,
       { bypassDisambiguation: true },
     );
-    expect(withBypass.map(d => d.name)).toContain('set_factor_value');
+    expect(withBypass.map(d => d.name)).toContain('challenge_assumption');
     expect(withBypass.map(d => d.name)).toContain('explain_result');
   });
 
@@ -481,34 +488,38 @@ describe("buildToolDefinitions — entity disambiguation", () => {
   it("chip-click bypass: chip-visible tool is also LLM-executable", () => {
     // Reproduces the chip visibility/execution divergence scenario.
     // Ambiguous entities at ideate: chip set (pre-disambiguation) includes
-    // set_factor_value, but LLM set (post-disambiguation) excludes it.
+    // challenge_assumption, but LLM set (post-disambiguation) excludes it.
     // On chip click, pipeline-v4 applies bypassDisambiguation to the LLM
     // set too — without it, the chip click would downgrade to "action not
     // available".
+    //
+    // Fix 2A note: set_factor_value / add_constraint / remove_factor are
+    // now handler-resolved and exempt from disambiguation, so this test
+    // uses challenge_assumption as the probe.
     const entities = new Map<string, EntityEntry>([
       ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
       ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
     ]);
     const ctx = buildTestContext({ entities, analysis_summary: null });
 
-    // Chip set: pre-disambiguation — set_factor_value survives
+    // Chip set: pre-disambiguation — challenge_assumption survives
     const chipSet = buildToolDefinitions(
-      ['set_factor_value', 'run_analysis'],
+      ['challenge_assumption', 'run_analysis'],
       ctx,
       { bypassDisambiguation: true },
     );
-    expect(chipSet.map(d => d.name)).toContain('set_factor_value');
+    expect(chipSet.map(d => d.name)).toContain('challenge_assumption');
 
-    // LLM set without chip click: disambiguation strips set_factor_value
+    // LLM set without chip click: disambiguation strips challenge_assumption
     const typedMessageSet = buildToolDefinitions(
-      ['set_factor_value', 'run_analysis'],
+      ['challenge_assumption', 'run_analysis'],
       ctx,
     );
-    expect(typedMessageSet.map(d => d.name)).not.toContain('set_factor_value');
+    expect(typedMessageSet.map(d => d.name)).not.toContain('challenge_assumption');
 
     // LLM set on chip click (isChipClick → bypassDisambiguation): match chip set
     const chipClickSet = buildToolDefinitions(
-      ['set_factor_value', 'run_analysis'],
+      ['challenge_assumption', 'run_analysis'],
       ctx,
       { bypassDisambiguation: true },
     );
@@ -542,12 +553,44 @@ describe("buildToolDefinitions — entity disambiguation", () => {
       { term: 'factor', candidates: [{ id: 'f1', label: 'Alpha Factor' }, { id: 'f2', label: 'Beta Factor' }] },
     ];
 
-    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const defs = buildToolDefinitions(['challenge_assumption', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
 
     // disambiguation_hints triggers suppression of target_id tools
-    expect(names).not.toContain('set_factor_value');
+    // (Fix 2A exempts set_factor_value / add_constraint / remove_factor —
+    // challenge_assumption is the non-exempt probe tool here).
+    expect(names).not.toContain('challenge_assumption');
     expect(names).toContain('run_analysis');
+  });
+
+  // ========================================================================
+  // Fix 2A — handler-resolved actions are exempt from disambiguation
+  // ========================================================================
+  it("(Fix 2A) set_factor_value survives disambiguation — handler resolves entity itself", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: null });
+
+    const defs = buildToolDefinitions(['set_factor_value'], ctx);
+    expect(defs.map(d => d.name)).toContain('set_factor_value');
+  });
+
+  it("(Fix 2A) add_constraint and remove_factor also exempt", () => {
+    const entities = new Map<string, EntityEntry>([
+      ['f1', { id: 'f1', label: 'Q3 Sales Projection', kind: 'factor', aliases: [], is_action_target: true }],
+      ['f2', { id: 'f2', label: 'Q3 Sales Forecast', kind: 'factor', aliases: [], is_action_target: true }],
+    ]);
+    const ctx = buildTestContext({ entities, analysis_summary: null });
+    // graph is non-null for data-availability filter
+    (ctx as { graph: unknown }).graph = { nodes: [{ id: 'x' }] };
+    (ctx as { graph_summary: { node_count: number } }).graph_summary = { node_count: 1 } as never;
+
+    const defs = buildToolDefinitions(['add_constraint', 'remove_factor'], ctx);
+    const names = defs.map(d => d.name);
+    expect(names).toContain('add_constraint');
+    expect(names).toContain('remove_factor');
   });
 });
 
@@ -830,10 +873,10 @@ describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
     // the test isolates the disambiguation behaviour.
     const ctx = buildTestContext({ entities, analysis_summary: null });
 
-    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const defs = buildToolDefinitions(['challenge_assumption', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
 
-    expect(names).not.toContain('set_factor_value');
+    expect(names).not.toContain('challenge_assumption');
     expect(names).toContain('run_analysis');
   });
 
@@ -872,11 +915,12 @@ describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
     ]);
     const ctx = buildTestContext({ entities, analysis_summary: null });
 
-    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    // Use challenge_assumption as probe — set_factor_value is Fix 2A-exempt.
+    const defs = buildToolDefinitions(['challenge_assumption', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
 
     // f1 and f2 share "annual" + "sales" → 2 shared → suppression
-    expect(names).not.toContain('set_factor_value');
+    expect(names).not.toContain('challenge_assumption');
     expect(names).toContain('run_analysis');
   });
 
@@ -888,11 +932,11 @@ describe("buildToolDefinitions — disambiguation threshold (P2 #5)", () => {
     ]);
     const ctx = buildTestContext({ entities, analysis_summary: null });
 
-    const defs = buildToolDefinitions(['set_factor_value', 'run_analysis'], ctx);
+    const defs = buildToolDefinitions(['challenge_assumption', 'run_analysis'], ctx);
     const names = defs.map(d => d.name);
 
     // "q3" + "sales" shared after punctuation trim → 2 shared → suppression
-    expect(names).not.toContain('set_factor_value');
+    expect(names).not.toContain('challenge_assumption');
     expect(names).toContain('run_analysis');
   });
 

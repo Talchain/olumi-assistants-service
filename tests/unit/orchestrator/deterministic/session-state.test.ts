@@ -542,3 +542,85 @@ describe('analysis cache lifecycle', () => {
     expect(next.analysis_graph_hash).toBe('abc');
   });
 });
+
+// ============================================================================
+// Fix 0A — speculative branch
+// ============================================================================
+
+describe('advanceSessionState — speculative (Fix 0A)', () => {
+  it('does NOT push calibrations_provided when speculative', () => {
+    const prev = defaultSessionState();
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(
+      prev,
+      'set_factor_value',
+      ctx,
+      { calibrated_factor_id: 'fac_salary' },
+      { speculative: true },
+    );
+    expect(next.calibrations_provided).toEqual([]);
+  });
+
+  it('DOES push calibrations_provided on accepted (speculative:false) set_factor_value', () => {
+    const prev = defaultSessionState();
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(
+      prev,
+      'set_factor_value',
+      ctx,
+      { calibrated_factor_id: 'fac_salary', patch_accepted: true },
+      { speculative: false },
+    );
+    expect(next.calibrations_provided).toEqual(['fac_salary']);
+  });
+
+  it('does NOT clear analysis cache when speculative', () => {
+    const prev = mergeSessionState({
+      analysis_graph_hash: 'abc',
+      analysis_scenario_id: 's1',
+      prior_analysis_envelope: { ok: true } as unknown as SessionState['prior_analysis_envelope'],
+    });
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, 'set_factor_value', ctx, undefined, { speculative: true });
+    expect(next.analysis_graph_hash).toBe('abc');
+    expect(next.analysis_scenario_id).toBe('s1');
+    expect(next.prior_analysis_envelope).toEqual({ ok: true });
+  });
+
+  it('DOES clear analysis cache on accepted graph-mutating action', () => {
+    const prev = mergeSessionState({
+      analysis_graph_hash: 'abc',
+      analysis_scenario_id: 's1',
+      prior_analysis_envelope: { ok: true } as unknown as SessionState['prior_analysis_envelope'],
+    });
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, 'set_factor_value', ctx, undefined, { speculative: false });
+    expect(next.analysis_graph_hash).toBeNull();
+    expect(next.prior_analysis_envelope).toBeNull();
+  });
+
+  it('does not register calibration if outcome lacks calibrated_factor_id (speculative)', () => {
+    const prev = defaultSessionState();
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(
+      prev,
+      'set_factor_value',
+      ctx,
+      undefined,
+      { speculative: true },
+    );
+    expect(next.calibrations_provided).toEqual([]);
+  });
+
+  it('preserves prior_analysis_envelope across a speculative add_option turn', () => {
+    const prev = mergeSessionState({
+      analysis_graph_hash: 'hash',
+      analysis_scenario_id: 'scn',
+      prior_analysis_envelope: { cached: true } as unknown as SessionState['prior_analysis_envelope'],
+    });
+    const ctx = makeMinimalContext();
+    const next = advanceSessionState(prev, 'add_option', ctx, undefined, { speculative: true });
+    expect(next.analysis_graph_hash).toBe('hash');
+    expect(next.prior_analysis_envelope).toEqual({ cached: true });
+  });
+});

@@ -1392,6 +1392,9 @@ export async function handleEditGraph(
           applied_graph_hash: baseGraphHash,
         },
         turnId,
+        undefined,
+        undefined,
+        'tool:edit_graph',
       )],
       assistantText: `Constraint **${constraintLabel}**${constraintMatch.newConstraint.threshold != null ? ` (threshold: ${constraintMatch.newConstraint.threshold})` : ''} would be added.`,
       latencyMs: Date.now() - startTime,
@@ -2220,7 +2223,7 @@ export async function handleEditGraph(
       ...(interventionUpdates.length > 0 && { intervention_updates: interventionUpdates }),
     };
 
-    const block = createGraphPatchBlock(patchData, turnId);
+    const block = createGraphPatchBlock(patchData, turnId, undefined, undefined, 'tool:edit_graph');
 
     // Store per-operation metadata and removed_edges in block debug payload
     // (attached to provenance for observability + mirrored at the data top-level
@@ -2365,7 +2368,7 @@ function buildRejectionResult(
     },
   };
 
-  const block = createGraphPatchBlock(patchData, turnId);
+  const block = createGraphPatchBlock(patchData, turnId, undefined, undefined, 'tool:edit_graph');
   const latencyMs = Date.now() - startTime;
 
   log.warn(

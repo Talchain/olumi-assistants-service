@@ -4,7 +4,7 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { computeStructuralReadiness } from '../../../../src/orchestrator/tools/analysis-ready-helper.js';
+import { computeStructuralReadiness, mergeInterventionSources } from '../../../../src/orchestrator/tools/analysis-ready-helper.js';
 import type { GraphV3T } from '../../../../src/schemas/cee-v3.js';
 
 function makeReadyGraph(): GraphV3T {
@@ -147,5 +147,66 @@ describe('computeStructuralReadiness', () => {
       const baselineOpt = result!.options.find((o) => o.option_id === 'opt_b');
       expect(baselineOpt!.is_baseline, `Expected is_baseline=true for label: "${baselineLabel}"`).toBe(true);
     }
+  });
+});
+
+// ============================================================================
+// Fix 1A — unconditional read across all three intervention sources
+// ============================================================================
+
+describe('mergeInterventionSources (Fix 1A)', () => {
+  it('reads Source 1 (data.interventions) even when flag-era callers pass only Source 1', () => {
+    const node = {
+      id: 'opt_a',
+      data: { interventions: { fac_x: 0.75 } },
+    } as unknown as Record<string, unknown>;
+    expect(mergeInterventionSources(node)).toEqual({ fac_x: 0.75 });
+  });
+
+  it('reads Source 3 (top-level interventions) as fallback', () => {
+    const node = {
+      id: 'opt_a',
+      interventions: { fac_x: 0.5 },
+    } as unknown as Record<string, unknown>;
+    expect(mergeInterventionSources(node)).toEqual({ fac_x: 0.5 });
+  });
+
+  it('Source 1 (data.interventions) wins when both Source 1 and Source 3 are populated with different values', () => {
+    const node = {
+      id: 'opt_a',
+      data: { interventions: { fac_x: 0.9 } },
+      interventions: { fac_x: 0.1 },
+    } as unknown as Record<string, unknown>;
+    // Precedence: data.interventions > top-level interventions.
+    expect(mergeInterventionSources(node)).toEqual({ fac_x: 0.9 });
+  });
+
+  it('Source 2 (slash-keyed) fills factors missing from Source 1', () => {
+    const node = {
+      id: 'opt_a',
+      data: { interventions: { fac_x: 0.5 } },
+      'data/interventions/fac_y': 0.3,
+    } as unknown as Record<string, unknown>;
+    expect(mergeInterventionSources(node)).toEqual({ fac_x: 0.5, fac_y: 0.3 });
+  });
+
+  it('returns undefined when no sources have interventions', () => {
+    expect(mergeInterventionSources({ id: 'opt_a' })).toBeUndefined();
+  });
+
+  it('regression: Fix 1A — Source 1 read does not depend on flag state', () => {
+    // Prior to Fix 1A, reads from data.interventions were gated behind
+    // CEE_EDIT_INTERVENTION_ROUTING_ENABLED. After the fix, reads are
+    // unconditional. Pre-existing options that stored interventions only
+    // at data.interventions (e.g. written by edit_graph) must survive the
+    // intervention merge even with the write-side flag disabled.
+    const node = {
+      id: 'opt_raise',
+      data: { interventions: { fac_market_size: 0.75, fac_cost: 0.3 } },
+    } as unknown as Record<string, unknown>;
+    expect(mergeInterventionSources(node)).toEqual({
+      fac_market_size: 0.75,
+      fac_cost: 0.3,
+    });
   });
 });

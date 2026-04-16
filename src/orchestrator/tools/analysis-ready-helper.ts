@@ -11,7 +11,6 @@
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
-import { config } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
 import { labelMatchesBaseline } from "../../cee/transforms/analysis-ready.js";
 
@@ -63,7 +62,14 @@ export function extractNumericIntervention(v: unknown): number | undefined {
  * data.interventions per the prompt, while top-level may contain stale
  * values from a prior pipeline run.
  *
- * Sources 1 and 2 are gated behind CEE_EDIT_INTERVENTION_ROUTING_ENABLED.
+ * Fix 1A: the read path consults all three sources unconditionally. Previously
+ * Sources 1+2 were gated behind CEE_EDIT_INTERVENTION_ROUTING_ENABLED, which
+ * caused add_option (and any other handler that rebuilds a synthetic graph
+ * post-mutation) to silently lose existing options' interventions whenever
+ * the flag was off and those options happened to carry interventions at
+ * `data.interventions` rather than the top-level field. The flag still gates
+ * where future writers WRITE slash-keyed entries, but the read side must
+ * always consider every known location.
  *
  * @internal Exported for testing.
  */
@@ -71,42 +77,39 @@ export function mergeInterventionSources(nodeAny: Record<string, unknown>): Reco
   const merged: Record<string, number> = {};
   let found = false;
 
-  // Sources 1+2: gated behind feature flag
-  if (config.cee.editInterventionRoutingEnabled) {
-    // Source 1 (highest precedence): node.data.interventions — canonical edit location
-    const data = nodeAny.data;
-    if (data && typeof data === 'object') {
-      const dataInterventions = (data as Record<string, unknown>).interventions;
-      if (dataInterventions && typeof dataInterventions === 'object') {
-        for (const [k, v] of Object.entries(dataInterventions as Record<string, unknown>)) {
-          const num = extractNumericIntervention(v);
-          if (num !== undefined) {
-            merged[k] = num;
-            found = true;
-            log.info(
-              { event: 'analysis_ready.intervention_merged', source: 'data.interventions', factor_id: k },
-              `analysis_ready merged intervention from data.interventions: ${k}`,
-            );
-          }
+  // Source 1 (highest precedence): node.data.interventions — canonical edit location
+  const data = nodeAny.data;
+  if (data && typeof data === 'object') {
+    const dataInterventions = (data as Record<string, unknown>).interventions;
+    if (dataInterventions && typeof dataInterventions === 'object') {
+      for (const [k, v] of Object.entries(dataInterventions as Record<string, unknown>)) {
+        const num = extractNumericIntervention(v);
+        if (num !== undefined) {
+          merged[k] = num;
+          found = true;
+          log.info(
+            { event: 'analysis_ready.intervention_merged', source: 'data.interventions', factor_id: k },
+            `analysis_ready merged intervention from data.interventions: ${k}`,
+          );
         }
       }
     }
+  }
 
-    // Source 2: flat slash-keyed entries like "data/interventions/fac_1"
-    for (const [k, v] of Object.entries(nodeAny)) {
-      const match = k.match(/^data\/interventions\/(.+)$/);
-      if (!match) continue;
-      const facId = match[1];
-      if (facId in merged) continue; // data.interventions already set
-      const num = extractNumericIntervention(v);
-      if (num !== undefined) {
-        merged[facId] = num;
-        found = true;
-        log.info(
-          { event: 'analysis_ready.intervention_merged', source: 'slash_keyed', factor_id: facId, field_from: k },
-          `analysis_ready merged intervention from slash-keyed entry: ${k}`,
-        );
-      }
+  // Source 2: flat slash-keyed entries like "data/interventions/fac_1"
+  for (const [k, v] of Object.entries(nodeAny)) {
+    const match = k.match(/^data\/interventions\/(.+)$/);
+    if (!match) continue;
+    const facId = match[1];
+    if (facId in merged) continue; // data.interventions already set
+    const num = extractNumericIntervention(v);
+    if (num !== undefined) {
+      merged[facId] = num;
+      found = true;
+      log.info(
+        { event: 'analysis_ready.intervention_merged', source: 'slash_keyed', factor_id: facId, field_from: k },
+        `analysis_ready merged intervention from slash-keyed entry: ${k}`,
+      );
     }
   }
 

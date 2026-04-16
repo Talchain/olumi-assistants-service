@@ -435,7 +435,7 @@ async function handlePatchAccepted(
         },
       } satisfies GraphPatchBlockData,
       provenance: {
-        trigger: 'system_event:patch_accepted',
+        trigger: 'system:patch_accepted',
         turn_id: turnId,
         timestamp: new Date().toISOString(),
       },
@@ -753,13 +753,21 @@ function buildGraphPatchBlock(
     summary: buildPatchSummary(opsForSummary, null, 'accepted', graph ?? null),
   };
 
-  return createGraphPatchBlock(data, turnId, undefined, [
-    {
-      action_id: `undo_${patchId}`,
-      label: 'Undo',
-      action_type: 'undo',
-    },
-  ]);
+  return createGraphPatchBlock(
+    data,
+    turnId,
+    undefined,
+    [
+      {
+        action_id: `undo_${patchId}`,
+        label: 'Undo',
+        action_type: 'undo',
+      },
+    ],
+    // Fix 0C: attribute accepted patches to the system event so they can
+    // be distinguished from tool-originated proposals in audit trails.
+    'system:patch_accepted',
+  );
 }
 
 // ============================================================================
