@@ -798,11 +798,17 @@ export async function* executePipelineV4(
     const executedAction = toolExecution?.toolName as ActionName ?? null;
     const actionResult = toolExecution?.result ?? null;
 
-    // Proposal integrity (Fix 0A/0B): when the action emits operations, the
-    // envelope assembler will render a graph_patch block with status:'proposed'
-    // and auto_apply:false. Treat the turn as speculative — downstream
-    // state-advancing side-effects must not fire until the user accepts.
-    const emitsProposal = (actionResult?.operations?.length ?? 0) > 0;
+    // Proposal integrity: when the handler's fact explicitly declares
+    // auto_apply: false, the edit is speculative — a proposal patch the
+    // user has not yet accepted. Downstream state-advancing side-effects
+    // (analysis cache, calibrations, convergence, top-level analysis_ready)
+    // must not fire until acceptance.
+    //
+    // This is the single source of truth for speculative state. All guards
+    // (Fix 0A session-state, Fix 0B analysis_inputs, Fix 1 envelope
+    // analysis_ready) reference this flag rather than deriving from
+    // operations.length independently.
+    const isSpeculative = actionResult?.fact?.auto_apply === false;
 
     // ── Mid-turn analysis_inputs refresh ──────────────────────────────
     // When an action mutates options and emits a fresh analysis_ready,
@@ -816,7 +822,7 @@ export async function* executePipelineV4(
     // consumers (coaching context rebuilds, chip gating) must continue to
     // see the pre-proposal analysis_inputs. The refreshed view is only
     // canonical once acceptance lands.
-    const refreshedAnalysisInputsSkipped = emitsProposal;
+    const refreshedAnalysisInputsSkipped = isSpeculative;
     if (
       actionResult?.analysis_ready
       && !actionResult.failure
@@ -1136,9 +1142,9 @@ export async function* executePipelineV4(
 
     // WS6: Advance session state after action execution.
     //
-    // Proposal integrity (Fix 0A): `emitsProposal` (computed earlier) signals
-    // that the envelope will render a status:'proposed' / auto_apply:false
-    // patch block. Pass `speculative: true` so advanceSessionState does not
+    // Proposal integrity (Fix 0A): `isSpeculative` (computed earlier) signals
+    // that the handler declared auto_apply:false — a proposal requiring user
+    // acceptance. Pass `speculative: true` so advanceSessionState does not
     // clear the analysis cache, push calibrations_provided, or treat the edit
     // as a convergence commit until acceptance.
     const actionOutcome = executedAction === 'set_factor_value' && streamResult.toolExecution?.input
@@ -1150,7 +1156,7 @@ export async function* executePipelineV4(
           executedAction,
           turnContext,
           actionOutcome,
-          { speculative: emitsProposal },
+          { speculative: isSpeculative },
         )
       : null;
 
@@ -1247,15 +1253,24 @@ export async function* executePipelineV4(
       sessionState: updatedSessionState ?? sessionState,
       availableTools: chipToolNames,
       responseSource,
+      isSpeculative,
     });
 
     // WS6: Attach updated session state to envelope for UI round-trip.
     // Capture the chip_ids produced this turn so the next turn's
     // chip_ids_shown_prev_turn + last_chip_ids_shown drive the 2-turn
     // suppression window deterministically.
+    //
+    // Fix 3: skip the chip window update on draft_graph turns. Draft is
+    // auto-applied by the system — the user never had a chance to click
+    // the draft turn's chips before they're rotated into the suppression
+    // window. Without this skip, the post-draft chips suppress turn 2's
+    // candidates (3 of 4 suppressed on staging), leaving minimal
+    // actionable guidance on the first post-draft conversational turn.
+    const skipChipWindow = executedAction === 'draft_graph';
     if (updatedSessionState) {
       const chipIds = getChipIdsForSession(envelope.suggested_actions ?? []);
-      const stateForRoundTrip = chipIds.length > 0
+      const stateForRoundTrip = !skipChipWindow && chipIds.length > 0
         ? updateLastChipIds(updatedSessionState, chipIds)
         : updatedSessionState;
       (envelope as unknown as Record<string, unknown>).updated_session_state = stateForRoundTrip;
@@ -1358,6 +1373,10 @@ export interface AssembleInput {
   /** When 'composer', the assistantText was produced by the response composer
    *  and should NOT be concatenated with actionResult.assistantText. */
   responseSource?: 'composer' | 'legacy_handler' | 'llm_only';
+  /** Fix 1: when true, this turn is speculative (handler declared
+   *  auto_apply:false). Top-level envelope fields that would reflect
+   *  post-mutation state (analysis_ready) must use accepted state only. */
+  isSpeculative?: boolean;
 }
 
 /**
@@ -1383,6 +1402,7 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     sessionState = null,
     availableTools = [],
     responseSource,
+    isSpeculative: speculative = false,
   } = input;
 
   // T1 (Phase A): structured failure short-circuit. When the action handler
@@ -1732,7 +1752,13 @@ export function assembleV4Envelope(input: AssembleInput): OrchestratorResponseEn
     // graph_patch block above. Some UI consumers read it from the envelope,
     // others from the patch block — populate both to keep them in sync.
     // Skipped on failure (no analysis_ready in a failure envelope).
-    ...(!actionResult?.failure && actionResult?.analysis_ready
+    //
+    // Fix 1: on speculative turns (proposal not yet accepted), the
+    // analysis_ready reflects the post-proposal graph — which is not
+    // canonical until the user accepts. The patch block continues to
+    // carry the speculative preview for card rendering; the top-level
+    // envelope reflects accepted state only.
+    ...(!speculative && !actionResult?.failure && actionResult?.analysis_ready
       ? { analysis_ready: actionResult.analysis_ready }
       : {}),
     lineage,

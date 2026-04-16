@@ -265,7 +265,7 @@ export const setFactorValueAction: ActionDefinition = {
 
     return {
       blocks: [],
-      assistantText: `Updated **${entity.label}** to ${displayValue}.`,
+      assistantText: `**${entity.label}** at ${displayValue} would be applied.`,
       guidance_items: [],
       operations,
       fact: {

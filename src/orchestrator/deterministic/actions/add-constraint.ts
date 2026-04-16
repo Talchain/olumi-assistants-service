@@ -94,9 +94,16 @@ export const addConstraintAction: ActionDefinition = {
 
     return {
       blocks: [],
-      assistantText: `Added a ${constraintType} constraint on **${entity.label}**${threshold != null ? ` (threshold: ${threshold})` : ''}.`,
+      assistantText: `A ${constraintType} constraint on **${entity.label}**${threshold != null ? ` (threshold: ${threshold})` : ''} would be added.`,
       guidance_items: [],
       operations,
+      fact: {
+        action: 'constraint_added',
+        entities_affected: [{ id: entity.id, label: entity.label, kind: entity.kind }],
+        what_changed: `${constraintType} constraint on ${entity.label}`,
+        stale_analysis: ctx.analysis_summary != null,
+        auto_apply: false,
+      },
     };
   },
 

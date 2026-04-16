@@ -357,3 +357,26 @@ describe("remove_factor action — analysis_ready recompute", () => {
     }
   });
 });
+
+// ============================================================================
+// Fix 4: handler emits structured fact for composer routing
+// ============================================================================
+
+describe('remove_factor — handler fact (Fix 4)', () => {
+  it('emits fact with action: factor_removed and auto_apply: false', async () => {
+    const ctx = makeTurnContext(makeGraphWithOptions());
+    const result = await removeFactorAction.execute({ target_id: 'fac_price' }, ctx);
+    expect(result.fact).toBeDefined();
+    expect(result.fact!.action).toBe('factor_removed');
+    expect(result.fact!.auto_apply).toBe(false);
+    expect(result.fact!.entities_affected[0].id).toBe('fac_price');
+    expect(result.fact!.entities_affected[0].label).toBe('Price');
+  });
+
+  it('assistantText uses proposal language ("would")', async () => {
+    const ctx = makeTurnContext(makeGraphWithOptions());
+    const result = await removeFactorAction.execute({ target_id: 'fac_price' }, ctx);
+    expect(result.assistantText).toContain('would');
+    expect(result.assistantText).not.toMatch(/\bRemoved\b/);
+  });
+});

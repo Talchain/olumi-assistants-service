@@ -108,7 +108,8 @@ describe("set_factor_value — structured CAP_EXCEEDED failure (T1)", () => {
     );
     expect(result.failure).toBeUndefined();
     expect(result.operations).toBeDefined();
-    expect(result.assistantText).toContain('Updated');
+    // Proposal language (auto_apply: false) — "would be applied", not "Updated".
+    expect(result.assistantText).toContain('would');
   });
 });
 

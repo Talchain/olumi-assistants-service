@@ -325,6 +325,8 @@ describe('patch_accepted', () => {
       expect((result.blocks[0].data as unknown as Record<string, unknown>).status).toBe('rejected');
       expect(result.assistantText).toContain('Cycle in graph');
       expect(result.graphHash).toBeUndefined();
+      // Fix P1.3: rejection provenance trigger matches acceptance path
+      expect(result.blocks[0].provenance.trigger).toBe('system:patch_accepted');
     });
 
     it('feature_disabled: returns "unavailable" message, no applied block', async () => {

@@ -225,6 +225,13 @@ export const removeFactorAction: ActionDefinition = {
       guidance_items: [],
       operations,
       ...(analysisReady ? { analysis_ready: analysisReady } : {}),
+      fact: {
+        action: 'factor_removed',
+        entities_affected: [{ id: entity.id, label: entity.label, kind: entity.kind }],
+        what_changed: `${entity.label} and ${connectedEdges.length} edge${connectedEdges.length !== 1 ? 's' : ''}`,
+        stale_analysis: ctx.analysis_summary != null,
+        auto_apply: false,
+      },
     };
   },
 

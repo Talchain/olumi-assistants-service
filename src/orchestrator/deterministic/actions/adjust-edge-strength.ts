@@ -97,11 +97,22 @@ export const adjustEdgeStrengthAction: ActionDefinition = {
       },
     }];
 
+    const changeDesc = `**${fromEntity.label}** → **${toEntity.label}** from ${edge.strength_mean.toFixed(2)} to ${preservedSign.toFixed(2)}`;
     return {
       blocks: [],
-      assistantText: `Adjusted **${fromEntity.label}** → **${toEntity.label}** strength from ${edge.strength_mean.toFixed(2)} to ${preservedSign.toFixed(2)}.`,
+      assistantText: `Edge strength ${changeDesc} would be adjusted.`,
       guidance_items: [],
       operations,
+      fact: {
+        action: 'edge_adjusted',
+        entities_affected: [
+          { id: fromEntity.id, label: fromEntity.label, kind: fromEntity.kind },
+          { id: toEntity.id, label: toEntity.label, kind: toEntity.kind },
+        ],
+        what_changed: `${fromEntity.label} → ${toEntity.label} to ${preservedSign.toFixed(2)}`,
+        stale_analysis: ctx.analysis_summary != null,
+        auto_apply: false,
+      },
     };
   },
 

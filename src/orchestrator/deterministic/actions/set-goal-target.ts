@@ -57,11 +57,20 @@ export const setGoalTargetAction: ActionDefinition = {
       },
     }];
 
+    const goalLabel = goalEntry?.label ?? 'Goal';
     return {
       blocks: [],
-      assistantText: `Updated the goal target for **${goalEntry?.label ?? 'Goal'}** to ${threshold}.`,
+      assistantText: `**${goalLabel}** target would change to ${threshold}.`,
       guidance_items: [],
       operations,
+      fact: {
+        action: 'goal_target_set',
+        entities_affected: [{ id: goalId, label: goalLabel, kind: 'goal' }],
+        what_changed: `${goalLabel} target to ${threshold}`,
+        stale_analysis: ctx.analysis_summary != null,
+        auto_apply: false,
+        data: { target: threshold },
+      },
     };
   },
 
