@@ -6,6 +6,7 @@
 
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
+import { formatNodeValue } from "../format-node-value.js";
 
 export const setGoalTargetAction: ActionDefinition = {
   action_type: 'set_goal_target',
@@ -58,15 +59,20 @@ export const setGoalTargetAction: ActionDefinition = {
     }];
 
     const goalLabel = goalEntry?.label ?? 'Goal';
+    const formattedThreshold = formatNodeValue({
+      raw_value: threshold,
+      unit,
+      kind: 'goal',
+    }) ?? String(threshold);
     return {
       blocks: [],
-      assistantText: `**${goalLabel}** target would change to ${threshold}.`,
+      assistantText: `**${goalLabel}** target would change to ${formattedThreshold}.`,
       guidance_items: [],
       operations,
       fact: {
         action: 'goal_target_set',
         entities_affected: [{ id: goalId, label: goalLabel, kind: 'goal' }],
-        what_changed: `${goalLabel} target to ${threshold}`,
+        what_changed: `${goalLabel} target to ${formattedThreshold}`,
         stale_analysis: ctx.analysis_summary != null,
         auto_apply: false,
         data: { target: threshold },

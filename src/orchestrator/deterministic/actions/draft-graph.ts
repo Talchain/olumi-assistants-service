@@ -8,7 +8,9 @@
 
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
-import { handleDraftGraph } from "../../tools/draft-graph.js";
+import type { GuidanceItem } from "../../types/guidance-item.js";
+import { handleDraftGraph, type StrengthenItem } from "../../tools/draft-graph.js";
+import { SIGNAL_CODES, computeGuidanceItemId } from "../../types/guidance-item.js";
 import { log } from "../../../utils/telemetry.js";
 
 export const draftGraphAction: ActionDefinition = {
@@ -92,10 +94,12 @@ export const draftGraphAction: ActionDefinition = {
           }
         : undefined;
 
+      const guidanceFromStrengthen = convertStrengthenToGuidance(result.strengthenItems);
+
       return {
         blocks: result.blocks,
         assistantText: result.assistantText,
-        guidance_items: [],
+        guidance_items: guidanceFromStrengthen,
         applied_graph: result.graphOutput ?? undefined,
         ...(fact ? { fact } : {}),
       };
@@ -118,3 +122,32 @@ export const draftGraphAction: ActionDefinition = {
   chipLabel: () => 'Draft model',
   chipPrompt: () => 'Draft a decision model from my brief',
 };
+
+/**
+ * Convert LLM coaching strengthen_items to GuidanceItems.
+ * Each item becomes a `STRENGTHEN_ITEM` guidance signal with `could_fix`
+ * category, surfaced in the guidance strip above the composer.
+ */
+function convertStrengthenToGuidance(items: StrengthenItem[]): GuidanceItem[] {
+  return items.map((item) => {
+    const item_id = computeGuidanceItemId(
+      SIGNAL_CODES.STRENGTHEN_ITEM,
+      item.id,
+      'analysis',
+    );
+    return {
+      item_id,
+      signal_code: SIGNAL_CODES.STRENGTHEN_ITEM,
+      category: 'could_fix' as const,
+      source: 'analysis' as const,
+      title: item.label,
+      detail: item.detail,
+      primary_action: {
+        type: 'discuss' as const,
+        prompt: `Tell me more about: ${item.label}`,
+      },
+      target_object: { type: 'graph' as const },
+      priority: 35,
+    };
+  });
+}

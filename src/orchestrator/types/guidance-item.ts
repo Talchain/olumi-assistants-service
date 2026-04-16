@@ -66,6 +66,9 @@ export const SIGNAL_CODES = {
   // size guard and was not persisted across turns. UI is encouraged to
   // ask result questions immediately after run_analysis completes.
   ANALYSIS_CACHE_SKIPPED: 'ANALYSIS_CACHE_SKIPPED',
+  // LLM-generated coaching strengthen_items — areas the model identified
+  // as needing reinforcement during draft generation.
+  STRENGTHEN_ITEM: 'STRENGTHEN_ITEM',
 } as const;
 
 export type SignalCode = typeof SIGNAL_CODES[keyof typeof SIGNAL_CODES];

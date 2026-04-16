@@ -156,15 +156,17 @@ export function computeChips(
       candidates.push(chipCalibrateTopFactor(coaching));
       candidates.push(chipCompareOptions());
     } else if (ci.dominant_factor_label) {
-      // Dominant factor — confidence check + flip + brief.
+      // Dominant factor — confidence check + flip + premortem.
+      // chipGenerateBrief suppressed: generate_artefact handler is not yet functional.
       candidates.push(chipHowConfidentInFactor(ci.dominant_factor_label));
       candidates.push(chipWhatWouldFlip());
-      candidates.push(chipGenerateBrief());
+      candidates.push(chipRunPremortem());
     } else {
-      // Stable result — calibrate + premortem + brief.
+      // Stable result — calibrate + premortem + compare.
+      // chipGenerateBrief suppressed: generate_artefact handler is not yet functional.
       candidates.push(chipHowConfidentInFactor(coaching.drivers[0]?.factor_label ?? 'the top driver'));
       candidates.push(chipRunPremortem());
-      candidates.push(chipGenerateBrief());
+      candidates.push(chipCompareOptions());
     }
   } else {
     // Stale analysis (analysis_summary absent from coaching_inputs when the

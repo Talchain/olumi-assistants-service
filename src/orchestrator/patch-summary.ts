@@ -14,6 +14,7 @@
 
 import type { PatchOperation, GraphV3T } from './types.js';
 import { log } from '../utils/telemetry.js';
+import { formatNodeValue, extractRawValue } from './deterministic/format-node-value.js';
 
 // ============================================================================
 // Label resolution helpers (T4)
@@ -345,6 +346,10 @@ function buildSmallSemanticSummary(
           } else {
             sentences.push(`${verb} **${label}** ${friendly} to ${newValueDisplay}`);
           }
+        } else if (fieldWordRedundant) {
+          // Value/data field with no displayable value — omit the field word
+          // entirely to avoid leaking field keys like "value" into the summary.
+          sentences.push(`${verb} **${label}**`);
         } else {
           sentences.push(`${verb} **${label}** ${friendly}`);
         }
@@ -554,6 +559,8 @@ export function buildPatchSummary(
           parts.push(fieldWordRedundant
             ? `Updated ${u.label} to ${newValueDisplay}`
             : `Updated ${u.label} ${field} to ${newValueDisplay}`);
+        } else if (fieldWordRedundant) {
+          parts.push(`Updated ${u.label}`);
         } else {
           parts.push(`Updated ${u.label} ${field}`);
         }
@@ -729,10 +736,10 @@ export function buildPatchDetailItems(operations: PatchOperation[]): PatchDetail
     for (const u of a.updatedNodes) {
       if (u.fields.length === 1) {
         const field = friendlyFieldName(u.fields[0]);
-        items.push({ description: `${u.label}: ${field} updated` });
+        items.push({ description: field ? `${u.label}: ${field} updated` : `${u.label} updated` });
       } else if (u.fields.length > 1) {
-        const fieldList = u.fields.slice(0, 2).map(friendlyFieldName).join(', ');
-        items.push({ description: `${u.label}: ${fieldList} updated` });
+        const fieldList = u.fields.slice(0, 2).map(friendlyFieldName).filter(Boolean).join(', ');
+        items.push({ description: fieldList ? `${u.label}: ${fieldList} updated` : `${u.label} updated` });
       } else {
         items.push({ description: `${u.label} updated` });
       }
@@ -791,7 +798,14 @@ function formatUpdateValueForDisplay(
   if (rawField === 'value' || rawField === 'data') {
     if (typeof newValue === 'number' && Number.isFinite(newValue)) {
       const unit = resolveNodeUnit(graph, nodeId);
-      return unit ? `${newValue} ${unit}` : String(newValue);
+      const graphNode = graph?.nodes.find((n) => (n as { id?: string }).id === nodeId);
+      const formatted = formatNodeValue({
+        value: newValue,
+        unit: unit ?? undefined,
+        raw_value: extractRawValue(graphNode),
+        kind: (graphNode as { kind?: string } | undefined)?.kind,
+      });
+      return formatted ?? (unit ? `${newValue} ${unit}` : String(newValue));
     }
     return null;
   }
@@ -832,8 +846,8 @@ function friendlyFieldName(field: string): string {
     strength_std: 'strength variance',
     exists_probability: 'confidence',
     effect_direction: 'direction',
-    data: 'value',
-    value: 'value',
+    data: 'data',
+    value: '',
     category: 'category',
     kind: 'type',
   };

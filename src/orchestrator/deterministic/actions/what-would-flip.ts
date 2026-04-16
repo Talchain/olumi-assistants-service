@@ -8,6 +8,7 @@
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult, FlipAnalysisBlockData } from "../types.js";
 import { createFlipAnalysisBlock } from "../../blocks/factory.js";
+import { formatNodeValue, extractRawValue } from "../format-node-value.js";
 
 export const whatWouldFlipAction: ActionDefinition = {
   action_type: 'what_would_flip',
@@ -84,11 +85,23 @@ export const whatWouldFlipAction: ActionDefinition = {
     for (const driver of drivers.slice(0, 3)) {
       const node = ctx.entities.nodes.get(driver.factor_id);
       const threshold = flipMap.get(driver.factor_id);
-      const valueStr = node?.value != null ? ` (current: ${node.value}${node.unit ? ' ' + node.unit : ''})` : '';
-      if (threshold?.flip_status === 'concrete' && threshold.flip_value !== null) {
-        const flipStr = `; flips at ${threshold.flip_value}${threshold.unit ? ' ' + threshold.unit : ''}`;
+      const graphNode = ctx.graph?.nodes.find((n) => n.id === driver.factor_id);
+      const formattedValue = node?.value != null
+        ? formatNodeValue({
+            value: node.value,
+            unit: node.unit,
+            cap: node.cap,
+            raw_value: extractRawValue(graphNode),
+            kind: node.kind,
+          })
+        : undefined;
+      const valueStr = formattedValue ? ` (current: ${formattedValue})` : '';
+      const formattedFlip = threshold?.flip_value != null
+        ? formatFlipValueWithUnit(threshold.flip_value, threshold.unit ?? undefined, node)
+        : undefined;
+      if (threshold?.flip_status === 'concrete' && formattedFlip != null) {
         narrativeParts.push(
-          `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}${flipStr}.`,
+          `**${driver.label}**${valueStr}: sensitivity ${driver.sensitivity.toFixed(2)}; flips at ${formattedFlip}.`,
         );
       } else if (threshold?.flip_status === 'no_practical_flip') {
         narrativeParts.push(
@@ -234,6 +247,31 @@ function formatFlipValue(value: number): string {
   if (Math.abs(value) < 0.01 && value !== 0) return value.toExponential(1);
   // Round to 2 decimals, strip trailing zeros and any dangling decimal point.
   return String(Math.round(value * 100) / 100);
+}
+
+/**
+ * Format a flip threshold value with its unit for narrative display.
+ * Delegates to the shared formatting utility when possible; falls back
+ * to the local `formatFlipValue` + raw unit concatenation.
+ */
+function formatFlipValueWithUnit(
+  flipValue: number,
+  unit: string | undefined,
+  node: { kind?: string; cap?: number } | undefined,
+): string {
+  // Try the shared utility — treats the flip value as a raw_value so
+  // currency shorthand, percentages, and time units are handled correctly.
+  const formatted = formatNodeValue({
+    raw_value: flipValue,
+    unit,
+    kind: node?.kind,
+    cap: node?.cap,
+  });
+  if (formatted) return formatted;
+
+  // Fallback: local formatting + unit
+  const base = formatFlipValue(flipValue);
+  return unit ? `${base} ${unit}` : base;
 }
 
 /**

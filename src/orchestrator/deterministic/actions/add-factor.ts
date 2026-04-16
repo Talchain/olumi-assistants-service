@@ -10,6 +10,7 @@ import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
 import type { PatchOperation } from "../../types.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "../../context/constants.js";
+import { formatNodeValue } from "../format-node-value.js";
 
 export const addFactorAction: ActionDefinition = {
   action_type: 'add_factor',
@@ -145,8 +146,10 @@ export const addFactorAction: ActionDefinition = {
       });
     }
 
-    const unitStr = unit ? ` ${unit}` : '';
-    const valueStr = value != null ? ` (value: ${value}${unitStr})` : '';
+    const formattedValue = value != null
+      ? formatNodeValue({ value, unit, kind }) ?? `${value}${unit ? ` ${unit}` : ''}`
+      : undefined;
+    const valueStr = formattedValue != null ? ` (${formattedValue})` : '';
 
     // WS2: HandlerFact for the response composer. When the composer is
     // enabled it replaces the legacy assistantText below with proposal-
@@ -163,11 +166,11 @@ export const addFactorAction: ActionDefinition = {
       fact: {
         action: 'factor_added',
         entities_affected: [{ id: nodeId, label, kind }],
-        what_changed: value != null ? `new factor at ${value}${unitStr}` : 'new factor',
+        what_changed: formattedValue != null ? `new factor at ${formattedValue}` : 'new factor',
         stale_analysis: ctx.analysis_summary != null,
         auto_apply: false,
         data: {
-          value_label: value != null ? `value: ${value}${unitStr}` : undefined,
+          value_label: formattedValue ?? undefined,
           target_label: targetLabel,
           category,
         },

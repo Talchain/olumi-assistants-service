@@ -679,12 +679,12 @@ export const editGraphAction: ActionDefinition = {
         if (operations.length === 0) {
           return {
             blocks: [],
-            assistantText: "I couldn't place an edge between those nodes — one of them doesn't exist in the current model.",
+            assistantText: "I couldn't place an edge between those nodes. One of them doesn't exist in the current model.",
             guidance_items: [],
             failure: {
               code: 'EDIT_GRAPH_INVALID_EDGE',
               message: `Stripped ${stripped.length} add_edge operation(s) referencing unknown endpoints.`,
-              user_message: "I couldn't place an edge between those nodes — one of them doesn't exist in the current model.",
+              user_message: "I couldn't place an edge between those nodes. One of them doesn't exist in the current model.",
               recovery_hint: 'Name the specific existing factors or options to connect.',
             },
           };

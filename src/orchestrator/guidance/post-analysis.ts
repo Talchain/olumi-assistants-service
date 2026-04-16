@@ -170,6 +170,7 @@ function verifyFactIds(
 function convertProposalCards(
   response: V2RunResponseEnvelope,
   analysisHash: string | undefined,
+  emittedReviewCardNodeIds?: Set<string>,
 ): GuidanceItem[] {
   const cards = response.review_cards;
   if (!Array.isArray(cards)) return [];
@@ -179,6 +180,11 @@ function convertProposalCards(
   for (const rawCard of cards) {
     if (!rawCard || typeof rawCard !== 'object') continue;
     const card = rawCard as Record<string, unknown>;
+
+    // Skip cards whose node is already rendered as a review_card block —
+    // avoids duplicate content in the guidance strip vs response body.
+    const nodeId = typeof card.node_id === 'string' ? card.node_id : undefined;
+    if (nodeId && emittedReviewCardNodeIds?.has(nodeId)) continue;
 
     const priorityBand = typeof card.priority_band === 'string' ? card.priority_band.toLowerCase() : 'medium';
 
@@ -197,8 +203,7 @@ function convertProposalCards(
         category = 'should_fix'; signal_code = SIGNAL_CODES.PROPOSAL_CARD_MEDIUM; priority = 65;
     }
 
-    // Determine target + action
-    const nodeId = typeof card.node_id === 'string' ? card.node_id : undefined;
+    // Determine target + action (nodeId already resolved above for dedup check)
     const nodeLabel = typeof card.node_label === 'string' ? card.node_label : undefined;
 
     const action = nodeId
@@ -335,7 +340,7 @@ function convertRobustness(
     signal_code: SIGNAL_CODES.FRAGILE_RESULT,
     category: 'must_fix',
     source: 'analysis',
-    title: 'Result is fragile — small changes could flip the recommendation',
+    title: 'Result is fragile. Small changes could flip the recommendation',
     detail: 'The model\'s outcome is sensitive to its assumptions. Consider running a pre-mortem or calibrating the key drivers.',
     primary_action: { type: 'discuss', prompt: 'What would need to change for the recommendation to flip?' },
     target_object: { type: 'graph' },
@@ -446,7 +451,7 @@ function buildTechniqueOffers(
       category: 'technique',
       source: 'analysis',
       title: 'Run a pre-mortem to identify failure scenarios',
-      detail: 'Imagine the decision failed — what went wrong? A pre-mortem surfaces hidden risks before committing.',
+      detail: 'Imagine the decision failed. What went wrong? A pre-mortem surfaces hidden risks before committing.',
       primary_action: { type: 'run_exercise', exercise: 'pre_mortem' },
       target_object: { type: 'graph' },
       priority: 25,
@@ -510,7 +515,7 @@ function buildTechniqueOffers(
         signal_code: SIGNAL_CODES.TECHNIQUE_DEVIL_ADVOCATE,
         category: 'technique',
         source: 'analysis',
-        title: 'It\'s close — argue against the top option',
+        title: 'It\'s close. Argue against the top option',
         detail: 'The top two options are within 10% of each other. A devil\'s advocate exercise can surface factors you might be missing.',
         primary_action: { type: 'run_exercise', exercise: 'devil_advocate' },
         target_object: { type: 'graph' },
@@ -539,13 +544,13 @@ function buildTechniqueOffers(
 export function generatePostAnalysisGuidance(
   response: V2RunResponseEnvelope,
   graph: GraphV3T | null,
-  options?: { intentClassification?: string; responseMode?: string },
+  options?: { intentClassification?: string; responseMode?: string; emittedReviewCardNodeIds?: Set<string> },
 ): GuidanceItem[] {
   const analysisHash = getAnalysisHash(response);
   const nodeMap = buildNodeMap(graph);
 
   const items: GuidanceItem[] = [
-    ...convertProposalCards(response, analysisHash),
+    ...convertProposalCards(response, analysisHash, options?.emittedReviewCardNodeIds),
     ...convertFactorSensitivity(response, nodeMap, analysisHash),
     ...convertRobustness(response, analysisHash),
     ...convertConstraintViolations(response, analysisHash),

@@ -58,12 +58,23 @@ export interface CEEDraftWarning {
   edge_ids?: string[];
 }
 
+/** Structured strengthen item from LLM coaching output. */
+export interface StrengthenItem {
+  id: string;
+  label: string;
+  detail: string;
+  action_type: string;
+  bias_category?: string;
+}
+
 export interface DraftGraphResult {
   blocks: TypedConversationBlock[];
   assistantText: string | null;
   latencyMs: number;
   /** Coaching context for Phase 3 LLM narration (coaching.summary + strengthen_items) */
   narrationHint?: string;
+  /** Structured strengthen items from LLM coaching — areas the model needs reinforcement. */
+  strengthenItems: StrengthenItem[];
   /** Structured draft warnings from the pipeline (CEEStructuralWarningV1[]) */
   draftWarnings: CEEDraftWarning[];
   /** The drafted graph, for post-draft structural analysis */
@@ -225,6 +236,9 @@ export async function handleDraftGraph(
     patchData.repairs_applied = repairsApplied;
   }
 
+  // Extract strengthen_items as structured data for guidance conversion
+  const strengthenItems = extractStrengthenItems(body);
+
   // Build narration_hint from coaching data (for Phase 3 LLM context)
   const narrationHint = coachingSummary ?? undefined;
 
@@ -264,6 +278,7 @@ export async function handleDraftGraph(
     assistantText,
     latencyMs,
     narrationHint,
+    strengthenItems,
     draftWarnings,
     graphOutput,
     toolLLMTelemetry,
@@ -476,15 +491,44 @@ function extractCoachingSummary(body: Record<string, unknown>): string | null {
 
   const strengthen = coaching.strengthen_items;
   if (Array.isArray(strengthen) && strengthen.length > 0) {
-    const items = strengthen
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => `- ${item}`);
-    if (items.length > 0) {
-      parts.push('Strengthen: ' + items.join(', '));
+    // strengthen_items are objects per Zod schema: {id, label, detail, action_type, bias_category?}
+    const labels = strengthen
+      .filter((item): item is Record<string, unknown> => item != null && typeof item === 'object')
+      .map((item) => typeof item.label === 'string' ? item.label : null)
+      .filter((label): label is string => label != null && label.length > 0);
+    if (labels.length > 0) {
+      parts.push('Strengthen: ' + labels.map((l) => `- ${l}`).join(', '));
     }
   }
 
   return parts.length > 0 ? parts.join('\n') : null;
+}
+
+/**
+ * Extract structured strengthen_items from coaching data.
+ * Validates each item against the Zod-defined shape.
+ */
+function extractStrengthenItems(body: Record<string, unknown>): StrengthenItem[] {
+  const coaching = body.coaching as Record<string, unknown> | undefined;
+  if (!coaching) return [];
+
+  const raw = coaching.strengthen_items;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  const items: StrengthenItem[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const item = entry as Record<string, unknown>;
+    if (typeof item.id !== 'string' || typeof item.label !== 'string' || typeof item.detail !== 'string' || typeof item.action_type !== 'string') continue;
+    items.push({
+      id: item.id,
+      label: item.label,
+      detail: item.detail,
+      action_type: item.action_type,
+      ...(typeof item.bias_category === 'string' ? { bias_category: item.bias_category } : {}),
+    });
+  }
+  return items;
 }
 
 /**

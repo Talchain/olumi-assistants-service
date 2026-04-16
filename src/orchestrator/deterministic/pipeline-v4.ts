@@ -1954,7 +1954,7 @@ function getUserFacingErrorMessage(errorCode: string, isDraftGraph?: boolean): s
     case STREAM_ERROR_CODES.LLM_TIMEOUT:
     case STREAM_ERROR_CODES.TURN_BUDGET_EXCEEDED:
       return isDraftGraph
-        ? 'Building your decision model is taking longer than usual. Please try again — complex decisions can take up to a minute.'
+        ? 'Building your decision model is taking longer than usual. Please try again. Complex decisions can take up to a minute.'
         : 'This is taking longer than expected. Try again or rephrase your message.';
     case STREAM_ERROR_CODES.TOOL_ERROR:
       return "That action couldn't be completed. Try a different approach or rephrase your request.";

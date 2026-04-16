@@ -148,7 +148,7 @@ export function handlePendingConfirmation(
       cleared: true,
       actionResult: {
         blocks: [],
-        assistantText: 'Got it — proposal dismissed.',
+        assistantText: 'Got it, proposal dismissed.',
         guidance_items: [],
       },
     };

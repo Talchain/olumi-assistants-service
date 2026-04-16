@@ -10,6 +10,7 @@ import type { SuggestedAction } from "../../types.js";
 import { resolveEntity } from "../entity-resolver.js";
 import { log } from "../../../utils/telemetry.js";
 import { qualitativeBand, synthesiseDisplayValue } from "../../../cee/factor-extraction/display-value.js";
+import { formatNodeValue, extractRawValue } from "../format-node-value.js";
 
 /**
  * Map a raw currency signal (symbol or short code) to a canonical unit label.
@@ -258,10 +259,14 @@ export const setFactorValueAction: ActionDefinition = {
     }];
 
     // Compute display_value for the composer to render instead of the raw
-    // numeric. Qualitative bands only apply to unitless 0-1 factors
-    // (no unit OR unit === 'scale'); factors with real units (£, %, months,
-    // etc.) keep the numeric + unit form.
-    const displayValue = computeDisplayValue(value, effectiveUnit);
+    // numeric. Delegates to the shared formatting utility which handles
+    // currency shorthand, percentages, time units, and qualitative bands.
+    const graphNode = ctx.graph?.nodes.find((n) => n.id === entity.id);
+    const displayValue = computeDisplayValue(value, effectiveUnit, {
+      cap: nodeEntry?.cap,
+      raw_value: extractRawValue(graphNode),
+      kind: entity.kind,
+    });
 
     return {
       blocks: [],
@@ -300,18 +305,40 @@ export const setFactorValueAction: ActionDefinition = {
 /**
  * Produce the user-facing display value for a factor.
  *
- * Decision tree (matches the DS v5 "no raw 0-1 values" rule):
- *   - Unitless 0-1 factor (no unit OR unit === 'scale') → qualitative band
- *     e.g. 0.25 → "low", 0.75 → "high". Logged under
- *     `v4.display_value_qualitative` so staging can see how often this path
- *     fires and whether it's the dominant display mode.
- *   - Any real unit (£, $, %, months, etc.) → numeric + unit form
- *     ("75,000 £", "3 %", "18 months"). This matches existing surfaces and
- *     avoids inventing qualitative labels for quantities that have a natural
- *     scale.
- *   - Out-of-range numeric (outside 0-1) with no unit → plain numeric.
+ * Delegates to `formatNodeValue` (shared utility) which handles currency
+ * shorthand (£500k), percentages, time units, qualitative bands for
+ * unitless 0-1 factors, and plain number formatting.
+ *
+ * Falls back to the legacy qualitative-band / raw-numeric path when
+ * the shared utility returns `undefined` (insufficient data).
  */
-function computeDisplayValue(value: number, unit?: string): string {
+function computeDisplayValue(
+  value: number,
+  unit?: string,
+  meta?: { cap?: number; raw_value?: number; kind?: string },
+): string {
+  // Try the shared formatting utility first (handles currency, %, time, etc.)
+  const formatted = formatNodeValue({
+    value,
+    unit,
+    cap: meta?.cap,
+    raw_value: meta?.raw_value,
+    kind: meta?.kind,
+  });
+  if (formatted) {
+    log.debug(
+      {
+        event: 'v4.display_value_formatted',
+        value,
+        unit: unit ?? null,
+        formatted,
+      },
+      'set_factor_value: rendered via shared formatting utility',
+    );
+    return formatted;
+  }
+
+  // Fallback: qualitative band for unitless 0-1 factors
   const hasRealUnit =
     !!unit && unit.toLowerCase() !== 'scale';
 
