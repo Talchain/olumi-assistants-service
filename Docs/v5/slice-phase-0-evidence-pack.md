@@ -109,6 +109,16 @@ Purely documentation — asserts Phase 0 did not erode the A2 test baseline. Eac
 
 ---
 
+## 3.1 Non-blocking observations from SQL/RLS review (pre-apply)
+
+Surfaced from [`Docs/v5/slice-phase-0-sql-review.md`](slice-phase-0-sql-review.md) §8 — three items that passed review but warrant explicit visibility in the evidence trail.
+
+| # | Observation | Disposition |
+|---|---|---|
+| 3.1.1 | **Spec-vs-migration column-count mismatch on `v5_handler_facts`.** An ephemeral dispatch-checklist message said "9 expected columns"; the migration + audit §4.2 + validator all define **10** (id, v5_conversation_turn_id, scenario_id, user_id, handler_id, action_type, fact_version, noop, payload, created_at). Likely miscount — `fact_version` is the easiest column to omit counting from memory. | **No code change needed.** Audit, migration, validator, schemas package are all internally consistent. The ephemeral checklist isn't committed anywhere. Surfaced here so future reviewers re-counting don't repeat the confusion. |
+| 3.1.2 | **`service_role` role-existence assumption in migration.** `GRANT EXECUTE ... TO service_role` assumes the role is present on the target database. Staging confirms it (CEE prompt store already uses this role); Supabase projects created after the 2024 role-model refactor all ship with `service_role`. | **Not a concern on staging.** Documented for future migration authors targeting self-hosted Postgres or pre-refactor Supabase projects — those environments would need the GRANT statement adjusted to the local role name. |
+| 3.1.3 | **No explicit `search_path` grant for `service_role`.** RPC sets `SET search_path = pg_catalog, public` at function level, which covers the function body. `service_role`'s own session default is Postgres-standard `"$user", public`. | **Fine in practice.** CEE invokes via one-shot `supabase-js.rpc()` — no interleaved direct queries in the same session, so the session-level search_path is irrelevant. Documented for future readers who might run multi-statement service-role sessions. |
+
 ## 4. Known limits + residual risks carried to Tranche 2
 
 1. **Post-migration RPC grant validation.** The audit §4.4 requires a Tranche 2 evidence-pack test that invokes `append_turn_atomic` with the CEE service-role key and asserts no `permission denied`. Cannot be run in Phase 0 because the function doesn't yet exist. This is the single runtime assumption in Phase 0 that depends on Supabase role-privilege behaviour.
