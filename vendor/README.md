@@ -7,7 +7,7 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.5.0.tgz`
+### `talchain-schemas-0.5.1.tgz`
 
 **Purpose:** pre-publish consumption of `@talchain/schemas` v0.5.0 for
 V5 slices B + C + D1 + D2 (session + handler-fact + per-handler arg/result
