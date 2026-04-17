@@ -171,6 +171,22 @@ check_transport_invariants() {
 }
 
 # ---------------------------------------------------------------------------
+# 9. V5 data-responsibility tripwire — CEE must not compute PLoT-owned
+#    enrichment fields (factor_sensitivity, m1_coaching, flip_thresholds,
+#    conditional_probabilities, edge_e_values). Passthrough only.
+#    Catches the V4 silent-drop regression class before it recurs.
+# ---------------------------------------------------------------------------
+check_data_responsibility() {
+  if bash scripts/validate-data-responsibility.sh > /dev/null 2>&1; then
+    print_check "data-responsibility" "OK"
+  else
+    print_check "data-responsibility" "FAIL"
+    bash scripts/validate-data-responsibility.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
 echo ""
@@ -185,6 +201,7 @@ check_stale_js
 check_dependency_audit
 check_tarball_sha
 check_transport_invariants
+check_data_responsibility
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
