@@ -109,15 +109,17 @@ else
 fi
 
 # ------------------------------------------------------------
-# 6. Validation scripts present + executable
+# 6. Validation scripts + post-apply validator + closure artefacts
 # ------------------------------------------------------------
 
 SCRIPTS=(
   'scripts/validate-data-responsibility.sh'
   'scripts/validate-transport-invariants.sh'
   'scripts/validate-tarball-sha.sh'
+  'scripts/validate-docs-consistency.sh'
   'scripts/phase-0-introspect.ts'
   'scripts/phase-0-shape-probe.ts'
+  'scripts/phase-0-post-apply-validate.ts'
 )
 
 for s in "${SCRIPTS[@]}"; do
@@ -128,8 +130,21 @@ for s in "${SCRIPTS[@]}"; do
   fi
 done
 
+# Pre-push hook must include the two Phase-0-specific checks wired in the
+# last hardening round. If someone deletes them, this gate catches it.
+if grep -q 'check_phase_0_complete' "$REPO_ROOT/scripts/validate-prepush.sh"; then
+  pass "pre-push hook: check_phase_0_complete wired"
+else
+  fail "pre-push hook missing check_phase_0_complete (Phase 0 closure gate unbound)"
+fi
+if grep -q 'check_docs_consistency' "$REPO_ROOT/scripts/validate-prepush.sh"; then
+  pass "pre-push hook: check_docs_consistency wired"
+else
+  fail "pre-push hook missing check_docs_consistency (docs regression unbound)"
+fi
+
 # ------------------------------------------------------------
-# 7. Audit doc landmarks
+# 7. Audit + plan + evidence + sql-review doc landmarks
 # ------------------------------------------------------------
 
 AUDIT="$REPO_ROOT/Docs/v5/slice-phase-0-supabase-audit.md"
@@ -148,6 +163,14 @@ if [ -f "$AUDIT" ]; then
 else
   fail "audit doc missing: $AUDIT"
 fi
+
+for doc in 'slice-bcd-plan.md' 'slice-phase-0-evidence-pack.md' 'slice-phase-0-sql-review.md'; do
+  if [ -f "$REPO_ROOT/Docs/v5/$doc" ]; then
+    pass "doc present: $doc"
+  else
+    fail "doc missing: Docs/v5/$doc"
+  fi
+done
 
 # ------------------------------------------------------------
 # Summary

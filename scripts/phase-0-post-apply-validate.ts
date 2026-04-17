@@ -375,6 +375,37 @@ function emitJsonSummary(): void {
   );
 }
 
+async function preflightScenarioExists(client: SupabaseClient, scenarioId: string): Promise<void> {
+  // Without this preflight, a missing TEST_SCENARIO_ID would cause the
+  // CHECK/FK/unique probes to fail with "scenario not found" errors that
+  // masquerade as constraint bugs. Fail fast with a clean operator message
+  // so the failure mode is "your env is wrong", not "the migration is wrong".
+  const { data, error } = await client
+    .from('scenarios')
+    .select('id')
+    .eq('id', scenarioId)
+    .limit(1);
+
+  if (error) {
+    if (JSON_MODE) {
+      console.log(JSON.stringify({ status: 'preflight-failed', reason: `scenarios query failed: ${error.message}`, code: errCode(error) }));
+    } else {
+      console.error(`[post-apply-validate] preflight: scenarios query failed — ${error.message}`);
+    }
+    process.exit(3);
+  }
+
+  if (!data || data.length === 0) {
+    if (JSON_MODE) {
+      console.log(JSON.stringify({ status: 'preflight-failed', reason: `TEST_SCENARIO_ID=${scenarioId} not found in public.scenarios` }));
+    } else {
+      console.error(`[post-apply-validate] preflight: TEST_SCENARIO_ID=${scenarioId} does not exist in public.scenarios.`);
+      console.error('[post-apply-validate] create a throwaway scenarios row first and export its id as TEST_SCENARIO_ID.');
+    }
+    process.exit(3);
+  }
+}
+
 (async () => {
   const service = createClient(URL!, SERVICE_KEY!, { auth: { persistSession: false } });
   const anon = createClient(URL!, ANON_KEY!, { auth: { persistSession: false } });
@@ -383,6 +414,14 @@ function emitJsonSummary(): void {
     console.log('# Phase 0 post-apply validation (strict)');
     console.log(`Generated: ${new Date().toISOString()}`);
     console.log(`Run id:    ${RUN_ID}`);
+    console.log('');
+    console.log('## Preflight');
+  }
+
+  await preflightScenarioExists(service, TEST_SCENARIO_ID!);
+  if (!JSON_MODE) {
+    console.log(`\x1b[32mPASS\x1b[0m  preflight-scenario-exists`);
+    console.log(`       TEST_SCENARIO_ID=${TEST_SCENARIO_ID} exists in public.scenarios`);
     console.log('');
     console.log('## Required checks');
   }
