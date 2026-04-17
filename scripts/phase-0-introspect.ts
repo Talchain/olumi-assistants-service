@@ -7,16 +7,23 @@
  *
  * Usage
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
- *     pnpm exec tsx scripts/phase-0-introspect.ts
+ *     pnpm exec tsx scripts/phase-0-introspect.ts [--strict]
  *
  * The service-role key is not in local `.env`; source it from the staging
  * Supabase project dashboard (Project Settings → API → service_role key)
  * for this one-shot read-only check. Never commit credentials.
  *
+ * Flags
+ *   --strict  Treat "credentials missing" as a hard failure (exit 3 instead
+ *             of exit 2). Default mode treats missing creds as a skipped
+ *             check (exit 2); --strict refuses to proceed and lets CI gates
+ *             block a "passed by not running" outcome. By design, --strict
+ *             fails unless credentials are provided.
+ *
  * Exit codes
- *   0  all checks completed (caller inspects output)
- *   2  required env vars missing
- *   3  unexpected surprise surfaced (table collision, or hard error)
+ *   0  all live checks completed without surprise (caller inspects output)
+ *   2  required env vars missing (default mode only; --strict upgrades to 3)
+ *   3  unexpected surprise surfaced OR --strict required check was skipped
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -27,6 +34,7 @@ import * as dotenv from 'dotenv';
 // uniform avoids "works-in-server-fails-in-script" surprises.
 dotenv.config();
 
+const STRICT = process.argv.includes('--strict');
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -35,7 +43,11 @@ if (!URL || !KEY) {
   console.error('[phase-0-introspect] run with:');
   console.error('  SUPABASE_URL=https://<ref>.supabase.co \\');
   console.error('  SUPABASE_SERVICE_ROLE_KEY=<service-role-JWT> \\');
-  console.error('    pnpm exec tsx scripts/phase-0-introspect.ts');
+  console.error('    pnpm exec tsx scripts/phase-0-introspect.ts' + (STRICT ? ' --strict' : ''));
+  if (STRICT) {
+    console.error('[phase-0-introspect] --strict: refusing to exit 0 on a skipped check. Exit 3.');
+    process.exit(3);
+  }
   process.exit(2);
 }
 

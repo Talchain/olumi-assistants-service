@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# Phase 0 completion gate — plan rev 2 I-1.
+#
+# Single machine-checkable assertion that every Phase 0 artefact is present
+# and wired. Runs before Tranche 2 dispatch as a fast sanity check so a
+# "doc-approved but half-committed" Phase 0 cannot pass informal review.
+#
+# Each check is local (file existence + grep). The script does NOT run
+# migrations, call Supabase, or execute tests — it's a pre-flight gate,
+# not a deep verification. The live gates (introspection --strict,
+# post-migration RPC test) run separately.
+#
+# Non-zero exit blocks CI / pre-push.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+EXIT=0
+
+fail() {
+  echo "FAIL: $1"
+  EXIT=1
+}
+
+pass() {
+  echo "OK:   $1"
+}
+
+# ------------------------------------------------------------
+# 1. Vendored tarball + SHA manifest (schemas 0.5.1)
+# ------------------------------------------------------------
+
+TARBALL="$REPO_ROOT/vendor/talchain-schemas-0.5.1.tgz"
+MANIFEST="$REPO_ROOT/vendor/talchain-schemas-0.5.1.tgz.sha256"
+
+if [ -f "$TARBALL" ]; then pass "vendored tarball: talchain-schemas-0.5.1.tgz"; else fail "missing: $TARBALL"; fi
+if [ -f "$MANIFEST" ]; then pass "vendored SHA manifest: talchain-schemas-0.5.1.tgz.sha256"; else fail "missing: $MANIFEST"; fi
+
+# Pin in CEE package.json
+if grep -q '"@talchain/schemas": "file:\./vendor/talchain-schemas-0\.5\.1\.tgz"' "$REPO_ROOT/package.json"; then
+  pass "package.json pin: @talchain/schemas@0.5.1"
+else
+  fail "package.json pin not at 0.5.1"
+fi
+
+# ------------------------------------------------------------
+# 2. 7 new CeeTaskId literals present in src/prompts/schema.ts
+# ------------------------------------------------------------
+
+TASK_IDS=(
+  'run_analysis_narrate'
+  'set_factor_value_narrate'
+  'add_constraint_narrate'
+  'adjust_edge_strength_narrate'
+  'explain_result_narrate'
+  'compare_options_narrate'
+  'what_would_flip_narrate'
+)
+
+for tid in "${TASK_IDS[@]}"; do
+  if grep -q "'$tid'" "$REPO_ROOT/src/prompts/schema.ts"; then
+    pass "CeeTaskId literal: '$tid'"
+  else
+    fail "CeeTaskId literal missing in src/prompts/schema.ts: '$tid'"
+  fi
+done
+
+# ------------------------------------------------------------
+# 3. 7 new OPERATION_TO_TASK_ID entries present in prompt-loader.ts
+# ------------------------------------------------------------
+
+for tid in "${TASK_IDS[@]}"; do
+  # Match either `key: 'value'` style — expect operation key matches task_id 1:1.
+  if grep -q "${tid}: '${tid}'" "$REPO_ROOT/src/adapters/llm/prompt-loader.ts"; then
+    pass "OPERATION_TO_TASK_ID entry: $tid"
+  else
+    fail "OPERATION_TO_TASK_ID entry missing: $tid"
+  fi
+done
+
+# ------------------------------------------------------------
+# 4. 7 placeholder prompt fragments registered in defaults.ts
+# ------------------------------------------------------------
+
+for tid in "${TASK_IDS[@]}"; do
+  if grep -q "registerDefaultPrompt('${tid}'" "$REPO_ROOT/src/prompts/defaults.ts"; then
+    pass "default prompt registered: $tid"
+  else
+    fail "default prompt missing in defaults.ts: $tid"
+  fi
+done
+
+# ------------------------------------------------------------
+# 5. Migration file + rollback companion
+# ------------------------------------------------------------
+
+MIGRATION_GLOB=("$REPO_ROOT"/supabase/migrations/*_v5_session_store.sql)
+ROLLBACK_GLOB=("$REPO_ROOT"/supabase/migrations/rollback/*_v5_session_store_rollback.sql.do-not-apply)
+
+if [ -e "${MIGRATION_GLOB[0]}" ]; then
+  pass "migration file: ${MIGRATION_GLOB[0]##*/}"
+else
+  fail "no migration file matching *_v5_session_store.sql under supabase/migrations/"
+fi
+
+if [ -e "${ROLLBACK_GLOB[0]}" ]; then
+  pass "rollback companion: ${ROLLBACK_GLOB[0]##*/}"
+else
+  fail "no rollback companion matching *_v5_session_store_rollback.sql.do-not-apply under supabase/migrations/rollback/"
+fi
+
+# ------------------------------------------------------------
+# 6. Validation scripts present + executable
+# ------------------------------------------------------------
+
+SCRIPTS=(
+  'scripts/validate-data-responsibility.sh'
+  'scripts/validate-transport-invariants.sh'
+  'scripts/validate-tarball-sha.sh'
+  'scripts/phase-0-introspect.ts'
+  'scripts/phase-0-shape-probe.ts'
+)
+
+for s in "${SCRIPTS[@]}"; do
+  if [ -f "$REPO_ROOT/$s" ]; then
+    pass "script present: $s"
+  else
+    fail "script missing: $s"
+  fi
+done
+
+# ------------------------------------------------------------
+# 7. Audit doc landmarks
+# ------------------------------------------------------------
+
+AUDIT="$REPO_ROOT/Docs/v5/slice-phase-0-supabase-audit.md"
+if [ -f "$AUDIT" ]; then
+  pass "audit doc present"
+  if grep -qE '^## 5\..*Verdict:[[:space:]]+NEW_TABLES' "$AUDIT"; then
+    pass "audit verdict: NEW_TABLES"
+  else
+    fail "audit §5 heading does not start with 'Verdict: NEW_TABLES'"
+  fi
+  if grep -q 'v5_conversation_turns' "$AUDIT" && grep -q 'v5_handler_facts' "$AUDIT"; then
+    pass "audit references v5_ prefixed table names"
+  else
+    fail "audit missing v5_ prefixed references (rename not carried through?)"
+  fi
+else
+  fail "audit doc missing: $AUDIT"
+fi
+
+# ------------------------------------------------------------
+# Summary
+# ------------------------------------------------------------
+
+echo
+if [ "$EXIT" -eq 0 ]; then
+  echo "Phase 0 completion gate: PASS."
+else
+  echo "Phase 0 completion gate: FAIL. Fix the missing artefact(s) above before dispatching Tranche 2."
+fi
+
+exit "$EXIT"
