@@ -156,9 +156,42 @@ Rotation of the staging `service_role` key happens after that test passes.
 
 ---
 
-## 7. Sign-off
+## 7. Sign-off — split into pre-apply / post-apply gates
 
-Phase 0 is **complete** pending Paul's final review of this evidence pack. No outstanding Phase 0 work remains in the plan §8 list. All gates are green. Migration file is not-yet-applied, as designed.
+Phase 0 has two sequential completion states. Conflating them was ambiguous; this split makes the Tranche 2 dispatch condition operationally crisp.
+
+### 7.1 Pre-apply complete — **YES, as of commit `c763c070`**
+
+Everything that can be delivered before the migration runs against staging Supabase is in place:
+
+| Item | Status |
+|---|---|
+| Schemas package shipped at 0.5.1, vendored, typechecked | ✅ |
+| Prompt wiring (7 task IDs + operations + defaults) | ✅ |
+| Migration file + break-glass rollback companion committed | ✅ |
+| Data-responsibility + closure + introspection scripts committed | ✅ |
+| Dispatcher guard tests — 7 new in `dispatch.test.ts` | ✅ |
+| Pre-push hook extended (data-responsibility check 9) | ✅ |
+| Audit + plan + evidence + SQL-review docs published | ✅ |
+| Live introspection Run 4: both `v5_*` targets absent-OK | ✅ |
+| Closure gate `validate-phase-0-complete.sh`: PASS | ✅ |
+| CEE `staging` pushed, Render deploy healthy | ✅ |
+| UI package-lock sync → Contract Validation green | ✅ |
+
+### 7.2 Post-apply complete — **NO, pending operator actions**
+
+The migration is committed but NOT applied. Tranche 2 cannot dispatch until:
+
+| Step | Owner | Status | Output landing |
+|---|---|---|---|
+| Apply migration via Supabase dashboard (Path A) | Paul | pending | operator confirms run + timestamp |
+| Run `scripts/phase-0-post-apply-validate.ts --json` against staging with all four required env vars | CC | pending | JSON snapshot pasted into Tranche 2 evidence pack |
+| Operator runs supplementary SQL snippet (indexes + named constraints + function ACL) in dashboard | Paul | pending | dashboard output pasted into Tranche 2 evidence pack |
+| Rotate staging `service_role` key; update Render env var | Paul | pending | new key active, old key revoked |
+| Create backlog item for `public.conversation_turns` (owner Paul, non-interference rule) | Paul | pending | tracker link |
+| Write repo-state matrix at `Docs/v5/slice-phase-0-repo-state-matrix.md` | CC | pending | doc commit |
+
+**Tranche 2 dispatches only after every post-apply row above is ✅.** Conflating "pre-apply done" with "Phase 0 done" was the ambiguity this section now closes.
 
 ### Push-policy exception
 
