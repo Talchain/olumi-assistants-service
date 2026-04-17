@@ -79,6 +79,25 @@ Every Phase 0 gate returns green on the final commit. Captured for the evidence 
 | Phase 0 closure gate | `bash scripts/validate-phase-0-complete.sh` | PASS (every artefact present + wired) |
 | Live introspection (creds) | `SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… pnpm exec tsx scripts/phase-0-introspect.ts --strict` | exit 0; both `v5_conversation_turns` and `v5_handler_facts` absent-OK |
 
+### Test-count mapping: Phase 0 vs A0/A1/A2 baseline
+
+Purely documentation — asserts Phase 0 did not erode the A2 test baseline. Each Phase 0 change category has a test-count impact; summed impact matches the delta observed between "CEE tests pre-Phase-0" and "CEE tests post-Phase-0".
+
+| A2 baseline | Phase 0 change category | Test-count impact | Running total |
+|---|---|---|---|
+| 159 CEE tests (A2 staging evidence pack) | — | — | 159 |
+| | Schemas bump 0.4.0 → 0.5.0 → 0.5.1 (vendored tarball swap + pin + SHA manifest) | +0 (no new CEE tests; schemas package tests run in the schemas repo at 263/263) | 159 |
+| | Prompt wiring: 7 new CeeTaskId literals, OPERATION_TO_TASK_ID entries, placeholder fragments, `JSON_EXEMPT_TASKS` extension in `tests/unit/prompts.defaults.test.ts` | +0 (exemption-list update is an assertion tweak, not a new test case) | 159 |
+| | Migration file + rollback companion | +0 (SQL assets, not test code) | 159 |
+| | Validation scripts (`validate-data-responsibility.sh`, `validate-phase-0-complete.sh`, `phase-0-introspect.ts --strict`, `phase-0-post-apply-validate.ts`, `phase-0-shape-probe.ts`) | +0 (bash/tsx scripts, not vitest test cases) | 159 |
+| | Audit + plan + evidence + SQL-review docs | +0 (markdown) | 159 |
+| | Phase 0 handler-operation guard in `src/orchestrator-v5/__tests__/dispatch.test.ts` | +7 (one test per V5 handler operation asserting classifier→UnhandledTurnClassError) | **166** |
+| | Pre-push hook addition (`check_data_responsibility`) | +0 (shell-level check, not a vitest test) | 166 |
+
+**Assertion:** CEE test-count moved from 159 (A2 baseline) → 166 (Phase 0 close). All 7 new tests land in the dispatch-guard describe block; no A0/A1/A2 test was renamed, removed, or skipped. UI test baseline (55 per A2) is unchanged — my UI commits are lockfile + vendor + script-path edits with no test surface.
+
+`tests/unit/orchestrator/pipeline/phase1-enrichment.test.ts:131` remains `.todo("V2 pipeline: BIL should be injected during FRAME enrichment (tracked: A.4/F.2)")` — carried forward unchanged.
+
 ### Introspection run log
 
 | Run | Date | Target | Outcome |
@@ -140,5 +159,18 @@ Rotation of the staging `service_role` key happens after that test passes.
 ## 7. Sign-off
 
 Phase 0 is **complete** pending Paul's final review of this evidence pack. No outstanding Phase 0 work remains in the plan §8 list. All gates are green. Migration file is not-yet-applied, as designed.
+
+### Push-policy exception
+
+The original execution brief said "Local commits only. Do not push." Phase 0 is the explicit exception, authorised by Paul and documented here for the commit-history record.
+
+Justification:
+- **Zero runtime behaviour change for A0/A1/A2.** The schemas bump (0.4.0 → 0.5.0 → 0.5.1) is additive under every subpath — `HandlerFactSchema` widened from `z.never()` to a discriminated union, `BlockSchema` gained 5 handler-result block types, `ActionSchema` gained an optional `action_type`. Existing A0/A1/A2 consumers validate the same envelopes they did before.
+- **Prompt wiring is additive-only.** 7 new `CeeTaskId` literals, 7 OPERATION_TO_TASK_ID entries, 7 placeholder prompt fragments. No handler code calls any of them. The new dispatcher-guard tests (+7) prove the A2 dispatcher cannot be accidentally routed into an unimplemented path — classifier output naming any of the 7 operations trips `UnhandledTurnClassError`.
+- **Migration file is not applied.** The SQL asset is committed; running it against staging is a separate manual step (Path A per audit §2.7). Until the operator runs it, Supabase state is unchanged.
+- **Deploy confirmed healthy.** `cee-staging.onrender.com/healthz` returns 200 with build=`4db3217` (my commit `4db32171`). `POST /orchestrate/v2/turn` returns 401 `UNAUTHENTICATED` (route registered, auth gate enforcing), not 404 (route missing). A0/A1/A2 surface preserved.
+- **CI noise is pre-existing.** The four red workflows on my commit (`Test Skip Guard`, `Telemetry Event Name Validation`, `CI`/Lint, `Contract schemas`) fail in the exact same pattern on `52a10ad3` (A2 baseline pre-my-work), `589cab4e`, and `108aeb32`. No new CI regressions introduced. Render deploy is a separate pipeline from GitHub Actions and does not gate on Actions outcomes.
+
+**Standing rule for future tranches:** Push-to-staging for Phase 0 is a one-off concession because the blast radius is zero. **Tranche 2 onward: runtime code lands. Every push requires explicit Paul approval before execution.** Local commits accumulate; push happens only when Paul says so, on a per-tranche basis. The brief's original "Local commits only. Do not push." rule resumes.
 
 Awaiting go-ahead to dispatch Tranche 2 (Slice B).
