@@ -58,14 +58,11 @@ export interface TurnExecutorRunResult {
     commit_performed: boolean;
     failure_type: FailureTypeLiteral | null;
     wall_clock_ms: number;
-    turn_class: A2TurnClass;
+    // `null` when classifier itself failed (schema violation / timeout /
+    // abort); the actual A2TurnClass otherwise.
+    turn_class: A2TurnClass | null;
   };
 }
-
-// Until classify succeeds we don't know the turn class. Telemetry needs a
-// placeholder value so the `started` event can fire with a default. After
-// classify resolves, `completed` carries the actual class.
-const TURN_CLASS_PENDING = 'direct_answer' as const satisfies A2TurnClass;
 
 /**
  * Run a single V5 turn end-to-end. Always returns a well-formed OlumiResponse;
@@ -83,23 +80,33 @@ export async function runTurnExecutor(
   const context = buildTurnContext(payload, requestId);
   stagesCompleted.push('build_turn_context');
 
+  // A2: `turn_class` is intentionally omitted from `started`. The classifier
+  // hasn't run yet; the authoritative value lands on `completed`. Emitting a
+  // provisional value here (e.g. 'direct_answer') would skew any metric that
+  // aggregates `started` events by turn_class.
   emit(TelemetryEvents.TurnExecutorStarted, {
     request_id: requestId,
     session_id: context.session_id,
     stage: context.stage,
-    // Provisional: classifier decides the actual class. The `completed` event
-    // carries the resolved value.
-    turn_class: TURN_CLASS_PENDING,
   });
 
   const turnAbort = new AbortController();
   const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
 
   let response: OlumiResponse;
+  // A2: `llmCallsUsed` accrues AS calls happen, not at dispatch success.
+  // - Classifier success → incremented to 1 via `onClassified`.
+  // - Narrate success → full dispatch result value (2) assigned after return.
+  // - Narrate failure after successful classify → stays at 1 (classifier ran).
+  // - Classifier failure → stays at 0 (no usable LLM call completed).
   let llmCallsUsed = 0;
   let commitPerformed = false;
   let failureType: FailureTypeLiteral | null = null;
-  let resolvedTurnClass: A2TurnClass = TURN_CLASS_PENDING;
+  // A2: nullable until classifier resolves the actual turn class. `completed`
+  // telemetry carries `null` in the rare case that classification itself failed
+  // (schema violation / timeout / abort). Downstream consumers can distinguish
+  // "class unknown" from a specific class cleanly.
+  let resolvedTurnClass: A2TurnClass | null = null;
 
   try {
     let dispatchResult: DispatchResult;
@@ -107,9 +114,11 @@ export async function runTurnExecutor(
       dispatchResult = await dispatch(context, {
         signal: turnAbort.signal,
         // A2: capture classifier outcome even if narrate later throws — so
-        // `turn_executor.completed` telemetry reports the true resolved class.
+        // `turn_executor.completed` telemetry reports the true resolved class
+        // and `llm_calls_used` reflects that the classifier call DID happen.
         onClassified: (cls) => {
           resolvedTurnClass = cls;
+          llmCallsUsed = 1;
           stagesCompleted.push('classify');
         },
       });
@@ -128,9 +137,12 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
       if (error instanceof NarrateTimeoutError) {
+        // Preserve phase attribution (correction): classify vs narrate.
+        // Wire code is shared (LLM_TIMEOUT → UPSTREAM_TIMEOUT); only the
+        // failure-envelope `details.phase` and telemetry differ.
         failureType = INTERNAL_TO_WIRE.LLM_TIMEOUT;
         response = buildFailureResponse('LLM_TIMEOUT', context.stage, {
-          phase: 'narrate',
+          phase: error.phase,
         });
         return finalizeRun();
       }

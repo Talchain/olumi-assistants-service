@@ -18,6 +18,34 @@ import type { FailureTypeLiteral } from '@talchain/schemas/boundary';
 // A1 implemented `direct_answer` only. A2 adds `clarify`.
 export type A2TurnClass = 'direct_answer' | 'clarify';
 
+export const A2_TURN_CLASSES = ['direct_answer', 'clarify'] as const;
+
+export function isA2TurnClass(value: unknown): value is A2TurnClass {
+  return typeof value === 'string' && (A2_TURN_CLASSES as readonly string[]).includes(value);
+}
+
+/**
+ * Raised when the classifier returns well-formed output whose `turn_class`
+ * value is outside the A2TurnClass union (e.g. `{"turn_class":"propose"}`).
+ * Per Paul's correction 3: this is an internal invariant breach (P0), NOT a
+ * recoverable schema violation. TurnExecutor maps it to UNHANDLED →
+ * INTERNAL_ERROR.
+ *
+ * Contrast with `ClassifierSchemaViolationError` in classify.ts, which is
+ * raised for malformed JSON / missing field / wrong value type — those are
+ * recoverable LLM faults mapped to LLM_UNAVAILABLE.
+ *
+ * Defined here (not in dispatch.ts) so classify.ts can throw it directly
+ * without a circular import.
+ */
+export class UnhandledTurnClassError extends Error {
+  readonly reason = 'unhandled_turn_class' as const;
+  constructor(public readonly attempted: string) {
+    super(`Unhandled turn class for A2: "${attempted}". A2 implements direct_answer + clarify only.`);
+    this.name = 'UnhandledTurnClassError';
+  }
+}
+
 // Dispatch result for A2. The outcome is always one of:
 //  - the adapter's narrate-mode output text (success)
 //  - an internal invariant violation (every unknown turn class from a valid

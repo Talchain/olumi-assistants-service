@@ -22,7 +22,6 @@
  */
 
 import type { TurnContext } from '@talchain/schemas/orchestrator';
-import type { TurnClassType } from '@talchain/schemas/boundary';
 
 import {
   invokeNarrate,
@@ -32,21 +31,18 @@ import { getSystemPrompt } from '../adapters/llm/prompt-loader.js';
 import { sanitiseNarrateOutput, type SanitiseResult } from './sanitise.js';
 import { classifyTurn } from './classify.js';
 import { dispatchClarify } from './clarify.js';
-import type { A2TurnClass } from './types.js';
+import { type A2TurnClass, UnhandledTurnClassError } from './types.js';
+
+// Re-export UnhandledTurnClassError at the dispatch seam for callers that
+// previously imported it here. Canonical definition is in types.ts so
+// classify.ts can throw it without a circular import.
+export { UnhandledTurnClassError } from './types.js';
 
 export interface DispatchResult {
   turn_class: A2TurnClass;
   sanitised: SanitiseResult;
   llm_calls_used: number; // 2 on success (classify + narrate)
   raw_text_length: number;
-}
-
-export class UnhandledTurnClassError extends Error {
-  readonly reason: 'unhandled_turn_class' = 'unhandled_turn_class';
-  constructor(attempted: string) {
-    super(`Unhandled turn class for A2: "${attempted}". A2 implements direct_answer + clarify only.`);
-    this.name = 'UnhandledTurnClassError';
-  }
 }
 
 export interface DispatchOpts {
@@ -101,10 +97,11 @@ export async function dispatch(
     };
   }
 
-  // Defensive: classifier schema narrows to the A2TurnClass union, so this
-  // branch is type-unreachable. Kept as a runtime tripwire in case the schema
-  // is ever widened without updating this switch.
-  throw new UnhandledTurnClassError(turn_class as unknown as TurnClassType);
+  // Defensive: `classifyTurn` narrows to the A2TurnClass union (it throws
+  // UnhandledTurnClassError inside classify.ts for unsupported values), so
+  // this branch is type-unreachable. Kept as a runtime tripwire in case the
+  // classifier narrowing is weakened without updating this switch.
+  throw new UnhandledTurnClassError(turn_class as unknown as string);
 }
 
 interface HandlerResult {

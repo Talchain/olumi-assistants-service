@@ -17,11 +17,20 @@ import { UpstreamTimeoutError } from '../adapters/llm/errors.js';
 
 // Internal failure signals the wrapper raises. TurnExecutor maps each to a
 // FailureType before egress.
+//
+// `phase` distinguishes classifier-side timeouts from narrate-side timeouts
+// for telemetry + debug attribution (A2 correction). Wire-level mapping is
+// identical for both (LLM_TIMEOUT → UPSTREAM_TIMEOUT); only the failure
+// envelope's `details.phase` differs, which propagates to observability.
+export type LlmPhase = 'classify' | 'narrate';
+
 export class NarrateTimeoutError extends Error {
   readonly kind = 'LLM_TIMEOUT';
-  constructor(message: string) {
+  readonly phase: LlmPhase;
+  constructor(message: string, phase: LlmPhase = 'narrate') {
     super(message);
     this.name = 'NarrateTimeoutError';
+    this.phase = phase;
   }
 }
 
@@ -84,10 +93,10 @@ export async function invokeNarrate(
   } catch (error) {
     // Map provider-side timeouts + externally triggered aborts to the A1 class.
     if (error instanceof UpstreamTimeoutError) {
-      throw new NarrateTimeoutError(`Upstream timeout during narrate: ${error.message}`);
+      throw new NarrateTimeoutError(`Upstream timeout during narrate: ${error.message}`, 'narrate');
     }
     if (isAbortLikeError(error)) {
-      throw new NarrateTimeoutError('Narrate call aborted by caller signal');
+      throw new NarrateTimeoutError('Narrate call aborted by caller signal', 'narrate');
     }
     throw error;
   }

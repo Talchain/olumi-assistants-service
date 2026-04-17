@@ -68,6 +68,7 @@ vi.mock('../../adapters/llm/prompt-loader.js', () => ({
 
 const { classifyTurn, ClassifierSchemaViolationError } = await import('../classify.js');
 const { NarrateTimeoutError } = await import('../llm-adapter.js');
+const { UnhandledTurnClassError } = await import('../types.js');
 
 const BASE_INPUT = {
   user_message: 'help me decide',
@@ -102,7 +103,12 @@ describe('classifyTurn', () => {
     });
   });
 
-  describe('schema violations → ClassifierSchemaViolationError', () => {
+  /**
+   * STRUCTURAL failures → ClassifierSchemaViolationError → recoverable LLM
+   * fault. These cases cover malformed output where the LLM did not produce
+   * a JSON object with a string `turn_class` field.
+   */
+  describe('structural failures → ClassifierSchemaViolationError', () => {
     it('empty output', async () => {
       classifierMock.content = '';
       await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
@@ -117,15 +123,15 @@ describe('classifyTurn', () => {
       );
     });
 
-    it('invalid union value', async () => {
-      classifierMock.content = '{"turn_class":"propose"}';
+    it('missing turn_class key', async () => {
+      classifierMock.content = '{"other":"value"}';
       await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
         ClassifierSchemaViolationError,
       );
     });
 
-    it('missing turn_class key', async () => {
-      classifierMock.content = '{"other":"value"}';
+    it('turn_class is not a string (wrong type)', async () => {
+      classifierMock.content = '{"turn_class":42}';
       await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
         ClassifierSchemaViolationError,
       );
@@ -139,15 +145,64 @@ describe('classifyTurn', () => {
     });
   });
 
-  describe('timeouts → NarrateTimeoutError', () => {
+  /**
+   * UNSUPPORTED CLASS → UnhandledTurnClassError → P0 invariant breach.
+   * Well-formed JSON with a string `turn_class` whose value is not in the
+   * A2TurnClass union. Per Paul's correction 3, this is NOT a recoverable
+   * schema violation. Regression guard for the P0 tripwire.
+   */
+  describe('unsupported class → UnhandledTurnClassError (P0)', () => {
+    it('rejects a classifier-returned unknown class (e.g. "propose")', async () => {
+      classifierMock.content = '{"turn_class":"propose"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(UnhandledTurnClassError);
+    });
+
+    it('rejects a wire-enum value that is not in A2TurnClass (e.g. "frame")', async () => {
+      classifierMock.content = '{"turn_class":"frame"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(UnhandledTurnClassError);
+    });
+
+    it('rejects an arbitrary string (e.g. "nonsense-value")', async () => {
+      classifierMock.content = '{"turn_class":"nonsense-value"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(UnhandledTurnClassError);
+    });
+
+    it('error carries the rejected value in `attempted` for debug', async () => {
+      classifierMock.content = '{"turn_class":"propose"}';
+      let caught: unknown;
+      try {
+        await classifyTurn(BASE_INPUT);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UnhandledTurnClassError);
+      expect((caught as InstanceType<typeof UnhandledTurnClassError>).attempted).toBe('propose');
+    });
+  });
+
+  describe('timeouts → NarrateTimeoutError with phase="classify"', () => {
     it('maps upstream timeout', async () => {
       classifierMock.throws = 'upstream_timeout';
-      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(NarrateTimeoutError);
+      let caught: unknown;
+      try {
+        await classifyTurn(BASE_INPUT);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(NarrateTimeoutError);
+      expect((caught as InstanceType<typeof NarrateTimeoutError>).phase).toBe('classify');
     });
 
     it('maps caller abort', async () => {
       classifierMock.throws = 'abort';
-      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(NarrateTimeoutError);
+      let caught: unknown;
+      try {
+        await classifyTurn(BASE_INPUT);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(NarrateTimeoutError);
+      expect((caught as InstanceType<typeof NarrateTimeoutError>).phase).toBe('classify');
     });
   });
 

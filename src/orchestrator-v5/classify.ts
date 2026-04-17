@@ -6,18 +6,23 @@
  *   { "turn_class": "direct_answer" }  OR  { "turn_class": "clarify" }
  *
  * Uses `responseFormat: 'json_object'` on the adapter seam. We parse the
- * returned content and Zod-validate against a narrow schema. A failed parse
- * or an out-of-union `turn_class` value is treated distinctly:
+ * returned content, Zod-validate its structural shape, then check the
+ * `turn_class` value against the A2TurnClass union. Three distinct failure
+ * classes (Paul's correction 3):
  *
- *   - Invalid JSON or invalid union value → `ClassifierSchemaViolationError`
- *     → TurnExecutor maps to LLM_SCHEMA_VIOLATION → LLM_UNAVAILABLE wire code.
- *     Per Paul's correction 3: classifier failing to produce valid structured
- *     output is a recoverable LLM fault (mirrors narrate-mode failures), not
- *     an internal invariant breach.
+ *   - STRUCTURAL failure (invalid JSON, missing key, wrong type, extra keys)
+ *     → `ClassifierSchemaViolationError` → LLM_SCHEMA_VIOLATION →
+ *     LLM_UNAVAILABLE wire code. Recoverable LLM fault, user retries.
  *
- *   - Upstream timeout or caller-abort → `NarrateTimeoutError` (same class
- *     narrate uses, by design — they share the mapping LLM_TIMEOUT →
- *     UPSTREAM_TIMEOUT).
+ *   - UNSUPPORTED CLASS (well-formed JSON whose `turn_class` is not in the
+ *     A2TurnClass union, e.g. `{"turn_class":"propose"}`) →
+ *     `UnhandledTurnClassError` → UNHANDLED → INTERNAL_ERROR wire code.
+ *     P0 invariant breach (contract says the LLM cannot return this).
+ *
+ *   - UPSTREAM TIMEOUT / caller abort → `NarrateTimeoutError` with
+ *     `phase: 'classify'` — shared wire mapping with narrate (LLM_TIMEOUT →
+ *     UPSTREAM_TIMEOUT), phase preserved for debug attribution in telemetry
+ *     and failure-envelope `details`.
  *
  * Budget semantics (Paul's correction 4): classifier and narrate each get a
  * fresh `LLM_BUDGET_NARRATE_MS` window. Outer `TURN_BUDGET_MS` is the shared
@@ -31,7 +36,7 @@ import { getAdapter } from '../adapters/llm/router.js';
 import { UpstreamTimeoutError } from '../adapters/llm/errors.js';
 import { getSystemPrompt } from '../adapters/llm/prompt-loader.js';
 import { NarrateTimeoutError } from './llm-adapter.js';
-import type { A2TurnClass } from './types.js';
+import { type A2TurnClass, isA2TurnClass, UnhandledTurnClassError } from './types.js';
 
 export class ClassifierSchemaViolationError extends Error {
   readonly kind = 'LLM_SCHEMA_VIOLATION';
@@ -41,9 +46,13 @@ export class ClassifierSchemaViolationError extends Error {
   }
 }
 
+// Structural schema: accepts ANY non-empty string for turn_class. The
+// A2TurnClass union check is applied separately after Zod so we can
+// distinguish "malformed output" (LLM_SCHEMA_VIOLATION) from "well-formed
+// output but unsupported class value" (UnhandledTurnClassError → P0).
 const ClassifierOutputSchema = z
   .object({
-    turn_class: z.enum(['direct_answer', 'clarify']),
+    turn_class: z.string().min(1),
   })
   .strict();
 
@@ -69,9 +78,11 @@ export interface ClassifyTurnResult {
  * Classify a user turn into `direct_answer` or `clarify`.
  *
  * Failure modes:
- *   - Upstream timeout / caller abort → NarrateTimeoutError
- *   - Empty content or invalid JSON → ClassifierSchemaViolationError
- *   - JSON parses but `turn_class` not in union → ClassifierSchemaViolationError
+ *   - Upstream timeout / caller abort → NarrateTimeoutError (phase='classify')
+ *   - Empty content, invalid JSON, missing key, wrong type, extra keys →
+ *     ClassifierSchemaViolationError (recoverable LLM fault)
+ *   - Well-formed JSON whose `turn_class` is not in A2TurnClass →
+ *     UnhandledTurnClassError (P0 invariant breach; see types.ts)
  *
  * Any other thrown error propagates — TurnExecutor catches at the dispatch
  * boundary and maps to UNHANDLED.
@@ -101,10 +112,10 @@ export async function classifyTurn(
     content = (result.content ?? '').trim();
   } catch (error) {
     if (error instanceof UpstreamTimeoutError) {
-      throw new NarrateTimeoutError(`Upstream timeout during classify: ${error.message}`);
+      throw new NarrateTimeoutError(`Upstream timeout during classify: ${error.message}`, 'classify');
     }
     if (isAbortLikeError(error)) {
-      throw new NarrateTimeoutError('Classify call aborted by caller signal');
+      throw new NarrateTimeoutError('Classify call aborted by caller signal', 'classify');
     }
     throw error;
   }
@@ -125,8 +136,15 @@ export async function classifyTurn(
   const validated = ClassifierOutputSchema.safeParse(parsed);
   if (!validated.success) {
     throw new ClassifierSchemaViolationError(
-      `Classifier output failed schema validation: ${validated.error.message}`,
+      `Classifier output failed structural validation: ${validated.error.message}`,
     );
+  }
+
+  // Structural OK — now check the value against the A2TurnClass union.
+  // Paul's correction 3: an unsupported class from valid output is a P0
+  // invariant breach (UNHANDLED), NOT a recoverable schema violation.
+  if (!isA2TurnClass(validated.data.turn_class)) {
+    throw new UnhandledTurnClassError(validated.data.turn_class);
   }
 
   return { turn_class: validated.data.turn_class };

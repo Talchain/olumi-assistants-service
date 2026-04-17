@@ -256,8 +256,8 @@ describe('runTurnExecutor', () => {
     });
   });
 
-  describe('LLM_TIMEOUT', () => {
-    it('maps narrate upstream timeout to UPSTREAM_TIMEOUT wire code', async () => {
+  describe('LLM_TIMEOUT (A2: phase attribution preserved)', () => {
+    it('maps narrate upstream timeout to UPSTREAM_TIMEOUT with phase="narrate"', async () => {
       phaseState.narrate = { kind: 'upstream_timeout' };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       OlumiResponseSchema.parse(response);
@@ -266,25 +266,47 @@ describe('runTurnExecutor', () => {
       expect(block.type).toBe('error');
       if (block.type === 'error') {
         expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
+        // Phase attribution: narrate timed out after a successful classify.
+        expect(block.details).toMatchObject({ phase: 'narrate' });
       }
       expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
       expect(telemetry.commit_performed).toBe(false);
+      // P1a: classifier ran successfully before narrate threw → llm_calls_used=1.
+      expect(telemetry.llm_calls_used).toBe(1);
+      // turn_class resolved by the classifier (direct_answer by default).
+      expect(telemetry.turn_class).toBe('direct_answer');
       expectExactlyOneResponseInvariant();
     });
 
-    it('maps classify upstream timeout to UPSTREAM_TIMEOUT wire code', async () => {
+    it('maps classify upstream timeout to UPSTREAM_TIMEOUT with phase="classify"', async () => {
       phaseState.classify = { kind: 'upstream_timeout' };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
       OlumiResponseSchema.parse(response);
       const block = response.blocks[0]!;
+      expect(block.type).toBe('error');
       if (block.type === 'error') {
         expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
+        // Phase attribution: classifier timed out before it could return.
+        expect(block.details).toMatchObject({ phase: 'classify' });
       }
       expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
+      // P1a: classifier never completed → llm_calls_used=0.
+      expect(telemetry.llm_calls_used).toBe(0);
+      // turn_class unresolved because the classifier never succeeded.
+      expect(telemetry.turn_class).toBeNull();
+    });
+
+    it('clarify branch narrate timeout: turn_class=clarify + llm_calls_used=1', async () => {
+      phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
+      phaseState.narrate = { kind: 'upstream_timeout' };
+      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
+      expect(telemetry.turn_class).toBe('clarify');
+      expect(telemetry.llm_calls_used).toBe(1);
     });
   });
 
-  describe('LLM_SCHEMA_VIOLATION (A2)', () => {
+  describe('LLM_SCHEMA_VIOLATION (A2: malformed classifier output only)', () => {
     it('classifier returns non-JSON → LLM_UNAVAILABLE envelope', async () => {
       phaseState.classify = { kind: 'success', output: 'not json at all' };
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
@@ -297,13 +319,51 @@ describe('runTurnExecutor', () => {
       }
       expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
       expect(telemetry.commit_performed).toBe(false);
+      // Classifier call completed with output, but the output was unusable.
+      // A1 parity: a call that returned no usable result does not count.
+      expect(telemetry.llm_calls_used).toBe(0);
+      expect(telemetry.turn_class).toBeNull();
+      expectExactlyOneResponseInvariant();
+    });
+  });
+
+  /**
+   * Paul's correction 3 (P0): well-formed classifier output whose `turn_class`
+   * is not in the A2TurnClass union is an invariant breach, mapped to
+   * UNHANDLED → INTERNAL_ERROR — NOT to the recoverable LLM_UNAVAILABLE path.
+   * Regression guard at the turn-executor seam.
+   */
+  describe('UNHANDLED tripwire (A2: valid JSON but unsupported class)', () => {
+    it('classifier returns out-of-union value → INTERNAL_ERROR envelope (P0)', async () => {
+      phaseState.classify = { kind: 'success', output: '{"turn_class":"propose"}' };
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      OlumiResponseSchema.parse(response);
+      const block = response.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        // P0 mapping: UNHANDLED → INTERNAL_ERROR (NOT the LLM_UNAVAILABLE
+        // recoverable path). Drift-prevention: the earlier implementation
+        // conflated this with LLM_SCHEMA_VIOLATION via Zod's enum narrowing.
+        expect(block.error_code).toBe('INTERNAL_ERROR');
+        expect(block.details).toMatchObject({ reason: 'unhandled_turn_class' });
+      }
+      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+      expect(telemetry.commit_performed).toBe(false);
+      expect(telemetry.llm_calls_used).toBe(0);
+      // turn_class unresolved: the classifier DID produce output, but the
+      // value it picked is outside A2TurnClass — so we have no resolved class.
+      expect(telemetry.turn_class).toBeNull();
       expectExactlyOneResponseInvariant();
     });
 
-    it('classifier returns out-of-union value → LLM_UNAVAILABLE envelope', async () => {
-      phaseState.classify = { kind: 'success', output: '{"turn_class":"propose"}' };
-      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+    it('classifier returns wire-enum value not in A2 (e.g. "frame") → INTERNAL_ERROR (P0)', async () => {
+      phaseState.classify = { kind: 'success', output: '{"turn_class":"frame"}' };
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      const block = response.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('INTERNAL_ERROR');
+      }
+      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
     });
   });
 
@@ -406,6 +466,12 @@ describe('runTurnExecutor', () => {
         name: 'classifier_schema_violation',
         setup: () => {
           phaseState.classify = { kind: 'success', output: 'not json' };
+        },
+      },
+      {
+        name: 'classifier_unsupported_class_P0',
+        setup: () => {
+          phaseState.classify = { kind: 'success', output: '{"turn_class":"propose"}' };
         },
       },
     ];

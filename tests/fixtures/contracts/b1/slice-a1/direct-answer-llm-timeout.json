@@ -34,10 +34,12 @@
       "turn_executor_started_count": 1,
       "turn_executor_completed_count": 1,
       "response_emitted": true,
-      "llm_calls_used": 0,
+      "llm_calls_used": 1,
       "commit_performed": false,
       "failure_type": "UPSTREAM_TIMEOUT",
-      "note_a2_update": "A2 mock routes the timeout into the narrate phase after successful classify; replay-level assertion on llm_calls_used is not made in the integration test."
+      "turn_class": "direct_answer",
+      "details_phase": "narrate",
+      "note_a2_update": "A2: classifier succeeds (llm_calls_used=1), narrate throws. Failure-envelope details.phase='narrate' distinguishes this from a classifier-phase timeout (where llm_calls_used=0, turn_class=null)."
     }
   }
 }

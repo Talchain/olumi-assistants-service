@@ -35,9 +35,11 @@
       "turn_executor_started_count": 1,
       "turn_executor_completed_count": 1,
       "response_emitted": true,
+      "llm_calls_used": 1,
       "commit_performed": false,
       "failure_type": "UPSTREAM_TIMEOUT",
-      "turn_class": "clarify"
+      "turn_class": "clarify",
+      "details_phase": "narrate"
     }
   }
 }

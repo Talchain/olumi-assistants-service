@@ -137,24 +137,42 @@ describe('dispatch', () => {
       );
     });
 
-    it('invalid union value → ClassifierSchemaViolationError', async () => {
+    /**
+     * Paul's correction 3 (P0): well-formed JSON whose `turn_class` is not in
+     * the A2TurnClass union is an invariant breach (UNHANDLED), NOT a
+     * recoverable schema violation. Regression guard — prevents drift back
+     * to the earlier conflation.
+     */
+    it('valid JSON with unsupported class → UnhandledTurnClassError (P0)', async () => {
       phaseMocks.classify.content = '{"turn_class":"propose"}';
-      await expect(dispatch(BASE_CONTEXT)).rejects.toBeInstanceOf(
-        ClassifierSchemaViolationError,
-      );
+      await expect(dispatch(BASE_CONTEXT)).rejects.toBeInstanceOf(UnhandledTurnClassError);
     });
 
-    it('upstream timeout on classify → NarrateTimeoutError', async () => {
+    it('upstream timeout on classify → NarrateTimeoutError with phase="classify"', async () => {
       phaseMocks.classify.throws = 'upstream_timeout';
-      await expect(dispatch(BASE_CONTEXT)).rejects.toBeInstanceOf(NarrateTimeoutError);
+      let caught: unknown;
+      try {
+        await dispatch(BASE_CONTEXT);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(NarrateTimeoutError);
+      expect((caught as InstanceType<typeof NarrateTimeoutError>).phase).toBe('classify');
     });
   });
 
   describe('narrate failures after successful classify', () => {
-    it('upstream timeout on narrate → NarrateTimeoutError', async () => {
+    it('upstream timeout on narrate → NarrateTimeoutError with phase="narrate"', async () => {
       phaseMocks.classify.content = '{"turn_class":"direct_answer"}';
       phaseMocks.narrate.throws = 'upstream_timeout';
-      await expect(dispatch(BASE_CONTEXT)).rejects.toBeInstanceOf(NarrateTimeoutError);
+      let caught: unknown;
+      try {
+        await dispatch(BASE_CONTEXT);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(NarrateTimeoutError);
+      expect((caught as InstanceType<typeof NarrateTimeoutError>).phase).toBe('narrate');
     });
 
     it('empty narrate output → NarrateEmptyOutputError', async () => {
