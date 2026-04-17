@@ -187,6 +187,38 @@ check_data_responsibility() {
 }
 
 # ---------------------------------------------------------------------------
+# 10. Phase 0 closure gate — every Phase 0 artefact present + wired.
+#     Guards against accidental deletion of the task IDs, migration file,
+#     rollback companion, validation scripts, or audit verdict/rename refs.
+#     Becomes near-noise-free once Tranche 2+ lands (always passes on a
+#     well-formed tree), but catches drift if anyone touches the artefacts.
+# ---------------------------------------------------------------------------
+check_phase_0_complete() {
+  if bash scripts/validate-phase-0-complete.sh > /dev/null 2>&1; then
+    print_check "phase-0-complete" "OK"
+  else
+    print_check "phase-0-complete" "FAIL"
+    bash scripts/validate-phase-0-complete.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 11. Docs consistency guard — regression tripwire against specific stale
+#     patterns the external reviewer flagged + we fixed (grant-model
+#     contradictions, removed p_user_id parameter, pin/tarball drift).
+# ---------------------------------------------------------------------------
+check_docs_consistency() {
+  if bash scripts/validate-docs-consistency.sh > /dev/null 2>&1; then
+    print_check "docs-consistency" "OK"
+  else
+    print_check "docs-consistency" "FAIL"
+    bash scripts/validate-docs-consistency.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
 echo ""
@@ -202,6 +234,8 @@ check_dependency_audit
 check_tarball_sha
 check_transport_invariants
 check_data_responsibility
+check_phase_0_complete
+check_docs_consistency
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
