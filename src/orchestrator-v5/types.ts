@@ -94,11 +94,18 @@ export const INTERNAL_TO_WIRE: Record<InternalFailure, FailureTypeLiteral> = {
 // Exactly-one-response invariant: every `started` MUST have a matching
 // `completed` with `response_emitted=true`. TurnExecutor's top-level
 // try/finally enforces this.
+//
+// A2 notes on `turn_class`:
+// - `started` event OMITS `turn_class` entirely (classifier hasn't decided
+//   yet; emitting a provisional value skews aggregations).
+// - `completed` event emits `turn_class: A2TurnClass | null`. Null when the
+//   classifier itself failed (schema violation, out-of-union value, timeout,
+//   or abort) before it could produce a resolved class.
 export interface TurnExecutorTelemetry {
   request_id: string;
   session_id: string;
   stage: string;
-  turn_class: A2TurnClass;
+  turn_class: A2TurnClass | null;
   stages_completed: string[];
   response_emitted: boolean;
   llm_calls_used: number;

@@ -47,7 +47,7 @@ import {
 import { commitDirectAnswer } from './commit.js';
 import { buildTurnContext } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
-import { INTERNAL_TO_WIRE, type InternalFailure, type A2TurnClass } from './types.js';
+import { INTERNAL_TO_WIRE, type A2TurnClass } from './types.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;

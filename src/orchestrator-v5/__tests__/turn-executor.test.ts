@@ -368,7 +368,7 @@ describe('runTurnExecutor', () => {
   });
 
   describe("Paul's constraint 7 — BUDGET_EXCEEDED wins over LLM_TIMEOUT", () => {
-    it('when outer budget aborts during a slow LLM call, classifies as BUDGET_EXCEEDED', async () => {
+    it('outer budget aborts during slow classifier → BUDGET_EXCEEDED, llm_calls_used=0, turn_class=null', async () => {
       process.env.TURN_BUDGET_MS = '10';
       process.env.LLM_BUDGET_NARRATE_MS = '60000';
       phaseState.classify = {
@@ -385,6 +385,50 @@ describe('runTurnExecutor', () => {
       }
       expect(telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
       expect(telemetry.commit_performed).toBe(false);
+      // Classifier was aborted mid-call → no usable output produced.
+      expect(telemetry.llm_calls_used).toBe(0);
+      expect(telemetry.turn_class).toBeNull();
+      expectExactlyOneResponseInvariant();
+    });
+
+    it('outer budget aborts during narrate (after successful classify) → BUDGET_EXCEEDED, llm_calls_used=1, turn_class resolved', async () => {
+      process.env.TURN_BUDGET_MS = '30';
+      process.env.LLM_BUDGET_NARRATE_MS = '60000';
+      // Classifier returns quickly with clarify; narrate delays past the
+      // outer budget so the wall-clock abort fires during narrate.
+      phaseState.classify = {
+        kind: 'success',
+        output: '{"turn_class":"clarify"}',
+        delayMs: 0,
+      };
+      phaseState.narrate = {
+        kind: 'success',
+        output: 'never-reached',
+        delayMs: 200,
+      };
+      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      expect(telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
+      // Classifier call completed before the abort → counts.
+      expect(telemetry.llm_calls_used).toBe(1);
+      // turn_class resolved by the successful classify.
+      expect(telemetry.turn_class).toBe('clarify');
+      expectExactlyOneResponseInvariant();
+    });
+  });
+
+  describe('classifier generic error (A2)', () => {
+    it('non-typed error during classify → UNHANDLED/INTERNAL_ERROR envelope', async () => {
+      phaseState.classify = { kind: 'throw' };
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      OlumiResponseSchema.parse(response);
+      const block = response.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('INTERNAL_ERROR');
+      }
+      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+      expect(telemetry.llm_calls_used).toBe(0);
+      expect(telemetry.turn_class).toBeNull();
       expectExactlyOneResponseInvariant();
     });
   });

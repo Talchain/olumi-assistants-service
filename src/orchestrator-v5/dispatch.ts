@@ -47,24 +47,31 @@ export interface DispatchResult {
 
 export interface DispatchOpts {
   signal?: AbortSignal;
+  /**
+   * Fires once the classifier resolves the turn class, before the handler
+   * (direct_answer inline / clarify delegated) is invoked. Lets TurnExecutor
+   * record the resolved class and increment `llm_calls_used` to 1 so that
+   * failure-path telemetry is correct even when the narrate handler later
+   * throws.
+   */
+  onClassified?: (turnClass: A2TurnClass) => void;
 }
 
 /**
  * Classify the turn, then dispatch to the matching handler. Returns a single
  * uniform DispatchResult regardless of branch taken. Throws:
- *   - NarrateTimeoutError          (upstream timeout on classify OR narrate)
- *   - ClassifierSchemaViolationError (classifier returned unparseable output)
+ *   - NarrateTimeoutError          (upstream timeout on classify OR narrate;
+ *                                   carries `phase: 'classify' | 'narrate'`)
+ *   - ClassifierSchemaViolationError (malformed classifier output: invalid
+ *                                   JSON, missing key, wrong type, extras)
+ *   - UnhandledTurnClassError      (well-formed classifier output whose
+ *                                   turn_class is outside A2TurnClass — P0)
  *   - NarrateEmptyOutputError      (narrate returned nothing)
- *   - UnhandledTurnClassError      (classifier returned an out-of-union class)
  *   - any other Error              → TurnExecutor maps to UNHANDLED
- *
- * Preserves the classified turn_class on post-classify errors via the
- * `onClassified` callback so TurnExecutor telemetry can report the resolved
- * class even when the narrate handler throws.
  */
 export async function dispatch(
   context: TurnContext,
-  opts?: DispatchOpts & { onClassified?: (turnClass: A2TurnClass) => void },
+  opts?: DispatchOpts,
 ): Promise<DispatchResult> {
   const userMessage = findLatestUserMessage(context);
 
