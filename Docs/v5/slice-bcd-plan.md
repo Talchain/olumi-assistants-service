@@ -10,7 +10,8 @@ The value delivered is the **session + handler spine** that unblocks the E-serie
 
 - **Branch:** `staging`. A0/A1/A2 landed; most recent A2 commit `52a10ad3`.
 - **CEE `src/orchestrator-v5/`:** 12 files + 9 tests. No `tools/`, `session/`, or `session-cache/` yet.
-- **Schemas:** `@talchain/schemas@0.4.0` vendored (SHA `16cc078476…`). `HandlerFactSchema = z.never()`. `OlumiResponseSchema` has 6 required fields. 195/195 tests green. `V5ActionTypeSchema` and all handler block schemas do not exist yet.
+- **Schemas (at plan-writing time, 2026-04-17):** `@talchain/schemas@0.4.0` vendored (SHA `16cc078476…`). `HandlerFactSchema = z.never()`. `OlumiResponseSchema` has 6 required fields. 195/195 tests green. `V5ActionTypeSchema` and all handler block schemas do not exist yet.
+  - **Post-landing (2026-04-17):** baseline bump to `0.5.0` shipped with additive `/orchestrator` + `/boundary` contracts (HandlerFact union, session types, per-handler arg/result, 5 new block types, DecisionContext placeholder, V5ActionType alias). 0.5.1 patch added defensive tightening (biconditional refinement on SessionTurn/SessionCacheEntry, GraphPatchBlock operation narrowing, AddConstraint cross-field superRefine). Current vendored SHA: `bae85545…`. 263/263 tests green.
 - **Supabase:** Single migration `supabase/migrations/20260226010000_scenario_schema_v2_0_1_hardening.sql`. Existing tables: `scenarios` (with JSONB `events` column — audit must resolve reuse/shadow/replace, see §Tranche 1), `shared_briefs`, `cee_prompts`, `cee_prompt_versions`, `cee_prompt_observations`. RLS on `auth.uid()`. No `conversation_turn` or `handler_fact` tables.
 - **V4 action_type source-of-truth** in `src/orchestrator/deterministic/llm-response-schema.ts` and `src/orchestrator/deterministic/actions/`. Seven V5-relevant names verbatim: `run_analysis`, `set_factor_value`, `add_constraint`, `adjust_edge_strength`, `explain_result`, `compare_options`, `what_would_flip`.
 - **Fixtures:** `tests/fixtures/contracts/b1/slice-a1/` + `.../slice-a2/`. No b/c/d fixtures.
@@ -21,7 +22,7 @@ The value delivered is the **session + handler spine** that unblocks the E-serie
 
 | Tranche | Scope | Owner | Hard-stop artefact | DoD |
 |---|---|---|---|---|
-| **1 — Phase 0** | Supabase audit (with REUSE/EXTEND/NEW_TABLES verdict), schemas 0.4.0→0.5.0, action-type mapping, task_id literals, tarball+vendoring | Single agent | `Docs/v5/slice-phase-0-supabase-audit.md` + mapping table + addendum | Contracts locked, audit concludes with verdict + migration SQL |
+| **1 — Phase 0** | Supabase audit (with REUSE/EXTEND/NEW_TABLES verdict), schemas 0.4.0 → 0.5.0 → 0.5.1 (defensive patch), action-type mapping, task_id literals, tarball+vendoring | Single agent | `Docs/v5/slice-phase-0-supabase-audit.md` + mapping table + addendum | Contracts locked, audit concludes with verdict + migration SQL |
 | **2 — Slice B** | SessionStore (Supabase write-through + LRU), invalidation, TurnContext/commit wiring, migration | Single agent | `Docs/v5/slice-b-implementation.md` + `slice-b-evidence-pack.md` | Session state survives restart; invalidation fires on correct scope |
 | **3a — Slice C1** | Handler registry + interface, dispatcher `handler` branch, classifier routing extension, handler failure types, handler budget. **No run_analysis yet.** | Single agent | `Docs/v5/slice-c1-implementation.md` + `slice-c1-evidence-pack.md` | Handler spine operational; zero handlers registered; dispatch routes but nothing executes yet |
 | **3b — Slice C2** | `run_analysis` handler E2E: PLoT call, enrichment threading, persistence via B | Single agent | `Docs/v5/slice-c2-implementation.md` + `slice-c2-evidence-pack.md` | Analysis runs E2E; PLoT enrichment threads with specific field values; next turn sees current (not stale) analysis state |
@@ -32,7 +33,7 @@ Splitting C into C1+C2 reduces C2 blast radius: the spine ships behind an empty 
 ## Execution flow
 
 1. **Plan approved → commit `Docs/v5/slice-bcd-plan.md` as standalone commit** (revision 13). No Phase 0 code bundled.
-2. **Tranche 1 (Phase 0).** Session preamble, `conversation_search` for prior Supabase work, enumerate tables via repo tooling, **reach explicit REUSE/EXTEND/NEW_TABLES verdict** + proposed migration SQL in audit doc (revision 9). Resolve `scenarios.events` JSONB → reuse/shadow/replace verdict (revision 11). Then `@talchain/schemas@0.5.0` additive bump → tarball+SHA → vendored into CEE + UI → typecheck clean. Commit. Stop.
+2. **Tranche 1 (Phase 0).** Session preamble, `conversation_search` for prior Supabase work, enumerate tables via repo tooling, **reach explicit REUSE/EXTEND/NEW_TABLES verdict** + proposed migration SQL in audit doc (revision 9). Resolve `scenarios.events` JSONB → reuse/shadow/replace verdict (revision 11). Then `@talchain/schemas@0.5.0` additive bump (baseline) → defensive `0.5.1` patch (biconditional + operation narrowing + cross-field refine) → tarball+SHA → vendored into CEE + UI → typecheck clean. Commit. Stop.
 3. **Tranche 2 (Slice B).** Session store + cache + invalidation + migration. Tier 3 gate + integration smoke + telemetry blocking gate. Commit. Stop.
 4. **Tranche 3a (Slice C1).** Registry + dispatch extension + classifier routing + handler interface. Empty registry at end (no handlers). Tier 3 gate + telemetry gate. Commit. Stop.
 5. **Tranche 3b (Slice C2).** `run_analysis` handler E2E, registered. Tier 3 gate + enrichment-threading test + **stale-state assertion** (revision 4) + telemetry gate. Commit. Stop.
@@ -133,7 +134,7 @@ Gate fail = halt + fix + rerun, NOT document-and-defer. Paul reviews only after 
 - Create in `~/Documents/GitHub/olumi-schemas/src/orchestrator/`: handler-fact discriminated union, session types, action-type enum, per-handler arg+result schemas, block schemas, `decision_context` placeholder.
 - Create: `Docs/v5/slice-phase-0-supabase-audit.md` (with REUSE/EXTEND/NEW_TABLES verdict + `scenarios.events` disposition), `Docs/v5/slice-bcd-plan.md` (standalone commit).
 - Modify: `src/prompts/schema.ts`, `src/prompts/defaults.ts`, `src/adapters/llm/prompt-loader.ts`.
-- Replace: `vendor/talchain-schemas-0.4.0.tgz` → `vendor/talchain-schemas-0.5.0.tgz` + new `.sha256`. Update `package.json` pin.
+- Replace: `vendor/talchain-schemas-0.4.0.tgz` → `vendor/talchain-schemas-0.5.1.tgz` + new `.sha256` (via a 0.5.0 intermediate that landed then got patched to 0.5.1). Update `package.json` pin accordingly.
 - Create: `scripts/validate-data-responsibility.sh`.
 
 ### Tranche 2 (Slice B)

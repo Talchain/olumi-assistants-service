@@ -177,7 +177,7 @@ Paul overrode toward option 2 with this reasoning:
 - The `v5_` prefix establishes a consistent namespace convention for E-series work (`v5_coaching_state`, etc.) — a one-time clarity cost becomes ongoing infrastructure benefit.
 - Rename sidesteps all three dashboard-inspection concerns (FK references, RLS policies, triggers) because the pre-existing table is not touched at all.
 
-**Consequence:** V5 tables use `v5_conversation_turns` and `v5_handler_facts` throughout (§4). The pre-existing `public.conversation_turns` is left exactly as it is — no modification, no query, no drop. If its provenance is ever identified, that's a separate cleanup task owned by whoever created it.
+**Consequence:** V5 tables use `v5_conversation_turns` and `v5_handler_facts` throughout (§4). The pre-existing `public.conversation_turns` is left exactly as it is from the 2026-04-17 rename decision onward — no further modification, no further query, no drop. (The shape-probe query earlier in this section was the one-shot characterisation that informed the rename; after that, zero further interaction.) If its provenance is ever identified, that's a separate cleanup task owned by whoever created it.
 
 ### Run 4 — introspection with the renamed V5 targets (2026-04-17)
 
@@ -450,7 +450,7 @@ Notes:
 - Arguments are explicit and typed — no free-form JSON for top-level fields. Only `p_handler_facts` is JSONB because it is variable-length.
 - `SECURITY DEFINER` + `SET search_path` match the existing RPC idiom (§2.2).
 - **Identity derivation:** `user_id` is always read from `scenarios.user_id`. Caller cannot inject an alternative. This is a single source of truth and defends against CEE bugs in addition to malicious callers.
-- **Execute-grant pattern:** revoke from PUBLIC, no grant to authenticated. CEE uses service-role; that role inherits EXECUTE via superuser-like privileges at the Postgres layer.
+- **Execute-grant pattern:** revoke from PUBLIC, explicit `GRANT EXECUTE ... TO service_role`. No grant to `authenticated`. The explicit grant is the sole source of permission for the CEE write path — no reliance on role inheritance or superuser privileges. If the grant line is accidentally deleted, service_role loses EXECUTE and the Tranche 2 post-migration validation test (below) surfaces it as a hard failure before any Slice B code runs.
 - **Duplicate-turn guard:** the `IF NOT FOUND ... RETURN` early-exit ensures `v5_handler_facts` rows are written exactly once per `(scenario_id, turn_id)`. Re-invoking `append_turn_atomic` on a committed turn is a safe no-op that returns the same turn UUID, not a duplicate-key error and not a double-write.
 - **JSONB NULL safety:** `jsonb_array_length` raises on NULL input. `COALESCE(p_handler_facts, '[]'::jsonb)` treats NULL and empty-array uniformly. The signature still declares JSONB (not nullable) — callers should pass `[]` for handlerless turns — but defence-in-depth is cheap here.
 
