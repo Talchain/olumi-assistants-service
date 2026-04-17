@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
 const SCRIPT = join(REPO_ROOT, 'scripts', 'validate-tarball-sha.sh');
-const TARBALL = join(REPO_ROOT, 'vendor', 'talchain-schemas-0.4.0.tgz');
+const TARBALL = join(REPO_ROOT, 'vendor', 'talchain-schemas-0.5.0.tgz');
 const BACKUP = `${TARBALL}.backup-for-drift-test`;
 
 function runValidator(): { exitCode: number; stdout: string; stderr: string } {

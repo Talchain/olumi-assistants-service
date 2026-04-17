@@ -7,12 +7,16 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.3.0.tgz`
+### `talchain-schemas-0.5.0.tgz`
 
-**Purpose:** pre-publish A0 consumption of `@talchain/schemas` v0.3.0
-(V5 boundary contracts — `/boundary` + `/orchestrator` subpaths). Authored
-at `~/Documents/GitHub/olumi-schemas/`; not yet published to a private
-registry.
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.5.0 for
+V5 slices B + C + D1 + D2 (session + handler-fact + per-handler arg/result
++ handler-result block schemas, on top of the A1 `/boundary` +
+`/orchestrator` surface). Authored at `~/Documents/GitHub/olumi-schemas/`;
+not yet published to a private registry.
+
+Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1) are removed on each
+bump — only the currently-pinned version lives in `vendor/`.
 
 **How to update:**
 
