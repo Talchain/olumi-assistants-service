@@ -75,8 +75,13 @@ async function probeTable(client: SupabaseClient, name: string): Promise<ProbeRe
   console.log('');
 
   console.log('## Table collision check (V5 migration preconditions)');
+  // V5 tables use the `v5_` prefix after the 2026-04-17 rename decision
+  // (see audit §2.7). The historical `public.conversation_turns` sketch at
+  // 4/11 columns is left untouched; it is not V5's concern and is not probed
+  // by this script. Run `scripts/phase-0-shape-probe.ts` if you need to
+  // revisit that legacy table.
   let surprise = false;
-  for (const name of ['conversation_turns', 'handler_facts']) {
+  for (const name of ['v5_conversation_turns', 'v5_handler_facts']) {
     const result = await probeTable(client, name);
     console.log(`- ${result.name}: **${result.verdict}** — ${result.reason}`);
     if (result.verdict !== 'absent-OK') {

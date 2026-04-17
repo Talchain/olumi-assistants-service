@@ -46,7 +46,7 @@ Splitting C into C1+C2 reduces C2 blast radius: the spine ships behind an empty 
 1. **Source of truth:** Supabase. Cache is derivative; on disagreement, Supabase wins.
 2. **Write idempotency:** unique constraint `(scenario_id, turn_id)` + `ON CONFLICT DO NOTHING`.
 3. **Read window:** default 20 turns, `SESSION_READ_WINDOW_TURNS` env-configurable.
-4. **Handler-fact storage (revision 2):** separate `handler_facts` table, NOT a JSONB column on `conversation_turns`. Rationale: queryability (handler analytics, per-handler latency), RLS granularity (handler-specific policies possible), schema evolution (HandlerFact discriminated union will grow; JSONB blobs rot).
+4. **Handler-fact storage (revision 2):** separate `v5_handler_facts` table, NOT a JSONB column on `v5_conversation_turns`. Rationale: queryability (handler analytics, per-handler latency), RLS granularity (handler-specific policies possible), schema evolution (HandlerFact discriminated union will grow; JSONB blobs rot). (The `v5_` prefix was adopted on 2026-04-17 after an introspection collision finding — see audit §2.7.)
 
 ### Tranche 2 transaction semantics (revision 3)
 
@@ -139,7 +139,7 @@ Gate fail = halt + fix + rerun, NOT document-and-defer. Paul reviews only after 
 ### Tranche 2 (Slice B)
 - Create: `src/orchestrator-v5/session/session-store.ts` (interface), `session/supabase-store.ts`, `session-cache/lru-cache.ts`, `session/invalidation.ts`.
 - Modify: `src/orchestrator-v5/build-turn-context.ts` (read recent), `src/orchestrator-v5/commit.ts` (stop being no-op, write-through).
-- Create: `supabase/migrations/2026XXXX_v5_session_store.sql` — additive: `conversation_turns` table, `handler_facts` table, unique `(scenario_id, turn_id)`, RLS, `append_turn_atomic` RPC (revision 3).
+- Create: `supabase/migrations/2026XXXX_v5_session_store.sql` — additive: `v5_conversation_turns` table, `v5_handler_facts` table, unique `(scenario_id, turn_id)`, RLS, `append_turn_atomic` RPC (revision 3).
 - Create: `scripts/validate-state-write-invariant.sh`.
 
 ### Tranche 3a (C1)

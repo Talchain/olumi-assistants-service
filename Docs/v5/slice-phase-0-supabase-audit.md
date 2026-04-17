@@ -55,7 +55,7 @@ Grepping CEE source for `.from('scenarios')`, `.from("scenarios")`, `.from('shar
 - **CEE** receives `ScenarioEvent[]` via the turn request payload (see `ScenarioEvent` interface at [src/orchestrator/context/event-log-summary.ts:22](../../src/orchestrator/context/event-log-summary.ts#L22)) and consumes them read-only for things like the event log summary in enriched context.
 - **CEE's only Supabase writes** are to the prompt-management tables (`cee_prompts*`) and the draft-failures store — never to scenario-lifecycle tables.
 
-V5 session persistence changes this pattern: **CEE becomes the write-side owner for per-turn data** (`conversation_turns` + `handler_facts` per rev-2 §Tranche 2 decisions). UI continues to own `scenarios` and its lifecycle events. This is a deliberate separation of concerns, not a hostile takeover — see verdict §5.
+V5 session persistence changes this pattern: **CEE becomes the write-side owner for per-turn data** (`v5_conversation_turns` + `v5_handler_facts` per rev-2 §Tranche 2 decisions, with the `v5_` prefix chosen on 2026-04-17 — see §2.7). UI continues to own `scenarios` and its lifecycle events. This is a deliberate separation of concerns, not a hostile takeover — see verdict §5.
 
 ### 2.4 CEE Supabase connection
 
@@ -75,7 +75,7 @@ No prior session-persistence discussions are recorded in project memory ([memory
 
 ### 2.7 Live Supabase introspection (P0-1)
 
-A reusable introspection script lives at [scripts/phase-0-introspect.ts](../../scripts/phase-0-introspect.ts). It probes `conversation_turns` and `handler_facts` for existence against the live Supabase project referenced by `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
+A reusable introspection script lives at [scripts/phase-0-introspect.ts](../../scripts/phase-0-introspect.ts). It probes `v5_conversation_turns` and `v5_handler_facts` for existence against the live Supabase project referenced by `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. (Before the 2026-04-17 rename, the probe targeted `conversation_turns` and `handler_facts` — which is how the Run 2 collision was first detected.)
 
 **Run 1 (2026-04-17, attempted):** aborted at env-var load. CEE's local `.env` carries only LLM provider keys; Supabase credentials live in the Render deploy environment rather than local `.env`. Exit 2, instruction printed.
 
@@ -167,32 +167,32 @@ Generated: 2026-04-17T15:35:43.677Z
 - Whether foreign keys, triggers, indexes, or RLS policies reference this table. A drop must either `CASCADE` or these must be verified absent first.
 - When it was created and by whom (Supabase dashboard history or Postgres logs would answer; out of scope for a read-only probe).
 
-### Path decision: **option 3 (scoped drop)** — pending explicit Paul confirmation
+### Path decision: **option 2 (rename to `v5_` prefix)** — Paul-approved 2026-04-17
 
-Per the decision matrix Paul fixed at 2026-04-17:
+Per the matrix:
 > incompatible + zero rows → option 3 (scoped drop, Paul confirms)
 
-This maps unambiguously: shape is 4/11 (incompatible), rows = 0 (empty). Option 3 is the cleanest path — it preserves the clean `conversation_turns` name for V5 rather than locking in a permanent `v5_` prefix for a transient collision.
+Paul overrode toward option 2 with this reasoning:
+- The existing table's provenance is unknown. We cannot guarantee nothing will try to recreate or reference it, so a drop is irreversible-and-uncertain vs rename which is reversible-and-safe.
+- The `v5_` prefix establishes a consistent namespace convention for E-series work (`v5_coaching_state`, etc.) — a one-time clarity cost becomes ongoing infrastructure benefit.
+- Rename sidesteps all three dashboard-inspection concerns (FK references, RLS policies, triggers) because the pre-existing table is not touched at all.
 
-**Proposed migration prelude (NOT yet written to a migration file — awaiting confirmation):**
+**Consequence:** V5 tables use `v5_conversation_turns` and `v5_handler_facts` throughout (§4). The pre-existing `public.conversation_turns` is left exactly as it is — no modification, no query, no drop. If its provenance is ever identified, that's a separate cleanup task owned by whoever created it.
 
-```sql
--- Staging cleanup: the pre-existing public.conversation_turns is a 4-column
--- sketch unrelated to the V5 design, empty on 2026-04-17 per shape-probe
--- evidence. Dropped with CASCADE so any dependent FKs/indexes/RLS policies go
--- with it. Verified-empty precondition at probe time.
-DROP TABLE IF EXISTS public.conversation_turns CASCADE;
+### Run 4 — introspection with the renamed V5 targets (2026-04-17)
+
+After updating the introspection script's target list to the `v5_` names, re-ran against staging. Both targets confirmed absent, no surprises:
+
+```markdown
+# Phase 0 Supabase introspection
+Generated: 2026-04-17T16:09:53.680Z
+
+## Table collision check (V5 migration preconditions)
+- v5_conversation_turns: **absent-OK** — absent — code=PGRST205, msg="Could not find the table 'public.v5_conversation_turns' in the schema cache"
+- v5_handler_facts: **absent-OK** — absent — code=PGRST205, msg="Could not find the table 'public.v5_handler_facts' in the schema cache"
 ```
 
-**Paul-confirmation checklist before this prelude ships:**
-1. Open Supabase dashboard → Table Editor → `public.conversation_turns` → inspect for FK references IN (other tables → this table) and FK references OUT (this table → other tables). If IN exists, `CASCADE` will drop those FKs too — confirm the target FK is also safe to lose.
-2. Confirm no RLS policies on this table protect data we're not expecting (empty now, but check the policy list in case a policy is load-bearing for something else).
-3. Confirm no triggers on the table that perform side-effects.
-4. Once confirmed, Paul gives explicit go-ahead in writing. The drop prelude is added to the migration file as its first statement.
-
-**If any check surfaces a blocker**, fall back to option 2 (rename to `v5_conversation_turns`). This is reversible and non-destructive; the permanent-`v5_` cost is worth it if the existing table turns out to be load-bearing for anything else.
-
-**Re-run introspection after resolution.** Either path MUST be followed by a fresh `pnpm exec tsx scripts/phase-0-introspect.ts` run confirming both `conversation_turns` AND `handler_facts` report `absent-OK`, BEFORE the migration file is written.
+Exit 0. Migration preconditions are clean. The migration file can now be written against §4 DDL verbatim.
 
 ---
 
@@ -230,9 +230,9 @@ Event types are scenario-lifecycle coarse-grained — one event per major state 
 
 `scenarios.events` is **preserved unchanged**. UI continues writing scenario-lifecycle events to it. CEE continues reading it from the request payload as today.
 
-V5 turn-level data (`conversation_turns`, `handler_facts`) lives in **new** tables that CEE owns via service-role writes. No dual-writes. No new entries to `scenarios.events` from V5.
+V5 turn-level data (`v5_conversation_turns`, `v5_handler_facts`) lives in **new** tables that CEE owns via service-role writes. No dual-writes. No new entries to `scenarios.events` from V5.
 
-**Implication for event log summary:** the existing `buildEventLogSummary()` over `ScenarioEvent[]` continues to operate on scenario-lifecycle events only. If V5 needs a turn-log summary later, it builds it from `conversation_turns` / `handler_facts` — not from `scenarios.events`.
+**Implication for event log summary:** the existing `buildEventLogSummary()` over `ScenarioEvent[]` continues to operate on scenario-lifecycle events only. If V5 needs a turn-log summary later, it builds it from `v5_conversation_turns` / `v5_handler_facts` — not from `scenarios.events`.
 
 ---
 
@@ -246,9 +246,14 @@ The migration file begins with an explicit dependency declaration so the chain i
 
 ```sql
 -- ============================================================
--- V5 session store — conversation_turns + handler_facts
+-- V5 session store — v5_conversation_turns + v5_handler_facts
 -- Target: Staging Supabase
 -- Date: 2026-04-XX
+--
+-- v5_ prefix decision: 2026-04-17 introspection found an unrelated,
+-- incompatible public.conversation_turns sketch (4/11 columns, 0 rows,
+-- unknown provenance). Option 2 (rename) chosen over option 3 (drop) so
+-- the pre-existing table stays untouched. See audit §2.7.
 --
 -- Depends on:
 --   - scenarios table (from earlier remote migration not checked in)
@@ -259,12 +264,12 @@ The migration file begins with an explicit dependency declaration so the chain i
 -- ============================================================
 ```
 
-### 4.1 `conversation_turns`
+### 4.1 `v5_conversation_turns`
 
-One row per successful turn. Failed turns write zero rows (brief §4.4).
+One row per successful turn. Failed turns write zero rows (brief §4.4). Table name uses the `v5_` prefix after the 2026-04-17 collision finding to sidestep the incompatible pre-existing `public.conversation_turns` sketch without touching it (§2.7).
 
 ```sql
-CREATE TABLE IF NOT EXISTS conversation_turns (
+CREATE TABLE IF NOT EXISTS v5_conversation_turns (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scenario_id      UUID NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
   user_id          UUID NOT NULL,  -- denormalised from scenarios.user_id for RLS + pruning
@@ -276,15 +281,15 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
   llm_calls_used   INTEGER NOT NULL DEFAULT 0,
   duration_ms      INTEGER NOT NULL DEFAULT 0,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT conversation_turns_scenario_turn_unique UNIQUE (scenario_id, turn_id)
+  CONSTRAINT v5_conversation_turns_scenario_turn_unique UNIQUE (scenario_id, turn_id)
 );
 
-CREATE INDEX IF NOT EXISTS conversation_turns_scenario_created_idx
-  ON conversation_turns (scenario_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS conversation_turns_user_created_idx
-  ON conversation_turns (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS v5_conversation_turns_scenario_created_idx
+  ON v5_conversation_turns (scenario_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS v5_conversation_turns_user_created_idx
+  ON v5_conversation_turns (user_id, created_at DESC);
 
-COMMENT ON COLUMN conversation_turns.user_id IS
+COMMENT ON COLUMN v5_conversation_turns.user_id IS
   'Denormalised from scenarios.user_id for RLS without join. Drift is API-unreachable; no CHECK constraint by design.';
 ```
 
@@ -292,32 +297,34 @@ COMMENT ON COLUMN conversation_turns.user_id IS
 - `user_id` denormalised so RLS can filter without a join. Foreign-key to `scenarios` keeps lifecycle aligned; `ON DELETE CASCADE` cleans up when a scenario is removed.
 - `turn_class` is a free TEXT with a CHECK constraint added below (enum-like but evolvable).
 
-### 4.2 `handler_facts`
+### 4.2 `v5_handler_facts`
 
-One row per HandlerFact emitted by a handler turn. Zero rows for non-handler turns.
+One row per HandlerFact emitted by a handler turn. Zero rows for non-handler turns. Table name uses the `v5_` prefix for parity with §4.1; no pre-existing `handler_facts` collision existed but the prefix is applied consistently so the V5 session layer has a single namespace convention.
 
 ```sql
-CREATE TABLE IF NOT EXISTS handler_facts (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  conversation_turn_id UUID NOT NULL REFERENCES conversation_turns(id) ON DELETE CASCADE,
-  scenario_id          UUID NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
-  user_id              UUID NOT NULL,
-  handler_id           TEXT NOT NULL,   -- e.g. run_analysis, set_factor_value
-  action_type          TEXT NOT NULL,   -- canonical V4 action_type literal
-  fact_version         INTEGER NOT NULL DEFAULT 1,
-  noop                 BOOLEAN NOT NULL DEFAULT FALSE,  -- rev 2 revision 5 suppression flag
-  payload              JSONB NOT NULL,  -- the HandlerFact body (Zod-validated at write time)
-  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS v5_handler_facts (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  v5_conversation_turn_id UUID NOT NULL REFERENCES v5_conversation_turns(id) ON DELETE CASCADE,
+  scenario_id             UUID NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+  user_id                 UUID NOT NULL,
+  handler_id              TEXT NOT NULL,   -- e.g. run_analysis, set_factor_value
+  action_type             TEXT NOT NULL,   -- canonical V4 action_type literal
+  fact_version            INTEGER NOT NULL DEFAULT 1,
+  noop                    BOOLEAN NOT NULL DEFAULT FALSE,  -- rev 2 revision 5 suppression flag
+  payload                 JSONB NOT NULL,  -- the HandlerFact body (Zod-validated at write time)
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS handler_facts_turn_idx
-  ON handler_facts (conversation_turn_id);
-CREATE INDEX IF NOT EXISTS handler_facts_scenario_handler_idx
-  ON handler_facts (scenario_id, handler_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS v5_handler_facts_turn_idx
+  ON v5_handler_facts (v5_conversation_turn_id);
+CREATE INDEX IF NOT EXISTS v5_handler_facts_scenario_handler_idx
+  ON v5_handler_facts (scenario_id, handler_id, created_at DESC);
 
-COMMENT ON COLUMN handler_facts.user_id IS
+COMMENT ON COLUMN v5_handler_facts.user_id IS
   'Denormalised from scenarios.user_id for RLS without join. Drift is API-unreachable; no CHECK constraint by design.';
 ```
+
+The FK column is `v5_conversation_turn_id` rather than `conversation_turn_id` so the prefix convention is visible at JOIN sites too. Renaming only the table would leave ambiguous-looking join syntax (`v5_handler_facts.conversation_turn_id REFERENCES v5_conversation_turns(id)`) — the mismatch would invite drift later.
 
 - Separate table (rev 2 revision 2): queryability, RLS granularity, schema evolution.
 - `payload` JSONB for the fact body (discriminated-union shape varies per handler). Zod schema enforces shape at write time in CEE; the JSONB column stores the validated blob.
@@ -329,17 +336,17 @@ COMMENT ON COLUMN handler_facts.user_id IS
 Match the `scenarios` pattern exactly. CEE service-role bypasses RLS for writes; `authenticated` role can read own rows via policy.
 
 ```sql
-ALTER TABLE conversation_turns ENABLE ROW LEVEL SECURITY;
-ALTER TABLE handler_facts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE v5_conversation_turns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE v5_handler_facts ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Users can read own conversation turns" ON conversation_turns;
-CREATE POLICY "Users can read own conversation turns"
-  ON conversation_turns FOR SELECT
+DROP POLICY IF EXISTS "Users can read own v5 conversation turns" ON v5_conversation_turns;
+CREATE POLICY "Users can read own v5 conversation turns"
+  ON v5_conversation_turns FOR SELECT
   USING (auth.uid() = user_id);
 
-DROP POLICY IF EXISTS "Users can read own handler facts" ON handler_facts;
-CREATE POLICY "Users can read own handler facts"
-  ON handler_facts FOR SELECT
+DROP POLICY IF EXISTS "Users can read own v5 handler facts" ON v5_handler_facts;
+CREATE POLICY "Users can read own v5 handler facts"
+  ON v5_handler_facts FOR SELECT
   USING (auth.uid() = user_id);
 ```
 
@@ -381,7 +388,7 @@ BEGIN
   END IF;
 
   -- ON CONFLICT DO NOTHING satisfies write idempotency
-  INSERT INTO conversation_turns (
+  INSERT INTO v5_conversation_turns (
     scenario_id, user_id, turn_id, turn_class, handler_id,
     request_hash, response_emitted, llm_calls_used, duration_ms
   ) VALUES (
@@ -397,7 +404,7 @@ BEGIN
   -- the whole-append idempotency contract.
   IF NOT FOUND THEN
     SELECT id INTO v_turn_id
-      FROM conversation_turns
+      FROM v5_conversation_turns
       WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id;
     RETURN v_turn_id;
   END IF;
@@ -406,8 +413,8 @@ BEGIN
   IF jsonb_array_length(COALESCE(p_handler_facts, '[]'::jsonb)) > 0 THEN
     FOR v_fact IN SELECT * FROM jsonb_array_elements(p_handler_facts)
     LOOP
-      INSERT INTO handler_facts (
-        conversation_turn_id, scenario_id, user_id,
+      INSERT INTO v5_handler_facts (
+        v5_conversation_turn_id, scenario_id, user_id,
         handler_id, action_type, noop, payload
       ) VALUES (
         v_turn_id,
@@ -444,7 +451,7 @@ Notes:
 - `SECURITY DEFINER` + `SET search_path` match the existing RPC idiom (§2.2).
 - **Identity derivation:** `user_id` is always read from `scenarios.user_id`. Caller cannot inject an alternative. This is a single source of truth and defends against CEE bugs in addition to malicious callers.
 - **Execute-grant pattern:** revoke from PUBLIC, no grant to authenticated. CEE uses service-role; that role inherits EXECUTE via superuser-like privileges at the Postgres layer.
-- **Duplicate-turn guard:** the `IF NOT FOUND ... RETURN` early-exit ensures handler_facts are written exactly once per `(scenario_id, turn_id)`. Re-invoking `append_turn_atomic` on a committed turn is a safe no-op that returns the same turn UUID, not a duplicate-key error and not a double-write.
+- **Duplicate-turn guard:** the `IF NOT FOUND ... RETURN` early-exit ensures `v5_handler_facts` rows are written exactly once per `(scenario_id, turn_id)`. Re-invoking `append_turn_atomic` on a committed turn is a safe no-op that returns the same turn UUID, not a duplicate-key error and not a double-write.
 - **JSONB NULL safety:** `jsonb_array_length` raises on NULL input. `COALESCE(p_handler_facts, '[]'::jsonb)` treats NULL and empty-array uniformly. The signature still declares JSONB (not nullable) — callers should pass `[]` for handlerless turns — but defence-in-depth is cheap here.
 
 **Post-migration validation (Tranche 2 deliverable, mandatory).** Once this migration is applied against staging Supabase, Tranche 2's evidence pack MUST include a one-shot integration test that:
@@ -460,8 +467,8 @@ This validates the grant model end-to-end against a real database rather than re
 Both added as separate `ALTER TABLE` statements so future adjustments (e.g. a new `'exercise'` turn class once E-series lands) can amend individual CHECKs without touching the `CREATE TABLE` statement.
 
 ```sql
-ALTER TABLE conversation_turns
-  ADD CONSTRAINT conversation_turns_turn_class_valid
+ALTER TABLE v5_conversation_turns
+  ADD CONSTRAINT v5_conversation_turns_turn_class_valid
   CHECK (turn_class IN ('direct_answer', 'clarify', 'handler', 'unhandled'));
 
 -- Biconditional: handler_id is non-null iff turn_class = 'handler'.
@@ -469,26 +476,18 @@ ALTER TABLE conversation_turns
 -- handler turn missing its handler_id) that Zod types alone cannot enforce at
 -- the persistence layer. Mirrored by a Zod refinement on SessionTurnSchema
 -- in `@talchain/schemas` 0.5.1 (see schemas repo commit history).
-ALTER TABLE conversation_turns
-  ADD CONSTRAINT conversation_turns_handler_id_biconditional
+ALTER TABLE v5_conversation_turns
+  ADD CONSTRAINT v5_conversation_turns_handler_id_biconditional
   CHECK ((turn_class = 'handler') = (handler_id IS NOT NULL));
 ```
 
 ---
 
-## 5. **Verdict: NEW_TABLES with scoped cleanup prelude** (plan rev 2 revision 9, revised 2026-04-17)
+## 5. **Verdict: NEW_TABLES** (plan rev 2 revision 9, finalised 2026-04-17)
 
-V5 session persistence adds two new tables (`conversation_turns`, `handler_facts`) + one new RPC (`append_turn_atomic`) + matching RLS policies.
+V5 session persistence adds two new tables (`v5_conversation_turns`, `v5_handler_facts`) + one new RPC (`append_turn_atomic`) + matching RLS policies. Zero changes to existing tables, zero destructive DDL, zero impact on any other schema state.
 
-**Revised on 2026-04-17** after the introspection run surfaced a pre-existing incompatible `public.conversation_turns` sketch table (4/11 expected columns, 0 rows — see §2.7 shape characterisation). The migration now requires a single-statement cleanup prelude:
-
-```sql
-DROP TABLE IF EXISTS public.conversation_turns CASCADE;
-```
-
-This is scoped (one table, verified-empty at probe time), gated (Paul-confirmation checklist in §2.7 before the prelude ships), and conditional (if any check in the checklist surfaces a blocker, the fallback is option 2 — rename V5 tables to `v5_conversation_turns` / `v5_handler_facts` and leave the existing sketch alone).
-
-**Zero impact on other existing state.** `scenarios`, `shared_briefs`, `cee_prompts*`, draft-failures store, and every SECURITY DEFINER RPC continue unchanged. The cleanup targets only the empty `conversation_turns` sketch.
+The `v5_` prefix was chosen after the 2026-04-17 introspection run surfaced a pre-existing incompatible `public.conversation_turns` sketch of unknown provenance (§2.7 shape characterisation — 4/11 columns, 0 rows). Paul's decision (2026-04-17): **option 2 (rename)** over option 3 (scoped drop). Reasoning: the drop is irreversible, the provenance is unknown (we cannot be sure nothing will try to recreate or reference it), and the `v5_` prefix establishes a consistent namespace convention that E-series will build on (e.g. `v5_coaching_state`). Rename sidesteps FK / RLS / trigger concerns entirely — the pre-existing table is not touched.
 
 **`scenarios.events` disposition:** Replace (for turn-level data) — see §3.3. The column is unchanged; V5 simply does not write to it. UI-owned lifecycle events continue unchanged.
 
@@ -502,9 +501,9 @@ This is scoped (one table, verified-empty at probe time), gated (Paul-confirmati
 - `AddConstraintArgsSchema` gains `.superRefine()` cross-field validation — impossible kind/bound combinations (e.g. `range` with null bounds) reject at dispatch rather than propagating to a handler.
 
 The package now exports all of:
-- `SessionTurnSchema` matching the `conversation_turns` row shape above (response-side representation — cache/read tier).
-- `HandlerFactSchema` discriminated union matching the `handler_facts.payload` shape per-handler.
-- Per-handler `HandlerFactResult` types that Zod-validate at write time before going into `handler_facts.payload`.
+- `SessionTurnSchema` matching the `v5_conversation_turns` row shape above (response-side representation — cache/read tier). Schema field names are unaffected by the physical table rename; the TypeScript and Zod types describe logical shape, not physical storage.
+- `HandlerFactSchema` discriminated union matching the `v5_handler_facts.payload` shape per-handler.
+- Per-handler `HandlerFactResult` types that Zod-validate at write time before going into `v5_handler_facts.payload`.
 
 The action-type mapping table (brief §3.3) is a separate required Phase 0 artefact. Seven V5-relevant V4 `action_type` literals are already verified verbatim against V4 source:
 
@@ -532,7 +531,7 @@ All V5 literals match V4 verbatim; zero rename. This table will be committed as 
 | RPC transaction fails mid-insert. | PL/pgSQL block is implicitly atomic — on failure, Postgres rolls back the whole function. `supabase-js` `.rpc()` surfaces the error; CEE TurnExecutor maps to `STATE_COMMIT_FAILED` failure type (added in Tranche 2 alongside the Supabase store implementation). |
 | `append_turn_atomic` signature changes later. | Separate migration file per change. The first signature ships additively here. |
 
-**Rollback:** the migration is additive-only. A break-glass rollback companion ships alongside the migration at `supabase/migrations/rollback/2026XXXX_v5_session_store_rollback.sql.do-not-apply` — the `.do-not-apply` suffix ensures migration tooling skips it. Contents drop the function first, then the fact table, then the turn table (reverse order so foreign keys are respected). The rollback file exists as documentation and break-glass only — **not** auto-run, **not** part of the tranche's standard rollback path. Standard rollback if Tranche 2 regresses: stop writing from CEE (feature flag off) and leave the tables empty-but-present. Apply the companion manually only if the tables themselves must go.
+**Rollback:** the migration is additive-only. A break-glass rollback companion ships alongside the migration at `supabase/migrations/rollback/2026XXXX_v5_session_store_rollback.sql.do-not-apply` — the `.do-not-apply` suffix ensures migration tooling skips it. Contents drop the function first, then `v5_handler_facts`, then `v5_conversation_turns` (reverse order so foreign keys are respected). The rollback file exists as documentation and break-glass only — **not** auto-run, **not** part of the tranche's standard rollback path. Standard rollback if Tranche 2 regresses: stop writing from CEE (feature flag off) and leave the tables empty-but-present. Apply the companion manually only if the tables themselves must go.
 
 ---
 
