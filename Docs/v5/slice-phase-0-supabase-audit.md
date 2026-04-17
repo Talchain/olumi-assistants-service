@@ -72,6 +72,44 @@ A `migrations 2/` directory exists but is empty — Finder duplicate artefact. R
 
 No prior session-persistence discussions are recorded in project memory ([memory/MEMORY.md](../../../../../../.claude/projects/-Users-paulslee-Documents-GitHub-olumi-assistants-service/memory/MEMORY.md)). The CEE context module under `src/orchestrator/context/` is the nearest neighbour — it builds compact summaries of scenario events but does not persist anything.
 
+### 2.7 Live Supabase introspection (P0-1)
+
+A reusable introspection script lives at [scripts/phase-0-introspect.ts](../../scripts/phase-0-introspect.ts). It probes `conversation_turns` and `handler_facts` for existence against the live Supabase project referenced by `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
+
+**Attempted run (2026-04-17):** aborted at env-var load. CEE's local `.env` carries only LLM provider keys; Supabase credentials live in the staging/production deploy environment (Render) rather than local `.env`, contrary to an earlier assumption in the audit plan. The script exited cleanly with `exit 2` and the instruction:
+
+```
+SUPABASE_URL=https://<ref>.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=<service-role-JWT> \
+  pnpm exec tsx scripts/phase-0-introspect.ts
+```
+
+**Paul-runnable snapshot output expected:**
+
+```markdown
+# Phase 0 Supabase introspection
+Generated: <ISO timestamp>
+
+## Table collision check (V5 migration preconditions)
+- conversation_turns: **absent-OK** — absent — code=PGRST205, msg="..."
+- handler_facts: **absent-OK** — absent — code=PGRST205, msg="..."
+
+## Known-good preconditions (verified via committed source, not live query)
+- pgcrypto.gen_random_bytes() — used by create_shared_brief ...
+- auth.uid() — used by every existing SECURITY DEFINER RPC ...
+```
+
+When the script is run against the staging Supabase project (Paul → Supabase dashboard → Project Settings → API → service_role key), the output should be pasted back here in place of the "expected" block above to close the P0-1 gap fully.
+
+**Source-evidence fallback.** Even without the live probe, the three preconditions have circumstantial evidence:
+- `conversation_turns` and `handler_facts` are V5-coined table names; no committed migration or documented schema references them, so a collision is implausible but not impossible.
+- `pgcrypto.gen_random_bytes()` is already used by [create_shared_brief](../../supabase/migrations/20260226010000_scenario_schema_v2_0_1_hardening.sql) in the committed hardening migration — if pgcrypto were missing, that RPC would fail on every invocation, and it does not.
+- `auth.uid()` is used by every existing SECURITY DEFINER RPC per `supabase/README.md` §RPCs.
+
+The live probe reduces residual risk to near-zero; the source-evidence path holds it at very low. Phase 0 sign-off can accept either posture with Paul's explicit call.
+
+**Scope limit.** `pg_catalog` and `information_schema` are not accessible through Supabase PostgREST without a project-settings change that exposes additional schemas. The script therefore cannot query `pg_extension` or `pg_proc` directly. If deeper introspection is ever required, either add a read-only SQL RPC to the migration set or use a direct Postgres driver with the project connection string (kept outside `.env`).
+
 ---
 
 ## 3. `scenarios.events` JSONB — lifecycle verdict (plan rev 2 revision 11)
@@ -223,14 +261,15 @@ CREATE POLICY "Users can read own handler facts"
 
 No INSERT/UPDATE/DELETE policies for `authenticated`. All writes go through the `append_turn_atomic` RPC (§4.4) or directly via the CEE service-role key. This mirrors `shared_briefs`: direct writes are impossible; all mutation is RPC-mediated or service-role.
 
-### 4.4 `append_turn_atomic` RPC (rev 2 revision 3)
+### 4.4 `append_turn_atomic` RPC (rev 2 revision 3, hardened post-review)
 
 Single-transaction append covering one `conversation_turn` row + N `handler_fact` rows.
+
+**Security hardening (2026-04-17 review):** the function no longer accepts a caller-supplied `p_user_id`. SECURITY DEFINER bypasses RLS, which in the previous design combined with a trusted `p_user_id` parameter to create a user-impersonation vector: any `authenticated` caller could write rows tagged with an arbitrary `user_id`. The redesign derives `user_id` from `scenarios.user_id` via `p_scenario_id` — single source of truth, unspoofable — and revokes EXECUTE from `authenticated`. Only CEE's service-role path reaches this RPC, matching CEE's actual Supabase auth posture (§2.4).
 
 ```sql
 CREATE OR REPLACE FUNCTION append_turn_atomic(
   p_scenario_id      UUID,
-  p_user_id          UUID,
   p_turn_id          TEXT,
   p_turn_class       TEXT,
   p_handler_id       TEXT,
@@ -247,14 +286,22 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   v_turn_id UUID;
+  v_user_id UUID;
   v_fact    JSONB;
 BEGIN
+  -- Derive user_id from the scenario — unspoofable; trust nothing about
+  -- caller-supplied identity. If the scenario does not exist, raise.
+  SELECT user_id INTO v_user_id FROM scenarios WHERE id = p_scenario_id;
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'scenario % not found', p_scenario_id;
+  END IF;
+
   -- ON CONFLICT DO NOTHING satisfies write idempotency
   INSERT INTO conversation_turns (
     scenario_id, user_id, turn_id, turn_class, handler_id,
     request_hash, response_emitted, llm_calls_used, duration_ms
   ) VALUES (
-    p_scenario_id, p_user_id, p_turn_id, p_turn_class, p_handler_id,
+    p_scenario_id, v_user_id, p_turn_id, p_turn_class, p_handler_id,
     p_request_hash, p_response_emitted, p_llm_calls_used, p_duration_ms
   )
   ON CONFLICT (scenario_id, turn_id) DO NOTHING
@@ -281,7 +328,7 @@ BEGIN
       ) VALUES (
         v_turn_id,
         p_scenario_id,
-        p_user_id,
+        v_user_id,  -- derived, never caller-supplied
         v_fact->>'handler_id',
         v_fact->>'action_type',
         COALESCE((v_fact->>'noop')::boolean, FALSE),
@@ -294,28 +341,40 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION append_turn_atomic(UUID, UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION append_turn_atomic(UUID, UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB) TO authenticated;
--- Service role inherits EXECUTE via its superuser-like grants; no explicit grant needed for CEE service-role writes.
+REVOKE EXECUTE ON FUNCTION append_turn_atomic(UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB) FROM PUBLIC;
+-- No GRANT to authenticated. Service role inherits EXECUTE via superuser-like
+-- privileges; only CEE's service-role path reaches this function. A future
+-- UI write path (if ever needed) will use a separate RPC that derives identity
+-- from auth.uid(), not a spoofable parameter.
 ```
 
 Notes:
 - Single function invocation = single transaction. This satisfies rev 2 revision 3 (compensating-writes fallback not needed — `supabase-js` `.rpc()` wraps the call in a single HTTP request that executes the entire PL/pgSQL body in one transaction).
 - Arguments are explicit and typed — no free-form JSON for top-level fields. Only `p_handler_facts` is JSONB because it is variable-length.
 - `SECURITY DEFINER` + `SET search_path` match the existing RPC idiom (§2.2).
-- Execute-grant pattern: revoke from PUBLIC, grant to `authenticated`. CEE uses service-role so it's unaffected; however the grant lets future UI reads/use if ever needed.
+- **Identity derivation:** `user_id` is always read from `scenarios.user_id`. Caller cannot inject an alternative. This is a single source of truth and defends against CEE bugs in addition to malicious callers.
+- **Execute-grant pattern:** revoke from PUBLIC, no grant to authenticated. CEE uses service-role; that role inherits EXECUTE via superuser-like privileges at the Postgres layer.
 - **Duplicate-turn guard:** the `IF NOT FOUND ... RETURN` early-exit ensures handler_facts are written exactly once per `(scenario_id, turn_id)`. Re-invoking `append_turn_atomic` on a committed turn is a safe no-op that returns the same turn UUID, not a duplicate-key error and not a double-write.
 - **JSONB NULL safety:** `jsonb_array_length` raises on NULL input. `COALESCE(p_handler_facts, '[]'::jsonb)` treats NULL and empty-array uniformly. The signature still declares JSONB (not nullable) — callers should pass `[]` for handlerless turns — but defence-in-depth is cheap here.
 
-### 4.5 `turn_class` CHECK constraint
+### 4.5 Cross-field CHECK constraints
+
+Both added as separate `ALTER TABLE` statements so future adjustments (e.g. a new `'exercise'` turn class once E-series lands) can amend individual CHECKs without touching the `CREATE TABLE` statement.
 
 ```sql
 ALTER TABLE conversation_turns
   ADD CONSTRAINT conversation_turns_turn_class_valid
   CHECK (turn_class IN ('direct_answer', 'clarify', 'handler', 'unhandled'));
-```
 
-Added as a separate `ALTER TABLE` so future additions (e.g. `'exercise'` once E-series lands) can amend the CHECK without touching the `CREATE TABLE` statement.
+-- Biconditional: handler_id is non-null iff turn_class = 'handler'.
+-- Catches a semantic-garbage class of bug (non-handler turn citing a handler, or
+-- handler turn missing its handler_id) that Zod types alone cannot enforce at
+-- the persistence layer. Mirrored by a Zod refinement on SessionTurnSchema
+-- in `@talchain/schemas` 0.5.1 (see schemas repo commit history).
+ALTER TABLE conversation_turns
+  ADD CONSTRAINT conversation_turns_handler_id_biconditional
+  CHECK ((turn_class = 'handler') = (handler_id IS NOT NULL));
+```
 
 ---
 
