@@ -13,8 +13,9 @@
 - Grepped CEE `src/**/*.ts` for Supabase client usage (`createClient`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `.from('scenarios')`, `rpc('append_scenario_event')`, etc.).
 - Reviewed [src/orchestrator/context/event-log-summary.ts](../../src/orchestrator/context/event-log-summary.ts) for the current `ScenarioEvent` shape that flows through `scenarios.events` JSONB.
 - Checked [src/config/index.ts](../../src/config/index.ts) for CEE's Supabase configuration.
+- **Live introspection (post-0.5.1 hardening):** executed [scripts/phase-0-introspect.ts](../../scripts/phase-0-introspect.ts) against staging Supabase with Paul-supplied `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` env vars. See §2.7 for the actual output and the signed-off residual-risk posture for checks outside supabase-js scope.
 
-No live Supabase query was run — the repo-tracked migration file is a hardening patch only (no `CREATE TABLE` statements), so the canonical DDL lives on the remote DB and was not re-derived for this audit. The inventory is assembled from the README + client code, both of which are treated as source of truth.
+The inventory combines README + client code (source of truth for shapes + RPC inventory) with the live introspection snapshot (source of truth for "does the target table already exist"). Schema-state assumptions about Supabase-default extensions and functions (`pgcrypto.gen_random_uuid()`, `auth.uid()`) are indirectly evidenced by existing SECURITY DEFINER RPCs that already depend on them in production — see §2.7.
 
 ---
 
@@ -76,39 +77,51 @@ No prior session-persistence discussions are recorded in project memory ([memory
 
 A reusable introspection script lives at [scripts/phase-0-introspect.ts](../../scripts/phase-0-introspect.ts). It probes `conversation_turns` and `handler_facts` for existence against the live Supabase project referenced by `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
 
-**Attempted run (2026-04-17):** aborted at env-var load. CEE's local `.env` carries only LLM provider keys; Supabase credentials live in the staging/production deploy environment (Render) rather than local `.env`, contrary to an earlier assumption in the audit plan. The script exited cleanly with `exit 2` and the instruction:
+**Run 1 (2026-04-17, attempted):** aborted at env-var load. CEE's local `.env` carries only LLM provider keys; Supabase credentials live in the Render deploy environment rather than local `.env`. Exit 2, instruction printed.
 
-```
-SUPABASE_URL=https://<ref>.supabase.co \
-SUPABASE_SERVICE_ROLE_KEY=<service-role-JWT> \
-  pnpm exec tsx scripts/phase-0-introspect.ts
-```
-
-**Paul-runnable snapshot output expected:**
+**Run 2 (2026-04-17, executed with Paul-supplied staging service-role key):**
 
 ```markdown
 # Phase 0 Supabase introspection
-Generated: <ISO timestamp>
+Generated: 2026-04-17T15:28:13.901Z
 
 ## Table collision check (V5 migration preconditions)
-- conversation_turns: **absent-OK** — absent — code=PGRST205, msg="..."
-- handler_facts: **absent-OK** — absent — code=PGRST205, msg="..."
+- conversation_turns: **present-collision** — returned 0 rows on limit(0) probe — schema registered
+- handler_facts: **absent-OK** — absent — code=PGRST205, msg="Could not find the table 'public.handler_facts' in the schema cache"
 
 ## Known-good preconditions (verified via committed source, not live query)
-- pgcrypto.gen_random_bytes() — used by create_shared_brief ...
-- auth.uid() — used by every existing SECURITY DEFINER RPC ...
+- `pgcrypto.gen_random_bytes()` — used by `create_shared_brief` in the committed hardening migration.
+- `auth.uid()` — used by every existing SECURITY DEFINER RPC per `supabase/README.md` §RPCs.
+- Both are Supabase-default extensions/functions; a project lacking them would fail existing RPCs, not just new ones.
+
+[phase-0-introspect] SURPRISE — halt Phase 0 and review.
+Exit code: 3
 ```
 
-When the script is run against the staging Supabase project (Paul → Supabase dashboard → Project Settings → API → service_role key), the output should be pasted back here in place of the "expected" block above to close the P0-1 gap fully.
+### ⚠️ Collision: `public.conversation_turns` already exists in staging
 
-**Source-evidence fallback.** Even without the live probe, the three preconditions have circumstantial evidence:
-- `conversation_turns` and `handler_facts` are V5-coined table names; no committed migration or documented schema references them, so a collision is implausible but not impossible.
-- `pgcrypto.gen_random_bytes()` is already used by [create_shared_brief](../../supabase/migrations/20260226010000_scenario_schema_v2_0_1_hardening.sql) in the committed hardening migration — if pgcrypto were missing, that RPC would fail on every invocation, and it does not.
-- `auth.uid()` is used by every existing SECURITY DEFINER RPC per `supabase/README.md` §RPCs.
+This is a **hard halt** condition per the script's own protocol and the plan's stop-on-surprise rule. The migration as currently designed would collide with pre-existing state. Investigating and resolving this MUST happen before any migration file is written, let alone applied.
 
-The live probe reduces residual risk to near-zero; the source-evidence path holds it at very low. Phase 0 sign-off can accept either posture with Paul's explicit call.
+**Hypotheses (unverified — need Paul's inspection of the staging DB):**
+1. A prior V5 dry-run or partial-apply left the table behind.
+2. Another service/team created a `conversation_turns` table for an unrelated purpose.
+3. A stale PostgREST schema cache entry (least likely — cache misses usually manifest as PGRST205, not false positives).
 
-**Scope limit.** `pg_catalog` and `information_schema` are not accessible through Supabase PostgREST without a project-settings change that exposes additional schemas. The script therefore cannot query `pg_extension` or `pg_proc` directly. If deeper introspection is ever required, either add a read-only SQL RPC to the migration set or use a direct Postgres driver with the project connection string (kept outside `.env`).
+**Required next steps before Phase 0 can sign off:**
+1. Paul inspects the existing `public.conversation_turns` via the Supabase dashboard (Table Editor → public → conversation_turns) or a direct `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='conversation_turns'` query in the SQL Editor.
+2. Decide:
+   - **Compatible:** existing schema matches §4.1 shape → add `IF NOT EXISTS` guard (already present) and validate the existing `(scenario_id, turn_id)` unique constraint + RLS + indexes match or can be adjusted idempotently.
+   - **Incompatible:** rename the V5 tables to disambiguate (e.g. `v5_conversation_turns`, `v5_handler_facts`). Audit §4 + migration file updated accordingly.
+   - **Stale:** existing table is safe to drop → add a scoped `DROP TABLE IF EXISTS` companion migration (risky; only if Paul is certain no data is referenced).
+3. Re-run `pnpm exec tsx scripts/phase-0-introspect.ts` with the same creds and confirm the resolution before continuing.
+
+**Residual-risk sign-off for checks outside supabase-js scope (Paul-accepted).** Even if the collision is resolved, the two catalog checks (`pg_extension` and `pg_proc`) remain unrunnable via supabase-js against a standard-config Supabase project (PostgREST does not expose `pg_catalog` or `information_schema`). Indirect evidence is accepted as sufficient:
+- `pgcrypto.gen_random_bytes()` is actively invoked by `create_shared_brief` every time a brief is shared on staging. Its absence would have surfaced as user-visible failures, which it has not. Paul-signed residual risk: very low.
+- `auth.uid()` is invoked by every existing SECURITY DEFINER RPC (`append_scenario_event`, `apply_patch_and_log`, `store_analysis_and_log`, etc.). Its absence would manifest as universal RLS-related failures across the UI write path. Paul-signed residual risk: very low.
+
+If the collision resolution takes us to a path where the RPC is rewritten or the tables are renamed, the residual-risk sign-off stands — it applies to Supabase-default plumbing, not to the specific table names.
+
+**Scope limit.** If deeper catalog introspection is ever required, either add a read-only SQL RPC to the migration set or use a direct Postgres driver with the project connection string (kept outside `.env`). This is explicitly NOT in Phase 0 scope.
 
 ---
 
@@ -342,10 +355,16 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION append_turn_atomic(UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB) FROM PUBLIC;
--- No GRANT to authenticated. Service role inherits EXECUTE via superuser-like
--- privileges; only CEE's service-role path reaches this function. A future
--- UI write path (if ever needed) will use a separate RPC that derives identity
--- from auth.uid(), not a spoofable parameter.
+-- Explicit grant to service_role — the role CEE uses for every write path.
+-- Making the grant explicit rather than relying on implicit inheritance
+-- removes any ambiguity about whether service_role retains EXECUTE after the
+-- PUBLIC revoke. service_role is not a Postgres superuser in standard
+-- Supabase projects; it has BYPASSRLS + broad defaults, but REVOKE FROM PUBLIC
+-- can still remove its EXECUTE in some configurations. Explicit grant closes
+-- that ambiguity. No GRANT to authenticated.
+GRANT EXECUTE ON FUNCTION append_turn_atomic(UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB) TO service_role;
+-- A future UI write path (if ever needed) will use a separate RPC that
+-- derives identity from auth.uid(), not a spoofable parameter.
 ```
 
 Notes:
@@ -356,6 +375,14 @@ Notes:
 - **Execute-grant pattern:** revoke from PUBLIC, no grant to authenticated. CEE uses service-role; that role inherits EXECUTE via superuser-like privileges at the Postgres layer.
 - **Duplicate-turn guard:** the `IF NOT FOUND ... RETURN` early-exit ensures handler_facts are written exactly once per `(scenario_id, turn_id)`. Re-invoking `append_turn_atomic` on a committed turn is a safe no-op that returns the same turn UUID, not a duplicate-key error and not a double-write.
 - **JSONB NULL safety:** `jsonb_array_length` raises on NULL input. `COALESCE(p_handler_facts, '[]'::jsonb)` treats NULL and empty-array uniformly. The signature still declares JSONB (not nullable) — callers should pass `[]` for handlerless turns — but defence-in-depth is cheap here.
+
+**Post-migration validation (Tranche 2 deliverable, mandatory).** Once this migration is applied against staging Supabase, Tranche 2's evidence pack MUST include a one-shot integration test that:
+1. Creates a throwaway `scenarios` row (or reuses a staging test fixture).
+2. Calls `append_turn_atomic(...)` via `supabase-js` with the CEE service-role key.
+3. Asserts the call returns a UUID, **not** a `permission denied` or `42501` error.
+4. Cleans up the throwaway row.
+
+This validates the grant model end-to-end against a real database rather than relying on Postgres-role-inheritance assumptions. If the call fails with a permission error, investigate and fix before handing off to Slice B proper — the RPC signature is the only Phase 0 artefact that depends on a non-local runtime assumption about Supabase role privileges.
 
 ### 4.5 Cross-field CHECK constraints
 
@@ -388,7 +415,12 @@ V5 session persistence adds two new tables (`conversation_turns`, `handler_facts
 
 ## 6. Dependency on Phase 0 schemas work
 
-The schema package bump (`@talchain/schemas@0.5.0`) must export:
+**Status:** landed. `@talchain/schemas@0.5.0` shipped the baseline (SessionTurn, HandlerFact discriminated union, per-handler arg + result schemas, 5 handler-result block types on the BlockSchema union, V5ActionType alias, DecisionContext placeholder). `@talchain/schemas@0.5.1` added defensive tightening:
+- `SessionTurnSchema` / `SessionCacheEntrySchema` enforce the `turn_class='handler' ⇔ handler_id IS NOT NULL` biconditional via Zod `.refine()`, mirrored by the SQL CHECK constraint in §4.5.
+- `GraphPatchBlockSchema.operation` narrowed from the full 7-value `ActionType` enum to the three graph-edit literals (`set_factor_value | add_constraint | adjust_edge_strength`), with a runtime subset-drift guard test.
+- `AddConstraintArgsSchema` gains `.superRefine()` cross-field validation — impossible kind/bound combinations (e.g. `range` with null bounds) reject at dispatch rather than propagating to a handler.
+
+The package now exports all of:
 - `SessionTurnSchema` matching the `conversation_turns` row shape above (response-side representation — cache/read tier).
 - `HandlerFactSchema` discriminated union matching the `handler_facts.payload` shape per-handler.
 - Per-handler `HandlerFactResult` types that Zod-validate at write time before going into `handler_facts.payload`.
@@ -423,24 +455,25 @@ All V5 literals match V4 verbatim; zero rename. This table will be committed as 
 
 ---
 
-## 8. Approvals required before schemas proceed
+## 8. Approvals + remaining Phase 0 work
 
-Per plan rev 2 §Execution flow step 2 and brief §3.5, the next Phase 0 step (schema bump + tarball + vendoring) cannot begin until Paul reviews:
+Paul has approved (in sequence) the audit verdict, the `scenarios.events` disposition, the proposed DDL + RPC, the action-type mapping table, the RLS + grant posture, and the post-review hardening (P0-3 RPC redesign, P1-1 biconditional, P1-2 explicit service_role grant, P1-3 cross-field validation).
 
-1. Verdict: **NEW_TABLES** (§5).
-2. `scenarios.events` disposition: **Replace** for turn-level data (§3.3).
-3. Proposed DDL + RPC (§4).
-4. Action-type mapping table (§6).
-5. RLS + grant posture (§4.3, §4.4).
+**Landed:**
+- `@talchain/schemas@0.5.0` → `0.5.1` (additive-only; negative contract tests cover every refinement). Vendored into CEE + UI with SHA-manifested tarball. Typecheck clean on both.
+- Audit doc hardened with P0-3 RPC redesign (§4.4), P1-1 SQL CHECK (§4.5), P1-2 explicit service_role grant (§4.4), live introspection snapshot + residual-risk sign-off (§2.7).
+- Memory corrected: Supabase credentials live in the Render deploy environment, not local `.env`.
 
-On approval, Phase 0 resumes with:
-- Schema bump `@talchain/schemas@0.4.0` → `0.5.0` (additive-only).
-- Vendored tarball rebuild + SHA manifest.
-- Pin update in CEE and UI `package.json`.
-- Typecheck clean against new schemas.
-- Migration file committed under `supabase/migrations/2026XXXX_v5_session_store.sql` (applied against staging Supabase as a separate operational step — not run by Phase 0).
-- New CEE task_id literals + `OPERATION_TO_TASK_ID` additions.
-- `scripts/validate-data-responsibility.sh` shipped.
+**Remaining Phase 0 work (Tranche 1 close-out):**
+- 7 new `CeeTaskId` literals in [src/prompts/schema.ts](../../src/prompts/schema.ts) matching the 7 V5 handler task IDs.
+- 7 new `OPERATION_TO_TASK_ID` entries in [src/adapters/llm/prompt-loader.ts](../../src/adapters/llm/prompt-loader.ts) mapping handler operations to task IDs.
+- 7 placeholder prompt fragments in [src/prompts/defaults.ts](../../src/prompts/defaults.ts) (Paul remains sole author of real prompt content).
+- Migration file at `supabase/migrations/2026XXXX_v5_session_store.sql` incorporating the DDL + RPC from §4 verbatim (additive, idempotent).
+- Break-glass rollback companion at `supabase/migrations/rollback/2026XXXX_v5_session_store_rollback.sql.do-not-apply`.
+- `scripts/validate-data-responsibility.sh` grep-guard against cross-service computation leaks.
+- `scripts/validate-phase-0-complete.sh` closure script (I-1) that fails if any of the above are missing, so partial-Phase-0 states cannot pass informal verification.
 - Final Phase 0 evidence-pack commit.
+
+The migration itself is **not** run by Phase 0 — applying it against staging Supabase is a separate operational step that happens at Tranche 2 start, immediately before the Slice B session layer needs the tables.
 
 Phase 0 then hard-stops for Tranche 2 (Slice B) approval.
