@@ -117,6 +117,18 @@ const OPERATION_TO_TASK_ID: Record<string, CeeTaskId> = {
   // V5 slice A2 — clarification narrate + pre-narrate turn classifier.
   clarify_narrate: 'clarify_narrate',
   turn_classifier: 'turn_classifier',
+  // V5 slices C2 + D1 + D2 (Phase 0 wiring). Operation keys match the V4
+  // action_type literals verified in the phase-0 Supabase audit §6 mapping
+  // table. Handler modules that consume these prompts do not land until the
+  // tranche commits; the loader wiring is complete now so future dispatch
+  // can resolve without further Phase 0 touches.
+  run_analysis_narrate: 'run_analysis_narrate',
+  set_factor_value_narrate: 'set_factor_value_narrate',
+  add_constraint_narrate: 'add_constraint_narrate',
+  adjust_edge_strength_narrate: 'adjust_edge_strength_narrate',
+  explain_result_narrate: 'explain_result_narrate',
+  compare_options_narrate: 'compare_options_narrate',
+  what_would_flip_narrate: 'what_would_flip_narrate',
   // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 };
 

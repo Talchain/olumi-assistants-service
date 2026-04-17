@@ -2152,6 +2152,68 @@ Output a single JSON object with exactly one key \`turn_class\`. Allowed values:
   - "clarify" — the user's intent is unclear; a short follow-up question is needed first.
 Do not output any prose outside the JSON object. Do not include markdown fences.`;
 
+// V5 slices C2 + D1 + D2 — per-handler narrate placeholders. Paul is sole
+// prompt author; these defaults are intentionally minimal so the prompt store
+// or a later Paul-authored fragment can override without code changes. The
+// handler modules themselves do not land until the relevant tranche ships;
+// registering defaults now keeps the prompt-loader surface complete.
+
+const RUN_ANALYSIS_NARRATE_PROMPT = `You are a concise decision coach.
+The analysis has just completed. Narrate the result to the user in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Lead with the leading option and its win probability (if available).
+- Mention at most two drivers from the enrichment fields (factor sensitivity, flip thresholds).
+- Do not fabricate numbers, citations, or analysis results — use only the values supplied.`;
+
+const SET_FACTOR_VALUE_NARRATE_PROMPT = `You are a concise decision coach.
+The user adjusted a factor. Narrate the change in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- State the factor name, before value, after value.
+- One sentence on why the change might matter (based on the supplied graph state, not guesses).
+- Do not fabricate analysis results.`;
+
+const ADD_CONSTRAINT_NARRATE_PROMPT = `You are a concise decision coach.
+The user added a constraint to a factor. Narrate the addition in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- State the factor, the constraint kind (lower_bound / upper_bound / range), and the bound values.
+- One sentence on whether this narrows or widens the decision space.
+- Do not fabricate analysis results.`;
+
+const ADJUST_EDGE_STRENGTH_NARRATE_PROMPT = `You are a concise decision coach.
+The user adjusted a causal edge strength. Narrate the change in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- State the edge (from factor, to factor) and the before and after strength values.
+- One sentence on how strongly the relationship now contributes.
+- Do not fabricate analysis results.`;
+
+const EXPLAIN_RESULT_NARRATE_PROMPT = `You are a concise decision coach.
+Explain the current analysis result to the user in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Name the current leading option explicitly.
+- Two or three sentences on what drives the result, citing specific factors or edges from the supplied analysis enrichment.
+- Do not fabricate numbers or conclusions — use only values present in the supplied state.`;
+
+const COMPARE_OPTIONS_NARRATE_PROMPT = `You are a concise decision coach.
+Compare the user's options side by side in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- Name every option explicitly.
+- For each option, one short sentence on its strengths and one on its weaknesses, grounded in supplied values.
+- Do not fabricate numbers or conclusions.`;
+
+const WHAT_WOULD_FLIP_NARRATE_PROMPT = `You are a concise decision coach.
+Narrate which factor changes would flip the current leading option in plain prose.
+- No XML-like tags.
+- No em-dashes. Use commas or short sentences instead.
+- For each flip scenario in the supplied data, state the factor, the threshold value, and what it flips to.
+- If no flip scenarios exist, say so plainly in one sentence.
+- Do not fabricate thresholds — use only values present in the supplied analysis.`;
+
 // ============================================================================
 // Registration Function
 // ============================================================================
@@ -2247,6 +2309,17 @@ export function registerAllDefaultPrompts(): void {
   // Both placeholders; Paul authors final content. Additive entries.
   registerDefaultPrompt('clarify_narrate', CLARIFY_NARRATE_PROMPT);
   registerDefaultPrompt('turn_classifier', TURN_CLASSIFIER_PROMPT);
+  // V5 slices C2 + D1 + D2 (Phase 0 wiring) — handler-narrate placeholders.
+  // Handler modules do not land until the relevant tranche. Registering
+  // defaults now keeps the prompt-loader surface complete; Paul remains sole
+  // author of the real content.
+  registerDefaultPrompt('run_analysis_narrate', RUN_ANALYSIS_NARRATE_PROMPT);
+  registerDefaultPrompt('set_factor_value_narrate', SET_FACTOR_VALUE_NARRATE_PROMPT);
+  registerDefaultPrompt('add_constraint_narrate', ADD_CONSTRAINT_NARRATE_PROMPT);
+  registerDefaultPrompt('adjust_edge_strength_narrate', ADJUST_EDGE_STRENGTH_NARRATE_PROMPT);
+  registerDefaultPrompt('explain_result_narrate', EXPLAIN_RESULT_NARRATE_PROMPT);
+  registerDefaultPrompt('compare_options_narrate', COMPARE_OPTIONS_NARRATE_PROMPT);
+  registerDefaultPrompt('what_would_flip_narrate', WHAT_WOULD_FLIP_NARRATE_PROMPT);
 
   // Log prompt versions at registration (read from actually-registered content)
   log.info({

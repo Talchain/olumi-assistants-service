@@ -46,6 +46,17 @@ export const CeeTaskIdSchema = z.enum([
   // both fragments (placeholder defaults in defaults.ts).
   'clarify_narrate',
   'turn_classifier',
+  // V5 slices C2 + D1 + D2 (Phase 0 wiring) — narrate-mode prompts for each
+  // handler turn class. Additive; handlers themselves do not land until the
+  // B/C/D tranches. Placeholder defaults in defaults.ts; Paul remains sole
+  // author of real content.
+  'run_analysis_narrate',
+  'set_factor_value_narrate',
+  'add_constraint_narrate',
+  'adjust_edge_strength_narrate',
+  'explain_result_narrate',
+  'compare_options_narrate',
+  'what_would_flip_narrate',
 ]);
 export type CeeTaskId = z.infer<typeof CeeTaskIdSchema>;
 
