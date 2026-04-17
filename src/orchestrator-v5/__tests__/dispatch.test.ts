@@ -196,4 +196,43 @@ describe('dispatch', () => {
       expect(err.name).toBe('UnhandledTurnClassError');
     });
   });
+
+  /**
+   * Phase 0 wiring guard. The 7 V5 handler operations
+   * (run_analysis / set_factor_value / add_constraint / adjust_edge_strength /
+   * explain_result / compare_options / what_would_flip) are now wired into
+   * the prompt-loader (CeeTaskId + OPERATION_TO_TASK_ID + default fragments),
+   * but no handler *code* exists yet — that's tranche B/C/D work. If the
+   * classifier were to return any of these names today, dispatch MUST reject
+   * with UnhandledTurnClassError. This test proves the placeholder wiring
+   * cannot be accidentally reached via the A2 dispatcher.
+   */
+  describe('Phase 0 handler-operation guard (wiring without handler code)', () => {
+    const HANDLER_OPERATIONS = [
+      'run_analysis',
+      'set_factor_value',
+      'add_constraint',
+      'adjust_edge_strength',
+      'explain_result',
+      'compare_options',
+      'what_would_flip',
+    ] as const;
+
+    for (const op of HANDLER_OPERATIONS) {
+      it(`classifier returning "${op}" → UnhandledTurnClassError (no handler wired in A2)`, async () => {
+        phaseMocks.classify.content = `{"turn_class":"${op}"}`;
+        phaseMocks.narrate.content = 'this narrate MUST NOT run';
+        let caught: unknown;
+        try {
+          await dispatch(BASE_CONTEXT);
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(UnhandledTurnClassError);
+        expect((caught as InstanceType<typeof UnhandledTurnClassError>).message).toContain(op);
+        // Narrate must not have been called: if it had, its output would have
+        // been sanitised and returned. The throw short-circuits that path.
+      });
+    }
+  });
 });
