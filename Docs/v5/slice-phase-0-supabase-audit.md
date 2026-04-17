@@ -123,6 +123,77 @@ If the collision resolution takes us to a path where the RPC is rewritten or the
 
 **Scope limit.** If deeper catalog introspection is ever required, either add a read-only SQL RPC to the migration set or use a direct Postgres driver with the project connection string (kept outside `.env`). This is explicitly NOT in Phase 0 scope.
 
+### Existing `conversation_turns` shape characterisation (2026-04-17)
+
+Ran [scripts/phase-0-shape-probe.ts](../../scripts/phase-0-shape-probe.ts) — a read-only per-column probe triggered by the collision finding. Real output:
+
+```markdown
+# Phase 0 — public.conversation_turns shape probe
+Generated: 2026-04-17T15:35:43.677Z
+
+## Row count
+- rows: 0
+
+## Full expected-column select
+- columns tried: id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at
+- status: FAILED
+- error: column conversation_turns.turn_id does not exist
+- code: 42703
+
+## Per-column existence probe
+- id: present
+- scenario_id: present
+- user_id: present
+- turn_id: MISSING — column conversation_turns.turn_id does not exist
+- turn_class: MISSING — column conversation_turns.turn_class does not exist
+- handler_id: MISSING — column conversation_turns.handler_id does not exist
+- request_hash: MISSING — column conversation_turns.request_hash does not exist
+- response_emitted: MISSING — column conversation_turns.response_emitted does not exist
+- llm_calls_used: MISSING — column conversation_turns.llm_calls_used does not exist
+- duration_ms: MISSING — column conversation_turns.duration_ms does not exist
+- created_at: present
+
+## Summary
+- expected-column coverage: 4 / 11
+- missing columns: turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms
+- shape verdict: INCOMPATIBLE
+- data verdict: EMPTY
+```
+
+**What the shape tells us.** The existing table has the four identity-plus-timestamp columns (`id`, `scenario_id`, `user_id`, `created_at`) and nothing more. That pattern looks like a minimal sketch or placeholder — plausibly a prior V5 dry-run that was not completed, an abandoned sibling feature's scaffold, or a very-thin audit-log table that never got its payload columns. No V5 migration has been applied from this repo, so this table was created by some other path (dashboard, a prior migration not checked in, or a partial earlier round). Provenance is unknown from the repo's side.
+
+**What the shape does NOT tell us.**
+- Whether extra columns exist beyond the expected set (PostgREST doesn't expose column metadata without a row-returning SELECT; `rows: 0` means the scope-limit caveat applies unchanged).
+- Whether foreign keys, triggers, indexes, or RLS policies reference this table. A drop must either `CASCADE` or these must be verified absent first.
+- When it was created and by whom (Supabase dashboard history or Postgres logs would answer; out of scope for a read-only probe).
+
+### Path decision: **option 3 (scoped drop)** — pending explicit Paul confirmation
+
+Per the decision matrix Paul fixed at 2026-04-17:
+> incompatible + zero rows → option 3 (scoped drop, Paul confirms)
+
+This maps unambiguously: shape is 4/11 (incompatible), rows = 0 (empty). Option 3 is the cleanest path — it preserves the clean `conversation_turns` name for V5 rather than locking in a permanent `v5_` prefix for a transient collision.
+
+**Proposed migration prelude (NOT yet written to a migration file — awaiting confirmation):**
+
+```sql
+-- Staging cleanup: the pre-existing public.conversation_turns is a 4-column
+-- sketch unrelated to the V5 design, empty on 2026-04-17 per shape-probe
+-- evidence. Dropped with CASCADE so any dependent FKs/indexes/RLS policies go
+-- with it. Verified-empty precondition at probe time.
+DROP TABLE IF EXISTS public.conversation_turns CASCADE;
+```
+
+**Paul-confirmation checklist before this prelude ships:**
+1. Open Supabase dashboard → Table Editor → `public.conversation_turns` → inspect for FK references IN (other tables → this table) and FK references OUT (this table → other tables). If IN exists, `CASCADE` will drop those FKs too — confirm the target FK is also safe to lose.
+2. Confirm no RLS policies on this table protect data we're not expecting (empty now, but check the policy list in case a policy is load-bearing for something else).
+3. Confirm no triggers on the table that perform side-effects.
+4. Once confirmed, Paul gives explicit go-ahead in writing. The drop prelude is added to the migration file as its first statement.
+
+**If any check surfaces a blocker**, fall back to option 2 (rename to `v5_conversation_turns`). This is reversible and non-destructive; the permanent-`v5_` cost is worth it if the existing table turns out to be load-bearing for anything else.
+
+**Re-run introspection after resolution.** Either path MUST be followed by a fresh `pnpm exec tsx scripts/phase-0-introspect.ts` run confirming both `conversation_turns` AND `handler_facts` report `absent-OK`, BEFORE the migration file is written.
+
 ---
 
 ## 3. `scenarios.events` JSONB — lifecycle verdict (plan rev 2 revision 11)
@@ -405,9 +476,19 @@ ALTER TABLE conversation_turns
 
 ---
 
-## 5. **Verdict: NEW_TABLES** (plan rev 2 revision 9)
+## 5. **Verdict: NEW_TABLES with scoped cleanup prelude** (plan rev 2 revision 9, revised 2026-04-17)
 
-V5 session persistence adds two new tables (`conversation_turns`, `handler_facts`) + one new RPC (`append_turn_atomic`) + matching RLS policies. Zero changes to existing tables, zero destructive DDL, zero impact on UI's existing scenario-lifecycle write path.
+V5 session persistence adds two new tables (`conversation_turns`, `handler_facts`) + one new RPC (`append_turn_atomic`) + matching RLS policies.
+
+**Revised on 2026-04-17** after the introspection run surfaced a pre-existing incompatible `public.conversation_turns` sketch table (4/11 expected columns, 0 rows — see §2.7 shape characterisation). The migration now requires a single-statement cleanup prelude:
+
+```sql
+DROP TABLE IF EXISTS public.conversation_turns CASCADE;
+```
+
+This is scoped (one table, verified-empty at probe time), gated (Paul-confirmation checklist in §2.7 before the prelude ships), and conditional (if any check in the checklist surfaces a blocker, the fallback is option 2 — rename V5 tables to `v5_conversation_turns` / `v5_handler_facts` and leave the existing sketch alone).
+
+**Zero impact on other existing state.** `scenarios`, `shared_briefs`, `cee_prompts*`, draft-failures store, and every SECURITY DEFINER RPC continue unchanged. The cleanup targets only the empty `conversation_turns` sketch.
 
 **`scenarios.events` disposition:** Replace (for turn-level data) — see §3.3. The column is unchanged; V5 simply does not write to it. UI-owned lifecycle events continue unchanged.
 
@@ -477,3 +558,11 @@ Paul has approved (in sequence) the audit verdict, the `scenarios.events` dispos
 The migration itself is **not** run by Phase 0 — applying it against staging Supabase is a separate operational step that happens at Tranche 2 start, immediately before the Slice B session layer needs the tables.
 
 Phase 0 then hard-stops for Tranche 2 (Slice B) approval.
+
+---
+
+## 9. Operational notes (post-Phase-0 housekeeping)
+
+**Rotate the staging Supabase `service_role` key after Phase 0 closes.** The key was briefly transited through conversation logs during the 2026-04-17 introspection runs (two uses: `scripts/phase-0-introspect.ts` and `scripts/phase-0-shape-probe.ts`). Do NOT rotate mid-Phase-0 — introspection will keep needing the key for (a) post-resolution re-run of `phase-0-introspect.ts` and (b) the Tranche 2 post-migration RPC-grant validation test per §4.4. Rotate once Phase 0 is signed off and Tranche 2's grant-validation test has run successfully. Action: Supabase dashboard → Project Settings → API → service_role key → Rotate. Re-deploy CEE and UI with the fresh key.
+
+**Future introspection hygiene.** Prefer piping secrets via `op run --` (1Password CLI), `direnv`-managed `.envrc` files that never commit, or a shell-local `~/.config/olumi/supabase-staging.env` sourced explicitly rather than pasted into chat. The current-round exposure is bounded and mitigated by rotation; do not normalise the paste-into-chat pattern.
