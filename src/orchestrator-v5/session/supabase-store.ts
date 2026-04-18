@@ -111,9 +111,13 @@ export class SupabaseSessionStore implements SessionStore {
     scenarioId: string,
     limit: number = this.options.defaultReadLimit,
   ): Promise<readonly SessionTurn[]> {
+    // Cache hit iff: we have enough cached turns OR the cache holds the
+    // complete (exhausted) history for this scenario. Without the
+    // `complete` check, a short-history scenario (DB has 2 turns) would
+    // re-query DB on every read with a default limit of 20.
     const cached = this.cache.getScenario(scenarioId);
-    if (cached && cached.length >= limit) {
-      return cached.slice(0, limit);
+    if (cached && (cached.complete || cached.turns.length >= limit)) {
+      return cached.turns.slice(0, limit);
     }
 
     const { data, error } = await this.client
@@ -137,16 +141,19 @@ export class SupabaseSessionStore implements SessionStore {
       if (parsed.success) {
         turns.push(parsed.data);
       } else {
-        // Row shape drift — skip but surface for debugging. Caller sees
-        // fewer turns rather than a thrown error, which matches the
-        // graceful-degradation contract.
+        // Row shape drift — throw so the caller (build-turn-context) can
+        // emit session.read_degraded telemetry and continue with empty
+        // history. Without this throw, silent data corruption could
+        // propagate to handlers.
         throw new SessionReadError(
           `readRecent(${scenarioId}): row failed SessionTurnSchema — ${parsed.error.message}`,
           { cause: parsed.error },
         );
       }
     }
-    this.cache.populate(scenarioId, turns);
+    // Complete iff DB returned fewer rows than the caller's limit — more
+    // rows would have been returned if they existed.
+    this.cache.populate(scenarioId, turns, { complete: turns.length < limit });
     return turns;
   }
 

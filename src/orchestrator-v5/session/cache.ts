@@ -26,6 +26,25 @@ export interface LRUCacheConfig {
 interface ScenarioEntry {
   turns: SessionTurn[]; // sorted by created_at DESC
   staleTurnIds: Set<string>;
+  /**
+   * True when the cache entry holds EVERY turn that exists for this
+   * scenario (i.e. the last DB read returned fewer rows than its requested
+   * limit, proving there are no more). Reads whose requested limit exceeds
+   * `turns.length` can still be satisfied from cache when this is true —
+   * without it, the store would pointlessly re-query on every read of a
+   * short-history scenario.
+   */
+  complete: boolean;
+}
+
+export interface PopulateOptions {
+  /** See ScenarioEntry.complete. */
+  readonly complete: boolean;
+}
+
+export interface CacheSnapshot {
+  readonly turns: readonly SessionTurn[];
+  readonly complete: boolean;
 }
 
 export class SessionLRUCache {
@@ -42,8 +61,11 @@ export class SessionLRUCache {
   /**
    * Returns a deep-frozen snapshot of the non-stale turns for this scenario,
    * or `null` if the scenario is not cached. LRU-bumps the scenario on hit.
+   * The `complete` flag tells callers whether the snapshot is the full
+   * history (safe to serve large-limit reads) or truncated at the read
+   * boundary (must re-query DB for higher limits).
    */
-  getScenario(scenarioId: string): readonly SessionTurn[] | null {
+  getScenario(scenarioId: string): CacheSnapshot | null {
     const entry = this.map.get(scenarioId);
     if (!entry) return null;
     // LRU bump: delete + re-set moves the key to the end of the Map iteration
@@ -51,19 +73,29 @@ export class SessionLRUCache {
     this.map.delete(scenarioId);
     this.map.set(scenarioId, entry);
     const fresh = entry.turns.filter((t) => !entry.staleTurnIds.has(t.turn_id));
-    return deepFreeze(fresh.slice());
+    return { turns: deepFreeze(fresh.slice()), complete: entry.complete };
   }
 
   /**
    * Replace the scenario's cached turns. Called on cache miss when the store
-   * freshly read from Supabase. Bounded to `maxTurnsPerScenario`.
+   * freshly read from Supabase. Bounded to `maxTurnsPerScenario`. Callers
+   * pass `complete: true` iff the DB read returned fewer rows than the
+   * caller's limit (i.e. the DB is exhausted for this scenario).
    */
-  populate(scenarioId: string, turns: readonly SessionTurn[]): void {
+  populate(
+    scenarioId: string,
+    turns: readonly SessionTurn[],
+    opts: PopulateOptions = { complete: false },
+  ): void {
+    // If we had to bound by maxTurnsPerScenario, we can never claim
+    // completeness from cache — the DB may hold more than we retained.
     const bounded = turns.slice(0, this.config.maxTurnsPerScenario);
+    const complete = opts.complete && bounded.length === turns.length;
     this.map.delete(scenarioId);
     this.map.set(scenarioId, {
       turns: [...bounded],
       staleTurnIds: new Set(),
+      complete,
     });
     this.evictOverLimit();
   }
@@ -82,7 +114,10 @@ export class SessionLRUCache {
     if (!entry) return;
     entry.turns.unshift(turn);
     if (entry.turns.length > this.config.maxTurnsPerScenario) {
+      // We just evicted the tail turn from cache. It still exists in DB,
+      // so the cache is no longer a complete view.
       entry.turns.length = this.config.maxTurnsPerScenario;
+      entry.complete = false;
     }
     // LRU bump
     this.map.delete(scenarioId);

@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { TurnContextSchema } from '@talchain/schemas/orchestrator';
+import { TurnContextSchema, type SessionTurn } from '@talchain/schemas/orchestrator';
+
+import { setTestSink } from '../../utils/telemetry.js';
 import { buildTurnContext } from '../build-turn-context.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
+import { SessionReadError } from '../session/store.js';
 
 const BASE = {
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -71,5 +74,82 @@ describe('buildTurnContext', () => {
     const ctx = await buildTurnContext(BASE, 'req-1', OPTS);
     expect(ctx.budgets.turn_ms).toBe(180_000);
     expect(ctx.budgets.llm_narrate_ms).toBe(60_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice B additions — prior_turns + graceful degradation
+// ---------------------------------------------------------------------------
+
+function makeSessionTurn(turnId: string, createdAt: string): SessionTurn {
+  return {
+    id: `row-${turnId}`,
+    scenario_id: BASE.scenario_id,
+    user_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    turn_id: turnId,
+    turn_class: 'direct_answer',
+    handler_id: null,
+    request_hash: `sha256:${turnId}`,
+    response_emitted: true,
+    llm_calls_used: 2,
+    duration_ms: 123,
+    created_at: createdAt,
+  };
+}
+
+describe('buildTurnContext slice B — prior_turns population', () => {
+  const prevEnv = { ...process.env };
+  beforeEach(() => {
+    process.env.VITEST = 'true';
+  });
+  afterEach(() => {
+    process.env = { ...prevEnv };
+    setTestSink(null);
+  });
+
+  it('populates prior_turns from sessionStore.readRecent', async () => {
+    const priorTurns = [
+      makeSessionTurn('t2', '2026-04-17T11:00:00.000+00:00'),
+      makeSessionTurn('t1', '2026-04-17T10:00:00.000+00:00'),
+    ];
+    const store = createNoopSessionStore({ priorTurns });
+    const ctx = await buildTurnContext(BASE, 'req-1', { sessionStore: store });
+    expect(ctx.prior_turns).toHaveLength(2);
+    expect(ctx.prior_turns[0].turn_id).toBe('t2');
+  });
+
+  it('returns empty prior_turns when readRecent throws (graceful degradation)', async () => {
+    const boom = new SessionReadError('DB offline', { code: '57P03' });
+    const store = createNoopSessionStore({ throwOnRead: boom });
+    const ctx = await buildTurnContext(BASE, 'req-1', { sessionStore: store });
+    expect(ctx.prior_turns).toEqual([]);
+  });
+
+  it('emits session.read_degraded telemetry with error_code + severity=warning on read failure', async () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      throwOnRead: new SessionReadError('RPC down', { code: '53300' }),
+    });
+    await buildTurnContext(BASE, 'req-1', { sessionStore: store });
+    const event = events.find((e) => e.name === 'session.read_degraded');
+    expect(event).toBeDefined();
+    expect(event!.data).toMatchObject({
+      request_id: 'req-1',
+      scenario_id: BASE.scenario_id,
+      error_code: '53300',
+      severity: 'warning',
+    });
+  });
+
+  it('emits read_degraded with error_code=unknown when the error has no code', async () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      throwOnRead: new Error('something plain'),
+    });
+    await buildTurnContext(BASE, 'req-1', { sessionStore: store });
+    const event = events.find((e) => e.name === 'session.read_degraded');
+    expect(event!.data.error_code).toBe('unknown');
   });
 });
