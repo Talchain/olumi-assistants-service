@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "seed_used": 42,
+    "n_samples": 1000,
+    "response_hash": "sha256:happy-path-fixture-a1b2c3d4"
+  },
+  "results": [
+    { "option_id": "opt_a", "option_label": "Option A", "win_probability": 0.62, "percentile_p10": 0.55, "percentile_p90": 0.68 },
+    { "option_id": "opt_b", "option_label": "Option B", "win_probability": 0.38, "percentile_p10": 0.31, "percentile_p90": 0.47 }
+  ],
+  "fact_objects": [
+    { "fact_type": "option_comparison", "fact_id": "f1", "data": { "lead": "opt_a", "margin": 0.24 } },
+    { "fact_type": "sensitivity", "fact_id": "f2", "data": { "factor": "fac_price", "elasticity": 0.4 } }
+  ],
+  "review_cards": [
+    { "card_id": "rc1", "title": "Leading option", "body": "Option A leads by 24pp under current assumptions." }
+  ],
+  "robustness": {
+    "level": "moderate",
+    "fragile_edges": [
+      { "edge_id": "fac_price->goal_1", "threshold_delta": 0.12 }
+    ]
+  },
+  "factor_sensitivity": [
+    { "label": "Price", "elasticity": 0.4, "direction": "negative" },
+    { "label": "Quality", "elasticity": 0.2, "direction": "positive" }
+  ],
+  "constraint_analysis": {
+    "joint_probability": 0.78,
+    "per_constraint": [
+      { "constraint_id": "c1", "satisfied_probability": 0.89 }
+    ]
+  },
+  "response_hash": "sha256:happy-path-fixture-top-level-z9y8",
+  "analysis_status": "completed"
+}
