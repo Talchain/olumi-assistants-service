@@ -3,7 +3,7 @@
 **Date:** 2026-04-18
 **Branch:** `claude/v5-slice-c1` (off `staging`)
 **Branch-base:** `08714098` (Slice B squash-merge)
-**Head (pre-push):** `bff0cc22`
+**Head:** `ebeb163e`
 **Scope:** Handler spine only. Zero handlers registered by design — every `turn_class: 'handler'` turn dispatches, resolves against the empty registry, and returns UNHANDLED → INTERNAL_ERROR cleanly. Slice C2 (`run_analysis`) will be the first handler registration.
 
 Paul's 2026-04-18 refinement requirement: evidence pack + implementation doc collapsed into a single file (refinement #9). §Implementation below.
@@ -30,7 +30,7 @@ Paul's 2026-04-18 refinement requirement: evidence pack + implementation doc col
 |---|---|
 | [src/orchestrator-v5/types.ts](../../src/orchestrator-v5/types.ts) | New `C1TurnClass = A2TurnClass \| 'handler'` union + `isC1TurnClass`. New `UnhandledTurnClassReason` (`unhandled_turn_class` / `handler_not_registered` / `missing_handler_id`). `UnhandledTurnClassError` constructor widened: `(reason, attempted)`. `InternalFailure` adds `HANDLER_INVOCATION_FAILED` + `HANDLER_RESULT_INVALID`, both mapping to `INTERNAL_ERROR`. `TurnExecutorTelemetry.turn_class` widened to `C1TurnClass \| null`. |
 | [src/orchestrator-v5/budgets.ts](../../src/orchestrator-v5/budgets.ts) | New `DEFAULT_LLM_HANDLER_BUDGET_MS = 45_000`. New `getHandlerBudgetMs()` reads `LLM_BUDGET_HANDLER_MS` at call time (matches TURN_BUDGET_MS / LLM_BUDGET_NARRATE_MS pattern). Wire `Budgets` schema unchanged (CEE-internal function, no schema bump). |
-| [src/orchestrator-v5/classify.ts](../../src/orchestrator-v5/classify.ts) | `ClassifierOutputSchema` adds optional `handler_id` + biconditional refinement (Paul refinement #6): `handler_id` present iff `turn_class === 'handler'`. Post-Zod semantic checks widened: `isA2TurnClass` → `isC1TurnClass`. Handler-id validated via `V5ActionTypeSchema.safeParse`. `ClassifyTurnResult` gains `handler_id?: V5ActionType`. |
+| [src/orchestrator-v5/classify.ts](../../src/orchestrator-v5/classify.ts) | `ClassifierOutputSchema` adds optional `handler_id` + biconditional refinement (Paul refinement #6): `handler_id` present iff `turn_class === 'handler'`. Post-Zod semantic checks widened: `isA2TurnClass` → `isC1TurnClass`. Handler-id validated via `V5ActionTypeSchema.safeParse`. `ClassifyTurnResult` converted to discriminated union: `handler` arm has `handler_id: V5ActionType` (required); all other arms have `handler_id?: never` — callers narrowing on `turn_class === 'handler'` get non-optional `handler_id` for free. |
 | [src/orchestrator-v5/dispatch.ts](../../src/orchestrator-v5/dispatch.ts) | `DispatchResult` converted to discriminated union on `turn_class`: A2 variant carries `sanitised`; handler variant carries `handler_id` + `handler_outcome`. New `DispatchOpts.registry` (defaults to `EMPTY_HANDLER_REGISTRY`) + `DispatchOpts.payload`. `onClassified` callback widened to `(C1TurnClass, V5ActionType \| undefined)`. New `dispatchHandler()` resolves + invokes; registry miss throws `UnhandledTurnClassError(reason='handler_not_registered')`. |
 | [src/orchestrator-v5/turn-executor.ts](../../src/orchestrator-v5/turn-executor.ts) | `resolvedTurnClass` widened to `C1TurnClass \| null`. Contamination telemetry narrowed by `turn_class !== 'handler'` (handler outcomes bypass narrate sanitiser). Compose stage: 3-branch if/else if/else over `turn_class` — handler branch composes via `composeDirectAnswerResponse` on `handler_outcome.assistant_text` (unreachable in C1, kept for C2 exhaustiveness). `dispatch()` call passes `payload` through for handler invocation support. |
 
@@ -60,10 +60,11 @@ Paul's 2026-04-18 refinement requirement: evidence pack + implementation doc col
 | `e010ff75` | D3 | Handler registry module + 6 tests |
 | `972855a2` | D4+D5 | Classifier biconditional + semantic checks; dispatch handler branch + discriminated-union DispatchResult; turn-executor compose branching |
 | `bff0cc22` | D6 | 36 new unit tests across classify + dispatch + turn-executor |
+| `ebeb163e` | post-review | `ClassifyTurnResult` → discriminated union (Gemini PR comment addressed): `handler` arm gets `handler_id: V5ActionType` required; all other arms get `handler_id?: never`. 274/274 tests still pass. |
 
 ---
 
-## 3. Gates passed (head `bff0cc22`)
+## 3. Gates passed (head `ebeb163e`)
 
 | Gate | Command | Result |
 |---|---|---|
