@@ -73,8 +73,4 @@ suite('Slice B RPC grant validation (audit §4.4)', () => {
   });
 });
 
-if (!envReady) {
-  describe('Slice B RPC grant validation (skipped — env not set)', () => {
-    it.skip('missing env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY', () => undefined);
-  });
-}
+// describe.skip above already handles the env-missing case.

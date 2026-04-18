@@ -112,8 +112,4 @@ suite('Slice B invalidation — scoped vs full', () => {
   });
 });
 
-if (!envReady) {
-  describe('Slice B invalidation (skipped — env not set)', () => {
-    it.skip('missing env', () => undefined);
-  });
-}
+// describe.skip above already handles the env-missing case.

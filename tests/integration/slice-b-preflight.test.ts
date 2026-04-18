@@ -69,12 +69,5 @@ suite('Slice B preflight — staging Supabase state', () => {
   });
 });
 
-// If env is missing, emit a human-readable note so developers know why this
-// suite didn't run. Vitest's `.skip` is quiet by default.
-if (!envReady) {
-  describe('Slice B preflight (skipped — env not set)', () => {
-    it.skip('missing env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TEST_SCENARIO_ID', () => {
-      // placeholder
-    });
-  });
-}
+// When env is missing, vitest's `describe.skip` path above handles it —
+// the suite reports as skipped in the runner output. No redundant block.

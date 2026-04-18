@@ -121,8 +121,4 @@ suite('Slice B concurrent-writes — idempotency under real concurrency', () => 
   });
 });
 
-if (!envReady) {
-  describe('Slice B concurrent-writes (skipped — env not set)', () => {
-    it.skip('missing env', () => undefined);
-  });
-}
+// describe.skip above already handles the env-missing case.

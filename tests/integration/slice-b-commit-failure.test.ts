@@ -65,8 +65,4 @@ suite('Slice B commit-failure — RPC error propagates as StateCommitFailedError
   });
 });
 
-if (!envReady) {
-  describe('Slice B commit-failure (skipped — env not set)', () => {
-    it.skip('missing env', () => undefined);
-  });
-}
+// describe.skip above already handles the env-missing case.

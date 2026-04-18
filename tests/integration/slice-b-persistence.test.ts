@@ -102,8 +102,4 @@ suite('Slice B persistence — two-turn flow survives cache flush', () => {
   });
 });
 
-if (!envReady) {
-  describe('Slice B persistence (skipped — env not set)', () => {
-    it.skip('missing env', () => undefined);
-  });
-}
+// describe.skip above already handles the env-missing case.
