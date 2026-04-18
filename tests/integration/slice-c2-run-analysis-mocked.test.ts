@@ -69,7 +69,6 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   resetSessionStoreForTests: () => {},
 }));
 
-import { createRegistry } from '../../src/orchestrator-v5/tools/registry.js';
 import type { PLoTClient } from '../../src/orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../src/orchestrator/types.js';
 import type {
@@ -113,7 +112,7 @@ function makeSnapshot(): RunAnalysisScenarioSnapshot {
 
 function makeMockPlot(response: V2RunResponseEnvelope): PLoTClient {
   return {
-    run: vi.fn(async () => structuredClone(response) as V2RunResponseEnvelope),
+    run: vi.fn(async () => JSON.parse(JSON.stringify(response)) as V2RunResponseEnvelope),
     validatePatch: vi.fn().mockResolvedValue({}),
   } as unknown as PLoTClient;
 }

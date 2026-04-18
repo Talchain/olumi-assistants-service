@@ -85,7 +85,6 @@ vi.mock('../session/index.js', () => ({
 // mutable deps box. Each test configures `registryDeps` before invoking
 // runTurnExecutor. Keeps the real createRegistry + handler in play so we
 // exercise the integration surface, not a stubbed registry.
-import { createRegistry } from '../tools/registry.js';
 import type { PLoTClient } from '../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import type {
@@ -176,11 +175,6 @@ function installSink(): void {
 }
 function uninstallSink(): void {
   setTestSink(null);
-}
-function completedEvent(): Event {
-  const c = events.filter((e) => e.event === 'turn_executor.completed');
-  if (c.length !== 1) throw new Error(`expected 1 completed event, got ${c.length}`);
-  return c[0]!;
 }
 function expectBI01(): void {
   const started = events.filter((e) => e.event === 'turn_executor.started');
@@ -425,18 +419,17 @@ describe("turn-executor × run_analysis — Paul's constraint 7 (BUDGET_EXCEEDED
       scenarioReader: async () => makeScenarioSnapshot(),
     };
 
-    const prevBudget = process.env.TURN_BUDGET_MS;
-    process.env.TURN_BUDGET_MS = '5'; // tight budget so outer abort fires first
+    // `vi.stubEnv` is the lint-compliant way to mutate a single env var
+    // for the duration of a test. process.env direct-assignment is banned
+    // by the repo's eslint config (config module is the boot-time source
+    // of truth everywhere else).
+    vi.stubEnv('TURN_BUDGET_MS', '5'); // tight budget so outer abort fires first
     try {
       const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-budget');
       expectBI01();
       expect(telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
     } finally {
-      if (prevBudget === undefined) {
-        delete process.env.TURN_BUDGET_MS;
-      } else {
-        process.env.TURN_BUDGET_MS = prevBudget;
-      }
+      vi.unstubAllEnvs();
     }
   });
 });

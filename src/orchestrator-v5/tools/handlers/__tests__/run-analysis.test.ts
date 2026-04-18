@@ -64,7 +64,7 @@ function makePlotClient(response: V2RunResponseEnvelope | (() => Promise<V2RunRe
     () =>
       typeof response === 'function'
         ? response()
-        : Promise.resolve(structuredClone(response) as V2RunResponseEnvelope),
+        : Promise.resolve(JSON.parse(JSON.stringify(response)) as V2RunResponseEnvelope),
   );
   const validatePatch = vi.fn().mockResolvedValue({});
   return { run, validatePatch } as unknown as PLoTClient;
@@ -148,7 +148,7 @@ describe('run_analysis handler — happy path', () => {
   });
 
   it('fact.result.enrichment equals the validated V2RunResponse byte-for-byte (Resolution 2)', async () => {
-    const responseSnapshot = structuredClone(happyFixture) as unknown as V2RunResponseEnvelope;
+    const responseSnapshot = JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope;
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(responseSnapshot),
       scenarioReader: makeScenarioReader(),
