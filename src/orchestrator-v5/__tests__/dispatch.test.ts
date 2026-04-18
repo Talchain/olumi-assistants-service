@@ -72,6 +72,16 @@ vi.mock('../../adapters/llm/prompt-loader.js', () => ({
 const { dispatch, UnhandledTurnClassError } = await import('../dispatch.js');
 const { ClassifierSchemaViolationError } = await import('../classify.js');
 const { NarrateEmptyOutputError, NarrateTimeoutError } = await import('../llm-adapter.js');
+const { EMPTY_HANDLER_REGISTRY } = await import('../tools/registry.js');
+
+import type {
+  HandlerFn,
+  HandlerInvocation,
+  HandlerOutcome,
+  HandlerRegistry,
+} from '../tools/registry.js';
+import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { V5ActionType } from '@talchain/schemas/orchestrator';
 
 const BASE_CONTEXT: TurnContext = {
   stage: 'frame',
@@ -190,8 +200,9 @@ describe('dispatch', () => {
 
   describe('UnhandledTurnClassError (schema tripwire)', () => {
     it('is exported for TurnExecutor to catch', () => {
-      const err = new UnhandledTurnClassError('propose');
+      const err = new UnhandledTurnClassError('unhandled_turn_class', 'propose');
       expect(err.reason).toBe('unhandled_turn_class');
+      expect(err.attempted).toBe('propose');
       expect(err.message).toMatch(/propose/);
       expect(err.name).toBe('UnhandledTurnClassError');
     });
@@ -234,5 +245,243 @@ describe('dispatch', () => {
         // been sanitised and returned. The throw short-circuits that path.
       });
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Slice C1 — handler turn class routing (D5)
+  // ---------------------------------------------------------------------------
+
+  const BASE_PAYLOAD: OrchestratorTurnPayload = {
+    turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    stage: 'frame',
+    turn_class: 'frame',
+    message: 'decide between vendors',
+  };
+
+  describe('C1 — handler turn routing against empty registry', () => {
+    it('throws UnhandledTurnClassError(handler_not_registered) when handler class dispatches + registry is empty (default)', async () => {
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"run_analysis"}';
+      let caught: unknown;
+      try {
+        await dispatch(BASE_CONTEXT, { payload: BASE_PAYLOAD });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UnhandledTurnClassError);
+      const err = caught as InstanceType<typeof UnhandledTurnClassError>;
+      expect(err.reason).toBe('handler_not_registered');
+      expect(err.attempted).toBe('run_analysis');
+    });
+
+    it('throws the same error when registry is explicitly the EMPTY singleton', async () => {
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"explain_result"}';
+      await expect(
+        dispatch(BASE_CONTEXT, {
+          payload: BASE_PAYLOAD,
+          registry: EMPTY_HANDLER_REGISTRY,
+        }),
+      ).rejects.toMatchObject({ reason: 'handler_not_registered', attempted: 'explain_result' });
+    });
+
+    it('dispatch throws an invariant Error when a REGISTERED handler dispatches without a payload opt', async () => {
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"run_analysis"}';
+      // Registry resolves → payload guard is the next check → fires because
+      // payload is absent. Caller-contract violation surfaced cleanly.
+      const fakeHandler: HandlerFn = async () => ({
+        assistant_text: 'x',
+        handler_facts: [],
+        llm_calls_used: 0,
+      });
+      const registry: HandlerRegistry = new Map([['run_analysis', fakeHandler]]);
+      await expect(dispatch(BASE_CONTEXT, { registry })).rejects.toThrow(/payload/);
+    });
+
+    it('never calls narrate when handler class dispatches (short-circuits on registry miss)', async () => {
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"run_analysis"}';
+      phaseMocks.narrate.content = 'NARRATE MUST NOT RUN';
+      await expect(
+        dispatch(BASE_CONTEXT, { payload: BASE_PAYLOAD }),
+      ).rejects.toBeInstanceOf(UnhandledTurnClassError);
+    });
+  });
+
+  describe('C1 — handler turn routing against populated test registry', () => {
+    it('invokes the resolved HandlerFn, returns DispatchResult with handler_outcome', async () => {
+      const captured: HandlerInvocation[] = [];
+      const fakeHandler: HandlerFn = async (invocation) => {
+        captured.push(invocation);
+        return {
+          assistant_text: 'handler assistant text',
+          handler_facts: [],
+          llm_calls_used: 1,
+        };
+      };
+      const registry: HandlerRegistry = new Map([['run_analysis', fakeHandler]]);
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"run_analysis"}';
+
+      const result = await dispatch(BASE_CONTEXT, {
+        payload: BASE_PAYLOAD,
+        registry,
+      });
+      expect(result.turn_class).toBe('handler');
+      if (result.turn_class === 'handler') {
+        expect(result.handler_id).toBe('run_analysis');
+        expect(result.handler_outcome.assistant_text).toBe('handler assistant text');
+        expect(result.handler_outcome.handler_facts).toEqual([]);
+        expect(result.llm_calls_used).toBe(2); // classifier (1) + handler's declared (1)
+      }
+      expect(captured).toHaveLength(1);
+    });
+
+    it('HandlerInvocation carries context, payload, requestId, and signal through unchanged', async () => {
+      let invocation: HandlerInvocation | undefined;
+      const fakeHandler: HandlerFn = async (inv) => {
+        invocation = inv;
+        return { assistant_text: 'x', handler_facts: [], llm_calls_used: 0 };
+      };
+      const registry: HandlerRegistry = new Map([['explain_result', fakeHandler]]);
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"explain_result"}';
+      const externalController = new AbortController();
+
+      await dispatch(BASE_CONTEXT, {
+        payload: BASE_PAYLOAD,
+        registry,
+        signal: externalController.signal,
+      });
+      expect(invocation).toBeDefined();
+      expect(invocation!.context).toBe(BASE_CONTEXT);
+      expect(invocation!.payload).toBe(BASE_PAYLOAD);
+      expect(invocation!.requestId).toBe('req-1');
+      expect(invocation!.signal).toBe(externalController.signal);
+    });
+
+    it('llm_calls_used sums classifier (1) + HandlerOutcome.llm_calls_used', async () => {
+      const fakeHandler: HandlerFn = async () => ({
+        assistant_text: 'x',
+        handler_facts: [],
+        llm_calls_used: 3, // handler made 3 LLM calls
+      });
+      const registry: HandlerRegistry = new Map([['compare_options', fakeHandler]]);
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"compare_options"}';
+      const result = await dispatch(BASE_CONTEXT, {
+        payload: BASE_PAYLOAD,
+        registry,
+      });
+      expect(result.llm_calls_used).toBe(4);
+    });
+
+    it('llm_calls_used = 1 when handler makes zero LLM calls (deterministic path)', async () => {
+      const fakeHandler: HandlerFn = async () => ({
+        assistant_text: 'deterministic output',
+        handler_facts: [],
+        llm_calls_used: 0,
+      });
+      const registry: HandlerRegistry = new Map([['set_factor_value', fakeHandler]]);
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"set_factor_value"}';
+      const result = await dispatch(BASE_CONTEXT, {
+        payload: BASE_PAYLOAD,
+        registry,
+      });
+      expect(result.llm_calls_used).toBe(1);
+    });
+
+    it('onClassified callback receives both turn_class and handler_id', async () => {
+      const observed: Array<{ cls: string; handlerId?: V5ActionType }> = [];
+      const fakeHandler: HandlerFn = async () => ({
+        assistant_text: 'x',
+        handler_facts: [],
+        llm_calls_used: 0,
+      });
+      const registry: HandlerRegistry = new Map([['run_analysis', fakeHandler]]);
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"run_analysis"}';
+      await dispatch(BASE_CONTEXT, {
+        payload: BASE_PAYLOAD,
+        registry,
+        onClassified: (cls, handlerId) => {
+          observed.push({ cls, handlerId });
+        },
+      });
+      expect(observed).toEqual([{ cls: 'handler', handlerId: 'run_analysis' }]);
+    });
+
+    it('handler outcome is returned even if HandlerOutcome.handler_facts is populated', async () => {
+      const fakeHandler: HandlerFn = async () => ({
+        assistant_text: 'x',
+        handler_facts: [
+          {
+            fact_type: 'run_analysis',
+            fact_version: 1,
+            noop: false,
+            result: {} as unknown as HandlerOutcome['handler_facts'][number]['result'],
+          },
+        ],
+        llm_calls_used: 1,
+      });
+      const registry: HandlerRegistry = new Map([['run_analysis', fakeHandler]]);
+      phaseMocks.classify.content =
+        '{"turn_class":"handler","handler_id":"run_analysis"}';
+      const result = await dispatch(BASE_CONTEXT, {
+        payload: BASE_PAYLOAD,
+        registry,
+      });
+      if (result.turn_class === 'handler') {
+        expect(result.handler_outcome.handler_facts).toHaveLength(1);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Slice C1 — A2 regression (Paul refinement #7)
+  // Existing direct_answer / clarify DispatchResult shape preserved under the
+  // extended discriminated union.
+  // ---------------------------------------------------------------------------
+
+  describe('C1 — A2 regression under extended discriminated DispatchResult', () => {
+    it('direct_answer DispatchResult has sanitised + NO handler_outcome / handler_id', async () => {
+      phaseMocks.classify.content = '{"turn_class":"direct_answer"}';
+      phaseMocks.narrate.content = 'A2 path still works';
+      const result = await dispatch(BASE_CONTEXT);
+      expect(result.turn_class).toBe('direct_answer');
+      if (result.turn_class === 'direct_answer') {
+        expect(result.sanitised.output).toBe('A2 path still works');
+        expect((result as unknown as { handler_outcome?: unknown }).handler_outcome).toBeUndefined();
+        expect((result as unknown as { handler_id?: unknown }).handler_id).toBeUndefined();
+      }
+    });
+
+    it('clarify DispatchResult has sanitised + NO handler_outcome / handler_id', async () => {
+      phaseMocks.classify.content = '{"turn_class":"clarify"}';
+      phaseMocks.narrate.content = 'clarify path still works';
+      const result = await dispatch(BASE_CONTEXT);
+      expect(result.turn_class).toBe('clarify');
+      if (result.turn_class === 'clarify') {
+        expect(result.sanitised.output).toBe('clarify path still works');
+        expect((result as unknown as { handler_outcome?: unknown }).handler_outcome).toBeUndefined();
+      }
+    });
+
+    it('direct_answer llm_calls_used still equals 2 on success (classify + narrate)', async () => {
+      phaseMocks.classify.content = '{"turn_class":"direct_answer"}';
+      phaseMocks.narrate.content = 'answer';
+      const result = await dispatch(BASE_CONTEXT);
+      expect(result.llm_calls_used).toBe(2);
+    });
+
+    it('clarify llm_calls_used still equals 2 on success', async () => {
+      phaseMocks.classify.content = '{"turn_class":"clarify"}';
+      phaseMocks.narrate.content = 'What is the decision?';
+      const result = await dispatch(BASE_CONTEXT);
+      expect(result.llm_calls_used).toBe(2);
+    });
   });
 });

@@ -212,4 +212,142 @@ describe('classifyTurn', () => {
       await expect(classifyTurn(BASE_INPUT)).rejects.toThrow('generic failure');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Slice C1: handler class extension
+  // -------------------------------------------------------------------------
+
+  describe('C1 — handler turn class', () => {
+    it('returns turn_class=handler + handler_id for a valid handler+id pair', async () => {
+      classifierMock.content = '{"turn_class":"handler","handler_id":"run_analysis"}';
+      const result = await classifyTurn(BASE_INPUT);
+      expect(result.turn_class).toBe('handler');
+      expect(result.handler_id).toBe('run_analysis');
+    });
+
+    it('accepts every V5ActionType literal as a valid handler_id', async () => {
+      const handlerIds = [
+        'run_analysis',
+        'set_factor_value',
+        'add_constraint',
+        'adjust_edge_strength',
+        'explain_result',
+        'compare_options',
+        'what_would_flip',
+      ] as const;
+      for (const id of handlerIds) {
+        classifierMock.content = `{"turn_class":"handler","handler_id":"${id}"}`;
+        const result = await classifyTurn(BASE_INPUT);
+        expect(result.turn_class).toBe('handler');
+        expect(result.handler_id).toBe(id);
+      }
+    });
+
+    it('does not include handler_id on the result for direct_answer turns', async () => {
+      classifierMock.content = '{"turn_class":"direct_answer"}';
+      const result = await classifyTurn(BASE_INPUT);
+      expect(result.handler_id).toBeUndefined();
+    });
+
+    it('does not include handler_id on the result for clarify turns', async () => {
+      classifierMock.content = '{"turn_class":"clarify"}';
+      const result = await classifyTurn(BASE_INPUT);
+      expect(result.handler_id).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Slice C1 — biconditional refinement (Paul refinement #6)
+  // handler_id must be present iff turn_class === 'handler'
+  // -------------------------------------------------------------------------
+
+  describe('C1 — biconditional: handler_id present iff turn_class=handler', () => {
+    it('rejects stray handler_id on a direct_answer turn (forward direction)', async () => {
+      classifierMock.content = '{"turn_class":"direct_answer","handler_id":"run_analysis"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
+        ClassifierSchemaViolationError,
+      );
+    });
+
+    it('rejects stray handler_id on a clarify turn (forward direction)', async () => {
+      classifierMock.content = '{"turn_class":"clarify","handler_id":"set_factor_value"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
+        ClassifierSchemaViolationError,
+      );
+    });
+
+    it('rejects handler turn without handler_id (reverse direction)', async () => {
+      classifierMock.content = '{"turn_class":"handler"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
+        ClassifierSchemaViolationError,
+      );
+    });
+
+    it('rejects empty-string handler_id on a handler turn (z.string().min(1))', async () => {
+      classifierMock.content = '{"turn_class":"handler","handler_id":""}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
+        ClassifierSchemaViolationError,
+      );
+    });
+
+    it('rejects null handler_id on a handler turn (not a string)', async () => {
+      classifierMock.content = '{"turn_class":"handler","handler_id":null}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
+        ClassifierSchemaViolationError,
+      );
+    });
+
+    it('rejects stray handler_id on an unsupported turn_class (biconditional fires before union check)', async () => {
+      // "propose" is not in C1TurnClass; handler_id present. Structural Zod
+      // refinement fires first (handler_id present → turn_class must equal
+      // 'handler', else biconditional fails).
+      classifierMock.content = '{"turn_class":"propose","handler_id":"run_analysis"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toBeInstanceOf(
+        ClassifierSchemaViolationError,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Slice C1 — invalid handler_id → UnhandledTurnClassError('missing_handler_id')
+  // Biconditional schema passes (handler_id present), but the value is not
+  // a valid V5ActionType literal.
+  // -------------------------------------------------------------------------
+
+  describe('C1 — invalid handler_id semantic → UnhandledTurnClassError(missing_handler_id)', () => {
+    it('rejects a hallucinated handler_id value ("make_coffee")', async () => {
+      classifierMock.content = '{"turn_class":"handler","handler_id":"make_coffee"}';
+      let caught: unknown;
+      try {
+        await classifyTurn(BASE_INPUT);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(UnhandledTurnClassError);
+      const err = caught as InstanceType<typeof UnhandledTurnClassError>;
+      expect(err.reason).toBe('missing_handler_id');
+      expect(err.attempted).toBe('make_coffee');
+    });
+
+    it('rejects a wrong-casing handler_id ("RUN_ANALYSIS")', async () => {
+      classifierMock.content = '{"turn_class":"handler","handler_id":"RUN_ANALYSIS"}';
+      let caught: unknown;
+      try {
+        await classifyTurn(BASE_INPUT);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(UnhandledTurnClassError);
+      const err = caught as InstanceType<typeof UnhandledTurnClassError>;
+      expect(err.reason).toBe('missing_handler_id');
+      expect(err.attempted).toBe('RUN_ANALYSIS');
+    });
+
+    it('rejects a handler_id that drops the underscore ("runanalysis")', async () => {
+      classifierMock.content = '{"turn_class":"handler","handler_id":"runanalysis"}';
+      await expect(classifyTurn(BASE_INPUT)).rejects.toMatchObject({
+        reason: 'missing_handler_id',
+      });
+    });
+  });
 });

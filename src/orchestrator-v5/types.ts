@@ -24,12 +24,45 @@ export function isA2TurnClass(value: unknown): value is A2TurnClass {
   return typeof value === 'string' && (A2_TURN_CLASSES as readonly string[]).includes(value);
 }
 
+// C1 adds the `handler` class. A2TurnClass stays narrow so compose branches
+// that only handle A2 (direct_answer / clarify) retain strict typing. Places
+// that must handle all C1 classes — dispatch, classify, turn-executor —
+// widen to `C1TurnClass`. See Docs/v5/slice-c1-* for the deviation note.
+export type C1TurnClass = A2TurnClass | 'handler';
+
+export const C1_TURN_CLASSES = ['direct_answer', 'clarify', 'handler'] as const;
+
+export function isC1TurnClass(value: unknown): value is C1TurnClass {
+  return typeof value === 'string' && (C1_TURN_CLASSES as readonly string[]).includes(value);
+}
+
+/**
+ * Reasons the classifier output cannot be honoured by the dispatcher. Kept
+ * as a union rather than a per-reason error subclass to keep the catch path
+ * in turn-executor narrow — a single `instanceof UnhandledTurnClassError`
+ * covers every branch, and telemetry uses `err.reason` to distinguish.
+ *
+ *   - `unhandled_turn_class`: well-formed output, class outside `C1TurnClass`
+ *     (e.g. `propose`, `decide`). A2/C1 leave these reserved.
+ *   - `handler_not_registered`: `turn_class === 'handler'` with a valid
+ *     `V5ActionType` handler_id, but the registry has no entry. In C1 the
+ *     registry is empty by design — every handler turn lands here.
+ *   - `missing_handler_id`: `turn_class === 'handler'` but `handler_id` is
+ *     absent or not a valid V5ActionType literal. Distinct from
+ *     ClassifierSchemaViolationError (which fires on structural parse
+ *     failure) — the biconditional check is a semantic validation.
+ */
+export type UnhandledTurnClassReason =
+  | 'unhandled_turn_class'
+  | 'handler_not_registered'
+  | 'missing_handler_id';
+
 /**
  * Raised when the classifier returns well-formed output whose `turn_class`
- * value is outside the A2TurnClass union (e.g. `{"turn_class":"propose"}`).
- * Per Paul's correction 3: this is an internal invariant breach (P0), NOT a
- * recoverable schema violation. TurnExecutor maps it to UNHANDLED →
- * INTERNAL_ERROR.
+ * value cannot be honoured by the dispatcher. Per Paul's correction 3 (A2)
+ * and Slice C1's registry-miss deviation: this is an internal invariant
+ * breach (P0), NOT a recoverable schema violation. TurnExecutor maps it to
+ * UNHANDLED → INTERNAL_ERROR regardless of reason.
  *
  * Contrast with `ClassifierSchemaViolationError` in classify.ts, which is
  * raised for malformed JSON / missing field / wrong value type — those are
@@ -39,10 +72,23 @@ export function isA2TurnClass(value: unknown): value is A2TurnClass {
  * without a circular import.
  */
 export class UnhandledTurnClassError extends Error {
-  readonly reason = 'unhandled_turn_class' as const;
-  constructor(public readonly attempted: string) {
-    super(`Unhandled turn class for A2: "${attempted}". A2 implements direct_answer + clarify only.`);
+  constructor(
+    public readonly reason: UnhandledTurnClassReason,
+    public readonly attempted: string,
+  ) {
+    super(messageForReason(reason, attempted));
     this.name = 'UnhandledTurnClassError';
+  }
+}
+
+function messageForReason(reason: UnhandledTurnClassReason, attempted: string): string {
+  switch (reason) {
+    case 'unhandled_turn_class':
+      return `Unhandled turn class: "${attempted}". V5 C1 implements direct_answer, clarify, handler only.`;
+    case 'handler_not_registered':
+      return `Handler turn class dispatched with id "${attempted}" but no handler is registered for that id.`;
+    case 'missing_handler_id':
+      return `Classifier returned turn_class='handler' with missing or invalid handler_id: "${attempted}".`;
   }
 }
 
@@ -72,6 +118,8 @@ export type InternalFailure =
   | 'LLM_SCHEMA_VIOLATION'
   | 'BUDGET_EXCEEDED'
   | 'STATE_COMMIT_FAILED'
+  | 'HANDLER_INVOCATION_FAILED'
+  | 'HANDLER_RESULT_INVALID'
   | 'UNHANDLED';
 
 // Mapping internal → wire code. The contamination case is NOT listed here —
@@ -82,11 +130,18 @@ export type InternalFailure =
 // which A2 is explicitly out of scope for). LLM_UNAVAILABLE's user-facing
 // text ("The model is temporarily unavailable. Please retry shortly.") is the
 // correct user action for a transient LLM structured-output malfunction.
+//
+// HANDLER_INVOCATION_FAILED + HANDLER_RESULT_INVALID: reserved for C2+ when
+// real handlers register. C1 ships with an empty registry, so these codes
+// are plumbed but dormant — a registry miss raises UnhandledTurnClassError
+// with reason='handler_not_registered' (UNHANDLED path), NOT these codes.
 export const INTERNAL_TO_WIRE: Record<InternalFailure, FailureTypeLiteral> = {
   LLM_TIMEOUT: 'UPSTREAM_TIMEOUT',
   LLM_SCHEMA_VIOLATION: 'LLM_UNAVAILABLE',
   BUDGET_EXCEEDED: 'TURN_BUDGET_EXCEEDED',
   STATE_COMMIT_FAILED: 'INTERNAL_ERROR',
+  HANDLER_INVOCATION_FAILED: 'INTERNAL_ERROR',
+  HANDLER_RESULT_INVALID: 'INTERNAL_ERROR',
   UNHANDLED: 'INTERNAL_ERROR',
 };
 
@@ -95,17 +150,18 @@ export const INTERNAL_TO_WIRE: Record<InternalFailure, FailureTypeLiteral> = {
 // `completed` with `response_emitted=true`. TurnExecutor's top-level
 // try/finally enforces this.
 //
-// A2 notes on `turn_class`:
+// Notes on `turn_class`:
 // - `started` event OMITS `turn_class` entirely (classifier hasn't decided
 //   yet; emitting a provisional value skews aggregations).
-// - `completed` event emits `turn_class: A2TurnClass | null`. Null when the
+// - `completed` event emits `turn_class: C1TurnClass | null`. Null when the
 //   classifier itself failed (schema violation, out-of-union value, timeout,
-//   or abort) before it could produce a resolved class.
+//   or abort) before it could produce a resolved class. C1 adds 'handler'
+//   as a possible resolved value.
 export interface TurnExecutorTelemetry {
   request_id: string;
   session_id: string;
   stage: string;
-  turn_class: A2TurnClass | null;
+  turn_class: C1TurnClass | null;
   stages_completed: string[];
   response_emitted: boolean;
   llm_calls_used: number;

@@ -1,42 +1,60 @@
 /**
- * V5 TurnExecutor — pre-narrate turn classifier (A2).
+ * V5 TurnExecutor — pre-narrate turn classifier (A2 + C1).
  *
  * One LLM call over the `turn_classifier` prompt fragment. The fragment
  * instructs the model to return a single JSON object:
- *   { "turn_class": "direct_answer" }  OR  { "turn_class": "clarify" }
+ *   { "turn_class": "direct_answer" }
+ *   { "turn_class": "clarify" }
+ *   { "turn_class": "handler", "handler_id": "run_analysis" }   (C1+)
  *
  * Uses `responseFormat: 'json_object'` on the adapter seam. We parse the
- * returned content, Zod-validate its structural shape, then check the
- * `turn_class` value against the A2TurnClass union. Three distinct failure
- * classes (Paul's correction 3):
+ * returned content, Zod-validate its structural shape + biconditional
+ * refinement (handler_id present iff turn_class === 'handler'), then check
+ * `turn_class` against the C1TurnClass union and `handler_id` against
+ * V5ActionType's 7 literals. Four distinct failure classes:
  *
- *   - STRUCTURAL failure (invalid JSON, missing key, wrong type, extra keys)
+ *   - STRUCTURAL failure (invalid JSON, missing key, wrong type, extra keys,
+ *     or biconditional violation such as `handler_id` on a non-handler turn)
  *     → `ClassifierSchemaViolationError` → LLM_SCHEMA_VIOLATION →
  *     LLM_UNAVAILABLE wire code. Recoverable LLM fault, user retries.
  *
  *   - UNSUPPORTED CLASS (well-formed JSON whose `turn_class` is not in the
- *     A2TurnClass union, e.g. `{"turn_class":"propose"}`) →
- *     `UnhandledTurnClassError` → UNHANDLED → INTERNAL_ERROR wire code.
- *     P0 invariant breach (contract says the LLM cannot return this).
+ *     C1TurnClass union, e.g. `{"turn_class":"propose"}`) →
+ *     `UnhandledTurnClassError(reason='unhandled_turn_class')` → UNHANDLED →
+ *     INTERNAL_ERROR wire code. P0 invariant breach.
+ *
+ *   - INVALID HANDLER ID (`turn_class === 'handler'` but `handler_id` is
+ *     outside the 7 V5ActionType literals, e.g. `"make_coffee"`) →
+ *     `UnhandledTurnClassError(reason='missing_handler_id')` → UNHANDLED →
+ *     INTERNAL_ERROR. Distinct from the biconditional violation: the shape
+ *     is correct (both fields present) but the semantic value is invalid.
  *
  *   - UPSTREAM TIMEOUT / caller abort → `NarrateTimeoutError` with
  *     `phase: 'classify'` — shared wire mapping with narrate (LLM_TIMEOUT →
- *     UPSTREAM_TIMEOUT), phase preserved for debug attribution in telemetry
- *     and failure-envelope `details`.
+ *     UPSTREAM_TIMEOUT), phase preserved for debug attribution.
  *
  * Budget semantics (Paul's correction 4): classifier and narrate each get a
  * fresh `LLM_BUDGET_NARRATE_MS` window. Outer `TURN_BUDGET_MS` is the shared
- * wall-clock ceiling. Worst-case LLM time = 2 × LLM_BUDGET_NARRATE_MS, bounded
- * by TURN_BUDGET_MS. See `budgets.ts` for the documentation.
+ * wall-clock ceiling. Handler invocations get their own fresh
+ * `LLM_BUDGET_HANDLER_MS` (see budgets.ts / tools/registry.ts).
  */
 
 import { z } from 'zod';
+
+import {
+  V5ActionTypeSchema,
+  type V5ActionType,
+} from '@talchain/schemas/orchestrator';
 
 import { getAdapter } from '../adapters/llm/router.js';
 import { UpstreamTimeoutError } from '../adapters/llm/errors.js';
 import { getSystemPrompt } from '../adapters/llm/prompt-loader.js';
 import { NarrateTimeoutError } from './llm-adapter.js';
-import { type A2TurnClass, isA2TurnClass, UnhandledTurnClassError } from './types.js';
+import {
+  type C1TurnClass,
+  isC1TurnClass,
+  UnhandledTurnClassError,
+} from './types.js';
 
 export class ClassifierSchemaViolationError extends Error {
   readonly kind = 'LLM_SCHEMA_VIOLATION';
@@ -46,15 +64,30 @@ export class ClassifierSchemaViolationError extends Error {
   }
 }
 
-// Structural schema: accepts ANY non-empty string for turn_class. The
-// A2TurnClass union check is applied separately after Zod so we can
-// distinguish "malformed output" (LLM_SCHEMA_VIOLATION) from "well-formed
-// output but unsupported class value" (UnhandledTurnClassError → P0).
+// Structural schema: accepts ANY non-empty string for turn_class. Value-level
+// checks are applied post-Zod so we can distinguish "malformed output"
+// (LLM_SCHEMA_VIOLATION) from "well-formed output but unsupported semantic
+// value" (UnhandledTurnClassError → P0). `z.string()` — NOT `z.enum` — per
+// plan R3: enum collisions between structural and semantic parse levels.
+//
+// Biconditional refinement (Paul 2026-04-18 refinement #6): `handler_id` is
+// present iff `turn_class === 'handler'`. Mirrors the SessionTurnSchema
+// biconditional landed in Phase 0 audit §4.5. Violations fire inside Zod,
+// so they surface as ClassifierSchemaViolationError — distinct from the
+// post-parse UnhandledTurnClassError path.
 const ClassifierOutputSchema = z
   .object({
     turn_class: z.string().min(1),
+    handler_id: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (obj) => (obj.turn_class === 'handler') === (obj.handler_id !== undefined),
+    {
+      message: "handler_id must be present iff turn_class === 'handler'",
+      path: ['handler_id'],
+    },
+  );
 
 export interface ClassifyTurnInput {
   /** Latest user message (already extracted from TurnContext.messages). */
@@ -70,9 +103,9 @@ export interface ClassifyTurnOpts {
   signal?: AbortSignal;
 }
 
-export interface ClassifyTurnResult {
-  turn_class: A2TurnClass;
-}
+export type ClassifyTurnResult =
+  | { turn_class: Exclude<C1TurnClass, 'handler'>; handler_id?: never }
+  | { turn_class: 'handler'; handler_id: V5ActionType };
 
 /**
  * Classify a user turn into `direct_answer` or `clarify`.
@@ -140,13 +173,28 @@ export async function classifyTurn(
     );
   }
 
-  // Structural OK — now check the value against the A2TurnClass union.
-  // Paul's correction 3: an unsupported class from valid output is a P0
-  // invariant breach (UNHANDLED), NOT a recoverable schema violation.
-  if (!isA2TurnClass(validated.data.turn_class)) {
-    throw new UnhandledTurnClassError(validated.data.turn_class);
+  // Structural OK (including biconditional). Semantic checks:
+  // 1. turn_class is in C1TurnClass. Unsupported → UNHANDLED P0.
+  if (!isC1TurnClass(validated.data.turn_class)) {
+    throw new UnhandledTurnClassError('unhandled_turn_class', validated.data.turn_class);
   }
 
+  // 2. If handler class, handler_id is a valid V5ActionType. The biconditional
+  //    refinement guarantees handler_id is present when we reach here; validate
+  //    its value against the canonical schema (keeps this in sync with any
+  //    future additions to V5ActionType in @talchain/schemas).
+  if (validated.data.turn_class === 'handler') {
+    const handlerIdResult = V5ActionTypeSchema.safeParse(validated.data.handler_id);
+    if (!handlerIdResult.success) {
+      throw new UnhandledTurnClassError(
+        'missing_handler_id',
+        validated.data.handler_id ?? '<unset>',
+      );
+    }
+    return { turn_class: 'handler', handler_id: handlerIdResult.data };
+  }
+
+  // 3. Non-handler class (direct_answer / clarify): no handler_id carried.
   return { turn_class: validated.data.turn_class };
 }
 

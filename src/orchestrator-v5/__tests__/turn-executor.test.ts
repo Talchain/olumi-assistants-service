@@ -542,4 +542,95 @@ describe('runTurnExecutor', () => {
       expectExactlyOneResponseInvariant();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Slice C1 — handler turn class + empty registry
+  //
+  // Every handler turn in C1 dispatches → resolveHandler returns null →
+  // UnhandledTurnClassError(reason='handler_not_registered') → turn-executor's
+  // UNHANDLED catch maps to INTERNAL_ERROR wire code. BI-01 MUST hold.
+  // -------------------------------------------------------------------------
+
+  describe('C1 — handler class routing through empty registry', () => {
+    it('UNHANDLED envelope + BI-01 preserved when classifier emits handler class', async () => {
+      phaseState.classify = {
+        kind: 'success',
+        output: '{"turn_class":"handler","handler_id":"run_analysis"}',
+      };
+      phaseState.narrate = { kind: 'success', output: 'narrate MUST NOT run' };
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+
+      // BI-01: started + completed, response_emitted=true
+      expectExactlyOneResponseInvariant();
+
+      // Envelope shape: ErrorBlock with INTERNAL_ERROR wire code
+      OlumiResponseSchema.parse(response);
+      const block = response.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('INTERNAL_ERROR');
+      }
+
+      // Telemetry contract
+      expect(telemetry.response_emitted).toBe(true);
+      // Classifier succeeds + emits handler class before dispatch throws →
+      // turn_class IS resolved in telemetry (differs from the 'propose'
+      // path where classifier throws before resolving).
+      expect(telemetry.turn_class).toBe('handler');
+      expect(telemetry.commit_performed).toBe(false);
+      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+      expect(telemetry.stages_completed).toContain('classify');
+      expect(telemetry.stages_completed).not.toContain('compose');
+      expect(telemetry.stages_completed).not.toContain('commit');
+      expect(telemetry.llm_calls_used).toBe(1); // classifier ran; no handler invocation (miss)
+    });
+
+    it('UNHANDLED envelope when classifier emits handler class with hallucinated handler_id', async () => {
+      phaseState.classify = {
+        kind: 'success',
+        output: '{"turn_class":"handler","handler_id":"make_coffee"}',
+      };
+      phaseState.narrate = { kind: 'success', output: 'narrate MUST NOT run' };
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      expectExactlyOneResponseInvariant();
+
+      OlumiResponseSchema.parse(response);
+      const block = response.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('INTERNAL_ERROR');
+      }
+
+      // Classifier throws UnhandledTurnClassError(reason='missing_handler_id')
+      // BEFORE it yields a turn_class, so turn_class remains null in telemetry.
+      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+      expect(telemetry.turn_class).toBeNull();
+      expect(telemetry.commit_performed).toBe(false);
+    });
+
+    it('biconditional violation (stray handler_id on direct_answer) → LLM_UNAVAILABLE, BI-01 holds', async () => {
+      // Biconditional fires inside Zod → ClassifierSchemaViolationError →
+      // LLM_SCHEMA_VIOLATION → LLM_UNAVAILABLE wire code. Distinct from the
+      // semantic handler-id paths above.
+      phaseState.classify = {
+        kind: 'success',
+        output: '{"turn_class":"direct_answer","handler_id":"run_analysis"}',
+      };
+      phaseState.narrate = { kind: 'success', output: 'narrate MUST NOT run' };
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      expectExactlyOneResponseInvariant();
+
+      OlumiResponseSchema.parse(response);
+      const block = response.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('LLM_UNAVAILABLE');
+      }
+
+      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+      expect(telemetry.turn_class).toBeNull();
+      expect(telemetry.commit_performed).toBe(false);
+    });
+  });
 });
