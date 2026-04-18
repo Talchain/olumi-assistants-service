@@ -44,7 +44,7 @@ import {
   composeDirectAnswerResponse,
   composeClarifyResponse,
 } from './compose.js';
-import { commitDirectAnswer } from './commit.js';
+import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import { buildTurnContext } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
 import { INTERNAL_TO_WIRE, type A2TurnClass } from './types.js';
@@ -77,7 +77,7 @@ export async function runTurnExecutor(
   const startedAt = Date.now();
   const stagesCompleted: string[] = [];
 
-  const context = buildTurnContext(payload, requestId);
+  const context = await buildTurnContext(payload, requestId);
   stagesCompleted.push('build_turn_context');
 
   // A2: `turn_class` is intentionally omitted from `started`. The classifier
@@ -214,7 +214,23 @@ export async function runTurnExecutor(
           });
       stagesCompleted.push('compose');
 
-      const committed = commitDirectAnswer(composed);
+      // Slice B: commit persists through append_turn_atomic RPC. A throw here
+      // (StateCommitFailedError, SUPABASE_* unset, unexpected) is caught
+      // below and mapped to STATE_COMMIT_FAILED per the existing pattern
+      // (turn-executor.ts:223-232). `commit_performed` stays false on throw
+      // because this assignment is unreached. BI-01 holds: the finally
+      // block's hardcoded `response_emitted: true` ensures every `started`
+      // has a matching `completed`.
+      const committed = await commitDirectAnswer(composed, {
+        scenario_id: context.session_id,
+        turn_id: context.request_id,
+        turn_class: dispatchResult.turn_class,
+        handler_id: null, // A2 only emits direct_answer/clarify; neither carries a handler
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: llmCallsUsed,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+      });
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
 

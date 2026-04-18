@@ -446,6 +446,14 @@ export const TelemetryEvents = {
   TurnExecutorStarted: "turn_executor.started",
   TurnExecutorCompleted: "turn_executor.completed",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
+
+  // V5 session persistence (slice B).
+  // SessionReadDegraded emits when buildTurnContext's readRecent fails: the
+  // turn still runs with empty prior-turn history. Emitted with
+  // severity='warning' and a stable event name so ops alerting can match it;
+  // critical for detecting silent session-loss windows. Event payload:
+  // { scenario_id, error_code, severity: 'warning' }.
+  SessionReadDegraded: "session.read_degraded",
 } as const;
 
 /**
@@ -1802,6 +1810,19 @@ export function emit(event: string, data: Event) {
               status: String(eventData.status),
             });
           }
+          break;
+        }
+
+        case TelemetryEvents.SessionReadDegraded: {
+          // V5 Slice B — silent-session-loss alerting hook. Count every read
+          // failure so ops can alert on `session.read_degraded_total > 0`
+          // over a short window (e.g. 5 min). Tags carry the error shape so
+          // the dashboard can distinguish "RPC down" from "config drift"
+          // from "row-shape parse failure".
+          datadogClient.increment("session.read_degraded_total", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            severity: String((eventData.severity as string) || "warning"),
+          });
           break;
         }
 

@@ -79,6 +79,21 @@ vi.mock('../../adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'You are a test narrator.',
 }));
 
+// Slice B: mock the session store so commit RPC + readRecent don't try to
+// reach real Supabase. The turn-executor tests focus on BI-01 / timeout /
+// stage telemetry; persistence behaviour is covered by dedicated session +
+// integration tests.
+vi.mock('../session/index.js', () => ({
+  getSessionStore: () => ({
+    append: async () => ({ id: 'mock-row-id' }),
+    readRecent: async () => [],
+    readFactsFor: async () => [],
+    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+  }),
+  resetSessionStoreForTests: () => {},
+}));
+
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { UpstreamTimeoutError } = await import('../../adapters/llm/errors.js');
 
