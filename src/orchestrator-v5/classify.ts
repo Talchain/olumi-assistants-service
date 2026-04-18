@@ -143,8 +143,10 @@ export async function classifyTurn(
   // Structural OK — now check the value against the A2TurnClass union.
   // Paul's correction 3: an unsupported class from valid output is a P0
   // invariant breach (UNHANDLED), NOT a recoverable schema violation.
+  // Slice C1 will widen this check to C1TurnClass in D4 (classify.ts
+  // extension); D2 preserves A2 semantics for callers that haven't migrated.
   if (!isA2TurnClass(validated.data.turn_class)) {
-    throw new UnhandledTurnClassError(validated.data.turn_class);
+    throw new UnhandledTurnClassError('unhandled_turn_class', validated.data.turn_class);
   }
 
   return { turn_class: validated.data.turn_class };

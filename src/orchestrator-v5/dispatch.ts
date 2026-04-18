@@ -104,11 +104,11 @@ export async function dispatch(
     };
   }
 
-  // Defensive: `classifyTurn` narrows to the A2TurnClass union (it throws
+  // Defensive: `classifyTurn` narrows to the C1TurnClass union (it throws
   // UnhandledTurnClassError inside classify.ts for unsupported values), so
   // this branch is type-unreachable. Kept as a runtime tripwire in case the
   // classifier narrowing is weakened without updating this switch.
-  throw new UnhandledTurnClassError(turn_class as unknown as string);
+  throw new UnhandledTurnClassError('unhandled_turn_class', turn_class as unknown as string);
 }
 
 interface HandlerResult {

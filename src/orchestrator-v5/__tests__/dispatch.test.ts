@@ -190,8 +190,9 @@ describe('dispatch', () => {
 
   describe('UnhandledTurnClassError (schema tripwire)', () => {
     it('is exported for TurnExecutor to catch', () => {
-      const err = new UnhandledTurnClassError('propose');
+      const err = new UnhandledTurnClassError('unhandled_turn_class', 'propose');
       expect(err.reason).toBe('unhandled_turn_class');
+      expect(err.attempted).toBe('propose');
       expect(err.message).toMatch(/propose/);
       expect(err.name).toBe('UnhandledTurnClassError');
     });

@@ -32,6 +32,7 @@ import type { Budgets } from '@talchain/schemas/orchestrator';
 
 const DEFAULT_TURN_BUDGET_MS = 180_000; // 3 minutes — outer bound
 const DEFAULT_LLM_NARRATE_BUDGET_MS = 60_000; // 1 minute — per-LLM-call inner bound
+const DEFAULT_LLM_HANDLER_BUDGET_MS = 45_000; // 45 seconds — per-handler inner bound (C1+)
 
 function parseMs(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
@@ -45,4 +46,19 @@ export function getTurnExecutorBudgets(): Budgets {
     turn_ms: parseMs(process.env.TURN_BUDGET_MS, DEFAULT_TURN_BUDGET_MS),
     llm_narrate_ms: parseMs(process.env.LLM_BUDGET_NARRATE_MS, DEFAULT_LLM_NARRATE_BUDGET_MS),
   };
+}
+
+/**
+ * Per-handler inner budget window. Each handler invocation gets a fresh
+ * `LLM_BUDGET_HANDLER_MS` (independent of classifier / narrate budgets).
+ * Read at call time — overrides from integration tests / Render env rotation
+ * are honoured without a restart.
+ *
+ * Slice C1 exposes this function for registry consumers but registers zero
+ * handlers; Slice C2's `run_analysis` is the first caller. The outer
+ * `turn_ms` wall-clock bound continues to dominate per Paul's constraint 7
+ * (BUDGET_EXCEEDED wins over LLM_TIMEOUT when both apply).
+ */
+export function getHandlerBudgetMs(): number {
+  return parseMs(process.env.LLM_BUDGET_HANDLER_MS, DEFAULT_LLM_HANDLER_BUDGET_MS);
 }
