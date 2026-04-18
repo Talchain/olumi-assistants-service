@@ -40,7 +40,6 @@ import { sanitiseNarrateOutput, type SanitiseResult } from './sanitise.js';
 import { classifyTurn } from './classify.js';
 import { dispatchClarify } from './clarify.js';
 import {
-  EMPTY_HANDLER_REGISTRY,
   getDefaultRegistry,
   resolveHandler,
   type HandlerOutcome,
