@@ -48,6 +48,10 @@ import {
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import { buildTurnContext } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
+import {
+  HandlerInvocationFailedError,
+  HandlerResultInvalidError,
+} from './tools/handlers/run-analysis.js';
 import { INTERNAL_TO_WIRE, type C1TurnClass } from './types.js';
 
 export interface TurnExecutorRunResult {
@@ -185,6 +189,43 @@ export async function runTurnExecutor(
         failureType = INTERNAL_TO_WIRE.UNHANDLED;
         response = buildFailureResponse('UNHANDLED', context.stage, {
           reason: 'unhandled_turn_class',
+        });
+        return finalizeRun();
+      }
+      if (error instanceof HandlerInvocationFailedError) {
+        // C2: real handler threw at the invocation boundary — PLoT error,
+        // scenario read failure, args-validation failure, or non-completed
+        // analysis status. Distinct wire semantics from UNHANDLED: this is
+        // a contained upstream failure inside a registered handler, not an
+        // invariant breach. Constraint 7 already fired above if the outer
+        // budget tripped; reaching this branch means the handler error is
+        // the authoritative cause.
+        log.warn(
+          {
+            request_id: requestId,
+            kind: error.kind,
+            cause_kind: error.cause_kind,
+            message: error.message,
+          },
+          'V5 TurnExecutor handler invocation failed',
+        );
+        failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
+        response = buildFailureResponse('HANDLER_INVOCATION_FAILED', context.stage, {
+          cause_kind: error.cause_kind,
+        });
+        return finalizeRun();
+      }
+      if (error instanceof HandlerResultInvalidError) {
+        // C2: handler constructed a HandlerOutcome whose fact failed its
+        // own Zod schema. Indicates a handler-internal bug, not an upstream
+        // failure — elevate to ERROR log severity.
+        log.error(
+          { request_id: requestId, kind: error.kind, message: error.message },
+          'V5 TurnExecutor handler result invalid',
+        );
+        failureType = INTERNAL_TO_WIRE.HANDLER_RESULT_INVALID;
+        response = buildFailureResponse('HANDLER_RESULT_INVALID', context.stage, {
+          reason: 'fact_schema_violation',
         });
         return finalizeRun();
       }
