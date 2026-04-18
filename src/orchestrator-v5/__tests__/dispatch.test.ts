@@ -260,9 +260,12 @@ describe('dispatch', () => {
   };
 
   describe('C1 — handler turn routing against empty registry', () => {
-    it('throws UnhandledTurnClassError(handler_not_registered) when handler class dispatches + registry is empty (default)', async () => {
+    it('throws UnhandledTurnClassError(handler_not_registered) for an UN-registered handler against the default registry', async () => {
+      // C2 registers `run_analysis` in the default registry; the other six
+      // V5ActionType literals are still unregistered so the miss path remains
+      // testable via any of them. `explain_result` is slated for D2 (later).
       phaseMocks.classify.content =
-        '{"turn_class":"handler","handler_id":"run_analysis"}';
+        '{"turn_class":"handler","handler_id":"explain_result"}';
       let caught: unknown;
       try {
         await dispatch(BASE_CONTEXT, { payload: BASE_PAYLOAD });
@@ -272,7 +275,7 @@ describe('dispatch', () => {
       expect(caught).toBeInstanceOf(UnhandledTurnClassError);
       const err = caught as InstanceType<typeof UnhandledTurnClassError>;
       expect(err.reason).toBe('handler_not_registered');
-      expect(err.attempted).toBe('run_analysis');
+      expect(err.attempted).toBe('explain_result');
     });
 
     it('throws the same error when registry is explicitly the EMPTY singleton', async () => {
@@ -301,8 +304,9 @@ describe('dispatch', () => {
     });
 
     it('never calls narrate when handler class dispatches (short-circuits on registry miss)', async () => {
+      // Use a C2-unregistered handler_id to keep the miss path under test.
       phaseMocks.classify.content =
-        '{"turn_class":"handler","handler_id":"run_analysis"}';
+        '{"turn_class":"handler","handler_id":"compare_options"}';
       phaseMocks.narrate.content = 'NARRATE MUST NOT RUN';
       await expect(
         dispatch(BASE_CONTEXT, { payload: BASE_PAYLOAD }),

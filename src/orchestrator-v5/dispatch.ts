@@ -41,6 +41,7 @@ import { classifyTurn } from './classify.js';
 import { dispatchClarify } from './clarify.js';
 import {
   EMPTY_HANDLER_REGISTRY,
+  getDefaultRegistry,
   resolveHandler,
   type HandlerOutcome,
   type HandlerRegistry,
@@ -191,7 +192,10 @@ async function dispatchHandler(
   handlerId: V5ActionType,
   opts?: DispatchOpts,
 ): Promise<HandlerOutcome> {
-  const registry = opts?.registry ?? EMPTY_HANDLER_REGISTRY;
+  // C2: default is now the populated registry (one entry: run_analysis).
+  // Tests pass `opts.registry = EMPTY_HANDLER_REGISTRY` to exercise the
+  // miss path; C1 behaviour is preserved for those tests.
+  const registry = opts?.registry ?? getDefaultRegistry();
   const handler = resolveHandler(registry, handlerId);
   if (!handler) {
     throw new UnhandledTurnClassError('handler_not_registered', handlerId);

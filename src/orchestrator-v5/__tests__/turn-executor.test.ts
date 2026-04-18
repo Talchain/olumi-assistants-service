@@ -552,10 +552,13 @@ describe('runTurnExecutor', () => {
   // -------------------------------------------------------------------------
 
   describe('C1 — handler class routing through empty registry', () => {
-    it('UNHANDLED envelope + BI-01 preserved when classifier emits handler class', async () => {
+    it('UNHANDLED envelope + BI-01 preserved on registry miss (unregistered handler_id)', async () => {
+      // C2 registers run_analysis; the other six V5ActionType literals stay
+      // unregistered until their tranches ship. Pick one to exercise the
+      // miss path cleanly without touching C2 deps.
       phaseState.classify = {
         kind: 'success',
-        output: '{"turn_class":"handler","handler_id":"run_analysis"}',
+        output: '{"turn_class":"handler","handler_id":"explain_result"}',
       };
       phaseState.narrate = { kind: 'success', output: 'narrate MUST NOT run' };
 

@@ -79,6 +79,13 @@ import type {
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
 
+import { createPLoTClient, type PLoTClient } from '../../orchestrator/plot-client.js';
+
+import {
+  createRunAnalysisHandler,
+  type ScenarioReader,
+} from './handlers/run-analysis.js';
+
 /**
  * Input to a handler invocation. Populated by dispatch.ts from the same
  * sources it hands to invokeNarrate for direct_answer / clarify, plus the
@@ -107,20 +114,123 @@ export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcom
 export type HandlerRegistry = ReadonlyMap<V5ActionType, HandlerFn>;
 
 /**
- * The canonical empty registry for Slice C1. Dispatching any handler turn
- * against this registry misses and raises
- * `UnhandledTurnClassError('handler_not_registered', handlerId)`.
+ * The canonical empty registry. Kept for tests that want to exercise the
+ * "handler class emitted, no handler registered" path (registry miss →
+ * `UnhandledTurnClassError('handler_not_registered')` → INTERNAL_ERROR).
+ *
+ * Production dispatch uses `getDefaultRegistry()` instead; Slice C2 populates
+ * it with `run_analysis`.
  */
 export const EMPTY_HANDLER_REGISTRY: HandlerRegistry = new Map();
+
+/**
+ * Optional dependency overrides for `createRegistry()`. Tests supply mocks
+ * to isolate from real PLoT and real Supabase. Production omits overrides
+ * and the factory resolves defaults via `createPLoTClient()` plus a
+ * "not-yet-wired" scenario reader (see §ScenarioReader wiring below).
+ */
+export interface RegistryOverrides {
+  readonly plotClient?: PLoTClient;
+  readonly scenarioReader?: ScenarioReader;
+}
+
+/**
+ * Placeholder scenario reader used when no reader is injected. Calling it
+ * throws a clear "not wired" error — the `run_analysis` handler will then
+ * wrap it as `HandlerInvocationFailedError('scenario_read_failed')` and
+ * emit a typed failure envelope. This keeps the contract stable: tests
+ * always inject a reader; a later slice wires a production Supabase-backed
+ * reader through the same `RegistryOverrides` seam.
+ *
+ * The error message is deliberately explicit so production logs pinpoint
+ * the missing wiring rather than surfacing a generic `TypeError`.
+ */
+const NOT_WIRED_SCENARIO_READER: ScenarioReader = () => {
+  return Promise.reject(
+    new Error(
+      'run_analysis scenarioReader not injected — tests must pass a mock via createRegistry({scenarioReader}); production wiring is scope for a later slice',
+    ),
+  );
+};
+
+/**
+ * Construct a populated `HandlerRegistry`. Slice C2 registers `run_analysis`
+ * against the injected (or defaulted) dependencies.
+ *
+ * Tests call this with mocks to get a fresh, isolated registry. Production
+ * calls `getDefaultRegistry()` which memoises one instance for the process.
+ *
+ * Guard rail: handlers MUST be imported from `./handlers/` — no inline
+ * handler definitions in this module. D9's invariant script enforces.
+ */
+export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
+  const plotClient =
+    overrides?.plotClient ?? resolvePlotClient();
+  const scenarioReader = overrides?.scenarioReader ?? NOT_WIRED_SCENARIO_READER;
+
+  const runAnalysis = createRunAnalysisHandler({ plotClient, scenarioReader });
+
+  return new Map<V5ActionType, HandlerFn>([['run_analysis', runAnalysis]]);
+}
+
+function resolvePlotClient(): PLoTClient {
+  const client = createPLoTClient();
+  if (!client) {
+    // ISL_BASE_URL / PLoT endpoint not configured. Return a stub that fails
+    // on first .run() call rather than throwing at module-load time —
+    // keeps `getDefaultRegistry()` safe to call in dev shells where PLoT
+    // isn't wired (e.g. local smoke tests of the non-handler paths).
+    return {
+      run: () =>
+        Promise.reject(
+          new Error(
+            'PLoT client not configured (ISL_BASE_URL missing); cannot invoke run_analysis',
+          ),
+        ),
+      validatePatch: () =>
+        Promise.reject(
+          new Error('PLoT client not configured (ISL_BASE_URL missing)'),
+        ),
+    };
+  }
+  return client;
+}
+
+let defaultRegistryCache: HandlerRegistry | undefined;
+
+/**
+ * Lazy singleton: the production `HandlerRegistry`. First call constructs
+ * it with default dependencies; subsequent calls return the same instance.
+ * Tests that want a fresh registry use `createRegistry({...})` instead.
+ *
+ * Not exported as a `const` because dep resolution (createPLoTClient())
+ * reads env variables that the test runner may set AFTER module import.
+ * Lazy evaluation avoids capturing stale env at load time.
+ */
+export function getDefaultRegistry(): HandlerRegistry {
+  if (!defaultRegistryCache) {
+    defaultRegistryCache = createRegistry();
+  }
+  return defaultRegistryCache;
+}
+
+/**
+ * Reset the default-registry cache. Tests that reconfigure env vars
+ * between cases (e.g. toggling ISL_BASE_URL) should call this to force
+ * re-evaluation.
+ */
+export function _resetDefaultRegistryForTests(): void {
+  defaultRegistryCache = undefined;
+}
 
 /**
  * Typed lookup. Returns the `HandlerFn` for `handlerId` if registered,
  * else `null`. Callers (dispatch.ts) branch on the null to decide
  * between invoking the handler and raising the not-registered error.
  *
- * The function never mutates the registry. Slice C2 constructs a new
- * Map when it registers `run_analysis`; Slice D1/D2 likewise produce
- * new Maps rather than mutating a shared instance. This keeps the
+ * The function never mutates the registry. C2 registers `run_analysis`;
+ * later slices (D1/D2) produce new Maps via `createRegistry` with richer
+ * dependencies rather than mutating a shared instance. This keeps the
  * "registry immutable after construction" contract visible in the type.
  */
 export function resolveHandler(
