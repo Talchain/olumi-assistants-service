@@ -103,11 +103,9 @@ export interface ClassifyTurnOpts {
   signal?: AbortSignal;
 }
 
-export interface ClassifyTurnResult {
-  turn_class: C1TurnClass;
-  /** Present iff turn_class === 'handler'. Validated against V5ActionType. */
-  handler_id?: V5ActionType;
-}
+export type ClassifyTurnResult =
+  | { turn_class: Exclude<C1TurnClass, 'handler'>; handler_id?: never }
+  | { turn_class: 'handler'; handler_id: V5ActionType };
 
 /**
  * Classify a user turn into `direct_answer` or `clarify`.
