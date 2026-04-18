@@ -51,7 +51,7 @@ import { buildFailureResponse } from './failure-response.js';
 import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
-} from './tools/handlers/run-analysis.js';
+} from './tools/handler-errors.js';
 import { INTERNAL_TO_WIRE, type C1TurnClass } from './types.js';
 
 export interface TurnExecutorRunResult {

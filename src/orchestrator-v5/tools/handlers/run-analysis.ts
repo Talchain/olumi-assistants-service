@@ -56,6 +56,20 @@ import type {
   HandlerInvocation,
   HandlerOutcome,
 } from '../registry.js';
+import {
+  HandlerInvocationFailedError,
+  HandlerResultInvalidError,
+} from '../handler-errors.js';
+
+// Re-export handler-generic errors for backwards compatibility with test
+// modules that imported them directly from run-analysis.js. The canonical
+// location is now `../handler-errors.js`; tests that land after this point
+// should import from there.
+export {
+  HandlerInvocationFailedError,
+  HandlerResultInvalidError,
+  type HandlerInvocationFailedCause,
+} from '../handler-errors.js';
 
 // ============================================================================
 // Locked assistant_text templates (Refinement R1)
@@ -72,64 +86,6 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
 
 export type RunAnalysisAssistantTemplate =
   (typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES)[keyof typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES];
-
-// ============================================================================
-// Typed errors
-// ============================================================================
-
-/**
- * Handler failed at the invocation boundary — PLoT unavailable, PLoT
- * rejected the payload, scenario read failed, or analysis status came back
- * non-completed. Maps to `INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED` →
- * INTERNAL_ERROR wire code.
- *
- * `cause_kind` is a stable machine-readable tag for telemetry + tests
- * (avoid substring-matching the message across future refactors).
- */
-export class HandlerInvocationFailedError extends Error {
-  readonly kind = 'HANDLER_INVOCATION_FAILED';
-  readonly cause_kind: HandlerInvocationFailedCause;
-
-  constructor(
-    message: string,
-    options: { cause_kind: HandlerInvocationFailedCause; cause?: unknown },
-  ) {
-    super(message);
-    this.name = 'HandlerInvocationFailedError';
-    this.cause_kind = options.cause_kind;
-    if (options.cause !== undefined) {
-      // Preserve the original error for debug serialisation. `cause` is a
-      // standard ES2022 Error field; assignment keeps TS happy without a
-      // non-null assertion.
-      (this as { cause?: unknown }).cause = options.cause;
-    }
-  }
-}
-
-export type HandlerInvocationFailedCause =
-  | 'args_validation_failed'
-  | 'scenario_read_failed'
-  | 'plot_payload_invalid'
-  | 'plot_error'
-  | 'plot_timeout'
-  | 'plot_unknown'
-  | 'analysis_not_completed';
-
-/**
- * Handler constructed a result that failed its own Zod schema — indicates a
- * handler-internal bug, not an upstream problem. Maps to
- * `INTERNAL_TO_WIRE.HANDLER_RESULT_INVALID` → INTERNAL_ERROR wire code.
- */
-export class HandlerResultInvalidError extends Error {
-  readonly kind = 'HANDLER_RESULT_INVALID';
-  constructor(message: string, cause?: unknown) {
-    super(message);
-    this.name = 'HandlerResultInvalidError';
-    if (cause !== undefined) {
-      (this as { cause?: unknown }).cause = cause;
-    }
-  }
-}
 
 // ============================================================================
 // ScenarioReader — dependency injection seam for reading scenario state
@@ -318,7 +274,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Byte-for-byte pass-through of the validated PLoT envelope. No
         // projection, no stripping, no derived CEE-owned fields. The
         // enrichment escape hatch is the only place raw PLoT data lives.
-        enrichment: response as unknown as Record<string, unknown>,
+        // V2RunResponseEnvelope's `[k: string]: unknown` index signature
+        // makes it structurally a superset of `Record<string, unknown>`,
+        // so a direct cast is sound without the intermediate `as unknown`.
+        enrichment: response as Record<string, unknown>,
       },
     };
 
