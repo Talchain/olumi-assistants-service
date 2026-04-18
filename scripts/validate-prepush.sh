@@ -236,6 +236,23 @@ check_state_write_invariant() {
 }
 
 # ---------------------------------------------------------------------------
+# 13. Handler-ownership invariant — V5 Slice C2. F.6 negative-proof that
+#     the run_analysis handler does NOT reinterpret PLoT results, apply
+#     math/formatting helpers to response fields, use direct HTTP calls,
+#     reference the UI repo, or drift from the locked assistant_text
+#     template enum. Prevents the V4 "silent semantic drift" failure mode.
+# ---------------------------------------------------------------------------
+check_handler_ownership() {
+  if bash scripts/validate-handler-ownership.sh > /dev/null 2>&1; then
+    print_check "handler-ownership" "OK"
+  else
+    print_check "handler-ownership" "FAIL"
+    bash scripts/validate-handler-ownership.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
 echo ""
@@ -254,6 +271,7 @@ check_data_responsibility
 check_phase_0_complete
 check_docs_consistency
 check_state_write_invariant
+check_handler_ownership
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
