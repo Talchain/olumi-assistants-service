@@ -31,6 +31,7 @@
  */
 
 import type { OrchestratorTurnPayload, OlumiResponse, FailureTypeLiteral } from '@talchain/schemas/boundary';
+import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import {
@@ -47,7 +48,7 @@ import {
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import { buildTurnContext } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
-import { INTERNAL_TO_WIRE, type A2TurnClass } from './types.js';
+import { INTERNAL_TO_WIRE, type C1TurnClass } from './types.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -59,8 +60,8 @@ export interface TurnExecutorRunResult {
     failure_type: FailureTypeLiteral | null;
     wall_clock_ms: number;
     // `null` when classifier itself failed (schema violation / timeout /
-    // abort); the actual A2TurnClass otherwise.
-    turn_class: A2TurnClass | null;
+    // abort); the actual C1TurnClass otherwise.
+    turn_class: C1TurnClass | null;
   };
 }
 
@@ -102,20 +103,29 @@ export async function runTurnExecutor(
   let llmCallsUsed = 0;
   let commitPerformed = false;
   let failureType: FailureTypeLiteral | null = null;
-  // A2: nullable until classifier resolves the actual turn class. `completed`
-  // telemetry carries `null` in the rare case that classification itself failed
-  // (schema violation / timeout / abort). Downstream consumers can distinguish
-  // "class unknown" from a specific class cleanly.
-  let resolvedTurnClass: A2TurnClass | null = null;
+  // A2/C1: nullable until classifier resolves the actual turn class.
+  // `completed` telemetry carries `null` in the rare case that classification
+  // itself failed (schema violation / timeout / abort). Downstream consumers
+  // can distinguish "class unknown" from a specific class cleanly. Widened
+  // to C1TurnClass in Slice C1 to accept the new 'handler' variant.
+  let resolvedTurnClass: C1TurnClass | null = null;
 
   try {
     let dispatchResult: DispatchResult;
     try {
       dispatchResult = await dispatch(context, {
         signal: turnAbort.signal,
+        // Slice C1: payload passed through so dispatchHandler can forward it
+        // to registered handlers via HandlerInvocation. C1's empty registry
+        // means no handler actually reads it, but the contract is kept
+        // stable for C2.
+        payload,
         // A2: capture classifier outcome even if narrate later throws — so
         // `turn_executor.completed` telemetry reports the true resolved class
         // and `llm_calls_used` reflects that the classifier call DID happen.
+        // Slice C1: onClassified now also receives the resolved handler_id
+        // when turn_class === 'handler'. Stored on the closure if telemetry
+        // ever wants to surface it (not currently emitted on started).
         onClassified: (cls) => {
           resolvedTurnClass = cls;
           llmCallsUsed = 1;
@@ -192,7 +202,11 @@ export async function runTurnExecutor(
     }
 
     // Contamination telemetry is informational; response stays a success.
-    if (dispatchResult.sanitised.contamination_detected) {
+    // Only A2 branches carry sanitised output (handler outcomes bypass the
+    // narrate sanitiser). Slice C1: handler path is unreachable here because
+    // dispatch throws before returning a handler DispatchResult — kept in the
+    // narrow for C2 forward-compat.
+    if (dispatchResult.turn_class !== 'handler' && dispatchResult.sanitised.contamination_detected) {
       emit(TelemetryEvents.TurnExecutorContaminationNarrate, {
         request_id: requestId,
         raw_length: dispatchResult.raw_text_length,
@@ -203,15 +217,33 @@ export async function runTurnExecutor(
 
     // Compose + commit. Either throwing means STATE_COMMIT_FAILED → INTERNAL_ERROR.
     try {
-      const composed = dispatchResult.turn_class === 'clarify'
-        ? composeClarifyResponse({
-            assistant_text: dispatchResult.sanitised.output,
-            stage: context.stage,
-          })
-        : composeDirectAnswerResponse({
-            assistant_text: dispatchResult.sanitised.output,
-            stage: context.stage,
-          });
+      let composed;
+      let handlerIdForCommit: V5ActionType | null = null;
+      let handlerFactsForCommit: readonly HandlerFact[] = [];
+
+      if (dispatchResult.turn_class === 'handler') {
+        // Slice C1: unreachable — registry miss throws UnhandledTurnClassError
+        // in dispatch.ts before this returns. Slice C2 will compose against
+        // HandlerOutcome.assistant_text. For C1 the branch exists to keep
+        // the discriminated union exhaustive.
+        composed = composeDirectAnswerResponse({
+          assistant_text: dispatchResult.handler_outcome.assistant_text,
+          stage: context.stage,
+        });
+        handlerIdForCommit = dispatchResult.handler_id;
+        handlerFactsForCommit = dispatchResult.handler_outcome.handler_facts;
+      } else if (dispatchResult.turn_class === 'clarify') {
+        composed = composeClarifyResponse({
+          assistant_text: dispatchResult.sanitised.output,
+          stage: context.stage,
+        });
+      } else {
+        // direct_answer
+        composed = composeDirectAnswerResponse({
+          assistant_text: dispatchResult.sanitised.output,
+          stage: context.stage,
+        });
+      }
       stagesCompleted.push('compose');
 
       // Slice B: commit persists through append_turn_atomic RPC. A throw here
@@ -225,11 +257,11 @@ export async function runTurnExecutor(
         scenario_id: context.session_id,
         turn_id: context.request_id,
         turn_class: dispatchResult.turn_class,
-        handler_id: null, // A2 only emits direct_answer/clarify; neither carries a handler
+        handler_id: handlerIdForCommit,
         request_hash: computeRequestHash(payload),
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
-        handler_facts: [],
+        handler_facts: handlerFactsForCommit,
       });
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
