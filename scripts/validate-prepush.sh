@@ -219,6 +219,23 @@ check_docs_consistency() {
 }
 
 # ---------------------------------------------------------------------------
+# 12. State-write invariant — V5 Slice B. Ensures the session persistence
+#     surface is narrow: append_turn_atomic RPC + v5_* tables are only
+#     touched from session/supabase-store.ts; the SessionStore interface is
+#     only imported by the declared integration points (commit.ts,
+#     build-turn-context.ts).
+# ---------------------------------------------------------------------------
+check_state_write_invariant() {
+  if bash scripts/validate-state-write-invariant.sh > /dev/null 2>&1; then
+    print_check "state-write-invariant" "OK"
+  else
+    print_check "state-write-invariant" "FAIL"
+    bash scripts/validate-state-write-invariant.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
 echo ""
@@ -236,6 +253,7 @@ check_transport_invariants
 check_data_responsibility
 check_phase_0_complete
 check_docs_consistency
+check_state_write_invariant
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
