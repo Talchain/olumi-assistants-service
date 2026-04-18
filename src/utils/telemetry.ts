@@ -446,6 +446,14 @@ export const TelemetryEvents = {
   TurnExecutorStarted: "turn_executor.started",
   TurnExecutorCompleted: "turn_executor.completed",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
+
+  // V5 session persistence (slice B).
+  // SessionReadDegraded emits when buildTurnContext's readRecent fails: the
+  // turn still runs with empty prior-turn history. Emitted with
+  // severity='warning' and a stable event name so ops alerting can match it;
+  // critical for detecting silent session-loss windows. Event payload:
+  // { scenario_id, error_code, severity: 'warning' }.
+  SessionReadDegraded: "session.read_degraded",
 } as const;
 
 /**

@@ -121,6 +121,20 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'test system prompt',
 }));
 
+// Slice B: mock the V5 session store so the integration tests don't try to
+// reach Supabase. Every mocked method is a no-op; Slice B behaviour is
+// covered by dedicated session unit + integration tests.
+vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
+  getSessionStore: () => ({
+    append: async () => ({ id: 'mock-row-id' }),
+    readRecent: async () => [],
+    readFactsFor: async () => [],
+    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+  }),
+  resetSessionStoreForTests: () => {},
+}));
+
 let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
