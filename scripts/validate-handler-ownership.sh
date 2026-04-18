@@ -36,17 +36,25 @@ fail() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Handler registered only by registry.ts
+# 1. Handler module imported only by registry.ts
+#
+# Tightened post-C2: previously `turn-executor.ts` had an exception so it
+# could import the handler-generic errors (HandlerInvocationFailedError +
+# HandlerResultInvalidError). Those errors have since moved to
+# `tools/handler-errors.ts`, so the exception is no longer needed. If a
+# future change re-introduces an import from a handler module outside
+# registry.ts, this check fails the push — forcing a decision between
+# "generalise the shared surface" (move to handler-errors.ts) and
+# "genuine exception" (add justification here).
 # ---------------------------------------------------------------------------
 ILLEGAL_IMPORTS=$(
   grep -RIn --include='*.ts' --exclude-dir='__tests__' --exclude='*.test.ts' \
     -E "from '[^']*tools/handlers/run-analysis(\.js)?'" src/ 2>/dev/null \
   | grep -v '^src/orchestrator-v5/tools/registry\.ts:' \
-  | grep -v '^src/orchestrator-v5/turn-executor\.ts:' \
   || true
 )
 if [ -n "$ILLEGAL_IMPORTS" ]; then
-  fail 'runAnalysisHandler imported outside registry.ts + turn-executor.ts' "$ILLEGAL_IMPORTS"
+  fail 'runAnalysisHandler imported outside registry.ts' "$ILLEGAL_IMPORTS"
 fi
 
 # ---------------------------------------------------------------------------
@@ -161,12 +169,56 @@ fi
 # ---------------------------------------------------------------------------
 ENRICHMENT_OK=$(
   awk '/enrichment: /{print}' "$HANDLER_FILE" \
-  | grep -E "enrichment: response as unknown as Record" \
+  | grep -E "enrichment: response as Record" \
   || true
 )
 if [ -z "$ENRICHMENT_OK" ]; then
   fail 'result.enrichment is not a verbatim pass-through of the validated PLoT response' \
-    "Expected a line matching 'enrichment: response as unknown as Record' in $HANDLER_FILE; none found."
+    "Expected a line matching 'enrichment: response as Record' in $HANDLER_FILE; none found."
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Placeholder scenario-reader must NOT be the production default when a
+#    handler is registered on a newer surface (Resolution 1 / classifier
+#    prompt update). The placeholder (`NOT_WIRED_SCENARIO_READER`) exists
+#    by design in C2 to make the failure path visible while the real
+#    Supabase-backed reader is pending a future slice — but shipping a
+#    production registry with this default AFTER the classifier prompt
+#    starts emitting `handler_id: run_analysis` would fail real traffic
+#    with HANDLER_INVOCATION_FAILED(cause_kind='scenario_read_failed').
+#
+#    This guard fires when BOTH:
+#      (a) the classifier prompt already teaches the handler variant (i.e.
+#          the prompt mentions `handler_id` and `run_analysis` — the
+#          Paul-authored update has landed)
+#      (b) the production registry factory still binds
+#          `NOT_WIRED_SCENARIO_READER` as the default `scenarioReader`.
+#
+#    If only (a) is true, the placeholder is still safe (no real reader
+#    needed yet). If only (b) is true, the combo is inert until (a) also
+#    lands. Both together = unmergeable without wiring a real reader.
+# ---------------------------------------------------------------------------
+REGISTRY_FILE='src/orchestrator-v5/tools/registry.ts'
+PROMPT_FILE='src/prompts/defaults.ts'
+
+HANDLER_IN_PROMPT=$(
+  grep -n 'handler_id' "$PROMPT_FILE" 2>/dev/null \
+  | grep -iE 'run_analysis|"handler"' \
+  || true
+)
+PLACEHOLDER_IS_DEFAULT=$(
+  awk '
+    /function createRegistry/ { in_fn = 1 }
+    in_fn && /scenarioReader = /{print; if (/NOT_WIRED_SCENARIO_READER/) print "HIT"}
+    in_fn && /^}/ { in_fn = 0 }
+  ' "$REGISTRY_FILE" \
+  | grep -c '^HIT$' \
+  || true
+)
+
+if [ -n "$HANDLER_IN_PROMPT" ] && [ "${PLACEHOLDER_IS_DEFAULT:-0}" -gt 0 ]; then
+  fail 'placeholder scenario reader is the production default AFTER classifier prompt update landed' \
+    "Classifier prompt now emits handler_id on run_analysis (per $PROMPT_FILE), but createRegistry() in $REGISTRY_FILE still defaults scenarioReader to NOT_WIRED_SCENARIO_READER. Real traffic will fail with HANDLER_INVOCATION_FAILED(cause_kind='scenario_read_failed'). Wire a real Supabase-backed scenarioReader before merging."
 fi
 
 # ---------------------------------------------------------------------------
@@ -174,10 +226,11 @@ fi
 # ---------------------------------------------------------------------------
 if [ "$EXIT" -eq 0 ]; then
   echo 'Handler ownership invariant OK:'
-  echo '  - runAnalysisHandler imported only by registry.ts + turn-executor.ts'
+  echo '  - runAnalysisHandler imported only by registry.ts'
   echo '  - no direct HTTP calls; no UI-repo refs; no math/formatting helpers'
   echo '  - template enum has exactly 2 entries'
   echo '  - result.enrichment is a verbatim pass-through of the PLoT envelope'
+  echo '  - placeholder scenario reader acceptable (classifier prompt still direct_answer/clarify only)'
 fi
 
 exit "$EXIT"

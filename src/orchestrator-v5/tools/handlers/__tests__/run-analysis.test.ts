@@ -14,6 +14,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
+import * as talchainSchemas from '@talchain/schemas/orchestrator';
 
 import type { PLoTClient, PLoTClientRunOpts } from '../../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../../orchestrator/plot-client.js';
@@ -748,6 +750,90 @@ describe('run_analysis handler — HandlerResultInvalidError is defined and carr
     expect(err).toBeInstanceOf(Error);
     expect(err.kind).toBe('HANDLER_RESULT_INVALID');
     expect(err.name).toBe('HandlerResultInvalidError');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HandlerResultInvalidError reachability via schema-spy seam
+//
+// The handler's deterministic extraction logic structurally prevents a
+// malformed fact from being constructed under normal conditions (all five
+// required RunAnalysisResult fields are extracted with types that satisfy
+// the strict schema). To exercise the catch branch AND prove the
+// turn-executor mapping (HANDLER_RESULT_INVALID → INTERNAL_ERROR wire
+// code with details.reason='fact_schema_violation'), we force the schema's
+// safeParse to return { success: false } via `vi.spyOn`. This is the
+// minimum test surface that proves:
+//   1. The handler distinguishes result-invalid from invocation-failed
+//   2. Zod parse failure surfaces as HandlerResultInvalidError, not the
+//      generic UNHANDLED path
+//   3. The cause chain is preserved (cause = the ZodError)
+// Without this seam, the path would be an unreachable assertion in the
+// evidence pack — a promise the code makes but the test cannot verify.
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — HandlerResultInvalidError path via schema-spy', () => {
+  it('forced Zod safeParse failure → handler throws HandlerResultInvalidError with the ZodError preserved', async () => {
+    const forcedIssues: z.ZodIssue[] = [
+      {
+        code: 'custom',
+        path: ['result', 'summary'],
+        message: 'forced schema violation for test coverage',
+      },
+    ];
+    const forcedError = new z.ZodError(forcedIssues);
+    const spy = vi
+      .spyOn(talchainSchemas.RunAnalysisHandlerFactSchema, 'safeParse')
+      .mockReturnValue({ success: false, error: forcedError });
+
+    try {
+      const handler = createRunAnalysisHandler({
+        plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+        scenarioReader: makeScenarioReader(),
+      });
+
+      let caught: unknown;
+      try {
+        await handler(makeInvocation());
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(HandlerResultInvalidError);
+      const e = caught as HandlerResultInvalidError;
+      expect(e.kind).toBe('HANDLER_RESULT_INVALID');
+      expect(e.name).toBe('HandlerResultInvalidError');
+      // The ZodError is preserved on the `cause` chain so observability
+      // can surface the specific schema violation without log parsing.
+      expect((e as { cause?: unknown }).cause).toBe(forcedError);
+      // Spy observed the failure before the throw.
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('handler did NOT call scenarioReader or plotClient twice despite fact failure (no retry / no double-invoke)', async () => {
+    const forcedError = new z.ZodError([
+      { code: 'custom', path: [], message: 'forced' },
+    ]);
+    const spy = vi
+      .spyOn(talchainSchemas.RunAnalysisHandlerFactSchema, 'safeParse')
+      .mockReturnValue({ success: false, error: forcedError });
+
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const scenarioReader = vi.fn<[string, AbortSignal | undefined], Promise<RunAnalysisScenarioSnapshot>>(
+      () => Promise.resolve(makeScenarioSnapshot()),
+    );
+
+    try {
+      const handler = createRunAnalysisHandler({ plotClient, scenarioReader });
+      await expect(handler(makeInvocation())).rejects.toBeInstanceOf(HandlerResultInvalidError);
+      expect(plotClient.run).toHaveBeenCalledTimes(1);
+      expect(scenarioReader).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { z } from 'zod';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
@@ -359,34 +360,66 @@ describe('turn-executor × run_analysis — HandlerInvocationFailedError paths',
 // ---------------------------------------------------------------------------
 
 describe('turn-executor × run_analysis — HandlerResultInvalidError path', () => {
-  it('constructed fact failing schema → INTERNAL_ERROR with details.reason=fact_schema_violation', async () => {
-    // Force the handler to build a fact that violates the strict schema by
-    // making the PLoT response return a scenario_id-like payload the handler
-    // will copy through. Easiest route: provide a PLoT response whose
-    // enrichment structure itself triggers a strict-mode violation? No —
-    // enrichment is z.record(z.string(), z.unknown()) so anything serialises.
-    //
-    // Alternative: force leading_option_id to a non-string via direct-mock
-    // PLoT response — but the handler's selectLeadingOptionId only ever
-    // returns string|null. The only realistic fact-schema violation at run
-    // time is an upstream type-contract break which we can't reliably
-    // synthesize without patching the schema. Instead assert the error's
-    // branch exists: invoke with a PLoT response that causes extractOptionId
-    // to return non-string... not possible via current code.
-    //
-    // Simplest defensible coverage: inject a scenarioReader that produces a
-    // snapshot whose scenario_id (via payload) validates, and PLoT response
-    // passes through unchanged — then the result path is always valid. So
-    // the HandlerResultInvalidError path is structurally protected against
-    // but not forceable via public surface. Our coverage comes from the
-    // unit-test suite's HandlerResultInvalidError constructor check plus
-    // the schema-strict audit. Here we just assert the wire code mapping
-    // is reachable by unit-testing the catch branch in isolation.
-
-    // Confirm the wire mapping is correctly installed.
+  it('constant wire mapping: HANDLER_RESULT_INVALID + HANDLER_INVOCATION_FAILED both map to INTERNAL_ERROR', async () => {
     const { INTERNAL_TO_WIRE } = await import('../types.js');
     expect(INTERNAL_TO_WIRE.HANDLER_RESULT_INVALID).toBe('INTERNAL_ERROR');
     expect(INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED).toBe('INTERNAL_ERROR');
+  });
+
+  it('schema-spy seam: forced safeParse failure → INTERNAL_ERROR envelope with details.reason=fact_schema_violation, commit NOT performed, BI-01 holds', async () => {
+    // The handler's deterministic extraction logic structurally prevents a
+    // malformed RunAnalysisHandlerFact under real inputs (brief/C2 design).
+    // This test uses `vi.spyOn(RunAnalysisHandlerFactSchema.safeParse)` —
+    // the same seam the handler reaches for — to force the {success: false}
+    // branch, then verifies the full turn-executor mapping end-to-end:
+    //
+    //   handler throws HandlerResultInvalidError
+    //     → turn-executor catches at the dedicated branch
+    //       → wire code becomes INTERNAL_ERROR (per INTERNAL_TO_WIRE)
+    //       → failure envelope carries details.reason='fact_schema_violation'
+    //       → commit_performed=false, appendCalls.length===0 (no partial write)
+    //       → BI-01: started + completed with response_emitted=true
+    const schemas = await import('@talchain/schemas/orchestrator');
+    const forcedError = new z.ZodError([
+      { code: 'custom', path: ['result'], message: 'forced for test coverage' },
+    ]);
+    const spy = vi
+      .spyOn(schemas.RunAnalysisHandlerFactSchema, 'safeParse')
+      .mockReturnValue({ success: false, error: forcedError });
+
+    try {
+      registryDeps = {
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      };
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-hri');
+
+      expectBI01();
+      OlumiResponseSchema.parse(response);
+
+      const block = response.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('INTERNAL_ERROR');
+        expect(block.details).toMatchObject({ reason: 'fact_schema_violation' });
+      }
+
+      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+      expect(telemetry.commit_performed).toBe(false);
+      expect(telemetry.stages_completed).not.toContain('compose');
+      expect(telemetry.stages_completed).not.toContain('commit');
+      expect(telemetry.turn_class).toBe('handler');
+      expect(telemetry.llm_calls_used).toBe(1); // classifier only
+
+      // No partial persistence: the session store was never called with a
+      // malformed fact.
+      expect(appendCalls).toHaveLength(0);
+
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
