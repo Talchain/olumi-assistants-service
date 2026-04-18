@@ -1813,6 +1813,19 @@ export function emit(event: string, data: Event) {
           break;
         }
 
+        case TelemetryEvents.SessionReadDegraded: {
+          // V5 Slice B — silent-session-loss alerting hook. Count every read
+          // failure so ops can alert on `session.read_degraded_total > 0`
+          // over a short window (e.g. 5 min). Tags carry the error shape so
+          // the dashboard can distinguish "RPC down" from "config drift"
+          // from "row-shape parse failure".
+          datadogClient.increment("session.read_degraded_total", 1, {
+            error_code: String((eventData.error_code as string) || "unknown"),
+            severity: String((eventData.severity as string) || "warning"),
+          });
+          break;
+        }
+
         // Stage events are debug-only, don't send to Datadog by default
         default:
           // Unknown event - log warning but don't fail

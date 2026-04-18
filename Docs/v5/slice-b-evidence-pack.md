@@ -144,7 +144,7 @@ Slice B introduces one new telemetry event and preserves the existing V5 lifecyc
 
 BI-01 holds: every `turn_executor.started` → `turn_executor.completed` with `response_emitted: true`. Commit failure returns a failure envelope; the envelope is a response; BI-01 never trips. The failure catch at [turn-executor.ts:223-232](../../src/orchestrator-v5/turn-executor.ts#L223-L232) handles every new throw path — no new catch added.
 
-No handler durations / cache hit-rate counters emitted by Slice B — those are handler-level concerns for Slice C. `session_read_degraded_total` counter hook is named in the event constant comment but not yet incremented via StatsD; that's a follow-up if ops alerting decides to add the wire (non-blocking).
+No handler durations / cache hit-rate counters emitted by Slice B — those are handler-level concerns for Slice C. The `session.read_degraded_total` counter IS incremented via StatsD (see [telemetry.ts](../../src/utils/telemetry.ts) `case TelemetryEvents.SessionReadDegraded`) with tags `error_code` and `severity`; ops alerting can rule on `session.read_degraded_total > 0 over 5 min` to catch silent session-loss windows.
 
 ---
 
@@ -187,8 +187,7 @@ Per-deliverable Round 1 (brief compliance) + Round 2 (adversarial) performed inl
 2. **Scoped invalidation pessimism.** Slice B's `invalidateScoped(factor|edge)` marks every cached turn stale (not just turns whose facts reference the scoped target) because fact indexing doesn't exist yet. Documented in [cache.ts](../../src/orchestrator-v5/session/cache.ts) and [invalidation.ts](../../src/orchestrator-v5/session/invalidation.ts). Slice C should refine to fact-indexed eviction.
 3. **Wire-level `GraphInvalidationSchema` vs internal `InvalidationScope` divergence.** Internal has `edge`, wire has `manual`. When Slice C+ adds a PLoT-originated invalidation trigger, add a mapper at that boundary rather than forcing the internal type into the schema shape.
 4. **Session read flaky under high Supabase concurrency.** One transient `TypeError: fetch failed` observed during full-gate run. Second run clean. Not a code defect; consider lowering `--maxConcurrency` or adding retry wrapping on the Supabase client for CI hardening.
-5. **StatsD counter for `session_read_degraded_total`** is named in the event comment but not yet incremented. Wire it if ops alerting wants a per-minute rate threshold (non-blocking for Slice C).
-6. **Schemas 0.5.2 bump still not needed**; no schema pressure surfaced during Slice B. Revisit at Slice C when handler facts land.
+5. **Schemas 0.5.2 bump still not needed**; no schema pressure surfaced during Slice B. Revisit at Slice C when handler facts land.
 
 ---
 
