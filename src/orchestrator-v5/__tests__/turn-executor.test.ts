@@ -448,6 +448,104 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
   });
 
   // -------------------------------------------------------------------
+  // Routing log emission (P1-3)
+  // -------------------------------------------------------------------
+  describe('routing log emission', () => {
+    it('emits exactly one routing log record on a successful execute turn', async () => {
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(VALID_EXECUTE_INPUT, 'pre-action context'),
+      );
+      const fakeRegistry = new Map<string, never>([
+        ['run_analysis', (async () => ({
+          assistant_text: 'handler',
+          handler_facts: [],
+          llm_calls_used: 0,
+        })) as never],
+      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+      const writer = vi.fn().mockResolvedValue(undefined);
+
+      await runTurnExecutor(BASE_PAYLOAD, 'req-log1', {
+        routingAdapter,
+        handlerRegistry: fakeRegistry,
+        routingLogWriter: writer,
+      });
+
+      // Wait one microtask for the void-fired writer
+      await new Promise((r) => setImmediate(r));
+
+      expect(writer).toHaveBeenCalledTimes(1);
+      const record = writer.mock.calls[0]![0];
+      expect(record).toMatchObject({
+        scenario_id: BASE_PAYLOAD.scenario_id,
+        intent_class: 'execute',
+        handler_id: 'run_analysis',
+        resolution_status: 'resolved',
+        validation_error_code: null,
+        routing_error_cause: null,
+        raw_user_message: BASE_PAYLOAD.message,
+        sonnet_text: 'pre-action context',
+      });
+    });
+
+    it('emits a routing log record on routing failure (LLM_TIMEOUT path)', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => {
+        throw new UpstreamTimeoutError('read timeout');
+      });
+      const writer = vi.fn().mockResolvedValue(undefined);
+
+      await runTurnExecutor(BASE_PAYLOAD, 'req-log-err', {
+        routingAdapter,
+        routingLogWriter: writer,
+      });
+
+      await new Promise((r) => setImmediate(r));
+
+      expect(writer).toHaveBeenCalledTimes(1);
+      const record = writer.mock.calls[0]![0];
+      expect(record.routing_error_cause).toBe('timeout');
+      expect(record.intent_class).toBeNull();
+    });
+
+    it('emits a routing log record on validation rejection (validation_error_code populated)', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(VALID_EXECUTE_INPUT));
+      const graphLookup = {
+        findEntityById: () => null,
+        listEntitiesByKind: () => [],
+      };
+      const writer = vi.fn().mockResolvedValue(undefined);
+
+      await runTurnExecutor(BASE_PAYLOAD, 'req-log-val', {
+        routingAdapter,
+        graphLookup,
+        routingLogWriter: writer,
+      });
+
+      await new Promise((r) => setImmediate(r));
+
+      expect(writer).toHaveBeenCalledTimes(1);
+      expect(writer.mock.calls[0]![0].validation_error_code).toBe('ENTITY_NOT_FOUND');
+    });
+
+    it('honours redacted=true: raw_user_message dropped, sonnet_text hashed', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('top-secret model output'));
+      const writer = vi.fn().mockResolvedValue(undefined);
+
+      await runTurnExecutor(BASE_PAYLOAD, 'req-log-r', {
+        routingAdapter,
+        routingLogWriter: writer,
+        routingLogRedacted: true,
+      });
+
+      await new Promise((r) => setImmediate(r));
+
+      const record = writer.mock.calls[0]![0];
+      expect(record.raw_user_message).toBeNull();
+      expect(record.sonnet_text).toBeNull();
+      expect(record.sonnet_text_hash).toMatch(/^[0-9a-f]{64}$/);
+    });
+  });
+
+  // -------------------------------------------------------------------
   // Orientation / confirmation boundary
   // -------------------------------------------------------------------
   describe('boundary preservation', () => {

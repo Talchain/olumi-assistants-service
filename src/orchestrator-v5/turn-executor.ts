@@ -65,7 +65,7 @@ import {
 import { sanitiseNarrateOutput } from './sanitise.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
-import { assembleContextPack } from './context/context-pack-assembler.js';
+import { assembleContextPack, type ContextPack } from './context/context-pack-assembler.js';
 import {
   RoutingError,
   routeWithToolUse,
@@ -78,9 +78,15 @@ import {
   type ValidationError,
 } from './routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
+import {
+  buildRoutingLog,
+  writeRoutingLog,
+  type RoutingLog,
+} from './routing/routing-log.js';
 import type {
   CoachingMode,
   IntentClass,
+  ResolutionStatus,
 } from './routing/types.js';
 
 export interface TurnExecutorRunResult {
@@ -119,6 +125,17 @@ export interface RunTurnExecutorOptions {
    * lookup and validation is skipped.
    */
   readonly graphLookup?: GraphLookup;
+  /**
+   * Routing-log writer override. Tests pass a `vi.fn()` to capture records
+   * without touching the filesystem; production omits and the default
+   * file-append writer (logs/v5-routing-logs.jsonl) is used.
+   */
+  readonly routingLogWriter?: (record: RoutingLog) => Promise<void>;
+  /**
+   * Privacy override for the routing log. When true, raw_user_message is
+   * dropped and sonnet_text is hashed. Defaults to false in this PoC.
+   */
+  readonly routingLogRedacted?: boolean;
 }
 
 /**
@@ -155,6 +172,15 @@ export async function runTurnExecutor(
   let coachingMode: CoachingMode | null = null;
   let validationErrorCode: ValidationError['code'] | null = null;
 
+  // Routing log fields — closured so the finally block can emit one record
+  // per turn regardless of which terminal path fires (success / typed
+  // failure / unexpected error).
+  let routingErrorCause: string | null = null;
+  let resolutionStatus: ResolutionStatus | null = null;
+  let proposedHandlerIdForLog: string | null = null;
+  let sonnetTextForLog = '';
+  let contextPackForLog: ContextPack | null = null;
+
   try {
     // ==================================================================
     // STEP 1 — ORIENT
@@ -165,6 +191,7 @@ export async function runTurnExecutor(
         payload,
         priorTurns: context.prior_turns,
       });
+      contextPackForLog = contextPack;
       routingResult = await routeWithToolUse(contextPack, payload.message, {
         requestId,
         signal: turnAbort.signal,
@@ -173,6 +200,8 @@ export async function runTurnExecutor(
       // Account for actual routing-call count (1 on first-pass success,
       // 2 when REPAIR_ONCE used). The router knows; we trust its count.
       llmCallsUsed = routingResult.llmCallCount;
+      sonnetTextForLog =
+        routingResult.type === 'tool_call' ? routingResult.orientationText : routingResult.text;
       stagesCompleted.push('orient');
     } catch (error) {
       if (turnAbort.signal.aborted) {
@@ -214,6 +243,8 @@ export async function runTurnExecutor(
     if (routingResult.type === 'tool_call' && routingResult.proposal.intent_class === 'execute') {
       const action = routingResult.proposal.action;
       const proposedHandlerId = action.handler_id as V5ActionType;
+      resolutionStatus = action.entity.resolution_status;
+      proposedHandlerIdForLog = action.handler_id;
 
       // STEP 2 — VALIDATE. Skipped when no graph lookup is available
       // (Phase 1a gap: graph state not threaded through V5 payload).
@@ -406,6 +437,29 @@ export async function runTurnExecutor(
       failure_type: failureType,
       wall_clock_ms: Date.now() - startedAt,
     });
+    // Phase 1b D10/P1-3: emit one routing log record per turn — success or
+    // failure — so Phase 2 evaluation has the route-time signals (intent
+    // classification, coaching mode, resolution status, error cause). The
+    // writer is non-throwing; any I/O issue is swallowed in writeRoutingLog.
+    const writer = options.routingLogWriter ?? writeRoutingLog;
+    const record = buildRoutingLog({
+      turn_id: context.request_id,
+      scenario_id: context.session_id,
+      stage: context.stage,
+      intent_class: intentClass,
+      handler_id: proposedHandlerIdForLog,
+      coaching_mode: coachingMode,
+      resolution_status: resolutionStatus,
+      routing_error_cause: routingErrorCause,
+      validation_error_code: validationErrorCode,
+      compound_detected: contextPackForLog?.compound_detected ?? false,
+      compound_pattern_matched: null,
+      raw_user_message: payload.message,
+      sonnet_text: sonnetTextForLog,
+      redacted: options.routingLogRedacted ?? false,
+      created_at: new Date(startedAt).toISOString(),
+    });
+    void writer(record);
   }
 
   // ==================================================================
@@ -430,6 +484,7 @@ export async function runTurnExecutor(
   }
 
   function translateRoutingError(err: RoutingError): TurnExecutorRunResult {
+    routingErrorCause = err.cause;
     switch (err.cause) {
       case 'timeout':
         failureType = INTERNAL_TO_WIRE.LLM_TIMEOUT;

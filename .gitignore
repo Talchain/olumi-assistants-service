@@ -40,3 +40,7 @@ data/prompts.json.backup.*
 # Graph evaluator results (keep .gitkeep)
 tools/graph-evaluator/results/*
 !tools/graph-evaluator/results/.gitkeep
+
+# V5 Phase 1b — local routing log accumulation (PoC fallback before
+# proper Supabase persistence)
+logs/
