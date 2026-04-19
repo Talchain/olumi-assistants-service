@@ -295,7 +295,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       const stages = completedEvents()[0]!.data.stages_completed as string[];
       expect(stages).toContain('orient');
       expect(stages).toContain('validate');
-      expect(stages).toContain('validate_skipped_graph_checks');
+      expect(stages).toContain('validate_skipped_no_graph');
       expect(stages).toContain('execute');
       expect(stages).toContain('confirm');
       expect(stages).toContain('compose');

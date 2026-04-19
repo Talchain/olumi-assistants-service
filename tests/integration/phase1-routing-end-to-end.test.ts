@@ -149,7 +149,7 @@ describe('phase 1 routing end-to-end — execute turn via tool-use', () => {
       'build_turn_context',
       'orient',
       'validate',
-      'validate_skipped_graph_checks',
+      'validate_skipped_no_graph',
       'execute',
       'confirm',
       'compose',

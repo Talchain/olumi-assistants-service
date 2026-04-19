@@ -253,6 +253,22 @@ check_handler_ownership() {
 }
 
 # ---------------------------------------------------------------------------
+# 14. V5 Phase 1.5 invariants — the `validate_skipped_graph_checks` stage
+#     string-literal must not appear in production code (Phase 1.5 renamed
+#     it to `validate_skipped_no_graph`), and the ContextPack assembler
+#     must stay free of semantic transforms (F.6 passthrough).
+# ---------------------------------------------------------------------------
+check_phase_1_5_invariants() {
+  if bash scripts/validate-v5-phase1.5-invariants.sh > /dev/null 2>&1; then
+    print_check "phase-1.5-invariants" "OK"
+  else
+    print_check "phase-1.5-invariants" "FAIL"
+    bash scripts/validate-v5-phase1.5-invariants.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
 echo ""
@@ -272,6 +288,7 @@ check_phase_0_complete
 check_docs_consistency
 check_state_write_invariant
 check_handler_ownership
+check_phase_1_5_invariants
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
