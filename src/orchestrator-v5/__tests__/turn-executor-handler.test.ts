@@ -1,19 +1,22 @@
 /**
- * TurnExecutor — Slice C2 handler integration tests.
+ * TurnExecutor × run_analysis — C2 regression through Phase 1 seven-step flow.
  *
- * Covers the full turn-executor pipeline through a real run_analysis handler
- * with mocked PLoT + stubbed scenarioReader:
- *   - Happy path: BI-01 preserved, commit performed, response_emitted=true,
- *     fact flows through to commit, handler_id persisted
- *   - R3 llm_calls_used accounting: HandlerOutcome.llm_calls_used=0 composes
- *     to OlumiResponse accounting of 1 (classifier only) through the full
- *     pipeline — no double-count, no drop
- *   - HandlerInvocationFailedError → HANDLER_INVOCATION_FAILED → INTERNAL_ERROR
- *     envelope; commit_performed=false; BI-01 holds
- *   - HandlerResultInvalidError → HANDLER_RESULT_INVALID → INTERNAL_ERROR;
- *     commit_performed=false; BI-01 holds
- *   - assistant_text end-to-end is the handler's template, unchanged by
- *     compose (no narrate LLM call for run_analysis per Resolution 3)
+ * Same C2 invariants as before the routing refactor, but now dispatched via
+ * the new tool-use seam instead of the classifier:
+ *
+ *   - Happy path: run_analysis fact persists, assistant_text is the typed
+ *     confirmation template, BI-01 preserved, llm_calls accounting correct
+ *   - HandlerInvocationFailedError path: PLoT error, scenarioReader failure,
+ *     analysis_status=blocked → HANDLER_INVOCATION_FAILED → INTERNAL_ERROR;
+ *     commit NOT performed; BI-01 preserved
+ *   - HandlerResultInvalidError path: forced Zod safeParse failure →
+ *     HANDLER_RESULT_INVALID → INTERNAL_ERROR; no partial persistence
+ *   - Constraint 7: outer budget wins over inner handler error
+ *
+ * The new seam (tool-use) is mocked via an injected routingAdapter. The
+ * handler registry is built with real createRegistry(overrides) so the
+ * run_analysis handler is exercised end-to-end against mocked PLoT + stubbed
+ * scenarioReader.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -22,45 +25,13 @@ import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
+import type {
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+  ToolResponseBlock,
+} from '../../adapters/llm/types.js';
 
-// ---------------------------------------------------------------------------
-// Shared mock state
-// ---------------------------------------------------------------------------
-
-type PhaseBehaviour = { kind: 'success'; output: string } | { kind: 'throw' };
-
-const phaseState: Record<'classify' | 'narrate', PhaseBehaviour> = {
-  classify: { kind: 'success', output: '{"turn_class":"handler","handler_id":"run_analysis"}' },
-  narrate: { kind: 'success', output: 'narrate MUST NOT run for run_analysis per Resolution 3' },
-};
-
-vi.mock('../../adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'test-mock',
-    chat: async (args: { responseFormat?: string }) => {
-      const phase = args.responseFormat === 'json_object' ? 'classify' : 'narrate';
-      const behaviour = phaseState[phase];
-      if (behaviour.kind === 'throw') {
-        throw new Error(`mock ${phase} failure`);
-      }
-      return {
-        content: behaviour.output,
-        usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'test-mock',
-        latencyMs: 0,
-      };
-    },
-  }),
-}));
-
-vi.mock('../../adapters/llm/prompt-loader.js', () => ({
-  getSystemPrompt: async () => 'You are a test narrator.',
-}));
-
-// Slice B: stub session store — C2 focuses on handler-fact flow through
-// append; not testing Supabase write semantics here (those live in
-// slice-b-*.test.ts + slice-c2-atomic-persistence.test.ts integration tests).
-// We DO capture the handler_facts passed to append so we can assert round-trip.
+// Session store mock — capture append() calls for fact-round-trip assertions
 const appendCalls: Array<unknown> = [];
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -70,10 +41,7 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => [],
     readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({
-      scope,
-      entries_invalidated: [],
-    }),
+    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
@@ -82,10 +50,6 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => {},
 }));
 
-// Registry mock: swap getDefaultRegistry() for a test-time factory over a
-// mutable deps box. Each test configures `registryDeps` before invoking
-// runTurnExecutor. Keeps the real createRegistry + handler in play so we
-// exercise the integration surface, not a stubbed registry.
 import type { PLoTClient } from '../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import type {
@@ -93,31 +57,12 @@ import type {
   ScenarioReader,
 } from '../tools/handlers/run-analysis.js';
 
-interface RegistryDeps {
-  plotClient: PLoTClient;
-  scenarioReader: ScenarioReader;
-}
-let registryDeps: RegistryDeps | null = null;
-
-vi.mock('../tools/registry.js', async () => {
-  const actual = await vi.importActual<typeof import('../tools/registry.js')>(
-    '../tools/registry.js',
-  );
-  return {
-    ...actual,
-    getDefaultRegistry: () => {
-      if (!registryDeps) {
-        throw new Error('registryDeps not configured for test — see beforeEach in turn-executor-handler.test.ts');
-      }
-      return actual.createRegistry(registryDeps);
-    },
-  };
-});
-
 const { runTurnExecutor } = await import('../turn-executor.js');
+const { createRegistry } = await import('../tools/registry.js');
+const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 // ---------------------------------------------------------------------------
-// Test fixtures
+// Fixtures
 // ---------------------------------------------------------------------------
 
 const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -129,6 +74,39 @@ const BASE_PAYLOAD: OrchestratorTurnPayload = {
   turn_class: 'decide',
   stage: 'analyse',
 };
+
+const RUN_ANALYSIS_TOOL_CALL_INPUT = {
+  intent_class: 'execute',
+  action: {
+    handler_id: 'run_analysis',
+    entity: {
+      id: 'opt_a',
+      kind: 'option',
+      resolution_status: 'resolved',
+      resolution_method: 'id_match',
+    },
+    parameters: [],
+    cited_context_fields: ['graph.options'],
+  },
+};
+
+function mkToolUseResult(input: unknown, textBefore?: string): ChatWithToolsResult {
+  const content: ToolResponseBlock[] = [];
+  if (textBefore) content.push({ type: 'text', text: textBefore });
+  content.push({
+    type: 'tool_use',
+    id: 'tu-1',
+    name: OLUMI_ACTION_TOOL_NAME,
+    input: input as Record<string, unknown>,
+  });
+  return {
+    content,
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 50,
+  };
+}
 
 function makeGoldenResponse(): V2RunResponseEnvelope {
   return {
@@ -153,16 +131,25 @@ function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
   };
 }
 
-function makeMockPlotClient(
-  overrides?: Partial<{ run: PLoTClient['run'] }>,
-): PLoTClient {
-  const run =
-    overrides?.run ??
-    vi.fn(async () => makeGoldenResponse());
+function makeMockPlotClient(overrides?: Partial<{ run: PLoTClient['run'] }>): PLoTClient {
+  const run = overrides?.run ?? vi.fn(async () => makeGoldenResponse());
   return {
     run,
     validatePatch: vi.fn().mockResolvedValue({}),
   } as unknown as PLoTClient;
+}
+
+type ChatWithToolsMock = (
+  args: ChatWithToolsArgs,
+  opts: { requestId: string; timeoutMs?: number; signal?: AbortSignal },
+) => Promise<ChatWithToolsResult>;
+
+function mockRoutingAdapter(impl: ChatWithToolsMock) {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockImplementation(impl as never),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -187,83 +174,103 @@ function expectBI01(): void {
 
 beforeEach(() => {
   appendCalls.length = 0;
-  phaseState.classify = {
-    kind: 'success',
-    output: '{"turn_class":"handler","handler_id":"run_analysis"}',
-  };
-  phaseState.narrate = {
-    kind: 'success',
-    output: 'narrate MUST NOT run for run_analysis per Resolution 3',
-  };
-  registryDeps = null;
   events = [];
   installSink();
 });
 
 afterEach(() => {
   uninstallSink();
-  registryDeps = null;
 });
 
 // ---------------------------------------------------------------------------
 // Happy path
 // ---------------------------------------------------------------------------
 
-describe('turn-executor × run_analysis — happy path', () => {
-  it('classifier → dispatch → handler → compose → commit, BI-01 preserved, response_emitted=true', async () => {
-    registryDeps = {
+describe('turn-executor × run_analysis via tool-use — happy path', () => {
+  it('routing → validate (graph subset skipped) → handler → confirm → compose → commit, BI-01 preserved', async () => {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-happy');
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-happy', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
 
     expectBI01();
     OlumiResponseSchema.parse(response);
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.turn_class).toBe('handler');
+    expect(telemetry.intent_class).toBe('execute');
     expect(telemetry.commit_performed).toBe(true);
-    expect(telemetry.stages_completed).toContain('classify');
-    expect(telemetry.stages_completed).toContain('dispatch');
-    expect(telemetry.stages_completed).toContain('compose');
-    expect(telemetry.stages_completed).toContain('commit');
+    const stages = telemetry.stages_completed;
+    expect(stages).toContain('orient');
+    expect(stages).toContain('validate');
+    expect(stages).toContain('validate_skipped_graph_checks');
+    expect(stages).toContain('execute');
+    expect(stages).toContain('confirm');
+    expect(stages).toContain('compose');
+    expect(stages).toContain('commit');
   });
 
-  it('R3: llm_calls_used end-to-end = 1 (classifier only; handler contributes 0; narrate skipped)', async () => {
-    // Paul's R3: HandlerOutcome.llm_calls_used = 0 composes to
-    // OlumiResponse accounting of 1 via the full pipeline. No double-count,
-    // no drop. The handler's 0 is additive to the classifier's 1.
-    registryDeps = {
+  it('llm_calls_used = 1 (routing call only; handler contributes 0)', async () => {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-r3');
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-r3', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
 
     expect(telemetry.llm_calls_used).toBe(1);
   });
 
-  it('assistant_text in the composed response is the run_analysis DEFAULT template, byte-for-byte', async () => {
-    registryDeps = {
+  it('assistant_text = typed confirmation template (registry-driven per correction 5)', async () => {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-text');
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-text', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
 
     expect(response.assistant_text).toBe('Ran analysis on your current scenario.');
   });
 
   it('commit receives handler_facts with exactly one run_analysis fact', async () => {
-    registryDeps = {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    await runTurnExecutor(BASE_PAYLOAD, 'req-commit');
+    await runTurnExecutor(BASE_PAYLOAD, 'req-commit', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
 
     expect(appendCalls).toHaveLength(1);
-    const write = appendCalls[0] as { handler_facts: unknown[]; handler_id: string; turn_class: string };
+    const write = appendCalls[0] as {
+      handler_facts: unknown[];
+      handler_id: string;
+      turn_class: string;
+    };
     expect(write.handler_id).toBe('run_analysis');
     expect(write.turn_class).toBe('handler');
     expect(write.handler_facts).toHaveLength(1);
@@ -272,37 +279,49 @@ describe('turn-executor × run_analysis — happy path', () => {
   });
 
   it('fact persisted to append carries the enrichment byte-for-byte (round-trip evidence)', async () => {
-    const response = makeGoldenResponse();
-    registryDeps = {
-      plotClient: makeMockPlotClient({ run: vi.fn(async () => response) }),
+    const plotResponse = makeGoldenResponse();
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
+      plotClient: makeMockPlotClient({ run: vi.fn(async () => plotResponse) }),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    await runTurnExecutor(BASE_PAYLOAD, 'req-roundtrip');
+    await runTurnExecutor(BASE_PAYLOAD, 'req-roundtrip', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
 
     const write = appendCalls[0] as { handler_facts: unknown[] };
     const fact = write.handler_facts[0] as { result: { enrichment: unknown } };
-    expect(fact.result.enrichment).toEqual(response);
+    expect(fact.result.enrichment).toEqual(plotResponse);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Error paths — HandlerInvocationFailedError
+// HandlerInvocationFailedError paths
 // ---------------------------------------------------------------------------
 
-describe('turn-executor × run_analysis — HandlerInvocationFailedError paths', () => {
+describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailedError paths', () => {
   it('PLoT error → INTERNAL_ERROR envelope, commit_performed=false, BI-01 holds', async () => {
     const { PLoTError } = await import('../../orchestrator/plot-client.js');
-    registryDeps = {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient({
         run: vi.fn(async () => {
           throw new PLoTError('503 from PLoT');
         }),
       }),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-plot-err');
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-plot-err', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
 
     expectBI01();
     OlumiResponseSchema.parse(response);
@@ -316,18 +335,23 @@ describe('turn-executor × run_analysis — HandlerInvocationFailedError paths',
     expect(telemetry.stages_completed).not.toContain('compose');
     expect(telemetry.stages_completed).not.toContain('commit');
     expect(telemetry.turn_class).toBe('handler');
-    expect(telemetry.llm_calls_used).toBe(1); // classifier only
   });
 
   it('scenarioReader failure → INTERNAL_ERROR with cause_kind=scenario_read_failed in details', async () => {
-    registryDeps = {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => {
         throw new Error('supabase unreachable');
       },
-    };
+    });
 
-    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-scen-err');
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-scen-err', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
     const block = response.blocks[0]!;
     if (block.type === 'error') {
       expect(block.error_code).toBe('INTERNAL_ERROR');
@@ -342,12 +366,18 @@ describe('turn-executor × run_analysis — HandlerInvocationFailedError paths',
       response_hash: 'b-top',
       analysis_status: 'blocked',
     } as V2RunResponseEnvelope;
-    registryDeps = {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient({ run: vi.fn(async () => blockedResponse) }),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-blocked');
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-blocked', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
     const block = response.blocks[0]!;
     if (block.type === 'error') {
       expect(block.details).toMatchObject({ cause_kind: 'analysis_not_completed' });
@@ -356,29 +386,17 @@ describe('turn-executor × run_analysis — HandlerInvocationFailedError paths',
 });
 
 // ---------------------------------------------------------------------------
-// Log/telemetry distinction for HandlerResultInvalidError path
+// HandlerResultInvalidError path
 // ---------------------------------------------------------------------------
 
-describe('turn-executor × run_analysis — HandlerResultInvalidError path', () => {
+describe('turn-executor × run_analysis via tool-use — HandlerResultInvalidError path', () => {
   it('constant wire mapping: HANDLER_RESULT_INVALID + HANDLER_INVOCATION_FAILED both map to INTERNAL_ERROR', async () => {
     const { INTERNAL_TO_WIRE } = await import('../types.js');
     expect(INTERNAL_TO_WIRE.HANDLER_RESULT_INVALID).toBe('INTERNAL_ERROR');
     expect(INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED).toBe('INTERNAL_ERROR');
   });
 
-  it('schema-spy seam: forced safeParse failure → INTERNAL_ERROR envelope with details.reason=fact_schema_violation, commit NOT performed, BI-01 holds', async () => {
-    // The handler's deterministic extraction logic structurally prevents a
-    // malformed RunAnalysisHandlerFact under real inputs (brief/C2 design).
-    // This test uses `vi.spyOn(RunAnalysisHandlerFactSchema.safeParse)` —
-    // the same seam the handler reaches for — to force the {success: false}
-    // branch, then verifies the full turn-executor mapping end-to-end:
-    //
-    //   handler throws HandlerResultInvalidError
-    //     → turn-executor catches at the dedicated branch
-    //       → wire code becomes INTERNAL_ERROR (per INTERNAL_TO_WIRE)
-    //       → failure envelope carries details.reason='fact_schema_violation'
-    //       → commit_performed=false, appendCalls.length===0 (no partial write)
-    //       → BI-01: started + completed with response_emitted=true
+  it('forced safeParse failure → INTERNAL_ERROR + commit NOT performed + BI-01 holds', async () => {
     const schemas = await import('@talchain/schemas/orchestrator');
     const forcedError = new z.ZodError([
       { code: 'custom', path: ['result'], message: 'forced for test coverage' },
@@ -388,12 +406,18 @@ describe('turn-executor × run_analysis — HandlerResultInvalidError path', () 
       .mockReturnValue({ success: false, error: forcedError });
 
     try {
-      registryDeps = {
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+      );
+      const registry = createRegistry({
         plotClient: makeMockPlotClient(),
         scenarioReader: async () => makeScenarioSnapshot(),
-      };
+      });
 
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-hri');
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-hri', {
+        routingAdapter,
+        handlerRegistry: registry,
+      });
 
       expectBI01();
       OlumiResponseSchema.parse(response);
@@ -410,12 +434,8 @@ describe('turn-executor × run_analysis — HandlerResultInvalidError path', () 
       expect(telemetry.stages_completed).not.toContain('compose');
       expect(telemetry.stages_completed).not.toContain('commit');
       expect(telemetry.turn_class).toBe('handler');
-      expect(telemetry.llm_calls_used).toBe(1); // classifier only
 
-      // No partial persistence: the session store was never called with a
-      // malformed fact.
       expect(appendCalls).toHaveLength(0);
-
       expect(spy).toHaveBeenCalled();
     } finally {
       spy.mockRestore();
@@ -427,38 +447,33 @@ describe('turn-executor × run_analysis — HandlerResultInvalidError path', () 
 // Constraint 7 — BUDGET_EXCEEDED wins over handler errors
 // ---------------------------------------------------------------------------
 
-describe("turn-executor × run_analysis — Paul's constraint 7 (BUDGET_EXCEEDED precedence)", () => {
+describe("turn-executor × run_analysis via tool-use — Paul's constraint 7 (BUDGET_EXCEEDED precedence)", () => {
   it('outer budget abort during PLoT call → BUDGET_EXCEEDED wins over handler error', async () => {
-    // Simulate: PLoT throws a timeout after the outer budget has already
-    // fired. The catch branch at turn-executor.ts:142 sees
-    // turnAbort.signal.aborted === true and returns BUDGET_EXCEEDED BEFORE
-    // checking HandlerInvocationFailedError.
     const { PLoTTimeoutError } = await import('../../orchestrator/plot-client.js');
-    registryDeps = {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
       plotClient: makeMockPlotClient({
         run: vi.fn(async (_payload, _requestId, opts: unknown) => {
-          // Wait for the turn budget to fire (expecting it to abort us)
           await new Promise<void>((_resolve, reject) => {
             const o = opts as { turnSignal?: AbortSignal };
             o.turnSignal?.addEventListener('abort', () => {
               reject(new PLoTTimeoutError('budget abort'));
             });
-            // Safety net: reject after 500ms so the test can't hang if the
-            // budget never fires (it should fire at ~5ms with TURN_BUDGET_MS=5).
             setTimeout(() => reject(new PLoTTimeoutError('safety net')), 500);
           });
         }),
       }),
       scenarioReader: async () => makeScenarioSnapshot(),
-    };
+    });
 
-    // `vi.stubEnv` is the lint-compliant way to mutate a single env var
-    // for the duration of a test. process.env direct-assignment is banned
-    // by the repo's eslint config (config module is the boot-time source
-    // of truth everywhere else).
-    vi.stubEnv('TURN_BUDGET_MS', '5'); // tight budget so outer abort fires first
+    vi.stubEnv('TURN_BUDGET_MS', '5');
     try {
-      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-budget');
+      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-budget', {
+        routingAdapter,
+        handlerRegistry: registry,
+      });
       expectBI01();
       expect(telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
     } finally {

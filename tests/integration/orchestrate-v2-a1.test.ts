@@ -114,6 +114,44 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
         latencyMs: 0,
       };
     },
+    // V5 Phase 1: new tool-use routing entry point. A1 fixtures are all
+    // direct_answer turns → text-only response (inferred "converse").
+    // Reuses the narrate PhaseState so the existing fixture controls still
+    // drive throws/output/timing.
+    chatWithTools: async (
+      _args: unknown,
+      opts: { signal?: AbortSignal },
+    ) => {
+      const m = phaseState.narrate;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (m.throws === 'NarrateTimeoutError') {
+            import('../../src/adapters/llm/errors.js').then((errs) => {
+              reject(new errs.UpstreamTimeoutError('test timeout', 'narrate', 1));
+            });
+            return;
+          }
+          if (m.throws === 'generic') {
+            reject(new Error('test generic error'));
+            return;
+          }
+          resolve();
+        }, m.delayMs);
+        opts.signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          const abort = new Error('abort');
+          (abort as Error & { name: string }).name = 'AbortError';
+          reject(abort);
+        });
+      });
+      return {
+        content: [{ type: 'text', text: m.output }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+        model: 'test-a1-mock',
+        latencyMs: 0,
+      };
+    },
   }),
 }));
 
@@ -227,8 +265,8 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     expect(completed[0]!.data.response_emitted).toBe(true);
     expect(completed[0]!.data.failure_type).toBeNull();
     expect(completed[0]!.data.commit_performed).toBe(true);
-    // A2: classifier + narrate = 2 LLM calls on happy path
-    expect(completed[0]!.data.llm_calls_used).toBe(2);
+    // Phase 1: single routing call (tool-use) replaces the classifier+narrate pair
+    expect(completed[0]!.data.llm_calls_used).toBe(1);
     expect(completed[0]!.data.turn_class).toBe('direct_answer');
   });
 

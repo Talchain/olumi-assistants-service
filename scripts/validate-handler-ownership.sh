@@ -222,6 +222,115 @@ if [ -n "$HANDLER_IN_PROMPT" ] && [ "${PLACEHOLDER_IS_DEFAULT:-0}" -gt 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 8. Phase 1 — Anthropic SDK confined to route-with-tool-use.ts
+#
+# The Phase 1 routing spine is the single entry point for Anthropic tool-use
+# calls inside orchestrator-v5. Handler internals must not call the SDK
+# directly (they go through PLoTClient / other backends). This guard catches
+# drift where a new handler tries to fan out its own Anthropic call.
+# ---------------------------------------------------------------------------
+ROGUE_ANTHROPIC=$(
+  grep -RIn --include='*.ts' --exclude='*.test.ts' --exclude-dir='__tests__' \
+    -E "from '@anthropic-ai/sdk'" src/orchestrator-v5/ 2>/dev/null \
+  || true
+)
+if [ -n "$ROGUE_ANTHROPIC" ]; then
+  fail 'Anthropic SDK imported outside Phase 1 routing seam' "$ROGUE_ANTHROPIC"
+fi
+
+# ---------------------------------------------------------------------------
+# 9. Phase 1 — context pack assembler is free of UI / LLM imports
+#
+# ContextPack is a pure projection. Any LLM or UI import in this module is
+# a smell that will cascade into test mocks and cycle dependencies.
+# ---------------------------------------------------------------------------
+CTXPACK_FILE='src/orchestrator-v5/context/context-pack-assembler.ts'
+if [ -f "$CTXPACK_FILE" ]; then
+  CTX_BAD=$(
+    grep -nE "from '[^']*(adapters/llm|DecisionGuideAI|decision-guide-ai)" "$CTXPACK_FILE" 2>/dev/null \
+    || true
+  )
+  if [ -n "$CTX_BAD" ]; then
+    fail 'context-pack-assembler.ts imports an LLM or UI module' "$CTX_BAD"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 10. Phase 1 — validator has no LLM imports and no numeric coercions
+#
+# Validator is pure. LLM calls, network calls, and Math.round/.toFixed/
+# parseFloat would all indicate the validator has started reasoning about
+# values rather than structural conformance — semantic drift.
+# ---------------------------------------------------------------------------
+VALIDATOR_FILE='src/orchestrator-v5/routing/validator.ts'
+if [ -f "$VALIDATOR_FILE" ]; then
+  VAL_LLM=$(
+    grep -nE "from '[^']*(adapters/llm|routing/route-with-tool-use)" "$VALIDATOR_FILE" 2>/dev/null \
+    || true
+  )
+  if [ -n "$VAL_LLM" ]; then
+    fail 'validator.ts imports an LLM module' "$VAL_LLM"
+  fi
+
+  VAL_CODE=$(
+    awk '
+      /^[[:space:]]*\/\*/ { in_block = 1 }
+      in_block { if (/\*\//) in_block = 0; next }
+      /^[[:space:]]*\/\// { next }
+      /^[[:space:]]*\*/ { next }
+      { print NR ":" $0 }
+    ' "$VALIDATOR_FILE"
+  )
+  VAL_COERCIONS=$(
+    echo "$VAL_CODE" | grep -E "Math\.(round|floor|ceil)|\.toFixed\(|parseFloat\(" || true
+  )
+  if [ -n "$VAL_COERCIONS" ]; then
+    fail 'validator.ts uses numeric coercion (Math.round/.toFixed/parseFloat)' "$VAL_COERCIONS"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 11. Phase 1 — canonical enum quarantine (Resolution E + correction 4)
+#
+# The nine canonical enum NAMES from spec §5 must be DEFINED in exactly
+# one file: src/orchestrator-v5/routing/types.ts. Other files may import
+# the names; they must not contain their own declarations.
+#
+# Catch pattern: a declaration is either `export const <Name>` or
+# `export type <Name>` or `export enum <Name>` in a non-canonical file.
+# ---------------------------------------------------------------------------
+CANONICAL_FILE='src/orchestrator-v5/routing/types.ts'
+CANONICAL_ENUMS=(
+  'IntentClass'
+  'CoachingMode'
+  'EntityKind'
+  'ParameterOperator'
+  'ResolutionStatus'
+  'ResolutionMethod'
+  'AmbiguityType'
+  'ParameterSource'
+  'ContextPackField'
+)
+
+for name in "${CANONICAL_ENUMS[@]}"; do
+  # Presence in canonical file
+  if ! grep -qE "^export (const|type|enum) ${name}(Schema)?\\b" "$CANONICAL_FILE" 2>/dev/null; then
+    fail "canonical enum '${name}' missing from $CANONICAL_FILE" \
+      "Spec §5 enum must be defined in $CANONICAL_FILE (as a const Zod schema + inferred type)."
+  fi
+  # Drift detection outside canonical file
+  DRIFT=$(
+    grep -RIln --include='*.ts' --exclude-dir='__tests__' --exclude='*.test.ts' \
+      -E "^export (const|type|enum) ${name}(Schema)?\\b" src/orchestrator-v5/ 2>/dev/null \
+    | grep -v "^${CANONICAL_FILE}$" \
+    || true
+  )
+  if [ -n "$DRIFT" ]; then
+    fail "canonical enum '${name}' redeclared outside $CANONICAL_FILE" "$DRIFT"
+  fi
+done
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 if [ "$EXIT" -eq 0 ]; then
@@ -231,6 +340,9 @@ if [ "$EXIT" -eq 0 ]; then
   echo '  - template enum has exactly 2 entries'
   echo '  - result.enrichment is a verbatim pass-through of the PLoT envelope'
   echo '  - placeholder scenario reader acceptable (classifier prompt still direct_answer/clarify only)'
+  echo '  - Phase 1: Anthropic SDK confined to route-with-tool-use.ts'
+  echo '  - Phase 1: context-pack-assembler + validator free of LLM/UI imports'
+  echo '  - Phase 1: canonical §5 enums defined only in routing/types.ts'
 fi
 
 exit "$EXIT"

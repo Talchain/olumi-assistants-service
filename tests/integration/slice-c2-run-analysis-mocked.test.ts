@@ -41,6 +41,34 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
         latencyMs: 0,
       };
     },
+    // V5 Phase 1: tool-use routing path emits a handler-class tool call.
+    chatWithTools: async () => ({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'tu-1',
+          name: 'olumi_action',
+          input: {
+            intent_class: 'execute',
+            action: {
+              handler_id: 'run_analysis',
+              entity: {
+                id: 'opt_a',
+                kind: 'option',
+                resolution_status: 'resolved',
+                resolution_method: 'id_match',
+              },
+              parameters: [],
+              cited_context_fields: ['graph.options'],
+            },
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'test-mock',
+      latencyMs: 0,
+    }),
   }),
 }));
 
