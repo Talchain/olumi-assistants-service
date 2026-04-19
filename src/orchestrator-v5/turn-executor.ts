@@ -206,64 +206,60 @@ export async function runTurnExecutor(
   let sonnetTextForLog = '';
   let contextPackForLog: ContextPack | null = null;
 
-  // Phase 1.5: derive GraphLookup from the ingress payload BEFORE routing so
-  // a payload-drift situation (nodes present but none mappable) fails the
-  // turn fast, before we spend LLM tokens on a graph we cannot safely
-  // validate against. Tests can pre-supply options.graphLookup to bypass
-  // the adapter entirely. See BuildGraphLookupResult for the three states.
+  // Phase 1.5: graph lookup + drift detection. Initialised inside the try
+  // block so any failure during telemetry emit still lands in the top-level
+  // finally — preserves BI-01 (every started → matching completed).
   let graphLookupForValidate: GraphLookup | undefined;
   let graphLookupStatsForLog: GraphLookupStats | undefined;
   let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
     'no_graph';
-  if (options.graphLookup) {
-    graphLookupForValidate = options.graphLookup;
-    graphLookupBuildReason = 'test_override';
-    // P1-3 (review round 3): emit for test_override too so every turn that
-    // reaches this branch shows up in the graph_lookup event stream. Stats
-    // are zero because the adapter was bypassed — callers supplying a raw
-    // lookup don't surface the underlying payload shape here.
-    emit(TelemetryEvents.TurnExecutorGraphLookup, {
-      request_id: requestId,
-      outcome: 'test_override',
-      total_nodes: 0,
-      mapped_nodes: 0,
-      dropped_by_unknown_kind: 0,
-      dropped_by_missing_id: 0,
-    });
-  } else {
-    const adapterResult = buildGraphLookup(options.graphState ?? null);
-    graphLookupBuildReason = adapterResult.kind;
-    if (adapterResult.kind === 'ok') {
-      graphLookupForValidate = adapterResult.lookup;
-      graphLookupStatsForLog = adapterResult.stats;
+
+  try {
+    // Derive GraphLookup from the ingress payload. A payload-drift situation
+    // (nodes present but none mappable) fails the turn fast, before we
+    // spend LLM tokens on a graph we cannot safely validate against. Tests
+    // can pre-supply options.graphLookup to bypass the adapter entirely.
+    if (options.graphLookup) {
+      graphLookupForValidate = options.graphLookup;
+      graphLookupBuildReason = 'test_override';
       emit(TelemetryEvents.TurnExecutorGraphLookup, {
         request_id: requestId,
-        outcome: 'ok',
-        ...adapterResult.stats,
-      });
-    } else if (adapterResult.kind === 'all_dropped') {
-      graphLookupStatsForLog = adapterResult.stats;
-      emit(TelemetryEvents.TurnExecutorGraphLookup, {
-        request_id: requestId,
-        outcome: 'all_dropped',
-        ...adapterResult.stats,
-      });
-    } else {
-      // P1-1: emit no_graph so frame-stage + non-UI turns are observable
-      // alongside ok/all_dropped in the same event stream. Stats are all
-      // zero because there's no payload to describe.
-      emit(TelemetryEvents.TurnExecutorGraphLookup, {
-        request_id: requestId,
-        outcome: 'no_graph',
+        outcome: 'test_override',
         total_nodes: 0,
         mapped_nodes: 0,
         dropped_by_unknown_kind: 0,
         dropped_by_missing_id: 0,
       });
+    } else {
+      const adapterResult = buildGraphLookup(options.graphState ?? null);
+      graphLookupBuildReason = adapterResult.kind;
+      if (adapterResult.kind === 'ok') {
+        graphLookupForValidate = adapterResult.lookup;
+        graphLookupStatsForLog = adapterResult.stats;
+        emit(TelemetryEvents.TurnExecutorGraphLookup, {
+          request_id: requestId,
+          outcome: 'ok',
+          ...adapterResult.stats,
+        });
+      } else if (adapterResult.kind === 'all_dropped') {
+        graphLookupStatsForLog = adapterResult.stats;
+        emit(TelemetryEvents.TurnExecutorGraphLookup, {
+          request_id: requestId,
+          outcome: 'all_dropped',
+          ...adapterResult.stats,
+        });
+      } else {
+        emit(TelemetryEvents.TurnExecutorGraphLookup, {
+          request_id: requestId,
+          outcome: 'no_graph',
+          total_nodes: 0,
+          mapped_nodes: 0,
+          dropped_by_unknown_kind: 0,
+          dropped_by_missing_id: 0,
+        });
+      }
     }
-  }
 
-  try {
     // Hard-fail on payload drift: nodes were present but NONE mapped to a
     // known kind. Bypassing graph-dependent validation in this case would
     // silently degrade the safety envelope — reject the turn instead.

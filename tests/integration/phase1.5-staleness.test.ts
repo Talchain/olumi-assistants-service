@@ -18,8 +18,10 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../src/adapters/llm/types.js';
-import type { GraphV3T } from '../../src/schemas/cee-v3.js';
-import type { V2RunResponseEnvelope } from '../../src/orchestrator/types.js';
+import type {
+  GraphStateIngress,
+  AnalysisStateIngress,
+} from '../../src/orchestrator-v5/boundary/request-extensions.js';
 import type { RoutingLog } from '../../src/orchestrator-v5/routing/routing-log.js';
 
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
@@ -65,7 +67,7 @@ const BASE_PAYLOAD: OrchestratorTurnPayload = {
   stage: 'frame',
 };
 
-function mkGraph(nodes: number, edges: number): GraphV3T {
+function mkGraph(nodes: number, edges: number): GraphStateIngress {
   const n = Array.from({ length: nodes }, (_, i) => ({
     id: `n_${i}`,
     kind: 'factor',
@@ -75,7 +77,7 @@ function mkGraph(nodes: number, edges: number): GraphV3T {
     from: `n_${i % nodes}`,
     to: `n_${(i + 1) % nodes}`,
   }));
-  return { nodes: n, edges: e } as unknown as GraphV3T;
+  return { nodes: n, edges: e } as unknown as GraphStateIngress;
 }
 
 describe('Phase 1.5 — staleness scaffolding (no provenance on wire)', () => {
@@ -85,11 +87,11 @@ describe('Phase 1.5 — staleness scaffolding (no provenance on wire)', () => {
   it('staleness_reason is null when analysis arrives with no provenance', async () => {
     // Simulates the real UI wire: analysis present but no graph_hash on it.
     const graph = mkGraph(3, 2);
-    const analysis: V2RunResponseEnvelope = {
+    const analysis = {
       meta: { seed_used: 1, n_samples: 100, response_hash: 'abc' },
       results: [],
       analysis_status: 'complete',
-    } as unknown as V2RunResponseEnvelope;
+    } as unknown as AnalysisStateIngress;
 
     const routingAdapter = mockAdapter(textResult('looking at your analysis'));
     const logs: RoutingLog[] = [];

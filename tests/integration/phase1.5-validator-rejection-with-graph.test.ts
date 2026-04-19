@@ -24,7 +24,7 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../src/adapters/llm/types.js';
-import type { GraphV3T } from '../../src/schemas/cee-v3.js';
+import type { GraphStateIngress } from '../../src/orchestrator-v5/boundary/request-extensions.js';
 
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
@@ -77,10 +77,10 @@ const BASE_PAYLOAD: OrchestratorTurnPayload = {
 function mkGraph(
   nodes: Array<{ id: string; kind: string; label: string }>,
   options?: Array<Record<string, unknown>>,
-): GraphV3T {
+): GraphStateIngress {
   const g = { nodes, edges: [] } as Record<string, unknown>;
   if (options) g.options = options;
-  return g as unknown as GraphV3T;
+  return g as unknown as GraphStateIngress;
 }
 
 function handlerSpy() {
@@ -104,7 +104,7 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
       [{ id: 'opt_a', status: 'ready', interventions: { fac_1: { value: 1 } } }],
     );
     const handler = handlerSpy();
-    const registry = new Map([['run_analysis', handler]]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    const registry = new Map([['run_analysis', handler]]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
 
     const routingAdapter = mockAdapter(
       toolUseResult(
@@ -289,7 +289,7 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
       { id: 'opt_a', kind: 'option', label: 'A' },
     ]);
     const handler = handlerSpy();
-    const registry = new Map([['run_analysis', handler]]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    const registry = new Map([['run_analysis', handler]]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
     const routingAdapter = mockAdapter(
       toolUseResult(
         {

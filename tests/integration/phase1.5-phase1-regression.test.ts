@@ -14,7 +14,7 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../src/adapters/llm/types.js';
-import type { GraphV3T } from '../../src/schemas/cee-v3.js';
+import type { GraphStateIngress } from '../../src/orchestrator-v5/boundary/request-extensions.js';
 
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
@@ -74,7 +74,7 @@ const BASE_PAYLOAD: OrchestratorTurnPayload = {
   stage: 'frame',
 };
 
-function mkConfiguredGraph(): GraphV3T {
+function mkConfiguredGraph(): GraphStateIngress {
   return {
     nodes: [
       { id: 'goal_1', kind: 'goal', label: 'Profit' },
@@ -83,7 +83,7 @@ function mkConfiguredGraph(): GraphV3T {
     ],
     edges: [{ from: 'fac_1', to: 'goal_1', strength: { mean: 0.5, std: 0.1 } }],
     options: [{ id: 'opt_a', status: 'ready', interventions: { fac_1: { value: 1 } } }],
-  } as unknown as GraphV3T;
+  } as unknown as GraphStateIngress;
 }
 
 describe('Phase 1.5 — Phase 1 regression', () => {
@@ -148,7 +148,7 @@ describe('Phase 1.5 — Phase 1 regression', () => {
         'run_analysis',
         async () => ({ assistant_text: 'done', handler_facts: [], llm_calls_used: 1 }),
       ],
-    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    ]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
 
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-reg-exec', {
       routingAdapter,
@@ -189,7 +189,7 @@ describe('Phase 1.5 — Phase 1 regression', () => {
         'run_analysis',
         async () => ({ assistant_text: 'done', handler_facts: [], llm_calls_used: 1 }),
       ],
-    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    ]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-reg-frame', {
       routingAdapter,
       handlerRegistry: registry,

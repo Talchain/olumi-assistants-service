@@ -15,6 +15,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
+import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { RoutingLog } from '../../src/orchestrator-v5/routing/routing-log.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -348,13 +350,13 @@ describe('Phase 1.5 — direct runTurnExecutor with graph and real fixture graph
     });
 
     const registry = createRegistry({ plotClient, scenarioReader });
-    const logs: Array<Record<string, unknown>> = [];
+    const logs: RoutingLog[] = [];
 
-    const payload = {
+    const payload: OrchestratorTurnPayload = {
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       message: 'analyse',
-      turn_class: 'decide' as const,
+      turn_class: 'decide',
       stage: 'analyse',
     };
 

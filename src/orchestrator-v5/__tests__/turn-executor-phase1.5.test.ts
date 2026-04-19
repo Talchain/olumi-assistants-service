@@ -142,7 +142,7 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
         'run_analysis',
         (async () => ({ assistant_text: 'done', handler_facts: [], llm_calls_used: 1 })) as never,
       ],
-    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    ]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
 
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-1', {
       routingAdapter,
@@ -166,7 +166,7 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
         'run_analysis',
         (async () => ({ assistant_text: 'done', handler_facts: [], llm_calls_used: 1 })) as never,
       ],
-    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    ]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
 
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-2', {
       routingAdapter,
@@ -187,7 +187,7 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
         'run_analysis',
         (async () => ({ assistant_text: 'done', handler_facts: [], llm_calls_used: 1 })) as never,
       ],
-    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    ]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
 
     const logs: RoutingLog[] = [];
     await runTurnExecutor(BASE_PAYLOAD, 'req-p15-3', {
@@ -218,7 +218,7 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
         'run_analysis',
         (async () => ({ assistant_text: 'done', handler_facts: [], llm_calls_used: 1 })) as never,
       ],
-    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+    ]) as unknown as NonNullable<Parameters<typeof runTurnExecutor>[2]>['handlerRegistry'];
 
     const logs: RoutingLog[] = [];
     await runTurnExecutor(BASE_PAYLOAD, 'req-p15-4', {
@@ -319,6 +319,37 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     expect(errBlock?.details?.total_nodes).toBe(2);
   });
 
+  it('BI-01 preserved when graph_lookup telemetry emit throws (exactly-one-response)', async () => {
+    // Regression guard: the graph-lookup derivation was previously outside
+    // the try block — a throw from emit() could have orphaned the started
+    // event without a completed. Now it's inside try/finally so every
+    // started has a matching completed.
+    let startedCount = 0;
+    let completedCount = 0;
+    let throwOnce = true;
+    setTestSink((eventName) => {
+      if (eventName === 'turn_executor.graph_lookup' && throwOnce) {
+        throwOnce = false;
+        throw new Error('synthetic emit failure');
+      }
+      if (eventName === 'turn_executor.started') startedCount += 1;
+      if (eventName === 'turn_executor.completed') completedCount += 1;
+    });
+
+    const routingAdapter = mockRoutingAdapter(mkTextResult('hi'));
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p15-bi01', { routingAdapter }).catch(
+      () => {
+        /* swallow: turn may fail, but BI-01 is about event pairing */
+      },
+    );
+
+    // Started may or may not have fired (depends on event ordering), but
+    // if it did, completed MUST have matched. BI-01 is: started count ≤
+    // completed count. Zero emits is fine (emit itself failed); orphaned
+    // started is not.
+    expect(completedCount).toBeGreaterThanOrEqual(startedCount);
+  });
+
   it('P1-3 (round 3): test_override path emits graph_lookup telemetry with zero stats', async () => {
     // When a test injects options.graphLookup directly, the adapter is
     // bypassed — but the event must still fire so per-turn observability
@@ -343,7 +374,7 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     // no_graph path: all count fields should be 0 (not null) so analytics
     // don't need COALESCE wrappers; graph_lookup_outcome categorises the turn.
     const routingAdapter = mockRoutingAdapter(mkTextResult('frame hello'));
-    const logs: Array<Record<string, unknown>> = [];
+    const logs: RoutingLog[] = [];
     await runTurnExecutor(BASE_PAYLOAD, 'req-p15-log-outcome', {
       routingAdapter,
       routingLogWriter: async (r) => {
@@ -383,7 +414,7 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
       ],
     } as GraphStateIngress;
     const routingAdapter = mockRoutingAdapter(mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A));
-    const logs: Array<Record<string, unknown>> = [];
+    const logs: RoutingLog[] = [];
     await runTurnExecutor(BASE_PAYLOAD, 'req-p15-fail-fast-counts', {
       routingAdapter,
       graphState: drifted,
