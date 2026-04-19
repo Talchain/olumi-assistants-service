@@ -52,10 +52,7 @@ vi.mock('../session/index.js', () => ({
 
 import type { PLoTClient } from '../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
-import type {
-  RunAnalysisScenarioSnapshot,
-  ScenarioReader,
-} from '../tools/handlers/run-analysis.js';
+import type { RunAnalysisScenarioSnapshot } from '../tools/handlers/run-analysis.js';
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { createRegistry } = await import('../tools/registry.js');
