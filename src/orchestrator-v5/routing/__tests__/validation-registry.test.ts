@@ -129,9 +129,11 @@ describe('run_analysis precondition', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('precondition failure produces typed reason suitable for user-facing response', () => {
-    // Regression guard: the reason strings are machine-stable so compose can
-    // choose the right fix-path language.
+  it('precondition failure produces the stable machine-readable reason', () => {
+    // Regression guard: the reason string is stable so the compose layer
+    // can route it to actionable fix-path copy. After review round 2, the
+    // validator layer only emits `no_options_defined` — intervention
+    // readiness is the handler's responsibility (async scenario read).
     const graph = mkGraph([{ id: 'g1', kind: 'goal', label: 'Profit' }]);
     const lookup = lookupFor(graph);
     const result = validateToolCall(
@@ -139,9 +141,9 @@ describe('run_analysis precondition', () => {
       lookup,
       HANDLER_VALIDATION_REGISTRY,
     );
+    expect(result.valid).toBe(false);
     if (!result.valid) {
-      const reason = String(result.error.details?.reason);
-      expect(reason === 'no_options_defined' || reason === 'options_lack_intervention_data').toBe(true);
+      expect(result.error.details?.reason).toBe('no_options_defined');
     }
   });
 });

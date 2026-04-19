@@ -24,6 +24,13 @@ import { log } from '../../utils/telemetry.js';
 
 import type { IntentClass, CoachingMode, ResolutionStatus } from './types.js';
 
+/**
+ * Graph-lookup outcome surfaced onto each routing-log row. Mirrors the
+ * `outcome` field on the `turn_executor.graph_lookup` telemetry event so
+ * analytics joins between the two streams are free.
+ */
+export type GraphLookupOutcome = 'no_graph' | 'ok' | 'all_dropped' | 'test_override';
+
 export const DEFAULT_ROUTING_LOG_PATH = resolve(process.cwd(), 'logs', 'v5-routing-logs.jsonl');
 
 export type LabelTier = 'unreviewed' | 'triaged' | 'reviewed' | 'gold';
@@ -52,13 +59,17 @@ export interface RoutingLogInput {
   /** Phase 1.5: deterministic graph hash (16 hex chars) or null when no graph. */
   readonly graph_hash: string | null;
   /**
-   * Phase 1.5 review (Imp-2): adapter drop stats, so drift triage can read
-   * the per-turn log without cross-referencing the telemetry stream. Null
-   * when the adapter wasn't invoked (tests pass graphLookup directly).
+   * Phase 1.5 review (Imp-2 + round 3 Imp-1): adapter drop stats and the
+   * graph-lookup outcome, so drift triage and analytics work without
+   * cross-referencing the telemetry stream. Count fields default to zero
+   * (never null) so aggregation queries (AVG, SUM, percentile) don't need
+   * COALESCE wrappers. `graph_lookup_outcome` is the canonical categorical
+   * for per-turn grouping.
    */
-  readonly graph_mapped_nodes: number | null;
-  readonly graph_dropped_by_unknown_kind: number | null;
-  readonly graph_dropped_by_missing_id: number | null;
+  readonly graph_mapped_nodes: number;
+  readonly graph_dropped_by_unknown_kind: number;
+  readonly graph_dropped_by_missing_id: number;
+  readonly graph_lookup_outcome: GraphLookupOutcome;
 }
 
 export interface RoutingLog {
@@ -82,9 +93,10 @@ export interface RoutingLog {
   readonly graph_node_count: number;
   readonly graph_edge_count: number;
   readonly graph_hash: string | null;
-  readonly graph_mapped_nodes: number | null;
-  readonly graph_dropped_by_unknown_kind: number | null;
-  readonly graph_dropped_by_missing_id: number | null;
+  readonly graph_mapped_nodes: number;
+  readonly graph_dropped_by_unknown_kind: number;
+  readonly graph_dropped_by_missing_id: number;
+  readonly graph_lookup_outcome: GraphLookupOutcome;
 }
 
 /**
@@ -117,6 +129,7 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
       graph_mapped_nodes: input.graph_mapped_nodes,
       graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
       graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
+      graph_lookup_outcome: input.graph_lookup_outcome,
     };
   }
   return {
@@ -143,6 +156,7 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
     graph_mapped_nodes: input.graph_mapped_nodes,
     graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
     graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
+    graph_lookup_outcome: input.graph_lookup_outcome,
   };
 }
 

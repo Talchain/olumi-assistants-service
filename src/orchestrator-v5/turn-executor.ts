@@ -218,6 +218,18 @@ export async function runTurnExecutor(
   if (options.graphLookup) {
     graphLookupForValidate = options.graphLookup;
     graphLookupBuildReason = 'test_override';
+    // P1-3 (review round 3): emit for test_override too so every turn that
+    // reaches this branch shows up in the graph_lookup event stream. Stats
+    // are zero because the adapter was bypassed — callers supplying a raw
+    // lookup don't surface the underlying payload shape here.
+    emit(TelemetryEvents.TurnExecutorGraphLookup, {
+      request_id: requestId,
+      outcome: 'test_override',
+      total_nodes: 0,
+      mapped_nodes: 0,
+      dropped_by_unknown_kind: 0,
+      dropped_by_missing_id: 0,
+    });
   } else {
     const adapterResult = buildGraphLookup(options.graphState ?? null);
     graphLookupBuildReason = adapterResult.kind;
@@ -602,14 +614,17 @@ export async function runTurnExecutor(
       graph_node_count: graphNodeCount,
       graph_edge_count: graphEdgeCount,
       graph_hash: graphHash,
-      // Imp-2 (review): adapter stats in the routing log too, so drift
-      // triage can join per-turn log rows without cross-referencing the
-      // telemetry stream. Null when adapter wasn't invoked (test override).
-      graph_mapped_nodes: graphLookupStatsForLog?.mapped_nodes ?? null,
+      // Imp-2 + review round 3 Imp-1: adapter stats + categorical outcome
+      // on every row. Count fields default to numeric zero (not null) so
+      // aggregation queries don't need COALESCE wrappers. `graph_lookup_outcome`
+      // mirrors the telemetry event outcome for direct joins between the
+      // two streams.
+      graph_mapped_nodes: graphLookupStatsForLog?.mapped_nodes ?? 0,
       graph_dropped_by_unknown_kind:
-        graphLookupStatsForLog?.dropped_by_unknown_kind ?? null,
+        graphLookupStatsForLog?.dropped_by_unknown_kind ?? 0,
       graph_dropped_by_missing_id:
-        graphLookupStatsForLog?.dropped_by_missing_id ?? null,
+        graphLookupStatsForLog?.dropped_by_missing_id ?? 0,
+      graph_lookup_outcome: graphLookupBuildReason,
     });
     safeFireRoutingLogWrite(writer, record, requestId);
   }
@@ -740,10 +755,9 @@ export async function runTurnExecutor(
  * that compactAnalysis() consumes. The ingress schema only requires
  * `analysis_status`; compactAnalysis reads `meta`, `results`, `robustness`,
  * `factor_sensitivity`, etc. defensively. We fill required fields ONLY when
- * they are truly missing; when present but non-canonical (e.g. an
- * object-shaped `results` from an older compatibility payload), forward
- * verbatim and let compactAnalysis handle it — silent discarding of
- * analysis context would hide real data from the LLM (review P1-3).
+ * they are truly missing; when present but non-canonical we normalise into
+ * the array shape compactAnalysis expects without lying to the type system
+ * (review round 3 P1-2).
  */
 function coerceIngressAnalysis(a: AnalysisStateIngress): V2RunResponseEnvelope {
   const raw = a as AnalysisStateIngress & {
@@ -751,19 +765,34 @@ function coerceIngressAnalysis(a: AnalysisStateIngress): V2RunResponseEnvelope {
     results?: unknown;
     [k: string]: unknown;
   };
-  // Only default when truly absent. An array `results` passes through
-  // unchanged; a non-array `results` is forwarded under the unknown[] cast
-  // so compactAnalysis's internal guards (isOptionResult, Array.isArray
-  // checks) can iterate defensively rather than seeing silent emptiness.
-  const results: unknown[] =
-    raw.results === undefined
-      ? []
-      : (raw.results as unknown[]);
   return {
     ...raw,
     meta: raw.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
-    results,
+    results: normaliseResults(raw.results),
   };
+}
+
+/**
+ * Convert an arbitrary `results` value into the `unknown[]` that
+ * V2RunResponseEnvelope declares.
+ *
+ *   • array       → unchanged
+ *   • object      → Object.values(...) — handles keyed compatibility
+ *                   payloads (e.g. `{ opt_1: {...}, opt_2: {...} }`) so
+ *                   data is preserved rather than discarded
+ *   • missing     → []
+ *   • primitive   → [] (meaningless shape; nothing to preserve)
+ *
+ * No type assertions. The caller can reason about the returned array
+ * without guessing about the ingress shape.
+ */
+function normaliseResults(raw: unknown): unknown[] {
+  if (raw === undefined || raw === null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'object') {
+    return Object.values(raw as Record<string, unknown>);
+  }
+  return [];
 }
 
 function summariseRouting(result: RoutingResult): {

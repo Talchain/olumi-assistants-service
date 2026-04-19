@@ -4,9 +4,10 @@
  * Each test exercises one validator error code end-to-end and asserts the
  * MUST-PASS behavioural quality signals from plan D6:
  *
- *   • ENTITY_NOT_FOUND          — structured details name the missing entity
- *   • PRECONDITION_UNMET (distinguish no_options_defined vs
- *                                    options_lack_intervention_data)
+ *   • ENTITY_NOT_FOUND             — structured details name the missing entity
+ *   • PRECONDITION_UNMET           — reason='no_options_defined' (the only
+ *                                    wire-checkable readiness signal; handler
+ *                                    owns async intervention-readiness checks)
  *   • ENTITY_RESOLUTION_SUSPICIOUS — details carry both candidates
  *   • ENTITY_RESOLUTION_AMBIGUOUS  — must short-circuit, handler never runs
  *   • No raw internal text leaks to assistant_text

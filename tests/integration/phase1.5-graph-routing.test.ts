@@ -248,15 +248,16 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
     const completed = events.find((e) => e.event === 'turn_executor.completed');
     const stages = completed!.data.stages_completed as string[];
     // Regression guards: prove the precondition did NOT misfire on the
-    // real wire. Under the old bug this turn would have been rejected at
-    // validate with PRECONDITION_UNMET + 'options_lack_intervention_data'.
-    // Now validate runs; if anything fails it's downstream (handler /
-    // scenario read) — never a validator over-reach.
+    // real wire. A prior precondition revision required canonical options[]
+    // on graph_state, which the real UI doesn't carry — under that bug this
+    // turn would have been rejected at validate with PRECONDITION_UNMET.
+    // Now validate runs; any failure is downstream (handler / scenario
+    // read / PLoT) — never a validator over-reach.
     expect(stages).toContain('validate');
     expect(completed!.data.turn_class).toBe('handler'); // routed to handler
-    // The response envelope confirms validation passed — error details use
-    // scenario_read_failed / handler_invocation_failed causes, not
-    // PRECONDITION_UNMET's no_options_defined.
+    // The response envelope confirms validation passed — error details (if
+    // any) carry scenario_read_failed or other handler cause_kinds, not the
+    // validator-layer no_options_defined reason.
     const body = JSON.parse(res.body);
     const errBlock = (body.blocks as Array<{ type: string; details?: Record<string, unknown> }>)
       .find((b) => b.type === 'error');

@@ -319,6 +319,44 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     expect(errBlock?.details?.total_nodes).toBe(2);
   });
 
+  it('P1-3 (round 3): test_override path emits graph_lookup telemetry with zero stats', async () => {
+    // When a test injects options.graphLookup directly, the adapter is
+    // bypassed — but the event must still fire so per-turn observability
+    // is complete. Stats are zero because there's no adapter-level payload.
+    const mockLookup = {
+      findEntityById: () => null,
+      listEntitiesByKind: () => [],
+    };
+    const routingAdapter = mockRoutingAdapter(mkTextResult('hi'));
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p15-test-override-tel', {
+      routingAdapter,
+      graphLookup: mockLookup,
+    });
+    const glEvent = events.find((e) => e.event === 'turn_executor.graph_lookup');
+    expect(glEvent).toBeDefined();
+    expect(glEvent!.data.outcome).toBe('test_override');
+    expect(glEvent!.data.total_nodes).toBe(0);
+    expect(glEvent!.data.mapped_nodes).toBe(0);
+  });
+
+  it('Imp-1 (round 3): routing log carries graph_lookup_outcome + zero-default counts', async () => {
+    // no_graph path: all count fields should be 0 (not null) so analytics
+    // don't need COALESCE wrappers; graph_lookup_outcome categorises the turn.
+    const routingAdapter = mockRoutingAdapter(mkTextResult('frame hello'));
+    const logs: Array<Record<string, unknown>> = [];
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p15-log-outcome', {
+      routingAdapter,
+      routingLogWriter: async (r) => {
+        logs.push(r);
+      },
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(logs[0]!.graph_lookup_outcome).toBe('no_graph');
+    expect(logs[0]!.graph_mapped_nodes).toBe(0);
+    expect(logs[0]!.graph_dropped_by_unknown_kind).toBe(0);
+    expect(logs[0]!.graph_dropped_by_missing_id).toBe(0);
+  });
+
   it('P1-1: no_graph outcome is emitted on frame-stage turns so skips are observable', async () => {
     const routingAdapter = mockRoutingAdapter(mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A));
     await runTurnExecutor(BASE_PAYLOAD, 'req-p15-no-graph-tel', {
@@ -361,6 +399,28 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     // Imp-2: adapter stats also surface in the log for triage.
     expect(logs[0]!.graph_mapped_nodes).toBe(0);
     expect(logs[0]!.graph_dropped_by_unknown_kind).toBe(3);
+  });
+
+  it('P1-2 (round 3): normaliseResults converts object-shaped results to real array (no as-cast)', async () => {
+    // A compatibility payload where `results` is a keyed map. Previously we
+    // defaulted to [] (data loss) or cast to unknown[] (type lie). Now
+    // Object.values() yields a proper array that compactAnalysis can iterate.
+    const analysisWithObjectResults = {
+      analysis_status: 'complete',
+      meta: { seed_used: 1, n_samples: 100, response_hash: 'abc' },
+      results: {
+        opt_1: { option_id: 'opt_1', label: 'A', win_probability: 0.6 },
+        opt_2: { option_id: 'opt_2', label: 'B', win_probability: 0.4 },
+      },
+    } as unknown as AnalysisStateIngress;
+    const routingAdapter = mockRoutingAdapter(mkTextResult('analysis summary'));
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p12-obj-norm', {
+      routingAdapter,
+      analysisState: analysisWithObjectResults,
+    });
+    // Must not throw; compactAnalysis sees both option records.
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
   });
 
   it('P1-3: coerceIngressAnalysis preserves object-shaped results instead of discarding', async () => {
