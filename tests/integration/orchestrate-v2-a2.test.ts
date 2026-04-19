@@ -87,6 +87,36 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
         latencyMs: 0,
       };
     },
+    // V5 Phase 1: tool-use routing entry. A2 fixtures are clarify turns →
+    // emit a tool_use with intent_class="clarify". The question text is the
+    // narrate-phase output (preserves fixture control).
+    chatWithTools: async () => {
+      const m = phaseState.narrate;
+      if (m.throws === 'NarrateTimeoutError') {
+        const errs = await import('../../src/adapters/llm/errors.js');
+        throw new errs.UpstreamTimeoutError('test timeout', 'narrate', 1);
+      }
+      if (m.throws === 'generic') {
+        throw new Error('test generic error');
+      }
+      return {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'tu-1',
+            name: 'olumi_action',
+            input: {
+              intent_class: 'clarify',
+              clarification: { ambiguity_type: 'intent', question: m.output },
+            },
+          },
+        ],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 1, output_tokens: 1 },
+        model: 'test-a2-mock',
+        latencyMs: 0,
+      };
+    },
   }),
 }));
 
@@ -194,11 +224,12 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
     expect(completed[0]!.data.response_emitted).toBe(true);
     expect(completed[0]!.data.failure_type).toBeNull();
     expect(completed[0]!.data.commit_performed).toBe(true);
-    expect(completed[0]!.data.llm_calls_used).toBe(2);
+    // Phase 1: single routing call replaces classify+narrate pair
+    expect(completed[0]!.data.llm_calls_used).toBe(1);
     expect(completed[0]!.data.turn_class).toBe('clarify');
     const stages = completed[0]!.data.stages_completed as string[];
-    expect(stages).toContain('classify');
-    expect(stages).toContain('dispatch');
+    // Phase 1: stage vocabulary changed — orient replaces classify/dispatch
+    expect(stages).toContain('orient');
     expect(stages).toContain('compose');
     expect(stages).toContain('commit');
   });
@@ -229,8 +260,10 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
     expect(completed[0]!.data.response_emitted).toBe(true);
     expect(completed[0]!.data.failure_type).toBe('UPSTREAM_TIMEOUT');
     expect(completed[0]!.data.commit_performed).toBe(false);
-    // turn_class reflects the classifier decision even when narrate fails.
-    expect(completed[0]!.data.turn_class).toBe('clarify');
+    // Phase 1: routing + narrate are a single call. A timeout means no intent
+    // was resolved, so turn_class is null (was 'clarify' pre-refactor because
+    // the classifier had already decided before narrate timed out).
+    expect(completed[0]!.data.turn_class).toBeNull();
   });
 
   it('clarify-contamination: sanitiser strips tags + em-dashes, response succeeds', async () => {
