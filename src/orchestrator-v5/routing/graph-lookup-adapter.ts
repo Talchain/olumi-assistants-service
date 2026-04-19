@@ -148,7 +148,7 @@ export function buildGraphLookup(
   if (nodes.length === 0) return { kind: 'no_graph' };
 
   const byId = new Map<string, { id: string; kind: EntityKind; label: string | null }>();
-  const byKind = new Map<EntityKind, Array<{ id: string; label: string }>>();
+  const byKind = new Map<EntityKind, Array<{ id: string; label: string | null }>>();
 
   let droppedByMissingId = 0;
   let droppedByUnknownKind = 0;
@@ -168,7 +168,11 @@ export function buildGraphLookup(
     const label = typeof node.label === 'string' ? node.label : null;
     byId.set(node.id, { id: node.id, kind: mappedKind, label });
     const kindList = byKind.get(mappedKind) ?? [];
-    kindList.push({ id: node.id, label: label ?? node.id });
+    // Keep label as null when the node has no label, so downstream consumers
+    // (composer chips, Dice matching) can distinguish "real label" from
+    // "no label — do NOT surface the id". Previously this substituted
+    // `node.id` in as the label, which leaked id-shaped tokens into chips.
+    kindList.push({ id: node.id, label });
     byKind.set(mappedKind, kindList);
   }
 
@@ -178,7 +182,7 @@ export function buildGraphLookup(
   for (const entry of collectConstraintEntries(graph.goal_constraints)) {
     byId.set(entry.id, entry);
     const kindList = byKind.get('constraint') ?? [];
-    kindList.push({ id: entry.id, label: entry.label ?? entry.id });
+    kindList.push({ id: entry.id, label: entry.label });
     byKind.set('constraint', kindList);
   }
 

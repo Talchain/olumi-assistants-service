@@ -356,9 +356,9 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       expect(parsed.blocks[0]!.type).toBe('error');
       if (parsed.blocks[0]!.type === 'error') {
         expect(parsed.blocks[0]!.error_code).toBe('INTERNAL_ERROR');
-        const details = parsed.blocks[0]!.details as { cause_kind?: string; validation_error_code?: string };
-        expect(details?.cause_kind).toBe('validation_failed');
-        expect(details?.validation_error_code).toBe('ENTITY_NOT_FOUND');
+        const details = parsed.blocks[0]!.details as { failure_origin?: string; error_code?: string };
+        expect(details?.failure_origin).toBe('validator');
+        expect(details?.error_code).toBe('ENTITY_NOT_FOUND');
       }
       expect(telemetry.validation_error_code).toBe('ENTITY_NOT_FOUND');
       expect(telemetry.failure_type).toBe('INTERNAL_ERROR');

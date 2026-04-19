@@ -44,6 +44,7 @@
 
 import { z } from 'zod';
 
+import { describeSchema } from '../compose/helpers.js';
 import type { EntityKind, ProposalAction, ProposalEntity, ProposalParameter } from './types.js';
 
 // Dice coefficient delta above which the closer-match is flagged as
@@ -63,8 +64,12 @@ export const SUSPICIOUS_DICE_THRESHOLD = 0.15 as const;
 export interface GraphLookup {
   /** Find a node by id — any kind. Returns null when absent. */
   findEntityById(id: string): { id: string; kind: EntityKind; label: string | null } | null;
-  /** List all entities of a given kind. */
-  listEntitiesByKind(kind: EntityKind): ReadonlyArray<{ id: string; label: string }>;
+  /**
+   * List all entities of a given kind. `label` is null when the underlying
+   * node has no label — consumers must NEVER substitute the id in its place
+   * because ids leak into user-visible failure chips otherwise.
+   */
+  listEntitiesByKind(kind: EntityKind): ReadonlyArray<{ id: string; label: string | null }>;
 }
 
 // -----------------------------------------------------------------------
@@ -224,6 +229,7 @@ export function validateToolCall(
           handler_id: decl.handler_id,
           proposed_kind: proposal.entity.kind,
           accepted_kinds: [...decl.accepted_entity_kinds],
+          ...(proposal.entity.label ? { proposed_label: proposal.entity.label } : {}),
         },
       },
     };
@@ -245,6 +251,8 @@ export function validateToolCall(
             details: {
               parameter: p.name,
               issue: parsed.error.issues[0]?.message,
+              actual_value: p.value,
+              constraint_description: describeSchema(schema),
             },
           },
         };
@@ -264,6 +272,7 @@ export function validateToolCall(
           details: {
             entity_id: proposal.entity.id,
             entity_kind: proposal.entity.kind,
+            ...(proposal.entity.label ? { entity_label: proposal.entity.label } : {}),
           },
         },
       };
@@ -286,6 +295,8 @@ export function validateToolCall(
             entity_id: proposal.entity.id,
             proposed_kind: proposal.entity.kind,
             resolved_kind: existing.kind,
+            ...(proposal.entity.label ? { proposed_label: proposal.entity.label } : {}),
+            ...(existing.label ? { resolved_label: existing.label } : {}),
           },
         },
       };
@@ -327,15 +338,17 @@ function detectSuspiciousLabelMatch(
   if (!entity.label) return null;
   const candidates = graph.listEntitiesByKind(entity.kind);
   const chosen = candidates.find((c) => c.id === entity.id);
-  if (!chosen) return null; // findEntityById already proved it exists, but kind filter might miss it — just skip
+  // Unlabeled candidates cannot Dice-match a user-typed label — skip.
+  if (!chosen || chosen.label === null) return null;
 
   const chosenScore = bigramDice(entity.label, chosen.label);
   let bestOther: { id: string; label: string; score: number } | null = null;
   for (const cand of candidates) {
     if (cand.id === entity.id) continue;
+    if (cand.label === null) continue;
     const score = bigramDice(entity.label, cand.label);
     if (!bestOther || score > bestOther.score) {
-      bestOther = { ...cand, score };
+      bestOther = { id: cand.id, label: cand.label, score };
     }
   }
 
@@ -347,6 +360,7 @@ function detectSuspiciousLabelMatch(
         `but closer candidate "${bestOther.label}" Dice=${bestOther.score}`,
       details: {
         entity_id: entity.id,
+        entity_kind: entity.kind,
         chosen: { id: chosen.id, label: chosen.label, dice: chosenScore },
         closer_candidate: { id: bestOther.id, label: bestOther.label, dice: bestOther.score },
         delta: bestOther.score - chosenScore,

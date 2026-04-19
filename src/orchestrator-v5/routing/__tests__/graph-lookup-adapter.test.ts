@@ -170,7 +170,9 @@ describe('buildGraphLookup', () => {
         kind: 'constraint',
         label: 'Profit ≥ 100',
       });
-      // Missing label defaults to null on the entity; list falls back to id.
+      // Missing label stays null on both surfaces. The list MUST NOT
+      // substitute the id into the label field — that leaked id-shaped
+      // tokens into user-visible failure chips downstream.
       expect(lookup.findEntityById('c_risk')).toEqual({
         id: 'c_risk',
         kind: 'constraint',
@@ -178,7 +180,7 @@ describe('buildGraphLookup', () => {
       });
       expect(lookup.listEntitiesByKind('constraint')).toEqual([
         { id: 'c_profit', label: 'Profit ≥ 100' },
-        { id: 'c_risk', label: 'c_risk' },
+        { id: 'c_risk', label: null },
       ]);
     });
 
@@ -196,7 +198,7 @@ describe('buildGraphLookup', () => {
           ),
         ),
       );
-      expect(lookup.listEntitiesByKind('constraint')).toEqual([{ id: 'c_ok', label: 'c_ok' }]);
+      expect(lookup.listEntitiesByKind('constraint')).toEqual([{ id: 'c_ok', label: null }]);
     });
 
     it('empty/absent goal_constraints produces no constraint entities', () => {

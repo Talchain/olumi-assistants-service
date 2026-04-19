@@ -33,7 +33,29 @@ export type HandlerInvocationFailedCause =
   | 'plot_error'
   | 'plot_timeout'
   | 'plot_unknown'
-  | 'analysis_not_completed';
+  | 'analysis_not_completed'
+  | 'options_not_configured';
+
+/**
+ * Handler failure payload. `handler_id` is always present so telemetry and
+ * composers can attribute a failure without guessing. Known optional keys:
+ *   - `specific_issue`      short user-safe explanation for args_validation_*
+ *                            and plot_payload_invalid
+ *   - `first_option_label`  used by options_not_configured
+ *   - `missing_item_label`  reserved for future handlers
+ *   - `analysis_status`     used by analysis_not_completed
+ *   - `scenario_id`         used by scenario_read_failed
+ * Passthrough for any other keys a handler wants to surface in telemetry.
+ */
+export interface HandlerFailureDetails {
+  readonly handler_id: string;
+  readonly specific_issue?: string;
+  readonly first_option_label?: string;
+  readonly missing_item_label?: string;
+  readonly analysis_status?: string;
+  readonly scenario_id?: string;
+  readonly [key: string]: unknown;
+}
 
 /**
  * Handler failed at the invocation boundary — upstream service unavailable,
@@ -41,26 +63,55 @@ export type HandlerInvocationFailedCause =
  * returned a semantic error inside a valid wire envelope. Maps to
  * `INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED` → `INTERNAL_ERROR`.
  *
- * `cause_kind` is preserved on the failure envelope's `details` so
- * observability can distinguish "PLoT timed out" from "scenario not
- * readable" without parsing the error message.
+ * `cause_kind` is preserved on the failure envelope so observability can
+ * distinguish "PLoT timed out" from "scenario not readable" without parsing
+ * the message. `retryable` answers the semantic question "could a retry
+ * plausibly succeed?" — it does NOT decide the chip. The composer picks
+ * Retry vs "Try again in a moment" vs specific-fix per cause_kind
+ * independently.
  */
 export class HandlerInvocationFailedError extends Error {
   readonly kind = 'HANDLER_INVOCATION_FAILED';
   readonly cause_kind: HandlerInvocationFailedCause;
+  readonly retryable: boolean;
+  readonly details: Readonly<HandlerFailureDetails>;
 
   constructor(
     message: string,
-    options: { cause_kind: HandlerInvocationFailedCause; cause?: unknown },
+    options: {
+      cause_kind: HandlerInvocationFailedCause;
+      retryable: boolean;
+      details: Readonly<HandlerFailureDetails>;
+      cause?: unknown;
+    },
   ) {
     super(message);
     this.name = 'HandlerInvocationFailedError';
     this.cause_kind = options.cause_kind;
+    this.retryable = options.retryable;
+    // Defensive normalisation: TypeScript enforces `details` but runtime
+    // mutation / `as any` escapes / future deserialisation paths could deliver
+    // null/non-object. Normalise to a minimally valid shape so downstream
+    // composer switches can always read `details.handler_id` / specific_issue
+    // without throwing before their own safe fallback kicks in.
+    this.details = normaliseDetails(options.details);
     if (options.cause !== undefined) {
       // Standard ES2022 `cause` field — preserved for debug serialisation.
       (this as { cause?: unknown }).cause = options.cause;
     }
   }
+}
+
+function normaliseDetails(raw: unknown): Readonly<HandlerFailureDetails> {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { handler_id: 'unknown' };
+  }
+  const record = raw as Record<string, unknown>;
+  const handler_id =
+    typeof record.handler_id === 'string' && record.handler_id.length > 0
+      ? record.handler_id
+      : 'unknown';
+  return { ...record, handler_id };
 }
 
 /**

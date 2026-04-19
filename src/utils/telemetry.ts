@@ -447,6 +447,22 @@ export const TelemetryEvents = {
   TurnExecutorCompleted: "turn_executor.completed",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
+  // V5 TurnExecutor per-code failure composition.
+  // Emitted once per failure path that runs a per-code composer. Fields:
+  //   request_id, session_id, stage,
+  //   failure_origin: 'validator' | 'handler',       // which layer produced the error
+  //   error_code: ValidationErrorCode | HandlerInvocationFailedCause,
+  //   template_used: string,                         // the composer branch that ran
+  //   chip_attached: boolean,                        // did the response ship a chip?
+  //   chip_type: 'action' | 'text_prompt' | 'entity_suggestion' | null,
+  //   chip_count: number,
+  //   retryable?: boolean                            // handler layer only
+  // Regression guard: `template_used === 'fallback'` should never appear for
+  // reachable codes in integration tests — used to detect new codes missing
+  // templates. `failure_origin` is strictly 'validator' or 'handler'; the
+  // fallback path signals via template_used, NOT via failure_origin.
+  TurnExecutorFailureResponse: "turn_executor.failure_response",
+
   // V5 Phase 1.5: graph lookup adapter outcome (Imp-2, review P1-3).
   // Emitted exactly once per turn. Fields:
   //   outcome: 'no_graph' | 'ok' | 'all_dropped' | 'test_override'

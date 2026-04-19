@@ -334,7 +334,7 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
     expect(telemetry.turn_class).toBe('handler');
   });
 
-  it('scenarioReader failure → INTERNAL_ERROR with cause_kind=scenario_read_failed in details', async () => {
+  it('scenarioReader failure → INTERNAL_ERROR with error_code=scenario_read_failed in details', async () => {
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
     );
@@ -352,11 +352,14 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
     const block = response.blocks[0]!;
     if (block.type === 'error') {
       expect(block.error_code).toBe('INTERNAL_ERROR');
-      expect(block.details).toMatchObject({ cause_kind: 'scenario_read_failed' });
+      expect(block.details).toMatchObject({
+        failure_origin: 'handler',
+        error_code: 'scenario_read_failed',
+      });
     }
   });
 
-  it('analysis_status=blocked → INTERNAL_ERROR with cause_kind=analysis_not_completed', async () => {
+  it('analysis_status=blocked → INTERNAL_ERROR with error_code=analysis_not_completed', async () => {
     const blockedResponse: V2RunResponseEnvelope = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'b' },
       results: [],
@@ -377,7 +380,10 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
     });
     const block = response.blocks[0]!;
     if (block.type === 'error') {
-      expect(block.details).toMatchObject({ cause_kind: 'analysis_not_completed' });
+      expect(block.details).toMatchObject({
+        failure_origin: 'handler',
+        error_code: 'analysis_not_completed',
+      });
     }
   });
 });
