@@ -1,88 +1,44 @@
 /**
- * TurnExecutor unit tests (A1 + A2).
+ * TurnExecutor unit tests (V5 Phase 1 — tool-use routing spine).
  *
- * Covers:
- *   - BI-01 exactly-one-response (every `started` has a matching `completed`
- *     with response_emitted=true across every outcome path)
- *   - BI-02 contamination is handled in-band (response stays a success)
- *   - Paul's constraint 7: BUDGET_EXCEEDED wins over LLM_TIMEOUT when both apply
- *   - A2: `turn_class` in completed telemetry reflects classifier outcome
- *   - A2: classify stage appears in `stages_completed`
- *   - A2: classifier schema violation → LLM_UNAVAILABLE envelope
- *   - A2: llm_calls_used == 2 on success (classify + narrate)
- *   - Zod-validity of every returned envelope (happy + failure paths)
+ * Covers the seven-step flow (ORIENT → VALIDATE → EXECUTE → CONFIRM →
+ * COACH → COMPOSE → COMMIT):
  *
- * The LLM adapter is mocked at the `getAdapter(...).chat` seam. The mock
- * distinguishes classify calls (`args.responseFormat === 'json_object'`) from
- * narrate calls. No live provider calls (Paul's constraint 9).
+ *   - BI-01 exactly-one-response across every outcome path
+ *   - Tool-use execute turn: orientation + confirmation composed from
+ *     handler outcome (confirmation is registry-template-driven, not
+ *     ad-hoc parsing of facts)
+ *   - Text-only → inferred converse (A1/A2 direct_answer path preserved)
+ *   - Clarify intent → clarify envelope
+ *   - Coach intent → distinct code path, coaching_mode in telemetry
+ *     (brief correction 2 — preserves Phase 2 measurability)
+ *   - Validation skipped when no graph lookup is threaded (Phase 1a gap)
+ *   - Validation failure → HANDLER_INVOCATION_FAILED with validation_error_code
+ *   - RoutingError{timeout} → LLM_TIMEOUT envelope
+ *   - RoutingError{schema_repair_failed} → LLM_SCHEMA_VIOLATION envelope
+ *   - BUDGET_EXCEEDED wins over inner timeout (constraint 7)
+ *   - HandlerInvocationFailedError → HANDLER_INVOCATION_FAILED envelope
+ *   - Zod-validity of every returned envelope
+ *
+ * The LLM adapter seam is the injected `chatWithTools` mock (not the
+ * lower-level `chat` seam the pre-refactor tests used).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
+import type {
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+  ToolResponseBlock,
+} from '../../adapters/llm/types.js';
+import { UpstreamTimeoutError } from '../../adapters/llm/errors.js';
 
 // ---------------------------------------------------------------------------
-// Mock surface (shared classify + narrate via responseFormat routing)
+// Session store mock — no Supabase
 // ---------------------------------------------------------------------------
 
-type Phase = 'classify' | 'narrate';
-type PhaseBehaviour =
-  | { kind: 'success'; output: string; delayMs?: number }
-  | { kind: 'upstream_timeout'; delayMs?: number }
-  | { kind: 'abort'; delayMs?: number }
-  | { kind: 'throw'; delayMs?: number };
-
-const phaseState: Record<Phase, PhaseBehaviour> = {
-  classify: { kind: 'success', output: '{"turn_class":"direct_answer"}' },
-  narrate: { kind: 'success', output: 'hello world' },
-};
-
-vi.mock('../../adapters/llm/router.js', () => {
-  return {
-    getAdapter: () => ({
-      name: 'test-mock',
-      chat: async (
-        args: { responseFormat?: string },
-        opts: { signal?: AbortSignal },
-      ) => {
-        const phase: Phase = args.responseFormat === 'json_object' ? 'classify' : 'narrate';
-        const behaviour = phaseState[phase];
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            try {
-              dispatchBehaviour(phase, resolve, reject);
-            } catch (e) {
-              reject(e as Error);
-            }
-          }, behaviour.delayMs ?? 0);
-          opts.signal?.addEventListener('abort', () => {
-            clearTimeout(timer);
-            const abortError = new Error('aborted');
-            (abortError as Error & { name: string }).name = 'AbortError';
-            reject(abortError);
-          });
-        });
-        const output = behaviour.kind === 'success' ? behaviour.output : '';
-        return {
-          content: output,
-          usage: { input_tokens: 1, output_tokens: 1 },
-          model: 'test-mock',
-          latencyMs: 0,
-        };
-      },
-    }),
-  };
-});
-
-vi.mock('../../adapters/llm/prompt-loader.js', () => ({
-  getSystemPrompt: async () => 'You are a test narrator.',
-}));
-
-// Slice B: mock the session store so commit RPC + readRecent don't try to
-// reach real Supabase. The turn-executor tests focus on BI-01 / timeout /
-// stage telemetry; persistence behaviour is covered by dedicated session +
-// integration tests.
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: 'mock-row-id' }),
@@ -95,33 +51,69 @@ vi.mock('../session/index.js', () => ({
 }));
 
 const { runTurnExecutor } = await import('../turn-executor.js');
-const { UpstreamTimeoutError } = await import('../../adapters/llm/errors.js');
+const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
-function dispatchBehaviour(
-  phase: Phase,
-  resolve: () => void,
-  reject: (err: Error) => void,
-): void {
-  const b = phaseState[phase];
-  switch (b.kind) {
-    case 'success':
-      return resolve();
-    case 'upstream_timeout':
-      return reject(new UpstreamTimeoutError('test timeout', phase, 100));
-    case 'throw':
-      return reject(new Error('test-injected generic failure'));
-    case 'abort': {
-      const abortError = new Error('abort');
-      (abortError as Error & { name: string }).name = 'AbortError';
-      return reject(abortError);
-    }
-  }
+// ---------------------------------------------------------------------------
+// Helpers for mocked routing adapter
+// ---------------------------------------------------------------------------
+
+type ChatWithToolsMock = (
+  args: ChatWithToolsArgs,
+  opts: { requestId: string; timeoutMs?: number; signal?: AbortSignal },
+) => Promise<ChatWithToolsResult>;
+
+function mkToolUseResult(input: unknown, textBefore?: string): ChatWithToolsResult {
+  const content: ToolResponseBlock[] = [];
+  if (textBefore) content.push({ type: 'text', text: textBefore });
+  content.push({
+    type: 'tool_use',
+    id: 'tu-1',
+    name: OLUMI_ACTION_TOOL_NAME,
+    input: input as Record<string, unknown>,
+  });
+  return {
+    content,
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 50,
+  };
 }
 
-function resetPhases(): void {
-  phaseState.classify = { kind: 'success', output: '{"turn_class":"direct_answer"}' };
-  phaseState.narrate = { kind: 'success', output: 'hello world' };
+function mkTextResult(text: string): ChatWithToolsResult {
+  return {
+    content: [{ type: 'text', text }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 50,
+  };
 }
+
+const VALID_EXECUTE_INPUT = {
+  intent_class: 'execute',
+  action: {
+    handler_id: 'run_analysis',
+    entity: {
+      id: 'opt-a',
+      kind: 'option',
+      resolution_status: 'resolved',
+      resolution_method: 'id_match',
+    },
+    parameters: [],
+    cited_context_fields: ['graph.options'],
+  },
+};
+
+const CLARIFY_INPUT = {
+  intent_class: 'clarify',
+  clarification: { ambiguity_type: 'entity', question: 'Which option did you mean?' },
+};
+
+const COACH_INPUT = {
+  intent_class: 'coach',
+  coaching_mode: 'challenge',
+};
 
 // ---------------------------------------------------------------------------
 // Telemetry sink
@@ -135,10 +127,6 @@ function installSink(): void {
 function uninstallSink(): void {
   setTestSink(null);
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const BASE_PAYLOAD: OrchestratorTurnPayload = {
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -154,24 +142,26 @@ function startedCount(): number {
 function completedEvents(): Event[] {
   return events.filter((e) => e.event === 'turn_executor.completed');
 }
-function expectExactlyOneResponseInvariant(): void {
-  const started = startedCount();
+function expectBI01(): void {
+  expect(startedCount()).toBe(1);
   const completed = completedEvents();
-  expect(started).toBe(1);
   expect(completed).toHaveLength(1);
   expect(completed[0]!.data.response_emitted).toBe(true);
+}
+
+function mockRoutingAdapter(impl: ChatWithToolsMock) {
+  return { chatWithTools: vi.fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>().mockImplementation(impl as never) };
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('runTurnExecutor', () => {
+describe('runTurnExecutor — Phase 1 seven-step flow', () => {
   const originalEnv = { ...process.env };
   beforeEach(() => {
     events = [];
     installSink();
-    resetPhases();
     delete process.env.TURN_BUDGET_MS;
     delete process.env.LLM_BUDGET_NARRATE_MS;
   });
@@ -180,460 +170,299 @@ describe('runTurnExecutor', () => {
     process.env = { ...originalEnv };
   });
 
-  describe('happy path (direct_answer success)', () => {
-    it('returns a Zod-valid OlumiResponse with the LLM text', async () => {
-      phaseState.narrate = { kind: 'success', output: 'The framing.' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+  // -------------------------------------------------------------------
+  // Text-only / converse path (A1/A2 direct_answer preserved)
+  // -------------------------------------------------------------------
+  describe('text_only → inferred converse', () => {
+    it('produces a Zod-valid OlumiResponse with the Sonnet text, turn_class=direct_answer', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('Hello, how can I help?'));
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-c1', {
+        routingAdapter,
+      });
+
       const parsed = OlumiResponseSchema.parse(response);
-      expect(parsed.assistant_text).toBe('The framing.');
-      expect(parsed.blocks).toEqual([]);
-      expect(parsed.suggested_actions).toEqual([]);
-      expect(parsed.insights).toEqual([]);
-      expect(parsed.stage_indicator).toBe('frame');
+      expect(parsed.assistant_text).toBe('Hello, how can I help?');
       expect(telemetry.failure_type).toBeNull();
       expect(telemetry.commit_performed).toBe(true);
-      // A2: classify + narrate = 2 LLM calls on success
-      expect(telemetry.llm_calls_used).toBe(2);
+      expect(telemetry.llm_calls_used).toBe(1);
       expect(telemetry.turn_class).toBe('direct_answer');
-      expectExactlyOneResponseInvariant();
-      const completed = completedEvents()[0]!;
-      expect(completed.data.failure_type).toBeNull();
-      expect(completed.data.commit_performed).toBe(true);
-      expect(completed.data.turn_class).toBe('direct_answer');
-      expect(completed.data.llm_calls_used).toBe(2);
-      // stages_completed: presence-based (order-tolerant per Correction 2)
-      const stages = completed.data.stages_completed as string[];
-      expect(stages).toContain('classify');
-      expect(stages).toContain('dispatch');
+      expect(telemetry.intent_class).toBe('converse');
+      expect(telemetry.coaching_mode).toBeNull();
+      expectBI01();
+      const stages = completedEvents()[0]!.data.stages_completed as string[];
+      expect(stages).toContain('orient');
       expect(stages).toContain('compose');
       expect(stages).toContain('commit');
     });
 
     it('omits updated_session_state (constraint 6 — not in schema)', async () => {
-      const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
+      const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-c2', { routingAdapter });
       expect((response as Record<string, unknown>).updated_session_state).toBeUndefined();
     });
   });
 
-  describe('happy path (clarify success, A2)', () => {
-    it('classifier=clarify → clarify envelope + turn_class telemetry', async () => {
-      phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
-      phaseState.narrate = { kind: 'success', output: 'What decision are you weighing?' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
+  // -------------------------------------------------------------------
+  // Clarify intent
+  // -------------------------------------------------------------------
+  describe('clarify intent', () => {
+    it('uses clarification.question as assistant_text, turn_class=clarify', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(CLARIFY_INPUT));
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-cl1', {
+        routingAdapter,
+      });
+
       const parsed = OlumiResponseSchema.parse(response);
-      expect(parsed.assistant_text).toBe('What decision are you weighing?');
-      expect(parsed.blocks).toEqual([]);
-      expect(parsed.suggested_actions).toEqual([]);
-      expect(parsed.insights).toEqual([]);
-      expect(telemetry.failure_type).toBeNull();
-      expect(telemetry.commit_performed).toBe(true);
-      expect(telemetry.llm_calls_used).toBe(2);
+      expect(parsed.assistant_text).toBe('Which option did you mean?');
       expect(telemetry.turn_class).toBe('clarify');
-      expectExactlyOneResponseInvariant();
-      const completed = completedEvents()[0]!;
-      expect(completed.data.turn_class).toBe('clarify');
+      expect(telemetry.intent_class).toBe('clarify');
+      expectBI01();
     });
   });
 
-  describe('BI-02 contamination (sanitiser in-band)', () => {
-    it('strips tags and em-dashes, response stays a success', async () => {
-      phaseState.narrate = {
-        kind: 'success',
-        output: '<thinking>inner</thinking>Two forces \u2014 cost and speed.',
-      };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      expect(response.assistant_text).not.toMatch(/<[a-zA-Z]|\u2014/);
-      expect(response.assistant_text).toContain('Two forces');
-      expect(response.blocks).toEqual([]);
-      expect(telemetry.failure_type).toBeNull();
-      expectExactlyOneResponseInvariant();
-      const contam = events.filter(
-        (e) => e.event === 'turn_executor.contamination_narrate',
+  // -------------------------------------------------------------------
+  // Coach intent — DISTINCT path per brief correction 2
+  // -------------------------------------------------------------------
+  describe('coach intent (distinct from converse)', () => {
+    it('routes through its own path, logs intent_class="coach" and coaching_mode', async () => {
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(COACH_INPUT, 'Let me push back on that assumption...'),
       );
-      expect(contam).toHaveLength(1);
-      // A2: contamination telemetry carries the resolved turn_class
-      expect(contam[0]!.data.turn_class).toBe('direct_answer');
-    });
+      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-co1', { routingAdapter });
 
-    it('clarify-branch contamination also emits the telemetry event', async () => {
-      phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
-      phaseState.narrate = {
-        kind: 'success',
-        output: '<thinking>x</thinking>Which vendor are you comparing?',
-      };
-      await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      const contam = events.filter(
-        (e) => e.event === 'turn_executor.contamination_narrate',
-      );
-      expect(contam).toHaveLength(1);
-      expect(contam[0]!.data.turn_class).toBe('clarify');
-    });
-  });
-
-  describe('LLM_TIMEOUT (A2: phase attribution preserved)', () => {
-    it('maps narrate upstream timeout to UPSTREAM_TIMEOUT with phase="narrate"', async () => {
-      phaseState.narrate = { kind: 'upstream_timeout' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      expect(response.blocks).toHaveLength(1);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
-        // Phase attribution: narrate timed out after a successful classify.
-        expect(block.details).toMatchObject({ phase: 'narrate' });
-      }
-      expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
-      expect(telemetry.commit_performed).toBe(false);
-      // P1a: classifier ran successfully before narrate threw → llm_calls_used=1.
-      expect(telemetry.llm_calls_used).toBe(1);
-      // turn_class resolved by the classifier (direct_answer by default).
+      expect(telemetry.intent_class).toBe('coach');
+      expect(telemetry.coaching_mode).toBe('challenge');
+      // Runtime behaviour is identical to converse — turn_class stays direct_answer
       expect(telemetry.turn_class).toBe('direct_answer');
-      expectExactlyOneResponseInvariant();
+      expectBI01();
     });
 
-    it('maps classify upstream timeout to UPSTREAM_TIMEOUT with phase="classify"', async () => {
-      phaseState.classify = { kind: 'upstream_timeout' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
-        // Phase attribution: classifier timed out before it could return.
-        expect(block.details).toMatchObject({ phase: 'classify' });
-      }
-      expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
-      // P1a: classifier never completed → llm_calls_used=0.
-      expect(telemetry.llm_calls_used).toBe(0);
-      // turn_class unresolved because the classifier never succeeded.
-      expect(telemetry.turn_class).toBeNull();
-    });
+    it('distinguishes coach from converse on text-only turns — measurability prerequisite', async () => {
+      // Two back-to-back turns; one coach tool call, one text-only. Both
+      // produce direct_answer turn_class but distinct intent_class.
+      const coachCall = mkToolUseResult(COACH_INPUT, 'reflective question');
+      const converseCall = mkTextResult('sure, happy to help');
 
-    it('clarify branch narrate timeout: turn_class=clarify + llm_calls_used=1', async () => {
-      phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
-      phaseState.narrate = { kind: 'upstream_timeout' };
-      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
-      expect(telemetry.turn_class).toBe('clarify');
-      expect(telemetry.llm_calls_used).toBe(1);
+      const adapterCoach = mockRoutingAdapter(async () => coachCall);
+      const adapterConverse = mockRoutingAdapter(async () => converseCall);
+
+      const coach = await runTurnExecutor(BASE_PAYLOAD, 'req-co-a', { routingAdapter: adapterCoach });
+      const converse = await runTurnExecutor(BASE_PAYLOAD, 'req-co-b', { routingAdapter: adapterConverse });
+
+      expect(coach.telemetry.intent_class).toBe('coach');
+      expect(converse.telemetry.intent_class).toBe('converse');
+      expect(coach.telemetry.turn_class).toBe(converse.telemetry.turn_class);
     });
   });
 
-  describe('LLM_SCHEMA_VIOLATION (A2: malformed classifier output only)', () => {
-    it('classifier returns non-JSON → LLM_UNAVAILABLE envelope', async () => {
-      phaseState.classify = { kind: 'success', output: 'not json at all' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('LLM_UNAVAILABLE');
-        expect(block.details).toMatchObject({ phase: 'classify' });
-      }
-      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
-      expect(telemetry.commit_performed).toBe(false);
-      // Classifier call completed with output, but the output was unusable.
-      // A1 parity: a call that returned no usable result does not count.
-      expect(telemetry.llm_calls_used).toBe(0);
-      expect(telemetry.turn_class).toBeNull();
-      expectExactlyOneResponseInvariant();
-    });
-  });
+  // -------------------------------------------------------------------
+  // Execute intent with handler (validation skipped — Phase 1a gap)
+  // -------------------------------------------------------------------
+  describe('execute intent — handler path (validation skipped on Phase 1a)', () => {
+    it('invokes handler, renders typed confirmation, composes orientation + confirmation', async () => {
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(VALID_EXECUTE_INPUT, 'Running analysis on your scenario...'),
+      );
 
-  /**
-   * Paul's correction 3 (P0): well-formed classifier output whose `turn_class`
-   * is not in the A2TurnClass union is an invariant breach, mapped to
-   * UNHANDLED → INTERNAL_ERROR — NOT to the recoverable LLM_UNAVAILABLE path.
-   * Regression guard at the turn-executor seam.
-   */
-  describe('UNHANDLED tripwire (A2: valid JSON but unsupported class)', () => {
-    it('classifier returns out-of-union value → INTERNAL_ERROR envelope (P0)', async () => {
-      phaseState.classify = { kind: 'success', output: '{"turn_class":"propose"}' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        // P0 mapping: UNHANDLED → INTERNAL_ERROR (NOT the LLM_UNAVAILABLE
-        // recoverable path). Drift-prevention: the earlier implementation
-        // conflated this with LLM_SCHEMA_VIOLATION via Zod's enum narrowing.
-        expect(block.error_code).toBe('INTERNAL_ERROR');
-        expect(block.details).toMatchObject({ reason: 'unhandled_turn_class' });
-      }
-      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-      expect(telemetry.commit_performed).toBe(false);
-      expect(telemetry.llm_calls_used).toBe(0);
-      // turn_class unresolved: the classifier DID produce output, but the
-      // value it picked is outside A2TurnClass — so we have no resolved class.
-      expect(telemetry.turn_class).toBeNull();
-      expectExactlyOneResponseInvariant();
-    });
+      // Hand-built registry so we don't call PLoT
+      const fakeRegistry = new Map<string, never>([
+        [
+          'run_analysis',
+          (async () => ({
+            assistant_text: 'handler said this',
+            handler_facts: [],
+            llm_calls_used: 1,
+          })) as never,
+        ],
+      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
 
-    it('classifier returns wire-enum value not in A2 (e.g. "frame") → INTERNAL_ERROR (P0)', async () => {
-      phaseState.classify = { kind: 'success', output: '{"turn_class":"frame"}' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      const block = response.blocks[0]!;
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('INTERNAL_ERROR');
-      }
-      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-    });
-  });
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-ex1', {
+        routingAdapter,
+        handlerRegistry: fakeRegistry,
+      });
 
-  describe("Paul's constraint 7 — BUDGET_EXCEEDED wins over LLM_TIMEOUT", () => {
-    it('outer budget aborts during slow classifier → BUDGET_EXCEEDED, llm_calls_used=0, turn_class=null', async () => {
-      process.env.TURN_BUDGET_MS = '10';
-      process.env.LLM_BUDGET_NARRATE_MS = '60000';
-      phaseState.classify = {
-        kind: 'success',
-        output: '{"turn_class":"direct_answer"}',
-        delayMs: 200,
-      };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('TURN_BUDGET_EXCEEDED');
-      }
-      expect(telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
-      expect(telemetry.commit_performed).toBe(false);
-      // Classifier was aborted mid-call → no usable output produced.
-      expect(telemetry.llm_calls_used).toBe(0);
-      expect(telemetry.turn_class).toBeNull();
-      expectExactlyOneResponseInvariant();
-    });
-
-    it('outer budget aborts during narrate (after successful classify) → BUDGET_EXCEEDED, llm_calls_used=1, turn_class resolved', async () => {
-      process.env.TURN_BUDGET_MS = '30';
-      process.env.LLM_BUDGET_NARRATE_MS = '60000';
-      // Classifier returns quickly with clarify; narrate delays past the
-      // outer budget so the wall-clock abort fires during narrate.
-      phaseState.classify = {
-        kind: 'success',
-        output: '{"turn_class":"clarify"}',
-        delayMs: 0,
-      };
-      phaseState.narrate = {
-        kind: 'success',
-        output: 'never-reached',
-        delayMs: 200,
-      };
-      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      expect(telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
-      // Classifier call completed before the abort → counts.
-      expect(telemetry.llm_calls_used).toBe(1);
-      // turn_class resolved by the successful classify.
-      expect(telemetry.turn_class).toBe('clarify');
-      expectExactlyOneResponseInvariant();
-    });
-  });
-
-  describe('classifier generic error (A2)', () => {
-    it('non-typed error during classify → UNHANDLED/INTERNAL_ERROR envelope', async () => {
-      phaseState.classify = { kind: 'throw' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('INTERNAL_ERROR');
-      }
-      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-      expect(telemetry.llm_calls_used).toBe(0);
-      expect(telemetry.turn_class).toBeNull();
-      expectExactlyOneResponseInvariant();
-    });
-  });
-
-  describe('empty narrate output', () => {
-    it('maps to UNHANDLED/INTERNAL_ERROR envelope', async () => {
-      phaseState.narrate = { kind: 'success', output: '' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('INTERNAL_ERROR');
-      }
-      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-      expectExactlyOneResponseInvariant();
-    });
-  });
-
-  describe('generic unexpected error', () => {
-    it('maps to UNHANDLED/INTERNAL_ERROR envelope', async () => {
-      phaseState.narrate = { kind: 'throw' };
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('INTERNAL_ERROR');
-      }
-      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-      expectExactlyOneResponseInvariant();
-    });
-  });
-
-  describe("response_emitted=false is impossible (addendum §2.1.9)", () => {
-    const cases: Array<{ name: string; setup: () => void }> = [
-      { name: 'success_direct_answer', setup: () => { /* default */ } },
-      {
-        name: 'success_clarify',
-        setup: () => {
-          phaseState.classify = { kind: 'success', output: '{"turn_class":"clarify"}' };
-          phaseState.narrate = { kind: 'success', output: 'what are you deciding?' };
-        },
-      },
-      {
-        name: 'contamination',
-        setup: () => {
-          phaseState.narrate = { kind: 'success', output: '<x>y</x>contam' };
-        },
-      },
-      {
-        name: 'upstream_timeout_classify',
-        setup: () => { phaseState.classify = { kind: 'upstream_timeout' }; },
-      },
-      {
-        name: 'upstream_timeout_narrate',
-        setup: () => { phaseState.narrate = { kind: 'upstream_timeout' }; },
-      },
-      {
-        name: 'budget_exceeded',
-        setup: () => {
-          process.env.TURN_BUDGET_MS = '5';
-          phaseState.classify = {
-            kind: 'success',
-            output: '{"turn_class":"direct_answer"}',
-            delayMs: 200,
-          };
-        },
-      },
-      {
-        name: 'empty_output',
-        setup: () => { phaseState.narrate = { kind: 'success', output: '' }; },
-      },
-      {
-        name: 'generic_throw',
-        setup: () => { phaseState.narrate = { kind: 'throw' }; },
-      },
-      {
-        name: 'classifier_schema_violation',
-        setup: () => {
-          phaseState.classify = { kind: 'success', output: 'not json' };
-        },
-      },
-      {
-        name: 'classifier_unsupported_class_P0',
-        setup: () => {
-          phaseState.classify = { kind: 'success', output: '{"turn_class":"propose"}' };
-        },
-      },
-    ];
-
-    it.each(cases)('every outcome emits response_emitted=true: $name', async ({ setup }) => {
-      setup();
-      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      expect(telemetry.response_emitted).toBe(true);
-      expectExactlyOneResponseInvariant();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Slice C1 — handler turn class + empty registry
-  //
-  // Every handler turn in C1 dispatches → resolveHandler returns null →
-  // UnhandledTurnClassError(reason='handler_not_registered') → turn-executor's
-  // UNHANDLED catch maps to INTERNAL_ERROR wire code. BI-01 MUST hold.
-  // -------------------------------------------------------------------------
-
-  describe('C1 — handler class routing through empty registry', () => {
-    it('UNHANDLED envelope + BI-01 preserved on registry miss (unregistered handler_id)', async () => {
-      // C2 registers run_analysis; the other six V5ActionType literals stay
-      // unregistered until their tranches ship. Pick one to exercise the
-      // miss path cleanly without touching C2 deps.
-      phaseState.classify = {
-        kind: 'success',
-        output: '{"turn_class":"handler","handler_id":"explain_result"}',
-      };
-      phaseState.narrate = { kind: 'success', output: 'narrate MUST NOT run' };
-
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-
-      // BI-01: started + completed, response_emitted=true
-      expectExactlyOneResponseInvariant();
-
-      // Envelope shape: ErrorBlock with INTERNAL_ERROR wire code
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('INTERNAL_ERROR');
-      }
-
-      // Telemetry contract
-      expect(telemetry.response_emitted).toBe(true);
-      // Classifier succeeds + emits handler class before dispatch throws →
-      // turn_class IS resolved in telemetry (differs from the 'propose'
-      // path where classifier throws before resolving).
+      const parsed = OlumiResponseSchema.parse(response);
+      // The composed text contains orientation + typed confirmation (from the
+      // default VALIDATION_REGISTRY template — "Ran analysis on your current scenario.")
+      expect(parsed.assistant_text).toContain('Running analysis on your scenario...');
+      expect(parsed.assistant_text).toContain('Ran analysis on your current scenario.');
       expect(telemetry.turn_class).toBe('handler');
-      expect(telemetry.commit_performed).toBe(false);
-      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-      expect(telemetry.stages_completed).toContain('classify');
-      expect(telemetry.stages_completed).not.toContain('compose');
-      expect(telemetry.stages_completed).not.toContain('commit');
-      expect(telemetry.llm_calls_used).toBe(1); // classifier ran; no handler invocation (miss)
+      expect(telemetry.intent_class).toBe('execute');
+      expect(telemetry.commit_performed).toBe(true);
+      // 1 routing call + 1 handler-internal
+      expect(telemetry.llm_calls_used).toBe(2);
+
+      const stages = completedEvents()[0]!.data.stages_completed as string[];
+      expect(stages).toContain('orient');
+      expect(stages).toContain('validate_skipped');
+      expect(stages).toContain('execute');
+      expect(stages).toContain('confirm');
+      expect(stages).toContain('compose');
+      expect(stages).toContain('commit');
+      expectBI01();
     });
 
-    it('UNHANDLED envelope when classifier emits handler class with hallucinated handler_id', async () => {
-      phaseState.classify = {
-        kind: 'success',
-        output: '{"turn_class":"handler","handler_id":"make_coffee"}',
+    it('confirmation is registry-driven, not improvised from handler_facts', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(VALID_EXECUTE_INPUT));
+      const fakeRegistry = new Map<string, never>([
+        [
+          'run_analysis',
+          (async () => ({
+            assistant_text: 'improvised text from the handler',
+            handler_facts: [],
+            llm_calls_used: 0,
+          })) as never,
+        ],
+      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+
+      const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-ex2', {
+        routingAdapter,
+        handlerRegistry: fakeRegistry,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      // Confirmation comes from the HANDLER_VALIDATION_REGISTRY template,
+      // not from handler outcome.assistant_text
+      expect(parsed.assistant_text).toContain('Ran analysis on your current scenario.');
+      expect(parsed.assistant_text).not.toContain('improvised text from the handler');
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Execute intent with validation active
+  // -------------------------------------------------------------------
+  describe('execute intent — validation rejects proposal', () => {
+    it('returns HANDLER_INVOCATION_FAILED with validation_error_code in details', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(VALID_EXECUTE_INPUT));
+
+      // Graph has no matching entity → ENTITY_NOT_FOUND
+      const graphLookup = {
+        findEntityById: () => null,
+        listEntitiesByKind: () => [],
       };
-      phaseState.narrate = { kind: 'success', output: 'narrate MUST NOT run' };
 
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      expectExactlyOneResponseInvariant();
+      const fakeRegistry = new Map<string, never>([
+        ['run_analysis', (async () => { throw new Error('handler should not be called'); }) as never],
+      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
 
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('INTERNAL_ERROR');
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-v1', {
+        routingAdapter,
+        handlerRegistry: fakeRegistry,
+        graphLookup,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.blocks[0]!.type).toBe('error');
+      if (parsed.blocks[0]!.type === 'error') {
+        expect(parsed.blocks[0]!.error_code).toBe('INTERNAL_ERROR');
+        const details = parsed.blocks[0]!.details as { cause_kind?: string; validation_error_code?: string };
+        expect(details?.cause_kind).toBe('validation_failed');
+        expect(details?.validation_error_code).toBe('ENTITY_NOT_FOUND');
       }
-
-      // Classifier throws UnhandledTurnClassError(reason='missing_handler_id')
-      // BEFORE it yields a turn_class, so turn_class remains null in telemetry.
+      expect(telemetry.validation_error_code).toBe('ENTITY_NOT_FOUND');
       expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-      expect(telemetry.turn_class).toBeNull();
-      expect(telemetry.commit_performed).toBe(false);
+      expectBI01();
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Routing error paths
+  // -------------------------------------------------------------------
+  describe('routing error paths', () => {
+    it('UpstreamTimeoutError → LLM_TIMEOUT envelope + BI-01 preserved', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => {
+        throw new UpstreamTimeoutError('read timeout');
+      });
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-r1', {
+        routingAdapter,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.blocks[0]!.type).toBe('error');
+      if (parsed.blocks[0]!.type === 'error') {
+        expect(parsed.blocks[0]!.error_code).toBe('UPSTREAM_TIMEOUT');
+      }
+      expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
+      expectBI01();
     });
 
-    it('biconditional violation (stray handler_id on direct_answer) → LLM_UNAVAILABLE, BI-01 holds', async () => {
-      // Biconditional fires inside Zod → ClassifierSchemaViolationError →
-      // LLM_SCHEMA_VIOLATION → LLM_UNAVAILABLE wire code. Distinct from the
-      // semantic handler-id paths above.
-      phaseState.classify = {
-        kind: 'success',
-        output: '{"turn_class":"direct_answer","handler_id":"run_analysis"}',
-      };
-      phaseState.narrate = { kind: 'success', output: 'narrate MUST NOT run' };
+    it('schema repair failed after one retry → LLM_SCHEMA_VIOLATION envelope', async () => {
+      const routingAdapter = mockRoutingAdapter(
+        vi.fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+          .mockResolvedValueOnce(mkToolUseResult({ intent_class: 'execute' }))
+          .mockResolvedValueOnce(mkToolUseResult({ intent_class: 'clarify' })) as unknown as ChatWithToolsMock,
+      );
 
-      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-1');
-      expectExactlyOneResponseInvariant();
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-r2', {
+        routingAdapter,
+      });
 
-      OlumiResponseSchema.parse(response);
-      const block = response.blocks[0]!;
-      if (block.type === 'error') {
-        expect(block.error_code).toBe('LLM_UNAVAILABLE');
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.blocks[0]!.type).toBe('error');
+      if (parsed.blocks[0]!.type === 'error') {
+        expect(parsed.blocks[0]!.error_code).toBe('LLM_UNAVAILABLE');
       }
-
       expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
-      expect(telemetry.turn_class).toBeNull();
-      expect(telemetry.commit_performed).toBe(false);
+      expectBI01();
+    });
+
+    it('outer turn budget wins over inner adapter error (constraint 7)', async () => {
+      const routingAdapter = mockRoutingAdapter(async (_args, opts) => {
+        // Wait for abort
+        return await new Promise<ChatWithToolsResult>((_resolve, reject) => {
+          opts.signal?.addEventListener('abort', () => {
+            const err = Object.assign(new Error('aborted'), { name: 'AbortError' });
+            reject(err);
+          });
+        });
+      });
+      process.env.TURN_BUDGET_MS = '50';
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-r3', {
+        routingAdapter,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.blocks[0]!.type).toBe('error');
+      if (parsed.blocks[0]!.type === 'error') {
+        expect(parsed.blocks[0]!.error_code).toBe('TURN_BUDGET_EXCEEDED');
+      }
+      expect(telemetry.failure_type).toBe('TURN_BUDGET_EXCEEDED');
+      expectBI01();
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Orientation / confirmation boundary
+  // -------------------------------------------------------------------
+  describe('boundary preservation', () => {
+    it('orientation text does not mention outcomes — it is composed BEFORE handler runs', async () => {
+      const orientation = 'About to run analysis on your current scenario (pre-action context)';
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(VALID_EXECUTE_INPUT, orientation),
+      );
+      const fakeRegistry = new Map<string, never>([
+        [
+          'run_analysis',
+          (async () => ({
+            assistant_text: 'WINNER: Option A at 72% confidence',
+            handler_facts: [],
+            llm_calls_used: 1,
+          })) as never,
+        ],
+      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+
+      const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-b1', {
+        routingAdapter,
+        handlerRegistry: fakeRegistry,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      // Orientation appears first, then deterministic confirmation — the
+      // handler's "improvised" assistant_text (WINNER:...) does NOT appear.
+      expect(parsed.assistant_text.startsWith(orientation)).toBe(true);
+      expect(parsed.assistant_text).not.toContain('WINNER');
     });
   });
 });
