@@ -52,6 +52,9 @@ import {
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import { buildTurnContext } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
+import { composeValidationFailure } from './compose/validation-failure-responses.js';
+import { composeHandlerFailure } from './compose/handler-failure-responses.js';
+import type { ComposeContext } from './compose/types.js';
 import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
@@ -398,10 +401,26 @@ export async function runTurnExecutor(
           'V5 TurnExecutor validation rejected tool-call proposal',
         );
         failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
-        response = buildFailureResponse('HANDLER_INVOCATION_FAILED', context.stage, {
-          cause_kind: 'validation_failed',
-          validation_error_code: validationResult.error.code,
-          ...(validationResult.error.details ?? {}),
+        const composeCtx: ComposeContext = {
+          graph: graphLookupForValidate,
+          handlerRegistry: validationRegistry,
+        };
+        const composed = composeValidationFailure(
+          validationResult.error,
+          composeCtx,
+          context.stage,
+        );
+        response = composed.response;
+        emit(TelemetryEvents.TurnExecutorFailureResponse, {
+          request_id: requestId,
+          session_id: context.session_id,
+          stage: context.stage,
+          failure_origin: 'validator',
+          error_code: validationResult.error.code,
+          template_used: composed.template_id,
+          chip_attached: composed.response.suggested_actions.length > 0,
+          chip_type: composed.chip_type,
+          chip_count: composed.response.suggested_actions.length,
         });
         return finalizeRun();
       }
@@ -709,13 +728,29 @@ export async function runTurnExecutor(
           request_id: requestId,
           kind: error.kind,
           cause_kind: error.cause_kind,
+          retryable: error.retryable,
           message: error.message,
         },
         'V5 TurnExecutor handler invocation failed',
       );
       failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
-      response = buildFailureResponse('HANDLER_INVOCATION_FAILED', context.stage, {
-        cause_kind: error.cause_kind,
+      const composeCtx: ComposeContext = {
+        graph: graphLookupForValidate,
+        handlerRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+      };
+      const composed = composeHandlerFailure(error, composeCtx, context.stage);
+      response = composed.response;
+      emit(TelemetryEvents.TurnExecutorFailureResponse, {
+        request_id: requestId,
+        session_id: context.session_id,
+        stage: context.stage,
+        failure_origin: 'handler',
+        error_code: error.cause_kind,
+        template_used: composed.template_id,
+        chip_attached: composed.response.suggested_actions.length > 0,
+        chip_type: composed.chip_type,
+        chip_count: composed.response.suggested_actions.length,
+        retryable: error.retryable,
       });
       return finalizeRun();
     }

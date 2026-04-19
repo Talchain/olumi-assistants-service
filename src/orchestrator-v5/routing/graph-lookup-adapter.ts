@@ -72,9 +72,9 @@ export type BuildGraphLookupResult =
  *
  * Validator callers reason in terms of proposal targets: "option" and "goal"
  * are addressable via distinct kinds; everything else collapses into a
- * generic "node" bucket. ("edge" and "constraint" are not produced from
- * graph.nodes — they come from edges[] and goal_constraints[] respectively
- * and are out of Phase 1.5 scope.)
+ * generic "node" bucket. "edge" is not produced from graph.nodes — edges[]
+ * is a separate top-level array. "constraint" comes from graph.goal_constraints[]
+ * and is handled separately in buildGraphLookup (see debt inventory §1.3).
  */
 function toEntityKind(nodeKind: string): EntityKind | null {
   if (nodeKind === 'option') return 'option';
@@ -111,6 +111,30 @@ function normaliseOptions(
 }
 
 /**
+ * Project each goal_constraints[] entry into a lookup-compatible entity.
+ * GoalConstraintSchema (src/schemas/assist.ts) guarantees `constraint_id`
+ * is a non-empty string; `label` is optional. We surface constraints under
+ * `listEntitiesByKind('constraint')` so future handlers that target
+ * constraint entities get validator coverage. No current handler accepts
+ * 'constraint' — this is a forward-compatibility projection, validated
+ * by an adapter unit test.
+ */
+function collectConstraintEntries(
+  raw: GraphStateIngress['goal_constraints'],
+): Array<{ id: string; kind: EntityKind; label: string | null }> {
+  if (!raw) return [];
+  const entries: Array<{ id: string; kind: EntityKind; label: string | null }> = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+    const c = entry as { constraint_id?: unknown; label?: unknown };
+    if (typeof c.constraint_id !== 'string' || c.constraint_id.length === 0) continue;
+    const label = typeof c.label === 'string' ? c.label : null;
+    entries.push({ id: c.constraint_id, kind: 'constraint', label });
+  }
+  return entries;
+}
+
+/**
  * Build a GraphLookup from an ingress graph payload. Returns a discriminated
  * result so the caller can distinguish "no graph on the turn" (legitimate
  * skip) from "graph was present but we could not map any of it" (contract
@@ -124,10 +148,16 @@ export function buildGraphLookup(
   if (nodes.length === 0) return { kind: 'no_graph' };
 
   const byId = new Map<string, { id: string; kind: EntityKind; label: string | null }>();
-  const byKind = new Map<EntityKind, Array<{ id: string; label: string }>>();
+  const byKind = new Map<EntityKind, Array<{ id: string; label: string | null }>>();
 
   let droppedByMissingId = 0;
   let droppedByUnknownKind = 0;
+  // Tracked separately from `byId.size` because constraints get projected
+  // into byId after the node loop; mixing them inflates `mapped_nodes` and
+  // — worse — defeats the `all_dropped` payload-drift fail-fast (a payload
+  // with all-unknown-kind nodes plus any valid constraint would otherwise
+  // skip the hard-fail and silently degrade graph-dependent validation).
+  let nodeMappedCount = 0;
 
   for (const node of nodes) {
     // The ingress schema guarantees id/kind/label are strings; this guard
@@ -143,20 +173,44 @@ export function buildGraphLookup(
     }
     const label = typeof node.label === 'string' ? node.label : null;
     byId.set(node.id, { id: node.id, kind: mappedKind, label });
+    nodeMappedCount += 1;
     const kindList = byKind.get(mappedKind) ?? [];
-    kindList.push({ id: node.id, label: label ?? node.id });
+    // Keep label as null when the node has no label, so downstream consumers
+    // (composer chips, Dice matching) can distinguish "real label" from
+    // "no label — do NOT surface the id". Previously this substituted
+    // `node.id` in as the label, which leaked id-shaped tokens into chips.
+    kindList.push({ id: node.id, label });
     byKind.set(mappedKind, kindList);
   }
 
   const stats: GraphLookupStats = {
     total_nodes: nodes.length,
-    mapped_nodes: byId.size,
+    mapped_nodes: nodeMappedCount,
     dropped_by_unknown_kind: droppedByUnknownKind,
     dropped_by_missing_id: droppedByMissingId,
   };
 
-  if (byId.size === 0) {
+  // Fail fast on payload drift BEFORE projecting constraints. Keying this
+  // decision on `nodeMappedCount` (not `byId.size`) preserves the safety
+  // envelope: constraints alone are insufficient for graph-dependent
+  // validation to be safe.
+  if (nodeMappedCount === 0) {
     return { kind: 'all_dropped', stats };
+  }
+
+  // Project goal_constraints[] as constraint-kind entities. Additive to
+  // node-derived entries; constraints live on a separate wire field but
+  // share the same `findEntityById` / `listEntitiesByKind` surface.
+  // Dedupe by constraint id and skip ids that collide with an existing
+  // node — preserving `byId` as the authoritative entity-by-id index.
+  const seenConstraintIds = new Set<string>();
+  for (const entry of collectConstraintEntries(graph.goal_constraints)) {
+    if (seenConstraintIds.has(entry.id) || byId.has(entry.id)) continue;
+    seenConstraintIds.add(entry.id);
+    byId.set(entry.id, entry);
+    const kindList = byKind.get('constraint') ?? [];
+    kindList.push({ id: entry.id, label: entry.label });
+    byKind.set('constraint', kindList);
   }
 
   const optionsList = normaliseOptions(graph.options);

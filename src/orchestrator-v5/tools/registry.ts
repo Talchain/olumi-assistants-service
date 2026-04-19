@@ -215,15 +215,6 @@ export function getDefaultRegistry(): HandlerRegistry {
 }
 
 /**
- * Reset the default-registry cache. Tests that reconfigure env vars
- * between cases (e.g. toggling ISL_BASE_URL) should call this to force
- * re-evaluation.
- */
-export function _resetDefaultRegistryForTests(): void {
-  defaultRegistryCache = undefined;
-}
-
-/**
  * Typed lookup. Returns the `HandlerFn` for `handlerId` if registered,
  * else `null`. Callers (dispatch.ts) branch on the null to decide
  * between invoking the handler and raising the not-registered error.

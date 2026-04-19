@@ -84,9 +84,6 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
   NO_RESULTS: 'Ran analysis on your current scenario. No options were compared.',
 } as const;
 
-export type RunAnalysisAssistantTemplate =
-  (typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES)[keyof typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES];
-
 // ============================================================================
 // ScenarioReader — dependency injection seam for reading scenario state
 // ============================================================================
@@ -164,7 +161,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (!argsResult.success) {
       throw new HandlerInvocationFailedError(
         'RunAnalysisArgs failed validation',
-        { cause_kind: 'args_validation_failed', cause: argsResult.error },
+        {
+          cause_kind: 'args_validation_failed',
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            specific_issue: argsResult.error.issues[0]?.message,
+          },
+          cause: argsResult.error,
+        },
       );
     }
     const args: RunAnalysisArgs = argsResult.data;
@@ -176,8 +181,48 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     } catch (readError) {
       throw new HandlerInvocationFailedError(
         `Scenario read failed for ${args.scenario_id}`,
-        { cause_kind: 'scenario_read_failed', cause: readError },
+        {
+          cause_kind: 'scenario_read_failed',
+          retryable: true,
+          details: {
+            handler_id: 'run_analysis',
+            scenario_id: args.scenario_id,
+          },
+          cause: readError,
+        },
       );
+    }
+
+    // --- 2.5. options_not_configured guard --------------------------------
+    // The validator's "no_options_defined" precondition only checks the graph
+    // shape. Handler owns the richer check: options exist but none have
+    // non-empty interventions. First-option label is the minimal payload the
+    // composer needs to produce a specific next-step chip.
+    if (snapshot.options.length > 0) {
+      const anyConfigured = snapshot.options.some((opt) => {
+        const interventions = (opt as { interventions?: unknown }).interventions;
+        return (
+          interventions !== null &&
+          typeof interventions === 'object' &&
+          !Array.isArray(interventions) &&
+          Object.keys(interventions as Record<string, unknown>).length > 0
+        );
+      });
+      if (!anyConfigured) {
+        const firstLabel = firstOptionLabel(snapshot.options);
+        throw new HandlerInvocationFailedError(
+          'Options exist but none have configured interventions',
+          {
+            cause_kind: 'options_not_configured',
+            retryable: false,
+            details: {
+              handler_id: 'run_analysis',
+              ...(firstLabel !== null ? { first_option_label: firstLabel } : {}),
+              option_count: snapshot.options.length,
+            },
+          },
+        );
+      }
     }
 
     // --- 3. Build PLoT payload (allowlisted fields) -----------------------
@@ -209,13 +254,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       if (runError instanceof PLoTTimeoutError) {
         throw new HandlerInvocationFailedError(
           'PLoT timed out before returning a response',
-          { cause_kind: 'plot_timeout', cause: runError },
+          {
+            cause_kind: 'plot_timeout',
+            retryable: true,
+            details: { handler_id: 'run_analysis' },
+            cause: runError,
+          },
         );
       }
       if (runError instanceof PLoTError) {
         throw new HandlerInvocationFailedError(
           `PLoT returned error: ${runError.message}`,
-          { cause_kind: 'plot_error', cause: runError },
+          {
+            cause_kind: 'plot_error',
+            retryable: true,
+            details: { handler_id: 'run_analysis' },
+            cause: runError,
+          },
         );
       }
       // The PLoT client's outbound validator throws a plain Error with
@@ -227,14 +282,28 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         typeof runError === 'object' &&
         'orchestratorError' in runError
       ) {
+        const issueMsg = readOrchestratorErrorMessage(runError);
         throw new HandlerInvocationFailedError(
           'PLoT rejected outbound payload as invalid',
-          { cause_kind: 'plot_payload_invalid', cause: runError },
+          {
+            cause_kind: 'plot_payload_invalid',
+            retryable: false,
+            details: {
+              handler_id: 'run_analysis',
+              ...(issueMsg ? { specific_issue: issueMsg } : {}),
+            },
+            cause: runError,
+          },
         );
       }
       throw new HandlerInvocationFailedError(
         'PLoT invocation failed with unknown error',
-        { cause_kind: 'plot_unknown', cause: runError },
+        {
+          cause_kind: 'plot_unknown',
+          retryable: true,
+          details: { handler_id: 'run_analysis' },
+          cause: runError,
+        },
       );
     }
 
@@ -247,7 +316,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (analysisStatus !== null && analysisStatus !== 'completed') {
       throw new HandlerInvocationFailedError(
         `PLoT analysis did not complete: status=${analysisStatus}`,
-        { cause_kind: 'analysis_not_completed', cause: response },
+        {
+          cause_kind: 'analysis_not_completed',
+          retryable: true,
+          details: {
+            handler_id: 'run_analysis',
+            analysis_status: analysisStatus,
+          },
+          cause: response,
+        },
       );
     }
 
@@ -411,4 +488,34 @@ function extractOptionId(record: Record<string, unknown>): string | null {
     return record.option_label;
   }
   return null;
+}
+
+/**
+ * Read the `label` field from the first snapshot option record, when
+ * present. The handler only uses this for the options_not_configured
+ * composer payload; a null value still produces a coherent (if generic)
+ * user-facing message.
+ */
+function firstOptionLabel(
+  options: ReadonlyArray<Record<string, unknown>>,
+): string | null {
+  const first = options[0];
+  if (!first) return null;
+  const label = first.label;
+  return typeof label === 'string' && label.trim().length > 0 ? label.trim() : null;
+}
+
+/**
+ * Extract a user-safe description string from the PLoT client's
+ * orchestratorError-bearing payload-validator error. The surface area is
+ * small: the field is a plain Error-like object with a string `.message`.
+ * We never forward structured payloads to the user.
+ */
+function readOrchestratorErrorMessage(runError: unknown): string | null {
+  if (runError === null || typeof runError !== 'object') return null;
+  const record = runError as Record<string, unknown>;
+  const orch = record.orchestratorError;
+  if (orch === null || typeof orch !== 'object') return null;
+  const message = (orch as Record<string, unknown>).message;
+  return typeof message === 'string' && message.trim().length > 0 ? message : null;
 }

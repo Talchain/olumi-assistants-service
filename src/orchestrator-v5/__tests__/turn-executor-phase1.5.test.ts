@@ -282,9 +282,10 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     };
     expect(r.assistant_text).not.toContain('no_options_defined');
     const errBlock = r.blocks.find((b) => b.type === 'error') as
-      | { details?: { reason?: string } }
+      | { details?: { failure_origin?: string; error_code?: string } }
       | undefined;
-    expect(errBlock?.details?.reason).toBe('no_options_defined');
+    expect(errBlock?.details?.failure_origin).toBe('validator');
+    expect(errBlock?.details?.error_code).toBe('PRECONDITION_UNMET');
   });
 
   it('P0-2 all_dropped: graph with only unknown kinds fails the turn BEFORE routing', async () => {
