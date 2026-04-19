@@ -18,7 +18,7 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
-import type { GraphV3T } from '../../schemas/cee-v3.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import type { RoutingLog } from '../routing/routing-log.js';
 
 vi.mock('../session/index.js', () => ({
@@ -87,7 +87,7 @@ const RUN_ANALYSIS_PROPOSAL_OPT_A = {
 /**
  * Real-ish graph with options + interventions — passes run_analysis precondition.
  */
-function mkGraphWithConfiguredOptions(): GraphV3T {
+function mkGraphWithConfiguredOptions(): GraphStateIngress {
   return {
     nodes: [
       { id: 'goal_1', kind: 'goal', label: 'Maximize Profit' },
@@ -100,12 +100,13 @@ function mkGraphWithConfiguredOptions(): GraphV3T {
     options: [
       {
         id: 'opt_a',
+        status: 'ready',
         interventions: {
           fac_1: { value: 0.7, source: 'user_specified' },
         },
       },
     ],
-  } as unknown as GraphV3T;
+  } as GraphStateIngress;
 }
 
 type TelemetryEvent = { event: string; data: Record<string, unknown> };
@@ -223,13 +224,13 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
 
   it('precondition fires on a real graph with no intervention data — PRECONDITION_UNMET', async () => {
     // Graph has an option node but no configured interventions in options[].
-    const graphMissingInterventions: GraphV3T = {
+    const graphMissingInterventions: GraphStateIngress = {
       nodes: [
         { id: 'goal_1', kind: 'goal', label: 'Profit' },
         { id: 'opt_a', kind: 'option', label: 'Expand' },
       ],
       edges: [],
-    } as unknown as GraphV3T;
+    } as GraphStateIngress;
 
     const routingAdapter = mockRoutingAdapter(
       mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A, 'Running analysis...'),
@@ -256,6 +257,102 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
       | { details?: { reason?: string } }
       | undefined;
     expect(errBlock?.details?.reason).toBe('options_lack_intervention_data');
+  });
+
+  it('P0-2 all_dropped: graph with only unknown kinds fails the turn BEFORE routing', async () => {
+    // Payload drift regression guard: a graph whose nodes have unknown kinds
+    // must fail the turn (graph_payload_drift) rather than silently proceed
+    // as "no graph" and bypass validator graph-dependent checks.
+    const drifted: GraphStateIngress = {
+      nodes: [
+        { id: 'n1', kind: 'unseen_new_kind', label: 'N1' },
+        { id: 'n2', kind: 'another_unseen', label: 'N2' },
+      ],
+      edges: [],
+    } as GraphStateIngress;
+
+    const routingAdapter = mockRoutingAdapter(
+      mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A, 'should never be reached'),
+    );
+
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-drift', {
+      routingAdapter,
+      graphState: drifted,
+    });
+
+    // Routing adapter must NOT have been called — turn failed fast.
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+    const r = response as {
+      blocks: Array<{ type: string; details?: { reason?: string; total_nodes?: number } }>;
+    };
+    const errBlock = r.blocks.find((b) => b.type === 'error');
+    expect(errBlock?.details?.reason).toBe('graph_payload_drift');
+    expect(errBlock?.details?.total_nodes).toBe(2);
+  });
+
+  it('P0-2 all_dropped: telemetry event fires with drop stats (Imp-2)', async () => {
+    const drifted: GraphStateIngress = {
+      nodes: [{ id: 'n1', kind: 'nope', label: 'N' }],
+      edges: [],
+    } as GraphStateIngress;
+    const routingAdapter = mockRoutingAdapter(mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A));
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p15-drift-tel', {
+      routingAdapter,
+      graphState: drifted,
+    });
+
+    const glEvent = events.find((e) => e.event === 'turn_executor.graph_lookup');
+    expect(glEvent).toBeDefined();
+    expect(glEvent!.data.outcome).toBe('all_dropped');
+    expect(glEvent!.data.total_nodes).toBe(1);
+    expect(glEvent!.data.mapped_nodes).toBe(0);
+    expect(glEvent!.data.dropped_by_unknown_kind).toBe(1);
+  });
+
+  it('P0-1: validator rejects kind mismatch with ENTITY_KIND_MISMATCH (LLM hallucination guard)', async () => {
+    // Graph has opt_a as kind='option'; Sonnet proposes kind='goal' on the
+    // same id. Without the kind cross-check, this would pass structural
+    // checks (run_analysis accepts both option and goal) and reach the
+    // handler pointing at the wrong node class.
+    const graph: GraphStateIngress = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Profit' },
+        { id: 'opt_a', kind: 'option', label: 'A' },
+      ],
+      edges: [],
+      options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],
+    } as GraphStateIngress;
+
+    const routingAdapter = mockRoutingAdapter(
+      mkToolUseResult(
+        {
+          intent_class: 'execute',
+          action: {
+            handler_id: 'run_analysis',
+            entity: {
+              id: 'opt_a', // the id resolves to an option
+              kind: 'goal', // but LLM claims goal
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+              label: 'A',
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        },
+        'Running',
+      ),
+    );
+
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-kind', {
+      routingAdapter,
+      graphState: graph,
+    });
+
+    expect(telemetry.validation_error_code).toBe('ENTITY_KIND_MISMATCH');
+    expect(telemetry.commit_performed).toBe(false);
   });
 
   it('ENTITY_NOT_FOUND fires when Sonnet proposes an id absent from the graph', async () => {

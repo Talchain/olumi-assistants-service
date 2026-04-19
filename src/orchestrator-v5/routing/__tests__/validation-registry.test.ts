@@ -7,19 +7,25 @@
  *   • options_lack_intervention_data
  */
 import { describe, it, expect } from 'vitest';
-import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import type { ProposalAction } from '../types.js';
 import { buildGraphLookup } from '../graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
-import { validateToolCall } from '../validator.js';
+import { validateToolCall, type GraphLookup } from '../validator.js';
 
 function mkGraph(
   nodes: Array<{ id: string; kind: string; label: string }>,
   options?: Array<Record<string, unknown>>,
-): GraphV3T {
-  const g = { nodes, edges: [] } as unknown as Record<string, unknown>;
+): GraphStateIngress {
+  const g: Record<string, unknown> = { nodes, edges: [] };
   if (options) g.options = options;
-  return g as unknown as GraphV3T;
+  return g as GraphStateIngress;
+}
+
+function lookupFor(graph: GraphStateIngress): GraphLookup {
+  const r = buildGraphLookup(graph);
+  if (r.kind !== 'ok') throw new Error(`expected ok adapter result, got ${r.kind}`);
+  return r.lookup;
 }
 
 function runAnalysisProposal(entityId: string, entityKind: 'option' | 'goal'): ProposalAction {
@@ -40,7 +46,7 @@ function runAnalysisProposal(entityId: string, entityKind: 'option' | 'goal'): P
 describe('run_analysis precondition', () => {
   it('rejects with no_options_defined when graph has neither option-nodes nor options[]', () => {
     const graph = mkGraph([{ id: 'g1', kind: 'goal', label: 'Profit' }]);
-    const lookup = buildGraphLookup(graph)!;
+    const lookup = lookupFor(graph);
     const result = validateToolCall(
       runAnalysisProposal('g1', 'goal'),
       lookup,
@@ -61,7 +67,7 @@ describe('run_analysis precondition', () => {
       { id: 'g1', kind: 'goal', label: 'Profit' },
       { id: 'opt_a', kind: 'option', label: 'Option A' },
     ]);
-    const lookup = buildGraphLookup(graph)!;
+    const lookup = lookupFor(graph);
     const result = validateToolCall(
       runAnalysisProposal('opt_a', 'option'),
       lookup,
@@ -82,7 +88,7 @@ describe('run_analysis precondition', () => {
       ],
       [{ id: 'opt_a', interventions: {} }],
     );
-    const lookup = buildGraphLookup(graph)!;
+    const lookup = lookupFor(graph);
     const result = validateToolCall(
       runAnalysisProposal('opt_a', 'option'),
       lookup,
@@ -94,7 +100,7 @@ describe('run_analysis precondition', () => {
     }
   });
 
-  it('passes when at least one option has a configured intervention', () => {
+  it('passes when an option has status="ready" AND a configured intervention (P1-3)', () => {
     const graph = mkGraph(
       [
         { id: 'g1', kind: 'goal', label: 'Profit' },
@@ -103,17 +109,66 @@ describe('run_analysis precondition', () => {
       [
         {
           id: 'opt_a',
+          status: 'ready',
           interventions: { fac_1: { value: 0.8, source: 'user_specified' } },
         },
       ],
     );
-    const lookup = buildGraphLookup(graph)!;
+    const lookup = lookupFor(graph);
     const result = validateToolCall(
       runAnalysisProposal('opt_a', 'option'),
       lookup,
       HANDLER_VALIDATION_REGISTRY,
     );
     expect(result.valid).toBe(true);
+  });
+
+  it('P1-3: rejects when option has interventions but status is not "ready"', () => {
+    // Canonical isOptionReady() requires BOTH status === 'ready' and
+    // non-empty interventions. An option in needs_user_mapping with a
+    // stray intervention is not analysis-ready.
+    const graph = mkGraph(
+      [{ id: 'opt_a', kind: 'option', label: 'A' }],
+      [
+        {
+          id: 'opt_a',
+          status: 'needs_user_mapping',
+          interventions: { fac_1: { value: 1 } },
+        },
+      ],
+    );
+    const lookup = lookupFor(graph);
+    const result = validateToolCall(
+      runAnalysisProposal('opt_a', 'option'),
+      lookup,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error.code).toBe('PRECONDITION_UNMET');
+      expect(result.error.details?.reason).toBe('options_lack_intervention_data');
+    }
+  });
+
+  it('P0-1: rejects ENTITY_KIND_MISMATCH when proposal.kind differs from graph kind', () => {
+    // LLM hallucination guard: if Sonnet proposes kind='option' but the id
+    // resolves to a factor, validator must reject with ENTITY_KIND_MISMATCH.
+    // (Here we use a 'goal' proposed kind with an option id, to hit the cross-
+    // check without accepted_entity_kinds also rejecting it — run_analysis
+    // accepts both option and goal.)
+    const graph = mkGraph([{ id: 'opt_a', kind: 'option', label: 'A' }]);
+    const lookup = lookupFor(graph);
+    const result = validateToolCall(
+      runAnalysisProposal('opt_a', 'goal'), // proposed goal, graph says option
+      lookup,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
+      expect(result.error.details?.proposed_kind).toBe('goal');
+      expect(result.error.details?.resolved_kind).toBe('option');
+    }
   });
 
   it('precondition does not run when no graph lookup is available (frame stage)', () => {
@@ -131,7 +186,7 @@ describe('run_analysis precondition', () => {
     // Regression guard: the reason strings are machine-stable so compose can
     // choose the right fix-path language.
     const graph = mkGraph([{ id: 'g1', kind: 'goal', label: 'Profit' }]);
-    const lookup = buildGraphLookup(graph)!;
+    const lookup = lookupFor(graph);
     const result = validateToolCall(
       runAnalysisProposal('g1', 'goal'),
       lookup,

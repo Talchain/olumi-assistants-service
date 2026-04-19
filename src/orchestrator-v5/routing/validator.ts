@@ -269,6 +269,28 @@ export function validateToolCall(
       };
     }
 
+    // Phase 1.5 P0-1: cross-check proposal.entity.kind against the graph's
+    // actual kind for this id. The earlier accepted_entity_kinds check only
+    // trusts the LLM's claim about the entity. Without this check, an LLM
+    // that hallucinates kind='option' on a factor id would pass validation
+    // and reach the handler targeting the wrong node class.
+    if (existing.kind !== proposal.entity.kind) {
+      return {
+        valid: false,
+        error: {
+          code: 'ENTITY_KIND_MISMATCH',
+          message:
+            `Proposed kind "${proposal.entity.kind}" does not match graph-resolved kind ` +
+            `"${existing.kind}" for id "${proposal.entity.id}"`,
+          details: {
+            entity_id: proposal.entity.id,
+            proposed_kind: proposal.entity.kind,
+            resolved_kind: existing.kind,
+          },
+        },
+      };
+    }
+
     if (proposal.entity.resolution_method === 'label_match') {
       const suspicion = detectSuspiciousLabelMatch(proposal.entity, graph);
       if (suspicion) return { valid: false, error: suspicion };

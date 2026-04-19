@@ -310,7 +310,7 @@ describe('phase 1 validation rejection — no handler invocation, BI-01 preserve
     const graphLookup = {
       findEntityById: () => ({ id: 'opt_a', kind: 'option' as never, label: 'A' }),
       listEntitiesByKind: () => [{ id: 'opt_a', label: 'A' }],
-      options: [{ id: 'opt_a', interventions: { fac_1: { value: 0.8 } } }],
+      options: [{ id: 'opt_a', status: 'ready', interventions: { fac_1: { value: 0.8 } } }],
     };
 
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-vr4', {

@@ -78,9 +78,15 @@ import {
   type HandlerValidationRegistry,
   type ValidationError,
 } from './routing/validator.js';
-import { buildGraphLookup } from './routing/graph-lookup-adapter.js';
+import {
+  buildGraphLookup,
+  type GraphLookupStats,
+} from './routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
-import type { GraphV3T } from '../schemas/cee-v3.js';
+import type {
+  GraphStateIngress,
+  AnalysisStateIngress,
+} from './boundary/request-extensions.js';
 import type { V2RunResponseEnvelope } from '../orchestrator/types.js';
 import { compactAnalysis } from '../orchestrator/context/analysis-compact.js';
 import {
@@ -124,18 +130,19 @@ export interface RunTurnExecutorOptions {
   /** Injected validation registry (tests); production uses the default. */
   readonly validationRegistry?: HandlerValidationRegistry;
   /**
-   * Phase 1.5: graph content from the HTTP request body. When provided,
-   * populates ContextPack.graph and drives a derived GraphLookup for VALIDATE.
-   * Absent / null on frame-stage turns and non-UI callers (integration tests
-   * that pass graphLookup directly).
+   * Phase 1.5: graph content from the HTTP request body (Zod-parsed ingress
+   * shape — permissive content, not the full CEE response envelope). When
+   * provided, populates ContextPack.graph and drives a derived GraphLookup
+   * for VALIDATE. Absent / null on frame-stage turns and non-UI callers.
    */
-  readonly graphState?: GraphV3T | null;
+  readonly graphState?: GraphStateIngress | null;
   /**
-   * Phase 1.5: analysis envelope from the HTTP request body. When provided,
-   * populates ContextPack.analysis via compactAnalysis(). Absent / null on
-   * pre-analysis decisions.
+   * Phase 1.5: analysis envelope from the HTTP request body (Zod-parsed
+   * ingress shape — permissive; only `analysis_status` is structurally
+   * required). When provided, populates ContextPack.analysis via
+   * compactAnalysis(). Absent / null on pre-analysis decisions.
    */
-  readonly analysisState?: V2RunResponseEnvelope | null;
+  readonly analysisState?: AnalysisStateIngress | null;
   /**
    * Optional graph lookup override — tests pass a mock to exercise validator
    * paths without threading a full GraphV3T. Production derives this from
@@ -199,16 +206,74 @@ export async function runTurnExecutor(
   let sonnetTextForLog = '';
   let contextPackForLog: ContextPack | null = null;
 
+  // Phase 1.5: derive GraphLookup from the ingress payload BEFORE routing so
+  // a payload-drift situation (nodes present but none mappable) fails the
+  // turn fast, before we spend LLM tokens on a graph we cannot safely
+  // validate against. Tests can pre-supply options.graphLookup to bypass
+  // the adapter entirely. See BuildGraphLookupResult for the three states.
+  let graphLookupForValidate: GraphLookup | undefined;
+  let graphLookupStatsForLog: GraphLookupStats | undefined;
+  let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
+    'no_graph';
+  if (options.graphLookup) {
+    graphLookupForValidate = options.graphLookup;
+    graphLookupBuildReason = 'test_override';
+  } else {
+    const adapterResult = buildGraphLookup(options.graphState ?? null);
+    graphLookupBuildReason = adapterResult.kind;
+    if (adapterResult.kind === 'ok') {
+      graphLookupForValidate = adapterResult.lookup;
+      graphLookupStatsForLog = adapterResult.stats;
+      emit(TelemetryEvents.TurnExecutorGraphLookup, {
+        request_id: requestId,
+        outcome: 'ok',
+        ...adapterResult.stats,
+      });
+    } else if (adapterResult.kind === 'all_dropped') {
+      graphLookupStatsForLog = adapterResult.stats;
+      emit(TelemetryEvents.TurnExecutorGraphLookup, {
+        request_id: requestId,
+        outcome: 'all_dropped',
+        ...adapterResult.stats,
+      });
+    }
+  }
+
   try {
+    // Hard-fail on payload drift: nodes were present but NONE mapped to a
+    // known kind. Bypassing graph-dependent validation in this case would
+    // silently degrade the safety envelope — reject the turn instead.
+    if (graphLookupBuildReason === 'all_dropped' && graphLookupStatsForLog) {
+      log.error(
+        {
+          request_id: requestId,
+          stats: graphLookupStatsForLog,
+        },
+        'V5 TurnExecutor graph payload drift — all nodes dropped by adapter, failing turn',
+      );
+      failureType = INTERNAL_TO_WIRE.UNHANDLED;
+      response = buildFailureResponse('UNHANDLED', context.stage, {
+        reason: 'graph_payload_drift',
+        total_nodes: graphLookupStatsForLog.total_nodes,
+        dropped_by_unknown_kind: graphLookupStatsForLog.dropped_by_unknown_kind,
+        dropped_by_missing_id: graphLookupStatsForLog.dropped_by_missing_id,
+      });
+      return finalizeRun();
+    }
+
     // ==================================================================
     // STEP 1 — ORIENT
     // ==================================================================
     let routingResult: RoutingResult;
-    // Phase 1.5: compile analysis summary once per turn. `compactAnalysis` is
-    // the existing V4 utility that projects V2RunResponseEnvelope → the
-    // AnalysisResponseSummary shape the assembler consumes.
-    const analysisSummary =
-      options.analysisState ? compactAnalysis(options.analysisState) : null;
+    // Phase 1.5: compile analysis summary once per turn. compactAnalysis is
+    // the existing V4 utility that projects V2RunResponseEnvelope →
+    // AnalysisResponseSummary. AnalysisStateIngress is a structural subset
+    // (only analysis_status is required; everything else passthrough).
+    // coerceIngressAnalysis fills the minimal fields compactAnalysis expects
+    // before calling it; compactAnalysis is defensive on missing sub-fields.
+    const analysisSummary = options.analysisState
+      ? compactAnalysis(coerceIngressAnalysis(options.analysisState))
+      : null;
     try {
       const contextPack = assembleContextPack({
         payload,
@@ -278,21 +343,24 @@ export async function runTurnExecutor(
 
       // STEP 2 — VALIDATE. Structural checks (handler existence, resolution
       // status, kind, parameter bounds) ALWAYS run. Graph-dependent checks
-      // (entity existence, Dice suspicion, preconditions) activate when a
-      // GraphLookup is available — derived from options.graphState in
-      // production, or passed directly by tests via options.graphLookup.
+      // (entity existence, Dice suspicion, preconditions) activate when the
+      // pre-derived graphLookupForValidate is non-undefined (ok or
+      // test_override). The all_dropped case already failed the turn
+      // before the routing call.
       //
-      // Telemetry semantics (Phase 1.5 — plan D4):
+      // Telemetry semantics (Phase 1.5):
       //   • validate_skipped_no_graph — INTENTIONAL skip on frame-stage turns
       //     or non-UI callers that legitimately have no graph yet.
       //   • validate_skipped_graph_checks — the Phase 1a leak; absent from
       //     production code after Phase 1.5. Guarded by invariant script.
       const validationRegistry = options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
-      const graphLookup =
-        options.graphLookup ?? buildGraphLookup(options.graphState ?? null);
-      const validationResult = validateToolCall(action, graphLookup, validationRegistry);
+      const validationResult = validateToolCall(
+        action,
+        graphLookupForValidate,
+        validationRegistry,
+      );
       stagesCompleted.push('validate');
-      if (!graphLookup) {
+      if (!graphLookupForValidate) {
         stagesCompleted.push('validate_skipped_no_graph');
         log.info(
           { request_id: requestId, handler_id: proposedHandlerId, stage: context.stage },
@@ -634,6 +702,27 @@ export async function runTurnExecutor(
 // -----------------------------------------------------------------------
 // Small pure helpers
 // -----------------------------------------------------------------------
+
+/**
+ * Narrow an ingress analysis payload into the V2RunResponseEnvelope shape
+ * that compactAnalysis() consumes. The ingress schema only requires
+ * `analysis_status`; compactAnalysis reads `meta`, `results`, `robustness`,
+ * `factor_sensitivity`, etc. defensively. We fill the required fields with
+ * safe defaults and forward everything else verbatim — no type assertion,
+ * structural coercion only.
+ */
+function coerceIngressAnalysis(a: AnalysisStateIngress): V2RunResponseEnvelope {
+  const raw = a as AnalysisStateIngress & {
+    meta?: V2RunResponseEnvelope['meta'];
+    results?: unknown[];
+    [k: string]: unknown;
+  };
+  return {
+    ...raw,
+    meta: raw.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
+    results: Array.isArray(raw.results) ? raw.results : [],
+  };
+}
 
 function summariseRouting(result: RoutingResult): {
   turnClass: C1TurnClass;

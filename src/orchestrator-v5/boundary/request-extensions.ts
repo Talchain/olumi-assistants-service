@@ -30,8 +30,6 @@
 import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
-import type { GraphV3T } from '../../schemas/cee-v3.js';
-import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
@@ -86,9 +84,19 @@ export const AnalysisStateIngressSchema = z
   })
   .passthrough();
 
+/**
+ * Types inferred directly from the Zod schemas above. Downstream consumers
+ * (TurnExecutor, assembler, adapter) import these — nobody outside this
+ * module should `as`-cast to GraphV3T / V2RunResponseEnvelope when carrying
+ * an ingress payload, because those deeper types demand fields the wire
+ * schema does not require.
+ */
+export type GraphStateIngress = z.infer<typeof GraphStateIngressSchema>;
+export type AnalysisStateIngress = z.infer<typeof AnalysisStateIngressSchema>;
+
 export type ParsedRequestExtensions = {
-  graphState: GraphV3T | null;
-  analysisState: V2RunResponseEnvelope | null;
+  graphState: GraphStateIngress | null;
+  analysisState: AnalysisStateIngress | null;
 };
 
 export type ParseExtensionsResult =
@@ -131,7 +139,7 @@ export function parseRequestExtensions(
   const rawGraph = body.graph_state;
   const rawAnalysis = body.analysis_state;
 
-  let graphState: GraphV3T | null = null;
+  let graphState: GraphStateIngress | null = null;
   if (rawGraph !== undefined && rawGraph !== null) {
     const parsed = GraphStateIngressSchema.safeParse(rawGraph);
     if (!parsed.success) {
@@ -160,12 +168,10 @@ export function parseRequestExtensions(
         },
       };
     }
-    // Cast to GraphV3T — the schema is a subset of GraphV3T (required fields
-    // are the content fields the validator needs; extras passthrough).
-    graphState = parsed.data as unknown as GraphV3T;
+    graphState = parsed.data;
   }
 
-  let analysisState: V2RunResponseEnvelope | null = null;
+  let analysisState: AnalysisStateIngress | null = null;
   if (rawAnalysis !== undefined && rawAnalysis !== null) {
     const parsed = AnalysisStateIngressSchema.safeParse(rawAnalysis);
     if (!parsed.success) {
@@ -194,7 +200,7 @@ export function parseRequestExtensions(
         },
       };
     }
-    analysisState = parsed.data as unknown as V2RunResponseEnvelope;
+    analysisState = parsed.data;
   }
 
   // Emit a success event only when at least one extension field was actually

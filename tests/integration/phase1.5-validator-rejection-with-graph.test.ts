@@ -100,7 +100,7 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
         { id: 'goal_1', kind: 'goal', label: 'Profit' },
         { id: 'opt_a', kind: 'option', label: 'Expand' },
       ],
-      [{ id: 'opt_a', interventions: { fac_1: { value: 1 } } }],
+      [{ id: 'opt_a', status: 'ready', interventions: { fac_1: { value: 1 } } }],
     );
     const handler = handlerSpy();
     const registry = new Map([['run_analysis', handler]]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
@@ -237,7 +237,7 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
         { id: 'opt_a', kind: 'option', label: 'Expand into the United Kingdom' },
         { id: 'opt_b', kind: 'option', label: 'Expand UK' },
       ],
-      [{ id: 'opt_a', interventions: { fac_1: { value: 1 } } }],
+      [{ id: 'opt_a', status: 'ready', interventions: { fac_1: { value: 1 } } }],
     );
     const routingAdapter = mockAdapter(
       toolUseResult(

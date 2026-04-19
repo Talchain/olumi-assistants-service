@@ -7,12 +7,24 @@
  * the concrete graph representation so the validator stays mechanically
  * unchanged as new graph shapes appear.
  *
- * This adapter builds a GraphLookup from the Phase 1.5 GraphV3T payload,
- * preserving the adapter boundary per plan correction #5. The validator does
- * not learn about GraphV3T; it only learns about the lookup surface.
+ * This adapter builds a GraphLookup from the Phase 1.5 ingress payload. It
+ * returns a discriminated result so callers can distinguish three states
+ * (P0-2 fix):
+ *
+ *   • no_graph    — payload is absent, null, or structurally empty.
+ *                   Frame-stage turns legitimately land here; the caller
+ *                   emits `validate_skipped_no_graph` telemetry.
+ *   • all_dropped — nodes were present but NONE mapped to a known kind.
+ *                   This is a hard contract violation (the wire has drifted
+ *                   past what this code recognises); caller must fail the
+ *                   turn rather than silently skip graph-dependent checks.
+ *   • ok          — lookup built; stats describe how many nodes survived.
+ *
+ * Stats are surfaced into the routing log so payload drift is visible
+ * BEFORE the safety envelope silently degrades (Imp-2).
  */
 
-import type { GraphV3T } from '../../schemas/cee-v3.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import type { EntityKind } from './types.js';
 import type { GraphLookup } from './validator.js';
 
@@ -32,76 +44,122 @@ export interface GraphLookupWithOptions extends GraphLookup {
 }
 
 /**
+ * Per-turn statistics on how the ingress graph survived adapter mapping.
+ * Emitted to the routing log so wire drift is observable before it silently
+ * starts bypassing the safety envelope.
+ */
+export interface GraphLookupStats {
+  readonly total_nodes: number;
+  readonly mapped_nodes: number;
+  readonly dropped_by_unknown_kind: number;
+  readonly dropped_by_missing_id: number;
+}
+
+export type BuildGraphLookupResult =
+  | { readonly kind: 'no_graph' }
+  | { readonly kind: 'all_dropped'; readonly stats: GraphLookupStats }
+  | {
+      readonly kind: 'ok';
+      readonly lookup: GraphLookupWithOptions;
+      readonly stats: GraphLookupStats;
+    };
+
+/**
  * Map a NodeV3 `kind` field to the validator's EntityKind vocabulary.
  *
  *   NodeV3 kinds:  goal, factor, outcome, decision, risk, action, option
  *   EntityKind:    node, edge, option, goal, constraint
  *
- * Validator callers reason in terms of proposal targets: "option", "goal",
- * "constraint" are addressable via distinct kinds; everything else is a
- * generic "node" bucket. We preserve the option/goal distinction (handlers
- * like run_analysis accept those kinds explicitly) and collapse the rest
- * into "node".
+ * Validator callers reason in terms of proposal targets: "option" and "goal"
+ * are addressable via distinct kinds; everything else collapses into a
+ * generic "node" bucket. ("edge" and "constraint" are not produced from
+ * graph.nodes — they come from edges[] and goal_constraints[] respectively
+ * and are out of Phase 1.5 scope.)
  */
-function toEntityKind(nodeKind: unknown): EntityKind | null {
-  if (typeof nodeKind !== 'string') return null;
+function toEntityKind(nodeKind: string): EntityKind | null {
   if (nodeKind === 'option') return 'option';
   if (nodeKind === 'goal') return 'goal';
-  // factor / outcome / decision / risk / action all map to the generic
-  // "node" bucket per the validator's addressable-entity taxonomy.
-  if (nodeKind === 'factor' || nodeKind === 'outcome' || nodeKind === 'decision' ||
-      nodeKind === 'risk' || nodeKind === 'action') {
+  if (
+    nodeKind === 'factor' ||
+    nodeKind === 'outcome' ||
+    nodeKind === 'decision' ||
+    nodeKind === 'risk' ||
+    nodeKind === 'action'
+  ) {
     return 'node';
   }
   return null;
 }
 
 /**
- * Build a GraphLookup from a GraphV3T payload. Returns `undefined` when the
- * graph has no nodes — a frame-stage turn or a graph that arrived empty. The
- * validator treats `undefined` as "no lookup" and the TurnExecutor emits
- * `validate_skipped_no_graph` telemetry.
- *
- * The returned lookup is a pure projection over the graph's nodes. Edges are
- * not consulted — the validator surface never touches them.
+ * Normalise an ingress `options` value into a safe, read-only array of
+ * records. `GraphStateIngress.options` is `unknown[] | undefined` per the
+ * boundary schema — we narrow to proper records here so the precondition
+ * can reason about intervention configuration without further casts.
+ */
+function normaliseOptions(
+  raw: GraphStateIngress['options'],
+): ReadonlyArray<Record<string, unknown>> {
+  if (!raw) return [];
+  const records: Array<Record<string, unknown>> = [];
+  for (const entry of raw) {
+    if (typeof entry === 'object' && entry !== null && !Array.isArray(entry)) {
+      records.push(entry as Record<string, unknown>);
+    }
+  }
+  return records;
+}
+
+/**
+ * Build a GraphLookup from an ingress graph payload. Returns a discriminated
+ * result so the caller can distinguish "no graph on the turn" (legitimate
+ * skip) from "graph was present but we could not map any of it" (contract
+ * violation — payload drift).
  */
 export function buildGraphLookup(
-  graph: GraphV3T | null | undefined,
-): GraphLookup | undefined {
-  if (!graph) return undefined;
-  const nodes = graph.nodes ?? [];
-  if (nodes.length === 0) return undefined;
+  graph: GraphStateIngress | null | undefined,
+): BuildGraphLookupResult {
+  if (!graph) return { kind: 'no_graph' };
+  const nodes = graph.nodes;
+  if (nodes.length === 0) return { kind: 'no_graph' };
 
-  // Pre-index once: id → record, kind → record[]. Both are read-mostly for
-  // validator calls, so indexing up-front avoids O(n) scans per lookup.
   const byId = new Map<string, { id: string; kind: EntityKind; label: string | null }>();
   const byKind = new Map<EntityKind, Array<{ id: string; label: string }>>();
 
-  for (const raw of nodes) {
-    const node = raw as { id?: unknown; kind?: unknown; label?: unknown };
-    if (typeof node.id !== 'string') continue;
+  let droppedByMissingId = 0;
+  let droppedByUnknownKind = 0;
+
+  for (const node of nodes) {
+    // The ingress schema guarantees id/kind/label are strings; this guard
+    // only fires if a caller bypasses the boundary parse.
+    if (typeof node.id !== 'string') {
+      droppedByMissingId += 1;
+      continue;
+    }
     const mappedKind = toEntityKind(node.kind);
-    if (mappedKind === null) continue;
+    if (mappedKind === null) {
+      droppedByUnknownKind += 1;
+      continue;
+    }
     const label = typeof node.label === 'string' ? node.label : null;
-    const entry = { id: node.id, kind: mappedKind, label };
-    byId.set(node.id, entry);
+    byId.set(node.id, { id: node.id, kind: mappedKind, label });
     const kindList = byKind.get(mappedKind) ?? [];
     kindList.push({ id: node.id, label: label ?? node.id });
     byKind.set(mappedKind, kindList);
   }
 
-  if (byId.size === 0) return undefined;
+  const stats: GraphLookupStats = {
+    total_nodes: nodes.length,
+    mapped_nodes: byId.size,
+    dropped_by_unknown_kind: droppedByUnknownKind,
+    dropped_by_missing_id: droppedByMissingId,
+  };
 
-  // `options` is a passthrough field on the wire — GraphV3T's Zod schema
-  // declares only { nodes, edges }, but the UI may send an `options` array
-  // alongside. Surface whatever is there as a read-only array; preconditions
-  // that care about intervention configuration inspect it.
-  const rawOptions = ((graph as unknown as { options?: unknown }).options);
-  const optionsList: ReadonlyArray<Record<string, unknown>> = Array.isArray(rawOptions)
-    ? (rawOptions.filter((o): o is Record<string, unknown> =>
-        typeof o === 'object' && o !== null && !Array.isArray(o),
-      ))
-    : [];
+  if (byId.size === 0) {
+    return { kind: 'all_dropped', stats };
+  }
+
+  const optionsList = normaliseOptions(graph.options);
 
   const lookup: GraphLookupWithOptions = {
     findEntityById(id: string) {
@@ -112,5 +170,5 @@ export function buildGraphLookup(
     },
     options: optionsList,
   };
-  return lookup;
+  return { kind: 'ok', lookup, stats };
 }

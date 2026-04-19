@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
-import type { GraphV3T } from '../../schemas/cee-v3.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
 const HASH_HEX_LENGTH = 16;
@@ -37,12 +37,12 @@ const HASH_HEX_LENGTH = 16;
  *   4. SHA-256, take first 16 hex chars
  */
 export function computeDeterministicGraphHash(
-  graph: GraphV3T | null | undefined,
+  graph: GraphStateIngress | null | undefined,
 ): string | null {
   if (!graph) return null;
 
-  const nodes = graph.nodes ?? [];
-  const edges = graph.edges ?? [];
+  const nodes = graph.nodes;
+  const edges = graph.edges;
   if (nodes.length === 0 && edges.length === 0) return null;
 
   const nodeIdentity = nodes

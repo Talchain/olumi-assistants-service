@@ -28,7 +28,6 @@ import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { SessionTurn } from '@talchain/schemas/orchestrator';
 
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
-import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { detectCompound } from '../routing/compound-detector.js';
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
@@ -112,15 +111,16 @@ export interface AssembleContextPackInput {
 }
 
 /**
- * Graph input shape accepted by the assembler. Aligns with CEEGraphResponseV3
- * (schema_version "3.0" from src/schemas/cee-v3.ts) without importing the Zod
- * schema: we only read nodes/edges/options/goal_node_id/goal_constraints here,
- * and the passthrough contract means we never need to parse or validate the
- * shape. Callers providing V5 ingress payload graphs pass it unchanged.
+ * Graph input shape accepted by the assembler. The assembler treats graph
+ * content as opaque passthrough (F.6): it only reads `kind` on nodes to
+ * derive goals, and never introspects edges/options beyond forwarding them
+ * into the ContextPack. Accept any shape that carries the minimal wire
+ * fields — both `GraphV3T` (full Zod-validated shape) and `GraphStateIngress`
+ * (permissive Phase 1.5 boundary shape) are structurally compatible.
  */
 export interface GraphWithOptions {
-  readonly nodes: GraphV3T['nodes'];
-  readonly edges: GraphV3T['edges'];
+  readonly nodes: ReadonlyArray<{ readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly [k: string]: unknown }>;
+  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly [k: string]: unknown }>;
   readonly options?: readonly unknown[];
   readonly goal_node_id?: string;
   readonly goal_constraints?: readonly unknown[];

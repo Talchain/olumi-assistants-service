@@ -82,7 +82,7 @@ function mkConfiguredGraph(): GraphV3T {
       { id: 'fac_1', kind: 'factor', label: 'Demand' },
     ],
     edges: [{ from: 'fac_1', to: 'goal_1', strength: { mean: 0.5, std: 0.1 } }],
-    options: [{ id: 'opt_a', interventions: { fac_1: { value: 1 } } }],
+    options: [{ id: 'opt_a', status: 'ready', interventions: { fac_1: { value: 1 } } }],
   } as unknown as GraphV3T;
 }
 

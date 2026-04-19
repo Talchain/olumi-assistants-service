@@ -49,17 +49,24 @@ const runAnalysisPrecondition: PreconditionCheck = ({ graph }) => {
     return { ok: false, reason: 'no_options_defined' };
   }
 
-  const hasConfiguredInterventions = options.some((o) => {
-    const raw = o as { interventions?: unknown };
+  // P1-3: an option is only analysis-ready when both its status is 'ready'
+  // AND at least one intervention is configured — matches the canonical
+  // isOptionReady() helper in src/schemas/cee-v3.ts. An option with
+  // status='needs_user_mapping' + one intervention passes the looser
+  // "has interventions" check but isn't actually runnable.
+  const hasReadyOption = options.some((o) => {
+    const raw = o as { status?: unknown; interventions?: unknown };
+    if (raw.status !== 'ready') return false;
+    const interventions = raw.interventions;
     return (
-      raw.interventions !== undefined &&
-      raw.interventions !== null &&
-      typeof raw.interventions === 'object' &&
-      !Array.isArray(raw.interventions) &&
-      Object.keys(raw.interventions as Record<string, unknown>).length > 0
+      interventions !== undefined &&
+      interventions !== null &&
+      typeof interventions === 'object' &&
+      !Array.isArray(interventions) &&
+      Object.keys(interventions as Record<string, unknown>).length > 0
     );
   });
-  if (!hasConfiguredInterventions) {
+  if (!hasReadyOption) {
     return { ok: false, reason: 'options_lack_intervention_data' };
   }
 

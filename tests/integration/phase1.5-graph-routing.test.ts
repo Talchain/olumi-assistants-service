@@ -275,7 +275,7 @@ describe('Phase 1.5 — direct runTurnExecutor with graph and real fixture graph
     const scenarioReader = async () => ({
       graph: (UI_FIXTURE.graph_state as { nodes: unknown[]; edges: unknown[] }),
       options: [
-        { id: 'opt_1', option_id: 'opt_1', label: 'Expand East', interventions: { fac_1: { value: 1 } } },
+        { id: 'opt_1', option_id: 'opt_1', label: 'Expand East', status: 'ready', interventions: { fac_1: { value: 1 } } },
       ],
       goal_node_id: 'goal_1',
     });
@@ -296,7 +296,7 @@ describe('Phase 1.5 — direct runTurnExecutor with graph and real fixture graph
     const graphState = {
       ...(UI_FIXTURE.graph_state as Record<string, unknown>),
       options: [
-        { id: 'opt_1', interventions: { fac_1: { value: 0.8, source: 'user_specified' } } },
+        { id: 'opt_1', status: 'ready', interventions: { fac_1: { value: 0.8, source: 'user_specified' } } },
       ],
     };
 

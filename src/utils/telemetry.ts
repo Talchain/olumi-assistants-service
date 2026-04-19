@@ -447,6 +447,12 @@ export const TelemetryEvents = {
   TurnExecutorCompleted: "turn_executor.completed",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
+  // V5 Phase 1.5: graph lookup adapter outcome (Imp-2).
+  // Fields: outcome ('no_graph' | 'ok' | 'all_dropped'),
+  // total_nodes, mapped_nodes, dropped_by_unknown_kind, dropped_by_missing_id.
+  // 'all_dropped' is a hard payload-drift signal; ops should alert on it.
+  TurnExecutorGraphLookup: "turn_executor.graph_lookup",
+
   // V5 session persistence (slice B).
   // SessionReadDegraded emits when buildTurnContext's readRecent fails: the
   // turn still runs with empty prior-turn history. Emitted with
