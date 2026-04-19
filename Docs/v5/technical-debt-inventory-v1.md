@@ -309,14 +309,23 @@ No gaps identified.
 
 ## 9. Fixes landed in this audit
 
-See commits on `claude/v5-debt-audit`:
+See commits on `claude/v5-debt-audit` (each a separate, reviewable commit per brief instruction):
 
-1. `chore(v5): eslint — exempt co-located tests under src/**/__tests__/**` — fixes 64 spurious lint errors
-2. `chore(v5): remove dead export _resetDefaultRegistryForTests` — cleanup
-3. `chore(v5): remove dead export RunAnalysisAssistantTemplate` — cleanup
-4. `feat(v5): adapter maps goal_constraints[] to constraint entities` — closes deferred item §1.3
+1. `chore(v5): eslint — exempt co-located tests under src/**/__tests__/**` — one-line config addition; fixes 64 spurious lint errors across Phase 1 + Phase 1.5 test files
+2. `chore(v5): remove unused ScenarioReader import in turn-executor-handler.test` — cleanup surfaced by §1 fix
+3. `chore(v5): remove dead export _resetDefaultRegistryForTests (no callers)` — dead code removal
+4. `chore(v5): remove dead type RunAnalysisAssistantTemplate (no external consumers)` — dead code removal
+5. `feat(v5): adapter maps goal_constraints[] to constraint entities (debt §1.3)` — closes deferred §1.3 with 3 unit tests
 
-Each fix committed separately per brief instruction ("Commit fixes separately from the audit doc").
+**Verification after all fixes:**
+- `pnpm exec tsc -p tsconfig.build.json --noEmit` — clean
+- V5 + Phase 1.5 integration tests — **430/430 pass** (+4 new constraint projection tests)
+- Full suite — 0 new failures, +4 passes (vs. c41e6c0b baseline: 37 failed unchanged, 11738 passed)
+- Skip count — **unchanged** at 20 (no skips added, no skips removed)
+- `bash scripts/validate-v5-phase1.5-invariants.sh` — OK
+- `bash scripts/validate-state-write-invariant.sh` — OK
+- `bash scripts/validate-handler-ownership.sh` — OK
+- V5 production + PR files lint error count — **0**
 
 ---
 
