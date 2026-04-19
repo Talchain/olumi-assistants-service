@@ -92,6 +92,12 @@ export default [
       'src/version.ts', // Source of SERVICE_VERSION, intentionally reads from package.json with env override
       'scripts/**/*.ts',
       'tests/**/*.ts',
+      // Co-located tests alongside production code also need direct process.env
+      // access for the same reason as tests/ — setting/deleting env vars to
+      // exercise timeout + budget paths. Without this, every src/**/__tests__/
+      // test that calls `delete process.env.X` trips no-restricted-syntax.
+      'src/**/__tests__/**/*.ts',
+      'src/**/*.test.ts',
       'playwright.config.ts',
       'vitest.config.ts',
     ],
