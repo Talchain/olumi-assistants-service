@@ -239,7 +239,7 @@ describe('phase 1 validation rejection — no handler invocation, BI-01 preserve
     expect(telemetry.validation_error_code).toBe('ENTITY_RESOLUTION_AMBIGUOUS');
     expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
     expect(telemetry.commit_performed).toBe(false);
-    expect(telemetry.stages_completed).toContain('validate_skipped_graph_checks');
+    expect(telemetry.stages_completed).toContain('validate_skipped_no_graph');
     expect(telemetry.stages_completed).not.toContain('execute');
     expectBI01();
   });
@@ -304,9 +304,13 @@ describe('phase 1 validation rejection — no handler invocation, BI-01 preserve
       ),
     };
 
+    // Phase 1.5: run_analysis now has a precondition requiring configured
+    // interventions on options. The test needs a lookup that satisfies it so
+    // the "validation passes, handler throws" scenario is reachable.
     const graphLookup = {
       findEntityById: () => ({ id: 'opt_a', kind: 'option' as never, label: 'A' }),
       listEntitiesByKind: () => [{ id: 'opt_a', label: 'A' }],
+      options: [{ id: 'opt_a', interventions: { fac_1: { value: 0.8 } } }],
     };
 
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-vr4', {

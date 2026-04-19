@@ -66,6 +66,7 @@ import { sanitiseNarrateOutput } from './sanitise.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
 import { assembleContextPack, type ContextPack } from './context/context-pack-assembler.js';
+import { computeDeterministicGraphHash } from './context/graph-hash.js';
 import {
   RoutingError,
   routeWithToolUse,
@@ -77,7 +78,11 @@ import {
   type HandlerValidationRegistry,
   type ValidationError,
 } from './routing/validator.js';
+import { buildGraphLookup } from './routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
+import type { GraphV3T } from '../schemas/cee-v3.js';
+import type { V2RunResponseEnvelope } from '../orchestrator/types.js';
+import { compactAnalysis } from '../orchestrator/context/analysis-compact.js';
 import {
   buildRoutingLog,
   writeRoutingLog,
@@ -119,10 +124,23 @@ export interface RunTurnExecutorOptions {
   /** Injected validation registry (tests); production uses the default. */
   readonly validationRegistry?: HandlerValidationRegistry;
   /**
-   * Optional graph lookup. When undefined, VALIDATE skips entity-existence +
-   * Dice suspicion checks and emits a telemetry warning. Phase 1a: graph
-   * state is not yet threaded through the V5 payload, so production has no
-   * lookup and validation is skipped.
+   * Phase 1.5: graph content from the HTTP request body. When provided,
+   * populates ContextPack.graph and drives a derived GraphLookup for VALIDATE.
+   * Absent / null on frame-stage turns and non-UI callers (integration tests
+   * that pass graphLookup directly).
+   */
+  readonly graphState?: GraphV3T | null;
+  /**
+   * Phase 1.5: analysis envelope from the HTTP request body. When provided,
+   * populates ContextPack.analysis via compactAnalysis(). Absent / null on
+   * pre-analysis decisions.
+   */
+  readonly analysisState?: V2RunResponseEnvelope | null;
+  /**
+   * Optional graph lookup override — tests pass a mock to exercise validator
+   * paths without threading a full GraphV3T. Production derives this from
+   * `graphState` via buildGraphLookup(); when both are present, the explicit
+   * lookup wins (test ergonomics).
    */
   readonly graphLookup?: GraphLookup;
   /**
@@ -186,10 +204,17 @@ export async function runTurnExecutor(
     // STEP 1 — ORIENT
     // ==================================================================
     let routingResult: RoutingResult;
+    // Phase 1.5: compile analysis summary once per turn. `compactAnalysis` is
+    // the existing V4 utility that projects V2RunResponseEnvelope → the
+    // AnalysisResponseSummary shape the assembler consumes.
+    const analysisSummary =
+      options.analysisState ? compactAnalysis(options.analysisState) : null;
     try {
       const contextPack = assembleContextPack({
         payload,
         priorTurns: context.prior_turns,
+        graph: options.graphState ?? null,
+        analysis: analysisSummary,
       });
       contextPackForLog = contextPack;
       routingResult = await routeWithToolUse(contextPack, payload.message, {
@@ -252,20 +277,26 @@ export async function runTurnExecutor(
       proposedHandlerIdForLog = action.handler_id;
 
       // STEP 2 — VALIDATE. Structural checks (handler existence, resolution
-      // status, kind, parameter bounds) ALWAYS run, including in the
-      // production no-graph shape. Graph-dependent checks (entity existence,
-      // Dice suspicion, preconditions) are skipped internally by the
-      // validator when graph is undefined. The 'validate_skipped_graph_checks'
-      // stage marks the partial coverage so observability shows when the
-      // graph-dependent subset was bypassed.
+      // status, kind, parameter bounds) ALWAYS run. Graph-dependent checks
+      // (entity existence, Dice suspicion, preconditions) activate when a
+      // GraphLookup is available — derived from options.graphState in
+      // production, or passed directly by tests via options.graphLookup.
+      //
+      // Telemetry semantics (Phase 1.5 — plan D4):
+      //   • validate_skipped_no_graph — INTENTIONAL skip on frame-stage turns
+      //     or non-UI callers that legitimately have no graph yet.
+      //   • validate_skipped_graph_checks — the Phase 1a leak; absent from
+      //     production code after Phase 1.5. Guarded by invariant script.
       const validationRegistry = options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
-      const validationResult = validateToolCall(action, options.graphLookup, validationRegistry);
+      const graphLookup =
+        options.graphLookup ?? buildGraphLookup(options.graphState ?? null);
+      const validationResult = validateToolCall(action, graphLookup, validationRegistry);
       stagesCompleted.push('validate');
-      if (!options.graphLookup) {
-        stagesCompleted.push('validate_skipped_graph_checks');
-        log.warn(
-          { request_id: requestId, handler_id: proposedHandlerId },
-          'V5 TurnExecutor graph-dependent validation skipped — graph state not threaded through payload',
+      if (!graphLookup) {
+        stagesCompleted.push('validate_skipped_no_graph');
+        log.info(
+          { request_id: requestId, handler_id: proposedHandlerId, stage: context.stage },
+          'V5 TurnExecutor graph-dependent validation skipped — no graph on this turn',
         );
       }
       if (!validationResult.valid) {
@@ -455,6 +486,11 @@ export async function runTurnExecutor(
     // wrapper below catches both — turn execution must NEVER fail because
     // of routing log emission.
     const writer = options.routingLogWriter ?? writeRoutingLog;
+    // Phase 1.5: emit graph signal counts + deterministic hash so Phase 2
+    // evaluation can correlate validator behaviour with graph state.
+    const graphNodeCount = contextPackForLog?.graph.counts.nodes ?? 0;
+    const graphEdgeCount = contextPackForLog?.graph.counts.edges ?? 0;
+    const graphHash = computeDeterministicGraphHash(options.graphState ?? null);
     const record = buildRoutingLog({
       turn_id: context.request_id,
       scenario_id: context.session_id,
@@ -471,6 +507,9 @@ export async function runTurnExecutor(
       sonnet_text: sonnetTextForLog,
       redacted: options.routingLogRedacted ?? false,
       created_at: new Date(startedAt).toISOString(),
+      graph_node_count: graphNodeCount,
+      graph_edge_count: graphEdgeCount,
+      graph_hash: graphHash,
     });
     safeFireRoutingLogWrite(writer, record, requestId);
   }

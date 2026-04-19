@@ -23,12 +23,48 @@ import { getOrGenerateRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 import { validateIngress, validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
+import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
+
+// Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
+// keys), so we cannot pass `graph_state` / `analysis_state` straight through
+// to `validateIngress`. Extract them first via the Phase 1.5 extension
+// validator, then hand a stripped body to B1. Order is deliberate — if the
+// extensions parse fails, we want the 422 to name the specific field before
+// any other boundary error.
+const V5_EXTENSION_FIELDS = ['graph_state', 'analysis_state'] as const;
+
+function stripExtensionFields(body: unknown): unknown {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
+  const copy: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  for (const k of V5_EXTENSION_FIELDS) delete copy[k];
+  return copy;
+}
 
 export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void> {
   app.post('/orchestrate/v2/turn', async (req, reply) => {
     const requestId = getOrGenerateRequestId(req);
 
-    const ingress = validateIngress(req.body, requestId);
+    // Phase 1.5: parse graph_state + analysis_state FIRST. @talchain's
+    // OrchestratorTurnPayload schema is `strict` and would reject these
+    // fields as unrecognized keys if we ran B1 first. See
+    // Docs/v5/phase1.5-wire-investigation.md for wire rationale.
+    const extensions = parseRequestExtensions(req.body, requestId);
+    if (!extensions.ok) {
+      log.warn(
+        {
+          request_id: requestId,
+          error: extensions.error.error,
+          field: (extensions.error.details as { field?: string }).field,
+          issue_count: (extensions.error.details as { issues?: unknown[] }).issues?.length ?? 0,
+        },
+        'V5 request-extensions validation failed',
+      );
+      return reply.code(422).send(extensions.error);
+    }
+
+    // B1 ingress on the base body (graph/analysis stripped to appease strict mode).
+    const strippedBody = stripExtensionFields(req.body);
+    const ingress = validateIngress(strippedBody, requestId);
     if (!ingress.ok) {
       log.warn(
         { request_id: requestId, error: ingress.error.error, issue_count: (ingress.error.details as { issues?: unknown[] }).issues?.length ?? 0 },
@@ -37,9 +73,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(422).send(ingress.error);
     }
 
-    // A1: TurnExecutor produces an OlumiResponse (success or typed error block).
+    // TurnExecutor produces an OlumiResponse (success or typed error block).
     // It never throws past this boundary — every runtime failure → 200 + envelope.
-    const run = await runTurnExecutor(ingress.value, requestId);
+    const run = await runTurnExecutor(ingress.value, requestId, {
+      graphState: extensions.value.graphState,
+      analysisState: extensions.value.analysisState,
+    });
 
     const egress = validateEgress(run.response, requestId);
     if (!egress.ok) {

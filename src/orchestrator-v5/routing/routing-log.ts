@@ -46,6 +46,11 @@ export interface RoutingLogInput {
   readonly redacted: boolean;
   readonly created_at: string;
   readonly label_tier?: LabelTier;
+  /** Phase 1.5: graph signal counts from ContextPack.graph.counts. 0 on frame stage. */
+  readonly graph_node_count: number;
+  readonly graph_edge_count: number;
+  /** Phase 1.5: deterministic graph hash (16 hex chars) or null when no graph. */
+  readonly graph_hash: string | null;
 }
 
 export interface RoutingLog {
@@ -66,6 +71,9 @@ export interface RoutingLog {
   readonly redacted: boolean;
   readonly created_at: string;
   readonly label_tier: LabelTier;
+  readonly graph_node_count: number;
+  readonly graph_edge_count: number;
+  readonly graph_hash: string | null;
 }
 
 /**
@@ -92,6 +100,9 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
       redacted: true,
       created_at: input.created_at,
       label_tier: labelTier,
+      graph_node_count: input.graph_node_count,
+      graph_edge_count: input.graph_edge_count,
+      graph_hash: input.graph_hash,
     };
   }
   return {
@@ -112,6 +123,9 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
     redacted: false,
     created_at: input.created_at,
     label_tier: labelTier,
+    graph_node_count: input.graph_node_count,
+    graph_edge_count: input.graph_edge_count,
+    graph_hash: input.graph_hash,
   };
 }
 

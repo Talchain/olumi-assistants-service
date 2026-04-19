@@ -210,7 +210,7 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
     const stages = telemetry.stages_completed;
     expect(stages).toContain('orient');
     expect(stages).toContain('validate');
-    expect(stages).toContain('validate_skipped_graph_checks');
+    expect(stages).toContain('validate_skipped_no_graph');
     expect(stages).toContain('execute');
     expect(stages).toContain('confirm');
     expect(stages).toContain('compose');

@@ -18,7 +18,53 @@
  * graph threading lands in a later brief.
  */
 
-import type { HandlerValidationRegistry } from './validator.js';
+import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
+import type { GraphLookupWithOptions } from './graph-lookup-adapter.js';
+
+/**
+ * run_analysis precondition (Phase 1.5 — plan correction #4).
+ *
+ * Distinguishes two blockers with different fix paths so the user-facing
+ * response can tell the user exactly what to do next:
+ *
+ *   • `no_options_defined`          → "Define at least one option first."
+ *   • `options_lack_intervention_data` → "Configure interventions on your
+ *                                         options before running analysis."
+ *
+ * The naive "options.length > 0" check the brief initially proposed would
+ * pass for option nodes that have no intervention mappings yet — a different
+ * blocker from "no options at all", and worth reporting distinctly.
+ *
+ * The validator's `GraphLookup` interface is intentionally minimal
+ * (findEntityById + listEntitiesByKind). Preconditions that need richer
+ * data narrow to `GraphLookupWithOptions` — the adapter's extended return
+ * shape. Validator code is unchanged (plan correction #5).
+ */
+const runAnalysisPrecondition: PreconditionCheck = ({ graph }) => {
+  const extended = graph as Partial<GraphLookupWithOptions>;
+  const options = extended.options ?? [];
+  const optionNodes = graph.listEntitiesByKind('option');
+
+  if (options.length === 0 && optionNodes.length === 0) {
+    return { ok: false, reason: 'no_options_defined' };
+  }
+
+  const hasConfiguredInterventions = options.some((o) => {
+    const raw = o as { interventions?: unknown };
+    return (
+      raw.interventions !== undefined &&
+      raw.interventions !== null &&
+      typeof raw.interventions === 'object' &&
+      !Array.isArray(raw.interventions) &&
+      Object.keys(raw.interventions as Record<string, unknown>).length > 0
+    );
+  });
+  if (!hasConfiguredInterventions) {
+    return { ok: false, reason: 'options_lack_intervention_data' };
+  }
+
+  return { ok: true };
+};
 
 export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   run_analysis: {
@@ -29,6 +75,7 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
     // option or a goal kind — the handler is intrinsic to the scenario so
     // either is a valid addressable target.
     accepted_entity_kinds: ['option', 'goal'],
+    preconditions: runAnalysisPrecondition,
     confirmation_template: 'Ran analysis on your current scenario.',
   },
 };
