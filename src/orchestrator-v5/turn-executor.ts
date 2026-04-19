@@ -212,6 +212,11 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
       if (error instanceof RoutingError) {
+        // Pull the actual call count off the typed error so failure
+        // telemetry / routing-log records reflect attempts (1 on first-call
+        // failure, 2 on schema_repair_failed). Without this the failure
+        // path under-reports llm_calls_used as 0.
+        llmCallsUsed = error.llmCallCount;
         return translateRoutingError(error);
       }
       log.error(
@@ -246,36 +251,40 @@ export async function runTurnExecutor(
       resolutionStatus = action.entity.resolution_status;
       proposedHandlerIdForLog = action.handler_id;
 
-      // STEP 2 — VALIDATE. Skipped when no graph lookup is available
-      // (Phase 1a gap: graph state not threaded through V5 payload).
-      if (options.graphLookup) {
-        const validationRegistry = options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
-        const validationResult = validateToolCall(action, options.graphLookup, validationRegistry);
-        stagesCompleted.push('validate');
-        if (!validationResult.valid) {
-          validationErrorCode = validationResult.error.code;
-          log.warn(
-            {
-              request_id: requestId,
-              validation_error_code: validationResult.error.code,
-              details: validationResult.error.details,
-            },
-            'V5 TurnExecutor validation rejected tool-call proposal',
-          );
-          failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
-          response = buildFailureResponse('HANDLER_INVOCATION_FAILED', context.stage, {
-            cause_kind: 'validation_failed',
-            validation_error_code: validationResult.error.code,
-            ...(validationResult.error.details ?? {}),
-          });
-          return finalizeRun();
-        }
-      } else {
+      // STEP 2 — VALIDATE. Structural checks (handler existence, resolution
+      // status, kind, parameter bounds) ALWAYS run, including in the
+      // production no-graph shape. Graph-dependent checks (entity existence,
+      // Dice suspicion, preconditions) are skipped internally by the
+      // validator when graph is undefined. The 'validate_skipped_graph_checks'
+      // stage marks the partial coverage so observability shows when the
+      // graph-dependent subset was bypassed.
+      const validationRegistry = options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+      const validationResult = validateToolCall(action, options.graphLookup, validationRegistry);
+      stagesCompleted.push('validate');
+      if (!options.graphLookup) {
+        stagesCompleted.push('validate_skipped_graph_checks');
         log.warn(
           { request_id: requestId, handler_id: proposedHandlerId },
-          'V5 TurnExecutor validate step skipped — graph state not threaded through payload',
+          'V5 TurnExecutor graph-dependent validation skipped — graph state not threaded through payload',
         );
-        stagesCompleted.push('validate_skipped');
+      }
+      if (!validationResult.valid) {
+        validationErrorCode = validationResult.error.code;
+        log.warn(
+          {
+            request_id: requestId,
+            validation_error_code: validationResult.error.code,
+            details: validationResult.error.details,
+          },
+          'V5 TurnExecutor validation rejected tool-call proposal',
+        );
+        failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
+        response = buildFailureResponse('HANDLER_INVOCATION_FAILED', context.stage, {
+          cause_kind: 'validation_failed',
+          validation_error_code: validationResult.error.code,
+          ...(validationResult.error.details ?? {}),
+        });
+        return finalizeRun();
       }
 
       // STEP 3 — EXECUTE. Reuse the existing handler registry; contract is
@@ -437,10 +446,14 @@ export async function runTurnExecutor(
       failure_type: failureType,
       wall_clock_ms: Date.now() - startedAt,
     });
-    // Phase 1b D10/P1-3: emit one routing log record per turn — success or
-    // failure — so Phase 2 evaluation has the route-time signals (intent
-    // classification, coaching mode, resolution status, error cause). The
-    // writer is non-throwing; any I/O issue is swallowed in writeRoutingLog.
+    // Phase 1b D10 / review-cycle P1-3: emit one routing log record per
+    // turn — success or failure — so Phase 2 evaluation has the route-time
+    // signals (intent classification, coaching mode, resolution status,
+    // error cause). The default writeRoutingLog is non-throwing, but a
+    // custom routingLogWriter (tests / Phase 2 sinks) might throw
+    // synchronously OR return a rejecting promise. The fire-and-forget
+    // wrapper below catches both — turn execution must NEVER fail because
+    // of routing log emission.
     const writer = options.routingLogWriter ?? writeRoutingLog;
     const record = buildRoutingLog({
       turn_id: context.request_id,
@@ -453,13 +466,13 @@ export async function runTurnExecutor(
       routing_error_cause: routingErrorCause,
       validation_error_code: validationErrorCode,
       compound_detected: contextPackForLog?.compound_detected ?? false,
-      compound_pattern_matched: null,
+      compound_pattern_matched: contextPackForLog?.compound_pattern_matched ?? null,
       raw_user_message: payload.message,
       sonnet_text: sonnetTextForLog,
       redacted: options.routingLogRedacted ?? false,
       created_at: new Date(startedAt).toISOString(),
     });
-    void writer(record);
+    safeFireRoutingLogWrite(writer, record, requestId);
   }
 
   // ==================================================================
@@ -625,6 +638,36 @@ function renderConfirmation(
 function serialiseError(err: unknown): { name?: string; message?: string } {
   if (err instanceof Error) return { name: err.name, message: err.message };
   return { message: String(err) };
+}
+
+/**
+ * Fire-and-forget routing-log write that catches every failure path:
+ *   - synchronous throw from the writer function
+ *   - rejected promise returned by the writer
+ *   - non-promise return from the writer (defensive)
+ *
+ * Logs a warning on failure; never re-raises. Turn execution must complete
+ * regardless of routing-log status.
+ */
+function safeFireRoutingLogWrite(
+  writer: (record: RoutingLog) => Promise<void> | void,
+  record: RoutingLog,
+  requestId: string,
+): void {
+  try {
+    const fired = writer(record);
+    Promise.resolve(fired).catch((err) => {
+      log.warn(
+        { request_id: requestId, err: serialiseError(err) },
+        'V5 TurnExecutor routing log writer rejected — swallowed',
+      );
+    });
+  } catch (err) {
+    log.warn(
+      { request_id: requestId, err: serialiseError(err) },
+      'V5 TurnExecutor routing log writer threw synchronously — swallowed',
+    );
+  }
 }
 
 export type { InternalFailure } from './types.js';

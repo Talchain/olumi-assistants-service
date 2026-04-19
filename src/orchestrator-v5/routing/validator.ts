@@ -1,19 +1,33 @@
 /**
  * V5 Phase 1 — Validation Contract.
  *
- * Given a parsed ToolCallResponse proposal plus the graph and the handler
- * validation registry, produce a typed ValidationResult. Never throws; every
- * failure path yields a typed ValidationError.
+ * Given a parsed ToolCallResponse proposal plus an OPTIONAL graph and the
+ * handler validation registry, produce a typed ValidationResult. Never
+ * throws; every failure path yields a typed ValidationError.
  *
- * Ordered checks per spec §6:
- *   1. handler_id exists in registry                → HANDLER_NOT_FOUND
- *   2. entity.kind is accepted by the handler       → ENTITY_KIND_MISMATCH
- *   3. entity.id exists in graph                    → ENTITY_NOT_FOUND
- *   4. if resolution_method === 'label_match':
- *      Dice bigram sanity — if a closer match exists
- *      (Δ ≥ SUSPICIOUS_DICE_THRESHOLD) → ENTITY_RESOLUTION_SUSPICIOUS
- *   5. each parameter validates against its handler schema → PARAMETER_INVALID
- *   6. handler preconditions met                    → PRECONDITION_UNMET
+ * Ordered checks per spec §6 (current behaviour after the post-review fix
+ * that split structural vs graph-dependent checks):
+ *
+ *   ALWAYS RUN — structural (no graph required):
+ *     1. handler_id exists in registry            → HANDLER_NOT_FOUND
+ *     2. resolution_status === 'resolved'         → ENTITY_RESOLUTION_AMBIGUOUS
+ *        (precedes kind check: clarification supersedes structural error
+ *        because the user-facing recovery is "pick one of these", not "pick
+ *        a different handler")
+ *     3. entity.kind is accepted by the handler   → ENTITY_KIND_MISMATCH
+ *     4. each parameter validates                 → PARAMETER_INVALID
+ *
+ *   GRAPH-DEPENDENT — skipped when graph is undefined:
+ *     5. entity.id exists in graph                → ENTITY_NOT_FOUND
+ *     6. if resolution_method === 'label_match',
+ *        a closer Dice match exists               → ENTITY_RESOLUTION_SUSPICIOUS
+ *     7. handler preconditions met                → PRECONDITION_UNMET
+ *
+ * Phase 1a production runs structural checks only (graph not yet threaded
+ * through the V5 payload). Tests that want to exercise graph-dependent
+ * checks pass an explicit graphLookup. The split was added in response to
+ * post-PR review: graph-independent checks (especially resolution_status)
+ * MUST run on every execute proposal, not just when graph is available.
  *
  * Non-labeled resolutions (id_match, kind_inference, context_inference) skip
  * the Dice check — Dice is specific to label-matched resolutions.
@@ -161,7 +175,7 @@ function countTotal(ms: Map<string, number>): number {
 
 export function validateToolCall(
   proposal: ProposalAction,
-  graph: GraphLookup,
+  graph: GraphLookup | undefined,
   registry: HandlerValidationRegistry,
 ): ValidationResult {
   const decl = registry[proposal.handler_id];
@@ -215,26 +229,8 @@ export function validateToolCall(
     };
   }
 
-  const existing = graph.findEntityById(proposal.entity.id);
-  if (!existing) {
-    return {
-      valid: false,
-      error: {
-        code: 'ENTITY_NOT_FOUND',
-        message: `Entity "${proposal.entity.id}" not found in graph`,
-        details: {
-          entity_id: proposal.entity.id,
-          entity_kind: proposal.entity.kind,
-        },
-      },
-    };
-  }
-
-  if (proposal.entity.resolution_method === 'label_match') {
-    const suspicion = detectSuspiciousLabelMatch(proposal.entity, graph);
-    if (suspicion) return { valid: false, error: suspicion };
-  }
-
+  // PARAMETER_INVALID is structural — runs before the graph-dependent
+  // checks because handler-declared parameter bounds don't depend on graph.
   if (decl.parameter_schemas) {
     for (const p of proposal.parameters) {
       const schema = decl.parameter_schemas[p.name];
@@ -256,7 +252,33 @@ export function validateToolCall(
     }
   }
 
-  if (decl.preconditions) {
+  // ----- graph-dependent checks (skipped when graph is undefined) -----
+  if (graph) {
+    const existing = graph.findEntityById(proposal.entity.id);
+    if (!existing) {
+      return {
+        valid: false,
+        error: {
+          code: 'ENTITY_NOT_FOUND',
+          message: `Entity "${proposal.entity.id}" not found in graph`,
+          details: {
+            entity_id: proposal.entity.id,
+            entity_kind: proposal.entity.kind,
+          },
+        },
+      };
+    }
+
+    if (proposal.entity.resolution_method === 'label_match') {
+      const suspicion = detectSuspiciousLabelMatch(proposal.entity, graph);
+      if (suspicion) return { valid: false, error: suspicion };
+    }
+  }
+
+  // PRECONDITION_UNMET — preconditions take graph as input, so they only
+  // run when graph is available. Handlers whose preconditions don't need
+  // graph are still safe (the function ignores the unused arg).
+  if (graph && decl.preconditions) {
     const pre = decl.preconditions({ graph, entity: proposal.entity, parameters: proposal.parameters });
     if (!pre.ok) {
       return {

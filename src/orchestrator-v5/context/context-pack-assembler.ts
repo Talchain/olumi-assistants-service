@@ -93,6 +93,12 @@ export interface ContextPack {
   readonly compound_detected: boolean;
   /** Populated only when compound_detected is true. Ordered as they appear in the message. */
   readonly compound_segments?: readonly string[];
+  /**
+   * Conjunction the compound detector matched on (and / then / also / plus),
+   * null when no compound was detected. Surfaced into the routing log for
+   * Phase 2 evaluation of detector quality.
+   */
+  readonly compound_pattern_matched: string | null;
   readonly system_event: unknown | null;
 }
 
@@ -139,6 +145,7 @@ export function assembleContextPack(input: AssembleContextPackInput): ContextPac
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
     coaching: null,
     compound_detected: compound.detected,
+    compound_pattern_matched: compound.telemetry.pattern_matched,
     system_event: input.systemEvent ?? null,
   };
   if (compound.detected && compound.segments) {

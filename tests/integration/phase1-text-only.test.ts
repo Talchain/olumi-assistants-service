@@ -85,7 +85,7 @@ describe('phase 1 text-only — inferred converse', () => {
     expect(stages).toContain('compose');
     expect(stages).toContain('commit');
     expect(stages).not.toContain('validate');
-    expect(stages).not.toContain('validate_skipped');
+    expect(stages).not.toContain('validate_skipped_graph_checks');
     expect(stages).not.toContain('execute');
 
     // BI-01

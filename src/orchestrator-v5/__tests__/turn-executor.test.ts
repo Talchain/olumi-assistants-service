@@ -294,7 +294,8 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
 
       const stages = completedEvents()[0]!.data.stages_completed as string[];
       expect(stages).toContain('orient');
-      expect(stages).toContain('validate_skipped');
+      expect(stages).toContain('validate');
+      expect(stages).toContain('validate_skipped_graph_checks');
       expect(stages).toContain('execute');
       expect(stages).toContain('confirm');
       expect(stages).toContain('compose');
@@ -385,6 +386,22 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       }
       expect(telemetry.failure_type).toBe('UPSTREAM_TIMEOUT');
       expectBI01();
+    });
+
+    it('schema_repair_failed: telemetry.llm_calls_used reflects 2 routing attempts on failure path', async () => {
+      // Two bad responses → RoutingError(schema_repair_failed). Failure
+      // path must still report 2 attempts, not 0. Without the
+      // RoutingError.llmCallCount field, telemetry would under-report.
+      const routingAdapter = mockRoutingAdapter(
+        vi.fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+          .mockResolvedValueOnce(mkToolUseResult({ intent_class: 'execute' }))
+          .mockResolvedValueOnce(mkToolUseResult({ intent_class: 'clarify' })) as unknown as ChatWithToolsMock,
+      );
+
+      const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-fail-count', { routingAdapter });
+
+      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+      expect(telemetry.llm_calls_used).toBe(2);
     });
 
     it('successful repair retry: telemetry.llm_calls_used reflects 2 routing calls (Improvement-1)', async () => {
@@ -524,6 +541,54 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
 
       expect(writer).toHaveBeenCalledTimes(1);
       expect(writer.mock.calls[0]![0].validation_error_code).toBe('ENTITY_NOT_FOUND');
+    });
+
+    it('writer that throws synchronously does NOT propagate — turn execution completes cleanly', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
+      const writer = vi.fn(() => {
+        throw new Error('writer blew up sync');
+      }) as unknown as Parameters<typeof runTurnExecutor>[2]['routingLogWriter'];
+
+      let unhandled: unknown = null;
+      const handler = (err: unknown): void => { unhandled = err; };
+      process.on('unhandledRejection', handler);
+
+      try {
+        const result = await runTurnExecutor(BASE_PAYLOAD, 'req-w-throw', {
+          routingAdapter,
+          routingLogWriter: writer,
+        });
+        expect(result.telemetry.failure_type).toBeNull();
+        expect(result.telemetry.commit_performed).toBe(true);
+        // Yield twice so any leaked rejection would have surfaced
+        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
+        expect(unhandled).toBeNull();
+      } finally {
+        process.off('unhandledRejection', handler);
+      }
+    });
+
+    it('writer that returns a rejecting promise does NOT trigger unhandledRejection', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
+      const writer = vi.fn().mockRejectedValue(new Error('writer rejected'));
+
+      let unhandled: unknown = null;
+      const handler = (err: unknown): void => { unhandled = err; };
+      process.on('unhandledRejection', handler);
+
+      try {
+        const result = await runTurnExecutor(BASE_PAYLOAD, 'req-w-rej', {
+          routingAdapter,
+          routingLogWriter: writer,
+        });
+        expect(result.telemetry.failure_type).toBeNull();
+        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
+        expect(unhandled).toBeNull();
+      } finally {
+        process.off('unhandledRejection', handler);
+      }
     });
 
     it('honours redacted=true: raw_user_message dropped, sonnet_text hashed', async () => {

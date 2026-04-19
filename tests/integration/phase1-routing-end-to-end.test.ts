@@ -2,7 +2,7 @@
  * Phase 1 — Tool-use routing end-to-end (Suite A).
  *
  * Exercises the full turn pipeline through the new seven-step flow for an
- * execute-intent turn: ContextPack → routeWithToolUse → validate_skipped →
+ * execute-intent turn: ContextPack → routeWithToolUse → validate →
  * handler → confirm → compose → commit. All LLM seams are mocked; no real
  * Anthropic API calls.
  */
@@ -148,7 +148,8 @@ describe('phase 1 routing end-to-end — execute turn via tool-use', () => {
     expect(stages).toEqual([
       'build_turn_context',
       'orient',
-      'validate_skipped',
+      'validate',
+      'validate_skipped_graph_checks',
       'execute',
       'confirm',
       'compose',

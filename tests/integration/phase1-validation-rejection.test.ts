@@ -195,6 +195,90 @@ describe('phase 1 validation rejection — no handler invocation, BI-01 preserve
     expectBI01();
   });
 
+  it('PRODUCTION SHAPE (no graphLookup): ambiguous resolution still rejects, handler never invoked', async () => {
+    // The structural ENTITY_RESOLUTION_AMBIGUOUS check must fire even
+    // when no graphLookup is threaded — this is the "production shape"
+    // until graph wiring lands. Regression guard for the post-review fix
+    // that split structural vs graph-dependent checks.
+    const handlerSpy = vi.fn();
+    const registry = new Map([
+      ['run_analysis', (async () => { handlerSpy(); throw new Error('should not run'); }) as never],
+    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+
+    const routingAdapter = {
+      chatWithTools: vi.fn().mockResolvedValueOnce(
+        toolCall({
+          intent_class: 'execute',
+          action: {
+            handler_id: 'run_analysis',
+            entity: {
+              id: 'opt_a',
+              kind: 'option',
+              label: 'Expand',
+              resolution_status: 'ambiguous',
+              resolution_method: 'label_match',
+              candidates: [
+                { id: 'opt_a', label: 'Expand EU' },
+                { id: 'opt_b', label: 'Expand US' },
+              ],
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        }),
+      ),
+    };
+
+    // No graphLookup option — production shape until graph threading lands
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-vr-prod-amb', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(telemetry.validation_error_code).toBe('ENTITY_RESOLUTION_AMBIGUOUS');
+    expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+    expect(telemetry.commit_performed).toBe(false);
+    expect(telemetry.stages_completed).toContain('validate_skipped_graph_checks');
+    expect(telemetry.stages_completed).not.toContain('execute');
+    expectBI01();
+  });
+
+  it('PRODUCTION SHAPE (no graphLookup): unknown handler still rejects, handler never invoked', async () => {
+    const handlerSpy = vi.fn();
+    const registry = new Map([
+      ['run_analysis', (async () => { handlerSpy(); throw new Error('should not run'); }) as never],
+    ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+
+    const routingAdapter = {
+      chatWithTools: vi.fn().mockResolvedValueOnce(
+        toolCall({
+          intent_class: 'execute',
+          action: {
+            handler_id: 'no_such_handler',
+            entity: {
+              id: 'opt_a',
+              kind: 'option',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        }),
+      ),
+    };
+
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-vr-prod-handler', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(telemetry.validation_error_code).toBe('HANDLER_NOT_FOUND');
+    expectBI01();
+  });
+
   it('handler invocation failure AFTER validation pass still emits typed response + BI-01', async () => {
     // Sanity: validation can pass and handler can still fail for other reasons.
     const registry = new Map([

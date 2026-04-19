@@ -187,7 +187,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('turn-executor × run_analysis via tool-use — happy path', () => {
-  it('routing → validate_skipped → handler → confirm → compose → commit, BI-01 preserved', async () => {
+  it('routing → validate (graph subset skipped) → handler → confirm → compose → commit, BI-01 preserved', async () => {
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
     );
@@ -209,7 +209,8 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
     expect(telemetry.commit_performed).toBe(true);
     const stages = telemetry.stages_completed;
     expect(stages).toContain('orient');
-    expect(stages).toContain('validate_skipped');
+    expect(stages).toContain('validate');
+    expect(stages).toContain('validate_skipped_graph_checks');
     expect(stages).toContain('execute');
     expect(stages).toContain('confirm');
     expect(stages).toContain('compose');

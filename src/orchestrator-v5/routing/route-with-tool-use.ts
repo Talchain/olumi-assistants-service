@@ -90,11 +90,24 @@ export type RoutingErrorCause =
 export class RoutingError extends Error {
   readonly cause: RoutingErrorCause;
   readonly provider_message?: string | undefined;
-  constructor(cause: RoutingErrorCause, message: string, opts?: { provider_message?: string }) {
+  /**
+   * Total Anthropic chatWithTools invocations attempted before this error
+   * fired. 0 if the failure happened before the first call (e.g. defensive
+   * pre-check). 1 on a single-call failure. 2 when REPAIR_ONCE was used and
+   * the repair attempt also failed. Lets TurnExecutor report accurate
+   * llm_calls_used telemetry on failure paths (post-review fix).
+   */
+  readonly llmCallCount: number;
+  constructor(
+    cause: RoutingErrorCause,
+    message: string,
+    opts?: { provider_message?: string; llmCallCount?: number },
+  ) {
     super(message);
     this.name = 'RoutingError';
     this.cause = cause;
     this.provider_message = opts?.provider_message;
+    this.llmCallCount = opts?.llmCallCount ?? 0;
   }
 }
 
@@ -170,7 +183,7 @@ export async function routeWithToolUse(
       signal: options.signal,
     });
   } catch (err) {
-    throw translateAdapterError(err);
+    throw translateAdapterError(err, 1);
   }
 
   const parsedOrError = tryInterpret(firstResult, 1);
@@ -201,7 +214,7 @@ export async function routeWithToolUse(
       signal: options.signal,
     });
   } catch (err) {
-    throw translateAdapterError(err);
+    throw translateAdapterError(err, 2);
   }
 
   const secondAttempt = tryInterpret(repairResult, 2);
@@ -209,6 +222,7 @@ export async function routeWithToolUse(
   throw new RoutingError(
     'schema_repair_failed',
     `Routing tool-call repair attempt failed: ${secondAttempt.kind === 'non_repairable' ? secondAttempt.error.message : secondAttempt.detail}`,
+    { llmCallCount: 2 },
   );
 }
 
@@ -228,6 +242,7 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
       error: new RoutingError(
         'unexpected_stop_reason',
         'Sonnet hit max_tokens before completing routing decision',
+        { llmCallCount },
       ),
     };
   }
@@ -243,6 +258,7 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
         error: new RoutingError(
           'api_error',
           `Sonnet called unknown tool: "${toolUse.name}" (expected "${OLUMI_ACTION_TOOL_NAME}")`,
+          { llmCallCount },
         ),
       };
     }
@@ -267,7 +283,11 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
   if (joinedText.length === 0) {
     return {
       kind: 'non_repairable',
-      error: new RoutingError('empty_response', 'Sonnet returned neither tool call nor text'),
+      error: new RoutingError(
+        'empty_response',
+        'Sonnet returned neither tool call nor text',
+        { llmCallCount },
+      ),
     };
   }
 
@@ -301,22 +321,27 @@ function buildUserMessage(contextPack: ContextPack, message: string): string {
 // Adapter error → RoutingError
 // -----------------------------------------------------------------------
 
-function translateAdapterError(err: unknown): RoutingError {
+function translateAdapterError(err: unknown, llmCallCount: number): RoutingError {
   if (err instanceof UpstreamTimeoutError) {
-    return new RoutingError('timeout', `Routing call timed out: ${err.message}`);
+    return new RoutingError('timeout', `Routing call timed out: ${err.message}`, { llmCallCount });
   }
   if (isAbortLikeError(err)) {
-    return new RoutingError('aborted', 'Routing call aborted by caller signal');
+    return new RoutingError('aborted', 'Routing call aborted by caller signal', { llmCallCount });
   }
   if (err instanceof UpstreamHTTPError) {
     return new RoutingError('api_error', `Provider HTTP error during routing: ${err.message}`, {
       provider_message: err.message,
+      llmCallCount,
     });
   }
   if (err instanceof Error) {
-    return new RoutingError('api_error', `Unexpected error during routing: ${err.message}`);
+    return new RoutingError('api_error', `Unexpected error during routing: ${err.message}`, {
+      llmCallCount,
+    });
   }
-  return new RoutingError('api_error', `Unexpected non-Error value during routing: ${String(err)}`);
+  return new RoutingError('api_error', `Unexpected non-Error value during routing: ${String(err)}`, {
+    llmCallCount,
+  });
 }
 
 function isAbortLikeError(error: unknown): boolean {
