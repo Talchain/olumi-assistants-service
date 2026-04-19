@@ -29,6 +29,7 @@ import type { SessionTurn } from '@talchain/schemas/orchestrator';
 
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
+import { detectCompound } from '../routing/compound-detector.js';
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
 // five for token budget. Any trim beyond is caller's concern.
@@ -89,7 +90,9 @@ export interface ContextPack {
   readonly analysis: ContextPackAnalysis | null;
   readonly conversation: ContextPackConversation;
   readonly coaching: null;
-  readonly compound_detected: false;
+  readonly compound_detected: boolean;
+  /** Populated only when compound_detected is true. Ordered as they appear in the message. */
+  readonly compound_segments?: readonly string[];
   readonly system_event: unknown | null;
 }
 
@@ -127,16 +130,21 @@ const EMPTY_GRAPH: ContextPackGraph = Object.freeze({
 }) as ContextPackGraph;
 
 export function assembleContextPack(input: AssembleContextPackInput): ContextPack {
-  return {
+  const compound = detectCompound(input.payload.message);
+  const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     stage: input.payload.stage,
     graph: projectGraph(input.graph ?? null),
     analysis: projectAnalysis(input.analysis ?? null),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
     coaching: null,
-    compound_detected: false,
+    compound_detected: compound.detected,
     system_event: input.systemEvent ?? null,
   };
+  if (compound.detected && compound.segments) {
+    return { ...base, compound_segments: compound.segments };
+  }
+  return base;
 }
 
 function projectGraph(graph: GraphWithOptions | null): ContextPackGraph {
