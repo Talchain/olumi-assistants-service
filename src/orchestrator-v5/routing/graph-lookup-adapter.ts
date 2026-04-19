@@ -72,9 +72,9 @@ export type BuildGraphLookupResult =
  *
  * Validator callers reason in terms of proposal targets: "option" and "goal"
  * are addressable via distinct kinds; everything else collapses into a
- * generic "node" bucket. ("edge" and "constraint" are not produced from
- * graph.nodes — they come from edges[] and goal_constraints[] respectively
- * and are out of Phase 1.5 scope.)
+ * generic "node" bucket. "edge" is not produced from graph.nodes — edges[]
+ * is a separate top-level array. "constraint" comes from graph.goal_constraints[]
+ * and is handled separately in buildGraphLookup (see debt inventory §1.3).
  */
 function toEntityKind(nodeKind: string): EntityKind | null {
   if (nodeKind === 'option') return 'option';
@@ -108,6 +108,30 @@ function normaliseOptions(
     }
   }
   return records;
+}
+
+/**
+ * Project each goal_constraints[] entry into a lookup-compatible entity.
+ * GoalConstraintSchema (src/schemas/assist.ts) guarantees `constraint_id`
+ * is a non-empty string; `label` is optional. We surface constraints under
+ * `listEntitiesByKind('constraint')` so future handlers that target
+ * constraint entities get validator coverage. No current handler accepts
+ * 'constraint' — this is a forward-compatibility projection, validated
+ * by an adapter unit test.
+ */
+function collectConstraintEntries(
+  raw: GraphStateIngress['goal_constraints'],
+): Array<{ id: string; kind: EntityKind; label: string | null }> {
+  if (!raw) return [];
+  const entries: Array<{ id: string; kind: EntityKind; label: string | null }> = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+    const c = entry as { constraint_id?: unknown; label?: unknown };
+    if (typeof c.constraint_id !== 'string' || c.constraint_id.length === 0) continue;
+    const label = typeof c.label === 'string' ? c.label : null;
+    entries.push({ id: c.constraint_id, kind: 'constraint', label });
+  }
+  return entries;
 }
 
 /**
@@ -146,6 +170,16 @@ export function buildGraphLookup(
     const kindList = byKind.get(mappedKind) ?? [];
     kindList.push({ id: node.id, label: label ?? node.id });
     byKind.set(mappedKind, kindList);
+  }
+
+  // Project goal_constraints[] as constraint-kind entities. Additive to
+  // node-derived entries; constraints live on a separate wire field but
+  // share the same `findEntityById` / `listEntitiesByKind` surface.
+  for (const entry of collectConstraintEntries(graph.goal_constraints)) {
+    byId.set(entry.id, entry);
+    const kindList = byKind.get('constraint') ?? [];
+    kindList.push({ id: entry.id, label: entry.label ?? entry.id });
+    byKind.set('constraint', kindList);
   }
 
   const stats: GraphLookupStats = {

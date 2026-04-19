@@ -14,9 +14,11 @@ import { buildGraphLookup } from '../graph-lookup-adapter.js';
 function mkGraph(
   nodes: Array<{ id: string; kind: string; label: string }>,
   options?: unknown[],
+  goal_constraints?: unknown[],
 ): GraphStateIngress {
   const g: Record<string, unknown> = { nodes, edges: [] };
   if (options) g.options = options;
+  if (goal_constraints) g.goal_constraints = goal_constraints;
   return g as GraphStateIngress;
 }
 
@@ -147,5 +149,61 @@ describe('buildGraphLookup', () => {
   it('listEntitiesByKind returns empty array for absent kind', () => {
     const lookup = expectOk(buildGraphLookup(mkGraph([{ id: 'g1', kind: 'goal', label: 'G' }])));
     expect(lookup.listEntitiesByKind('option')).toEqual([]);
+  });
+
+  describe('goal_constraints projection (debt-audit §1.3)', () => {
+    it('surfaces constraints via findEntityById / listEntitiesByKind', () => {
+      const lookup = expectOk(
+        buildGraphLookup(
+          mkGraph(
+            [{ id: 'g1', kind: 'goal', label: 'G' }],
+            undefined,
+            [
+              { constraint_id: 'c_profit', node_id: 'g1', operator: '>=', value: 100, label: 'Profit ≥ 100' },
+              { constraint_id: 'c_risk', node_id: 'g1', operator: '<=', value: 0.3 },
+            ],
+          ),
+        ),
+      );
+      expect(lookup.findEntityById('c_profit')).toEqual({
+        id: 'c_profit',
+        kind: 'constraint',
+        label: 'Profit ≥ 100',
+      });
+      // Missing label defaults to null on the entity; list falls back to id.
+      expect(lookup.findEntityById('c_risk')).toEqual({
+        id: 'c_risk',
+        kind: 'constraint',
+        label: null,
+      });
+      expect(lookup.listEntitiesByKind('constraint')).toEqual([
+        { id: 'c_profit', label: 'Profit ≥ 100' },
+        { id: 'c_risk', label: 'c_risk' },
+      ]);
+    });
+
+    it('skips constraint entries without a string constraint_id', () => {
+      const lookup = expectOk(
+        buildGraphLookup(
+          mkGraph(
+            [{ id: 'g1', kind: 'goal', label: 'G' }],
+            undefined,
+            [
+              { label: 'orphan' }, // no constraint_id
+              { constraint_id: '' }, // empty id
+              { constraint_id: 'c_ok' },
+            ],
+          ),
+        ),
+      );
+      expect(lookup.listEntitiesByKind('constraint')).toEqual([{ id: 'c_ok', label: 'c_ok' }]);
+    });
+
+    it('empty/absent goal_constraints produces no constraint entities', () => {
+      const lookup = expectOk(
+        buildGraphLookup(mkGraph([{ id: 'g1', kind: 'goal', label: 'G' }])),
+      );
+      expect(lookup.listEntitiesByKind('constraint')).toEqual([]);
+    });
   });
 });
