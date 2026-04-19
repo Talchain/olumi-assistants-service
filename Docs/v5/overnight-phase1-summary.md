@@ -111,7 +111,10 @@ Open the PR against `staging` with the evidence pack as the body. Do not force-p
 ## Commit ladder (branch HEAD working backwards)
 
 ```
-(D12) this handoff
+baff1a26  fix(v5): Phase 1 review-cycle 2 — graph-independent validation, error counts, writer guard
+7238c3aa  feat(v5): P1-3 — wire routing log into TurnExecutor finalize
+42b037ab  fix(v5): Phase 1 review corrections — resolution_status, llm_calls, sanitisation
+14f9888f  docs(v5): D12 — overnight Phase 1 handoff summary
 fa244016  feat(v5): D11 — extend handler-ownership invariant for Phase 1
 43b466d8  feat(v5): D10 — routing log (JSONL file, Phase 1b)
 5d3dd195  feat(v5): D9 — compound detector (Phase 1b)
@@ -124,3 +127,17 @@ ca4ba530  test(v5): D7 — Phase 1 integration tests + A1/A2/C2 mock migration
 f8e7a178  feat(v5): D2 — context pack assembler (Phase 1a)
 8d697c92  docs(v5): phase 1 precondition check
 ```
+
+## Post-handoff corrections (cycles 1 + 2)
+
+Two rounds of critical review surfaced issues addressed before merge. See evidence pack §10 for the full breakdown. Highlights:
+
+- **Cycle 1:** validator now enforces `resolution_status === "resolved"`; routing log wired into TurnExecutor's `finally` block; execute orientation sanitised; `llm_calls_used` reflects repair retries; misleading test renamed.
+- **Cycle 2 (caught a P0 in cycle 1's own fix):** validator split into structural (always run) vs graph-dependent (skipped without graph). Stage telemetry: `validate` always + `validate_skipped_graph_checks` when graph absent. `RoutingError.llmCallCount` for accurate failure-path telemetry. `safeFireRoutingLogWrite` catches sync-throw + promise-rejection from custom writers. `compound_pattern_matched` threaded through ContextPack into routing log.
+
+**Final regression delta vs `staging` baseline:**
+- Passing tests: 1159 → **1253** (+94)
+- Failing: 19 → 19 (0 regressions; all environment-dep, identical)
+- Skipped: 127 → 127 (unchanged)
+
+**CI status at merge:** 5 GitHub workflows are red on the PR; **all five pre-exist on `staging`** and are unrelated to Phase 1 (transitive deps, schema codegen drift, pre-existing emit() string usage, pre-existing skipped-test debt, pre-existing lint debt). Evidence pack §10 documents each.
