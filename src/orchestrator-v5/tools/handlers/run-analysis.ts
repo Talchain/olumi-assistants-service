@@ -84,9 +84,6 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
   NO_RESULTS: 'Ran analysis on your current scenario. No options were compared.',
 } as const;
 
-export type RunAnalysisAssistantTemplate =
-  (typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES)[keyof typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES];
-
 // ============================================================================
 // ScenarioReader — dependency injection seam for reading scenario state
 // ============================================================================
