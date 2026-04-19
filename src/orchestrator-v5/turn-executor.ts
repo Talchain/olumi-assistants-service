@@ -170,7 +170,9 @@ export async function runTurnExecutor(
         signal: turnAbort.signal,
         adapter: options.routingAdapter,
       });
-      llmCallsUsed = 1;
+      // Account for actual routing-call count (1 on first-pass success,
+      // 2 when REPAIR_ONCE used). The router knows; we trust its count.
+      llmCallsUsed = routingResult.llmCallCount;
       stagesCompleted.push('orient');
     } catch (error) {
       if (turnAbort.signal.aborted) {
@@ -274,9 +276,21 @@ export async function runTurnExecutor(
       // STEP 5 — COACH. Null stub on execute turns. coaching_mode is never
       // set on execute turns per spec §5.
 
-      // STEP 6 — COMPOSE (execute)
+      // STEP 6 — COMPOSE (execute). Orientation is sanitised in-band like
+      // the converse/clarify/coach paths — Sonnet's pre-action text could
+      // carry contamination (tags, em-dashes) and must be cleaned before it
+      // joins the composed assistant_text.
+      const sanitisedOrientation = sanitiseNarrateOutput(routingResult.orientationText);
+      if (sanitisedOrientation.contamination_detected) {
+        emit(TelemetryEvents.TurnExecutorContaminationNarrate, {
+          request_id: requestId,
+          raw_length: routingResult.orientationText.length,
+          sanitised_length: sanitisedOrientation.output.length,
+          turn_class: 'handler',
+        });
+      }
       composedOk = composeToolCallResponse({
-        orientation: routingResult.orientationText,
+        orientation: sanitisedOrientation.output,
         confirmation: confirmationText,
         coaching: null,
         stage: context.stage,

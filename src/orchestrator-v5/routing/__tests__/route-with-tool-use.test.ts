@@ -109,6 +109,7 @@ describe('routeWithToolUse — happy paths', () => {
     if (result.type === 'tool_call') {
       expect(result.proposal.intent_class).toBe('execute');
       expect(result.orientationText).toBe('Running analysis on your current scenario...');
+      expect(result.llmCallCount).toBe(1);
     }
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
   });
@@ -280,6 +281,10 @@ describe('routeWithToolUse — REPAIR_ONCE', () => {
     });
 
     expect(result.type).toBe('tool_call');
+    if (result.type === 'tool_call') {
+      // Improvement-1: count must reflect both attempts
+      expect(result.llmCallCount).toBe(2);
+    }
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
 
     // The repair prompt must include the failure detail so Sonnet knows what to fix

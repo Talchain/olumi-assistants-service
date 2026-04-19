@@ -94,6 +94,7 @@ export type ValidationErrorCode =
   | 'HANDLER_NOT_FOUND'
   | 'ENTITY_KIND_MISMATCH'
   | 'ENTITY_NOT_FOUND'
+  | 'ENTITY_RESOLUTION_AMBIGUOUS'
   | 'ENTITY_RESOLUTION_SUSPICIOUS'
   | 'PARAMETER_INVALID'
   | 'PRECONDITION_UNMET';
@@ -173,6 +174,27 @@ export function validateToolCall(
         details: {
           handler_id: proposal.handler_id,
           registered: Object.keys(registry),
+        },
+      },
+    };
+  }
+
+  // Per tool-schema.ts parser intent: execute proposals with
+  // resolution_status !== 'resolved' must NOT execute. The parser accepts
+  // them so the validator can surface candidates in a typed clarification
+  // path; downstream compose can ask the user to disambiguate.
+  if (proposal.entity.resolution_status !== 'resolved') {
+    return {
+      valid: false,
+      error: {
+        code: 'ENTITY_RESOLUTION_AMBIGUOUS',
+        message: `Entity resolution is "${proposal.entity.resolution_status}" — cannot execute without confirmation`,
+        details: {
+          entity_id: proposal.entity.id,
+          entity_kind: proposal.entity.kind,
+          resolution_status: proposal.entity.resolution_status,
+          resolution_method: proposal.entity.resolution_method,
+          ...(proposal.entity.candidates ? { candidates: proposal.entity.candidates } : {}),
         },
       },
     };

@@ -61,6 +61,11 @@ export interface RoutingToolCallResult {
   readonly proposal: ToolCallResponse;
   readonly orientationText: string;
   readonly rawResult: ChatWithToolsResult;
+  /**
+   * Total Anthropic chatWithTools invocations made by this routing call.
+   * 1 on a successful first attempt; 2 when REPAIR_ONCE was used.
+   */
+  readonly llmCallCount: number;
 }
 
 export interface RoutingTextOnlyResult {
@@ -68,6 +73,8 @@ export interface RoutingTextOnlyResult {
   readonly text: string;
   readonly inferredIntent: 'converse';
   readonly rawResult: ChatWithToolsResult;
+  /** Total chatWithTools invocations (always 1 on text-only success). */
+  readonly llmCallCount: number;
 }
 
 export type RoutingResult = RoutingToolCallResult | RoutingTextOnlyResult;
@@ -166,7 +173,7 @@ export async function routeWithToolUse(
     throw translateAdapterError(err);
   }
 
-  const parsedOrError = tryInterpret(firstResult);
+  const parsedOrError = tryInterpret(firstResult, 1);
   if (parsedOrError.kind === 'ok') return parsedOrError.result;
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
 
@@ -197,7 +204,7 @@ export async function routeWithToolUse(
     throw translateAdapterError(err);
   }
 
-  const secondAttempt = tryInterpret(repairResult);
+  const secondAttempt = tryInterpret(repairResult, 2);
   if (secondAttempt.kind === 'ok') return secondAttempt.result;
   throw new RoutingError(
     'schema_repair_failed',
@@ -214,7 +221,7 @@ type Interpretation =
   | { kind: 'parse_failed'; detail: string }
   | { kind: 'non_repairable'; error: RoutingError };
 
-function tryInterpret(result: ChatWithToolsResult): Interpretation {
+function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interpretation {
   if (result.stop_reason === 'max_tokens') {
     return {
       kind: 'non_repairable',
@@ -248,6 +255,7 @@ function tryInterpret(result: ChatWithToolsResult): Interpretation {
           proposal,
           orientationText: joinedText,
           rawResult: result,
+          llmCallCount,
         },
       };
     } catch (err) {
@@ -270,6 +278,7 @@ function tryInterpret(result: ChatWithToolsResult): Interpretation {
       text: joinedText,
       inferredIntent: 'converse',
       rawResult: result,
+      llmCallCount,
     },
   };
 }

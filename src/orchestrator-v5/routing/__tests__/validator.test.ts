@@ -314,6 +314,69 @@ describe('validateToolCall — typed failures', () => {
     }
   });
 
+  it('returns ENTITY_RESOLUTION_AMBIGUOUS when resolution_status === "ambiguous", surfacing candidates', () => {
+    const graph = makeGraph([
+      { id: 'opt-a', kind: 'option', label: 'Expand EU' },
+      { id: 'opt-b', kind: 'option', label: 'Expand US' },
+    ]);
+    const proposal = makeRunAnalysisProposal({
+      entity: {
+        id: 'opt-a',
+        kind: 'option',
+        label: 'Expand',
+        resolution_status: 'ambiguous',
+        resolution_method: 'label_match',
+        candidates: [
+          { id: 'opt-a', label: 'Expand EU' },
+          { id: 'opt-b', label: 'Expand US' },
+        ],
+      },
+    });
+    const result = validateToolCall(proposal, graph, RUN_ANALYSIS_DECL);
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error.code).toBe('ENTITY_RESOLUTION_AMBIGUOUS');
+      const details = result.error.details as { resolution_status: string; candidates?: unknown[] };
+      expect(details.resolution_status).toBe('ambiguous');
+      expect(details.candidates).toHaveLength(2);
+    }
+  });
+
+  it('returns ENTITY_RESOLUTION_AMBIGUOUS when resolution_status === "unresolved"', () => {
+    const graph = makeGraph([{ id: 'opt-a', kind: 'option', label: 'Expand EU' }]);
+    const proposal = makeRunAnalysisProposal({
+      entity: {
+        id: 'opt-a',
+        kind: 'option',
+        resolution_status: 'unresolved',
+        resolution_method: 'context_inference',
+      },
+    });
+    const result = validateToolCall(proposal, graph, RUN_ANALYSIS_DECL);
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error.code).toBe('ENTITY_RESOLUTION_AMBIGUOUS');
+    }
+  });
+
+  it('resolution check fires BEFORE entity-kind mismatch — clarification supersedes structural error', () => {
+    // Even when both resolution is ambiguous AND kind is wrong, the
+    // resolution issue dominates because the user-facing recovery is
+    // "pick one of these" not "pick a different handler".
+    const graph = makeGraph([{ id: 'n-1', kind: 'factor', label: 'Cost' }]);
+    const proposal = makeRunAnalysisProposal({
+      entity: {
+        id: 'n-1',
+        kind: 'node',
+        resolution_status: 'ambiguous',
+        resolution_method: 'label_match',
+      },
+    });
+    const result = validateToolCall(proposal, graph, RUN_ANALYSIS_DECL);
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.error.code).toBe('ENTITY_RESOLUTION_AMBIGUOUS');
+  });
+
   it('checks fail in the documented order — handler miss precedes entity mismatch', () => {
     // If handler is wrong AND entity is wrong, the handler error wins.
     const graph = makeGraph([]);
@@ -332,15 +395,19 @@ describe('validateToolCall — typed failures', () => {
 // ---------------------------------------------------------------------
 
 describe('validateToolCall — behavioural guarantees', () => {
-  it('"set churn to 5%" does NOT validate as edit_graph (right tool for the job)', () => {
-    // Scenario: user intent is a parameter update. If Sonnet wrongly routes
-    // to edit_graph with a node-kind entity, the validator accepts it only
-    // because edit_graph declares it accepts node kinds. This test proves
-    // the SEPARATE contract: a parameter-bearing proposal on edit_graph
-    // would not pass the parameter schema if one were declared. For Phase
-    // 1a, edit_graph has no parameter schemas, so this test asserts that
-    // the right-tool pressure lives in the handler *declarations*, not in
-    // the validator's control flow. That is the correct locus.
+  it('right-tool-for-job pressure lives in handler declarations, not validator control flow', () => {
+    // Validates that the validator is a structural safety net governed by
+    // each handler's declaration — accepted_entity_kinds, parameter_schemas,
+    // preconditions. "Right tool" routing correctness is a routing-layer
+    // concern (Sonnet's prompt + telemetry-driven evals), not validator code.
+    //
+    // Demonstration: a parameter-bearing proposal on edit_graph (no param
+    // schema declared) passes structurally, while the same proposal on
+    // set_factor_value (param schema present) also passes. If Phase 2
+    // wants to harden "set churn → must go to set_factor_value", the
+    // mechanism is to declare a param schema on edit_graph that REJECTS
+    // scalar value updates — a registry-declaration change, not a
+    // validator code change.
     const graph = makeGraph([{ id: 'n-churn', kind: 'node', label: 'Churn' }]);
     const proposal: ProposalAction = {
       handler_id: 'edit_graph',
@@ -355,18 +422,11 @@ describe('validateToolCall — behavioural guarantees', () => {
       cited_context_fields: [],
     };
     const result = validateToolCall(proposal, graph, SET_FACTOR_VALUE_DECL);
-    // Validator accepts (edit_graph declares node kind), but the ROUTING
-    // layer should not have picked it. Documented: validation is a safety
-    // net, not the primary routing correctness signal.
     expect(result.valid).toBe(true);
 
-    // The positive path: the correct handler (set_factor_value) also
-    // validates, and its richer schema gives the user better feedback on
-    // parameter bounds.
-    const correctProposal: ProposalAction = {
-      ...proposal,
-      handler_id: 'set_factor_value',
-    };
+    // Same proposal on set_factor_value also validates — its richer schema
+    // would catch out-of-bounds values (covered separately above).
+    const correctProposal: ProposalAction = { ...proposal, handler_id: 'set_factor_value' };
     const correct = validateToolCall(correctProposal, graph, SET_FACTOR_VALUE_DECL);
     expect(correct.valid).toBe(true);
   });
