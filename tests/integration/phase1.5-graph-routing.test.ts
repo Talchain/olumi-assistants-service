@@ -200,6 +200,72 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
     expect(events.find((e) => e.event === 'turn_executor.started')).toBeUndefined();
   });
 
+  it('Imp-1 MUST-PASS: execute/run_analysis turn with UNMODIFIED real UI fixture reaches handler (no synthetic options)', async () => {
+    // Regression guard for the P0-1 bug: a prior precondition revision
+    // required graph_state.options[].status==='ready', which the real UI
+    // never sends. This test proves the precondition no longer over-reaches
+    // on the actual wire shape. The turn routes as execute/run_analysis,
+    // validator PASSES, and control reaches the handler (which is absent in
+    // this setup → UNHANDLED, which is the signal the validator let it
+    // through).
+    const payload = {
+      turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      message: UI_FIXTURE.message as string,
+      turn_class: 'frame',
+      stage: 'frame',
+      // EXACT fixture graph_state — no synthetic options, no status fields.
+      graph_state: UI_FIXTURE.graph_state,
+    };
+    // Route LLM to an execute/run_analysis proposal targeting one of the
+    // option nodes that the fixture actually carries.
+    nextToolUseResult = toolUseResult(
+      {
+        intent_class: 'execute',
+        action: {
+          handler_id: 'run_analysis',
+          entity: {
+            id: 'opt_1',
+            kind: 'option',
+            resolution_status: 'resolved',
+            resolution_method: 'id_match',
+            label: 'Expand East',
+          },
+          parameters: [],
+          cited_context_fields: ['graph.options'],
+        },
+      },
+      'Running analysis...',
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const completed = events.find((e) => e.event === 'turn_executor.completed');
+    const stages = completed!.data.stages_completed as string[];
+    // Regression guards: prove the precondition did NOT misfire on the
+    // real wire. Under the old bug this turn would have been rejected at
+    // validate with PRECONDITION_UNMET + 'options_lack_intervention_data'.
+    // Now validate runs; if anything fails it's downstream (handler /
+    // scenario read) — never a validator over-reach.
+    expect(stages).toContain('validate');
+    expect(completed!.data.turn_class).toBe('handler'); // routed to handler
+    // The response envelope confirms validation passed — error details use
+    // scenario_read_failed / handler_invocation_failed causes, not
+    // PRECONDITION_UNMET's no_options_defined.
+    const body = JSON.parse(res.body);
+    const errBlock = (body.blocks as Array<{ type: string; details?: Record<string, unknown> }>)
+      .find((b) => b.type === 'error');
+    if (errBlock) {
+      expect(errBlock.details?.validation_error_code).toBeUndefined();
+      expect(errBlock.details?.reason).not.toBe('no_options_defined');
+    }
+  });
+
   it('text_only turn with graph_state — validate stage skipped entirely', async () => {
     const payload = {
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',

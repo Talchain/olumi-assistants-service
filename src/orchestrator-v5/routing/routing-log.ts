@@ -51,6 +51,14 @@ export interface RoutingLogInput {
   readonly graph_edge_count: number;
   /** Phase 1.5: deterministic graph hash (16 hex chars) or null when no graph. */
   readonly graph_hash: string | null;
+  /**
+   * Phase 1.5 review (Imp-2): adapter drop stats, so drift triage can read
+   * the per-turn log without cross-referencing the telemetry stream. Null
+   * when the adapter wasn't invoked (tests pass graphLookup directly).
+   */
+  readonly graph_mapped_nodes: number | null;
+  readonly graph_dropped_by_unknown_kind: number | null;
+  readonly graph_dropped_by_missing_id: number | null;
 }
 
 export interface RoutingLog {
@@ -74,6 +82,9 @@ export interface RoutingLog {
   readonly graph_node_count: number;
   readonly graph_edge_count: number;
   readonly graph_hash: string | null;
+  readonly graph_mapped_nodes: number | null;
+  readonly graph_dropped_by_unknown_kind: number | null;
+  readonly graph_dropped_by_missing_id: number | null;
 }
 
 /**
@@ -103,6 +114,9 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
       graph_node_count: input.graph_node_count,
       graph_edge_count: input.graph_edge_count,
       graph_hash: input.graph_hash,
+      graph_mapped_nodes: input.graph_mapped_nodes,
+      graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
+      graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
     };
   }
   return {
@@ -126,6 +140,9 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
     graph_node_count: input.graph_node_count,
     graph_edge_count: input.graph_edge_count,
     graph_hash: input.graph_hash,
+    graph_mapped_nodes: input.graph_mapped_nodes,
+    graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
+    graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
   };
 }
 

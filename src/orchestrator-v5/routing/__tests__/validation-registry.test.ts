@@ -1,10 +1,14 @@
 /**
- * Unit tests for Phase 1.5 run_analysis precondition — plan correction #4.
+ * Unit tests for Phase 1.5 run_analysis precondition.
  *
- * The precondition distinguishes two blockers, each with a distinct `reason`
- * so user-facing responses can offer specific recovery paths:
- *   • no_options_defined
- *   • options_lack_intervention_data
+ * After review P0-1, the precondition is WIRE-CHECKABLE ONLY — it asserts
+ * "at least one option node exists in graph.nodes". Intervention-readiness
+ * (status === 'ready' + non-empty interventions) lives in the scenario
+ * store, which only the handler has async access to; the handler produces
+ * typed HANDLER_INVOCATION_FAILED when options lack configuration. A prior
+ * revision attempted to check readiness at the validator layer and would
+ * have failed every production run_analysis turn because the real wire
+ * does not carry the canonical options array.
  */
 import { describe, it, expect } from 'vitest';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -59,10 +63,10 @@ describe('run_analysis precondition', () => {
     }
   });
 
-  it('rejects with options_lack_intervention_data when option nodes exist but options[] is empty', () => {
-    // Option nodes present in graph but no canonical options[] array (and so
-    // no interventions). This is the "user added options but never configured
-    // effects" state.
+  it('passes when at least one option node exists — even without canonical options[] on wire (P0-1)', () => {
+    // This is the real-wire happy path: UI sends graph_state with an option
+    // node but no top-level options[] array. The validator PASSES this; the
+    // handler reads scenario data async and enforces intervention readiness.
     const graph = mkGraph([
       { id: 'g1', kind: 'goal', label: 'Profit' },
       { id: 'opt_a', kind: 'option', label: 'Option A' },
@@ -73,46 +77,16 @@ describe('run_analysis precondition', () => {
       lookup,
       HANDLER_VALIDATION_REGISTRY,
     );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('PRECONDITION_UNMET');
-      expect(result.error.details?.reason).toBe('options_lack_intervention_data');
-    }
+    expect(result.valid).toBe(true);
   });
 
-  it('rejects with options_lack_intervention_data when options[] entries have empty interventions', () => {
+  it('passes regardless of options[] readiness — that check moved to handler', () => {
+    // Whether options[] has status='ready' or status='needs_user_mapping',
+    // the validator is agnostic. The wire doesn't carry canonical options,
+    // so this layer cannot judge readiness without breaking every real turn.
     const graph = mkGraph(
-      [
-        { id: 'g1', kind: 'goal', label: 'Profit' },
-        { id: 'opt_a', kind: 'option', label: 'Option A' },
-      ],
-      [{ id: 'opt_a', interventions: {} }],
-    );
-    const lookup = lookupFor(graph);
-    const result = validateToolCall(
-      runAnalysisProposal('opt_a', 'option'),
-      lookup,
-      HANDLER_VALIDATION_REGISTRY,
-    );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.details?.reason).toBe('options_lack_intervention_data');
-    }
-  });
-
-  it('passes when an option has status="ready" AND a configured intervention (P1-3)', () => {
-    const graph = mkGraph(
-      [
-        { id: 'g1', kind: 'goal', label: 'Profit' },
-        { id: 'opt_a', kind: 'option', label: 'Option A' },
-      ],
-      [
-        {
-          id: 'opt_a',
-          status: 'ready',
-          interventions: { fac_1: { value: 0.8, source: 'user_specified' } },
-        },
-      ],
+      [{ id: 'opt_a', kind: 'option', label: 'A' }],
+      [{ id: 'opt_a', status: 'needs_user_mapping', interventions: {} }],
     );
     const lookup = lookupFor(graph);
     const result = validateToolCall(
@@ -121,33 +95,6 @@ describe('run_analysis precondition', () => {
       HANDLER_VALIDATION_REGISTRY,
     );
     expect(result.valid).toBe(true);
-  });
-
-  it('P1-3: rejects when option has interventions but status is not "ready"', () => {
-    // Canonical isOptionReady() requires BOTH status === 'ready' and
-    // non-empty interventions. An option in needs_user_mapping with a
-    // stray intervention is not analysis-ready.
-    const graph = mkGraph(
-      [{ id: 'opt_a', kind: 'option', label: 'A' }],
-      [
-        {
-          id: 'opt_a',
-          status: 'needs_user_mapping',
-          interventions: { fac_1: { value: 1 } },
-        },
-      ],
-    );
-    const lookup = lookupFor(graph);
-    const result = validateToolCall(
-      runAnalysisProposal('opt_a', 'option'),
-      lookup,
-      HANDLER_VALIDATION_REGISTRY,
-    );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('PRECONDITION_UNMET');
-      expect(result.error.details?.reason).toBe('options_lack_intervention_data');
-    }
   });
 
   it('P0-1: rejects ENTITY_KIND_MISMATCH when proposal.kind differs from graph kind', () => {

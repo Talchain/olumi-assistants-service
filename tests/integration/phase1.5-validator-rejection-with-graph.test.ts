@@ -183,12 +183,13 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
     const errBlock = r.blocks.find((b) => b.type === 'error');
     expect(errBlock?.details?.reason).toBe('no_options_defined');
     expect(errBlock?.details?.handler_id).toBe('run_analysis');
-    // Distinct from the other precondition reason — plan correction #4.
-    expect(errBlock?.details?.reason).not.toBe('options_lack_intervention_data');
     expect(r.assistant_text).not.toContain('no_options_defined');
   });
 
-  it('PRECONDITION_UNMET — options_lack_intervention_data when options exist but no interventions configured', async () => {
+  it('P0-1 wire-reality: precondition PASSES when graph has option nodes even without on-wire options[]', async () => {
+    // The real UI sends only graph.nodes / graph.edges — no options[] array.
+    // The precondition must not over-reach and fail this turn; intervention-
+    // readiness belongs to the handler (which has async scenarioReader).
     const graph = mkGraph([
       { id: 'goal_1', kind: 'goal', label: 'Profit' },
       { id: 'opt_a', kind: 'option', label: 'A' },
@@ -215,17 +216,14 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
       ),
     );
 
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-pu2', {
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p01-wire', {
       routingAdapter,
       graphState: graph,
+      // No handler registered → handler dispatch miss produces UNHANDLED,
+      // NOT a PRECONDITION_UNMET. Key assertion: validation passes.
     });
 
-    expect(telemetry.validation_error_code).toBe('PRECONDITION_UNMET');
-    const r = response as { blocks: Array<{ type: string; details?: { reason?: string } }> };
-    const errBlock = r.blocks.find((b) => b.type === 'error');
-    // Distinct from the no-options case.
-    expect(errBlock?.details?.reason).toBe('options_lack_intervention_data');
-    expect(errBlock?.details?.reason).not.toBe('no_options_defined');
+    expect(telemetry.validation_error_code).toBeNull();
   });
 
   it('ENTITY_RESOLUTION_SUSPICIOUS — details carry both chosen + closer candidates', async () => {

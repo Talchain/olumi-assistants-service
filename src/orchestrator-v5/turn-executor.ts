@@ -236,6 +236,18 @@ export async function runTurnExecutor(
         outcome: 'all_dropped',
         ...adapterResult.stats,
       });
+    } else {
+      // P1-1: emit no_graph so frame-stage + non-UI turns are observable
+      // alongside ok/all_dropped in the same event stream. Stats are all
+      // zero because there's no payload to describe.
+      emit(TelemetryEvents.TurnExecutorGraphLookup, {
+        request_id: requestId,
+        outcome: 'no_graph',
+        total_nodes: 0,
+        mapped_nodes: 0,
+        dropped_by_unknown_kind: 0,
+        dropped_by_missing_id: 0,
+      });
     }
   }
 
@@ -556,8 +568,20 @@ export async function runTurnExecutor(
     const writer = options.routingLogWriter ?? writeRoutingLog;
     // Phase 1.5: emit graph signal counts + deterministic hash so Phase 2
     // evaluation can correlate validator behaviour with graph state.
-    const graphNodeCount = contextPackForLog?.graph.counts.nodes ?? 0;
-    const graphEdgeCount = contextPackForLog?.graph.counts.edges ?? 0;
+    //
+    // P1-2 (review): on fail-fast paths (graph_payload_drift, orient
+    // failures) the ContextPack never assembled, so fall back to the
+    // adapter stats + raw ingress arrays to preserve ingress counts.
+    // Without this, dashboards querying "turns with graph > N nodes"
+    // would miss fail-fast turns that DID carry a graph payload.
+    const ingressNodeCount = options.graphState?.nodes.length ?? 0;
+    const ingressEdgeCount = options.graphState?.edges.length ?? 0;
+    const graphNodeCount =
+      contextPackForLog?.graph.counts.nodes
+      ?? graphLookupStatsForLog?.total_nodes
+      ?? ingressNodeCount;
+    const graphEdgeCount =
+      contextPackForLog?.graph.counts.edges ?? ingressEdgeCount;
     const graphHash = computeDeterministicGraphHash(options.graphState ?? null);
     const record = buildRoutingLog({
       turn_id: context.request_id,
@@ -578,6 +602,14 @@ export async function runTurnExecutor(
       graph_node_count: graphNodeCount,
       graph_edge_count: graphEdgeCount,
       graph_hash: graphHash,
+      // Imp-2 (review): adapter stats in the routing log too, so drift
+      // triage can join per-turn log rows without cross-referencing the
+      // telemetry stream. Null when adapter wasn't invoked (test override).
+      graph_mapped_nodes: graphLookupStatsForLog?.mapped_nodes ?? null,
+      graph_dropped_by_unknown_kind:
+        graphLookupStatsForLog?.dropped_by_unknown_kind ?? null,
+      graph_dropped_by_missing_id:
+        graphLookupStatsForLog?.dropped_by_missing_id ?? null,
     });
     safeFireRoutingLogWrite(writer, record, requestId);
   }
@@ -707,20 +739,30 @@ export async function runTurnExecutor(
  * Narrow an ingress analysis payload into the V2RunResponseEnvelope shape
  * that compactAnalysis() consumes. The ingress schema only requires
  * `analysis_status`; compactAnalysis reads `meta`, `results`, `robustness`,
- * `factor_sensitivity`, etc. defensively. We fill the required fields with
- * safe defaults and forward everything else verbatim — no type assertion,
- * structural coercion only.
+ * `factor_sensitivity`, etc. defensively. We fill required fields ONLY when
+ * they are truly missing; when present but non-canonical (e.g. an
+ * object-shaped `results` from an older compatibility payload), forward
+ * verbatim and let compactAnalysis handle it — silent discarding of
+ * analysis context would hide real data from the LLM (review P1-3).
  */
 function coerceIngressAnalysis(a: AnalysisStateIngress): V2RunResponseEnvelope {
   const raw = a as AnalysisStateIngress & {
     meta?: V2RunResponseEnvelope['meta'];
-    results?: unknown[];
+    results?: unknown;
     [k: string]: unknown;
   };
+  // Only default when truly absent. An array `results` passes through
+  // unchanged; a non-array `results` is forwarded under the unknown[] cast
+  // so compactAnalysis's internal guards (isOptionResult, Array.isArray
+  // checks) can iterate defensively rather than seeing silent emptiness.
+  const results: unknown[] =
+    raw.results === undefined
+      ? []
+      : (raw.results as unknown[]);
   return {
     ...raw,
     meta: raw.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
-    results: Array.isArray(raw.results) ? raw.results : [],
+    results,
   };
 }
 

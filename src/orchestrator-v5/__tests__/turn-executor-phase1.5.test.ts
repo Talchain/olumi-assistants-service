@@ -18,7 +18,10 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
-import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import type {
+  GraphStateIngress,
+  AnalysisStateIngress,
+} from '../boundary/request-extensions.js';
 import type { RoutingLog } from '../routing/routing-log.js';
 
 vi.mock('../session/index.js', () => ({
@@ -34,6 +37,16 @@ vi.mock('../session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+
+function mkTextResult(text: string): ChatWithToolsResult {
+  return {
+    content: [{ type: 'text', text }] as ToolResponseBlock[],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 50,
+  };
+}
 
 function mkToolUseResult(input: unknown, textBefore?: string): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [];
@@ -222,41 +235,56 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     expect(logs[0]!.graph_hash).toBeNull();
   });
 
-  it('precondition fires on a real graph with no intervention data — PRECONDITION_UNMET', async () => {
-    // Graph has an option node but no configured interventions in options[].
-    const graphMissingInterventions: GraphStateIngress = {
+  it('P0-1: precondition fires only when graph has NO option nodes (no_options_defined)', async () => {
+    // Graph has a goal node but NO option nodes. Proposal targets the goal
+    // (which exists) so we reach the precondition; the precondition must
+    // then reject because no options are defined.
+    const graphNoOptions: GraphStateIngress = {
       nodes: [
         { id: 'goal_1', kind: 'goal', label: 'Profit' },
-        { id: 'opt_a', kind: 'option', label: 'Expand' },
+        { id: 'fac_1', kind: 'factor', label: 'Demand' },
       ],
       edges: [],
     } as GraphStateIngress;
 
     const routingAdapter = mockRoutingAdapter(
-      mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A, 'Running analysis...'),
+      mkToolUseResult(
+        {
+          intent_class: 'execute',
+          action: {
+            handler_id: 'run_analysis',
+            entity: {
+              id: 'goal_1',
+              kind: 'goal',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+              label: 'Profit',
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        },
+        'Running analysis...',
+      ),
     );
     const { telemetry, response } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-5', {
       routingAdapter,
-      graphState: graphMissingInterventions,
+      graphState: graphNoOptions,
     });
 
     expect(telemetry.validation_error_code).toBe('PRECONDITION_UNMET');
     expect(telemetry.commit_performed).toBe(false);
     expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
 
-    // User-facing text stays generic — the specific reason surfaces only in
-    // structured block details so the UI can render it per handler.
     const r = response as {
       assistant_text: string;
       blocks: Array<Record<string, unknown>>;
     };
-    expect(r.assistant_text).not.toContain('options_lack_intervention_data');
     expect(r.assistant_text).not.toContain('no_options_defined');
-    // Structured block carries the machine-readable reason for UI routing.
     const errBlock = r.blocks.find((b) => b.type === 'error') as
       | { details?: { reason?: string } }
       | undefined;
-    expect(errBlock?.details?.reason).toBe('options_lack_intervention_data');
+    expect(errBlock?.details?.reason).toBe('no_options_defined');
   });
 
   it('P0-2 all_dropped: graph with only unknown kinds fails the turn BEFORE routing', async () => {
@@ -289,6 +317,73 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     const errBlock = r.blocks.find((b) => b.type === 'error');
     expect(errBlock?.details?.reason).toBe('graph_payload_drift');
     expect(errBlock?.details?.total_nodes).toBe(2);
+  });
+
+  it('P1-1: no_graph outcome is emitted on frame-stage turns so skips are observable', async () => {
+    const routingAdapter = mockRoutingAdapter(mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A));
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p15-no-graph-tel', {
+      routingAdapter,
+      // no graphState
+    });
+    const glEvent = events.find((e) => e.event === 'turn_executor.graph_lookup');
+    expect(glEvent).toBeDefined();
+    expect(glEvent!.data.outcome).toBe('no_graph');
+    expect(glEvent!.data.total_nodes).toBe(0);
+    expect(glEvent!.data.mapped_nodes).toBe(0);
+  });
+
+  it('P1-2: routing log preserves graph counts on all_dropped fail-fast', async () => {
+    const drifted: GraphStateIngress = {
+      nodes: [
+        { id: 'n1', kind: 'nope_a', label: 'N1' },
+        { id: 'n2', kind: 'nope_b', label: 'N2' },
+        { id: 'n3', kind: 'nope_c', label: 'N3' },
+      ],
+      edges: [
+        { from: 'n1', to: 'n2' },
+        { from: 'n2', to: 'n3' },
+      ],
+    } as GraphStateIngress;
+    const routingAdapter = mockRoutingAdapter(mkToolUseResult(RUN_ANALYSIS_PROPOSAL_OPT_A));
+    const logs: Array<Record<string, unknown>> = [];
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p15-fail-fast-counts', {
+      routingAdapter,
+      graphState: drifted,
+      routingLogWriter: async (r) => {
+        logs.push(r);
+      },
+    });
+    await new Promise((r) => setImmediate(r));
+    // Dashboards querying "turns with a graph payload" must see the real
+    // ingress counts even when the turn failed before ContextPack assembly.
+    expect(logs[0]!.graph_node_count).toBe(3);
+    expect(logs[0]!.graph_edge_count).toBe(2);
+    // Imp-2: adapter stats also surface in the log for triage.
+    expect(logs[0]!.graph_mapped_nodes).toBe(0);
+    expect(logs[0]!.graph_dropped_by_unknown_kind).toBe(3);
+  });
+
+  it('P1-3: coerceIngressAnalysis preserves object-shaped results instead of discarding', async () => {
+    // A compatibility payload where `results` is an object rather than an
+    // array. Prior coercion silently forced it to [] — hiding the LLM
+    // from real analysis context. Current behaviour: pass through; compact
+    // analysis handles it defensively.
+    const analysisWithObjectResults = {
+      analysis_status: 'complete',
+      meta: { seed_used: 1, n_samples: 100, response_hash: 'abc' },
+      // Object-shaped — non-canonical but should not be silently erased.
+      results: { keyed: { option_id: 'x', label: 'X', win_probability: 0.7 } },
+    } as unknown as AnalysisStateIngress;
+    const routingAdapter = mockRoutingAdapter(mkTextResult('looking at analysis'));
+
+    // Turn should complete without throwing — compactAnalysis is defensive
+    // on non-array results. Key assertion: no uncaught TypeError / crash.
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-obj-results', {
+      routingAdapter,
+      analysisState: analysisWithObjectResults,
+    });
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
   });
 
   it('P0-2 all_dropped: telemetry event fires with drop stats (Imp-2)', async () => {
