@@ -208,4 +208,111 @@ describe('buildGraphLookup', () => {
       expect(lookup.listEntitiesByKind('constraint')).toEqual([]);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Bot-review regression guards (PR #147)
+  // -------------------------------------------------------------------------
+  describe('payload-drift safety + constraint projection invariants', () => {
+    // Codex P1: previously, projecting constraints into byId BEFORE the
+    // all_dropped check meant a payload with all-unknown-kind nodes plus
+    // any valid constraint slipped past the fail-fast safety envelope. The
+    // adapter now keys all_dropped on a node-only counter.
+    it('all_dropped fires when every node has unknown kind, even when goal_constraints has valid entries', () => {
+      const result = buildGraphLookup(
+        mkGraph(
+          [
+            { id: 'x1', kind: 'unknown_kind_1', label: 'A' },
+            { id: 'x2', kind: 'totally_made_up', label: 'B' },
+          ],
+          undefined,
+          [{ constraint_id: 'c_ok', label: 'fine' }],
+        ),
+      );
+      expect(result.kind).toBe('all_dropped');
+      if (result.kind === 'all_dropped') {
+        expect(result.stats.total_nodes).toBe(2);
+        expect(result.stats.mapped_nodes).toBe(0);
+        expect(result.stats.dropped_by_unknown_kind).toBe(2);
+      }
+    });
+
+    // Gemini #1: stats.mapped_nodes must reflect node-only mapping count, not
+    // node + constraint count, so routing-log telemetry stays interpretable.
+    it('stats.mapped_nodes reflects mapped graph nodes only, not constraints projected after', () => {
+      const result = buildGraphLookup(
+        mkGraph(
+          [
+            { id: 'g1', kind: 'goal', label: 'G' },
+            { id: 'o1', kind: 'option', label: 'O' },
+          ],
+          undefined,
+          [
+            { constraint_id: 'c_a', label: 'A' },
+            { constraint_id: 'c_b', label: 'B' },
+            { constraint_id: 'c_c', label: 'C' },
+          ],
+        ),
+      );
+      expect(result.kind).toBe('ok');
+      if (result.kind === 'ok') {
+        expect(result.stats.mapped_nodes).toBe(2); // NOT 5
+        expect(result.stats.total_nodes).toBe(2);
+      }
+    });
+
+    // Gemini #2: when a constraint id collides with an existing node id,
+    // the node MUST remain authoritative — the constraint is skipped to
+    // preserve the byId index invariant.
+    it('skips constraint entries whose id collides with an existing node id', () => {
+      const lookup = expectOk(
+        buildGraphLookup(
+          mkGraph(
+            [{ id: 'shared_id', kind: 'option', label: 'Real Option' }],
+            undefined,
+            [{ constraint_id: 'shared_id', label: 'Sneaky Constraint' }],
+          ),
+        ),
+      );
+      // Node remains authoritative for findEntityById.
+      expect(lookup.findEntityById('shared_id')).toEqual({
+        id: 'shared_id',
+        kind: 'option',
+        label: 'Real Option',
+      });
+      // Sneaky constraint never makes it into the constraint list.
+      expect(lookup.listEntitiesByKind('constraint')).toEqual([]);
+      // Original option list is intact.
+      expect(lookup.listEntitiesByKind('option')).toEqual([
+        { id: 'shared_id', label: 'Real Option' },
+      ]);
+    });
+
+    // Gemini #3: duplicate constraint ids must be deduped at projection time
+    // so listEntitiesByKind('constraint') doesn't return the same entry twice.
+    it('dedupes duplicate constraint ids in goal_constraints', () => {
+      const lookup = expectOk(
+        buildGraphLookup(
+          mkGraph(
+            [{ id: 'g1', kind: 'goal', label: 'G' }],
+            undefined,
+            [
+              { constraint_id: 'c_dup', label: 'first' },
+              { constraint_id: 'c_dup', label: 'second' },
+              { constraint_id: 'c_dup', label: 'third' },
+              { constraint_id: 'c_other', label: 'other' },
+            ],
+          ),
+        ),
+      );
+      const constraints = lookup.listEntitiesByKind('constraint');
+      expect(constraints).toHaveLength(2);
+      // First-write-wins on dedup: the initial entry is kept; subsequent
+      // duplicates are silently dropped.
+      expect(constraints).toEqual([
+        { id: 'c_dup', label: 'first' },
+        { id: 'c_other', label: 'other' },
+      ]);
+      expect(lookup.findEntityById('c_dup')?.label).toBe('first');
+    });
+  });
 });

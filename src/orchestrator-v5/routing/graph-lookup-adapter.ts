@@ -152,6 +152,12 @@ export function buildGraphLookup(
 
   let droppedByMissingId = 0;
   let droppedByUnknownKind = 0;
+  // Tracked separately from `byId.size` because constraints get projected
+  // into byId after the node loop; mixing them inflates `mapped_nodes` and
+  // — worse — defeats the `all_dropped` payload-drift fail-fast (a payload
+  // with all-unknown-kind nodes plus any valid constraint would otherwise
+  // skip the hard-fail and silently degrade graph-dependent validation).
+  let nodeMappedCount = 0;
 
   for (const node of nodes) {
     // The ingress schema guarantees id/kind/label are strings; this guard
@@ -167,6 +173,7 @@ export function buildGraphLookup(
     }
     const label = typeof node.label === 'string' ? node.label : null;
     byId.set(node.id, { id: node.id, kind: mappedKind, label });
+    nodeMappedCount += 1;
     const kindList = byKind.get(mappedKind) ?? [];
     // Keep label as null when the node has no label, so downstream consumers
     // (composer chips, Dice matching) can distinguish "real label" from
@@ -176,25 +183,34 @@ export function buildGraphLookup(
     byKind.set(mappedKind, kindList);
   }
 
-  // Project goal_constraints[] as constraint-kind entities. Additive to
-  // node-derived entries; constraints live on a separate wire field but
-  // share the same `findEntityById` / `listEntitiesByKind` surface.
-  for (const entry of collectConstraintEntries(graph.goal_constraints)) {
-    byId.set(entry.id, entry);
-    const kindList = byKind.get('constraint') ?? [];
-    kindList.push({ id: entry.id, label: entry.label });
-    byKind.set('constraint', kindList);
-  }
-
   const stats: GraphLookupStats = {
     total_nodes: nodes.length,
-    mapped_nodes: byId.size,
+    mapped_nodes: nodeMappedCount,
     dropped_by_unknown_kind: droppedByUnknownKind,
     dropped_by_missing_id: droppedByMissingId,
   };
 
-  if (byId.size === 0) {
+  // Fail fast on payload drift BEFORE projecting constraints. Keying this
+  // decision on `nodeMappedCount` (not `byId.size`) preserves the safety
+  // envelope: constraints alone are insufficient for graph-dependent
+  // validation to be safe.
+  if (nodeMappedCount === 0) {
     return { kind: 'all_dropped', stats };
+  }
+
+  // Project goal_constraints[] as constraint-kind entities. Additive to
+  // node-derived entries; constraints live on a separate wire field but
+  // share the same `findEntityById` / `listEntitiesByKind` surface.
+  // Dedupe by constraint id and skip ids that collide with an existing
+  // node — preserving `byId` as the authoritative entity-by-id index.
+  const seenConstraintIds = new Set<string>();
+  for (const entry of collectConstraintEntries(graph.goal_constraints)) {
+    if (seenConstraintIds.has(entry.id) || byId.has(entry.id)) continue;
+    seenConstraintIds.add(entry.id);
+    byId.set(entry.id, entry);
+    const kindList = byKind.get('constraint') ?? [];
+    kindList.push({ id: entry.id, label: entry.label });
+    byKind.set('constraint', kindList);
   }
 
   const optionsList = normaliseOptions(graph.options);
