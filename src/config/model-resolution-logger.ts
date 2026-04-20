@@ -86,10 +86,14 @@ const ALL_CEE_TASKS = Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[];
  * not visible here and require per-turn inspection.
  */
 export function logResolvedTaskModels(): void {
+  // Startup resolution is advisory only. Prompt-store model_config overrides
+  // are applied per request at parse time (src/cee/unified-pipeline/stages/parse.ts)
+  // and are not determinable at boot. The per-request log "model.resolution"
+  // and GET /admin/v1/turn-debug/:turn_id are the source of truth for the
+  // actually-used model on any given call.
   log.info(
     { event: 'model.startup_resolution_note' },
-    'Task model resolution logged below (env + code defaults only). ' +
-    'Store overrides apply at parse time and are visible per-turn via GET /admin/v1/routing-log/:turn_id.',
+    'Startup values are advisory. Per-request logs are the source of truth for store overrides applied after boot.',
   );
   for (const task of ALL_CEE_TASKS) {
     const { model, source } = resolveTaskModel(task);

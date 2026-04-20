@@ -202,32 +202,37 @@ describe("runStageBoundary", () => {
     expect(ctx.earlyReturn).toBeUndefined();
   });
 
-  it("soft-gates strict mode validation failure — graph passes through with warning (Track 1)", async () => {
+  it("fail-closes on strict-mode validation failure — sets earlyReturn(502) with typed envelope (MC-29)", async () => {
     (validateStrictModeV3 as any).mockImplementation(() => {
       throw new Error("Missing required field: edges");
     });
     const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
     await runStageBoundary(ctx);
 
-    // Track 1: strict mode is now a soft gate — graph passes through
-    expect(ctx.earlyReturn).toBeUndefined();
-    expect(ctx.finalResponse).toBeDefined();
-    // Graph is preserved (NOT nulled)
-    expect((ctx.finalResponse as any).graph).not.toBeNull();
+    // MC-29: strict-mode failure is fail-closed (was soft-gate Track 1 pre-fix).
+    expect(ctx.finalResponse).toBeUndefined();
+    expect(ctx.earlyReturn).toBeDefined();
+    expect(ctx.earlyReturn!.statusCode).toBe(502);
+    const body = ctx.earlyReturn!.body as Record<string, unknown>;
+    expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
+    expect(body.reason).toBe("egress_contract_violation");
+    const details = body.details as Record<string, unknown>;
+    expect(details.validator).toBe("strict_mode_v3");
 
-    // Warning recorded on pipeline outcome
+    // Warning recorded with blocked=true, degraded=false.
     const strictWarning = ctx.pipelineOutcome.warnings.find(
       (w: any) => w.stage === "boundary_strict_mode",
     );
     expect(strictWarning).toBeDefined();
     expect(strictWarning.error).toContain("Missing required field: edges");
-    expect(strictWarning.degraded).toBe(true);
+    expect(strictWarning.degraded).toBe(false);
+    expect(strictWarning.blocked).toBe(true);
 
-    // Should emit telemetry event
+    // Telemetry event uses the new consolidated code.
     expect(emit).toHaveBeenCalledWith(
       TelemetryEvents.CeeBoundaryBlocked,
       expect.objectContaining({
-        error_code: "CEE_V3_STRICT_MODE_DEGRADED",
+        error_code: "CEE_EGRESS_CONTRACT_VIOLATION",
         error_message: "Missing required field: edges",
       })
     );
@@ -505,19 +510,20 @@ describe("runStageBoundary", () => {
     expect(ctx.finalResponse.analysis_ready.bias_findings).toEqual([]);
   });
 
-  it("strict mode failure adds warning but preserves graph (Track 1)", async () => {
+  it("strict-mode failure sets earlyReturn(502) with typed envelope (MC-29)", async () => {
     (validateStrictModeV3 as any).mockImplementation(() => {
       throw new Error("strict validation failed");
     });
     const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: true, includeDebug: false } });
     await runStageBoundary(ctx);
 
-    // Track 1: graph preserved, warning recorded
-    expect(ctx.finalResponse).toBeDefined();
-    expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_strict_mode")).toBe(true);
+    // MC-29: fail-closed, not soft-gate.
+    expect(ctx.finalResponse).toBeUndefined();
+    expect(ctx.earlyReturn?.statusCode).toBe(502);
+    expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_strict_mode" && w.blocked === true)).toBe(true);
   });
 
-  it("V3 schema validation failure adds warning but preserves graph (Track 1)", async () => {
+  it("V3 schema validation failure sets earlyReturn(502) with typed envelope (MC-29)", async () => {
     const { CEEGraphResponseV3 } = await import("../../src/schemas/cee-v3.js");
     (CEEGraphResponseV3.safeParse as any).mockReturnValue({
       success: false,
@@ -527,11 +533,13 @@ describe("runStageBoundary", () => {
       const ctx = makeCtx({ opts: { schemaVersion: "v3", strictMode: false, includeDebug: false } });
       await runStageBoundary(ctx);
 
-      // Track 1: graph preserved, warning recorded
-      expect(ctx.finalResponse).toBeDefined();
-      // Graph is NOT nulled (soft gate)
-      expect((ctx.finalResponse as any).graph).not.toBeNull();
-      expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_v3_validation")).toBe(true);
+      // MC-29: fail-closed, not soft-gate.
+      expect(ctx.finalResponse).toBeUndefined();
+      expect(ctx.earlyReturn?.statusCode).toBe(502);
+      const body = ctx.earlyReturn!.body as Record<string, unknown>;
+      expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
+      expect(body.reason).toBe("egress_contract_violation");
+      expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_v3_validation" && w.blocked === true)).toBe(true);
     } finally {
       // Restore safeParse so subsequent tests aren't affected
       (CEEGraphResponseV3.safeParse as any).mockReturnValue({ success: true });

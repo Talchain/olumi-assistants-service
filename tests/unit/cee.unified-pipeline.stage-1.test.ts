@@ -27,6 +27,7 @@ vi.mock("../../src/utils/costGuard.js", () => ({
 
 vi.mock("../../src/adapters/llm/router.js", () => ({
   getAdapter: vi.fn(),
+  getAdapterWithResolution: vi.fn(),
   getMaxTokensFromConfig: () => undefined,
 }));
 
@@ -78,7 +79,7 @@ import { runStageParse } from "../../src/cee/unified-pipeline/stages/parse.js";
 import { groundAttachments, buildRefinementBrief } from "../../src/routes/assist.draft-graph.js";
 import { calcConfidence, shouldClarify } from "../../src/utils/confidence.js";
 import { allowedCostUSD } from "../../src/utils/costGuard.js";
-import { getAdapter } from "../../src/adapters/llm/router.js";
+import { getAdapter, getAdapterWithResolution } from "../../src/adapters/llm/router.js";
 import { UpstreamTimeoutError, ClientDisconnectError } from "../../src/adapters/llm/errors.js";
 import { createEdgeFieldStash } from "../../src/cee/unified-pipeline/edge-identity.js";
 import { normaliseCeeGraphVersionAndProvenance } from "../../src/cee/transforms/graph-normalisation.js";
@@ -161,6 +162,14 @@ function setupMocks(overrides?: {
     meta: { model: "gpt-4o" },
   });
   (getAdapter as any).mockReturnValue(mockAdapter);
+  (getAdapterWithResolution as any).mockReturnValue({
+    adapter: mockAdapter,
+    resolution: {
+      task: 'draft_graph',
+      resolved_model: 'gpt-4o',
+      resolution_source: 'task_default',
+    },
+  });
 
   // edge stash
   const stash = {

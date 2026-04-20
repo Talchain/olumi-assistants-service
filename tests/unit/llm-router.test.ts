@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getAdapter, getAdapterForProvider, resetAdapterCache } from "../../src/adapters/llm/router.js";
+import { getAdapter, getAdapterForProvider, getAdapterWithResolution, resetAdapterCache } from "../../src/adapters/llm/router.js";
+import { TASK_MODEL_DEFAULTS, type CeeTask } from "../../src/config/model-routing.js";
+import { _resetConfigCache } from "../../src/config/index.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router", () => {
@@ -430,6 +432,128 @@ describe("LLM Router", () => {
 
       expect(adapter.name).toBe("openai");
       expect(adapter.model).toBe("gpt-4-turbo");
+    });
+  });
+
+  describe("getAdapterWithResolution resolution_source", () => {
+    beforeEach(() => {
+      // Ensure every resolution test starts from a clean env/config.
+      for (const key of Object.keys(process.env)) {
+        if (key.startsWith("CEE_MODEL_")) delete process.env[key];
+      }
+      delete process.env.LLM_PROVIDER;
+      delete process.env.LLM_MODEL;
+      _resetConfigCache();
+      resetAdapterCache();
+    });
+
+    it("reports resolution_source=task_default when only TASK_MODEL_DEFAULTS applies", () => {
+      process.env.LLM_PROVIDER = "openai";
+      _resetConfigCache();
+      const { resolution } = getAdapterWithResolution("draft_graph");
+      expect(resolution.resolution_source).toBe("task_default");
+      expect(resolution.resolved_model).toBe(TASK_MODEL_DEFAULTS.draft_graph);
+    });
+
+    it("reports resolution_source=env_var when CEE_MODEL_DRAFT is set", () => {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.CEE_MODEL_DRAFT = "gpt-4.1-2025-04-14";
+      _resetConfigCache();
+      const { resolution } = getAdapterWithResolution("draft_graph");
+      expect(resolution.resolution_source).toBe("env_var");
+      expect(resolution.resolved_model).toBe("gpt-4.1-2025-04-14");
+    });
+
+    it("reports resolution_source=per_call when modelOverride is passed without origin", () => {
+      process.env.LLM_PROVIDER = "openai";
+      _resetConfigCache();
+      const { resolution } = getAdapterWithResolution("draft_graph", "gpt-4o");
+      expect(resolution.resolution_source).toBe("per_call");
+      expect(resolution.resolved_model).toBe("gpt-4o");
+    });
+
+    it("reports resolution_source=store_model_config when origin is supplied", () => {
+      process.env.LLM_PROVIDER = "openai";
+      _resetConfigCache();
+      const { resolution } = getAdapterWithResolution(
+        "draft_graph",
+        "gpt-4o",
+        "store_model_config",
+      );
+      expect(resolution.resolution_source).toBe("store_model_config");
+      expect(resolution.resolved_model).toBe("gpt-4o");
+    });
+
+    it("never labels a client-body override as store_model_config (negative test)", () => {
+      // Client-body override = modelOverride passed without an origin flag.
+      // Even after repeated invocations with different overrides, the router
+      // must never upgrade a per_call classification to store_model_config.
+      process.env.LLM_PROVIDER = "openai";
+      _resetConfigCache();
+      for (const model of ["gpt-4o", "gpt-4.1-2025-04-14", "gpt-4-turbo"]) {
+        const { resolution } = getAdapterWithResolution("draft_graph", model);
+        expect(resolution.resolution_source).toBe("per_call");
+        expect(resolution.resolution_source).not.toBe("store_model_config");
+      }
+    });
+
+    it("reports resolution_source=llm_model_fallback when only LLM_MODEL applies (non-CeeTask)", () => {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.LLM_MODEL = "gpt-4o-mini";
+      _resetConfigCache();
+      // A non-CeeTask name means no TASK_MODEL_DEFAULTS entry applies; the
+      // resolution stays at the initial LLM_MODEL assignment.
+      const { resolution } = getAdapterWithResolution("unmapped_task_name");
+      expect(resolution.resolution_source).toBe("llm_model_fallback");
+      expect(resolution.resolved_model).toBe("gpt-4o-mini");
+    });
+  });
+
+  describe("getAdapter behavioural no-op across TASK_MODEL_DEFAULTS", () => {
+    beforeEach(() => {
+      for (const key of Object.keys(process.env)) {
+        if (key.startsWith("CEE_MODEL_")) delete process.env[key];
+      }
+      delete process.env.LLM_MODEL;
+      // Use fixtures provider so no real API keys are needed; assert on
+      // resolution.resolved_model (which reflects the router's selectedModel
+      // before the fixtures adapter overrides .model to "fixture-v1").
+      process.env.LLM_PROVIDER = "fixtures";
+      _resetConfigCache();
+      resetAdapterCache();
+    });
+
+    // Behavioural-no-op matrix: after the precedence-tracking refactor,
+    // every CeeTask must still resolve to its TASK_MODEL_DEFAULTS entry
+    // when no env / store / per-call override is in effect. This is the
+    // guard against accidental runtime drift.
+    for (const task of Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[]) {
+      it(`resolves ${task} to TASK_MODEL_DEFAULTS.${task}`, () => {
+        const { resolution } = getAdapterWithResolution(task);
+        expect(resolution.resolved_model).toBe(TASK_MODEL_DEFAULTS[task]);
+        expect(resolution.resolution_source).toBe("task_default");
+      });
+    }
+
+    it("store-override case: orchestrator with store_model_config resolves to the store model", () => {
+      process.env.LLM_PROVIDER = "fixtures";
+      _resetConfigCache();
+      const { resolution } = getAdapterWithResolution(
+        "orchestrator",
+        "claude-sonnet-4-6",
+        "store_model_config",
+      );
+      expect(resolution.resolved_model).toBe("claude-sonnet-4-6");
+      expect(resolution.resolution_source).toBe("store_model_config");
+    });
+
+    it("env-var case: edit_graph with CEE_MODEL_EDIT_GRAPH resolves to the env model", () => {
+      process.env.LLM_PROVIDER = "fixtures";
+      process.env.CEE_MODEL_EDIT_GRAPH = "claude-sonnet-4-6";
+      _resetConfigCache();
+      const { resolution } = getAdapterWithResolution("edit_graph");
+      expect(resolution.resolved_model).toBe("claude-sonnet-4-6");
+      expect(resolution.resolution_source).toBe("env_var");
     });
   });
 });
