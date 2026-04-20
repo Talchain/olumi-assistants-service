@@ -20,11 +20,13 @@ Only one direct caller of `runStageBoundary`:
 |---|---|---|---|
 | `runUnifiedPipeline` | [src/cee/unified-pipeline/index.ts:638](../../src/cee/unified-pipeline/index.ts#L638) | V5-active (the only unified pipeline) | None — uses existing `drainEarlyReturn(ctx)` at [index.ts:657](../../src/cee/unified-pipeline/index.ts#L657) which now surfaces our typed 502. |
 
-Transitive (route-level):
+Transitive (route-level and tool-level) — every caller of `runUnifiedPipeline`:
 
-| Route | File:line | Invokes | Notes |
+| Caller | File:line | Classification | Impact |
 |---|---|---|---|
-| `POST /assist/v1/draft-graph` | [src/routes/assist.v1.draft-graph.ts:528](../../src/routes/assist.v1.draft-graph.ts#L528) | `runUnifiedPipeline` | Returns `{ statusCode, body }` verbatim — no transformation of error bodies. |
+| `POST /assist/v1/draft-graph` | [src/routes/assist.v1.draft-graph.ts:528](../../src/routes/assist.v1.draft-graph.ts#L528) | V5-active (current primary route) | Returns `{ statusCode, body }` verbatim via `reply.code(statusCode).send(body)` — no transformation of error bodies. Invalid V3 egress now surfaces as HTTP 502 + typed envelope. |
+| `POST /assist/v1/draft-graph-stream` | [src/routes/assist.v1.draft-graph-stream.ts:473](../../src/routes/assist.v1.draft-graph-stream.ts#L473) | V5-active (streaming variant) | Identical propagation pattern. Invalid V3 egress will now produce a 502 in the streaming route too. The streaming route should be exercised post-deploy to confirm its error-surfacing path handles the typed envelope gracefully (likely no change needed — it forwards `{ statusCode, body }` as the non-streaming route does). |
+| `handleDraftGraph` (V4 orchestrator tool) | [src/orchestrator/tools/draft-graph.ts:162](../../src/orchestrator/tools/draft-graph.ts#L162) | Legacy V4 (intra-process tool call, not HTTP) | Invokes `runUnifiedPipeline` as a function call. The caller inspects `pipelineResult.statusCode` and `.body`; under MC-29, a 502 result will propagate to V4 tool-error handling. This path is dormant under V5 routing (V5 uses the handlers in `src/orchestrator-v5/tools/`) but lives in the tree. Confirm V4 tool-error path does not swallow the typed envelope — noted for review, out of scope for this brief. |
 
 The existing `catch (boundaryErr)` at [index.ts:639](../../src/cee/unified-pipeline/index.ts#L639) remains as a safety net for genuinely unexpected throws (e.g., transform bugs). My fix does not throw; it sets `earlyReturn`. The catch block is correct to keep — it covers a different failure class.
 
@@ -136,3 +138,31 @@ The only remaining hits are historical comments explaining the fix (not the patt
 
 - OpenAPI enum extension to add `CEE_EGRESS_CONTRACT_VIOLATION` as a first-class response `code`. Current approach uses `CEE_VALIDATION_FAILED` + `reason` to avoid regenerating the spec mid-brief. File follow-up ticket if the distinction should surface to clients through the typed code.
 - Ingress fail-closed at [assist.v1.draft-graph.ts:404](../../src/routes/assist.v1.draft-graph.ts#L404) — see §5 hit 2.
+
+### Task A follow-up debt: uncovered `getAdapter` call sites
+
+Task A wired per-request `resolution_source` logging in [parse.ts](../../src/cee/unified-pipeline/stages/parse.ts) only. Other active `getAdapter` call sites do not yet emit `model.resolution` or call `recordModelResolution`. They will continue to use `getAdapter` transparently (returns the same adapter) but resolution data for those calls will not appear in `GET /admin/v1/turn-debug/:turn_id`. Tracked debt, to be addressed in a follow-up brief:
+
+V5-active sites (highest priority for follow-up):
+- [src/orchestrator-v5/classify.ts:128](../../src/orchestrator-v5/classify.ts#L128) (`turn_classifier`)
+- [src/orchestrator-v5/llm-adapter.ts:65](../../src/orchestrator-v5/llm-adapter.ts#L65) (`direct_answer_narrate`)
+- [src/orchestrator-v5/routing/route-with-tool-use.ts:369](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L369) (`direct_answer_narrate`)
+
+CEE pipeline sites (mid priority):
+- [src/cee/clarifier/question-generator.ts:152](../../src/cee/clarifier/question-generator.ts#L152)
+- [src/cee/clarifier/answer-processor.ts:153](../../src/cee/clarifier/answer-processor.ts#L153)
+- [src/cee/unified-pipeline/stages/repair/plot-validation.ts:178](../../src/cee/unified-pipeline/stages/repair/plot-validation.ts#L178)
+- [src/cee/unified-pipeline/stages/repair/orchestrator-validation.ts:29](../../src/cee/unified-pipeline/stages/repair/orchestrator-validation.ts#L29)
+- [src/cee/validation-pipeline/validate-graph.ts:54](../../src/cee/validation-pipeline/validate-graph.ts#L54)
+
+Legacy V4 sites (low priority, dormant under V5 routing):
+- [src/orchestrator/tools/dispatch.ts](../../src/orchestrator/tools/dispatch.ts) (multiple call sites)
+- [src/orchestrator/parallel-generate.ts:312](../../src/orchestrator/parallel-generate.ts#L312)
+- [src/orchestrator/deterministic/pipeline-v4.ts:617](../../src/orchestrator/deterministic/pipeline-v4.ts#L617)
+- [src/orchestrator/pipeline/pipeline.ts:209](../../src/orchestrator/pipeline/pipeline.ts#L209)
+
+Per-route handlers (lowest priority; most are single-shot utility routes):
+- `src/routes/assist.{clarify-brief,critique-graph,suggest-options,explain-diff,v1.decision-review,v1.edit-graph}.ts`
+- `src/server.ts` (several `getAdapter()` calls for health/chat probes)
+
+Recommendation: a single follow-up brief migrates all V5-active sites to `getAdapterWithResolution` + `recordModelResolution`, leaving legacy V4 untouched. A shared invocation seam was considered during Task A design and rejected: the router has no access to `request_id` and threading it via AsyncLocalStorage is invasive. The explicit-caller pattern trades some boilerplate for zero runtime coupling.

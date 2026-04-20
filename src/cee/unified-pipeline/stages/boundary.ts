@@ -315,7 +315,7 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       error: errMsg,
       degraded: false,
       blocked: true,
-    } as any);
+    });
 
     ctx.earlyReturn = {
       statusCode: 502,

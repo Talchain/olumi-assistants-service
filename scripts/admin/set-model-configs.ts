@@ -29,8 +29,10 @@
  *   # Apply
  *   pnpm exec tsx scripts/admin/set-model-configs.ts --target staging --execute
  *
- *   # Rollback (apply a previously written rollback patch set)
- *   pnpm exec tsx scripts/admin/set-model-configs.ts --rollback-file scripts/admin/snapshots/model-config-rollback-staging-<ts>.json --execute
+ *
+ * Rollback: a rollback patch file is written alongside every run (dry-run
+ * and execute). Applying a rollback is a future-brief capability; for now,
+ * the patches file can be hand-applied via the admin PATCH endpoint.
  */
 
 import 'dotenv/config';
@@ -80,7 +82,6 @@ export interface RunOptions {
   readonly target?: Target;
   readonly execute: boolean;
   readonly verbose: boolean;
-  readonly rollbackFile?: string;
 }
 
 export interface SnapshotEntry {
@@ -175,9 +176,21 @@ export function checkUrlAllowlist(
   if (!host.endsWith(ALLOWED_SUPABASE_HOST_SUFFIX)) {
     return { error: `SUPABASE_URL host '${host}' does not end with '${ALLOWED_SUPABASE_HOST_SUFFIX}'` };
   }
+  // Target-specific env var is REQUIRED, not advisory. The script
+  // refuses to run if the operator hasn't explicitly declared which
+  // URL corresponds to which environment; host-suffix alone is too
+  // weak a guard for a mutation script.
   const expectedKey = target === 'staging' ? 'SUPABASE_URL_STAGING' : 'SUPABASE_URL_PRODUCTION';
   const expected = env[expectedKey];
-  if (expected && expected !== url) {
+  if (!expected) {
+    return {
+      error:
+        `${expectedKey} is not set. Refusing to proceed: the script requires ` +
+        `an explicit URL for the selected --target so mistargeting is caught ` +
+        `before any write. Set ${expectedKey} to the Supabase URL for ${target}.`,
+    };
+  }
+  if (expected !== url) {
     return {
       error:
         `SUPABASE_URL mismatch for --target ${target}. ` +
@@ -197,26 +210,16 @@ export function checkUrlAllowlist(
  */
 export async function run(opts: RunOptions, deps: RunDeps): Promise<RunResult> {
   // ── Flag validation ───────────────────────────────────────────────
-  if (!opts.target && !opts.rollbackFile) {
-    deps.stderr('Error: --target <staging|production> is required (or --rollback-file for rollback).');
+  if (!opts.target) {
+    deps.stderr('Error: --target <staging|production> is required.');
     return { exitCode: 2, updated: 0, skipped: 0, failed: 0 };
   }
-  if (opts.target && opts.target !== 'staging' && opts.target !== 'production') {
+  if (opts.target !== 'staging' && opts.target !== 'production') {
     deps.stderr(`Error: --target must be 'staging' or 'production', got '${opts.target}'`);
     return { exitCode: 2, updated: 0, skipped: 0, failed: 0 };
   }
 
-  // Rollback mode reads patches from a file and applies them; for brevity
-  // the forward flow covers both because the apply step is identical.
-  // (We defer full rollback UX to a future brief per the plan; the file
-  // exists and is loadable but --rollback-file forward-mode is gated off
-  // until explicitly wired.)
-  if (opts.rollbackFile) {
-    deps.stderr('Error: --rollback-file mode is not yet wired in this script. Re-run without it.');
-    return { exitCode: 2, updated: 0, skipped: 0, failed: 0 };
-  }
-
-  const target = opts.target!;
+  const target = opts.target;
 
   // ── Env + allowlist guards ────────────────────────────────────────
   const urlCheck = checkUrlAllowlist(target, deps.env);
@@ -390,7 +393,6 @@ async function main(): Promise<number> {
       target: { type: 'string' },
       execute: { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
-      'rollback-file': { type: 'string' },
     },
     strict: true,
   });
@@ -404,7 +406,6 @@ async function main(): Promise<number> {
     target: values.target as Target | undefined,
     execute: Boolean(values.execute),
     verbose: Boolean(values.verbose),
-    rollbackFile: values['rollback-file'],
   };
 
   const result = await run(opts, {

@@ -174,6 +174,16 @@ describe('set-model-configs', () => {
       expect('error' in r).toBe(true);
       if ('error' in r) expect(r.error).toContain('mismatch');
     });
+    it('rejects when SUPABASE_URL_STAGING is not set (strict guard)', () => {
+      const r = checkUrlAllowlist('staging', { SUPABASE_URL: 'https://a.supabase.co' });
+      expect('error' in r).toBe(true);
+      if ('error' in r) expect(r.error).toContain('SUPABASE_URL_STAGING');
+    });
+    it('rejects when SUPABASE_URL_PRODUCTION is not set (strict guard)', () => {
+      const r = checkUrlAllowlist('production', { SUPABASE_URL: 'https://a.supabase.co' });
+      expect('error' in r).toBe(true);
+      if ('error' in r) expect(r.error).toContain('SUPABASE_URL_PRODUCTION');
+    });
     it('accepts matching URL', () => {
       const r = checkUrlAllowlist('staging', {
         SUPABASE_URL: 'https://a.supabase.co',
