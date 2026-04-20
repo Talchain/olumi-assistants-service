@@ -174,6 +174,14 @@ export interface RunTurnExecutorOptions {
    * dropped and sonnet_text is hashed. Defaults to false in this PoC.
    */
   readonly routingLogRedacted?: boolean;
+  /**
+   * V5 Group 1 Task B: scenario brief text, supplied by the route when
+   * the decision_review auto-fire should have a brief available. Passed
+   * to the decision-review enricher without ever touching the run_analysis
+   * handler fact's enrichment (F.6 / handler-ownership invariant).
+   * When null/absent, the enricher skips with reason `no_brief`.
+   */
+  readonly scenarioBrief?: string | null;
 }
 
 /**
@@ -495,6 +503,7 @@ export async function runTurnExecutor(
           requestId,
           scenarioId: context.session_id,
           signal: turnAbort.signal,
+          brief: options.scenarioBrief ?? null,
         });
       }
 

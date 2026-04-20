@@ -35,6 +35,14 @@ export interface EnrichDecisionReviewInput {
   readonly scenarioId: string;
   /** Outer turn-budget abort signal. */
   readonly signal: AbortSignal;
+  /**
+   * Scenario brief text passed out-of-band from the route/TurnExecutor.
+   * Deliberately NOT read from the run_analysis fact's enrichment — the
+   * handler-ownership invariant requires enrichment to be a verbatim
+   * pass-through of the PLoT envelope. When null/absent, the enricher
+   * skips with reason `no_brief` and the turn succeeds with thin content.
+   */
+  readonly brief: string | null;
 }
 
 type SkipReason =
@@ -66,13 +74,12 @@ export async function enrichRunAnalysisWithDecisionReview(
     return input.handlerFacts;
   }
 
-  const brief = readBrief(enrichment);
-  if (!brief) {
+  if (!input.brief || input.brief.length === 0) {
     skipTelemetry(input, 'no_brief');
     return input.handlerFacts;
   }
 
-  const invokeInput = buildInvokeInput(brief, enrichment, fact.result.leading_option_id);
+  const invokeInput = buildInvokeInput(input.brief, enrichment, fact.result.leading_option_id);
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner');
     return input.handlerFacts;
@@ -156,10 +163,6 @@ export async function enrichRunAnalysisWithDecisionReview(
   }
 }
 
-function readBrief(enrichment: Record<string, unknown>): string | null {
-  const raw = enrichment['v5.brief'];
-  return typeof raw === 'string' && raw.length > 0 ? raw : null;
-}
 
 function buildInvokeInput(
   brief: string,

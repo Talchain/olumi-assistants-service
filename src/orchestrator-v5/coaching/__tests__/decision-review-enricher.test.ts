@@ -23,8 +23,10 @@ function runAnalysisFact(overrides: {
 }
 
 function minimalEnrichment(): Record<string, unknown> {
+  // No `v5.brief` field here — brief now travels out-of-band through
+  // EnrichDecisionReviewInput.brief to keep the handler fact enrichment a
+  // verbatim pass-through of the PLoT envelope (handler-ownership invariant).
   return {
-    'v5.brief': 'Decision brief about pricing strategy',
     results: [
       { option_id: 'opt-1', option_label: 'Option A', win_probability: 0.7 },
       { option_id: 'opt-2', option_label: 'Option B', win_probability: 0.3 },
@@ -34,6 +36,8 @@ function minimalEnrichment(): Record<string, unknown> {
     graph: { nodes: [], edges: [] },
   };
 }
+
+const DEFAULT_BRIEF = 'Decision brief about pricing strategy';
 
 function notAbortedSignal(): AbortSignal {
   return new AbortController().signal;
@@ -55,6 +59,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
     expect(out).toBe(facts);
     expect(spy).not.toHaveBeenCalled();
@@ -68,21 +73,39 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
     expect(out).toBe(facts);
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('skips when v5.brief is empty or missing', async () => {
+  it('skips when brief is null', async () => {
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
     const facts: readonly HandlerFact[] = [
-      runAnalysisFact({ enrichment: { results: [] } }),
+      runAnalysisFact({ enrichment: minimalEnrichment() }),
     ];
     const out = await enrichRunAnalysisWithDecisionReview({
       handlerFacts: facts,
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: null,
+    });
+    expect(out).toBe(facts);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('skips when brief is the empty string', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment() }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-1',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: '',
     });
     expect(out).toBe(facts);
     expect(spy).not.toHaveBeenCalled();
@@ -90,13 +113,14 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
 
   it('skips when results is empty (no winner available)', async () => {
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
-    const enrichment = { 'v5.brief': 'a brief', results: [] };
+    const enrichment = { results: [] };
     const facts: readonly HandlerFact[] = [runAnalysisFact({ enrichment })];
     const out = await enrichRunAnalysisWithDecisionReview({
       handlerFacts: facts,
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
     expect(out).toBe(facts);
     expect(spy).not.toHaveBeenCalled();
@@ -130,6 +154,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
 
     expect(out).not.toBe(facts);
@@ -138,7 +163,9 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
     expect(patched.fact_type).toBe('run_analysis');
     if (patched.fact_type !== 'run_analysis') throw new Error('narrowing');
     const enrichment = patched.result.enrichment as Record<string, unknown>;
-    expect(enrichment['v5.brief']).toBe('Decision brief about pricing strategy');
+    // Enrichment is a verbatim PLoT pass-through; V5 adds decision_review
+    // only. No v5.brief in enrichment (brief travels out-of-band).
+    expect(enrichment['v5.brief']).toBeUndefined();
     const dr = enrichment.decision_review as Record<string, unknown>;
     expect(dr.narrative_summary).toBe('option A wins');
     expect(dr.story_headlines).toEqual(['A ahead']);
@@ -154,6 +181,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
     expect(out).toBe(facts);
   });
@@ -177,6 +205,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
     expect(out).toBe(facts);
   });
@@ -199,6 +228,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
     // Advance past the 15s DECISION_REVIEW_TIMEOUT_MS default.
     await vi.advanceTimersByTimeAsync(15_000);
@@ -239,6 +269,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
 
     const patched = out[0];
@@ -281,6 +312,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       requestId: 'req-1',
       scenarioId: 'scen-a',
       signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
     });
     const after = Date.now();
 

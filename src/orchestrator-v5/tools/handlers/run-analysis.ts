@@ -101,7 +101,7 @@ export interface RunAnalysisScenarioSnapshot {
   readonly graph: unknown;
   /** PLoT-shape options: each with {id, option_id, label, interventions{}}. */
   readonly options: ReadonlyArray<Record<string, unknown>>;
-  /** Goal node id, required by PLoT. */
+  /** Goal node id — required by PLoT. */
   readonly goal_node_id: string;
   /** Optional seed passed through to PLoT if present. */
   readonly seed?: number;
@@ -109,15 +109,6 @@ export interface RunAnalysisScenarioSnapshot {
   readonly n_samples?: number;
   /** PLoT's `goal_constraints` field (not called `constraints`). */
   readonly goal_constraints?: unknown;
-  /**
-   * Scenario brief text. Consumed by the V5 Group 1 decision_review auto-fire
-   * (Task B) which invokes the decision_review LLM with the brief as input.
-   * Null when the scenario has no brief populated; decision_review skips in
-   * that case and run_analysis still succeeds with thin content. Production
-   * ScenarioReader should prefer `scenario_snapshots.brief_text` (text) over
-   * `scenarios.brief` (jsonb) for a plain-string projection.
-   */
-  readonly brief?: string | null;
 }
 
 /**
@@ -345,15 +336,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ? RUN_ANALYSIS_ASSISTANT_TEMPLATES.NO_RESULTS
       : RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT;
 
-    // Attach the scenario brief to enrichment under a V5-specific namespace
-    // so the Task B decision_review enricher can read it downstream without
-    // re-fetching. Namespaced (`v5.brief`) to avoid collision with PLoT's
-    // passthrough keys. Absent when the snapshot had no brief.
-    const v5Enrichment: Record<string, unknown> = { ...(response as Record<string, unknown>) };
-    if (typeof snapshot.brief === 'string' && snapshot.brief.length > 0) {
-      v5Enrichment['v5.brief'] = snapshot.brief;
-    }
-
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -363,12 +345,16 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         leading_option_id: leadingOptionId,
         // Omit `win_probabilities` entirely when empty to match the optional
         // schema shape (zod strict rejects explicit undefined on optional
-        // fields in some builds; safer to conditionally include).
+        // fields in some builds — safer to conditionally include).
         ...(winProbabilities !== null ? { win_probabilities: winProbabilities } : {}),
         summary: template,
-        // Pass-through of the validated PLoT envelope plus V5-namespaced
-        // additions (v5.brief). No projection or stripping of PLoT fields.
-        enrichment: v5Enrichment,
+        // Byte-for-byte pass-through of the validated PLoT envelope. No
+        // projection, no stripping, no derived CEE-owned fields. F.6
+        // ownership; the handler-ownership invariant enforces this pattern
+        // verbatim ("enrichment: response as Record"). Scenario brief for
+        // the decision_review auto-fire travels out-of-band via
+        // TurnExecutor options; do not reintroduce brief attachment here.
+        enrichment: response as Record<string, unknown>,
       },
     };
 
