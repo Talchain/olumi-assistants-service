@@ -111,7 +111,13 @@ export async function enrichRunAnalysisWithDecisionReview(
       return input.handlerFacts;
     }
 
-    const output = projectDecisionReviewOutput(result.output);
+    // F.6: verbatim pass-through of the LLM output with a V5-added
+    // produced_at timestamp. No field renaming, flattening, or filtering;
+    // consumers read required fields defensively. Review feedback P1.2.
+    const output: DecisionReviewOutput = {
+      produced_at: new Date().toISOString(),
+      ...result.output,
+    };
     const patched: HandlerFact = {
       ...fact,
       result: {
@@ -295,47 +301,6 @@ function readNumber(value: unknown): number | null {
 
 function sha256(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex');
-}
-
-function projectDecisionReviewOutput(raw: Record<string, unknown>): DecisionReviewOutput {
-  return {
-    produced_at: new Date().toISOString(),
-    narrative_summary: readString(raw.narrative_summary),
-    story_headlines: readStringArray(raw.story_headlines),
-    robustness_explanation: readStringOrObject(raw.robustness_explanation),
-    readiness_rationale: readString(raw.readiness_rationale),
-    evidence_enhancements: readUnknownArrayOrNull(raw.evidence_enhancements),
-    bias_findings: readUnknownArrayOrNull(raw.bias_findings),
-    key_assumptions: readStringArray(raw.key_assumptions),
-    decision_quality_prompts: readStringArray(raw.decision_quality_prompts),
-    pre_mortem: raw.pre_mortem ?? null,
-    flip_thresholds: raw.flip_thresholds ?? null,
-    scenario_contexts: raw.scenario_contexts ?? null,
-    framing_check: raw.framing_check ?? null,
-  };
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function readStringOrObject(value: unknown): string | null {
-  if (typeof value === 'string') return value.length > 0 ? value : null;
-  if (value !== null && typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    if (typeof obj.summary === 'string' && obj.summary.length > 0) return obj.summary;
-  }
-  return null;
-}
-
-function readStringArray(value: unknown): readonly string[] | null {
-  if (!Array.isArray(value)) return null;
-  const strings = value.filter((v): v is string => typeof v === 'string' && v.length > 0);
-  return strings.length > 0 ? strings : null;
-}
-
-function readUnknownArrayOrNull(value: unknown): readonly unknown[] | null {
-  return Array.isArray(value) ? value : null;
 }
 
 function skipTelemetry(input: EnrichDecisionReviewInput, reason: SkipReason): void {

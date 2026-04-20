@@ -36,20 +36,20 @@ export interface DraftCoaching {
   readonly bias_signals: readonly unknown[] | null;
 }
 
+/**
+ * decision_review LLM output, stored verbatim under
+ * RunAnalysisHandlerFact.result.enrichment.decision_review. F.6: V5 preserves
+ * and passes through; no semantic reshaping. `produced_at` is the only
+ * V5-added field (ISO timestamp recorded at attach time). Every other key
+ * the LLM emitted (narrative_summary, story_headlines, robustness_explanation,
+ * readiness_rationale, evidence_enhancements, bias_findings, key_assumptions,
+ * decision_quality_prompts, pre_mortem, flip_thresholds, scenario_contexts,
+ * framing_check, and any future fields) is passed through with its original
+ * shape. UI and coaching-cache consumers read required fields defensively.
+ */
 export interface DecisionReviewOutput {
   readonly produced_at: string;
-  readonly narrative_summary: string | null;
-  readonly story_headlines: readonly string[] | null;
-  readonly robustness_explanation: string | null;
-  readonly readiness_rationale: string | null;
-  readonly evidence_enhancements: readonly unknown[] | null;
-  readonly bias_findings: readonly unknown[] | null;
-  readonly key_assumptions: readonly string[] | null;
-  readonly decision_quality_prompts: readonly string[] | null;
-  readonly pre_mortem: unknown | null;
-  readonly flip_thresholds: unknown | null;
-  readonly scenario_contexts: unknown | null;
-  readonly framing_check: unknown | null;
+  readonly [key: string]: unknown;
 }
 
 export interface LastCoachingSignal {

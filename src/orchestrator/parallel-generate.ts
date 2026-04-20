@@ -18,6 +18,7 @@ import { log } from "../utils/telemetry.js";
 import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../config/timeouts.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
+import { appendDraftCoaching } from "../orchestrator-v5/coaching/draft-coaching-log.js";
 import type { DraftGraphResult } from "./tools/draft-graph.js";
 import { assembleEnvelope, buildTurnPlan } from "./envelope.js";
 import {
@@ -195,6 +196,19 @@ export async function handleParallelGenerate(
     const draftError = draftSettled.status === 'rejected' ? draftSettled.reason : null;
     const coachingText = coachingSettled.status === 'fulfilled' ? coachingSettled.value : null;
     const coachingError = coachingSettled.status === 'rejected' ? coachingSettled.reason : null;
+
+    // V5 Group 1 Task A follow-up: persist raw draft coaching so subsequent
+    // V5 turns in this scenario can read it into ContextPack.coaching.
+    if (draftResult !== null) {
+      void appendDraftCoaching({
+        scenario_id: turnRequest.scenario_id,
+        produced_at: new Date().toISOString(),
+        summary: draftResult.coachingSummary,
+        strengthen_items: draftResult.strengthenItems,
+        widening_log: draftResult.coachingWideningLog,
+        bias_signals: draftResult.coachingBiasSignals,
+      });
+    }
 
     log.info(
       {

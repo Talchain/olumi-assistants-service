@@ -30,6 +30,7 @@ import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
 import { buildLLMRawTrace } from "../cee/llm-output-store.js";
 import { buildScienceClaimsSection, injectScienceClaimsSection } from "../cee/decision-review/science-claims.js";
 import { performShapeCheck, type ReviewInputForGrounding } from "../cee/decision-review/shape-check.js";
+import { buildDecisionReviewUserMessage } from "../cee/decision-review/invoke.js";
 
 // ============================================================================
 // Feature Flag
@@ -214,52 +215,11 @@ function checkDecisionReviewLimit(
 // ============================================================================
 // User Message Builder
 // ============================================================================
-
-function buildUserMessage(input: DecisionReviewInput, margin: number | null): string {
-  const sections: string[] = [];
-
-  // Brief (do NOT log raw brief - use brief_hash for tracing)
-  sections.push("<BRIEF>");
-  sections.push(input.brief);
-  sections.push("</BRIEF>");
-
-  // Graph
-  sections.push("<GRAPH>");
-  sections.push(JSON.stringify(input.graph, null, 2));
-  sections.push("</GRAPH>");
-
-  // ISL Results
-  sections.push("<ISL_RESULTS>");
-  sections.push(JSON.stringify(input.isl_results, null, 2));
-  sections.push("</ISL_RESULTS>");
-
-  // Deterministic Coaching
-  sections.push("<DETERMINISTIC_COACHING>");
-  sections.push(JSON.stringify(input.deterministic_coaching, null, 2));
-  sections.push("</DETERMINISTIC_COACHING>");
-
-  // Decision Context
-  sections.push("<DECISION_CONTEXT>");
-  sections.push(`winner: ${JSON.stringify(input.winner)}`);
-  if (input.runner_up !== null) {
-    sections.push(`runner_up: ${JSON.stringify(input.runner_up)}`);
-  } else {
-    sections.push("runner_up: null (single-option decision)");
-  }
-  sections.push(`margin: ${JSON.stringify(margin)}`);
-  sections.push("</DECISION_CONTEXT>");
-
-  // Flip Threshold Data (optional)
-  sections.push("<FLIP_THRESHOLD_DATA>");
-  if (input.flip_threshold_data && input.flip_threshold_data.length > 0) {
-    sections.push(JSON.stringify(input.flip_threshold_data, null, 2));
-  } else {
-    sections.push("Not available");
-  }
-  sections.push("</FLIP_THRESHOLD_DATA>");
-
-  return sections.join("\n\n");
-}
+//
+// V5 Group 1 Task B follow-up (review feedback P1.3): the route delegates
+// user-message assembly to the shared helper in
+// src/cee/decision-review/invoke.ts so the HTTP route and the V5 auto-fire
+// path emit byte-identical prompts.
 
 // performShapeCheck extracted to src/cee/decision-review/shape-check.ts
 
@@ -459,8 +419,9 @@ export default async function route(app: FastifyInstance) {
         ? input.winner.win_probability - input.runner_up.win_probability
         : null;
 
-      // Build user message
-      const userMessage = buildUserMessage(input, margin);
+      // Build user message via the shared helper (single source of truth
+       // across the HTTP endpoint and the V5 auto-fire path).
+      const userMessage = buildDecisionReviewUserMessage(input, margin);
 
       // Get adapter for provider/model info
       const adapter = getAdapter("decision_review");
