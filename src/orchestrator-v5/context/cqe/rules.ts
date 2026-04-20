@@ -299,6 +299,12 @@ const rule_P2: PatternRule = {
   },
 };
 
+// Typed filter guard. Lets parse callbacks return `CqePatternMatch | null`
+// without resorting to `as unknown` bypasses (brief §13).
+function isMatch(x: CqePatternMatch | null | undefined): x is CqePatternMatch {
+  return x !== null && x !== undefined;
+}
+
 function scanAllExec(text: string, regex: RegExp): RegExpExecArray[] {
   const out: RegExpExecArray[] = [];
   const cloned = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g');
@@ -329,7 +335,7 @@ const rule_P3: PatternRule = {
       const num = parseNum(m.groups?.num ?? '');
       const suffix = m.groups?.suffix;
       const rawUnit = m.groups?.unit;
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       const comparator: 'at_least' | 'at_most' = new RegExp(`^(?:${COMPARATOR_ATLEAST})$`, 'i').test(cmpRaw)
         ? 'at_least'
         : 'at_most';
@@ -351,7 +357,7 @@ const rule_P3: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P4 multiplier_verb ----------------------------------------------------
@@ -410,7 +416,7 @@ const rule_P5: PatternRule = {
       const entry = WORD_FRACTIONS.find((e) =>
         new RegExp(`^${e.phrase.replace(/\s+/g, '\\s+')}$`, 'i').test(phraseRaw),
       );
-      if (!entry) return null as unknown as CqePatternMatch;
+      if (!entry) return null;
       return emit(
         m,
         text,
@@ -422,7 +428,7 @@ const rule_P5: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P6 directional_percent -------------------------------------------------
@@ -439,7 +445,7 @@ const rule_P6: PatternRule = {
     scanAllExec(text, P6_REGEX).map((m) => {
       const verb = m[1];
       const num = parseNum(m[2]);
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       const direction = directionFromVerb(verb) === 'up' ? 'up' : 'down';
       return emit(
         m,
@@ -453,7 +459,7 @@ const rule_P6: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P6b directional_absolute ----------------------------------------------
@@ -473,9 +479,9 @@ const rule_P6b: PatternRule = {
       const num = parseNum(m[3]);
       const suffix = m[4];
       const rawUnit = m[5];
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       const direction = directionFromVerb(verb);
-      if (direction === 'set') return null as unknown as CqePatternMatch;
+      if (direction === 'set') return null;
       let unit = normaliseUnit(rawUnit);
       if (currSym) unit = normaliseCurrencyUnit(currSym);
       const value = applySuffix(num, suffix);
@@ -502,7 +508,7 @@ const rule_P6b: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P7 set_verb_value -----------------------------------------------------
@@ -529,7 +535,7 @@ const rule_P7: PatternRule = {
       const num = parseNum(m[3]);
       const suffix = m[4];
       const rawUnit = m[5];
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       let unit = normaliseUnit(rawUnit);
       if (currSym) unit = normaliseCurrencyUnit(currSym);
       let value = applySuffix(num, suffix);
@@ -549,7 +555,7 @@ const rule_P7: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // P7 continuation: "and X to N" after a preceding masked P7 clause.
@@ -561,12 +567,12 @@ const rule_P7_continuation: PatternRule = {
       const windowStart = Math.max(0, m.index - 40);
       const before = text.slice(windowStart, m.index);
       const whitespaceRun = before.match(/\s{8,}$/);
-      if (!whitespaceRun) return null as unknown as CqePatternMatch;
+      if (!whitespaceRun) return null;
       const currSym = m[1];
       const num = parseNum(m[2]);
       const suffix = m[3];
       const rawUnit = m[4];
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       let unit = normaliseUnit(rawUnit);
       if (currSym) unit = normaliseCurrencyUnit(currSym);
       let value = applySuffix(num, suffix);
@@ -586,7 +592,7 @@ const rule_P7_continuation: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P8 currency -----------------------------------------------------------
@@ -711,10 +717,10 @@ const rule_P9: PatternRule = {
       const windowStart = Math.max(0, spanStart - 20);
       const before = text.slice(windowStart, spanStart);
       if (new RegExp(`\\b(?:${DIRECTION_VERB})\\b[^%]*$`, 'i').test(before)) {
-        return null as unknown as CqePatternMatch;
+        return null;
       }
       const num = parseNum(m[1]);
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       return emit(
         m,
         text,
@@ -725,7 +731,7 @@ const rule_P9: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P10 vague_quantifier --------------------------------------------------
@@ -752,7 +758,7 @@ const rule_P10: PatternRule = {
       const raw = m[0];
       const phraseRaw = m[1].toLowerCase();
       const entry = VAGUE_QUANTIFIERS.find((e) => e.phrase === phraseRaw);
-      if (!entry) return null as unknown as CqePatternMatch;
+      if (!entry) return null;
       const hasPercent = /\bpercent|%$/i.test(raw);
       return emit(
         m,
@@ -765,84 +771,148 @@ const rule_P10: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P11 from_to (split per Gate 3) ----------------------------------------
 
-// Per-side unit support: allow optional unit (%, months, etc) between NUM and
-// "to"/end, not just currency symbol. Per CQE Design v1.1 §4.2 P11 "per-side
-// units accepted".
-const P11_REGEX = new RegExp(
-  `\\bfrom\\s+(?:(${CURRENCY_SYMBOL}))?(${NUM})\\s*(${SUFFIX})?\\s*(${UNIT})?\\s+to\\s+(?:(${CURRENCY_SYMBOL}))?(${NUM})\\s*(${SUFFIX})?\\s*(${UNIT})?`,
+// P11 is structurally split into two anchored sub-patterns per brief §6
+// Gate 3 and investigation proposal §3.3 (avoid one mega-regex with optional
+// per-side unit alternation — high backtracking risk).
+//
+//   P11_WITH_UNITS_CURRENCY: both sides carry a matching currency symbol
+//     ("from £50k to £70k")
+//   P11_WITH_UNITS_SUFFIX:   both sides carry a matching explicit UNIT suffix
+//     ("from 3% to 5%", "from 5 months to 10 months")
+//   P11_WITHOUT_UNITS:       no per-side unit on either side; optional
+//     trailing UNIT applies to both ("from 200k to 150k", "from 3 to 5 months")
+//
+// The apply() function runs all three, masks each match span from the shared
+// working text, and merges results in code. Each sub-pattern has zero optional
+// per-side unit groups so backtracking worst-case is bounded by the NUM
+// alternation alone.
+const P11_WITH_UNITS_CURRENCY_REGEX = new RegExp(
+  `\\bfrom\\s+(${CURRENCY_SYMBOL})(${NUM})(?:\\s*(${SUFFIX}))?\\s+to\\s+(${CURRENCY_SYMBOL})(${NUM})(?:\\s*(${SUFFIX}))?`,
   'gi',
 );
+
+const P11_WITH_UNITS_SUFFIX_REGEX = new RegExp(
+  `\\bfrom\\s+(${NUM})(?:\\s*(${SUFFIX}))?\\s*(${UNIT})\\s+to\\s+(${NUM})(?:\\s*(${SUFFIX}))?\\s*(${UNIT})`,
+  'gi',
+);
+
+const P11_WITHOUT_UNITS_REGEX = new RegExp(
+  `\\bfrom\\s+(${NUM})(?:\\s*(${SUFFIX}))?\\s+to\\s+(${NUM})(?:\\s*(${SUFFIX}))?(?:\\s*(${UNIT}))?`,
+  'gi',
+);
+
+interface P11Parsed {
+  numA: number;
+  numB: number;
+  suffixA: string | undefined;
+  suffixB: string | undefined;
+  unit: string | null;
+}
+
+function emitP11(
+  m: RegExpExecArray,
+  text: string,
+  parsed: P11Parsed,
+  ctx: RuleContext,
+): CqePatternMatch {
+  const { numA, numB, suffixA, suffixB, unit } = parsed;
+  const valueA = applySuffix(numA, suffixA);
+  const valueB = applySuffix(numB, suffixB);
+  const isPercentUnit = unit === 'percentage';
+
+  const windowStart = Math.max(0, m.index - 40);
+  const before = text.slice(windowStart, m.index);
+  const verbMatch = before.match(
+    new RegExp(`\\b(${DIRECTION_VERB})\\b(?=[^\\n]*$)`, 'i'),
+  );
+  const verbDirection = verbMatch ? directionFromVerb(verbMatch[1]) : null;
+  const trajectoryDirection: 'up' | 'down' | 'set' =
+    valueB > valueA ? 'up' : valueB < valueA ? 'down' : 'set';
+  const direction = verbDirection ?? trajectoryDirection;
+
+  const hasSuffix = Boolean(suffixA || suffixB);
+  return emit(
+    m,
+    text,
+    {
+      value: isPercentUnit ? valueB / 100 : valueB,
+      range_min: isPercentUnit ? valueA / 100 : valueA,
+      range_max: isPercentUnit ? valueB / 100 : valueB,
+      operator: 'set',
+      direction,
+      unit,
+      value_origin: hasSuffix ? 'suffix_expansion' : 'literal',
+    },
+    ctx,
+  );
+}
 
 const rule_P11: PatternRule = {
   id: 'P11',
   priority: 12,
   apply: (text, ctx) => {
     const out: CqePatternMatch[] = [];
-    for (const m of scanAllExec(text, P11_REGEX)) {
-      const currA = m[1];
-      const numA = parseNum(m[2]);
-      const suffixA = m[3];
-      const unitA = m[4];
-      const currB = m[5];
-      const numB = parseNum(m[6]);
-      const suffixB = m[7];
-      const unitB = m[8];
-      if (!Number.isFinite(numA) || !Number.isFinite(numB)) continue;
+    const masked = new Set<string>();
+    const addMatch = (m: RegExpExecArray, parsed: P11Parsed): void => {
+      const span = `${m.index}:${m.index + m[0].length}`;
+      if (masked.has(span)) return;
+      // Also skip if the current span overlaps any prior span.
+      for (const prev of masked) {
+        const [ps, pe] = prev.split(':').map(Number) as [number, number];
+        if (ps < m.index + m[0].length && pe > m.index) return;
+      }
+      masked.add(span);
+      out.push(emitP11(m, text, parsed, ctx));
+    };
 
-      let unit: string | null = null;
+    // Sub-pattern A: currency symbol on both sides (must match).
+    for (const m of scanAllExec(text, P11_WITH_UNITS_CURRENCY_REGEX)) {
+      const currA = m[1];
+      const numA = parseNum(m[2] ?? '');
+      const suffixA = m[3];
+      const currB = m[4];
+      const numB = parseNum(m[5] ?? '');
+      const suffixB = m[6];
+      if (!Number.isFinite(numA) || !Number.isFinite(numB)) continue;
+      if (!currA || !currB) continue;
+      const a = normaliseCurrencyUnit(currA);
+      const b = normaliseCurrencyUnit(currB);
+      if (a !== b) continue;
+      addMatch(m, { numA, numB, suffixA, suffixB, unit: a });
+    }
+
+    // Sub-pattern B: explicit UNIT suffix on both sides (must match).
+    for (const m of scanAllExec(text, P11_WITH_UNITS_SUFFIX_REGEX)) {
+      const numA = parseNum(m[1] ?? '');
+      const suffixA = m[2];
+      const unitA = m[3];
+      const numB = parseNum(m[4] ?? '');
+      const suffixB = m[5];
+      const unitB = m[6];
+      if (!Number.isFinite(numA) || !Number.isFinite(numB)) continue;
       const nUnitA = unitA ? normaliseUnit(unitA) : null;
       const nUnitB = unitB ? normaliseUnit(unitB) : null;
-      if (currA && currB) {
-        const a = normaliseCurrencyUnit(currA);
-        const b = normaliseCurrencyUnit(currB);
-        if (a !== b) continue;
-        unit = a;
-      } else if (nUnitA && nUnitB) {
-        if (nUnitA !== nUnitB) continue;
-        unit = nUnitB;
-      } else if (currB) {
-        unit = normaliseCurrencyUnit(currB);
-      } else if (currA) {
-        unit = normaliseCurrencyUnit(currA);
-      } else {
-        unit = nUnitB ?? nUnitA;
-      }
-
-      const valueA = applySuffix(numA, suffixA);
-      const valueB = applySuffix(numB, suffixB);
-      const isPercentUnit = unit === 'percentage';
-
-      const windowStart = Math.max(0, m.index - 40);
-      const before = text.slice(windowStart, m.index);
-      const verbMatch = before.match(new RegExp(`\\b(${DIRECTION_VERB})\\b(?=[^\\n]*$)`, 'i'));
-      const verbDirection = verbMatch ? directionFromVerb(verbMatch[1]) : null;
-      const trajectoryDirection: 'up' | 'down' | 'set' =
-        valueB > valueA ? 'up' : valueB < valueA ? 'down' : 'set';
-      const direction = verbDirection ?? trajectoryDirection;
-
-      const hasSuffix = Boolean(suffixA || suffixB);
-      out.push(
-        emit(
-          m,
-          text,
-          {
-            value: isPercentUnit ? valueB / 100 : valueB,
-            range_min: isPercentUnit ? valueA / 100 : valueA,
-            range_max: isPercentUnit ? valueB / 100 : valueB,
-            operator: 'set',
-            direction,
-            unit,
-            value_origin: hasSuffix ? 'suffix_expansion' : 'literal',
-          },
-          ctx,
-        ),
-      );
+      if (!nUnitA || !nUnitB || nUnitA !== nUnitB) continue;
+      addMatch(m, { numA, numB, suffixA, suffixB, unit: nUnitB });
     }
+
+    // Sub-pattern C: no per-side unit on either side; optional trailing unit.
+    for (const m of scanAllExec(text, P11_WITHOUT_UNITS_REGEX)) {
+      const numA = parseNum(m[1] ?? '');
+      const suffixA = m[2];
+      const numB = parseNum(m[3] ?? '');
+      const suffixB = m[4];
+      const trailingUnit = m[5];
+      if (!Number.isFinite(numA) || !Number.isFinite(numB)) continue;
+      const unit = trailingUnit ? normaliseUnit(trailingUnit) : null;
+      addMatch(m, { numA, numB, suffixA, suffixB, unit });
+    }
+
     return out;
   },
 };
@@ -864,7 +934,7 @@ const rule_P12: PatternRule = {
       const num = parseNum(m[3]);
       const suffix = m[4];
       const rawUnit = m[5];
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       const direction = directionFromVerb(verb);
       let unit = normaliseUnit(rawUnit);
       if (currSym) unit = normaliseCurrencyUnit(currSym);
@@ -883,7 +953,7 @@ const rule_P12: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- P13 percentage_points -------------------------------------------------
@@ -900,7 +970,7 @@ const rule_P13: PatternRule = {
     scanAllExec(text, P13_REGEX).map((m) => {
       const verb = m[1];
       const num = parseNum(m[2]);
-      if (!Number.isFinite(num)) return null as unknown as CqePatternMatch;
+      if (!Number.isFinite(num)) return null;
       const direction = verb ? directionFromVerb(verb) : null;
       const operator: ParameterOperator | null = verb
         ? direction === 'up'
@@ -921,7 +991,7 @@ const rule_P13: PatternRule = {
         },
         ctx,
       );
-    }).filter(Boolean),
+    }).filter(isMatch),
 };
 
 // ---- rule ordering ---------------------------------------------------------

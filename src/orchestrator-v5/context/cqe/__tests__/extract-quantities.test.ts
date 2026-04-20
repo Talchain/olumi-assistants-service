@@ -59,24 +59,25 @@ function matchFailures(
   results: readonly QuantityExtractionResult[],
 ): string[] {
   const failures: string[] = [];
-  if (fixture.expected.length === 0) {
-    if (results.length !== 0) {
-      failures.push(`expected no results, got ${results.length}`);
-    }
-    return failures;
-  }
-  if (results.length < fixture.expected.length) {
+  // Exact result count per brief §6 Gate 7 (deep equality per fixture).
+  // Over-matches are failures, not warnings, so phantom extractions can't
+  // hide behind a permissive "at least N" check.
+  if (results.length !== fixture.expected.length) {
     failures.push(
-      `expected at least ${fixture.expected.length} result(s), got ${results.length}`,
+      `expected ${fixture.expected.length} result(s), got ${results.length}`,
     );
     return failures;
   }
+  // Positional ordering required: results must align index-by-index with
+  // expectations. Each expected result is a Partial<> — only listed fields
+  // are compared; unlisted fields are not asserted but must still sit at
+  // the matching index.
   for (let i = 0; i < fixture.expected.length; i++) {
     const expected = fixture.expected[i]!;
     const actual = results[i]!;
     for (const key of Object.keys(expected) as Array<keyof QuantityExtractionResult>) {
       const expectedValue = (expected as Record<string, unknown>)[key];
-      const actualValue = (actual as unknown as Record<string, unknown>)[key];
+      const actualValue = actual[key];
       if (!deepEqual(expectedValue, actualValue)) {
         failures.push(
           `result[${i}].${String(key)} expected ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actualValue)}`,

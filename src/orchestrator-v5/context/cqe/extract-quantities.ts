@@ -1,7 +1,12 @@
 import type { QuantityExtractionResult } from '@talchain/schemas/orchestrator';
+import { log } from '../../../utils/telemetry.js';
 import { preNormalise, MAX_INPUT_LENGTH } from './pre-normalise.js';
 import { applyWordNumberPrePass } from './word-numbers.js';
-import { PATTERN_RULES, type CqePatternMatch } from './rules.js';
+import {
+  PATTERN_RULES,
+  type CqePatternMatch,
+  type PatternRule,
+} from './rules.js';
 import { compromiseBackstop } from './compromise-backstop.js';
 import { applyPostFilters } from './post-filters.js';
 
@@ -32,11 +37,32 @@ export interface CqeExtractionOutput {
   readonly summary: CqeExtractionSummary;
 }
 
+/**
+ * Internal options for testing the circuit-breaker behaviour of the
+ * extractor. Not part of the public contract. Production callers never pass
+ * these; they exist so the timeout unit test can simulate a pattern
+ * exceeding its wall-clock budget without needing a real slow regex.
+ */
+export interface RunExtractionInternalOptions {
+  /**
+   * Rules (by id, e.g. "P1") the orchestrator should treat as having timed
+   * out. When a rule is in this set, its apply() is skipped entirely, the
+   * per-pattern timeout telemetry fires exactly as if the circuit breaker
+   * had tripped, and later rules continue unaffected.
+   */
+  readonly __testForceTimeoutPatterns?: ReadonlySet<string>;
+  /** Override the rule list (for tests that want a minimal set). */
+  readonly __testPatternRules?: readonly PatternRule[];
+}
+
 export function extractQuantities(rawMessage: string): QuantityExtractionResult[] {
   return runExtraction(rawMessage).results as QuantityExtractionResult[];
 }
 
-export function runExtraction(rawMessage: string): CqeExtractionOutput {
+export function runExtraction(
+  rawMessage: string,
+  internalOptions: RunExtractionInternalOptions = {},
+): CqeExtractionOutput {
   const startedAt = nowMs();
   const originalLength = typeof rawMessage === 'string' ? rawMessage.length : 0;
   const emptySummary: CqeExtractionSummary = {
@@ -65,21 +91,35 @@ export function runExtraction(rawMessage: string): CqeExtractionOutput {
     const patternsMatched = new Set<string>();
     const budgetDeadline = startedAt + CQE_TOTAL_BUDGET_MS;
 
-    for (const rule of PATTERN_RULES) {
+    const activeRules =
+      internalOptions.__testPatternRules ?? PATTERN_RULES;
+    const forcedTimeouts = internalOptions.__testForceTimeoutPatterns ?? EMPTY_SET;
+
+    for (const rule of activeRules) {
       if (nowMs() > budgetDeadline) {
         timedOut = true;
         break;
+      }
+      if (forcedTimeouts.has(rule.id)) {
+        timedOut = true;
+        emitPatternTimeout(rule.id, 'forced_for_test');
+        continue;
       }
       const ruleStart = nowMs();
       let ruleMatches: CqePatternMatch[];
       try {
         ruleMatches = rule.apply(maskedText, { wordNumberReplacements: replacements });
-      } catch {
+      } catch (err) {
+        log.warn(
+          { pattern_id: rule.id, err: String(err) },
+          'CQE rule threw during apply; continuing with no mask',
+        );
         continue;
       }
       const ruleDuration = nowMs() - ruleStart;
       if (ruleDuration > CQE_REGEX_TIMEOUT_MS) {
         timedOut = true;
+        emitPatternTimeout(rule.id, 'wall_clock_exceeded', ruleDuration);
         continue;
       }
       for (const m of ruleMatches) {
@@ -119,7 +159,19 @@ export function runExtraction(rawMessage: string): CqeExtractionOutput {
     };
 
     return { results, summary };
-  } catch {
+  } catch (err) {
+    // Defence-in-depth: extractQuantities() contract says it never throws.
+    // If an unexpected error surfaces (e.g. a runtime change in compromise
+    // or a pattern regex that the typechecker missed), surface it through
+    // structured logging so it isn't silently a dark feature.
+    log.warn(
+      {
+        event: 'cqe.extraction_failed',
+        err: String(err),
+        message_length: originalLength,
+      },
+      'CQE extraction threw unexpectedly; returning empty result set',
+    );
     return {
       results: [],
       summary: { ...emptySummary, duration_ms: nowMs() - startedAt },
@@ -129,6 +181,25 @@ export function runExtraction(rawMessage: string): CqeExtractionOutput {
 
 function nowMs(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+const EMPTY_SET: ReadonlySet<string> = new Set<string>();
+
+function emitPatternTimeout(
+  patternId: string,
+  reason: 'wall_clock_exceeded' | 'forced_for_test',
+  durationMs?: number,
+): void {
+  log.warn(
+    {
+      event: 'cqe.pattern_timeout',
+      pattern_id: patternId,
+      reason,
+      duration_ms: durationMs,
+      timeout_cap_ms: CQE_REGEX_TIMEOUT_MS,
+    },
+    'CQE pattern exceeded wall-clock budget; no partial mask recorded',
+  );
 }
 
 function maskSpan(text: string, start: number, end: number): string {

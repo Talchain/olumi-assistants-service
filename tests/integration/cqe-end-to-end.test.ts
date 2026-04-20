@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { assembleContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
+import { routeWithToolUse } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type {
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+} from '../../src/adapters/llm/types.js';
 
-// End-to-end sanity: confirm parsed_quantities populated by CQE reaches the
-// ContextPack produced by assembleContextPack(), preserving optional
-// value_origin through serialisation. Covers brief §10 (liveness) and §8
-// (code-path trace).
+// End-to-end integration: confirm parsed_quantities populated by CQE
+// reaches the ContextPack produced by assembleContextPack(), traverses
+// routeWithToolUse(), lands inside the JSON.stringify'd user message that
+// Sonnet receives, and preserves optional value_origin through every
+// hop. Covers brief §6 Gate 10 (liveness) and §7 acceptance criterion
+// for the assembleContextPack → routeWithToolUse → JSON.stringify chain.
 
 const basePayload: OrchestratorTurnPayload = {
   turn_id: '11111111-1111-4111-8111-111111111111',
@@ -55,5 +62,46 @@ describe('CQE end-to-end via assembleContextPack', () => {
       priorTurns: [],
     });
     expect(coachPack.parsed_quantities.length).toBeGreaterThan(0);
+  });
+
+  it('value_origin survives assembleContextPack → routeWithToolUse → JSON.stringify (brief §7)', async () => {
+    // Capture the exact user-message string the routing layer hands to
+    // Sonnet. This is the end-to-end production serialisation path — no
+    // hand-rolled JSON.stringify, no narrowing transform.
+    let capturedContent: string | null = null;
+    const mockAdapter = {
+      chatWithTools: async (args: ChatWithToolsArgs): Promise<ChatWithToolsResult> => {
+        capturedContent = args.messages[0]?.content as string;
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'mock orientation',
+            },
+          ],
+          stop_reason: 'end_turn' as const,
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'test-model',
+          latencyMs: 1,
+        };
+      },
+    };
+
+    const pack = assembleContextPack({
+      payload: { ...basePayload, message: 'the budget is £150k' },
+      priorTurns: [],
+    });
+
+    await routeWithToolUse(pack, 'the budget is £150k', {
+      requestId: 'test-req-1',
+      adapter: mockAdapter,
+    });
+
+    expect(capturedContent).not.toBeNull();
+    // The Sonnet-facing user message contains the JSON-serialised ContextPack.
+    // `value_origin: "suffix_expansion"` must survive the path.
+    expect(capturedContent!).toContain('"parsed_quantities"');
+    expect(capturedContent!).toContain('"value_origin": "suffix_expansion"');
+    expect(capturedContent!).toContain('150000');
   });
 });

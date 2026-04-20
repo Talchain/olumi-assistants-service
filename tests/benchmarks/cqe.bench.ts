@@ -2,7 +2,8 @@ import { bench, describe } from 'vitest';
 import { extractQuantities } from '../../src/orchestrator-v5/context/cqe/extract-quantities.js';
 
 // CQE benchmarks per cqe-investigation-proposal.md §8.2 (5-case matrix).
-// Run via `pnpm exec vitest bench tests/benchmarks/cqe-bench.ts --config tests/benchmarks/vitest.benchmark.config.ts`.
+// Run via `pnpm exec vitest bench --run --config tests/benchmarks/vitest.benchmark.config.ts tests/benchmarks/cqe.bench.ts`.
+// Explicit-p95 harness: `pnpm exec tsx tests/benchmarks/cqe-p95-bench.ts` (evidence in tests/benchmarks/cqe-results.md).
 // Target p95 thresholds (guidance, not hard limits in-process):
 //   Case 1 idle path                     <1ms
 //   Case 2 multi-pattern realistic       <5ms
