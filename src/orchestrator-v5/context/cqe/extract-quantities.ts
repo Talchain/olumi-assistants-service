@@ -9,6 +9,7 @@ import {
 } from './rules.js';
 import { compromiseBackstop } from './compromise-backstop.js';
 import { applyPostFilters } from './post-filters.js';
+import { tracePattern } from './pattern-trace.js';
 
 // Main CQE orchestrator. Pure, synchronous, deterministic, never throws.
 // Returns an ordered array of QuantityExtractionResult per CQE Design v1.1 §5.
@@ -141,10 +142,14 @@ function runExtractionInternal(
         emitPatternTimeout(rule.id, 'wall_clock_exceeded', ruleDuration);
         continue;
       }
+      if (ruleMatches.length === 0) {
+        tracePattern(rule.id, false, null, ruleDuration);
+      }
       for (const m of ruleMatches) {
         matches.push({ ...m, patternId: rule.id });
         patternsMatched.add(rule.id);
         maskedText = maskSpan(maskedText, m.spanStart, m.spanEnd);
+        tracePattern(rule.id, true, `${m.spanStart}:${m.spanEnd}`, ruleDuration);
       }
     }
 

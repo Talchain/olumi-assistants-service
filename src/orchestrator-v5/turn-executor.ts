@@ -106,6 +106,7 @@ import type {
   IntentClass,
   ResolutionStatus,
 } from './routing/types.js';
+import { storeTurnDebug } from './debug/turn-debug-store.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -317,6 +318,20 @@ export async function runTurnExecutor(
         ...cqeSummary,
       });
       contextPackForLog = contextPack;
+      storeTurnDebug({
+        turn_id: requestId,
+        session_id: context.session_id,
+        stored_at: Date.now(),
+        cqe: {
+          parsed_quantities: contextPack.parsed_quantities,
+          patterns_matched: cqeSummary.patterns_matched,
+          timeout: cqeSummary.timeout,
+          compromise_match_count: cqeSummary.compromise_match_count,
+          duration_ms: cqeSummary.duration_ms,
+          message_too_long: cqeSummary.message_too_long,
+          word_range_missed: cqeSummary.word_range_missed,
+        },
+      });
       routingResult = await routeWithToolUse(contextPack, payload.message, {
         requestId,
         signal: turnAbort.signal,
