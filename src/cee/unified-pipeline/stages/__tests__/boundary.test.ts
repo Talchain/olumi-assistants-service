@@ -178,7 +178,7 @@ describe('runStageBoundary', () => {
   });
 
   describe('strict mode fail-closed', () => {
-    it('sets earlyReturn with 502 and CEE_VALIDATION_FAILED envelope on strict-mode failure', async () => {
+    it('sets earlyReturn with 502 and CEE_EGRESS_CONTRACT_VIOLATION envelope on strict-mode failure', async () => {
       strictShouldThrow = true;
       const ctx = makeCtx({
         opts: { schemaVersion: 'v3', strictMode: true, requestStartMs: Date.now() } as StageContext['opts'],
@@ -187,7 +187,7 @@ describe('runStageBoundary', () => {
       expect(ctx.earlyReturn).toBeDefined();
       expect(ctx.earlyReturn!.statusCode).toBe(502);
       const body = ctx.earlyReturn!.body as { error: Record<string, unknown> };
-      expect(body.error.code).toBe('CEE_VALIDATION_FAILED');
+      expect(body.error.code).toBe('CEE_EGRESS_CONTRACT_VIOLATION');
       expect(body.error.reason).toBe('egress_contract_violation');
       expect(body.error.retryable).toBe(false);
       const details = body.error.details as Record<string, unknown>;
@@ -229,7 +229,7 @@ describe('runStageBoundary', () => {
       expect(ctx.earlyReturn).toBeDefined();
       expect(ctx.earlyReturn!.statusCode).toBe(502);
       const body = ctx.earlyReturn!.body as { error: Record<string, unknown> };
-      expect(body.error.code).toBe('CEE_VALIDATION_FAILED');
+      expect(body.error.code).toBe('CEE_EGRESS_CONTRACT_VIOLATION');
       expect(body.error.reason).toBe('egress_contract_violation');
       const details = body.error.details as Record<string, unknown>;
       expect(details.validator).toBe('zod_v3');

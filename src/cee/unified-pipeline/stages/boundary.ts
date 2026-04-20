@@ -132,7 +132,7 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
 
     // Strict mode validation (fail-closed per boundary contract v1.1 §4.2).
     // Previously a soft-gate log-and-continue; now sets ctx.earlyReturn with
-    // HTTP 502 and a CEE_VALIDATION_FAILED envelope carrying
+    // HTTP 502 and a CEE_EGRESS_CONTRACT_VIOLATION envelope carrying
     // reason='egress_contract_violation' plus the validator tag.
     if (ctx.opts.strictMode) {
       try {
@@ -165,7 +165,7 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
         ctx.earlyReturn = {
           statusCode: 502,
           body: buildCeeErrorResponse(
-            "CEE_VALIDATION_FAILED",
+            "CEE_EGRESS_CONTRACT_VIOLATION",
             `Egress contract violation (strict_mode_v3): ${errMsg}`,
             {
               requestId: ctx.requestId,
@@ -320,7 +320,7 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     ctx.earlyReturn = {
       statusCode: 502,
       body: buildCeeErrorResponse(
-        "CEE_VALIDATION_FAILED",
+        "CEE_EGRESS_CONTRACT_VIOLATION",
         `Egress contract violation (zod_v3): ${errMsg}`,
         {
           requestId: ctx.requestId,

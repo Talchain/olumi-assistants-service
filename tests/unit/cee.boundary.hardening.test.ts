@@ -107,7 +107,7 @@ describe("Stage 6: Boundary Hardening (Stream F)", () => {
       expect(ctx.earlyReturn).toBeDefined();
       expect(ctx.earlyReturn!.statusCode).toBe(502);
       const body = ctx.earlyReturn!.body as Record<string, unknown>;
-      expect(body.code).toBe("CEE_VALIDATION_FAILED");
+      expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
       expect(body.reason).toBe("egress_contract_violation");
       expect(body.retryable).toBe(false);
       const details = body.details as Record<string, unknown>;

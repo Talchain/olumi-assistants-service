@@ -1,9 +1,19 @@
 # MC-29 boundary fail-closed — review pack
 
-**Brief:** `v5-group2-model-routing-hygiene` Task C
+**Brief:** `v5-group2-model-routing-hygiene` Task C (+ pre-merge follow-up `v5-group2-pre-merge-followup`)
 **Date:** 2026-04-20
 **Branch:** `claude/v5-model-routing-hygiene`
 **Severity:** BLOCKER (boundary contract v1.1 §4.2, codebase audit §4.2.9 / §6.1 row 5)
+
+> **Operational notes — read before deploy**
+>
+> 1. **Task A observability scope.** Per-request model resolution logging is wired in the `parse.ts` unified-pipeline path only. V5-active LLM call sites not yet instrumented: [classify.ts:128](../../src/orchestrator-v5/classify.ts#L128), [llm-adapter.ts:65](../../src/orchestrator-v5/llm-adapter.ts#L65), [route-with-tool-use.ts:369](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L369). Operators must not assume universal coverage from the `model_resolutions` trail. `CEE_TURN_DEBUG_ENABLED=true` must be set on staging for the trail to be visible via `/admin/v1/turn-debug/:turn_id`.
+>
+> 2. **Task B model-string divergence.** `TASK_MODEL_DEFAULTS` in `src/config/model-routing.ts` uses `claude-sonnet-4-20250514` (older snapshot ID). The admin script `scripts/admin/set-model-configs.ts` writes `claude-sonnet-4-6` (current canonical ID) as specified in the brief. These are **different string values**. Before running `--execute` against staging, verify the LLM adapter / model registry recognises `claude-sonnet-4-6`. The script's comparison table will show `DIVERGES FROM CODE DEFAULT` for these rows — intentional and expected.
+>
+> 3. **Task C post-deploy monitoring.** For draft_graph turns: the 502 envelope flows [boundary.ts → index.ts:657 (drainEarlyReturn) → assist.v1.draft-graph.ts:528 → HTTP]. For streaming: same path via [assist.v1.draft-graph-stream.ts:473](../../src/routes/assist.v1.draft-graph-stream.ts#L473). For edit_graph via the unified pipeline: same path via the edit_graph route handler. Users see a typed error with `code: CEE_EGRESS_CONTRACT_VIOLATION` and `retryable: false`. **Paul should monitor for 502 responses on draft_graph and edit_graph endpoints after deployment.** These were previously silent 200 responses with invalid data; the new behaviour is correct per boundary contract v1.1 §4.2.
+>
+> 4. **Pre-existing lint baseline.** Lint errors on `src/adapters/llm/router.ts:159` ('NodeJS' is not defined) and `src/cee/unified-pipeline/types.ts:20` ('CEEErrorResponseV1' is defined but never used) are present on `origin/staging` before this work. Not introduced by these changes.
 
 ## 1. What changed
 
@@ -32,14 +42,14 @@ The existing `catch (boundaryErr)` at [index.ts:639](../../src/cee/unified-pipel
 
 ## 3. Error class and response path
 
-**Error code:** `CEE_VALIDATION_FAILED` (existing OpenAPI enum value) — the brief permits "nearest equivalent" when `BoundaryError` §4.3 is not materialised in the pipeline. Introducing a new `CEE_EGRESS_CONTRACT_VIOLATION` code would require regenerating the OpenAPI spec, which is outside the scope of this brief. The semantic distinction is carried in the `reason` field and `details`.
+**Error code:** `CEE_EGRESS_CONTRACT_VIOLATION` — added to the `CEEErrorCode` enum in [openapi.yaml](../../openapi.yaml) (and the generated [openapi.d.ts](../../src/generated/openapi.d.ts)) for this fix. This is a first-class response code, not a repurposed "nearest equivalent" — both fail-closed sites use it as the HTTP body `code`.
 
 **Envelope shape:** `CEEErrorResponseV1` produced by `buildCeeErrorResponse()`:
 
 ```json
 {
   "schema": "cee.error.v1",
-  "code": "CEE_VALIDATION_FAILED",
+  "code": "CEE_EGRESS_CONTRACT_VIOLATION",
   "message": "Egress contract violation (zod_v3 | strict_mode_v3): <errMsg>",
   "retryable": false,
   "source": "cee",
@@ -62,7 +72,7 @@ The existing `catch (boundaryErr)` at [index.ts:639](../../src/cee/unified-pipel
 
 | BoundaryError field | Source in this fix |
 |---|---|
-| `error` | `code` (`CEE_VALIDATION_FAILED`) |
+| `error` | `code` (`CEE_EGRESS_CONTRACT_VIOLATION`) |
 | `boundary` | `details.boundary` (`"B1"`) |
 | `direction` | `details.direction` (`"response"`) |
 | `validator` | `details.validator` (`"zod_v3"` or `"strict_mode_v3"`) |
@@ -84,7 +94,7 @@ Update dashboards, alerts, and log-query aggregations from the old names to the 
 | `CEE_V3_STRICT_MODE_DEGRADED` | `CEE_EGRESS_CONTRACT_VIOLATION` | `error_code` on `cee.boundary.blocked` telemetry event |
 | `CEE_V3_VALIDATION_DEGRADED` | `CEE_EGRESS_CONTRACT_VIOLATION` | `error_code` on `cee.boundary.blocked` telemetry event |
 
-**Note:** the HTTP response body uses `code: CEE_VALIDATION_FAILED` (the existing OpenAPI enum). The telemetry event payload carries `error_code: CEE_EGRESS_CONTRACT_VIOLATION` to preserve semantic distinction for dashboards without touching the OpenAPI spec. The `reason: egress_contract_violation` field in the envelope carries the same distinction for clients.
+**Note:** both the HTTP response body (`code`) and the telemetry event payload (`error_code`) now use `CEE_EGRESS_CONTRACT_VIOLATION`. The new code was added to the `CEEErrorCode` enum in `openapi.yaml` and the generated `openapi.d.ts`. Clients parsing the `code` field as a discriminated union must handle the new variant.
 
 Stage-name rename in `ctx.pipelineOutcome.warnings[]`: unchanged (still `boundary_strict_mode` and `boundary_v3_validation`), but the shape gained an optional `blocked: boolean` field distinct from the existing `degraded: boolean`. Dashboards that read `warnings[].degraded` will see `false` for MC-29 fail-closed cases (was `true` under the soft-gate). Use `warnings[].blocked === true` to identify MC-29-originated blocks.
 
@@ -110,7 +120,7 @@ Stage-name rename in `ctx.pipelineOutcome.warnings[]`: unchanged (still `boundar
 
 Ten tests, all passing. Cover:
 - Happy path: valid V3 → `finalResponse` set, `earlyReturn` unset.
-- Strict-mode failure: `earlyReturn` with 502, `CEE_VALIDATION_FAILED`, `reason: egress_contract_violation`, `details.validator: strict_mode_v3`, `details.boundary: "B1"`, `details.direction: "response"`. `finalResponse` unset. Warning recorded with `degraded: false, blocked: true`.
+- Strict-mode failure: `earlyReturn` with 502, `CEE_EGRESS_CONTRACT_VIOLATION`, `reason: egress_contract_violation`, `details.validator: strict_mode_v3`, `details.boundary: "B1"`, `details.direction: "response"`. `finalResponse` unset. Warning recorded with `degraded: false, blocked: true`.
 - Zod failure: `earlyReturn` with 502, `details.validator: zod_v3`, `issue_count`, `validation_issues[]`.
 - Dev escape hatch: `boundaryAllowInvalid=true` passes through (preserved).
 - V2 and V1 paths unaffected (no strict-mode / Zod logic).
@@ -119,7 +129,7 @@ Ten tests, all passing. Cover:
 
 Two tests, passing. Exercise the full `runUnifiedPipeline` wrapper — stages 1-6 plus `drainEarlyReturn` plus `attachPipelineOutcome`:
 
-- `returns HTTP 502 with CEE_VALIDATION_FAILED and reason egress_contract_violation`: feeds an invalid V3 body via a mocked `transformResponseToV3`, runs the full pipeline with `LLM_PROVIDER=fixtures`, and asserts the result is `{ statusCode: 502, body: { code: 'CEE_VALIDATION_FAILED', reason: 'egress_contract_violation', retryable: false, source: 'cee', details: { validator: 'zod_v3', boundary: 'B1', direction: 'response' } } }`.
+- `returns HTTP 502 with CEE_EGRESS_CONTRACT_VIOLATION and reason egress_contract_violation`: feeds an invalid V3 body via a mocked `transformResponseToV3`, runs the full pipeline with `LLM_PROVIDER=fixtures`, and asserts the result is `{ statusCode: 502, body: { code: 'CEE_EGRESS_CONTRACT_VIOLATION', reason: 'egress_contract_violation', retryable: false, source: 'cee', details: { validator: 'zod_v3', boundary: 'B1', direction: 'response' } } }`.
 - `does NOT return a 200 fallback envelope when egress validation fails`: negative assertion that the previous soft-gate 200-with-packaged-graph path is dead.
 
 This is the critical proof: the typed 502 reaches the route-level caller intact. The previous soft-gate path (200 + fallback body) is dead.
@@ -136,8 +146,9 @@ The only remaining hits are historical comments explaining the fix (not the patt
 
 ## 7. Out-of-scope items noted
 
-- OpenAPI enum extension to add `CEE_EGRESS_CONTRACT_VIOLATION` as a first-class response `code`. Current approach uses `CEE_VALIDATION_FAILED` + `reason` to avoid regenerating the spec mid-brief. File follow-up ticket if the distinction should surface to clients through the typed code.
 - Ingress fail-closed at [assist.v1.draft-graph.ts:404](../../src/routes/assist.v1.draft-graph.ts#L404) — see §5 hit 2.
+
+**Resolved during pre-merge follow-up (`v5-group2-pre-merge-followup`):** the `CEE_EGRESS_CONTRACT_VIOLATION` enum value is now a first-class member of `CEEErrorCode` in `openapi.yaml` and `src/generated/openapi.d.ts`. Both fail-closed sites emit it as the HTTP body `code`. No "nearest equivalent" fallback remains.
 
 ### Task A follow-up debt: uncovered `getAdapter` call sites
 

@@ -73,7 +73,7 @@ describe('Route-level fail-closed: invalid V3 egress produces 502 (MC-29)', () =
     vi.clearAllMocks();
   });
 
-  it('returns HTTP 502 with CEE_VALIDATION_FAILED and reason egress_contract_violation', async () => {
+  it('returns HTTP 502 with CEE_EGRESS_CONTRACT_VIOLATION and reason egress_contract_violation', async () => {
     const baseInput = {
       brief: SIMPLE_BRIEF,
       docs: [],
@@ -103,7 +103,7 @@ describe('Route-level fail-closed: invalid V3 egress produces 502 (MC-29)', () =
       source?: string;
       details?: Record<string, unknown>;
     };
-    expect(body.code).toBe('CEE_VALIDATION_FAILED');
+    expect(body.code).toBe('CEE_EGRESS_CONTRACT_VIOLATION');
     expect(body.reason).toBe('egress_contract_violation');
     expect(body.message).toContain('Egress contract violation');
     expect(body.retryable).toBe(false);

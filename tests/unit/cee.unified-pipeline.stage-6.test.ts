@@ -214,7 +214,7 @@ describe("runStageBoundary", () => {
     expect(ctx.earlyReturn).toBeDefined();
     expect(ctx.earlyReturn!.statusCode).toBe(502);
     const body = ctx.earlyReturn!.body as Record<string, unknown>;
-    expect(body.code).toBe("CEE_VALIDATION_FAILED");
+    expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
     expect(body.reason).toBe("egress_contract_violation");
     const details = body.details as Record<string, unknown>;
     expect(details.validator).toBe("strict_mode_v3");
@@ -537,7 +537,7 @@ describe("runStageBoundary", () => {
       expect(ctx.finalResponse).toBeUndefined();
       expect(ctx.earlyReturn?.statusCode).toBe(502);
       const body = ctx.earlyReturn!.body as Record<string, unknown>;
-      expect(body.code).toBe("CEE_VALIDATION_FAILED");
+      expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
       expect(body.reason).toBe("egress_contract_violation");
       expect(ctx.pipelineOutcome.warnings.some((w: any) => w.stage === "boundary_v3_validation" && w.blocked === true)).toBe(true);
     } finally {
