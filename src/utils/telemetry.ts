@@ -479,6 +479,14 @@ export const TelemetryEvents = {
   // critical for detecting silent session-loss windows. Event payload:
   // { scenario_id, error_code, severity: 'warning' }.
   SessionReadDegraded: "session.read_degraded",
+
+  // CQE (Custom Quantity Extractor — V5 Layer 0) per CQE Design v1.1 §9 and
+  // cqe-investigation-proposal.md §7.2. Emits once per turn after the
+  // assembler runs extractQuantities(). Carries aggregate signals needed for
+  // SLO tracking and upgrade-trigger alerts (word_range_missed > 5%,
+  // compromise_match_count > 30%). Per-turn context lives in the routing
+  // log; this event is the observability stream.
+  CqeExtraction: "cqe.extraction",
 } as const;
 
 /**
@@ -1848,6 +1856,54 @@ export function emit(event: string, data: Event) {
             error_code: String((eventData.error_code as string) || "unknown"),
             severity: String((eventData.severity as string) || "warning"),
           });
+          break;
+        }
+
+        case TelemetryEvents.CqeExtraction: {
+          // CQE per-turn aggregate metrics. Fields are a subset of the 10
+          // CqeExtractionSummary fields — patterns_matched is omitted here
+          // (high cardinality goes to the routing log only), as are the
+          // low-signal message_too_long and ambiguous_phrasing_detected.
+          datadogClient.increment("cqe.extraction.completed", 1);
+          if (typeof eventData.timeout === "boolean" && eventData.timeout) {
+            datadogClient.increment("cqe.extraction.timeout", 1);
+          }
+          if (
+            typeof eventData.word_range_missed === "boolean" &&
+            eventData.word_range_missed
+          ) {
+            datadogClient.increment("cqe.extraction.word_range_missed", 1);
+          }
+          if (typeof eventData.message_length === "number") {
+            datadogClient.histogram(
+              "cqe.extraction.message_length",
+              eventData.message_length,
+            );
+          }
+          if (typeof eventData.result_count === "number") {
+            datadogClient.histogram(
+              "cqe.extraction.result_count",
+              eventData.result_count,
+            );
+          }
+          if (typeof eventData.cqe_match_count === "number") {
+            datadogClient.gauge(
+              "cqe.extraction.cqe_match_count",
+              eventData.cqe_match_count,
+            );
+          }
+          if (typeof eventData.compromise_match_count === "number") {
+            datadogClient.gauge(
+              "cqe.extraction.compromise_match_count",
+              eventData.compromise_match_count,
+            );
+          }
+          if (typeof eventData.duration_ms === "number") {
+            datadogClient.histogram(
+              "cqe.extraction.duration_ms",
+              eventData.duration_ms,
+            );
+          }
           break;
         }
 
