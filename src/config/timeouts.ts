@@ -108,6 +108,16 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("EXPLAIN_DIFF_TIMEOUT_MS", 15_000),
 );
 
+/**
+ * Decision-review auto-fire LLM call timeout (default: 15s, clamped 5s-5m).
+ * V5 Group 1 Task B: the decision_review call fires synchronously after a
+ * successful run_analysis with this hard timeout. On timeout the turn still
+ * succeeds with thin content (decision_review enrichment absent).
+ */
+export const DECISION_REVIEW_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("DECISION_REVIEW_TIMEOUT_MS", 15_000),
+);
+
 /** Clarify-brief LLM call timeout (default: 10s, clamped 5s–5m) */
 export const CLARIFY_BRIEF_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("CLARIFY_BRIEF_TIMEOUT_MS", 10_000),
@@ -346,6 +356,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     SUGGEST_OPTIONS_TIMEOUT_MS,
     CRITIQUE_TIMEOUT_MS,
     EXPLAIN_DIFF_TIMEOUT_MS,
+    DECISION_REVIEW_TIMEOUT_MS,
     CLARIFY_BRIEF_TIMEOUT_MS,
     ASK_TIMEOUT_MS,
     CLARIFIER_QUESTION_TIMEOUT_MS,

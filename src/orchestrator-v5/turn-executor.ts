@@ -69,6 +69,7 @@ import { sanitiseNarrateOutput } from './sanitise.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
 import { readCoachingCache } from './coaching/coaching-cache-reader.js';
+import { enrichRunAnalysisWithDecisionReview } from './coaching/decision-review-enricher.js';
 import {
   assembleContextPackWithSummary,
   type ContextPack,
@@ -480,6 +481,19 @@ export async function runTurnExecutor(
         return translateExecuteError(error);
       }
 
+      // V5 Group 1 Task B — decision_review auto-fire after run_analysis.
+      // Non-blocking: enricher never throws, degrades to thin content on
+      // timeout/failure. Hard 15s timeout inside the enricher; outer
+      // turn-budget signal still wins when it fires first.
+      if (proposedHandlerId === 'run_analysis') {
+        handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
+          handlerFacts: handlerOutcome.handler_facts,
+          requestId,
+          scenarioId: context.session_id,
+          signal: turnAbort.signal,
+        });
+      }
+
       // STEP 4 — CONFIRM. Typed-per-handler per brief correction 5.
       const confirmationText = renderConfirmation(proposedHandlerId, handlerOutcome, options);
       stagesCompleted.push('confirm');
@@ -505,6 +519,7 @@ export async function runTurnExecutor(
         confirmation: confirmationText,
         coaching: null,
         stage: context.stage,
+        handlerFacts: handlerFactsForCommit,
       });
       stagesCompleted.push('compose');
     } else if (

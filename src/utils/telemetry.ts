@@ -480,6 +480,19 @@ export const TelemetryEvents = {
   // { scenario_id, error_code, severity: 'warning' }.
   SessionReadDegraded: "session.read_degraded",
 
+  // V5 Group 1 Task B: decision_review auto-fire after successful
+  // run_analysis. Invoked emits once the enricher decides to fire. Skipped
+  // emits with a reason when the prerequisite data is absent. Failed emits
+  // when the call times out / aborts / shape-check fails; in all failure
+  // modes the turn still succeeds with thin content (enrichment absent).
+  V5DecisionReviewInvoked: "v5.decision_review.invoked",
+  V5DecisionReviewSkipped: "v5.decision_review.skipped",
+  V5DecisionReviewFailed: "v5.decision_review.failed",
+
+  // V5 Group 1 Task C: coaching signal fired during Step 5. Payload carries
+  // the signal_id + turn_id so evaluators can correlate with coaching text.
+  V5CoachingSignalFired: "v5.coaching.signal_fired",
+
   // CQE (Custom Quantity Extractor — V5 Layer 0) per CQE Design v1.1 §9 and
   // cqe-investigation-proposal.md §7.2. Emits once per turn after the
   // assembler runs extractQuantities(). Carries aggregate signals needed for
