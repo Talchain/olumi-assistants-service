@@ -6,29 +6,25 @@
  *    most recent record for scenario_id.
  *  - decision_review: most recent run_analysis HandlerFact with
  *    enrichment.decision_review present. Reached via priorFacts argument.
- *  - last_coaching_signal: most recent signal fired for this scenario. Two
- *    sources feed this:
- *      1. run_analysis handler facts (enrichment.coaching_signal_id),
- *         because the FIRST_ANALYSIS_COMPLETE signal attaches to the
- *         successful run_analysis fact.
- *      2. the routing-log JSONL, filtered by scenario_id. Edit-handler
- *         signals (STALE_*, HIGH_SENSITIVITY_EDIT) write here because the
- *         edit HandlerFact variants have no enrichment field in the frozen
- *         schema. The routing-log scan is the source-of-truth for those
- *         signals; the fact-enrichment path is a faster check for
- *         run_analysis turns that always have a fact with enrichment.
+ *  - last_coaching_signal: merged from two sources and picked by newest
+ *    produced_at:
+ *      1. run_analysis handler facts (enrichment.coaching_signal_id).
+ *         FIRST_ANALYSIS_COMPLETE attaches here.
+ *      2. last-coaching-signal sidecar (per-scenario). Edit-handler signals
+ *         (STALE_*, HIGH_SENSITIVITY_EDIT) write only here because edit
+ *         HandlerFact variants have no enrichment field in the frozen
+ *         schema.
+ *    Merging by timestamp (not short-circuit) ensures an older
+ *    analysis-turn signal does not mask a newer edit-turn signal; this is
+ *    review feedback P1.1.
  *
- * Linear scan of routing-log is fine at PoC volumes.
+ * Never throws; every failure surfaces as null sub-fields.
  */
-
-import { readFile } from 'node:fs/promises';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { log } from '../../utils/telemetry.js';
-import { DEFAULT_ROUTING_LOG_PATH } from '../routing/routing-log.js';
-
 import { readLatestDraftCoaching } from './draft-coaching-log.js';
+import { readLatestLastCoachingSignal } from './last-coaching-signal-log.js';
 import {
   EMPTY_COACHING_CACHE,
   type CoachingCache,
@@ -43,15 +39,14 @@ import {
 export async function readCoachingCache(
   scenarioId: string,
   priorFacts: readonly HandlerFact[] = [],
-  routingLogPath: string = DEFAULT_ROUTING_LOG_PATH,
 ): Promise<CoachingCache> {
-  const draft = await readLatestDraftCoaching(scenarioId);
+  const [draft, sidecarSignal] = await Promise.all([
+    readLatestDraftCoaching(scenarioId),
+    readLatestLastCoachingSignal(scenarioId),
+  ]);
   const decisionReview = extractLatestDecisionReview(priorFacts);
-  const signalFromFacts = extractLatestCoachingSignalFromFacts(priorFacts);
-  const signalFromLog = signalFromFacts === null
-    ? await extractLatestCoachingSignalFromRoutingLog(scenarioId, routingLogPath)
-    : null;
-  const lastSignal = signalFromFacts ?? signalFromLog;
+  const factSignal = extractLatestCoachingSignalFromFacts(priorFacts);
+  const lastSignal = pickNewestSignal(factSignal, sidecarSignal);
 
   if (draft === null && decisionReview === null && lastSignal === null) {
     return EMPTY_COACHING_CACHE;
@@ -80,7 +75,8 @@ function extractLatestDecisionReview(
   return null;
 }
 
-/** Walk facts newest-first to find the most recent enrichment.coaching_signal_id. */
+/** Walk facts newest-first for the most recent enrichment.coaching_signal_id.
+ *  Returns null for edit-handler turns (their fact shape has no enrichment). */
 function extractLatestCoachingSignalFromFacts(
   facts: readonly HandlerFact[],
 ): LastCoachingSignal | null {
@@ -104,54 +100,22 @@ function extractLatestCoachingSignalFromFacts(
 }
 
 /**
- * Scan the routing-log JSONL for the most recent coaching_signal_id rows
- * matching the scenario. Returns null on file-not-found, parse errors, or
- * when no matching row carries a signal. This is the only persistence path
- * for edit-handler signals because edit HandlerFact variants have no
- * enrichment field (schema-frozen).
+ * Merge the two signal sources by produced_at timestamp. ISO-8601 strings
+ * sort lexicographically by time. When both are present, the newer wins;
+ * ties resolve to the fact source (ties only happen by coincidence since
+ * the enrichment write and the sidecar append are separate operations).
+ * Tie resolution is not user-facing: both sources record the same signal
+ * on the same turn, so picking either yields the same signal_id.
  */
-async function extractLatestCoachingSignalFromRoutingLog(
-  scenarioId: string,
-  filePath: string,
-): Promise<LastCoachingSignal | null> {
-  let contents: string;
-  try {
-    contents = await readFile(filePath, 'utf8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      log.warn(
-        { scenario_id: scenarioId, file_path: filePath, err: (err as Error).message },
-        'V5 routing-log read failed during coaching-cache resolve, returning null',
-      );
-    }
-    return null;
-  }
-
-  let latest: LastCoachingSignal | null = null;
-  for (const line of contents.split('\n')) {
-    if (line.length === 0) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (parsed === null || typeof parsed !== 'object') continue;
-    const obj = parsed as Record<string, unknown>;
-    if (obj.scenario_id !== scenarioId) continue;
-    const signalId = obj.coaching_signal_id;
-    if (!isCoachingSignalId(signalId)) continue;
-    if (typeof obj.turn_id !== 'string' || typeof obj.created_at !== 'string') continue;
-    if (latest === null || obj.created_at >= latest.produced_at) {
-      latest = {
-        signal_id: signalId,
-        turn_id: obj.turn_id,
-        produced_at: obj.created_at,
-      };
-    }
-  }
-  return latest;
+function pickNewestSignal(
+  factSignal: LastCoachingSignal | null,
+  sidecarSignal: LastCoachingSignal | null,
+): LastCoachingSignal | null {
+  if (factSignal === null) return sidecarSignal;
+  if (sidecarSignal === null) return factSignal;
+  return sidecarSignal.produced_at > factSignal.produced_at
+    ? sidecarSignal
+    : factSignal;
 }
 
 function isCoachingSignalId(value: unknown): value is CoachingSignalId {

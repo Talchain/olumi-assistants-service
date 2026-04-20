@@ -70,6 +70,7 @@ import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './t
 
 import { readCoachingCache } from './coaching/coaching-cache-reader.js';
 import { enrichRunAnalysisWithDecisionReview } from './coaching/decision-review-enricher.js';
+import { appendLastCoachingSignal } from './coaching/last-coaching-signal-log.js';
 import type { CoachingSignalId } from './coaching/types.js';
 import { detectCoachingSignal } from './signals/coaching-signals.js';
 import {
@@ -523,8 +524,9 @@ export async function runTurnExecutor(
           signal_id: coachingDetection.signal_id,
           handler_id: proposedHandlerId,
         });
-        // Persist signal metadata into enrichment on run_analysis facts so
-        // the next turn's CoachingCache.last_coaching_signal can surface it.
+        // Persist signal metadata into enrichment on run_analysis facts
+        // (frozen schema has enrichment only there) so the next turn's
+        // CoachingCache.last_coaching_signal can surface it.
         if (proposedHandlerId === 'run_analysis') {
           handlerFactsForCommit = attachCoachingSignalToRunAnalysisFact(
             handlerFactsForCommit,
@@ -532,6 +534,16 @@ export async function runTurnExecutor(
             requestId,
           );
         }
+        // Also write to the per-scenario sidecar. This is the only
+        // persistence path for edit-handler signals (STALE_*, HIGH_*)
+        // because edit HandlerFact variants have no enrichment field.
+        // Fire-and-forget; the sidecar helper swallows I/O failures.
+        void appendLastCoachingSignal({
+          scenario_id: context.session_id,
+          signal_id: coachingDetection.signal_id,
+          turn_id: requestId,
+          produced_at: new Date().toISOString(),
+        });
       }
       stagesCompleted.push('coach');
 

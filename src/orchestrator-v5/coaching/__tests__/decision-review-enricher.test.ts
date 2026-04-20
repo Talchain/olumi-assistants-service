@@ -248,4 +248,56 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
     expect(patchedEnrichment.review_cards).toEqual([{ id: 'card-1' }]);
     expect(patchedEnrichment.decision_review).toBeDefined();
   });
+
+  // Review feedback P1.2: produced_at is V5's timestamp and must not be
+  // overridden by the LLM output even if a field with that name appears in
+  // the payload. Regression guard against spread-order bugs.
+  it('produced_at from V5 is retained when the LLM output includes its own produced_at', async () => {
+    const hostileLlmOutput = {
+      narrative_summary: 'option A wins',
+      story_headlines: ['A ahead'],
+      // An LLM that hallucinates this field should not be able to masquerade
+      // as a trusted V5 timestamp. The spread in the enricher must place
+      // V5's produced_at last so the payload field is overwritten.
+      produced_at: '1970-01-01T00:00:00.000Z',
+    };
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: hostileLlmOutput,
+      raw: '{}',
+      model: 'gpt-4.1',
+      provider: 'openai',
+      llm_latency_ms: 100,
+      input_tokens: 10,
+      output_tokens: 20,
+      prompt_version: 'v1',
+    });
+
+    const before = Date.now();
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment() }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-1',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+    });
+    const after = Date.now();
+
+    const patched = out[0];
+    if (patched.fact_type !== 'run_analysis') throw new Error('narrowing');
+    const dr = (patched.result.enrichment as Record<string, unknown>).decision_review as
+      | Record<string, unknown>
+      | undefined;
+    expect(dr).toBeDefined();
+    // Other payload fields pass through verbatim:
+    expect(dr!.narrative_summary).toBe('option A wins');
+    expect(dr!.story_headlines).toEqual(['A ahead']);
+    // produced_at is a V5 timestamp, not the LLM's 1970 value:
+    expect(typeof dr!.produced_at).toBe('string');
+    const producedAtMs = Date.parse(dr!.produced_at as string);
+    expect(producedAtMs).toBeGreaterThanOrEqual(before);
+    expect(producedAtMs).toBeLessThanOrEqual(after);
+    expect(dr!.produced_at).not.toBe('1970-01-01T00:00:00.000Z');
+  });
 });

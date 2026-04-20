@@ -114,9 +114,15 @@ export async function enrichRunAnalysisWithDecisionReview(
     // F.6: verbatim pass-through of the LLM output with a V5-added
     // produced_at timestamp. No field renaming, flattening, or filtering;
     // consumers read required fields defensively. Review feedback P1.2.
+    //
+    // Spread order: payload first, then produced_at last. The LLM output
+    // must not override V5's timestamp — a collision would break the
+    // cache-read gate (isDecisionReviewOutput checks produced_at is a
+    // string) and could make the decision_review enrichment appear stale
+    // when it isn't.
     const output: DecisionReviewOutput = {
-      produced_at: new Date().toISOString(),
       ...result.output,
+      produced_at: new Date().toISOString(),
     };
     const patched: HandlerFact = {
       ...fact,

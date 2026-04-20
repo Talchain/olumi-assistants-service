@@ -11,6 +11,11 @@ import {
   DEFAULT_DRAFT_COACHING_LOG_PATH,
   readLatestDraftCoaching,
 } from '../draft-coaching-log.js';
+import {
+  appendLastCoachingSignal,
+  DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH,
+  type LastCoachingSignalRecord,
+} from '../last-coaching-signal-log.js';
 import { readCoachingCache } from '../coaching-cache-reader.js';
 import type { DraftCoaching } from '../types.js';
 
@@ -158,5 +163,95 @@ describe('readCoachingCache', () => {
     expect(cache.draft_coaching?.bias_signals).toEqual(draftRecord.bias_signals);
     // decision_review is null (no decision_review field on that enrichment):
     expect(cache.decision_review).toBeNull();
+  });
+
+  // Review feedback P1.1: signal sources must merge by produced_at, not
+  // short-circuit on facts. These tests pin the merge contract so a newer
+  // edit-turn signal cannot be masked by an older analysis-turn signal.
+  describe('last_coaching_signal merge precedence', () => {
+    function factWithSignal(args: {
+      signal_id: string;
+      turn_id: string;
+      produced_at: string;
+    }): HandlerFact {
+      return runAnalysisFact({
+        coaching_signal_id: args.signal_id,
+        coaching_signal_turn_id: args.turn_id,
+        coaching_signal_produced_at: args.produced_at,
+      });
+    }
+
+    it('picks the sidecar signal when it is newer than the fact signal', async () => {
+      const uniqueScenario = `scen-merge-sidecar-newer-${Date.now()}`;
+      const olderFactFact = factWithSignal({
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'turn-older',
+        produced_at: '2026-04-20T09:00:00.000Z',
+      });
+      const newerSidecar: LastCoachingSignalRecord = {
+        scenario_id: uniqueScenario,
+        signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
+        turn_id: 'turn-newer',
+        produced_at: '2026-04-20T10:00:00.000Z',
+      };
+      await appendLastCoachingSignal(newerSidecar, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
+
+      const cache = await readCoachingCache(uniqueScenario, [olderFactFact]);
+      expect(cache.last_coaching_signal?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+      expect(cache.last_coaching_signal?.turn_id).toBe('turn-newer');
+    });
+
+    it('picks the fact signal when it is newer than the sidecar signal', async () => {
+      const uniqueScenario = `scen-merge-fact-newer-${Date.now()}`;
+      const newerFactFact = factWithSignal({
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'turn-fact',
+        produced_at: '2026-04-20T11:00:00.000Z',
+      });
+      const olderSidecar: LastCoachingSignalRecord = {
+        scenario_id: uniqueScenario,
+        signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
+        turn_id: 'turn-sidecar',
+        produced_at: '2026-04-20T09:00:00.000Z',
+      };
+      await appendLastCoachingSignal(olderSidecar, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
+
+      const cache = await readCoachingCache(uniqueScenario, [newerFactFact]);
+      expect(cache.last_coaching_signal?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+      expect(cache.last_coaching_signal?.turn_id).toBe('turn-fact');
+    });
+
+    it('falls back to sidecar when no fact carries a signal', async () => {
+      const uniqueScenario = `scen-sidecar-only-${Date.now()}`;
+      const sidecarOnly: LastCoachingSignalRecord = {
+        scenario_id: uniqueScenario,
+        signal_id: 'HIGH_SENSITIVITY_EDIT',
+        turn_id: 'turn-edit',
+        produced_at: '2026-04-20T12:00:00.000Z',
+      };
+      await appendLastCoachingSignal(sidecarOnly, DEFAULT_LAST_COACHING_SIGNAL_LOG_PATH);
+
+      const cache = await readCoachingCache(uniqueScenario, []);
+      expect(cache.last_coaching_signal?.signal_id).toBe('HIGH_SENSITIVITY_EDIT');
+      expect(cache.last_coaching_signal?.turn_id).toBe('turn-edit');
+    });
+
+    it('falls back to fact when no sidecar entry exists for the scenario', async () => {
+      const uniqueScenario = `scen-fact-only-${Date.now()}`;
+      const fact = factWithSignal({
+        signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        turn_id: 'turn-fact-only',
+        produced_at: '2026-04-20T08:00:00.000Z',
+      });
+
+      const cache = await readCoachingCache(uniqueScenario, [fact]);
+      expect(cache.last_coaching_signal?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+    });
+
+    it('returns null when neither source has a signal for this scenario', async () => {
+      const uniqueScenario = `scen-no-signal-${Date.now()}`;
+      const cache = await readCoachingCache(uniqueScenario, []);
+      expect(cache.last_coaching_signal).toBeNull();
+    });
   });
 });
