@@ -4,6 +4,7 @@
 **Date completed:** 20 April 2026
 **Branches:** `claude/v5-cqe-investigation` in both repos (local, uncommitted to remote)
 **Status:** Ready for Paul review. No push. No staging deploy.
+**Revision:** rev2 (2026-04-20, post-ChatGPT review). Original rev1 shipped the CQE implementation; rev2 incorporates ChatGPT review Tiers A (brief-compliance), B (evidence), and C (polish). Tier D (design-doc amendments) closed per Paul's direction; CQE Design v1.2 to follow.
 
 ---
 
@@ -15,6 +16,7 @@
 | 1 | CEE vendor bump: tarball into `vendor/`; `package.json:69` pin; runtime deps `compromise` + `compromise-numbers`; dev dep `fast-check`; `pnpm install` | CEE 533d879b |
 | 2 | CQE module (6 files) under `src/orchestrator-v5/context/cqe/`; `parsed_quantities` field on `ContextPack`; wire into `assembleContextPack()`; 68 fixtures; unit + property + integration tests; 5-case bench | CEE e56c14e2 |
 | 3 | Telemetry: `cqe.extraction` event in `TelemetryEvents` enum + Datadog routing case; 10 CQE fields on `RoutingLogInput`/`RoutingLog`; `buildRoutingLog()` projection updates; `turn-executor.ts` ORIENT step threads `CqeExtractionSummary` into both surfaces | CEE 7d9ee8c6 |
+| Rev2 | Tier A-C review corrections (ChatGPT review): removed unsafe casts, split P11 into anchored sub-patterns, added per-pattern timeout telemetry + dedicated test, strict fixture equality, full-chain integration test, explicit p95 evidence, outer-catch warning, bench naming fix | CEE 78a15586 |
 
 ## 2. Schema-freeze precheck result
 
@@ -63,26 +65,28 @@ Performed before Phase 0 per brief §5.0. Schema identical across spec v3.2 §11
 
 | Location | Count | Purpose |
 |---|---|---|
-| `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.test.ts` | 72 | 68 fixtures from CQE Design v1.1 §8 plus 4 meta tests (fixture count assertion, defensive runtime contract, summary shape, message-too-long flag) |
+| `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.test.ts` | 72 | 68 fixtures from CQE Design v1.1 §8 plus 4 meta tests (fixture count assertion, defensive runtime contract, summary shape, message-too-long flag). **Rev2:** strict deep-equality enforced (exact count + positional ordering). |
 | `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.property.test.ts` | 3 | `fast-check` properties: no-throw on arbitrary strings, no-throw on adversarial unicode, output schema shape stability |
-| `tests/integration/cqe-end-to-end.test.ts` | 4 | End-to-end through `assembleContextPack()` for quantity-bearing and quantity-free messages; `JSON.stringify` preserves `value_origin`; non-action turn path |
-| `tests/benchmarks/cqe.bench.ts` | 5 | Idle, multi-pattern, adversarial, 2000-char, compromise-only |
+| `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.timeout.test.ts` | 3 | **Rev2 (Gate 5):** circuit-breaker fires per-pattern with `pattern_id` telemetry; no partial spans recorded; later rules run on unmasked text; compromise still runs; global return is non-empty |
+| `tests/integration/cqe-end-to-end.test.ts` | 5 | End-to-end through `assembleContextPack()` for quantity-bearing and quantity-free messages; `JSON.stringify` preserves `value_origin`; non-action turn path. **Rev2:** full-chain test through `routeWithToolUse()` with mock adapter that captures the Sonnet-facing user message and asserts `value_origin` survives. |
+| `tests/benchmarks/cqe.bench.ts` | 5 | Idle, multi-pattern, adversarial, 2000-char, compromise-only (vitest bench; p75/p99/p999) |
+| `tests/benchmarks/cqe-p95-bench.ts` | 5 | **Rev2:** explicit-p95 harness (N=400-2000 samples), emits p50/p75/p95/p99/p999 + breach tolerance vs target |
 
-**Total new: 79 tests + 5 benchmarks.** All pass.
+**Total new: 83 tests + 10 benchmarks.** All pass.
 
 ## 5. Benchmark results
 
-Full detail in `tests/benchmarks/cqe-results.md`. Summary:
+Full detail in `tests/benchmarks/cqe-results.md`. Rev2 adds explicit p95 numbers via the new `cqe-p95-bench.ts` harness.
 
-| # | Case | p99 | Target | Pass |
-|---|---|---|---|---|
-| 1 | Idle path (no numbers) | 0.22 ms | <1ms | ✓ |
-| 2 | Multi-pattern realistic | 0.27 ms | <5ms | ✓ |
-| 3 | Adversarial backtracking | 1.03 ms | <50ms (timeout cap) | ✓ |
-| 4 | 2000-char cap boundary | 0.78 ms | <20ms | ✓ |
-| 5 | Compromise-only fallback | 0.74 ms | <10ms | ✓ |
+| # | Case | **p95** | Target | Breach | Pass |
+|---|---|---|---|---|---|
+| 1 | Idle path (no numbers) | **0.120 ms** | <1ms | -88.0% | ✓ |
+| 2 | Multi-pattern realistic | **0.163 ms** | <5ms | -96.7% | ✓ |
+| 3 | Adversarial backtracking | **0.432 ms** | <50ms (timeout cap) | -99.1% | ✓ |
+| 4 | 2000-char cap boundary | **0.475 ms** | <20ms | -97.6% | ✓ |
+| 5 | Compromise-only fallback | **0.304 ms** | <10ms | -97.0% | ✓ |
 
-All five cases meet their proposal §8.2 targets with ≥10× headroom.
+All five cases meet their proposal §8.2 p95 targets with ≥88% headroom. Worst case is Case 4 at 47.5% of its 20ms budget; everything else is under 10% of its budget.
 
 ## 6. Dependency audit
 
@@ -159,15 +163,16 @@ Three documented, none silent:
 |---|---|---|---|
 | 1 | No routing prompt loader | ✓ | `grep -rE "loadPrompt\|readPromptFile\|promptTemplate\|loadRoutingPrompt" src/ --exclude-dir=node_modules` returns 0 results |
 | 2 | `ContextPack` stays local | ✓ | `grep -r "ContextPack" ~/Documents/GitHub/olumi-schemas/src/` returns 0 hits. Interface remains in `src/orchestrator-v5/context/context-pack-assembler.ts` |
-| 3 | P11 structural rewrite | ✓ | `rules.ts` defines `P11_REGEX` as a single anchored regex with per-side units; the parse function merges in code; no nested optional per-side unit alternation in one mega-regex |
+| 3 | P11 structural rewrite | ✓ (rev2) | `rules.ts` defines three anchored sub-patterns — `P11_WITH_UNITS_CURRENCY_REGEX`, `P11_WITH_UNITS_SUFFIX_REGEX`, `P11_WITHOUT_UNITS_REGEX` — with code-side merge in `rule_P11.apply()`. No single regex with optional per-side unit alternation. (rev1 initially had a single regex; rev2 split it per ChatGPT review.) |
 | 4 | Regex safety per-pattern | ✓ | P1/P2/P5/P8/P12 use bounded alternation and anchored lookbehinds per proposal §3.3; P11 split as above |
-| 5 | No partial-result fallback | ✓ | `extract-quantities.ts` on regex timeout: the timed-out pattern emits `timeout: true` in summary, masks nothing, later patterns continue on unmasked remainder, compromise runs on the final remainder. Global return is preserved matches, not `[]` |
+| 5 | No partial-result fallback | ✓ (rev2) | Rev2 adds immediate per-pattern telemetry (`cqe.pattern_timeout` with `pattern_id`) at the moment the circuit breaker trips, plus `__testForceTimeoutPatterns` hook and `extract-quantities.timeout.test.ts` (3 tests) proving all 5 points of Gate 5: telemetry emits pattern_id, no partial spans, later rules continue, compromise runs, global return is non-empty. |
 | 6 | F.6 compliance | ✓ | `grep -r "contextPack.graph\|ContextPack\["graph"\]" src/orchestrator-v5/context/cqe/ --include="*.ts" --exclude-dir=__tests__` returns 0 hits. No graph access in production CQE code. |
-| 7 | 68 fixtures pass | ✓ | `pnpm exec vitest run src/orchestrator-v5/context/cqe/__tests__/extract-quantities.test.ts` → 72/72 tests pass |
-| 8 | Benchmark thresholds | ✓ | See §5 above; `tests/benchmarks/cqe-results.md` |
-| 9 | CI passes | ✓ | `tsc -p tsconfig.build.json --noEmit` clean. Full vitest suite: 11 failed files / 38 failed tests / 11896 passed — identical to baseline. No new failures. telemetry-validation CI: event name registered, propagates to `dist/.../telemetry.js` VALID_EVENT_NAMES (verified with `pnpm build` + node eval) |
-| 10 | Liveness integration | ✓ | `tests/integration/cqe-end-to-end.test.ts` exercises `assembleContextPack()` with quantity-bearing input and asserts `parsed_quantities` non-empty with expected values |
+| 7 | 68 fixtures pass + strict equality (rev2) | ✓ | `pnpm exec vitest run src/orchestrator-v5/context/cqe/__tests__/extract-quantities.test.ts` → 72/72 tests pass under strict deep-equality (exact count + positional ordering). Rev2 tightened from ≥N count matching. |
+| 8 | Benchmark thresholds (rev2: explicit p95) | ✓ | See §5 above; `tests/benchmarks/cqe-results.md` now publishes explicit p95 numbers with breach-tolerance % (worst case -88% below target). |
+| 9 | CI passes | ✓ | `tsc -p tsconfig.build.json --noEmit` clean. Full vitest suite: 11 failed files / 38 failed tests / 11900 passed — identical failure count to baseline, +83 passed (all new CQE tests). telemetry-validation CI: event name registered, propagates to `dist/.../telemetry.js` VALID_EVENT_NAMES. |
+| 10 | Liveness integration (rev2: full chain) | ✓ | Rev2's 5th integration test exercises `assembleContextPack() → routeWithToolUse() → adapter.chatWithTools()` with a mock adapter that captures the Sonnet-facing user message and asserts `value_origin` survives. |
 | 11 | Dependency audit | ✓ | `Docs/v5/cqe-dependency-audit.md`; all three new deps MIT, zero vulns, node-compatible |
+| 13 (§13) | No `as unknown` / `as any` bypasses | ✓ (rev2) | `grep -rE "as unknown\|as any" src/orchestrator-v5/context/cqe/*.ts` returns zero production hits (only a comment explaining the `isMatch` helper). Rev2 removed 8 bypass casts by introducing a typed filter guard. |
 
 ## 12. Next step
 
