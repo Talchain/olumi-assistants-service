@@ -27,8 +27,9 @@ function baseInput(overrides: Partial<RoutingLogInput> = {}): RoutingLogInput {
     sonnet_text: overrides.sonnet_text ?? 'Running analysis...',
     redacted: overrides.redacted ?? false,
     created_at: overrides.created_at ?? '2026-04-19T02:00:00Z',
+    coaching_signal_id: overrides.coaching_signal_id ?? null,
     ...(overrides.label_tier ? { label_tier: overrides.label_tier } : {}),
-  };
+  } as RoutingLogInput;
 }
 
 describe('buildRoutingLog', () => {
@@ -74,6 +75,25 @@ describe('buildRoutingLog', () => {
     );
     expect(log.compound_detected).toBe(true);
     expect(log.compound_pattern_matched).toBe('then');
+  });
+
+  it('defaults coaching_signal_id to null and preserves it in both branches', () => {
+    // V5 Group 1 Task C: Step 5 coaching pass emits coaching_signal_id.
+    const nullLog = buildRoutingLog(baseInput());
+    expect(nullLog.coaching_signal_id).toBeNull();
+
+    const firedLog = buildRoutingLog(
+      baseInput({ coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE' }),
+    );
+    expect(firedLog.coaching_signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+
+    // Redacted path preserves the signal (not a user-supplied field, so it
+    // crosses the privacy boundary).
+    const redacted = buildRoutingLog(
+      baseInput({ coaching_signal_id: 'STALE_ANALYSIS_AFTER_EDIT', redacted: true }),
+    );
+    expect(redacted.coaching_signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    expect(redacted.redacted).toBe(true);
   });
 });
 

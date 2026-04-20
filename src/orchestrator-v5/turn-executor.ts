@@ -70,6 +70,8 @@ import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './t
 
 import { readCoachingCache } from './coaching/coaching-cache-reader.js';
 import { enrichRunAnalysisWithDecisionReview } from './coaching/decision-review-enricher.js';
+import type { CoachingSignalId } from './coaching/types.js';
+import { detectCoachingSignal } from './signals/coaching-signals.js';
 import {
   assembleContextPackWithSummary,
   type ContextPack,
@@ -205,6 +207,7 @@ export async function runTurnExecutor(
   let resolvedTurnClass: C1TurnClass | null = null;
   let intentClass: IntentClass | null = null;
   let coachingMode: CoachingMode | null = null;
+  let coachingSignalId: CoachingSignalId | null = null;
   let validationErrorCode: ValidationError['code'] | null = null;
 
   // Routing log fields — closured so the finally block can emit one record
@@ -498,8 +501,39 @@ export async function runTurnExecutor(
       const confirmationText = renderConfirmation(proposedHandlerId, handlerOutcome, options);
       stagesCompleted.push('confirm');
 
-      // STEP 5 — COACH. Null stub on execute turns. coaching_mode is never
-      // set on execute turns per spec §5.
+      // STEP 5 — COACH (V5 Group 1 Task C). Deterministic signal detector.
+      // At most one signal per action turn. Non-action intents (clarify,
+      // coach, converse) never reach this branch. coaching_mode is set by
+      // routing; Step 5 emits coaching_signal_id which is distinct.
+      // contextPackForLog is always assigned by the time EXECUTE succeeds.
+      const coachingDetection = contextPackForLog
+        ? detectCoachingSignal({
+            proposedHandlerId,
+            outcome: handlerOutcome,
+            contextPack: contextPackForLog,
+            priorFacts: context.prior_facts,
+          })
+        : null;
+      const coachingText = coachingDetection?.coaching_text ?? null;
+      coachingSignalId = coachingDetection?.signal_id ?? null;
+      if (coachingDetection) {
+        emit(TelemetryEvents.V5CoachingSignalFired, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          signal_id: coachingDetection.signal_id,
+          handler_id: proposedHandlerId,
+        });
+        // Persist signal metadata into enrichment on run_analysis facts so
+        // the next turn's CoachingCache.last_coaching_signal can surface it.
+        if (proposedHandlerId === 'run_analysis') {
+          handlerFactsForCommit = attachCoachingSignalToRunAnalysisFact(
+            handlerFactsForCommit,
+            coachingDetection.signal_id,
+            requestId,
+          );
+        }
+      }
+      stagesCompleted.push('coach');
 
       // STEP 6 — COMPOSE (execute). Orientation is sanitised in-band like
       // the converse/clarify/coach paths — Sonnet's pre-action text could
@@ -517,7 +551,7 @@ export async function runTurnExecutor(
       composedOk = composeToolCallResponse({
         orientation: sanitisedOrientation.output,
         confirmation: confirmationText,
-        coaching: null,
+        coaching: coachingText,
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
       });
@@ -699,6 +733,7 @@ export async function runTurnExecutor(
       cqe_word_range_missed: cqeSummaryForLog?.word_range_missed ?? false,
       cqe_ambiguous_phrasing_detected:
         cqeSummaryForLog?.ambiguous_phrasing_detected ?? false,
+      coaching_signal_id: coachingSignalId,
     });
     safeFireRoutingLogWrite(writer, record, requestId);
   }
@@ -927,6 +962,40 @@ function renderConfirmation(
 function serialiseError(err: unknown): { name?: string; message?: string } {
   if (err instanceof Error) return { name: err.name, message: err.message };
   return { message: String(err) };
+}
+
+/**
+ * V5 Group 1 Task C: attach a coaching signal marker to the run_analysis
+ * handler fact's enrichment so the next turn's coaching-cache reader can
+ * surface it as last_coaching_signal. For edit handlers (set_factor_value
+ * et al.), enrichment does not exist on the fact shape, so signal_id is
+ * carried only via the routing log.
+ */
+function attachCoachingSignalToRunAnalysisFact(
+  facts: readonly HandlerFact[],
+  signalId: CoachingSignalId,
+  turnId: string,
+): readonly HandlerFact[] {
+  const idx = facts.findIndex((f) => f.fact_type === 'run_analysis');
+  if (idx < 0) return facts;
+  const fact = facts[idx];
+  if (fact.fact_type !== 'run_analysis') return facts;
+  const base = fact.result.enrichment ?? {};
+  const next: HandlerFact = {
+    ...fact,
+    result: {
+      ...fact.result,
+      enrichment: {
+        ...base,
+        coaching_signal_id: signalId,
+        coaching_signal_turn_id: turnId,
+        coaching_signal_produced_at: new Date().toISOString(),
+      },
+    },
+  };
+  const out = facts.slice();
+  out[idx] = next;
+  return out;
 }
 
 /**
