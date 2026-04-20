@@ -70,6 +70,22 @@ export interface RoutingLogInput {
   readonly graph_dropped_by_unknown_kind: number;
   readonly graph_dropped_by_missing_id: number;
   readonly graph_lookup_outcome: GraphLookupOutcome;
+  /**
+   * CQE (Custom Quantity Extractor — Layer 0) per-turn telemetry, mirrored
+   * here from the assembler's CqeExtractionSummary for per-turn debugging
+   * joins. The `cqe.extraction` event carries the same shape into Datadog.
+   * All counts default to 0 so aggregation queries need no COALESCE wrapper.
+   */
+  readonly cqe_message_length: number;
+  readonly cqe_result_count: number;
+  readonly cqe_match_count: number;
+  readonly cqe_compromise_match_count: number;
+  readonly cqe_patterns_matched: readonly string[];
+  readonly cqe_duration_ms: number;
+  readonly cqe_timeout: boolean;
+  readonly cqe_message_too_long: boolean;
+  readonly cqe_word_range_missed: boolean;
+  readonly cqe_ambiguous_phrasing_detected: boolean;
 }
 
 export interface RoutingLog {
@@ -97,6 +113,16 @@ export interface RoutingLog {
   readonly graph_dropped_by_unknown_kind: number;
   readonly graph_dropped_by_missing_id: number;
   readonly graph_lookup_outcome: GraphLookupOutcome;
+  readonly cqe_message_length: number;
+  readonly cqe_result_count: number;
+  readonly cqe_match_count: number;
+  readonly cqe_compromise_match_count: number;
+  readonly cqe_patterns_matched: readonly string[];
+  readonly cqe_duration_ms: number;
+  readonly cqe_timeout: boolean;
+  readonly cqe_message_too_long: boolean;
+  readonly cqe_word_range_missed: boolean;
+  readonly cqe_ambiguous_phrasing_detected: boolean;
 }
 
 /**
@@ -130,6 +156,16 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
       graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
       graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
       graph_lookup_outcome: input.graph_lookup_outcome,
+      cqe_message_length: input.cqe_message_length,
+      cqe_result_count: input.cqe_result_count,
+      cqe_match_count: input.cqe_match_count,
+      cqe_compromise_match_count: input.cqe_compromise_match_count,
+      cqe_patterns_matched: input.cqe_patterns_matched,
+      cqe_duration_ms: input.cqe_duration_ms,
+      cqe_timeout: input.cqe_timeout,
+      cqe_message_too_long: input.cqe_message_too_long,
+      cqe_word_range_missed: input.cqe_word_range_missed,
+      cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
     };
   }
   return {
@@ -157,6 +193,16 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
     graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
     graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
     graph_lookup_outcome: input.graph_lookup_outcome,
+    cqe_message_length: input.cqe_message_length,
+    cqe_result_count: input.cqe_result_count,
+    cqe_match_count: input.cqe_match_count,
+    cqe_compromise_match_count: input.cqe_compromise_match_count,
+    cqe_patterns_matched: input.cqe_patterns_matched,
+    cqe_duration_ms: input.cqe_duration_ms,
+    cqe_timeout: input.cqe_timeout,
+    cqe_message_too_long: input.cqe_message_too_long,
+    cqe_word_range_missed: input.cqe_word_range_missed,
+    cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
   };
 }
 

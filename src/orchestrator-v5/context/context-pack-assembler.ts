@@ -25,10 +25,17 @@
  */
 
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
-import type { SessionTurn } from '@talchain/schemas/orchestrator';
+import type {
+  QuantityExtractionResult,
+  SessionTurn,
+} from '@talchain/schemas/orchestrator';
 
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 import { detectCompound } from '../routing/compound-detector.js';
+import {
+  runExtraction,
+  type CqeExtractionSummary,
+} from './cqe/extract-quantities.js';
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
 // five for token budget. Any trim beyond is caller's concern.
@@ -98,6 +105,13 @@ export interface ContextPack {
    * Phase 2 evaluation of detector quality.
    */
   readonly compound_pattern_matched: string | null;
+  /**
+   * Pre-parsed numeric quantities extracted from the user message by the
+   * Layer 0 CQE module. Empty when no quantities were found. Consumed by
+   * Sonnet via the routing prompt's PARAMETERS section — F.6: the LLM
+   * never does arithmetic. See CQE Design v1.1 §3 for field semantics.
+   */
+  readonly parsed_quantities: readonly QuantityExtractionResult[];
   readonly system_event: unknown | null;
 }
 
@@ -135,8 +149,20 @@ const EMPTY_GRAPH: ContextPackGraph = Object.freeze({
   counts: Object.freeze({ nodes: 0, edges: 0, options: 0, goals: 0, constraints: 0 }),
 }) as ContextPackGraph;
 
+export interface AssembleContextPackResult {
+  readonly contextPack: ContextPack;
+  readonly cqeSummary: CqeExtractionSummary;
+}
+
 export function assembleContextPack(input: AssembleContextPackInput): ContextPack {
+  return assembleContextPackWithSummary(input).contextPack;
+}
+
+export function assembleContextPackWithSummary(
+  input: AssembleContextPackInput,
+): AssembleContextPackResult {
   const compound = detectCompound(input.payload.message);
+  const extraction = runExtraction(input.payload.message);
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     stage: input.payload.stage,
@@ -146,12 +172,14 @@ export function assembleContextPack(input: AssembleContextPackInput): ContextPac
     coaching: null,
     compound_detected: compound.detected,
     compound_pattern_matched: compound.telemetry.pattern_matched,
+    parsed_quantities: extraction.results,
     system_event: input.systemEvent ?? null,
   };
-  if (compound.detected && compound.segments) {
-    return { ...base, compound_segments: compound.segments };
-  }
-  return base;
+  const contextPack =
+    compound.detected && compound.segments
+      ? { ...base, compound_segments: compound.segments }
+      : base;
+  return { contextPack, cqeSummary: extraction.summary };
 }
 
 function projectGraph(graph: GraphWithOptions | null): ContextPackGraph {

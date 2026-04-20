@@ -68,7 +68,11 @@ import {
 import { sanitiseNarrateOutput } from './sanitise.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
-import { assembleContextPack, type ContextPack } from './context/context-pack-assembler.js';
+import {
+  assembleContextPackWithSummary,
+  type ContextPack,
+} from './context/context-pack-assembler.js';
+import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import { computeDeterministicGraphHash } from './context/graph-hash.js';
 import {
   RoutingError,
@@ -208,6 +212,7 @@ export async function runTurnExecutor(
   let proposedHandlerIdForLog: string | null = null;
   let sonnetTextForLog = '';
   let contextPackForLog: ContextPack | null = null;
+  let cqeSummaryForLog: CqeExtractionSummary | null = null;
 
   // Phase 1.5: graph lookup + drift detection. Initialised inside the try
   // block so any failure during telemetry emit still lands in the top-level
@@ -298,11 +303,18 @@ export async function runTurnExecutor(
       ? compactAnalysis(coerceIngressAnalysis(options.analysisState))
       : null;
     try {
-      const contextPack = assembleContextPack({
+      const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
         graph: options.graphState ?? null,
         analysis: analysisSummary,
+      });
+      cqeSummaryForLog = cqeSummary;
+      emit(TelemetryEvents.CqeExtraction, {
+        request_id: requestId,
+        session_id: context.session_id,
+        stage: context.stage,
+        ...cqeSummary,
       });
       contextPackForLog = contextPack;
       routingResult = await routeWithToolUse(contextPack, payload.message, {
@@ -640,6 +652,17 @@ export async function runTurnExecutor(
       graph_dropped_by_missing_id:
         graphLookupStatsForLog?.dropped_by_missing_id ?? 0,
       graph_lookup_outcome: graphLookupBuildReason,
+      cqe_message_length: cqeSummaryForLog?.message_length ?? 0,
+      cqe_result_count: cqeSummaryForLog?.result_count ?? 0,
+      cqe_match_count: cqeSummaryForLog?.cqe_match_count ?? 0,
+      cqe_compromise_match_count: cqeSummaryForLog?.compromise_match_count ?? 0,
+      cqe_patterns_matched: cqeSummaryForLog?.patterns_matched ?? [],
+      cqe_duration_ms: cqeSummaryForLog?.duration_ms ?? 0,
+      cqe_timeout: cqeSummaryForLog?.timeout ?? false,
+      cqe_message_too_long: cqeSummaryForLog?.message_too_long ?? false,
+      cqe_word_range_missed: cqeSummaryForLog?.word_range_missed ?? false,
+      cqe_ambiguous_phrasing_detected:
+        cqeSummaryForLog?.ambiguous_phrasing_detected ?? false,
     });
     safeFireRoutingLogWrite(writer, record, requestId);
   }
