@@ -17,6 +17,7 @@ import { config } from "../../../config/index.js";
 import { getRuntimeEnv } from "../../../config/env-resolver.js";
 import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
 import { computeDiagnosticChecks } from "../../observability/diagnostic-checks.js";
+import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 
 export async function runStageBoundary(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "boundary" }, "Unified pipeline: Stage 6 (Boundary) started");
@@ -129,23 +130,26 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       }
     }
 
-    // Strict mode validation (Track 1 soft gate — log and continue)
+    // Strict mode validation (fail-closed per boundary contract v1.1 §4.2).
+    // Previously a soft-gate log-and-continue; now sets ctx.earlyReturn with
+    // HTTP 502 and a CEE_VALIDATION_FAILED envelope carrying
+    // reason='egress_contract_violation' plus the validator tag.
     if (ctx.opts.strictMode) {
       try {
         validateStrictModeV3(v3Body);
       } catch (err) {
         const errMsg = (err as Error).message;
         log.warn({
-          event: "pipeline.soft_gate_degraded",
+          event: "pipeline.boundary_fail_closed",
           stage: "boundary_strict_mode",
           error: errMsg,
           request_id: ctx.requestId,
-        }, "V3 strict mode validation failed — continuing with graph (soft gate)");
+        }, "V3 strict mode validation failed — fail-closed per boundary contract");
 
-        // Emit telemetry event (still useful for monitoring)
+        // Emit telemetry event with the new consolidated error code.
         emit(TelemetryEvents.CeeBoundaryBlocked, {
           request_id: ctx.requestId,
-          error_code: "CEE_V3_STRICT_MODE_DEGRADED",
+          error_code: "CEE_EGRESS_CONTRACT_VIOLATION",
           error_message: errMsg,
           validation_issues: [],
           graph_hash: (v3Body as any)?.meta?.graph_hash,
@@ -154,9 +158,25 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
         ctx.pipelineOutcome.warnings.push({
           stage: 'boundary_strict_mode',
           error: errMsg,
-          degraded: true,
+          degraded: false,
+          blocked: true,
         });
-        // Continue — do NOT null the graph or return blocked response
+
+        ctx.earlyReturn = {
+          statusCode: 502,
+          body: buildCeeErrorResponse(
+            "CEE_VALIDATION_FAILED",
+            `Egress contract violation (strict_mode_v3): ${errMsg}`,
+            {
+              requestId: ctx.requestId,
+              retryable: false,
+              reason: "egress_contract_violation",
+              details: { validator: "strict_mode_v3", boundary: "B1", direction: "response" },
+              stage: "boundary",
+            },
+          ),
+        };
+        return;
       }
     }
 
@@ -239,16 +259,17 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     // Belt-and-suspenders: validate V3 output before returning.
     // CIL Phase 1: when parse succeeds, use parseResult.data — Zod strips
     // undeclared fields (e.g. _retry_suggestion) so internal metadata doesn't
-    // leak to API clients. On failure, fall through to soft gate with raw v3Body.
+    // leak to API clients. On failure, fail closed per boundary contract v1.1 §4.2
+    // (a dev escape hatch remains via CEE_BOUNDARY_ALLOW_INVALID for local work).
     const parseResult = CEEGraphResponseV3.safeParse(v3Body);
     if (parseResult.success) {
       ctx.finalResponse = parseResult.data;
       return;
     }
 
-    // Track 1 (progressive degradation): V3 validation failures log a warning
-    // and pass through the raw graph rather than returning a blocked response.
-    // A valid graph must never be discarded by schema validation failures.
+    // Validation failed: emit telemetry and set a typed earlyReturn (502).
+    // The dev escape hatch (config.cee.boundaryAllowInvalid) still permits
+    // passthrough in local/test; staging and production cannot enable it.
     const runtimeEnv = getRuntimeEnv();
     const allowInvalid = config.cee.boundaryAllowInvalid;
 
@@ -270,20 +291,20 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
       return;
     }
 
-    // Soft gate (Track 1): log, record warning, pass through graph
+    // Fail-closed per boundary contract v1.1 §4.2 (was: Track 1 soft gate).
     log.warn({
-      event: "pipeline.soft_gate_degraded",
+      event: "pipeline.boundary_fail_closed",
       stage: "boundary_v3_validation",
       error_count: parseResult.error.issues.length,
       first_issues: extractZodIssues(parseResult.error, 3),
       request_id: ctx.requestId,
       runtime_env: runtimeEnv,
-    }, "V3 output failed schema validation — continuing with graph (soft gate)");
+    }, "V3 output failed schema validation — fail-closed per boundary contract");
 
-    // Emit telemetry event (still useful for monitoring)
+    // Emit telemetry event with the new consolidated error code.
     emit(TelemetryEvents.CeeBoundaryBlocked, {
       request_id: ctx.requestId,
-      error_code: "CEE_V3_VALIDATION_DEGRADED",
+      error_code: "CEE_EGRESS_CONTRACT_VIOLATION",
       error_message: errMsg,
       validation_issues: validationIssues,
       graph_hash: (v3Body as any)?.meta?.graph_hash,
@@ -292,10 +313,31 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     ctx.pipelineOutcome.warnings.push({
       stage: 'boundary_v3_validation',
       error: errMsg,
-      degraded: true,
-    });
+      degraded: false,
+      blocked: true,
+    } as any);
 
-    ctx.finalResponse = v3Body;
+    ctx.earlyReturn = {
+      statusCode: 502,
+      body: buildCeeErrorResponse(
+        "CEE_VALIDATION_FAILED",
+        `Egress contract violation (zod_v3): ${errMsg}`,
+        {
+          requestId: ctx.requestId,
+          retryable: false,
+          reason: "egress_contract_violation",
+          details: {
+            validator: "zod_v3",
+            boundary: "B1",
+            direction: "response",
+            issue_count: parseResult.error.issues.length,
+            validation_issues: validationIssues,
+          },
+          stage: "boundary",
+        },
+      ),
+    };
+    return;
   } else if (schemaVersion === "v2") {
     ctx.finalResponse = transformResponseToV2(ctx.ceeResponse as any);
   } else {

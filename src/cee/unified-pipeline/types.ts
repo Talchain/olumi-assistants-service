@@ -191,6 +191,13 @@ export interface PipelineWarning {
   stage: string;
   error: string;
   degraded: boolean;
+  /**
+   * True when the pipeline stage produced a typed fail-closed response
+   * rather than degrading. Distinct from `degraded: true` (which means
+   * the pipeline continued with lower-quality output). Introduced with
+   * the MC-29 boundary-stage fix.
+   */
+  blocked?: boolean;
 }
 
 export interface RepairProvenanceEntry {
