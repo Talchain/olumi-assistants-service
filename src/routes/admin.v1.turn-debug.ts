@@ -86,6 +86,12 @@ export async function adminTurnDebugRoutes(app: FastifyInstance): Promise<void> 
         message_too_long: result.cqe.message_too_long,
         word_range_missed: result.cqe.word_range_missed,
       },
+      model_resolutions: (result.model_resolutions ?? []).map((r) => ({
+        task: r.task,
+        resolved_model: r.resolved_model,
+        resolution_source: r.resolution_source,
+        timestamp: new Date(r.timestamp).toISOString(),
+      })),
     });
   });
 

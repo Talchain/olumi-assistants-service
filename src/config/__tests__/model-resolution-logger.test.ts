@@ -51,6 +51,14 @@ describe('logResolvedTaskModels', () => {
     expect(logInfoCalls[0].obj['event']).toBe('model.startup_resolution_note');
   });
 
+  it('emits refined caveat wording naming per-request logs as source of truth', () => {
+    logResolvedTaskModels();
+    const note = logInfoCalls.find((c) => c.obj['event'] === 'model.startup_resolution_note');
+    expect(note?.msg).toBe(
+      'Startup values are advisory. Per-request logs are the source of truth for store overrides applied after boot.',
+    );
+  });
+
   it('covers all 14 CeeTask values', () => {
     logResolvedTaskModels();
     const resolvedTasks = logInfoCalls

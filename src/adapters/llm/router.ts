@@ -617,6 +617,56 @@ function createFailoverAdapter(task?: string): LLMAdapter | null {
  * ```
  */
 export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
+  return getAdapterWithResolution(task, modelOverride).adapter;
+}
+
+/**
+ * Resolution source per the brief's precedence enum. See precedence block
+ * in src/config/model-routing.ts for the canonical chain.
+ *
+ * - per_call / store_model_config: discriminated by `origin` argument.
+ *   The router cannot tell these apart on its own.
+ * - env_var: CEE_MODEL_* via config.cee.models.*
+ * - task_default: TASK_MODEL_DEFAULTS fallback
+ * - providers_json: providers.json overrides or defaults
+ * - llm_model_fallback: LLM_PROVIDER/LLM_MODEL env vars, adapter default,
+ *   or failover (failover controls its own model internally).
+ */
+export type ResolutionSource =
+  | 'per_call'
+  | 'store_model_config'
+  | 'env_var'
+  | 'task_default'
+  | 'providers_json'
+  | 'llm_model_fallback';
+
+export interface ModelResolution {
+  readonly task?: string;
+  readonly resolved_model: string;
+  readonly resolution_source: ResolutionSource;
+  readonly modelOverride?: string;
+}
+
+export interface AdapterWithResolution {
+  readonly adapter: LLMAdapter;
+  readonly resolution: ModelResolution;
+}
+
+/**
+ * Get an adapter along with metadata describing which precedence step
+ * delivered the model. Prefer this over getAdapter at any site where the
+ * caller has request/turn context and can log or record the resolution.
+ *
+ * `origin` lets the caller annotate the semantic source of `modelOverride`.
+ * Pass 'store_model_config' when the override came from prompt-store
+ * model_config.{staging,production}; otherwise leave unset or pass
+ * 'per_call' (the default for client-body overrides).
+ */
+export function getAdapterWithResolution(
+  task?: string,
+  modelOverride?: string,
+  origin?: 'per_call' | 'store_model_config',
+): AdapterWithResolution {
   // Check for cached failover adapter first (before creating new objects)
   const failoverCacheKey = `failover:${task || "default"}`;
   if (wrappedAdapters.has(failoverCacheKey)) {
@@ -627,7 +677,16 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
         "Model override ignored: failover configuration takes precedence"
       );
     }
-    return wrappedAdapters.get(failoverCacheKey)!;
+    const adapter = wrappedAdapters.get(failoverCacheKey)!;
+    return {
+      adapter,
+      resolution: {
+        task,
+        resolved_model: adapter.model,
+        resolution_source: 'llm_model_fallback',
+        modelOverride,
+      },
+    };
   }
 
   // Check for failover configuration (only if not cached)
@@ -643,7 +702,16 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
     }
     // Cache the wrapped failover adapter
     wrappedAdapters.set(failoverCacheKey, withUsageTracking(withCaching(failoverAdapter)));
-    return wrappedAdapters.get(failoverCacheKey)!;
+    const adapter = wrappedAdapters.get(failoverCacheKey)!;
+    return {
+      adapter,
+      resolution: {
+        task,
+        resolved_model: adapter.model,
+        resolution_source: 'llm_model_fallback',
+        modelOverride,
+      },
+    };
   }
   const providersConfig = getConfig();
 
@@ -653,6 +721,9 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
 
   let selectedProvider: 'anthropic' | 'openai' | 'fixtures' = envProvider;
   let selectedModel: string | undefined = envModel === 'auto' ? undefined : envModel;
+  // Track which precedence branch most recently assigned selectedModel.
+  // Start as llm_model_fallback (LLM_MODEL env / DEFAULT_MODEL).
+  let winningSource: ResolutionSource = 'llm_model_fallback';
 
   // Check for task-specific override in config file (providers.json)
   if (providersConfig && task && providersConfig.overrides?.[task]) {
@@ -660,6 +731,7 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
     selectedProvider = override.provider;
     if (override.model) {
       selectedModel = override.model;
+      winningSource = 'providers_json';
     }
     log.info(
       { task, provider: selectedProvider, model: selectedModel, source: 'config_override' },
@@ -671,6 +743,7 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
     selectedProvider = providersConfig.defaults.provider;
     if (providersConfig.defaults.model) {
       selectedModel = providersConfig.defaults.model;
+      winningSource = 'providers_json';
     }
     log.info(
       { provider: selectedProvider, model: selectedModel, source: 'config_default' },
@@ -715,6 +788,8 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
         "Using request-time model override from client"
       );
       selectedModel = modelOverride;
+      // Caller annotates origin: store_model_config or per_call (default).
+      winningSource = origin === 'store_model_config' ? 'store_model_config' : 'per_call';
     }
   }
 
@@ -729,6 +804,7 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
         "Using CEE task-specific model from environment"
       );
       selectedModel = ceeModel;
+      winningSource = 'env_var';
     } else if (!ceeModel && task && isValidCeeTask(task)) {
       // No env override - use TASK_MODEL_DEFAULTS
       const taskDefault = getDefaultModelForTask(task);
@@ -742,6 +818,7 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
           "Using task default model from TASK_MODEL_DEFAULTS"
         );
         selectedModel = taskDefault;
+        winningSource = 'task_default';
       } else if (taskDefault && taskDefaultProvider !== selectedProvider) {
         log.info(
           { task, task_default: taskDefault, task_default_provider: taskDefaultProvider, configured_provider: selectedProvider, source: 'provider_mismatch' },
@@ -771,7 +848,16 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
     const adapter = getAdapterInstance(selectedProvider, selectedModel);
     wrappedAdapters.set(cacheKey, withUsageTracking(withCaching(adapter)));
   }
-  return wrappedAdapters.get(cacheKey)!;
+  const adapter = wrappedAdapters.get(cacheKey)!;
+  return {
+    adapter,
+    resolution: {
+      task,
+      resolved_model: selectedModel ?? adapter.model,
+      resolution_source: winningSource,
+      modelOverride,
+    },
+  };
 }
 
 /**

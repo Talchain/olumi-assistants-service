@@ -9,6 +9,7 @@
  */
 
 import type { QuantityExtractionResult } from '@talchain/schemas/orchestrator';
+import type { ResolutionSource } from '../../adapters/llm/router.js';
 import { config } from '../../config/index.js';
 
 /** Default TTL: 1 hour */
@@ -38,6 +39,18 @@ export interface TurnDebugCqeSection {
   readonly word_range_missed: boolean;
 }
 
+/**
+ * Per-LLM-call model resolution record. One entry per call; a turn may
+ * contain several. Appended in call-order.
+ */
+export interface ModelResolutionRecord {
+  readonly task?: string;
+  readonly resolved_model: string;
+  readonly resolution_source: ResolutionSource;
+  /** Unix timestamp (ms) when the resolution was recorded. */
+  readonly timestamp: number;
+}
+
 /** A single stored debug entry. */
 export interface TurnDebugEntry {
   readonly turn_id: string;
@@ -45,6 +58,12 @@ export interface TurnDebugEntry {
   /** Unix timestamp (ms) when this entry was stored. Used for TTL and the response header. */
   readonly stored_at: number;
   readonly cqe: TurnDebugCqeSection;
+  /**
+   * Per-LLM-call model resolutions for this turn, in call-order.
+   * Undefined when no resolutions recorded yet; empty array when explicitly
+   * cleared. Append via recordModelResolution.
+   */
+  readonly model_resolutions?: readonly ModelResolutionRecord[];
 }
 
 class TurnDebugStore {
@@ -59,13 +78,61 @@ class TurnDebugStore {
 
   set(entry: TurnDebugEntry): void {
     this.cleanup();
+    const existing = this.store.get(entry.turn_id);
+    if (!existing && this.store.size >= this.maxEntries) {
+      const oldestKey = this.store.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.store.delete(oldestKey);
+      }
+    }
+    // Preserve model_resolutions across overwrites; the CQE writer typically
+    // runs before any resolution recorder, but in either order the union
+    // must survive.
+    const merged: TurnDebugEntry = existing
+      ? {
+          ...entry,
+          model_resolutions: entry.model_resolutions ?? existing.model_resolutions,
+        }
+      : entry;
+    this.store.set(entry.turn_id, merged);
+  }
+
+  appendModelResolution(
+    turn_id: string,
+    session_id: string,
+    resolution: ModelResolutionRecord,
+  ): void {
+    this.cleanup();
+    const existing = this.store.get(turn_id);
+    if (existing) {
+      const model_resolutions = [...(existing.model_resolutions ?? []), resolution];
+      this.store.set(turn_id, { ...existing, model_resolutions });
+      return;
+    }
+    // First write for this turn: create a minimal entry so the resolution
+    // is persisted even if the CQE writer has not yet run. Enforce FIFO
+    // eviction on new-key insertion.
     if (this.store.size >= this.maxEntries) {
       const oldestKey = this.store.keys().next().value;
       if (oldestKey !== undefined) {
         this.store.delete(oldestKey);
       }
     }
-    this.store.set(entry.turn_id, entry);
+    this.store.set(turn_id, {
+      turn_id,
+      session_id,
+      stored_at: Date.now(),
+      cqe: {
+        parsed_quantities: [],
+        patterns_matched: [],
+        timeout: false,
+        compromise_match_count: 0,
+        duration_ms: 0,
+        message_too_long: false,
+        word_range_missed: false,
+      },
+      model_resolutions: [resolution],
+    });
   }
 
   /**
@@ -109,6 +176,26 @@ const turnDebugStore = new TurnDebugStore();
 export function storeTurnDebug(entry: TurnDebugEntry): void {
   if (!config.cee.turnDebugEnabled) return;
   turnDebugStore.set(entry);
+}
+
+/**
+ * Append a per-LLM-call model resolution to the turn's debug entry.
+ * No-op when CEE_TURN_DEBUG_ENABLED is false. Safe to call before the
+ * CQE writer has run — a minimal entry is created if needed.
+ */
+export function recordModelResolution(
+  turn_id: string,
+  session_id: string,
+  resolution: Omit<ModelResolutionRecord, 'timestamp'> & { timestamp?: number },
+): void {
+  if (!config.cee.turnDebugEnabled) return;
+  const record: ModelResolutionRecord = {
+    task: resolution.task,
+    resolved_model: resolution.resolved_model,
+    resolution_source: resolution.resolution_source,
+    timestamp: resolution.timestamp ?? Date.now(),
+  };
+  turnDebugStore.appendModelResolution(turn_id, session_id, record);
 }
 
 /**

@@ -12,7 +12,8 @@ import type { GraphT } from "../../../schemas/graph.js";
 import { groundAttachments, buildRefinementBrief } from "../../../routes/assist.draft-graph.js";
 import { calcConfidence, shouldClarify } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
-import { getAdapter } from "../../../adapters/llm/router.js";
+import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
+import { recordModelResolution } from "../../../orchestrator-v5/debug/turn-debug-store.js";
 import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
 import { config, shouldUseStagingPrompts } from "../../../config/index.js";
 import { createEdgeFieldStash } from "../edge-identity.js";
@@ -91,6 +92,10 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
   // ── Step 4: Model override resolution ───────────────────────────────────
   let effectiveModelOverride = (ctx.input as any).model as string | undefined;
+  // Origin distinguishes a store modelConfig override from a client-body
+  // override. The router sees both as modelOverride; this flag preserves
+  // the semantic distinction for resolution_source logging.
+  let overrideOrigin: 'per_call' | 'store_model_config' = 'per_call';
   if (!effectiveModelOverride) {
     const promptMeta = getSystemPromptMeta("draft_graph");
     if (promptMeta.modelConfig) {
@@ -98,6 +103,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
       const promptModel = promptMeta.modelConfig[env];
       if (promptModel) {
         effectiveModelOverride = promptModel;
+        overrideOrigin = 'store_model_config';
         log.info({
           task: "draft_graph",
           env,
@@ -109,8 +115,27 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   }
 
   // ── Step 5: Adapter selection ───────────────────────────────────────────
-  const draftAdapter = getAdapter("draft_graph", effectiveModelOverride);
+  const { adapter: draftAdapter, resolution: draftResolution } = getAdapterWithResolution(
+    "draft_graph",
+    effectiveModelOverride,
+    overrideOrigin,
+  );
   ctx.draftAdapter = draftAdapter;
+  log.debug(
+    {
+      event: 'model.resolution',
+      task: draftResolution.task,
+      resolved_model: draftResolution.resolved_model,
+      resolution_source: draftResolution.resolution_source,
+      request_id: ctx.requestId,
+    },
+    'Model resolution recorded for LLM call',
+  );
+  recordModelResolution(ctx.requestId, ctx.requestId, {
+    task: draftResolution.task,
+    resolved_model: draftResolution.resolved_model,
+    resolution_source: draftResolution.resolution_source,
+  });
 
   // ── Step 6: Cost guard ──────────────────────────────────────────────────
   const promptChars = ctx.effectiveBrief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);

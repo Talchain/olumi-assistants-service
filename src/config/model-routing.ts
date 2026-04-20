@@ -3,6 +3,47 @@
  *
  * Defines default model assignments per CEE task and identifies
  * which tasks require quality-tier models (cannot be downgraded).
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * Precedence
+ * ─────────────────────────────────────────────────────────────────
+ * The runtime model for a task is resolved via the following chain,
+ * highest priority first:
+ *
+ *   1. per_call              explicit modelOverride parameter passed to
+ *                            getAdapter(task, modelOverride). Clients can
+ *                            supply via request body.
+ *                            Source: src/adapters/llm/router.ts:688-719
+ *
+ *   2. store_model_config    prompt-store modelConfig.{staging,production}
+ *                            resolved upstream in parse.ts and passed to
+ *                            getAdapter as modelOverride. The router sees
+ *                            this as modelOverride; the origin flag in
+ *                            getAdapterWithResolution distinguishes it
+ *                            from per_call.
+ *                            Source: src/cee/unified-pipeline/stages/parse.ts:92-109
+ *
+ *   3. env_var               CEE_MODEL_* env vars via config.cee.models.*
+ *                            Source: src/adapters/llm/router.ts:725-731
+ *
+ *   4. task_default          TASK_MODEL_DEFAULTS (this file) via
+ *                            getDefaultModelForTask.
+ *                            Source: src/adapters/llm/router.ts:732-750
+ *
+ *   5. providers_json        providers.json task-override or config_default.
+ *                            Source: src/adapters/llm/router.ts:658-679
+ *
+ *   6. llm_model_fallback    LLM_PROVIDER / LLM_MODEL env or adapter default.
+ *                            Source: src/adapters/llm/router.ts:650-656, 681-686
+ *
+ * The final resolution is observable per-LLM-call via debug-level log
+ * "model.resolution" in callers that use getAdapterWithResolution, and
+ * per-turn via GET /admin/v1/turn-debug/:turn_id (model_resolutions[]).
+ *
+ * Startup values are advisory only. Per-request logs are the source of
+ * truth for store overrides applied after boot. See
+ * src/config/model-resolution-logger.ts.
+ * ─────────────────────────────────────────────────────────────────
  */
 
 /**

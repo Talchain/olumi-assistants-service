@@ -10,7 +10,7 @@ const mockConfig = {
 vi.mock('../../../config/index.js', () => ({ config: mockConfig }));
 
 // Dynamic import after mock is registered
-const { storeTurnDebug, getTurnDebug, getTurnDebugStoreSize, clearTurnDebugStore } =
+const { storeTurnDebug, getTurnDebug, getTurnDebugStoreSize, clearTurnDebugStore, recordModelResolution } =
   await import('../turn-debug-store.js');
 
 import type { TurnDebugEntry } from '../turn-debug-store.js';
@@ -111,5 +111,76 @@ describe('TurnDebugStore', () => {
     clearTurnDebugStore();
     expect(getTurnDebugStoreSize()).toBe(0);
     expect(getTurnDebug('turn-x')).toBeUndefined();
+  });
+
+  describe('recordModelResolution', () => {
+    it('appends a resolution record to an existing entry', () => {
+      storeTurnDebug(makeEntry('turn-a'));
+      recordModelResolution('turn-a', 'sess-1', {
+        task: 'draft_graph',
+        resolved_model: 'claude-sonnet-4-6',
+        resolution_source: 'store_model_config',
+      });
+      const result = getTurnDebug('turn-a');
+      expect(result).not.toBe('expired');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.model_resolutions).toHaveLength(1);
+      expect(result.model_resolutions?.[0].resolution_source).toBe('store_model_config');
+      expect(result.model_resolutions?.[0].resolved_model).toBe('claude-sonnet-4-6');
+    });
+
+    it('creates a minimal entry when no prior CQE entry exists', () => {
+      recordModelResolution('turn-new', 'sess-new', {
+        task: 'draft_graph',
+        resolved_model: 'gpt-4.1-2025-04-14',
+        resolution_source: 'task_default',
+      });
+      const result = getTurnDebug('turn-new');
+      expect(result).not.toBe('expired');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.model_resolutions).toHaveLength(1);
+      expect(result.cqe.parsed_quantities).toHaveLength(0);
+      expect(result.session_id).toBe('sess-new');
+    });
+
+    it('preserves resolutions across a subsequent storeTurnDebug overwrite', () => {
+      recordModelResolution('turn-order', 'sess-o', {
+        task: 'draft_graph',
+        resolved_model: 'claude-sonnet-4-6',
+        resolution_source: 'per_call',
+      });
+      storeTurnDebug(makeEntry('turn-order'));
+      const result = getTurnDebug('turn-order');
+      expect(result).not.toBe('expired');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.model_resolutions).toHaveLength(1);
+    });
+
+    it('is a no-op when CEE_TURN_DEBUG_ENABLED is false', () => {
+      mockConfig.cee.turnDebugEnabled = false;
+      recordModelResolution('turn-off', 'sess-off', {
+        task: 'draft_graph',
+        resolved_model: 'gpt-4o',
+        resolution_source: 'task_default',
+      });
+      expect(getTurnDebugStoreSize()).toBe(0);
+    });
+
+    it('preserves call order across multiple appends', () => {
+      storeTurnDebug(makeEntry('turn-multi'));
+      recordModelResolution('turn-multi', 'sess-m', {
+        task: 'draft_graph',
+        resolved_model: 'first',
+        resolution_source: 'task_default',
+      });
+      recordModelResolution('turn-multi', 'sess-m', {
+        task: 'repair_graph',
+        resolved_model: 'second',
+        resolution_source: 'env_var',
+      });
+      const result = getTurnDebug('turn-multi');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.model_resolutions?.map((r) => r.resolved_model)).toEqual(['first', 'second']);
+    });
   });
 });
