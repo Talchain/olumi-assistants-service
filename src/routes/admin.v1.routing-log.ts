@@ -31,13 +31,13 @@ export async function adminRoutingLogRoutes(app: FastifyInstance): Promise<void>
    * and graph lookup outcome without grepping the JSONL file directly.
    *
    * Note: path uses /v1/ prefix for consistency with other admin routes.
-   * The brief specified /admin/routing-log/:turn_id — the /v1/ prefix is a
+   * The brief specified /admin/routing-log/:turn_id -- the /v1/ prefix is a
    * deliberate deviation for route naming consistency (documented in Phase 2 report).
    *
    * Returns:
-   *   200 — record found
-   *   404 — turn_id not present in the JSONL file
-   *   410 — JSONL file absent (not yet written, or rotated/deleted)
+   *   200 -- record found
+   *   404 -- turn_id not present in the JSONL file
+   *   410 -- JSONL file absent (not yet written, or rotated/deleted)
    */
   app.get('/admin/v1/routing-log/:turn_id', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;

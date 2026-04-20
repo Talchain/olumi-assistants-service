@@ -71,6 +71,7 @@ import { adminTurnDebugRoutes } from "./routes/admin.v1.turn-debug.js";
 import { adminRoutingLogRoutes } from "./routes/admin.v1.routing-log.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { adminModelRoutes } from "./routes/admin.models.js";
+import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
@@ -258,6 +259,7 @@ export async function build() {
     deprecated_vars_detected: deprecationWarnings.length,
     dead_vars_detected: deadVarWarnings.length,
   }, 'Startup health summary');
+  logResolvedTaskModels();
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default

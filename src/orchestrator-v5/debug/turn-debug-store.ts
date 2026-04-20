@@ -2,7 +2,7 @@
  * Turn Debug Store
  *
  * In-memory FIFO store for per-turn V5 debug data, keyed by turn_id.
- * Enabled only when CEE_TURN_DEBUG_ENABLED=true — never populates in production
+ * Enabled only when CEE_TURN_DEBUG_ENABLED=true -- never populates in production
  * unless the flag is explicitly set.
  *
  * Pattern mirrors src/cee/llm-output-store.ts (TTL, FIFO eviction, singleton).
@@ -124,7 +124,7 @@ export function getTurnDebugStoreSize(): number {
   return turnDebugStore.size;
 }
 
-/** Clear all entries — test use only. */
+/** Clear all entries -- test use only. */
 export function clearTurnDebugStore(): void {
   turnDebugStore.clear();
 }

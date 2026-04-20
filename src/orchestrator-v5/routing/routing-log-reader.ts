@@ -18,9 +18,9 @@ import { log } from '../../utils/telemetry.js';
  * Read a single RoutingLog entry by turn_id from the JSONL file.
  *
  * Returns:
- *   RoutingLog  — entry found
- *   null        — turn_id not found in the file
- *   'file_absent' — JSONL file does not exist (never written, or rotated/deleted)
+ *   RoutingLog  -- entry found
+ *   null        -- turn_id not found in the file
+ *   'file_absent' -- JSONL file does not exist (never written, or rotated/deleted)
  */
 export async function readRoutingLogEntry(
   turn_id: string,
@@ -40,19 +40,19 @@ export async function readRoutingLogEntry(
     let found: RoutingLog | null = null;
 
     rl.on('line', (line) => {
-      if (found) return; // Already found — drain remaining events cheaply
+      if (found) return; // Already found -- drain remaining events cheaply
       const trimmed = line.trim();
       if (!trimmed) return;
       try {
         const record = JSON.parse(trimmed) as RoutingLog;
         if (record.turn_id === turn_id) {
           found = record;
-          // Close the stream immediately — no need to read further
+          // Close the stream immediately -- no need to read further
           rl.close();
           stream.destroy();
         }
       } catch {
-        // Malformed JSONL line — skip silently
+        // Malformed JSONL line -- skip silently
       }
     });
 
@@ -65,7 +65,7 @@ export async function readRoutingLogEntry(
       log.warn({ turn_id, err }, 'routing-log-reader: stream error');
       resolve(null);
     });
-    // stream.on('error') rejects the readline interface too — resolve with null rather than reject
+    // stream.on('error') rejects the readline interface too -- resolve with null rather than reject
     stream.on('error', () => reject);
   }).catch((err) => {
     log.warn({ turn_id, err }, 'routing-log-reader: unexpected error, returning null');

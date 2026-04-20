@@ -36,9 +36,9 @@ export async function adminTurnDebugRoutes(app: FastifyInstance): Promise<void> 
    * unless the flag is explicitly set).
    *
    * Returns:
-   *   200 — entry found
-   *   404 — turn_id not found (never stored or store not enabled)
-   *   410 — entry existed but TTL (1 hour) has elapsed
+   *   200 -- entry found
+   *   404 -- turn_id not found (never stored or store not enabled)
+   *   410 -- entry existed but TTL (1 hour) has elapsed
    */
   app.get('/admin/v1/turn-debug/:turn_id', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
