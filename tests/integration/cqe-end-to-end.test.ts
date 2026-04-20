@@ -66,7 +66,7 @@ describe('CQE end-to-end via assembleContextPack', () => {
 
   it('value_origin survives assembleContextPack → routeWithToolUse → JSON.stringify (brief §7)', async () => {
     // Capture the exact user-message string the routing layer hands to
-    // Sonnet. This is the end-to-end production serialisation path — no
+    // Sonnet. This is the end-to-end production serialisation path: no
     // hand-rolled JSON.stringify, no narrowing transform.
     let capturedContent: string | null = null;
     const mockAdapter = {

@@ -38,30 +38,50 @@ export interface CqeExtractionOutput {
 }
 
 /**
- * Internal options for testing the circuit-breaker behaviour of the
- * extractor. Not part of the public contract. Production callers never pass
- * these; they exist so the timeout unit test can simulate a pattern
- * exceeding its wall-clock budget without needing a real slow regex.
+ * Test-only hooks. Not exported from the public surface of this module;
+ * only `__runExtractionForTesting` accepts them. Production callers of
+ * `runExtraction(rawMessage)` cannot reach these fields by construction.
  */
-export interface RunExtractionInternalOptions {
+export interface CqeTestHooks {
   /**
    * Rules (by id, e.g. "P1") the orchestrator should treat as having timed
    * out. When a rule is in this set, its apply() is skipped entirely, the
    * per-pattern timeout telemetry fires exactly as if the circuit breaker
    * had tripped, and later rules continue unaffected.
    */
-  readonly __testForceTimeoutPatterns?: ReadonlySet<string>;
-  /** Override the rule list (for tests that want a minimal set). */
-  readonly __testPatternRules?: readonly PatternRule[];
+  readonly forceTimeoutPatterns?: ReadonlySet<string>;
+  /** Override the rule list (for tests that want a minimal or injected set). */
+  readonly patternRules?: readonly PatternRule[];
 }
 
 export function extractQuantities(rawMessage: string): QuantityExtractionResult[] {
   return runExtraction(rawMessage).results as QuantityExtractionResult[];
 }
 
-export function runExtraction(
+/**
+ * Public extractor entry point. Production code calls this; it takes only
+ * the raw user message and does not expose any test hooks on its signature.
+ */
+export function runExtraction(rawMessage: string): CqeExtractionOutput {
+  return runExtractionInternal(rawMessage, undefined);
+}
+
+/**
+ * Test-only extractor entry point. Production code must not import this.
+ * It accepts the same input plus `CqeTestHooks` for deterministic
+ * simulation of timeout and rule-injection scenarios that cannot be
+ * reliably produced in a synchronous unit test otherwise.
+ */
+export function __runExtractionForTesting(
   rawMessage: string,
-  internalOptions: RunExtractionInternalOptions = {},
+  hooks: CqeTestHooks,
+): CqeExtractionOutput {
+  return runExtractionInternal(rawMessage, hooks);
+}
+
+function runExtractionInternal(
+  rawMessage: string,
+  hooks: CqeTestHooks | undefined,
 ): CqeExtractionOutput {
   const startedAt = nowMs();
   const originalLength = typeof rawMessage === 'string' ? rawMessage.length : 0;
@@ -91,9 +111,8 @@ export function runExtraction(
     const patternsMatched = new Set<string>();
     const budgetDeadline = startedAt + CQE_TOTAL_BUDGET_MS;
 
-    const activeRules =
-      internalOptions.__testPatternRules ?? PATTERN_RULES;
-    const forcedTimeouts = internalOptions.__testForceTimeoutPatterns ?? EMPTY_SET;
+    const activeRules = hooks?.patternRules ?? PATTERN_RULES;
+    const forcedTimeouts = hooks?.forceTimeoutPatterns ?? EMPTY_SET;
 
     for (const rule of activeRules) {
       if (nowMs() > budgetDeadline) {
@@ -193,6 +212,10 @@ function emitPatternTimeout(
   log.warn(
     {
       event: 'cqe.pattern_timeout',
+      // Literal brief §6 Gate 5 requirement: payload carries `timeout: true`
+      // alongside `pattern_id` so machine-readable filters can select
+      // timed-out patterns without parsing the event name.
+      timeout: true,
       pattern_id: patternId,
       reason,
       duration_ms: durationMs,

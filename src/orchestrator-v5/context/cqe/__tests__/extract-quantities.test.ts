@@ -69,7 +69,7 @@ function matchFailures(
     return failures;
   }
   // Positional ordering required: results must align index-by-index with
-  // expectations. Each expected result is a Partial<> — only listed fields
+  // expectations. Each expected result is a Partial<>: only listed fields
   // are compared; unlisted fields are not asserted but must still sit at
   // the matching index.
   for (let i = 0; i < fixture.expected.length; i++) {

@@ -778,26 +778,42 @@ const rule_P10: PatternRule = {
 
 // P11 is structurally split into two anchored sub-patterns per brief §6
 // Gate 3 and investigation proposal §3.3 (avoid one mega-regex with optional
-// per-side unit alternation — high backtracking risk).
+// per-side unit alternation, which carries high backtracking risk).
 //
-//   P11_WITH_UNITS_CURRENCY: both sides carry a matching currency symbol
-//     ("from £50k to £70k")
-//   P11_WITH_UNITS_SUFFIX:   both sides carry a matching explicit UNIT suffix
-//     ("from 3% to 5%", "from 5 months to 10 months")
-//   P11_WITHOUT_UNITS:       no per-side unit on either side; optional
-//     trailing UNIT applies to both ("from 200k to 150k", "from 3 to 5 months")
+//   P11_WITH_UNITS:    each side must carry a unit. Top-level alternation
+//                      per side: currency-symbol form OR trailing UNIT form.
+//                      Mandatory one-of-two, NOT optional. Bounded
+//                      backtracking: at most two branches per side.
+//                      Covers "from 50 to 70" with implicit currency
+//                      symbols, "from 3% to 5%", and "from 5 months to
+//                      10 months".
 //
-// The apply() function runs all three, masks each match span from the shared
-// working text, and merges results in code. Each sub-pattern has zero optional
-// per-side unit groups so backtracking worst-case is bounded by the NUM
-// alternation alone.
-const P11_WITH_UNITS_CURRENCY_REGEX = new RegExp(
-  `\\bfrom\\s+(${CURRENCY_SYMBOL})(${NUM})(?:\\s*(${SUFFIX}))?\\s+to\\s+(${CURRENCY_SYMBOL})(${NUM})(?:\\s*(${SUFFIX}))?`,
-  'gi',
-);
-
-const P11_WITH_UNITS_SUFFIX_REGEX = new RegExp(
-  `\\bfrom\\s+(${NUM})(?:\\s*(${SUFFIX}))?\\s*(${UNIT})\\s+to\\s+(${NUM})(?:\\s*(${SUFFIX}))?\\s*(${UNIT})`,
+//   P11_WITHOUT_UNITS: neither side carries a unit. Numbers plus optional
+//                      multiplier suffix only; optional trailing UNIT at
+//                      the end applies to both bounds. Covers "from 200k
+//                      to 150k" and "from 3 to 5 months".
+//
+// The apply() function runs both, masks matched spans from the shared
+// working text, and merges results in code. Neither regex contains an
+// optional per-side UNIT group; SUFFIX (the k/m/bn multiplier marker) is
+// allowed optional because it does not define the unit.
+//
+// Group numbering in P11_WITH_UNITS:
+//   Side A currency branch: 1=SYM, 2=NUM, 3=SUFFIX?
+//   Side A unit branch:     4=NUM, 5=SUFFIX?, 6=UNIT
+//   Side B currency branch: 7=SYM, 8=NUM, 9=SUFFIX?
+//   Side B unit branch:     10=NUM, 11=SUFFIX?, 12=UNIT
+// Side X matched the currency branch iff group (6X-5) is defined.
+const P11_WITH_UNITS_REGEX = new RegExp(
+  `\\bfrom\\s+(?:` +
+    `(${CURRENCY_SYMBOL})(${NUM})(?:\\s*(${SUFFIX}))?` +
+    `|` +
+    `(${NUM})(?:\\s*(${SUFFIX}))?\\s*(${UNIT})` +
+  `)\\s+to\\s+(?:` +
+    `(${CURRENCY_SYMBOL})(${NUM})(?:\\s*(${SUFFIX}))?` +
+    `|` +
+    `(${NUM})(?:\\s*(${SUFFIX}))?\\s*(${UNIT})` +
+  `)`,
   'gi',
 );
 
@@ -870,38 +886,55 @@ const rule_P11: PatternRule = {
       out.push(emitP11(m, text, parsed, ctx));
     };
 
-    // Sub-pattern A: currency symbol on both sides (must match).
-    for (const m of scanAllExec(text, P11_WITH_UNITS_CURRENCY_REGEX)) {
+    // Sub-pattern 1 (WITH-UNITS): each side carries a unit via one of two
+    // branches. Pick the branch that matched based on which capture group
+    // is defined; reject mixed currency-vs-unit-suffix pairings by
+    // requiring both normalised units to match.
+    for (const m of scanAllExec(text, P11_WITH_UNITS_REGEX)) {
       const currA = m[1];
-      const numA = parseNum(m[2] ?? '');
-      const suffixA = m[3];
-      const currB = m[4];
-      const numB = parseNum(m[5] ?? '');
-      const suffixB = m[6];
-      if (!Number.isFinite(numA) || !Number.isFinite(numB)) continue;
-      if (!currA || !currB) continue;
-      const a = normaliseCurrencyUnit(currA);
-      const b = normaliseCurrencyUnit(currB);
-      if (a !== b) continue;
-      addMatch(m, { numA, numB, suffixA, suffixB, unit: a });
+      const numACurr = m[2];
+      const suffixACurr = m[3];
+      const numAUnit = m[4];
+      const suffixAUnit = m[5];
+      const unitA = m[6];
+
+      const currB = m[7];
+      const numBCurr = m[8];
+      const suffixBCurr = m[9];
+      const numBUnit = m[10];
+      const suffixBUnit = m[11];
+      const unitB = m[12];
+
+      const sideANum = parseNum((currA ? numACurr : numAUnit) ?? '');
+      const sideASuffix = currA ? suffixACurr : suffixAUnit;
+      const sideAUnit = currA
+        ? normaliseCurrencyUnit(currA)
+        : unitA
+          ? normaliseUnit(unitA)
+          : null;
+
+      const sideBNum = parseNum((currB ? numBCurr : numBUnit) ?? '');
+      const sideBSuffix = currB ? suffixBCurr : suffixBUnit;
+      const sideBUnit = currB
+        ? normaliseCurrencyUnit(currB)
+        : unitB
+          ? normaliseUnit(unitB)
+          : null;
+
+      if (!Number.isFinite(sideANum) || !Number.isFinite(sideBNum)) continue;
+      if (!sideAUnit || !sideBUnit || sideAUnit !== sideBUnit) continue;
+
+      addMatch(m, {
+        numA: sideANum,
+        numB: sideBNum,
+        suffixA: sideASuffix,
+        suffixB: sideBSuffix,
+        unit: sideAUnit,
+      });
     }
 
-    // Sub-pattern B: explicit UNIT suffix on both sides (must match).
-    for (const m of scanAllExec(text, P11_WITH_UNITS_SUFFIX_REGEX)) {
-      const numA = parseNum(m[1] ?? '');
-      const suffixA = m[2];
-      const unitA = m[3];
-      const numB = parseNum(m[4] ?? '');
-      const suffixB = m[5];
-      const unitB = m[6];
-      if (!Number.isFinite(numA) || !Number.isFinite(numB)) continue;
-      const nUnitA = unitA ? normaliseUnit(unitA) : null;
-      const nUnitB = unitB ? normaliseUnit(unitB) : null;
-      if (!nUnitA || !nUnitB || nUnitA !== nUnitB) continue;
-      addMatch(m, { numA, numB, suffixA, suffixB, unit: nUnitB });
-    }
-
-    // Sub-pattern C: no per-side unit on either side; optional trailing unit.
+    // Sub-pattern 2 (WITHOUT-UNITS): no per-side unit on either side;
+    // optional trailing unit applies to both.
     for (const m of scanAllExec(text, P11_WITHOUT_UNITS_REGEX)) {
       const numA = parseNum(m[1] ?? '');
       const suffixA = m[2];
@@ -1003,15 +1036,15 @@ const rule_P13: PatternRule = {
 // execution order is chosen to minimise false matches from the catch-all
 // rules (P2, P9) after specific ones have consumed their text.
 export const PATTERN_RULES: readonly PatternRule[] = Object.freeze([
-  rule_P13, // "N pp" / "N percentage points" — most specific suffix
-  rule_P11, // "from X to Y" — requires leading `from`
-  rule_P12, // "(verb) to N" — requires directional verb
+  rule_P13, // "N pp" / "N percentage points" (most specific suffix)
+  rule_P11, // "from X to Y" (requires leading `from`)
+  rule_P12, // "(verb) to N" (requires directional verb)
   rule_P1, // "between X and Y"
   rule_P5, // word fractions with directional verb
   rule_P7, // "set X to N"
   rule_P7_continuation, // "...and X to N" after masked P7 clause
   rule_P6, // "(verb) by N%"
-  rule_P3, // "at least/most N" — must precede P8 so "under £50k" gets at_most
+  rule_P3, // "at least/most N". Must precede P8 so "under £50k" gets at_most
   rule_P6b, // "(verb) by N [unit]" (no %)
   rule_P8, // currency (£/$/€/GBP/USD/EUR/grand/quid)
   rule_P4, // double/triple/halve

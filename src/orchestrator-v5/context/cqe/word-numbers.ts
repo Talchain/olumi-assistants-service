@@ -1,7 +1,7 @@
 // Word-number lexicon pre-pass per CQE Design v1.1 §4.1 step 2.
 //
 // Replaces one..ten with numerals before the rule table scans. Word fractions
-// (half/quarter/third, two thirds, three quarters) are NOT replaced here —
+// (half/quarter/third, two thirds, three quarters) are NOT replaced here.
 // they carry operator/multiplier semantics that P5 preserves.
 //
 // Position tracking: every substituted digit's position in the new string is
@@ -33,7 +33,7 @@ export interface WordNumberPrePassResult {
 
 // Skip replacement when the word-number is immediately followed (after
 // whitespace or hyphen) by a fraction word. "one third", "two thirds",
-// "three quarters" are word fractions owned by P5 — converting their lead
+// "three quarters" are word fractions owned by P5. Converting their lead
 // number to a digit ("1 third") breaks P5 matching.
 const FRACTION_FOLLOW = /^[\s-]+(?:thirds?|quarters?|halves?|half)\b/i;
 
@@ -53,7 +53,7 @@ export function applyWordNumberPrePass(input: string): WordNumberPrePassResult {
       }
       const followTail = text.slice(match.index + match[0].length);
       if (FRACTION_FOLLOW.test(followTail)) {
-        // Leave the word in place — P5 owns this phrase.
+        // Leave the word in place; P5 owns this phrase.
         scan += text.slice(cursor, match.index + match[0].length);
         cursor = match.index + match[0].length;
         continue;
