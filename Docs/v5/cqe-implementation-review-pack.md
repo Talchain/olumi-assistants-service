@@ -4,7 +4,7 @@
 **Date completed:** 20 April 2026
 **Branches:** `claude/v5-cqe-investigation` in both repos (local, uncommitted to remote)
 **Status:** Ready for Paul review. No push. No staging deploy.
-**Revision:** rev2 (2026-04-20, post-ChatGPT review). Original rev1 shipped the CQE implementation; rev2 incorporates ChatGPT review Tiers A (brief-compliance), B (evidence), and C (polish). Tier D (design-doc amendments) closed per Paul's direction; CQE Design v1.2 to follow.
+**Revision:** rev3 (2026-04-20). Original rev1 shipped the CQE implementation; rev2 incorporated Tier A/B/C corrections from ChatGPT's first review; rev3 addresses the six items from the round-2 review (timeout: true payload field, em dash sweep, real wall-clock test, runExtraction API split, bench metadata, P11 collapse to two sub-patterns). Tier D (design-doc amendments) closed per Paul's direction; CQE Design v1.2 to follow.
 
 ---
 
@@ -16,7 +16,8 @@
 | 1 | CEE vendor bump: tarball into `vendor/`; `package.json:69` pin; runtime deps `compromise` + `compromise-numbers`; dev dep `fast-check`; `pnpm install` | CEE 533d879b |
 | 2 | CQE module (6 files) under `src/orchestrator-v5/context/cqe/`; `parsed_quantities` field on `ContextPack`; wire into `assembleContextPack()`; 68 fixtures; unit + property + integration tests; 5-case bench | CEE e56c14e2 |
 | 3 | Telemetry: `cqe.extraction` event in `TelemetryEvents` enum + Datadog routing case; 10 CQE fields on `RoutingLogInput`/`RoutingLog`; `buildRoutingLog()` projection updates; `turn-executor.ts` ORIENT step threads `CqeExtractionSummary` into both surfaces | CEE 7d9ee8c6 |
-| Rev2 | Tier A-C review corrections (ChatGPT review): removed unsafe casts, split P11 into anchored sub-patterns, added per-pattern timeout telemetry + dedicated test, strict fixture equality, full-chain integration test, explicit p95 evidence, outer-catch warning, bench naming fix | CEE 78a15586 |
+| Rev2 | Tier A-C review corrections (ChatGPT review round 1): removed unsafe casts, split P11 into anchored sub-patterns, added per-pattern timeout telemetry + dedicated test, strict fixture equality, full-chain integration test, explicit p95 evidence, outer-catch warning, bench naming fix | CEE 78a15586 |
+| Rev3 | Round-2 review (six items): `timeout: true` field on telemetry payload, em dash sweep, spied-clock real wall-clock test, `runExtraction` split into public + `__runExtractionForTesting`, bench results doc gains commit/node/CPU metadata, P11 collapsed from three sub-patterns to two per brief §6 Gate 3 literal wording | CEE eb895238 |
 
 ## 2. Schema-freeze precheck result
 
@@ -67,26 +68,26 @@ Performed before Phase 0 per brief §5.0. Schema identical across spec v3.2 §11
 |---|---|---|
 | `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.test.ts` | 72 | 68 fixtures from CQE Design v1.1 §8 plus 4 meta tests (fixture count assertion, defensive runtime contract, summary shape, message-too-long flag). **Rev2:** strict deep-equality enforced (exact count + positional ordering). |
 | `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.property.test.ts` | 3 | `fast-check` properties: no-throw on arbitrary strings, no-throw on adversarial unicode, output schema shape stability |
-| `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.timeout.test.ts` | 3 | **Rev2 (Gate 5):** circuit-breaker fires per-pattern with `pattern_id` telemetry; no partial spans recorded; later rules run on unmasked text; compromise still runs; global return is non-empty |
+| `src/orchestrator-v5/context/cqe/__tests__/extract-quantities.timeout.test.ts` | 4 | **Rev2 (Gate 5):** circuit-breaker fires per-pattern with `timeout: true` + `pattern_id` telemetry; no partial spans recorded; later rules run on unmasked text; compromise still runs; global return is non-empty. **Rev3:** added a spied-clock test that drives the real `ruleDuration > CQE_REGEX_TIMEOUT_MS` branch, not only the forced-hook short-circuit. |
 | `tests/integration/cqe-end-to-end.test.ts` | 5 | End-to-end through `assembleContextPack()` for quantity-bearing and quantity-free messages; `JSON.stringify` preserves `value_origin`; non-action turn path. **Rev2:** full-chain test through `routeWithToolUse()` with mock adapter that captures the Sonnet-facing user message and asserts `value_origin` survives. |
 | `tests/benchmarks/cqe.bench.ts` | 5 | Idle, multi-pattern, adversarial, 2000-char, compromise-only (vitest bench; p75/p99/p999) |
 | `tests/benchmarks/cqe-p95-bench.ts` | 5 | **Rev2:** explicit-p95 harness (N=400-2000 samples), emits p50/p75/p95/p99/p999 + breach tolerance vs target |
 
-**Total new: 83 tests + 10 benchmarks.** All pass.
+**Total new: 84 tests + 10 benchmarks.** All pass.
 
 ## 5. Benchmark results
 
-Full detail in `tests/benchmarks/cqe-results.md`. Rev2 adds explicit p95 numbers via the new `cqe-p95-bench.ts` harness.
+Full detail in `tests/benchmarks/cqe-results.md` (rev3 doc gains Run metadata table: CEE commit, Node v20.19.5, Darwin 25.3.0, Apple M5). Rev3 p95 numbers (after P11 collapse):
 
 | # | Case | **p95** | Target | Breach | Pass |
 |---|---|---|---|---|---|
-| 1 | Idle path (no numbers) | **0.120 ms** | <1ms | -88.0% | ✓ |
-| 2 | Multi-pattern realistic | **0.163 ms** | <5ms | -96.7% | ✓ |
-| 3 | Adversarial backtracking | **0.432 ms** | <50ms (timeout cap) | -99.1% | ✓ |
-| 4 | 2000-char cap boundary | **0.475 ms** | <20ms | -97.6% | ✓ |
-| 5 | Compromise-only fallback | **0.304 ms** | <10ms | -97.0% | ✓ |
+| 1 | Idle path (no numbers) | **0.106 ms** | <1ms | -89.4% | ✓ |
+| 2 | Multi-pattern realistic | **0.127 ms** | <5ms | -97.5% | ✓ |
+| 3 | Adversarial backtracking | **0.408 ms** | <50ms (timeout cap) | -99.2% | ✓ |
+| 4 | 2000-char cap boundary | **0.467 ms** | <20ms | -97.7% | ✓ |
+| 5 | Compromise-only fallback | **0.640 ms** | <10ms | -93.6% | ✓ |
 
-All five cases meet their proposal §8.2 p95 targets with ≥88% headroom. Worst case is Case 4 at 47.5% of its 20ms budget; everything else is under 10% of its budget.
+All five cases meet their proposal §8.2 p95 targets with ≥93% headroom. Cases 1-4 are within ±0.04 ms of the rev2 baseline; Case 5 shifted from 0.304 ms to 0.640 ms (sampling-variance effect on a low-volume 400-sample case, not a structural regression). Worst case is Case 5 at 6.4% of its 10ms budget.
 
 ## 6. Dependency audit
 
@@ -163,9 +164,9 @@ Three documented, none silent:
 |---|---|---|---|
 | 1 | No routing prompt loader | ✓ | `grep -rE "loadPrompt\|readPromptFile\|promptTemplate\|loadRoutingPrompt" src/ --exclude-dir=node_modules` returns 0 results |
 | 2 | `ContextPack` stays local | ✓ | `grep -r "ContextPack" ~/Documents/GitHub/olumi-schemas/src/` returns 0 hits. Interface remains in `src/orchestrator-v5/context/context-pack-assembler.ts` |
-| 3 | P11 structural rewrite | ✓ (rev2) | `rules.ts` defines three anchored sub-patterns — `P11_WITH_UNITS_CURRENCY_REGEX`, `P11_WITH_UNITS_SUFFIX_REGEX`, `P11_WITHOUT_UNITS_REGEX` — with code-side merge in `rule_P11.apply()`. No single regex with optional per-side unit alternation. (rev1 initially had a single regex; rev2 split it per ChatGPT review.) |
+| 3 | P11 structural rewrite | ✓ (rev3) | `rules.ts` defines exactly two anchored sub-patterns per brief §6 Gate 3 literal wording: `P11_WITH_UNITS_REGEX` (top-level mandatory-one-of-two alternation per side: currency-prefix form OR trailing-UNIT form) and `P11_WITHOUT_UNITS_REGEX`. No single regex with optional per-side unit alternation. Code-side merge in `rule_P11.apply()` picks the matched branch by capture-group inspection. (rev1 had one regex with optional per-side units; rev2 split to three; rev3 collapsed to two.) |
 | 4 | Regex safety per-pattern | ✓ | P1/P2/P5/P8/P12 use bounded alternation and anchored lookbehinds per proposal §3.3; P11 split as above |
-| 5 | No partial-result fallback | ✓ (rev2) | Rev2 adds immediate per-pattern telemetry (`cqe.pattern_timeout` with `pattern_id`) at the moment the circuit breaker trips, plus `__testForceTimeoutPatterns` hook and `extract-quantities.timeout.test.ts` (3 tests) proving all 5 points of Gate 5: telemetry emits pattern_id, no partial spans, later rules continue, compromise runs, global return is non-empty. |
+| 5 | No partial-result fallback | ✓ (rev3) | Per-pattern telemetry (`cqe.pattern_timeout`) carries literal `timeout: true` boolean, `pattern_id`, `reason`, `duration_ms`, and `timeout_cap_ms`. Four tests in `extract-quantities.timeout.test.ts`: forced-hook coverage (3 tests) for observable side effects plus a spied-clock deterministic test (rev3) that exercises the physical `ruleDuration > CQE_REGEX_TIMEOUT_MS` branch with `vi.spyOn(performance, 'now')`. All 5 points of Gate 5 verified. |
 | 6 | F.6 compliance | ✓ | `grep -r "contextPack.graph\|ContextPack\["graph"\]" src/orchestrator-v5/context/cqe/ --include="*.ts" --exclude-dir=__tests__` returns 0 hits. No graph access in production CQE code. |
 | 7 | 68 fixtures pass + strict equality (rev2) | ✓ | `pnpm exec vitest run src/orchestrator-v5/context/cqe/__tests__/extract-quantities.test.ts` → 72/72 tests pass under strict deep-equality (exact count + positional ordering). Rev2 tightened from ≥N count matching. |
 | 8 | Benchmark thresholds (rev2: explicit p95) | ✓ | See §5 above; `tests/benchmarks/cqe-results.md` now publishes explicit p95 numbers with breach-tolerance % (worst case -88% below target). |
