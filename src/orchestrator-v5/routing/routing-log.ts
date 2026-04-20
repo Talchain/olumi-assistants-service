@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 
 import { log } from '../../utils/telemetry.js';
 
+import type { CoachingSignalId } from '../coaching/types.js';
 import type { IntentClass, CoachingMode, ResolutionStatus } from './types.js';
 
 /**
@@ -86,6 +87,13 @@ export interface RoutingLogInput {
   readonly cqe_message_too_long: boolean;
   readonly cqe_word_range_missed: boolean;
   readonly cqe_ambiguous_phrasing_detected: boolean;
+  /**
+   * V5 Group 1 Task C: the coaching signal emitted by Step 5, if any.
+   * Null on turns where no signal fired or where Step 5 did not run
+   * (non-action intents skip Step 5). Persisted for offline evaluation of
+   * coaching coverage and precision.
+   */
+  readonly coaching_signal_id: CoachingSignalId | null;
 }
 
 export interface RoutingLog {
@@ -123,6 +131,8 @@ export interface RoutingLog {
   readonly cqe_message_too_long: boolean;
   readonly cqe_word_range_missed: boolean;
   readonly cqe_ambiguous_phrasing_detected: boolean;
+  /** V5 Group 1 Task C: coaching signal emitted by Step 5, or null. */
+  readonly coaching_signal_id: CoachingSignalId | null;
 }
 
 /**
@@ -166,6 +176,7 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
       cqe_message_too_long: input.cqe_message_too_long,
       cqe_word_range_missed: input.cqe_word_range_missed,
       cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
+      coaching_signal_id: input.coaching_signal_id,
     };
   }
   return {
@@ -203,6 +214,7 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
     cqe_message_too_long: input.cqe_message_too_long,
     cqe_word_range_missed: input.cqe_word_range_missed,
     cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
+    coaching_signal_id: input.coaching_signal_id,
   };
 }
 

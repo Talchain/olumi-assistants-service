@@ -15,6 +15,7 @@ import { createPLoTClient } from "../plot-client.js";
 import { getAdapter } from "../../adapters/llm/router.js";
 import { handleRunAnalysis } from "./run-analysis.js";
 import { handleDraftGraph } from "./draft-graph.js";
+import { appendDraftCoaching } from "../../orchestrator-v5/coaching/draft-coaching-log.js";
 import { handleGenerateBrief } from "./generate-brief.js";
 import { handleEditGraph } from "./edit-graph.js";
 import type { EditGraphTraceDiagnostics } from "./edit-graph.js";
@@ -258,6 +259,17 @@ export async function dispatchToolHandler(
       }
       const result = await handleDraftGraph(brief, opts.request, turnId, {
         userCurrencyHint: opts.userCurrencyHint ?? null,
+      });
+      // V5 Group 1 Task A follow-up: persist raw coaching output so subsequent
+      // V5 turns in this scenario can read it into ContextPack.coaching. Every
+      // handleDraftGraph call site must perform this append.
+      void appendDraftCoaching({
+        scenario_id: context.scenario_id,
+        produced_at: new Date().toISOString(),
+        summary: result.coachingSummary,
+        strengthen_items: result.strengthenItems,
+        widening_log: result.coachingWideningLog,
+        bias_signals: result.coachingBiasSignals,
       });
       const draftGuidance = result.graphOutput
         ? generatePostDraftGuidance(result.graphOutput, result.draftWarnings, context.framing ?? null)

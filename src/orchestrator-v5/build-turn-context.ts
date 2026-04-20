@@ -22,7 +22,7 @@
  */
 
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
-import type { SessionTurn, TurnContext } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, SessionTurn, TurnContext } from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 
@@ -33,12 +33,19 @@ import { getSessionStore } from './session/index.js';
 export interface EnrichedTurnContext extends TurnContext {
   /**
    * Prior turns for this scenario, fetched at turn-build time from the
-   * session store (Supabase, with LRU cache). Ordered by `created_at DESC`
-   * — most recent first. Empty array means either "no prior history" or
-   * "persistence read degraded" — disambiguate via the
+   * session store (Supabase, with LRU cache). Ordered by `created_at DESC`,
+   * most recent first. Empty array means either "no prior history" or
+   * "persistence read degraded"; disambiguate via the
    * `session.read_degraded` telemetry event.
    */
   readonly prior_turns: readonly SessionTurn[];
+  /**
+   * Handler facts for prior_turns (V5 Group 1: used by coaching-cache
+   * reader to resolve decision_review enrichment and last coaching signal).
+   * Order matches prior_turns (newest-first). Empty array when no prior
+   * handler turns exist or when the facts read degraded.
+   */
+  readonly prior_facts: readonly HandlerFact[];
 }
 
 export interface BuildTurnContextOptions {
@@ -77,25 +84,66 @@ export async function buildTurnContext(
     budgets,
   };
 
-  const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, options.sessionStore);
+  const store = options.sessionStore ?? tryGetSessionStore();
+  const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, store);
+  const priorFacts = await fetchPriorFacts(priorTurns, requestId, payload.scenario_id, store);
 
-  return { ...baseContext, prior_turns: priorTurns };
+  return { ...baseContext, prior_turns: priorTurns, prior_facts: priorFacts };
+}
+
+function tryGetSessionStore(): SessionStore | undefined {
+  try {
+    return getSessionStore();
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchPriorTurns(
   scenarioId: string,
   requestId: string,
-  injected: SessionStore | undefined,
+  store: SessionStore | undefined,
 ): Promise<readonly SessionTurn[]> {
+  if (!store) return [];
   try {
-    const store = injected ?? getSessionStore();
     return await store.readRecent(scenarioId);
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
     log.warn(
       { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
-      'V5 buildTurnContext: session.readRecent failed — continuing with empty prior_turns',
+      'V5 buildTurnContext: session.readRecent failed, continuing with empty prior_turns',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode ?? 'unknown',
+      severity: 'warning',
+    });
+    return [];
+  }
+}
+
+async function fetchPriorFacts(
+  priorTurns: readonly SessionTurn[],
+  requestId: string,
+  scenarioId: string,
+  store: SessionStore | undefined,
+): Promise<readonly HandlerFact[]> {
+  if (!store) return [];
+  if (priorTurns.length === 0) return [];
+  const handlerTurnIds = priorTurns
+    .filter((t) => t.turn_class === 'handler')
+    .map((t) => t.turn_id);
+  if (handlerTurnIds.length === 0) return [];
+  try {
+    return await store.readFactsFor(handlerTurnIds);
+  } catch (error) {
+    const errorCode = error instanceof SessionReadError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      'V5 buildTurnContext: session.readFactsFor failed, continuing with empty prior_facts',
     );
     emit(TelemetryEvents.SessionReadDegraded, {
       request_id: requestId,

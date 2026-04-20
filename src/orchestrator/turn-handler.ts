@@ -48,6 +48,7 @@ import { getToolDefinitions } from "./tools/registry.js";
 import { createCommentaryBlock, createReviewCardBlock, createArtefactBlock } from "./blocks/factory.js";
 import { handleRunAnalysis } from "./tools/run-analysis.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
+import { appendDraftCoaching } from "../orchestrator-v5/coaching/draft-coaching-log.js";
 import { handleGenerateBrief } from "./tools/generate-brief.js";
 import { handleEditGraph, computeGraphHash } from "./tools/edit-graph.js";
 import { handleExplainResults } from "./tools/explain-results.js";
@@ -952,6 +953,16 @@ async function dispatchTool(
       case 'draft_graph': {
         const brief = (toolInput.brief as string) || turnRequest.message;
         const result = await handleDraftGraph(brief, request, turnId);
+        // V5 Group 1 Task A follow-up: persist raw coaching output for V5
+        // ContextPack threading on subsequent turns.
+        void appendDraftCoaching({
+          scenario_id: turnRequest.scenario_id,
+          produced_at: new Date().toISOString(),
+          summary: result.coachingSummary,
+          strengthen_items: result.strengthenItems,
+          widening_log: result.coachingWideningLog,
+          bias_signals: result.coachingBiasSignals,
+        });
         blocks = result.blocks;
         assistantText = result.assistantText;
         toolLatencyMs = result.latencyMs;

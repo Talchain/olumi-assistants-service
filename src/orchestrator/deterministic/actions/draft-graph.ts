@@ -12,6 +12,7 @@ import type { GuidanceItem } from "../../types/guidance-item.js";
 import { handleDraftGraph, type StrengthenItem } from "../../tools/draft-graph.js";
 import { SIGNAL_CODES, computeGuidanceItemId } from "../../types/guidance-item.js";
 import { log } from "../../../utils/telemetry.js";
+import { appendDraftCoaching } from "../../../orchestrator-v5/coaching/draft-coaching-log.js";
 
 export const draftGraphAction: ActionDefinition = {
   action_type: 'draft_graph',
@@ -95,6 +96,17 @@ export const draftGraphAction: ActionDefinition = {
         : undefined;
 
       const guidanceFromStrengthen = convertStrengthenToGuidance(result.strengthenItems);
+
+      // Persist raw coaching output for V5 ContextPack threading on subsequent
+      // turns. Fire-and-forget; the sidecar helper swallows I/O errors.
+      void appendDraftCoaching({
+        scenario_id: ctx.scenario_id,
+        produced_at: new Date().toISOString(),
+        summary: result.coachingSummary,
+        strengthen_items: result.strengthenItems,
+        widening_log: result.coachingWideningLog,
+        bias_signals: result.coachingBiasSignals,
+      });
 
       return {
         blocks: result.blocks,

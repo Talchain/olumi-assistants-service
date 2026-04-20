@@ -70,7 +70,11 @@ describe('assembleContextPack', () => {
     expect(pack.version).toBe(CONTEXT_PACK_VERSION);
     expect(pack.version).toBe('2.0');
     expect(pack.stage).toBe('frame');
-    expect(pack.coaching).toBeNull();
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
     expect(pack.compound_detected).toBe(false);
     expect(pack.system_event).toBeNull();
   });
@@ -164,14 +168,18 @@ describe('assembleContextPack', () => {
     expect(pack.conversation.last_tool_used).toBe('run_analysis');
   });
 
-  it('coaching is null (Phase 1a stub — preserved across all inputs)', () => {
+  it('coaching defaults to empty cache when caller supplies nothing (Group 1: shape replaces Phase 1a null stub)', () => {
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,
       priorTurns: [makeSessionTurn({ turn_class: 'handler', handler_id: 'run_analysis' })],
       analysis: makeAnalysis(),
     });
 
-    expect(pack.coaching).toBeNull();
+    expect(pack.coaching).toEqual({
+      draft_coaching: null,
+      decision_review: null,
+      last_coaching_signal: null,
+    });
     expect(pack.compound_detected).toBe(false);
   });
 

@@ -12,6 +12,7 @@
  */
 
 import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 export interface ComposeInput {
   assistant_text: string;
@@ -62,6 +63,14 @@ export interface ComposeToolCallInput {
   readonly confirmation: string;
   readonly coaching: string | null;
   readonly stage: StageType;
+  /**
+   * V5 Group 1 Task B: when the turn's handler facts include a run_analysis
+   * fact, compose emits an `analysis_result` block carrying the minimal
+   * result fields plus the opaque enrichment (which may carry
+   * `decision_review` under enrichment when the auto-fire completed).
+   * Undefined for handler turns that do not produce this fact shape.
+   */
+  readonly handlerFacts?: readonly HandlerFact[];
 }
 
 export function composeToolCallResponse(input: ComposeToolCallInput): OlumiResponse {
@@ -72,12 +81,39 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
   if (trimmedConfirmation) pieces.push(trimmedConfirmation);
   if (input.coaching) pieces.push(input.coaching.trim());
 
+  const blocks = input.handlerFacts ? buildBlocksFromFacts(input.handlerFacts) : [];
+
   return {
     response_version: 2,
     assistant_text: pieces.join('\n\n'),
-    blocks: [],
+    blocks,
     suggested_actions: [],
     insights: [],
     stage_indicator: input.stage,
   };
+}
+
+/**
+ * Map recognised handler facts to OlumiResponse blocks. Only the shapes
+ * listed in the boundary-schema discriminated union are emitted; unknown
+ * or composer-irrelevant fact types (e.g. set_factor_value) do not produce
+ * blocks on this path (graph-patch emission stays elsewhere).
+ */
+function buildBlocksFromFacts(
+  facts: readonly HandlerFact[],
+): OlumiResponse['blocks'] {
+  const blocks: OlumiResponse['blocks'] = [];
+  for (const fact of facts) {
+    if (fact.fact_type === 'run_analysis') {
+      const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
+      blocks.push({
+        type: 'analysis_result',
+        summary,
+        leading_option_id,
+        ...(win_probabilities !== undefined ? { win_probabilities } : {}),
+        ...(enrichment !== undefined ? { enrichment } : {}),
+      });
+    }
+  }
+  return blocks;
 }

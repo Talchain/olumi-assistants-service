@@ -361,7 +361,11 @@ describe('TurnExecutor — success path is unchanged', () => {
     });
 
     expect(result.response.suggested_actions).toEqual([]);
-    expect(result.response.blocks).toEqual([]);
+    // V5 Group 1 Task B: successful run_analysis now emits an analysis_result
+    // block carrying the PLoT enrichment (and, when the auto-fire completed,
+    // enrichment.decision_review). The assistant_text invariant is unchanged.
+    expect(result.response.blocks).toHaveLength(1);
+    expect(result.response.blocks[0]).toMatchObject({ type: 'analysis_result' });
     expect(result.response.assistant_text).toContain('Running the analysis.');
     expect(result.response.assistant_text).toContain('Ran analysis');
 

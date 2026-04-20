@@ -245,7 +245,12 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
       handlerRegistry: registry,
     });
 
-    expect(response.assistant_text).toBe('Ran analysis on your current scenario.');
+    // V5 Group 1 Task C: on a first successful run_analysis, Step 5 emits the
+    // FIRST_ANALYSIS_COMPLETE signal and compose appends its coaching text
+    // after the confirmation template. Both pieces must be present; order
+    // is confirmation then coaching (composeToolCallResponse).
+    expect(response.assistant_text).toContain('Ran analysis on your current scenario.');
+    expect(response.assistant_text).toContain('first analysis');
   });
 
   it('commit receives handler_facts with exactly one run_analysis fact', async () => {
@@ -291,8 +296,15 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
     });
 
     const write = appendCalls[0] as { handler_facts: unknown[] };
-    const fact = write.handler_facts[0] as { result: { enrichment: unknown } };
-    expect(fact.result.enrichment).toEqual(plotResponse);
+    const fact = write.handler_facts[0] as { result: { enrichment: Record<string, unknown> } };
+    // V5 Group 1 adds V5-namespaced keys to enrichment (v5.brief from the
+    // ScenarioReader snapshot; coaching_signal_id / _turn_id / _produced_at
+    // when Step 5 fires). PLoT-originated keys pass through byte-for-byte.
+    for (const key of Object.keys(plotResponse)) {
+      expect(fact.result.enrichment[key]).toEqual(
+        (plotResponse as Record<string, unknown>)[key],
+      );
+    }
   });
 });
 
