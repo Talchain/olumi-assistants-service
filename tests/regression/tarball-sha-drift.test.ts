@@ -19,7 +19,22 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
 const SCRIPT = join(REPO_ROOT, 'scripts', 'validate-tarball-sha.sh');
-const TARBALL = join(REPO_ROOT, 'vendor', 'talchain-schemas-0.5.1.tgz');
+
+// Derive the currently-pinned tarball from package.json so the drift
+// simulation targets whatever the validator actually checks. Mirrors the
+// pin-discovery logic in scripts/validate-tarball-sha.sh (generalised in
+// the CQE 0.6.0 bump to avoid a hardcoded version per file).
+const PACKAGE_JSON = readFileSync(join(REPO_ROOT, 'package.json'), 'utf8');
+const PIN_MATCH = PACKAGE_JSON.match(
+  /"@talchain\/schemas":\s*"file:\.\/vendor\/([^"]+\.tgz)"/,
+);
+if (!PIN_MATCH) {
+  throw new Error(
+    'tarball-sha-drift test cannot run: package.json has no pinned @talchain/schemas file:./vendor/*.tgz',
+  );
+}
+const PINNED_TARBALL = PIN_MATCH[1]!;
+const TARBALL = join(REPO_ROOT, 'vendor', PINNED_TARBALL);
 const BACKUP = `${TARBALL}.backup-for-drift-test`;
 
 function runValidator(): { exitCode: number; stdout: string; stderr: string } {

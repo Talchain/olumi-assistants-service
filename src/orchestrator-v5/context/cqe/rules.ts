@@ -122,12 +122,6 @@ function directionFromVerb(verb: string): 'up' | 'down' | 'set' {
   return 'set';
 }
 
-function operatorForDirection(direction: 'up' | 'down' | 'set'): ParameterOperator {
-  if (direction === 'up') return 'increment';
-  if (direction === 'down') return 'decrement';
-  return 'set';
-}
-
 function isApproximatelyPrefixed(text: string, spanStart: number): boolean {
   const windowStart = Math.max(0, spanStart - 40);
   const before = text.slice(windowStart, spanStart);

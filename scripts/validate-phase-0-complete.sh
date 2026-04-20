@@ -26,21 +26,29 @@ pass() {
 }
 
 # ------------------------------------------------------------
-# 1. Vendored tarball + SHA manifest (schemas 0.5.1)
+# 1. Vendored tarball + SHA manifest (currently pinned version)
+#
+# Generalised in CQE 0.6.0 bump: the Phase 0 semantic is "the
+# @talchain/schemas tarball + its manifest + its pin all exist and
+# agree", not "the pin is literally 0.5.1 forever". We derive the
+# pinned filename from package.json and then check presence of the
+# file and manifest, plus that the pin references a file:./vendor/
+# schemas tarball at all (guards against an accidental swap to an
+# npm-registry version).
 # ------------------------------------------------------------
 
-TARBALL="$REPO_ROOT/vendor/talchain-schemas-0.5.1.tgz"
-MANIFEST="$REPO_ROOT/vendor/talchain-schemas-0.5.1.tgz.sha256"
-
-if [ -f "$TARBALL" ]; then pass "vendored tarball: talchain-schemas-0.5.1.tgz"; else fail "missing: $TARBALL"; fi
-if [ -f "$MANIFEST" ]; then pass "vendored SHA manifest: talchain-schemas-0.5.1.tgz.sha256"; else fail "missing: $MANIFEST"; fi
-
-# Pin in CEE package.json
-if grep -q '"@talchain/schemas": "file:\./vendor/talchain-schemas-0\.5\.1\.tgz"' "$REPO_ROOT/package.json"; then
-  pass "package.json pin: @talchain/schemas@0.5.1"
+PINNED_TARBALL="$(grep -oE '"@talchain/schemas":[[:space:]]*"file:\./vendor/[^"]+\.tgz"' "$REPO_ROOT/package.json" | sed -E 's|.*vendor/||; s|".*||' || true)"
+if [ -z "$PINNED_TARBALL" ]; then
+  fail "package.json does not pin @talchain/schemas to a file:./vendor/*.tgz"
 else
-  fail "package.json pin not at 0.5.1"
+  pass "package.json pin: @talchain/schemas -> $PINNED_TARBALL"
 fi
+
+TARBALL="$REPO_ROOT/vendor/$PINNED_TARBALL"
+MANIFEST="$TARBALL.sha256"
+
+if [ -f "$TARBALL" ]; then pass "vendored tarball: $PINNED_TARBALL"; else fail "missing: $TARBALL"; fi
+if [ -f "$MANIFEST" ]; then pass "vendored SHA manifest: $PINNED_TARBALL.sha256"; else fail "missing: $MANIFEST"; fi
 
 # ------------------------------------------------------------
 # 2. 7 new CeeTaskId literals present in src/prompts/schema.ts

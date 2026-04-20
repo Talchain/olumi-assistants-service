@@ -93,7 +93,7 @@ describe('CQE timeout behaviour (brief §6 Gate 5)', () => {
     const ticks = [1000, 1000, 1000, 1060, 1060];
     let callCount = 0;
     const perfSpy = vi
-      .spyOn(performance, 'now')
+      .spyOn(globalThis.performance, 'now')
       .mockImplementation(() => ticks[Math.min(callCount++, ticks.length - 1)] ?? 0);
 
     try {

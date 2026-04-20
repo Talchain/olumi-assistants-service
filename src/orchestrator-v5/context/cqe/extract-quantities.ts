@@ -199,7 +199,11 @@ function runExtractionInternal(
 }
 
 function nowMs(): number {
-  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  // Prefer a monotonic clock where available (always on Node 18+, always
+  // in browsers). globalThis.performance satisfies the project's eslint
+  // no-undef rule without a per-file ambient global.
+  const perf = globalThis.performance;
+  return perf !== undefined ? perf.now() : Date.now();
 }
 
 const EMPTY_SET: ReadonlySet<string> = new Set<string>();
