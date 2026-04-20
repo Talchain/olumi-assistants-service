@@ -68,6 +68,7 @@ import {
 import { sanitiseNarrateOutput } from './sanitise.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
+import { readCoachingCache } from './coaching/coaching-cache-reader.js';
 import {
   assembleContextPackWithSummary,
   type ContextPack,
@@ -304,11 +305,16 @@ export async function runTurnExecutor(
       ? compactAnalysis(coerceIngressAnalysis(options.analysisState))
       : null;
     try {
+      const coachingCache = await readCoachingCache(
+        context.session_id,
+        context.prior_facts,
+      );
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
         graph: options.graphState ?? null,
         analysis: analysisSummary,
+        coaching: coachingCache,
       });
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {

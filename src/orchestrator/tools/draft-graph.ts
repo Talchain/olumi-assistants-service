@@ -73,8 +73,15 @@ export interface DraftGraphResult {
   latencyMs: number;
   /** Coaching context for Phase 3 LLM narration (coaching.summary + strengthen_items) */
   narrationHint?: string;
-  /** Structured strengthen items from LLM coaching — areas the model needs reinforcement. */
+  /** Structured strengthen items from LLM coaching, areas the model needs reinforcement. */
   strengthenItems: StrengthenItem[];
+  /** Raw LLM coaching.summary text, preserved for V5 ContextPack threading. */
+  coachingSummary: string | null;
+  /** Raw LLM coaching.widening_log, preserved byte-for-byte for V5 ContextPack. */
+  coachingWideningLog: readonly unknown[] | null;
+  /** Raw LLM coaching.bias_signals (namespaced under draft_coaching in V5 to
+   *  avoid collision with CEE preflight bias_signals). */
+  coachingBiasSignals: readonly unknown[] | null;
   /** Structured draft warnings from the pipeline (CEEStructuralWarningV1[]) */
   draftWarnings: CEEDraftWarning[];
   /** The drafted graph, for post-draft structural analysis */
@@ -239,6 +246,12 @@ export async function handleDraftGraph(
   // Extract strengthen_items as structured data for guidance conversion
   const strengthenItems = extractStrengthenItems(body);
 
+  // Preserve raw coaching fields for V5 ContextPack threading. Kept alongside
+  // the existing narrationHint/strengthenItems flow; no V4 behaviour change.
+  const coachingSummaryRaw = extractCoachingSummaryRaw(body);
+  const coachingWideningLog = extractCoachingWideningLog(body);
+  const coachingBiasSignals = extractCoachingBiasSignals(body);
+
   // Build narration_hint from coaching data (for Phase 3 LLM context)
   const narrationHint = coachingSummary ?? undefined;
 
@@ -279,6 +292,9 @@ export async function handleDraftGraph(
     latencyMs,
     narrationHint,
     strengthenItems,
+    coachingSummary: coachingSummaryRaw,
+    coachingWideningLog,
+    coachingBiasSignals,
     draftWarnings,
     graphOutput,
     toolLLMTelemetry,
@@ -502,6 +518,30 @@ function extractCoachingSummary(body: Record<string, unknown>): string | null {
   }
 
   return parts.length > 0 ? parts.join('\n') : null;
+}
+
+/** Extract raw coaching.summary text for V5 ContextPack threading. */
+function extractCoachingSummaryRaw(body: Record<string, unknown>): string | null {
+  const coaching = body.coaching as Record<string, unknown> | undefined;
+  if (!coaching) return null;
+  const summary = coaching.summary;
+  return typeof summary === 'string' && summary.length > 0 ? summary : null;
+}
+
+/** Extract raw coaching.widening_log; pass-through array or null. */
+function extractCoachingWideningLog(body: Record<string, unknown>): readonly unknown[] | null {
+  const coaching = body.coaching as Record<string, unknown> | undefined;
+  if (!coaching) return null;
+  const raw = coaching.widening_log;
+  return Array.isArray(raw) ? raw : null;
+}
+
+/** Extract raw coaching.bias_signals; pass-through array or null. */
+function extractCoachingBiasSignals(body: Record<string, unknown>): readonly unknown[] | null {
+  const coaching = body.coaching as Record<string, unknown> | undefined;
+  if (!coaching) return null;
+  const raw = coaching.bias_signals;
+  return Array.isArray(raw) ? raw : null;
 }
 
 /**

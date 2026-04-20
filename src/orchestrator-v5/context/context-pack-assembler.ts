@@ -31,6 +31,7 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
+import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import { detectCompound } from '../routing/compound-detector.js';
 import {
   runExtraction,
@@ -95,7 +96,14 @@ export interface ContextPack {
   readonly graph: ContextPackGraph;
   readonly analysis: ContextPackAnalysis | null;
   readonly conversation: ContextPackConversation;
-  readonly coaching: null;
+  /**
+   * Coaching state assembled from prior turns. draft_coaching is populated
+   * from the draft-graph sidecar (logs/v5-draft-graph-coaching.jsonl) keyed
+   * by scenario_id. decision_review is populated from the most recent
+   * run_analysis handler fact's enrichment.decision_review (Task B). Null
+   * sub-fields when no prior data exists.
+   */
+  readonly coaching: CoachingCache;
   readonly compound_detected: boolean;
   /** Populated only when compound_detected is true. Ordered as they appear in the message. */
   readonly compound_segments?: readonly string[];
@@ -122,6 +130,10 @@ export interface AssembleContextPackInput {
   readonly analysis?: AnalysisResponseSummary | null;
   readonly systemEvent?: unknown | null;
   readonly pendingConfirmation?: boolean;
+  /** Pre-resolved coaching state. Caller reads sidecar / prior facts before
+   *  calling the assembler; keeps the assembler synchronous. Defaults to
+   *  EMPTY_COACHING_CACHE when not supplied. */
+  readonly coaching?: CoachingCache;
 }
 
 /**
@@ -169,7 +181,7 @@ export function assembleContextPackWithSummary(
     graph: projectGraph(input.graph ?? null),
     analysis: projectAnalysis(input.analysis ?? null),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
-    coaching: null,
+    coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
     compound_pattern_matched: compound.telemetry.pattern_matched,
     parsed_quantities: extraction.results,

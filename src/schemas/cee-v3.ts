@@ -447,7 +447,10 @@ export const CEEGraphResponseV3 = z.object({
    * PLoT merges these with compiled constraint nodes (explicit wins on conflict).
    */
   goal_constraints: z.array(GoalConstraintSchema).optional(),
-  /** LLM coaching output — optional decision-quality insights */
+  /** LLM coaching output, optional decision-quality insights. widening_log
+   *  and bias_signals added for V5 coaching pipeline; shapes preserved as
+   *  unknown because the prompt (Paul-owned) defines them. Tasks consume via
+   *  draft_coaching namespace; see src/orchestrator-v5/coaching/types.ts. */
   coaching: z.object({
     summary: z.string(),
     strengthen_items: z.array(z.object({
@@ -457,6 +460,8 @@ export const CEEGraphResponseV3 = z.object({
       action_type: z.string(),
       bias_category: z.string().optional(),
     })), // CIL Phase 1: strip unknown fields on strengthen_items
+    widening_log: z.array(z.unknown()).optional(),
+    bias_signals: z.array(z.unknown()).optional(),
   }).optional(), // CIL Phase 1: strip unknown fields on coaching wrapper
   /** LLM causal claims — stated reasoning about direct effects, mediations, confounders (Phase 2B) */
   causal_claims: CausalClaimsArraySchema,
