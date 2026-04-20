@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { rm, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
 
 const TEST_KEY = 'test-admin-key-xyz';
-const TMP_DIR = join(tmpdir(), 'routing-log-route-tests');
-const LOG_PATH = join(TMP_DIR, 'test.jsonl');
 
 const mockConfig = {
   prompts: {
@@ -89,15 +84,13 @@ const SAMPLE_RECORD = {
 describe('GET /admin/v1/routing-log/:turn_id', () => {
   let app: ReturnType<typeof buildApp>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     app = buildApp();
-    await mkdir(TMP_DIR, { recursive: true });
     vi.mocked(mockReader).mockReset();
   });
 
   afterEach(async () => {
     await app.close();
-    await rm(TMP_DIR, { recursive: true, force: true });
   });
 
   it('returns 401 when X-Admin-Key header is absent', async () => {

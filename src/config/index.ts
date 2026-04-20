@@ -468,9 +468,9 @@ const ConfigSchema = z.object({
     // Observability settings (debug panel visibility)
     observabilityEnabled: booleanString.default(false), // If true, include _observability in CEE responses
     observabilityRawIO: createEnvEnforcedBoolean(false, "CEE_OBSERVABILITY_RAW_IO"), // If true, include raw prompts/responses (security: locked in prod)
-    // V5 turn debug store (CEE_TURN_DEBUG_ENABLED — enable for debug sessions only)
+    // V5 turn debug store (CEE_TURN_DEBUG_ENABLED -- enable for debug sessions only)
     turnDebugEnabled: booleanString.default(false), // If true, store per-turn CQE extraction data for admin retrieval
-    // CQE verbose pattern trace (CQE_VERBOSE_TRACE — enable for debug sessions only)
+    // CQE verbose pattern trace (CQE_VERBOSE_TRACE -- enable for debug sessions only)
     cqeVerboseTrace: booleanString.default(false), // If true, emit per-pattern trace to stderr
     // Repair loop settings
     maxPatchOperations: z.coerce.number().int().min(1).max(100).default(15), // Max operations per edit_graph patch

@@ -39,6 +39,7 @@ export async function readRoutingLogEntry(
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
     let found: RoutingLog | null = null;
+    let earlyDestroy = false;
 
     rl.on('line', (line) => {
       if (found) return; // Already found -- drain remaining events cheaply
@@ -48,6 +49,7 @@ export async function readRoutingLogEntry(
         const record = JSON.parse(trimmed) as RoutingLog;
         if (record.turn_id === turn_id) {
           found = record;
+          earlyDestroy = true;
           // Close the stream immediately -- no need to read further
           rl.close();
           stream.destroy();
@@ -59,6 +61,8 @@ export async function readRoutingLogEntry(
 
     rl.on('close', () => resolve(found));
     stream.on('error', (err) => {
+      // Suppress the ERR_STREAM_DESTROYED that fires after an intentional early destroy
+      if (earlyDestroy) return;
       log.warn({ turn_id, err }, 'routing-log-reader: stream error');
       resolve('read_error');
     });
