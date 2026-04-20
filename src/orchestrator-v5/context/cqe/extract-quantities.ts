@@ -142,12 +142,15 @@ function runExtractionInternal(
         emitPatternTimeout(rule.id, 'wall_clock_exceeded', ruleDuration);
         continue;
       }
+      if (ruleMatches.length === 0) {
+        tracePattern(rule.id, false, null, ruleDuration);
+      }
       for (const m of ruleMatches) {
         matches.push({ ...m, patternId: rule.id });
         patternsMatched.add(rule.id);
         maskedText = maskSpan(maskedText, m.spanStart, m.spanEnd);
+        tracePattern(rule.id, true, `${m.spanStart}:${m.spanEnd}`, ruleDuration);
       }
-      tracePattern(rule.id, ruleMatches.length > 0, ruleMatches.length, ruleDuration);
     }
 
     const backstopMatches = compromiseBackstop(maskedText, matches);

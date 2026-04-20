@@ -60,6 +60,14 @@ export async function adminRoutingLogRoutes(app: FastifyInstance): Promise<void>
       });
     }
 
+    if (result === 'read_error') {
+      log.warn({ turn_id: params.data.turn_id, event: 'routing_log.error', reason: 'read_error' }, 'Routing log read error');
+      return reply.status(500).send({
+        error: 'read_error',
+        message: 'Failed to read routing log file. Check server logs for details.',
+      });
+    }
+
     if (!result) {
       log.info({ turn_id: params.data.turn_id, event: 'routing_log.miss', reason: 'not_found' }, 'Routing log entry not found');
       return reply.status(404).send({

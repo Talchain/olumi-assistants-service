@@ -19,7 +19,8 @@ export interface PatternTraceEvent {
   readonly event: 'cqe.pattern_trace';
   readonly pattern_id: string;
   readonly matched: boolean;
-  readonly match_count: number;
+  /** Text span matched, e.g. "12:19". null when matched is false. */
+  readonly match_span: string | null;
   readonly duration_ms: number;
 }
 
@@ -31,7 +32,7 @@ export interface PatternTraceEvent {
 export function tracePattern(
   pattern_id: string,
   matched: boolean,
-  match_count: number,
+  match_span: string | null,
   duration_ms: number,
 ): void {
   if (!config.cee.cqeVerboseTrace) return;
@@ -40,7 +41,7 @@ export function tracePattern(
       event: 'cqe.pattern_trace',
       pattern_id,
       matched,
-      match_count,
+      match_span,
       duration_ms,
     };
     process.stderr.write(JSON.stringify(line) + '\n');

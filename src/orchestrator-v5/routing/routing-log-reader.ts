@@ -18,14 +18,15 @@ import { log } from '../../utils/telemetry.js';
  * Read a single RoutingLog entry by turn_id from the JSONL file.
  *
  * Returns:
- *   RoutingLog  -- entry found
- *   null        -- turn_id not found in the file
- *   'file_absent' -- JSONL file does not exist (never written, or rotated/deleted)
+ *   RoutingLog     -- entry found
+ *   null           -- turn_id not found in the file
+ *   'file_absent'  -- JSONL file does not exist (never written, or rotated/deleted)
+ *   'read_error'   -- I/O failure reading an existing file (EACCES, EMFILE, etc.)
  */
 export async function readRoutingLogEntry(
   turn_id: string,
   filePath: string = DEFAULT_ROUTING_LOG_PATH,
-): Promise<RoutingLog | null | 'file_absent'> {
+): Promise<RoutingLog | null | 'file_absent' | 'read_error'> {
   // Check file existence before opening a stream
   try {
     await access(filePath);
@@ -33,7 +34,7 @@ export async function readRoutingLogEntry(
     return 'file_absent';
   }
 
-  return new Promise<RoutingLog | null>((resolve, reject) => {
+  return new Promise<RoutingLog | null | 'read_error'>((resolve) => {
     const stream = createReadStream(filePath, { encoding: 'utf8' });
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
@@ -57,18 +58,9 @@ export async function readRoutingLogEntry(
     });
 
     rl.on('close', () => resolve(found));
-    rl.on('error', (err) => {
-      log.warn({ turn_id, err }, 'routing-log-reader: readline error');
-      resolve(null);
-    });
     stream.on('error', (err) => {
       log.warn({ turn_id, err }, 'routing-log-reader: stream error');
-      resolve(null);
+      resolve('read_error');
     });
-    // stream.on('error') rejects the readline interface too -- resolve with null rather than reject
-    stream.on('error', () => reject);
-  }).catch((err) => {
-    log.warn({ turn_id, err }, 'routing-log-reader: unexpected error, returning null');
-    return null;
   });
 }

@@ -76,22 +76,9 @@ function resolveTaskModel(task: CeeTask): { model: string; source: ModelSource }
   return { model: TASK_MODEL_DEFAULTS[task], source: 'code_default' };
 }
 
-const ALL_CEE_TASKS: readonly CeeTask[] = [
-  'clarification',
-  'preflight',
-  'draft_graph',
-  'edit_graph',
-  'bias_check',
-  'evidence_helper',
-  'sensitivity_coach',
-  'options',
-  'suggest_options',
-  'explainer',
-  'orchestrator',
-  'repair_graph',
-  'critique_graph',
-  'decision_review',
-];
+// Derived from TASK_MODEL_DEFAULTS so new tasks are automatically included.
+// TASK_MODEL_DEFAULTS is Record<CeeTask, string>, so Object.keys is exhaustive.
+const ALL_CEE_TASKS = Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[];
 
 /**
  * Emit one log line per CeeTask showing resolved model and source tier.
