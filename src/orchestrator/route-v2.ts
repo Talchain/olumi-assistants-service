@@ -72,36 +72,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
-import { getOrGenerateRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
-import { validateIngress, validateEgress } from '../validators/b1.js';
+import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
-import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
-import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
-
-// Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
-// keys), so we cannot pass `graph_state` / `analysis_state` / `user_id`
-// straight through to `validateIngress`. Extract them first via the
-// extension validator, then hand a stripped body to B1. Order is
-// deliberate — if the extensions parse fails, we want the 422 to name
-// the specific field before any other boundary error.
-//
-// `user_id` was added 2026-04-21 for the upsert-on-append pre-flight —
-// see supabase/migrations/…_v5_ensure_scenario_exists.sql for the
-// security trade-off (PoC: trust-the-caller; production: JWT-scoped client).
-const V5_EXTENSION_FIELDS = ['graph_state', 'analysis_state', 'user_id'] as const;
-
-function stripExtensionFields(body: unknown): unknown {
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
-  const copy: Record<string, unknown> = { ...(body as Record<string, unknown>) };
-  for (const k of V5_EXTENSION_FIELDS) delete copy[k];
-  return copy;
-}
+import { runPreFlight } from './route-v2-preflight.js';
 
 // ────────────────────────────────────────────────────────────────────
 // Dispatch-trigger regexes (hoisted to module scope — constructing these
@@ -132,66 +111,17 @@ const EDIT_GRAPH_NEGATIVE_REGEX =
 
 export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void> {
   app.post('/orchestrate/v2/turn', async (req, reply) => {
-    const requestId = getOrGenerateRequestId(req);
-
-    // Phase 1.5: parse graph_state + analysis_state FIRST. @talchain's
-    // OrchestratorTurnPayload schema is `strict` and would reject these
-    // fields as unrecognized keys if we ran B1 first. See
-    // Docs/v5/phase1.5-wire-investigation.md for wire rationale.
-    const extensions = parseRequestExtensions(req.body, requestId);
-    if (!extensions.ok) {
-      log.warn(
-        {
-          request_id: requestId,
-          error: extensions.error.error,
-          field: (extensions.error.details as { field?: string }).field,
-          issue_count: (extensions.error.details as { issues?: unknown[] }).issues?.length ?? 0,
-        },
-        'V5 request-extensions validation failed',
-      );
-      return reply.code(422).send(extensions.error);
+    // Shared pre-flight: extension parse → B1 ingress → scenario upsert.
+    // Every dispatch branch in this handler runs AFTER this call. The
+    // helper is the only site that may invoke those three primitives in
+    // this file; a file-scoped ESLint rule (see eslint.config.js) enforces
+    // that new branches cannot reintroduce them directly. See
+    // Docs/v5/route-v2-branch-audit.md for the rationale and audit.
+    const pre = await runPreFlight(req);
+    if (!pre.ok) {
+      return reply.code(pre.status).send(pre.error);
     }
-
-    // B1 ingress on the base body (graph/analysis stripped to appease strict mode).
-    const strippedBody = stripExtensionFields(req.body);
-    const ingress = validateIngress(strippedBody, requestId);
-    if (!ingress.ok) {
-      log.warn(
-        { request_id: requestId, error: ingress.error.error, issue_count: (ingress.error.details as { issues?: unknown[] }).issues?.length ?? 0 },
-        'V5 B1 ingress validation failed',
-      );
-      return reply.code(422).send(ingress.error);
-    }
-
-    // Upsert-on-append pre-flight (2026-04-21, replaces the 2026-04-20
-    // existence-only check from dbd59c9e). If the caller supplied a
-    // `user_id`, idempotently create the `scenarios` row on-demand so the
-    // first V5 turn never races the UI's scenario INSERT. If the caller
-    // did NOT supply `user_id` (old UI path), skip the pre-flight — we
-    // cannot INSERT without an owner, and `append_turn_atomic` is the
-    // last line of defence. If the row pre-existed with a DIFFERENT
-    // owner, reject as cross-tenant with a typed 422.
-    //
-    // ⚠ Trust-the-caller on `user_id` is PoC scope. Production must
-    // upgrade to a JWT-scoped Supabase client so identity comes from
-    // `auth.uid()`. The migration header documents the accepted risk.
-    const preflight = await preflightEnsureScenario(
-      ingress.value.scenario_id,
-      extensions.value.userId,
-      requestId,
-    );
-    if (!preflight.ok) {
-      const preflightError: BoundaryError = {
-        error: 'INGRESS_CONTRACT_VIOLATION',
-        boundary: 'B1',
-        direction: 'ingress',
-        validator: 'scenario_preflight',
-        details: { reason: preflight.reason, scenario_id: ingress.value.scenario_id },
-        request_id: requestId,
-        retryable: false,
-      };
-      return reply.code(422).send(preflightError);
-    }
+    const { requestId, ingress, extensions } = pre.context;
 
     // v0.7.0 schema: ingress is a discriminated union on `kind`. System events
     // (patch_accepted / patch_dismissed / direct_graph_edit / chip_click /
@@ -208,9 +138,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //     invoking the fail-closed 500 path. This keeps the wire invariant
     //     honest ("commit_performed=false + recognised skip reason ⇒ 200";
     //     "commit_performed=false + no recognised skip reason ⇒ 500").
-    if (ingress.value.kind === 'system_event') {
+    if (ingress.kind === 'system_event') {
       const sysResult = await dispatchSystemEvent({
-        payload: ingress.value,
+        payload: ingress,
         requestId,
       });
       if (!sysResult.commitPerformed && sysResult.commitSkippedReason !== 'client_only_event') {
@@ -222,8 +152,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           details: {
             retryable: true,
             reason: 'system_event_commit_failed',
-            event_kind: ingress.value.event.kind,
-            stage: ingress.value.stage,
+            event_kind: ingress.event.kind,
+            stage: ingress.stage,
           },
           request_id: requestId,
           retryable: true,
@@ -231,7 +161,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         log.error(
           {
             request_id: requestId,
-            event_kind: ingress.value.event.kind,
+            event_kind: ingress.event.kind,
           },
           'V5 system event commit failed — returning 500 with BoundaryError envelope',
         );
@@ -240,7 +170,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       const sysEgress = validateEgress(sysResult.response, requestId);
       if (!sysEgress.ok) {
         log.error(
-          { request_id: requestId, event_kind: ingress.value.event.kind },
+          { request_id: requestId, event_kind: ingress.event.kind },
           'V5 system event egress validation failed — returning typed fallback envelope',
         );
         return reply.code(200).send(sysEgress.fallback);
@@ -266,12 +196,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // TurnExecutor which returns a typed FEATURE_NOT_ENABLED via the
     // existing UNSUPPORTED_ACTION path (v5-exclusive-cee P0 follow-up).
     const isChipClickRunAnalysis =
-      ingress.value.source === 'chip_click' &&
-      ingress.value.chip?.action_type === 'run_analysis';
+      ingress.source === 'chip_click' &&
+      ingress.chip?.action_type === 'run_analysis';
     if (isChipClickRunAnalysis) {
       try {
         const cc = await dispatchChipClickRunAnalysis({
-          payload: ingress.value,
+          payload: ingress,
           requestId,
         });
         // Discriminated outcome — each case maps to a distinct wire
@@ -287,7 +217,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               retryable: cc.retryable,
               reason: 'chip_click_run_analysis_handler_failed',
               cause_kind: cc.causeKind,
-              stage: ingress.value.stage,
+              stage: ingress.stage,
             },
             request_id: requestId,
             retryable: cc.retryable,
@@ -303,7 +233,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             details: {
               retryable: false,
               reason: 'chip_click_run_analysis_handler_result_invalid',
-              stage: ingress.value.stage,
+              stage: ingress.stage,
             },
             request_id: requestId,
             retryable: false,
@@ -319,7 +249,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             details: {
               retryable: true,
               reason: 'chip_click_run_analysis_commit_failed',
-              stage: ingress.value.stage,
+              stage: ingress.stage,
             },
             request_id: requestId,
             retryable: true,
@@ -352,7 +282,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           details: {
             retryable: true,
             reason: 'chip_click_run_analysis_handler_threw',
-            stage: ingress.value.stage,
+            stage: ingress.stage,
           },
           request_id: requestId,
           retryable: true,
@@ -383,14 +313,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //     on a conversational message, so we err on the side of NOT
     //     dispatching.
     const isDraftGraphShape =
-      ingress.value.stage === 'frame' &&
-      extensions.value.graphState == null &&
-      ingress.value.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-      DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.value.message);
+      ingress.stage === 'frame' &&
+      extensions.graphState == null &&
+      ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
+      DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
     if (isDraftGraphShape) {
       try {
         const dg = await dispatchDraftGraph({
-          payload: ingress.value,
+          payload: ingress,
           requestId,
           request: req,
         });
@@ -403,7 +333,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             details: {
               retryable: true,
               reason: 'draft_graph_commit_failed',
-              stage: ingress.value.stage,
+              stage: ingress.stage,
             },
             request_id: requestId,
             retryable: true,
@@ -440,7 +370,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           details: {
             retryable: true,
             reason: 'draft_graph_pipeline_threw',
-            stage: ingress.value.stage,
+            stage: ingress.stage,
           },
           request_id: requestId,
           retryable: true,
@@ -468,10 +398,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //     "explain this", "compare options", "what would" — those are
     //     meta-questions that might contain an edit verb incidentally.
     const isEditGraphShape =
-      extensions.value.graphState != null &&
-      (ingress.value.stage === 'analyse' || ingress.value.stage === 'decide') &&
-      EDIT_GRAPH_POSITIVE_REGEX.test(ingress.value.message) &&
-      !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.value.message);
+      extensions.graphState != null &&
+      (ingress.stage === 'analyse' || ingress.stage === 'decide') &&
+      EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message) &&
+      !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
     if (isEditGraphShape) {
       try {
         // graphState confirmed non-null by the `isEditGraphShape` guard.
@@ -480,11 +410,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // analysisIngressToV2Envelope in edit-graph-dispatch.ts). No
         // `as unknown as` casts leak across this boundary.
         const eg = await dispatchEditGraph({
-          payload: ingress.value,
+          payload: ingress,
           requestId,
           request: req,
-          graphState: extensions.value.graphState!,
-          analysisState: extensions.value.analysisState ?? null,
+          graphState: extensions.graphState!,
+          analysisState: extensions.analysisState ?? null,
         });
         if (!eg.commitPerformed) {
           const boundaryError: BoundaryError = {
@@ -495,7 +425,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             details: {
               retryable: true,
               reason: 'edit_graph_commit_failed',
-              stage: ingress.value.stage,
+              stage: ingress.stage,
             },
             request_id: requestId,
             retryable: true,
@@ -527,7 +457,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           details: {
             retryable: true,
             reason: 'edit_graph_pipeline_threw',
-            stage: ingress.value.stage,
+            stage: ingress.stage,
           },
           request_id: requestId,
           retryable: true,
@@ -541,9 +471,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // status on the wire is decided here by the route, NOT by the
     // TurnExecutor — see the status/body matrix in the file header. The
     // executor never throws past this boundary.
-    const run = await runTurnExecutor(ingress.value, requestId, {
-      graphState: extensions.value.graphState,
-      analysisState: extensions.value.analysisState,
+    const run = await runTurnExecutor(ingress, requestId, {
+      graphState: extensions.graphState,
+      analysisState: extensions.analysisState,
     });
 
     // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
@@ -586,7 +516,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // commit failure in `analyse` stage vs `frame` stage has
           // different user implications ("the analysis ran but didn't
           // save" vs "we couldn't frame the decision").
-          stage: ingress.value.stage,
+          stage: ingress.stage,
           stages_completed: run.telemetry.stages_completed,
         },
         request_id: requestId,
