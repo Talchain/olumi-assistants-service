@@ -260,57 +260,75 @@ describe('SupabaseSessionStore.readFactsFor', () => {
   });
 });
 
-describe('SupabaseSessionStore.checkScenarioExists (Group 3 Task A pre-flight)', () => {
-  it('returns true when the scenarios table row exists', async () => {
-    const { client, selectCalls } = makeClient({
-      selectResult: { data: [{ id: SCENARIO }], error: null },
+describe('SupabaseSessionStore.ensureScenarioExists (upsert-on-append pre-flight)', () => {
+  it('invokes ensure_scenario_exists with the caller-supplied scenario_id + user_id', async () => {
+    const { client, rpcCalls } = makeClient({
+      rpcResult: { data: USER, error: null },
     });
     const store = new SupabaseSessionStore(
       client,
       new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
       { defaultReadLimit: 20 },
     );
-    await expect(store.checkScenarioExists(SCENARIO)).resolves.toBe(true);
-    // Verify the lookup hit the correct table with the correct PK filter.
-    expect(selectCalls).toHaveLength(1);
-    expect(selectCalls[0].table).toBe('scenarios');
-    expect(selectCalls[0].cols).toBe('id');
-    const filters = selectCalls[0].filters as Record<string, unknown>;
-    expect(filters['eq:id']).toBe(SCENARIO);
-    expect(filters.limit).toBe(1);
+    await expect(store.ensureScenarioExists(SCENARIO, USER)).resolves.toEqual({
+      user_id: USER,
+    });
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].fn).toBe('ensure_scenario_exists');
+    expect(rpcCalls[0].args).toEqual({
+      p_scenario_id: SCENARIO,
+      p_user_id: USER,
+    });
   });
 
-  it('returns false when the scenarios row does not exist', async () => {
-    const { client } = makeClient({ selectResult: { data: [], error: null } });
-    const store = new SupabaseSessionStore(
-      client,
-      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
-      { defaultReadLimit: 20 },
-    );
-    await expect(store.checkScenarioExists(SCENARIO)).resolves.toBe(false);
-  });
-
-  it('returns false when the driver returns data:null (defensive)', async () => {
-    const { client } = makeClient({ selectResult: { data: null, error: null } });
-    const store = new SupabaseSessionStore(
-      client,
-      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
-      { defaultReadLimit: 20 },
-    );
-    await expect(store.checkScenarioExists(SCENARIO)).resolves.toBe(false);
-  });
-
-  it('throws SessionReadError on a Supabase-reported SELECT error', async () => {
+  it('returns the authoritative owner when it differs from the caller (cross-tenant signal)', async () => {
+    // The RPC re-reads scenarios.user_id regardless of whether it inserted,
+    // so a pre-existing row with a different owner surfaces as a non-matching
+    // user_id. The STORE itself does not reject — that decision lives in the
+    // pre-flight caller (build-turn-context.preflightEnsureScenario).
+    const otherOwner = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
     const { client } = makeClient({
-      selectResult: { error: { message: 'connection reset', code: 'ECONNRESET' } },
+      rpcResult: { data: otherOwner, error: null },
     });
     const store = new SupabaseSessionStore(
       client,
       new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
       { defaultReadLimit: 20 },
     );
-    await expect(store.checkScenarioExists(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
-    await expect(store.checkScenarioExists(SCENARIO)).rejects.toMatchObject({ code: 'ECONNRESET' });
+    await expect(store.ensureScenarioExists(SCENARIO, USER)).resolves.toEqual({
+      user_id: otherOwner,
+    });
+  });
+
+  it('throws SessionReadError on an RPC-level error', async () => {
+    const { client } = makeClient({
+      rpcResult: { error: { message: 'connection reset', code: 'ECONNRESET' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.ensureScenarioExists(SCENARIO, USER)).rejects.toBeInstanceOf(
+      SessionReadError,
+    );
+    await expect(store.ensureScenarioExists(SCENARIO, USER)).rejects.toMatchObject({
+      code: 'ECONNRESET',
+    });
+  });
+
+  it('throws SessionReadError when the RPC returns a non-string (shape drift guard)', async () => {
+    const { client } = makeClient({
+      rpcResult: { data: { unexpected: 'object' }, error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.ensureScenarioExists(SCENARIO, USER)).rejects.toBeInstanceOf(
+      SessionReadError,
+    );
   });
 });
 

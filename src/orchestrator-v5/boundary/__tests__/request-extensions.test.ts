@@ -144,6 +144,41 @@ describe('parseRequestExtensions', () => {
     }
   });
 
+  it('returns userId: null when user_id is absent', () => {
+    const result = parseRequestExtensions({ message: 'hi' }, REQUEST_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.userId).toBeNull();
+  });
+
+  it('returns userId: null when user_id is explicitly null', () => {
+    const result = parseRequestExtensions({ user_id: null }, REQUEST_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.userId).toBeNull();
+  });
+
+  it('accepts a valid UUID user_id', () => {
+    const uid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const result = parseRequestExtensions({ user_id: uid }, REQUEST_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.userId).toBe(uid);
+  });
+
+  it('rejects a non-string user_id (structural failure)', () => {
+    const result = parseRequestExtensions({ user_id: 12345 }, REQUEST_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error.details as { field?: string }).field).toBe('user_id');
+    }
+  });
+
+  it('rejects a malformed user_id (not a UUID)', () => {
+    const result = parseRequestExtensions({ user_id: 'not-a-uuid' }, REQUEST_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error.details as { field?: string }).field).toBe('user_id');
+    }
+  });
+
   it('passes through edges with strength details (wire shape)', () => {
     const body = {
       graph_state: {

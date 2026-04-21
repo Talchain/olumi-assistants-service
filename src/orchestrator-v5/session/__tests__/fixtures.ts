@@ -27,9 +27,14 @@ export interface NoopSessionStoreOptions {
   readonly facts?: readonly HandlerFact[];
   readonly throwOnRead?: Error;
   readonly throwOnAppend?: Error;
-  /** Default true — most tests assume the scenario exists. */
-  readonly scenarioExists?: boolean;
-  readonly throwOnCheckScenarioExists?: Error;
+  /**
+   * Owner `user_id` returned by `ensureScenarioExists`. Defaults to echoing
+   * back the caller-supplied `userId`, which makes the pre-flight pass the
+   * ownership check. Override to a different UUID to simulate cross-tenant
+   * attempts.
+   */
+  readonly scenarioOwnerUserId?: string;
+  readonly throwOnEnsureScenarioExists?: Error;
 }
 
 export function createNoopSessionStore(
@@ -59,9 +64,12 @@ export function createNoopSessionStore(
     async invalidateAll(_scenarioId: string): Promise<InvalidationResult> {
       return { scope: { kind: 'structural' }, entries_invalidated: [] };
     },
-    async checkScenarioExists(_scenarioId: string): Promise<boolean> {
-      if (opts.throwOnCheckScenarioExists) throw opts.throwOnCheckScenarioExists;
-      return opts.scenarioExists ?? true;
+    async ensureScenarioExists(
+      _scenarioId: string,
+      userId: string,
+    ): Promise<{ user_id: string }> {
+      if (opts.throwOnEnsureScenarioExists) throw opts.throwOnEnsureScenarioExists;
+      return { user_id: opts.scenarioOwnerUserId ?? userId };
     },
   };
 }

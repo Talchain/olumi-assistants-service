@@ -39,23 +39,31 @@ export interface SessionStore {
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**
-   * Returns true when a row exists in `public.scenarios` with `id = scenarioId`.
-   * Used by the V2 route's pre-flight check (Task A) to surface a missing
-   * scenario as a typed 422 at ingress rather than letting `append_turn_atomic`
-   * surface it as an opaque `STATE_COMMIT_FAILED` at commit. Read failures
-   * propagate as `SessionReadError` — callers treat them as "unknown" and
-   * should fail-closed on ambiguity (the pre-flight treats a read error as
-   * "pass" so an outage doesn't block traffic; the later RPC will still fail
-   * loudly if the row is genuinely missing).
+   * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
+   * creating it with `userId` as the owner if absent. Replaces the 2026-04-20
+   * existence-only `checkScenarioExists` pre-flight: real user traffic had
+   * the UI's scenarios INSERT land after or concurrently with the first V5
+   * turn, so strict existence rejected valid traffic.
    *
-   * ⚠ Does NOT enforce caller ownership. See the ⚠ LIMITATION block on
-   * SupabaseSessionStore.checkScenarioExists for the honest cross-tenant
-   * story and the reasons a `p_user_id` RPC parameter is the WRONG shape
-   * for the close (audit tripwire in scripts/validate-docs-consistency.sh
-   * §2 — parameterised user_id re-opens the SECURITY DEFINER user-
-   * impersonation vector).
+   * Returns the AUTHORITATIVE `user_id` (as stored in `public.scenarios`).
+   * This may differ from the caller-supplied `userId` when the row pre-
+   * existed with a different owner — callers MUST compare returned
+   * `user_id` against the caller's `userId` and reject cross-tenant
+   * access. The RPC does NOT overwrite an existing row's user_id.
+   *
+   * Read/RPC failures propagate as `SessionReadError`. The pre-flight
+   * treats those as "unknown" and fails-open (traffic continues; the
+   * later `append_turn_atomic` is the last line of defence).
+   *
+   * ⚠ PoC security posture — trust-the-caller on `userId`. CEE's HTTP
+   * ingress is API-key + HMAC authenticated service-to-service; there
+   * is no end-user Supabase JWT reaching Postgres. The SECURITY DEFINER
+   * RPC therefore has no way to verify `userId` independently — it
+   * writes what the caller passes. Production upgrade: per-request
+   * JWT-scoped client + an RPC that reads identity from `auth.uid()`.
+   * See supabase/migrations/…_v5_ensure_scenario_exists.sql header.
    */
-  checkScenarioExists(scenarioId: string): Promise<boolean>;
+  ensureScenarioExists(scenarioId: string, userId: string): Promise<{ user_id: string }>;
 }
 
 /**

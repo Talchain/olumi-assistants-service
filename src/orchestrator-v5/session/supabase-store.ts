@@ -209,52 +209,53 @@ export class SupabaseSessionStore implements SessionStore {
     return this.cache.invalidateAll(scenarioId);
   }
 
-  async checkScenarioExists(scenarioId: string): Promise<boolean> {
-    // Single-column SELECT keyed on PK. Service-role client bypasses RLS,
-    // so this returns true for ANY row that exists in `public.scenarios`,
-    // regardless of who owns it.
+  async ensureScenarioExists(
+    scenarioId: string,
+    userId: string,
+  ): Promise<{ user_id: string }> {
+    // Upsert-on-append: the `ensure_scenario_exists` RPC runs
+    // `INSERT … ON CONFLICT (id) DO NOTHING` and returns the
+    // AUTHORITATIVE user_id from the stored row. When a row pre-
+    // existed with a different owner the returned user_id will NOT
+    // match the caller's — callers (pre-flight) must compare and
+    // reject cross-tenant access there.
     //
-    // ⚠ CROSS-TENANT LIMITATION (Group 3 honesty note) ⚠
+    // ⚠ PoC security posture (see ensureScenarioExists on SessionStore
+    // and the migration file header):
     //
-    // This check does NOT enforce caller-scoped ownership. A caller who
-    // knows or guesses a foreign scenario UUID will pass pre-flight;
-    // `append_turn_atomic` also does not enforce ownership (it reads
-    // user_id FROM scenarios WHERE id = p_scenario_id and denormalises
-    // that value onto the turn row). UI-side auth + RLS on `scenarios`
-    // is the effective defence today because the UI's scenarioService
-    // uses the user's JWT and the UI user never sees another user's
-    // scenario_id in the first place.
+    //   - `p_user_id` is trusted because CEE authenticates callers
+    //     with API key + HMAC, not a JWT that PostgREST can forward.
+    //     Under SECURITY DEFINER the function has no independent way
+    //     to verify the user_id the caller supplies.
+    //   - The service-role key is already full-trust; a compromised
+    //     service-role caller can already bypass RLS entirely. The
+    //     parameterised user_id here does not widen that blast
+    //     radius for the PoC.
+    //   - Partial guardrail: scenarios.user_id FK → auth.users(id)
+    //     rejects arbitrary UUIDs; spoofing is narrowed to
+    //     "impersonate an existing auth user".
     //
-    // The WRONG way to close this gap (and an audit tripwire — see
-    // scripts/validate-docs-consistency.sh §2): extend append_turn_atomic
-    // with a `p_user_id` PARAMETER. Under SECURITY DEFINER the function
-    // would trust any user_id the service-role caller supplies, which
-    // re-opens a user-impersonation vector without actually verifying
-    // the caller IS that user.
-    //
-    // The CORRECT close uses PostgREST's request-level JWT propagation:
-    // mint a scoped Supabase client per request from the caller's
-    // Authorization bearer token, and query/call RPCs with that client
-    // so `auth.uid()` inside SQL resolves to the authenticated caller.
-    // Scenarios row reads then honour RLS automatically, and any
-    // SECURITY DEFINER function can read the real caller via
-    // `auth.uid()` rather than trusting a parameter. That is a
-    // substantive auth-stack change (Fastify hook to parse the bearer
-    // token, per-request Supabase client factory, RLS review) and lives
-    // beyond Group 3 scope. Tracked separately; Paul owns the design.
-    const { data, error } = await this.client
-      .from('scenarios')
-      .select('id')
-      .eq('id', scenarioId)
-      .limit(1);
+    // TODO(production): replace with per-request JWT-scoped Supabase
+    // client so `auth.uid()` resolves to the authenticated caller,
+    // and rewrite the RPC to read user_id from `auth.uid()` rather
+    // than a parameter. That is Group 3 round 2 Option A.
+    const { data, error } = await this.client.rpc('ensure_scenario_exists', {
+      p_scenario_id: scenarioId,
+      p_user_id: userId,
+    });
 
     if (error) {
       throw new SessionReadError(
-        `checkScenarioExists(${scenarioId}) failed: ${errMsg(error)}`,
+        `ensureScenarioExists(${scenarioId}) failed: ${errMsg(error)}`,
         { cause: error, code: errCode(error) },
       );
     }
-    return Array.isArray(data) && data.length > 0;
+    if (typeof data !== 'string') {
+      throw new SessionReadError(
+        `ensure_scenario_exists returned non-string user_id: ${JSON.stringify(data)}`,
+      );
+    }
+    return { user_id: data };
   }
 }
 

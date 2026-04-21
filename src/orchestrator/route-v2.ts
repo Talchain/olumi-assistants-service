@@ -7,10 +7,12 @@
  *
  *   422 + BoundaryError    INGRESS_CONTRACT_VIOLATION
  *                          - B1 ingress validation failed, OR
- *                          - pre-flight scenario check (Task A) rejected
- *                            the turn (missing scenario; or, when
- *                            v5CrossTenantEnforcement is on, foreign
- *                            scenario)
+ *                          - upsert-on-append pre-flight detected that
+ *                            the scenarios row exists but is owned by a
+ *                            different user_id than the caller supplied
+ *                            (cross-tenant attempt). A missing scenario
+ *                            is NOT a 422 anymore — pre-flight INSERTs
+ *                            it on-demand when user_id is present.
  *
  *   500 + BoundaryError    ANY runtime failure that left
  *                          commit_performed === false. That is a
@@ -45,11 +47,12 @@
  * Ordering within the handler is deliberate
  * ─────────────────────────────────────────────────────────────────
  *
- *   1. Extension parse (graph_state / analysis_state)
+ *   1. Extension parse (graph_state / analysis_state / user_id)
  *   2. B1 ingress (core payload)
- *   3. Pre-flight scenario check (Task A — existence only; cross-tenant
- *      ownership is deferred, see ⚠ block on SupabaseSessionStore.
- *      checkScenarioExists)
+ *   3. Upsert-on-append pre-flight — idempotently creates the scenarios
+ *      row from caller-supplied user_id; rejects with 422 only on cross-
+ *      tenant ownership mismatch. See ⚠ block on
+ *      SessionStore.ensureScenarioExists for the PoC security posture.
  *   4. runTurnExecutor
  *   5. Commit-status check (Task B — BEFORE egress so the invariant
  *      is total; a TurnExecutor whose output AND commit both fail
@@ -74,7 +77,7 @@ import { log } from '../utils/telemetry.js';
 import { validateIngress, validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
-import { preflightScenarioCheck } from '../orchestrator-v5/build-turn-context.js';
+import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
@@ -82,12 +85,16 @@ import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-c
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
-// keys), so we cannot pass `graph_state` / `analysis_state` straight through
-// to `validateIngress`. Extract them first via the Phase 1.5 extension
-// validator, then hand a stripped body to B1. Order is deliberate — if the
-// extensions parse fails, we want the 422 to name the specific field before
-// any other boundary error.
-const V5_EXTENSION_FIELDS = ['graph_state', 'analysis_state'] as const;
+// keys), so we cannot pass `graph_state` / `analysis_state` / `user_id`
+// straight through to `validateIngress`. Extract them first via the
+// extension validator, then hand a stripped body to B1. Order is
+// deliberate — if the extensions parse fails, we want the 422 to name
+// the specific field before any other boundary error.
+//
+// `user_id` was added 2026-04-21 for the upsert-on-append pre-flight —
+// see supabase/migrations/…_v5_ensure_scenario_exists.sql for the
+// security trade-off (PoC: trust-the-caller; production: JWT-scoped client).
+const V5_EXTENSION_FIELDS = ['graph_state', 'analysis_state', 'user_id'] as const;
 
 function stripExtensionFields(body: unknown): unknown {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
@@ -156,24 +163,21 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(422).send(ingress.error);
     }
 
-    // Task A pre-flight (Group 3): surface missing scenarios as a typed 422 at
-    // ingress rather than letting `append_turn_atomic` surface them as an
-    // opaque `STATE_COMMIT_FAILED` → `INTERNAL_ERROR` at commit. V5 depends on
-    // the UI having inserted the `scenarios` row during scenario creation
-    // (DecisionGuideAI's scenarioService); this check makes that architectural
-    // dependency fail loudly for the user. Best-effort by design — if the
-    // store is not configured (e.g. local tests without SUPABASE_*), skip; if
-    // a transient read error occurs, skip (the commit path is still the last
-    // line of defence).
+    // Upsert-on-append pre-flight (2026-04-21, replaces the 2026-04-20
+    // existence-only check from dbd59c9e). If the caller supplied a
+    // `user_id`, idempotently create the `scenarios` row on-demand so the
+    // first V5 turn never races the UI's scenario INSERT. If the caller
+    // did NOT supply `user_id` (old UI path), skip the pre-flight — we
+    // cannot INSERT without an owner, and `append_turn_atomic` is the
+    // last line of defence. If the row pre-existed with a DIFFERENT
+    // owner, reject as cross-tenant with a typed 422.
     //
-    // ⚠ Does NOT enforce caller ownership. See the ⚠ CROSS-TENANT
-    // LIMITATION block on SupabaseSessionStore.checkScenarioExists —
-    // closing that gap requires a per-request JWT-scoped Supabase
-    // client (so auth.uid() inside RPCs resolves to the real caller),
-    // NOT a `p_user_id` parameter (which is an audit tripwire — see
-    // scripts/validate-docs-consistency.sh §2).
-    const preflight = await preflightScenarioCheck(
+    // ⚠ Trust-the-caller on `user_id` is PoC scope. Production must
+    // upgrade to a JWT-scoped Supabase client so identity comes from
+    // `auth.uid()`. The migration header documents the accepted risk.
+    const preflight = await preflightEnsureScenario(
       ingress.value.scenario_id,
+      extensions.value.userId,
       requestId,
     );
     if (!preflight.ok) {
