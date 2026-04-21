@@ -88,7 +88,6 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     checkScenarioExists: async () => true,
-    checkScenarioOwnership: async () => true,
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},

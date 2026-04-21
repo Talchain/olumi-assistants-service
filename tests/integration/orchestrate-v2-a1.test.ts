@@ -217,10 +217,6 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     // Group 3 Task A: scenario pre-flight. A1 fixtures assume the scenario
     // exists, so the mock returns true — pre-flight passes.
     checkScenarioExists: async () => true,
-    // Group 3 P0 follow-up: owner-scoped variant. Not exercised by A1
-    // tests (v5CrossTenantEnforcement flag off) but mocked defensively so
-    // future test additions don't hit a TypeError.
-    checkScenarioOwnership: async () => true,
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},

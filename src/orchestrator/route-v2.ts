@@ -47,16 +47,15 @@
  *
  *   1. Extension parse (graph_state / analysis_state)
  *   2. B1 ingress (core payload)
- *   3. Auth hook — extract caller user_id (Group 3 P0 scaffold;
- *      currently a stub, inert when v5CrossTenantEnforcement is off)
- *   4. Pre-flight scenario check (Task A; ownership-checked when
- *      v5CrossTenantEnforcement is on)
- *   5. runTurnExecutor
- *   6. Commit-status check (Task B — BEFORE egress so the invariant
+ *   3. Pre-flight scenario check (Task A — existence only; cross-tenant
+ *      ownership is deferred, see ⚠ block on SupabaseSessionStore.
+ *      checkScenarioExists)
+ *   4. runTurnExecutor
+ *   5. Commit-status check (Task B — BEFORE egress so the invariant
  *      is total; a TurnExecutor whose output AND commit both fail
  *      takes the 500 path, not the 200-fallback path)
- *   7. B1 egress validator
- *   8. 200 + OlumiResponse
+ *   6. B1 egress validator
+ *   7. 200 + OlumiResponse
  *
  * Route registration is gated on config.features.orchestratorV5. When the
  * flag is off, this route is not registered and the endpoint returns 404.
@@ -67,10 +66,9 @@
  * No imports from V4 pipeline (pipeline-v4, response-assembler, handlers).
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
-import { config } from '../config/index.js';
 import { getOrGenerateRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 import { validateIngress, validateEgress } from '../validators/b1.js';
@@ -126,16 +124,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(422).send(ingress.error);
     }
 
-    // Auth hook (Group 3 P0 scaffold): extract the caller's user_id from
-    // the request. This is the single seam that future auth plumbing will
-    // fill in (Supabase JWT, Fastify auth plugin, signed header, etc.).
-    // Today it returns undefined — see extractCallerUserId below for the
-    // full TODO. Tests inject a user_id via the X-Olumi-User-Id header so
-    // the cross-tenant integration test can exercise the enforced path
-    // without a real auth stack.
-    const callerUserId = extractCallerUserId(req);
-    const enforceCrossTenant = config.features.v5CrossTenantEnforcement === true;
-
     // Task A pre-flight (Group 3): surface missing scenarios as a typed 422 at
     // ingress rather than letting `append_turn_atomic` surface them as an
     // opaque `STATE_COMMIT_FAILED` → `INTERNAL_ERROR` at commit. V5 depends on
@@ -146,16 +134,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // a transient read error occurs, skip (the commit path is still the last
     // line of defence).
     //
-    // Ownership mode (Group 3 P0 follow-up): when v5CrossTenantEnforcement
-    // is true AND a caller user_id is available, the preflight uses the
-    // user-scoped `check_scenario_ownership` RPC instead of the service-
-    // role `scenarios` SELECT. Absent owner check falls back to the legacy
-    // existence check so we don't accidentally block the happy path if the
-    // auth hook isn't wired yet.
+    // ⚠ Does NOT enforce caller ownership. See the ⚠ CROSS-TENANT
+    // LIMITATION block on SupabaseSessionStore.checkScenarioExists —
+    // closing that gap requires a per-request JWT-scoped Supabase
+    // client (so auth.uid() inside RPCs resolves to the real caller),
+    // NOT a `p_user_id` parameter (which is an audit tripwire — see
+    // scripts/validate-docs-consistency.sh §2).
     const preflightFailure = await preflightScenarioCheck(
       ingress.value.scenario_id,
       requestId,
-      enforceCrossTenant ? callerUserId : undefined,
     );
     if (preflightFailure) {
       return reply.code(422).send(preflightFailure);
@@ -169,13 +156,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const run = await runTurnExecutor(ingress.value, requestId, {
       graphState: extensions.value.graphState,
       analysisState: extensions.value.analysisState,
-      // Thread caller_user_id to commit only when enforcement is on.
-      // The store picks `append_turn_atomic_v2` iff caller_user_id is
-      // present on the write; leaving it undefined preserves legacy
-      // behaviour.
-      ...(enforceCrossTenant && callerUserId !== undefined
-        ? { callerUserId }
-        : {}),
     });
 
     // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
@@ -286,26 +266,20 @@ function extractRetryableFlag(response: unknown): boolean {
 async function preflightScenarioCheck(
   scenarioId: string,
   requestId: string,
-  callerUserId: string | undefined,
 ): Promise<BoundaryError | null> {
   let exists: boolean;
-  const ownershipMode = callerUserId !== undefined;
   try {
     const store = getSessionStore();
-    exists = ownershipMode
-      ? await store.checkScenarioOwnership(scenarioId, callerUserId as string)
-      : await store.checkScenarioExists(scenarioId);
+    exists = await store.checkScenarioExists(scenarioId);
   } catch (e) {
-    // Store not configured (missing SUPABASE_*) OR a transient read error
-    // OR (in ownership mode) the check_scenario_ownership RPC not installed
-    // yet. Do NOT block the turn — the commit RPC is the last line of
-    // defence. Log at debug so the absence of pre-flight is observable
-    // without noise.
+    // Store not configured (missing SUPABASE_*) OR a transient read error.
+    // Do NOT block the turn — the commit RPC will surface genuinely missing
+    // rows. Log at debug so the absence of pre-flight is observable without
+    // noise.
     log.debug(
       {
         request_id: requestId,
         scenario_id: scenarioId,
-        ownership_mode: ownershipMode,
         err_name: e instanceof Error ? e.name : 'unknown',
         err_message: e instanceof Error ? e.message : String(e),
       },
@@ -317,7 +291,7 @@ async function preflightScenarioCheck(
   if (exists) return null;
 
   log.warn(
-    { request_id: requestId, scenario_id: scenarioId, ownership_mode: ownershipMode },
+    { request_id: requestId, scenario_id: scenarioId },
     'V5 pre-flight: scenario not found — rejecting turn with 422',
   );
   return {
@@ -325,53 +299,8 @@ async function preflightScenarioCheck(
     boundary: 'B1',
     direction: 'ingress',
     validator: 'scenario_preflight',
-    // Uniform reason for both "missing" and "foreign owner" — telling a
-    // non-owner "exists but not yours" is a cross-tenant leak.
     details: { reason: 'scenario_not_found', scenario_id: scenarioId },
     request_id: requestId,
     retryable: false,
   };
-}
-
-/**
- * Extract the caller's user_id from the request. Group 3 P0 follow-up
- * scaffold — the real auth story is Paul-owned and gated on the
- * v5CrossTenantEnforcement feature flag + the
- * 20260422000000_v5_cross_tenant_enforcement.sql migration.
- *
- * Today this helper reads an `X-Olumi-User-Id` header ONLY when the
- * feature flag is on. In production, that header is trivially
- * spoofable — the real implementation will be one of:
- *
- *   (A) Fastify auth plugin that parses a Supabase JWT from the
- *       `Authorization: Bearer <jwt>` header, validates the signature
- *       against Supabase's JWKS endpoint, and sets `request.user = {
- *       id, ... }`. This helper then returns `(request as any).user.id`.
- *
- *   (B) A shared signed-header contract between the BFF proxy
- *       (Netlify edge function) and CEE, where the BFF rewrites the
- *       UI's JWT into a CEE-trusted signed header. Preserves the
- *       performance of no-JWT-parse in CEE while keeping the auth
- *       source of truth in one place.
- *
- * Either way, this helper becomes the single seam. Tests can override
- * via the header (which is inert in production if the auth plugin sets
- * request.user). Not yet in the test harness — will be wired in the
- * Paul-owned auth commit that accompanies the migration rollout.
- *
- * Returns undefined when the flag is off OR the header is missing.
- */
-function extractCallerUserId(req: FastifyRequest): string | undefined {
-  // Inert when the flag is off: no auth-source lookup, no header read.
-  if (!config.features.v5CrossTenantEnforcement) return undefined;
-  const raw = req.headers['x-olumi-user-id'];
-  if (typeof raw !== 'string' || raw.length === 0) return undefined;
-  // Basic UUID shape check — lets typos fail cleanly at the pre-flight
-  // instead of surfacing as an RPC syntax error deeper in the stack.
-  // Paul's real auth plugin will replace this with a validated JWT
-  // subject claim.
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) {
-    return undefined;
-  }
-  return raw;
 }

@@ -61,13 +61,6 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
       if (storeState.throwOnCheck) throw storeState.throwOnCheck;
       return storeState.existsByScenarioId.get(id) ?? false;
     },
-    // Group 3 P0 follow-up: owner-scoped pre-flight. Not exercised by
-    // this test file (flag is off in the config mock); the cross-tenant
-    // behaviour is covered by orchestrate-v2-cross-tenant.test.ts.
-    checkScenarioOwnership: async (id: string) => {
-      if (storeState.throwOnCheck) throw storeState.throwOnCheck;
-      return storeState.existsByScenarioId.get(id) ?? false;
-    },
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {
@@ -202,13 +195,17 @@ describe('POST /orchestrate/v2/turn — Group 3 Task A pre-flight scenario check
   });
 
   // ⚠ HONEST LIMITATION TEST ⚠
-  // The Group 3 brief's acceptance criterion asked for an RLS / cross-tenant
-  // test. The honest answer for the current architecture is that V5 has NO
-  // cross-tenant guard at the CEE layer — see the comment on
-  // SupabaseSessionStore.checkScenarioExists. This test asserts that
-  // limitation rather than simulating a stronger guarantee we don't have.
-  // The TODO in supabase-store.ts documents the closure (add p_user_id to
-  // append_turn_atomic + assert ownership in SQL).
+  // The Group 3 brief asked for an RLS / cross-tenant test. The honest
+  // answer for the current architecture is that V5 has NO cross-tenant
+  // guard at the CEE layer — see the ⚠ CROSS-TENANT LIMITATION block on
+  // SupabaseSessionStore.checkScenarioExists for why a `p_user_id` RPC
+  // parameter is NOT the right close (it re-opens the SECURITY DEFINER
+  // impersonation vector that scripts/validate-docs-consistency.sh §2
+  // guards against). The correct close is a per-request JWT-scoped
+  // Supabase client so `auth.uid()` inside RPCs resolves to the real
+  // caller; that is a substantive auth-stack change and lives beyond
+  // Group 3 scope. This test asserts the current (bounded) behaviour
+  // rather than simulating a stronger guarantee we don't have.
   it('does NOT reject a foreign scenario at the CEE layer (bounded guarantee)', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -219,9 +216,11 @@ describe('POST /orchestrate/v2/turn — Group 3 Task A pre-flight scenario check
     // runs, turn completes. In production this is safe ONLY because the UI
     // auth flow + RLS on `public.scenarios` prevent a UI user from ever
     // seeing another user's scenario_id — a non-UI caller with a guessed
-    // UUID would currently bypass the guard. When `append_turn_atomic` is
-    // extended with p_user_id enforcement, this test should flip to assert
-    // 422 + `reason: 'scenario_foreign'` (or a similar typed code).
+    // UUID would currently bypass the guard. When a per-request JWT-scoped
+    // Supabase client is wired in (so `auth.uid()` propagates into RPCs),
+    // this test should flip to assert 422 + `reason: 'scenario_not_found'`
+    // (leak-proof — we do NOT reveal that the scenario exists under a
+    // different owner).
     expect(res.statusCode).toBe(200);
     expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
   });

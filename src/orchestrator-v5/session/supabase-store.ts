@@ -71,16 +71,7 @@ export class SupabaseSessionStore implements SessionStore {
   ) {}
 
   async append(write: SessionTurnWrite): Promise<{ id: string }> {
-    // Group 3 P0 follow-up: when caller_user_id is present, route to the
-    // v2 RPC (`append_turn_atomic_v2`) which enforces ownership inside
-    // SQL. Callers are responsible for setting caller_user_id only when
-    // config.features.v5CrossTenantEnforcement is true AND the
-    // migration 20260422000000_v5_cross_tenant_enforcement.sql has been
-    // applied. Absent those, calling v2 will fail with a "function does
-    // not exist" error (caught below and surfaced as StateCommitFailedError).
-    const useV2 = write.caller_user_id !== undefined;
-    const rpcName = useV2 ? 'append_turn_atomic_v2' : 'append_turn_atomic';
-    const rpcArgs: Record<string, unknown> = {
+    const { data, error } = await this.client.rpc('append_turn_atomic', {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
       p_turn_class: write.turn_class,
@@ -90,21 +81,17 @@ export class SupabaseSessionStore implements SessionStore {
       p_llm_calls_used: write.llm_calls_used,
       p_duration_ms: write.duration_ms,
       p_handler_facts: serialiseHandlerFacts(write.handler_facts),
-    };
-    if (useV2) {
-      rpcArgs.p_user_id = write.caller_user_id;
-    }
-    const { data, error } = await this.client.rpc(rpcName, rpcArgs);
+    });
 
     if (error) {
       throw new StateCommitFailedError(
-        `${rpcName} RPC failed: ${errMsg(error)}`,
+        `append_turn_atomic RPC failed: ${errMsg(error)}`,
         { cause: error, rpc_code: errCode(error) },
       );
     }
     if (typeof data !== 'string') {
       throw new StateCommitFailedError(
-        `${rpcName} returned non-string id: ${JSON.stringify(data)}`,
+        `append_turn_atomic returned non-string id: ${JSON.stringify(data)}`,
       );
     }
 
@@ -227,14 +214,34 @@ export class SupabaseSessionStore implements SessionStore {
     // so this returns true for ANY row that exists in `public.scenarios`,
     // regardless of who owns it.
     //
-    // ⚠ LIMITATION (Group 3) ⚠
-    // This check does NOT enforce caller-scoped ownership. Use
-    // `checkScenarioOwnership` instead when you have the caller's user_id
-    // AND `config.features.v5CrossTenantEnforcement` is true AND the
-    // 20260422000000_v5_cross_tenant_enforcement.sql migration has been
-    // applied. This method remains for the legacy flow (UI-auth-only
-    // defence — the UI's scenarioService uses the user's JWT, so a UI
-    // user never "sees" another user's scenario_id in the first place).
+    // ⚠ CROSS-TENANT LIMITATION (Group 3 honesty note) ⚠
+    //
+    // This check does NOT enforce caller-scoped ownership. A caller who
+    // knows or guesses a foreign scenario UUID will pass pre-flight;
+    // `append_turn_atomic` also does not enforce ownership (it reads
+    // user_id FROM scenarios WHERE id = p_scenario_id and denormalises
+    // that value onto the turn row). UI-side auth + RLS on `scenarios`
+    // is the effective defence today because the UI's scenarioService
+    // uses the user's JWT and the UI user never sees another user's
+    // scenario_id in the first place.
+    //
+    // The WRONG way to close this gap (and an audit tripwire — see
+    // scripts/validate-docs-consistency.sh §2): extend append_turn_atomic
+    // with a `p_user_id` PARAMETER. Under SECURITY DEFINER the function
+    // would trust any user_id the service-role caller supplies, which
+    // re-opens a user-impersonation vector without actually verifying
+    // the caller IS that user.
+    //
+    // The CORRECT close uses PostgREST's request-level JWT propagation:
+    // mint a scoped Supabase client per request from the caller's
+    // Authorization bearer token, and query/call RPCs with that client
+    // so `auth.uid()` inside SQL resolves to the authenticated caller.
+    // Scenarios row reads then honour RLS automatically, and any
+    // SECURITY DEFINER function can read the real caller via
+    // `auth.uid()` rather than trusting a parameter. That is a
+    // substantive auth-stack change (Fastify hook to parse the bearer
+    // token, per-request Supabase client factory, RLS review) and lives
+    // beyond Group 3 scope. Tracked separately; Paul owns the design.
     const { data, error } = await this.client
       .from('scenarios')
       .select('id')
@@ -248,32 +255,6 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
     return Array.isArray(data) && data.length > 0;
-  }
-
-  async checkScenarioOwnership(scenarioId: string, callerUserId: string): Promise<boolean> {
-    // Group 3 P0 follow-up: caller-scoped existence check. Invokes the
-    // `check_scenario_ownership(p_scenario_id, p_user_id)` RPC defined
-    // in 20260422000000_v5_cross_tenant_enforcement.sql. The RPC
-    // deliberately returns FALSE for both "missing" and "foreign owner"
-    // — the distinction is NOT surfaced to the caller because telling a
-    // non-owner "yes it exists but not yours" is a cross-tenant leak.
-    //
-    // Throws SessionReadError on any RPC transport failure. The route
-    // pre-flight catches this and passes (best-effort, consistent with
-    // the legacy `checkScenarioExists` behaviour) — commit-side RPC is
-    // still the hard guard.
-    const { data, error } = await this.client.rpc('check_scenario_ownership', {
-      p_scenario_id: scenarioId,
-      p_user_id: callerUserId,
-    });
-
-    if (error) {
-      throw new SessionReadError(
-        `check_scenario_ownership(${scenarioId}) failed: ${errMsg(error)}`,
-        { cause: error, code: errCode(error) },
-      );
-    }
-    return data === true;
   }
 }
 

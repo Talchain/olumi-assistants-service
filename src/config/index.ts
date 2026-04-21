@@ -297,7 +297,6 @@ const ConfigSchema = z.object({
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
     pipelineV4Enabled: booleanString.default(true), // CEE_PIPELINE_V4_ENABLED — native tool-use pipeline (v4), replaces JSON-contract pipeline. Default flipped true (April 2026): V4 is the only supported path and the V1 handlers (e.g. src/orchestrator/tools/explain-results.ts) are stubbed to throw if reached. Set to false only for emergency rollback AND revert the V1 stubs.
     orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
-    v5CrossTenantEnforcement: booleanString.default(false), // ENABLE_V5_CROSS_TENANT_ENFORCEMENT — Group 3 follow-up. When true, V5 preflight + commit switch to user-scoped functions (check_scenario_ownership, append_turn_atomic_v2). Requires supabase/migrations/20260422000000_v5_cross_tenant_enforcement.sql to be applied. When false, V5 uses the original user_id-agnostic functions. Default false so CEE can ship independently of the migration's timing.
   }),
 
   // Prompt Cache Configuration
@@ -673,7 +672,6 @@ function parseConfig(): Config {
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
       orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
-      v5CrossTenantEnforcement: env.ENABLE_V5_CROSS_TENANT_ENFORCEMENT,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

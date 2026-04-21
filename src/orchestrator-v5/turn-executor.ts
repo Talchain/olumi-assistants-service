@@ -182,15 +182,6 @@ export interface RunTurnExecutorOptions {
    * When null/absent, the enricher skips with reason `no_brief`.
    */
   readonly scenarioBrief?: string | null;
-  /**
-   * Group 3 P0 follow-up: caller user_id extracted by the route's auth
-   * hook. When present, threaded into commit's SessionTurnWrite so the
-   * session store routes to `append_turn_atomic_v2` (ownership-enforced).
-   * When absent, commit uses the legacy `append_turn_atomic` (no
-   * ownership check). Gated in route-v2 by
-   * config.features.v5CrossTenantEnforcement.
-   */
-  readonly callerUserId?: string;
 }
 
 /**
@@ -667,10 +658,6 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
-        // Group 3 P0 follow-up: threads through to append_turn_atomic_v2
-        // when the feature flag is on. The store picks the RPC based on
-        // whether caller_user_id is present on the SessionTurnWrite.
-        ...(options.callerUserId ? { caller_user_id: options.callerUserId } : {}),
       });
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
