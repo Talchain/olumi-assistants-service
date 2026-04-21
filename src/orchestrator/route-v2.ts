@@ -157,6 +157,29 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(422).send(preflightError);
     }
 
+    // v0.7.0 schema: ingress is a discriminated union on `kind`. Task 1 of the
+    // v5-handler-surface brief adds a pre-TurnExecutor dispatch branch for
+    // `kind: 'system_event'`. Until that branch lands (next commit in the
+    // brief sequence), surface system_event ingress as a typed
+    // FEATURE_NOT_ENABLED so the wire contract stays honest — the v0.7.0
+    // schema accepts the payload but the handler isn't wired yet.
+    if (ingress.value.kind !== 'message') {
+      const notImplemented: BoundaryError = {
+        error: 'FEATURE_NOT_ENABLED',
+        boundary: 'B1',
+        direction: 'ingress',
+        validator: 'system_event_dispatch',
+        details: {
+          reason: 'system_event_dispatch_not_wired',
+          event_kind: ingress.value.event.kind,
+          retryable: false,
+        },
+        request_id: requestId,
+        retryable: false,
+      };
+      return reply.code(501).send(notImplemented);
+    }
+
     // TurnExecutor returns a well-formed OlumiResponse envelope on every
     // path (success, typed error block, or commit failure). The HTTP
     // status on the wire is decided here by the route, NOT by the

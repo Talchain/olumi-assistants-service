@@ -28,7 +28,7 @@
  * run_analysis makes 1+, explain_result makes 1).
  */
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { TurnContext, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import {
@@ -101,7 +101,7 @@ export interface DispatchOpts {
    * Optional to preserve compatibility with the A2 call sites that don't
    * dispatch handler turns; required when a handler turn is expected.
    */
-  payload?: OrchestratorTurnPayload;
+  payload?: MessageTurnPayload;
 }
 
 /**

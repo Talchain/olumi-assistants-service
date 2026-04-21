@@ -21,7 +21,7 @@
  * `TurnContext` continues to compile via structural subtyping.
  */
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact, SessionTurn, TurnContext } from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
@@ -57,8 +57,13 @@ export interface BuildTurnContextOptions {
   readonly sessionStore?: SessionStore;
 }
 
+// v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
+// union on `kind`. `buildTurnContext` only ever sees `kind: 'message'` payloads
+// because `route-v2.ts` dispatches `kind: 'system_event'` BEFORE calling the
+// TurnExecutor (system events have no `message` field). Typed as
+// `MessageTurnPayload` to make the invariant visible at compile time.
 export async function buildTurnContext(
-  payload: OrchestratorTurnPayload,
+  payload: MessageTurnPayload,
   requestId: string,
   options: BuildTurnContextOptions = {},
 ): Promise<EnrichedTurnContext> {

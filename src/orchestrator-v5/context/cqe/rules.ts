@@ -1,7 +1,7 @@
 import type {
   ParameterOperator,
   QuantityExtractionResult,
-} from '@talchain/schemas/orchestrator';
+} from './schema-types.js';
 import {
   overlapsWordNumberReplacement,
   type WordNumberReplacement,

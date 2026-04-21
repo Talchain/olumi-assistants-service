@@ -37,7 +37,7 @@
  */
 
 import type {
-  OrchestratorTurnPayload,
+  MessageTurnPayload,
   OlumiResponse,
   FailureTypeLiteral,
 } from '@talchain/schemas/boundary';
@@ -189,8 +189,13 @@ export interface RunTurnExecutorOptions {
  * OlumiResponse; internal runtime failures map to a typed response with an
  * ErrorBlock — never thrown past this function.
  */
+// v0.7.0 schema: `OrchestratorTurnPayload` is a discriminated union on `kind`.
+// `runTurnExecutor` only ever sees `kind: 'message'` payloads — `route-v2.ts`
+// catches `kind: 'system_event'` in a deterministic pre-TurnExecutor branch
+// (they have no `message` field and do not need LLM routing). Typed as
+// `MessageTurnPayload` to make the invariant visible at compile time.
 export async function runTurnExecutor(
-  payload: OrchestratorTurnPayload,
+  payload: MessageTurnPayload,
   requestId: string,
   options: RunTurnExecutorOptions = {},
 ): Promise<TurnExecutorRunResult> {

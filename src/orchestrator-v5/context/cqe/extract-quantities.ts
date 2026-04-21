@@ -1,4 +1,4 @@
-import type { QuantityExtractionResult } from '@talchain/schemas/orchestrator';
+import type { QuantityExtractionResult } from './schema-types.js';
 import { log } from '../../../utils/telemetry.js';
 import { preNormalise, MAX_INPUT_LENGTH } from './pre-normalise.js';
 import { applyWordNumberPrePass } from './word-numbers.js';

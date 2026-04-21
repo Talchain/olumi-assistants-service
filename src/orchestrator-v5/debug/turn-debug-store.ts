@@ -8,7 +8,7 @@
  * Pattern mirrors src/cee/llm-output-store.ts (TTL, FIFO eviction, singleton).
  */
 
-import type { QuantityExtractionResult } from '@talchain/schemas/orchestrator';
+import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import type { ResolutionSource } from '../../adapters/llm/router.js';
 import { config } from '../../config/index.js';
 
