@@ -76,6 +76,8 @@ import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
 import { preflightScenarioCheck } from '../orchestrator-v5/build-turn-context.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
+import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
+import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
 // keys), so we cannot pass `graph_state` / `analysis_state` straight through
@@ -211,6 +213,87 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return reply.code(200).send(sysEgress.fallback);
       }
       return reply.code(200).send(sysEgress.value);
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Draft_graph pre-Sonnet dispatch (v5-handler-surface brief Task 2)
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // `draft_graph` is NOT in v0.7.0 V5ActionType, so Sonnet's tool-use
+    // validator would reject any tool_use proposing it. Detect the
+    // first-time brief-submission shape BEFORE TurnExecutor and delegate
+    // deterministically to handleDraftGraph (which wraps the shared
+    // unified pipeline).
+    //
+    // Conservative trigger: all of the following must hold.
+    //   - kind: 'message'                      — system events branched.
+    //   - stage: 'frame'                       — frame-stage starter.
+    //   - no graph_state                       — nothing to edit yet.
+    //   - message ≥ DRAFT_GRAPH_MIN_BRIEF_LENGTH — matches V4 input schema.
+    //   - message looks like a decision brief  — positive keyword regex
+    //     below. False negatives (real briefs without keywords) fall
+    //     through to TurnExecutor text_only, which is already WORKING
+    //     per the matrix. False positives would mis-invoke the pipeline
+    //     on a conversational message, so we err on the side of NOT
+    //     dispatching.
+    const DECISION_BRIEF_REGEX =
+      /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
+    const isDraftGraphShape =
+      ingress.value.stage === 'frame' &&
+      extensions.value.graphState == null &&
+      ingress.value.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
+      DECISION_BRIEF_REGEX.test(ingress.value.message);
+    if (isDraftGraphShape) {
+      try {
+        const dg = await dispatchDraftGraph({
+          payload: ingress.value,
+          requestId,
+          request: req,
+        });
+        if (!dg.commitPerformed) {
+          const boundaryError: BoundaryError = {
+            error: 'INTERNAL_ERROR',
+            boundary: 'B1',
+            direction: 'egress',
+            validator: 'turn_commit',
+            details: {
+              retryable: true,
+              reason: 'draft_graph_commit_failed',
+              stage: ingress.value.stage,
+            },
+            request_id: requestId,
+            retryable: true,
+          };
+          return reply.code(500).send(boundaryError);
+        }
+        const dgEgress = validateEgress(dg.response, requestId);
+        if (!dgEgress.ok) {
+          log.error(
+            { request_id: requestId },
+            'V5 draft_graph dispatch egress validation failed — returning typed fallback envelope',
+          );
+          return reply.code(200).send(dgEgress.fallback);
+        }
+        return reply.code(200).send(dgEgress.value);
+      } catch (err) {
+        // The unified pipeline threw — surface a typed BoundaryError. The
+        // dispatcher already logged the details.
+        const boundaryError: BoundaryError = {
+          error: 'INTERNAL_ERROR',
+          boundary: 'B1',
+          direction: 'egress',
+          validator: 'draft_graph_pipeline',
+          details: {
+            retryable: true,
+            reason: 'draft_graph_pipeline_threw',
+            stage: ingress.value.stage,
+            message: err instanceof Error ? err.message : String(err),
+          },
+          request_id: requestId,
+          retryable: true,
+        };
+        return reply.code(500).send(boundaryError);
+      }
     }
 
     // TurnExecutor returns a well-formed OlumiResponse envelope on every

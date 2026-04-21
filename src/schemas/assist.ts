@@ -2,18 +2,28 @@ import { z } from "zod";
 import { Graph } from "./graph.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 
+/**
+ * Minimum brief length for draft_graph input validation.
+ *
+ * Changing this requires verifying that the preflight short-input exemption
+ * (≤2-word all-letter inputs bypass coverage check) handles sub-30-char
+ * briefs gracefully. See: preflight calibration brief, March 2026
+ * (src/cee/validation/preflight.ts)
+ *
+ * Consumed by:
+ *   - DraftGraphInput Zod (brief: z.string().min(DRAFT_GRAPH_MIN_BRIEF_LENGTH))
+ *   - ClarifyBriefInput Zod (same)
+ *   - V5 route-v2 dispatch trigger (isDraftGraphShape heuristic)
+ *
+ * TODO (backlog): Consider reducing to allow short valid decision questions
+ * like "Should I hire?" (14 chars) or "Expand to EU?" (13 chars) that
+ * currently fail here before reaching preflight readiness scoring.
+ */
+export const DRAFT_GRAPH_MIN_BRIEF_LENGTH = 30;
+export const DRAFT_GRAPH_MAX_BRIEF_LENGTH = 5000;
+
 export const DraftGraphInput = z.object({
-  // TODO (backlog): Consider reducing min(30) to allow short valid decision questions
-  // like "Should I hire?" (14 chars) or "Expand to EU?" (13 chars) that currently fail
-  // here before reaching preflight readiness scoring.
-  //
-  // SHARED CONSTRAINT — this min(30) also appears in ClarifyBriefInput (line ~206).
-  // Both must be changed together if this is ever updated.
-  //
-  // Changing this requires verifying that the preflight short-input exemption (≤2-word
-  // all-letter inputs bypass coverage check) handles sub-30-char briefs gracefully.
-  // See: preflight calibration brief, March 2026 (src/cee/validation/preflight.ts)
-  brief: z.string().min(30).max(5000),
+  brief: z.string().min(DRAFT_GRAPH_MIN_BRIEF_LENGTH).max(DRAFT_GRAPH_MAX_BRIEF_LENGTH),
   attachments: z
     .array(
       z.object({
@@ -213,9 +223,7 @@ export const SuggestOptionsOutput = z.object({
 });
 
 export const ClarifyBriefInput = z.object({
-  // SHARED CONSTRAINT — same min(30) as DraftGraphInput.brief above.
-  // Change both together. See backlog comment on DraftGraphInput for full context.
-  brief: z.string().min(30).max(5000),
+  brief: z.string().min(DRAFT_GRAPH_MIN_BRIEF_LENGTH).max(DRAFT_GRAPH_MAX_BRIEF_LENGTH),
   round: z.number().int().min(0).max(2).default(0),
   previous_answers: z.array(z.object({
     question: z.string(),
@@ -255,7 +263,7 @@ export const ClarifyBriefOutput = z.object({
 
 export const CritiqueGraphInput = z.object({
   graph: Graph,
-  brief: z.string().min(30).max(5000).optional(),
+  brief: z.string().min(DRAFT_GRAPH_MIN_BRIEF_LENGTH).max(DRAFT_GRAPH_MAX_BRIEF_LENGTH).optional(),
   attachments: z
     .array(
       z.object({
@@ -289,7 +297,7 @@ export const ExplainDiffInput = z.object({
     updates: z.array(z.any()).default([]),
     removes: z.array(z.any()).default([])
   }),
-  brief: z.string().min(30).max(5000).optional(),
+  brief: z.string().min(DRAFT_GRAPH_MIN_BRIEF_LENGTH).max(DRAFT_GRAPH_MAX_BRIEF_LENGTH).optional(),
   graph_summary: z.object({
     node_count: z.number(),
     edge_count: z.number()
