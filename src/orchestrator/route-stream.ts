@@ -58,21 +58,26 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
     "/orchestrate/v1/turn/stream",
     { preHandler: createOrchestratorRateLimitHook() },
     async (req, reply) => {
-      // Feature gate
-      if (!config.features.orchestratorStreaming) {
-        reply.code(404);
-        return reply.send({ error: "Not found" });
-      }
+      // We always have a request_id available for logs — compute it up
+      // front so both the V4_DISABLED guard and the feature-gate branch
+      // can include it consistently (P1-10 follow-up).
+      const requestId = getOrGenerateRequestId(req);
 
-      // V4_DISABLED guard (v5-exclusive-cee brief §3 Task 1). When the V4
-      // flag is off, do NOT open the SSE stream — the pipeline-stream
-      // executor would fall through to legacy V2 / V1 paths that
-      // nobody tests, which would surface as blank turns or timeouts.
-      // A plain-JSON 410 before the stream opens lets clients migrate
-      // to `/orchestrate/v2/turn` with a loud, typed signal.
+      // V4_DISABLED guard (v5-exclusive-cee brief §3 Task 1). Runs BEFORE
+      // the orchestratorStreaming feature gate so that a client calling
+      // a V4-disabled, streaming-disabled endpoint gets the migration
+      // signal (410) rather than an ambiguous "not found" (404). The
+      // V4_DISABLED signal is permanent ("go to /orchestrate/v2/turn");
+      // a 404 could mean almost anything. Precedence was reversed in
+      // the follow-up review (P1-5).
+      //
+      // Returning plain JSON before ANY SSE header is written keeps the
+      // wire contract predictable — the UI parser never sees a half-
+      // opened SSE connection that it then has to reconcile with an
+      // error body.
       if (!config.features.pipelineV4Enabled) {
         log.warn(
-          { route: '/orchestrate/v1/turn/stream' },
+          { request_id: requestId, route: '/orchestrate/v1/turn/stream' },
           'V1 streaming turn rejected: V4 disabled — use /orchestrate/v2/turn',
         );
         reply.code(410);
@@ -83,8 +88,13 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         });
       }
 
+      // Feature gate
+      if (!config.features.orchestratorStreaming) {
+        reply.code(404);
+        return reply.send({ error: "Not found" });
+      }
+
       const startTime = Date.now();
-      const requestId = getOrGenerateRequestId(req);
       const streamMetrics = {
         time_to_first_event_ms: 0,
         time_to_first_text_delta_ms: 0,

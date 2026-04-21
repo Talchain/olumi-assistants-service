@@ -89,22 +89,38 @@ describe("POST /orchestrate/v1/turn — V4_DISABLED guard (v5-exclusive-cee Task
     });
   });
 
-  it("does not emit the 410 when pipelineV4Enabled is true (sanity regression)", async () => {
-    // Flag ON: the guard must NOT fire. Downstream may fail for other
-    // reasons in this test's minimal env (no PLoT, no LLM adapter), but
-    // the status MUST NOT be 410. 502 / 500 / even 200 are all acceptable
-    // outcomes here — the assertion is only "not the guard's 410".
+  it("takes the V4 pipeline path when pipelineV4Enabled is true — asserts downstream V4 signals, not just != 410 (P1-6)", async () => {
+    // Flag ON: the guard must NOT fire AND the request must actually
+    // reach the V4 pipeline branch. Downstream may then fail for other
+    // reasons in this minimal env (no PLoT, no LLM adapter), but the
+    // outcome MUST be something the V4 pipeline produces, not the
+    // guard's 410 JSON shape.
     mockPipelineV4Enabled = true;
     const res = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
       payload: makeValidRequest(),
     });
+
+    // Concrete downstream signals (P1-6 tightening):
+    //   1. Status code is never 410 (the guard's status).
+    //   2. Response body is NOT the V4_DISABLED JSON shape — even if an
+    //      unrelated downstream path happens to return 410 for some reason
+    //      in the future, it MUST NOT masquerade as V4_DISABLED.
     expect(res.statusCode).not.toBe(410);
     const body = res.json();
-    if (res.statusCode === 410) {
-      // Only relevant if the assertion above failed — helps debugging.
-      expect(body.error).not.toBe("V4_DISABLED");
-    }
+    expect(body?.error).not.toBe("V4_DISABLED");
+    expect(body?.message).not.toBe(
+      "V4 orchestration is disabled. Use /orchestrate/v2/turn.",
+    );
+    // 3. Response must carry SOME V4-pipeline shape signal: V4 produces
+    //    either a TurnResponseV1 envelope (with `turn_id`) or an error
+    //    envelope with `error.code` (validation, tool-failure, etc).
+    //    Both are shape-distinguishable from the 410 {error, message,
+    //    retryable} tuple.
+    const hasV4Envelope =
+      typeof body?.turn_id === 'string' ||
+      (typeof body?.error === 'object' && body?.error !== null);
+    expect(hasV4Envelope).toBe(true);
   });
 });

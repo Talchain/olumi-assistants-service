@@ -180,10 +180,58 @@ describe("ceeOrchestratorStreamRouteV1", () => {
           message: "V4 orchestration is disabled. Use /orchestrate/v2/turn.",
           retryable: false,
         });
+        // P1-11 follow-up: wire-level check — response must be plain JSON,
+        // NOT a half-opened SSE stream. Fastify sets application/json on
+        // reply.send() with an object; the SSE_HEADERS (text/event-stream)
+        // are only written by reply.raw.writeHead — and our guard returns
+        // before that. Asserting content-type ensures a future refactor
+        // that accidentally opens the SSE stream and THEN writes JSON
+        // would be caught here.
+        expect(res.headers['content-type']).toMatch(/application\/json/);
+        expect(res.headers['content-type']).not.toMatch(/event-stream/);
         // executePipelineStream must NOT have been called.
         expect(executePipelineStream).not.toHaveBeenCalled();
       } finally {
         mockPipelineV4Enabled = true;
+      }
+    });
+
+    // P1-5 follow-up: V4_DISABLED precedence over orchestratorStreaming 404.
+    // When both flags disable the endpoint, a client should see the loud
+    // migration signal (410 V4_DISABLED) not the ambiguous "not found"
+    // (404). Only with V4 ON and streaming OFF does the 404 surface.
+    it("V4_DISABLED takes precedence over orchestratorStreaming OFF", async () => {
+      (config.features as any).orchestratorStreaming = false;
+      mockPipelineV4Enabled = false;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+        // 410 migration signal wins; 404 suppressed.
+        expect(res.statusCode).toBe(410);
+        const body = res.json();
+        expect(body.error).toBe("V4_DISABLED");
+      } finally {
+        (config.features as any).orchestratorStreaming = true;
+        mockPipelineV4Enabled = true;
+      }
+    });
+
+    it("orchestratorStreaming OFF with V4 ON still returns 404 (precedence regression)", async () => {
+      (config.features as any).orchestratorStreaming = false;
+      mockPipelineV4Enabled = true;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+        expect(res.statusCode).toBe(404);
+        expect(res.json()).toEqual({ error: "Not found" });
+      } finally {
+        (config.features as any).orchestratorStreaming = true;
       }
     });
   });
