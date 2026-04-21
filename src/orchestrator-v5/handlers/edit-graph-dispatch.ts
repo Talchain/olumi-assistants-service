@@ -73,7 +73,7 @@ function editResultToOlumiResponse(
   const fallback = result.wasRejected
     ? 'The proposed edit was rejected.'
     : result.appliedGraph
-      ? `Applied edit — graph now has ${result.appliedGraph.nodes?.length ?? 0} nodes and ${result.appliedGraph.edges?.length ?? 0} edges.`
+      ? `Applied edit. Graph now has ${result.appliedGraph.nodes?.length ?? 0} nodes and ${result.appliedGraph.edges?.length ?? 0} edges.`
       : 'Edit processed.';
   return {
     response_version: 2,

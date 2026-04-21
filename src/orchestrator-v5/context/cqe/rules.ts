@@ -1,5 +1,5 @@
 import type {
-  ParameterOperator,
+  CqeParameterOperator,
   QuantityExtractionResult,
 } from './schema-types.js';
 import {
@@ -482,7 +482,7 @@ const rule_P6b: PatternRule = {
       const isCut = direction === 'down';
       const verbLower = verb.toLowerCase();
       const isAddVerb = /^add/i.test(verbLower);
-      const operator: ParameterOperator = isAddVerb
+      const operator: CqeParameterOperator = isAddVerb
         ? 'add'
         : isCut
         ? 'decrement'
@@ -999,7 +999,7 @@ const rule_P13: PatternRule = {
       const num = parseNum(m[2]);
       if (!Number.isFinite(num)) return null;
       const direction = verb ? directionFromVerb(verb) : null;
-      const operator: ParameterOperator | null = verb
+      const operator: CqeParameterOperator | null = verb
         ? direction === 'up'
           ? 'increment'
           : direction === 'down'
