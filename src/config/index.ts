@@ -295,7 +295,23 @@ const ConfigSchema = z.object({
     artefactRenderingEnabled: booleanString.default(false), // CEE_ARTEFACT_RENDERING_ENABLED — when false, artefact blocks are suppressed with fallback commentary
     diagnosticTraceEnabled: booleanString.default(false), // CEE_DIAGNOSTIC_TRACE_ENABLED — attach _diagnostic_trace to V2 response envelopes
     deterministicOrchestratorEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED — three-layer deterministic intelligence pipeline
-    pipelineV4Enabled: booleanString.default(true), // CEE_PIPELINE_V4_ENABLED — native tool-use pipeline (v4), replaces JSON-contract pipeline. Default flipped true (April 2026): V4 is the only supported path and the V1 handlers (e.g. src/orchestrator/tools/explain-results.ts) are stubbed to throw if reached. Set to false only for emergency rollback AND revert the V1 stubs.
+    // CEE_PIPELINE_V4_ENABLED — V1 route-registration flag only.
+    //
+    // Scope narrowed by the v5-handler-surface brief (Task 0b) for clarity:
+    // this flag gates execution at the two V1 route entry points
+    // (src/orchestrator/route.ts, src/orchestrator/route-stream.ts) and their
+    // streaming cousin (src/orchestrator/pipeline/pipeline-stream.ts). It does
+    // NOT gate the unified pipeline (src/cee/unified-pipeline/), the V4 tool
+    // handlers (src/orchestrator/tools/*), or the deterministic orchestrator
+    // layer. Those remain callable from the V2/V5 route (route-v2.ts)
+    // regardless of this flag — the V5 draft_graph and edit_graph dispatches
+    // depend on that independence.
+    //
+    // Default flipped true (April 2026): V4 is the only supported V1 path and
+    // V1 handlers (e.g. src/orchestrator/tools/explain-results.ts) are
+    // stubbed to throw if reached. Set to false only for emergency rollback
+    // of V1 AND revert the V1 stubs.
+    pipelineV4Enabled: booleanString.default(true),
     orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
   }),
 
