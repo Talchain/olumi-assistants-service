@@ -189,6 +189,10 @@ describe('POST /orchestrate/v2/turn — UNSUPPORTED_ACTION end-to-end (v5-exclus
     expect(parsed.details).toMatchObject({
       retryable: false,
       failure_type: 'FEATURE_NOT_ENABLED',
+      // stage is stamped by route-v2.ts for operator triage. Asserting
+      // it here locks the wire contract so a future refactor cannot
+      // silently drop the field.
+      stage: 'frame',
     });
 
     // Turn telemetry carries the typed wire code so operators can filter
