@@ -75,6 +75,7 @@ import { validateIngress, validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
 import { preflightScenarioCheck } from '../orchestrator-v5/build-turn-context.js';
+import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
 // keys), so we cannot pass `graph_state` / `analysis_state` straight through
@@ -157,27 +158,59 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(422).send(preflightError);
     }
 
-    // v0.7.0 schema: ingress is a discriminated union on `kind`. Task 1 of the
-    // v5-handler-surface brief adds a pre-TurnExecutor dispatch branch for
-    // `kind: 'system_event'`. Until that branch lands (next commit in the
-    // brief sequence), surface system_event ingress as a typed
-    // FEATURE_NOT_ENABLED so the wire contract stays honest — the v0.7.0
-    // schema accepts the payload but the handler isn't wired yet.
-    if (ingress.value.kind !== 'message') {
-      const notImplemented: BoundaryError = {
-        error: 'FEATURE_NOT_ENABLED',
-        boundary: 'B1',
-        direction: 'ingress',
-        validator: 'system_event_dispatch',
-        details: {
-          reason: 'system_event_dispatch_not_wired',
-          event_kind: ingress.value.event.kind,
-          retryable: false,
-        },
-        request_id: requestId,
-        retryable: false,
-      };
-      return reply.code(501).send(notImplemented);
+    // v0.7.0 schema: ingress is a discriminated union on `kind`. System events
+    // (patch_accepted / patch_dismissed / direct_graph_edit / chip_click /
+    // undo / redo) are Layer 0 deterministic operations — no LLM routing, no
+    // handler dispatch. They branch HERE, before TurnExecutor, because
+    // SystemEventTurnPayload has no `message` field and TurnExecutor's ORIENT
+    // step cannot run without one.
+    //
+    // Commit semantics (see src/orchestrator-v5/system-events/dispatch.ts):
+    //   - Four state-changing events commit via append_turn_atomic.
+    //   - undo/redo are client-only and DO NOT commit. The dispatcher
+    //     signals that via commitSkippedReason: 'client_only_event'; the
+    //     branch below recognises that reason and still returns 200 without
+    //     invoking the fail-closed 500 path. This keeps the wire invariant
+    //     honest ("commit_performed=false + recognised skip reason ⇒ 200";
+    //     "commit_performed=false + no recognised skip reason ⇒ 500").
+    if (ingress.value.kind === 'system_event') {
+      const sysResult = await dispatchSystemEvent({
+        payload: ingress.value,
+        requestId,
+      });
+      if (!sysResult.commitPerformed && sysResult.commitSkippedReason !== 'client_only_event') {
+        const boundaryError: BoundaryError = {
+          error: 'INTERNAL_ERROR',
+          boundary: 'B1',
+          direction: 'egress',
+          validator: 'turn_commit',
+          details: {
+            retryable: true,
+            reason: 'system_event_commit_failed',
+            event_kind: ingress.value.event.kind,
+            stage: ingress.value.stage,
+          },
+          request_id: requestId,
+          retryable: true,
+        };
+        log.error(
+          {
+            request_id: requestId,
+            event_kind: ingress.value.event.kind,
+          },
+          'V5 system event commit failed — returning 500 with BoundaryError envelope',
+        );
+        return reply.code(500).send(boundaryError);
+      }
+      const sysEgress = validateEgress(sysResult.response, requestId);
+      if (!sysEgress.ok) {
+        log.error(
+          { request_id: requestId, event_kind: ingress.value.event.kind },
+          'V5 system event egress validation failed — returning typed fallback envelope',
+        );
+        return reply.code(200).send(sysEgress.fallback);
+      }
+      return reply.code(200).send(sysEgress.value);
     }
 
     // TurnExecutor returns a well-formed OlumiResponse envelope on every

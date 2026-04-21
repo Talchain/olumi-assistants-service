@@ -131,11 +131,13 @@ let events: Event[] = [];
 
 function buildRequest(scenarioId: string) {
   return {
+    kind: 'message' as const,
     turn_id: 'a1111111-1111-4111-8111-111111111111',
     scenario_id: scenarioId,
     message: 'pre-flight test message',
     turn_class: 'frame' as const,
     stage: 'frame' as const,
+    source: 'composer' as const,
   };
 }
 

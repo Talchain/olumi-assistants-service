@@ -12,11 +12,13 @@
     "expected_v5_outcome_class": "typed_boundary_error"
   },
   "request": {
+    "kind": "message",
     "turn_id": 12345,
     "scenario_id": "22222222-2222-4222-8222-222222222222",
     "message": ["this", "should", "be", "a", "string"],
     "turn_class": "not_a_real_class",
-    "stage": "frame"
+    "stage": "frame",
+    "source": "composer"
   },
   "expected": {
     "status": 422,

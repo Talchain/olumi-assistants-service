@@ -133,11 +133,13 @@ let lastRequestId: string | undefined;
 
 function buildRequest(turnId: string) {
   return {
+    kind: 'message' as const,
     turn_id: turnId,
     scenario_id: SCENARIO,
     message: 'test message for task c resolution',
     turn_class: 'frame' as const,
     stage: 'frame' as const,
+    source: 'composer' as const,
   };
 }
 

@@ -10,15 +10,18 @@
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
     "expected_v5_outcome_class": "direct_answer_success",
-    "note_a1": "A0 originally expected a FEATURE_NOT_ENABLED envelope. A1 replaced the stub with TurnExecutor, so this fixture now asserts a direct_answer success envelope; the B1 ingress/egress boundary behaviour it was designed to cover is unchanged."
+    "note_a1": "A0 originally expected a FEATURE_NOT_ENABLED envelope. A1 replaced the stub with TurnExecutor, so this fixture now asserts a direct_answer success envelope; the B1 ingress/egress boundary behaviour it was designed to cover is unchanged.",
+    "note_v0_7_0": "v5-handler-surface brief updated this fixture to the v0.7.0 discriminated-union shape (kind: 'message', required source)."
   },
   "mock_narrate_output": "Expanding into Germany depends on regulatory readiness, localisation cost, and the payoff of the additional market. Name the biggest uncertainty first.",
   "request": {
+    "kind": "message",
     "turn_id": "11111111-1111-4111-8111-111111111111",
     "scenario_id": "22222222-2222-4222-8222-222222222222",
     "message": "Should we expand into Germany next quarter?",
     "turn_class": "frame",
-    "stage": "frame"
+    "stage": "frame",
+    "source": "composer"
   },
   "expected": {
     "status": 200,

@@ -52,11 +52,13 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
 
 const VALID_PAYLOAD = {
+  kind: 'message' as const,
   turn_id: '11111111-1111-4111-8111-111111111111',
   scenario_id: '22222222-2222-4222-8222-222222222222',
   message: 'hello',
   turn_class: 'frame' as const,
   stage: 'frame' as const,
+  source: 'composer' as const,
 };
 
 describe('server-boot: /orchestrate/v2/turn registration is flag-gated', () => {
