@@ -41,14 +41,23 @@ import {
   type HandlerRegistry,
 } from '../tools/registry.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
-import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
 
+/**
+ * Note on ingress state (graphState / analysisState):
+ * The run_analysis handler reads its scenario state via the injected
+ * `scenarioReader` (see createRunAnalysisHandler in tools/handlers/
+ * run-analysis.ts) — NOT from the HTTP request body. A chip-click
+ * payload does not need to thread graph_state or analysis_state into
+ * the handler; passing them here would have been dead weight and
+ * invited drift between ingress state and the scenario-read truth.
+ * This interface therefore does not accept those fields. If a future
+ * handler DOES need ingress-state passthrough, add the fields then,
+ * not now.
+ */
 export interface DispatchChipClickRunAnalysisParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
-  readonly graphState: GraphStateIngress | null;
-  readonly analysisState: AnalysisStateIngress | null;
   /** Injectable registry for tests. Production uses the default singleton. */
   readonly handlerRegistry?: HandlerRegistry;
 }

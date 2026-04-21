@@ -30,7 +30,8 @@ import type {
   GraphV3T,
   V2RunResponseEnvelope,
 } from '../../orchestrator/types.js';
-import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { GraphV3 } from '../../schemas/cee-v3.js';
+import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
 // V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
@@ -57,8 +58,10 @@ export interface DispatchEditGraphParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
   readonly request: FastifyRequest;
+  /** Permissive ingress shape. Adapter inside converts to GraphV3T. */
   readonly graphState: GraphStateIngress;
-  readonly analysisState: V2RunResponseEnvelope | null;
+  /** Permissive ingress shape. Adapter inside converts to V2RunResponseEnvelope. */
+  readonly analysisState: AnalysisStateIngress | null;
 }
 
 export interface DispatchEditGraphResult {
@@ -85,13 +88,94 @@ function editResultToOlumiResponse(
   };
 }
 
-function graphStateToGraphV3(graphState: GraphStateIngress): GraphV3T {
-  // GraphStateIngress is a permissive ingress shape with `nodes: [{id,kind,label,...}]`
-  // and `edges: [{from,to,...}]`. V4's ConversationContext expects a full
-  // GraphV3T but handleEditGraph only reads structural fields, so a coerced
-  // cast is safe here. This mirrors the coerceIngressAnalysis pattern in
-  // turn-executor.ts.
-  return graphState as unknown as GraphV3T;
+/**
+ * Adapter: permissive `GraphStateIngress` (v0.7.0 wire shape) → strict
+ * `GraphV3T` (V4 internal type) for `ConversationContext.graph`.
+ *
+ * Ingress has already been Zod-validated by `parseRequestExtensions`, but its
+ * schema uses `.passthrough()` and weaker field types than GraphV3. Rather
+ * than `as unknown as` (erasing type safety), this adapter runs `GraphV3`
+ * through `safeParse`. Outcomes:
+ *   - parse success → return the parsed GraphV3T (nodes/edges preserved).
+ *   - parse failure → construct a minimal GraphV3T-compatible value from
+ *     the ingress fields `handleEditGraph` actually reads (nodes[id,kind,
+ *     label], edges[from,to]). Failure is logged at warn so the operator
+ *     sees the drift; the edit still proceeds because handleEditGraph
+ *     internally re-casts to a weaker structural type (see edit-graph.ts
+ *     lines 1662/1712/1766).
+ *
+ * Callers of this module MUST NOT apply `as unknown as GraphV3T` themselves
+ * — see the banner comment in src/orchestrator-v5/boundary/request-extensions.ts.
+ */
+function graphStateToGraphV3(graphState: GraphStateIngress, requestId: string): GraphV3T {
+  const parsed = GraphV3.safeParse(graphState);
+  if (parsed.success) {
+    return parsed.data;
+  }
+  log.warn(
+    {
+      request_id: requestId,
+      issue_count: parsed.error.issues.length,
+      first_issue_path: parsed.error.issues[0]?.path.join('.') ?? null,
+    },
+    'V5 edit_graph dispatch — graph ingress did not pass strict GraphV3 parse; using structural fallback',
+  );
+  // Structural fallback: build a GraphV3T-shaped object from the ingress
+  // fields handleEditGraph actually reads. Required GraphV3 fields that
+  // the ingress does NOT carry (edge.effect_direction, edge.strength
+  // object, edge.exists_probability) are stamped with inert defaults so
+  // the returned value satisfies GraphV3T's type without fabricating
+  // semantically meaningful values. handleEditGraph re-casts graph
+  // internally (edit-graph.ts:1662/1712/1766 cast to a weaker
+  // { nodes: Array<{id,kind?}>, edges?: unknown[] } type), so these
+  // defaults never influence the edit logic itself.
+  const fallbackNodes: GraphV3T['nodes'] = graphState.nodes.map((n) => {
+    const node = n as { id: string; kind: string; label?: string };
+    return {
+      id: node.id,
+      kind: node.kind as GraphV3T['nodes'][number]['kind'],
+      label: node.label ?? node.id,
+    };
+  });
+  const fallbackEdges: GraphV3T['edges'] = graphState.edges.map((e) => {
+    const edge = e as { from: string; to: string };
+    return {
+      from: edge.from,
+      to: edge.to,
+      strength: { mean: 0, std: 0 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    };
+  });
+  return { nodes: fallbackNodes, edges: fallbackEdges };
+}
+
+/**
+ * Adapter: permissive `AnalysisStateIngress` → `V2RunResponseEnvelope`.
+ *
+ * Mirrors `coerceIngressAnalysis` in turn-executor.ts (the existing V5
+ * convention for ingress→V4 envelope conversion). Only `analysis_status` is
+ * structurally required in the ingress schema; everything else is
+ * passthrough. We fill `meta` and normalise `results` so handleEditGraph's
+ * downstream consumers receive the shape they expect without this module
+ * applying a type-erasing `as unknown as` cast.
+ */
+function analysisIngressToV2Envelope(a: AnalysisStateIngress): V2RunResponseEnvelope {
+  const raw = a as AnalysisStateIngress & {
+    meta?: V2RunResponseEnvelope['meta'];
+    results?: unknown;
+    [k: string]: unknown;
+  };
+  const results: unknown[] = Array.isArray(raw.results)
+    ? raw.results
+    : raw.results && typeof raw.results === 'object'
+      ? Object.values(raw.results as Record<string, unknown>)
+      : [];
+  return {
+    ...raw,
+    meta: raw.meta ?? { seed_used: 0, n_samples: 0, response_hash: '' },
+    results,
+  };
 }
 
 export async function dispatchEditGraph(
@@ -101,8 +185,8 @@ export async function dispatchEditGraph(
   const startedAt = Date.now();
 
   const context: ConversationContext = {
-    graph: graphStateToGraphV3(graphState),
-    analysis_response: analysisState,
+    graph: graphStateToGraphV3(graphState, requestId),
+    analysis_response: analysisState ? analysisIngressToV2Envelope(analysisState) : null,
     framing: { stage: mapStageToDecisionStage(payload.stage) },
     messages: [{ role: 'user', content: payload.message }],
     scenario_id: payload.scenario_id,

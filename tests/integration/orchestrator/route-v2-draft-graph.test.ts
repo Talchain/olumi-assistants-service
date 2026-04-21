@@ -317,4 +317,77 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.error).toBe('INTERNAL_ERROR');
     expect(body.details.reason).toBe('draft_graph_pipeline_threw');
   });
+
+  // ------------------------------------------------------------------
+  // Regression: phrasings that might trip the heuristic trigger
+  // ------------------------------------------------------------------
+  // The heuristic regex is known to produce false negatives on valid
+  // decision briefs that don't use the tracked verbs. These cases
+  // document current behaviour so a future trigger change can see
+  // exactly which phrasings it's affecting. False negatives fall
+  // through to TurnExecutor text_only (already WORKING in the matrix),
+  // so the user still gets a response — just not a graph.
+
+  describe('regression phrasings — current trigger behaviour', () => {
+    const cases = [
+      {
+        label: 'positive: "should we" + decide',
+        message: 'Should we launch the new SKU in Q3 or hold?',
+        expectDispatch: true,
+      },
+      {
+        label: 'positive: "whether to"',
+        message: 'Whether to acquire the smaller competitor this year or next',
+        expectDispatch: true,
+      },
+      {
+        label: 'positive: ends with ?',
+        message: 'Is this a reasonable plan for the next six months of growth?',
+        expectDispatch: true,
+      },
+      {
+        label: 'KNOWN FALSE NEGATIVE: declarative "I am thinking about"',
+        message: 'I am thinking about moving the team to Austin next spring',
+        expectDispatch: false,
+      },
+      {
+        label: 'KNOWN FALSE NEGATIVE: "considering options"',
+        message: 'Considering our options for hiring senior engineers this year',
+        expectDispatch: false,
+      },
+      {
+        label: 'positive: "pivot"',
+        message: 'Pivot from enterprise to SMB — is this the right move now?',
+        expectDispatch: true,
+      },
+    ];
+
+    let turnIdSuffix = 0;
+    for (const c of cases) {
+      it(`${c.label}`, async () => {
+        if (c.expectDispatch) {
+          dispatchDraftGraphMock.mockResolvedValueOnce(makeDraftGraphMockResult());
+        }
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: {
+            kind: 'message',
+            turn_id: `11111111-1111-4111-8111-1111111dd1${String(turnIdSuffix++).padStart(2, '0')}`,
+            scenario_id: SCENARIO_ID,
+            stage: 'frame',
+            message: c.message,
+            turn_class: 'frame',
+            source: 'composer',
+          },
+        });
+        if (c.expectDispatch) {
+          expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+        } else {
+          expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+        }
+        expect([200, 500]).toContain(res.statusCode);
+      });
+    }
+  });
 });

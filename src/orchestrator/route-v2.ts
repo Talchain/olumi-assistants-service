@@ -279,7 +279,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return reply.code(200).send(dgEgress.value);
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
-        // dispatcher already logged the details.
+        // dispatcher already logged the details; re-log here with the
+        // route-level correlation context.
+        log.error(
+          {
+            request_id: requestId,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'V5 draft_graph pipeline threw — returning 500 BoundaryError',
+        );
+        // Wire body carries only stable, typed fields. Raw exception text
+        // stays in server logs (above).
         const boundaryError: BoundaryError = {
           error: 'INTERNAL_ERROR',
           boundary: 'B1',
@@ -289,7 +299,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             retryable: true,
             reason: 'draft_graph_pipeline_threw',
             stage: ingress.value.stage,
-            message: err instanceof Error ? err.message : String(err),
           },
           request_id: requestId,
           retryable: true,
@@ -318,8 +327,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const cc = await dispatchChipClickRunAnalysis({
           payload: ingress.value,
           requestId,
-          graphState: extensions.value.graphState ?? null,
-          analysisState: extensions.value.analysisState ?? null,
         });
         if (!cc.commitPerformed) {
           const boundaryError: BoundaryError = {
@@ -347,6 +354,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         }
         return reply.code(200).send(ccEgress.value);
       } catch (err) {
+        log.error(
+          {
+            request_id: requestId,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'V5 chip_click run_analysis handler threw — returning 500 BoundaryError',
+        );
         const boundaryError: BoundaryError = {
           error: 'INTERNAL_ERROR',
           boundary: 'B1',
@@ -356,7 +370,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             retryable: true,
             reason: 'chip_click_run_analysis_handler_threw',
             stage: ingress.value.stage,
-            message: err instanceof Error ? err.message : String(err),
           },
           request_id: requestId,
           retryable: true,
@@ -395,15 +408,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     if (isEditGraphShape) {
       try {
         // graphState confirmed non-null by the `isEditGraphShape` guard.
+        // Pass ingress types through directly — the dispatcher owns the
+        // conversion to V4 internal envelopes (see graphStateToGraphV3 and
+        // analysisIngressToV2Envelope in edit-graph-dispatch.ts). No
+        // `as unknown as` casts leak across this boundary.
         const eg = await dispatchEditGraph({
           payload: ingress.value,
           requestId,
           request: req,
           graphState: extensions.value.graphState!,
-          analysisState:
-            (extensions.value.analysisState as unknown as
-              | import('../orchestrator/types.js').V2RunResponseEnvelope
-              | null) ?? null,
+          analysisState: extensions.value.analysisState ?? null,
         });
         if (!eg.commitPerformed) {
           const boundaryError: BoundaryError = {
@@ -431,6 +445,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         }
         return reply.code(200).send(egEgress.value);
       } catch (err) {
+        log.error(
+          {
+            request_id: requestId,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'V5 edit_graph pipeline threw — returning 500 BoundaryError',
+        );
         const boundaryError: BoundaryError = {
           error: 'INTERNAL_ERROR',
           boundary: 'B1',
@@ -440,7 +461,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             retryable: true,
             reason: 'edit_graph_pipeline_threw',
             stage: ingress.value.stage,
-            message: err instanceof Error ? err.message : String(err),
           },
           request_id: requestId,
           retryable: true,

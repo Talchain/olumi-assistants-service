@@ -270,4 +270,76 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
     expect(body.error).toBe('INTERNAL_ERROR');
     expect(body.details.reason).toBe('edit_graph_pipeline_threw');
   });
+
+  // ------------------------------------------------------------------
+  // Regression: phrasings that might trip edit_graph trigger
+  // ------------------------------------------------------------------
+  // Positive guard: EDIT_INTENT_REGEX (verbs like change/reduce/add).
+  // Negative guard: NON_EDIT_INTENT_REGEX (explain/what would/why) — if
+  // it matches, dispatch is SUPPRESSED even when an edit verb is
+  // present. Mutating the graph on a meta-question is the worst failure
+  // mode, so we err toward NOT dispatching. These regression cases
+  // document the exact boundaries.
+  describe('regression phrasings — current trigger behaviour', () => {
+    const cases = [
+      {
+        label: 'positive: "raise" (synonym of increase)',
+        message: 'Raise the strength of the market risk edge',
+        expectDispatch: true,
+      },
+      {
+        label: 'positive: "lower" (synonym of decrease)',
+        message: 'Lower the cost factor by a notch',
+        expectDispatch: true,
+      },
+      {
+        label: 'positive: "tweak"',
+        message: 'Tweak the probability on the regulatory edge slightly',
+        expectDispatch: true,
+      },
+      {
+        label: 'suppressed: "explain why" + edit verb',
+        message: 'Explain why I should reduce the cost factor before acting',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: "tell me how" + edit verb',
+        message: 'Tell me how to add a constraint on schedule',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: "compare options" alone',
+        message: 'Compare options A and B for me',
+        expectDispatch: false,
+      },
+      {
+        label: 'KNOWN FALSE NEGATIVE: passive mutation request',
+        message: 'Regulatory factor should be weighted less heavily overall',
+        expectDispatch: false,
+      },
+    ];
+
+    let turnIdSuffix = 0;
+    for (const c of cases) {
+      it(`${c.label}`, async () => {
+        if (c.expectDispatch) {
+          dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+        }
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: payload({
+            turn_id: `11111111-1111-4111-8111-11111eee11${String(turnIdSuffix++).padStart(2, '0')}`,
+            message: c.message,
+          }),
+        });
+        if (c.expectDispatch) {
+          expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+        } else {
+          expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+        }
+        expect([200, 500]).toContain(res.statusCode);
+      });
+    }
+  });
 });

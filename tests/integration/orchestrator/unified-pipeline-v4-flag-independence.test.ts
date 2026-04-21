@@ -25,21 +25,21 @@ const llmChatMock = vi.fn().mockResolvedValue({
 
 vi.mock('../../../src/adapters/llm/router.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/adapters/llm/router.js')>();
+  const adapter = {
+    name: 'fixtures',
+    model: 'test-model',
+    chat: llmChatMock,
+    chatWithTools: llmChatMock,
+    // Unified pipeline's parse stage calls draftAdapter.draftGraph(...)
+    // (see src/cee/unified-pipeline/stages/parse.ts:186). This is the
+    // downstream invocation we assert on to prove flag-gate independence.
+    draftGraph: llmChatMock,
+  };
   return {
     ...actual,
-    getAdapter: vi.fn().mockReturnValue({
-      name: 'fixtures',
-      model: 'test-model',
-      chat: llmChatMock,
-      chatWithTools: llmChatMock,
-    }),
+    getAdapter: vi.fn().mockReturnValue(adapter),
     getAdapterWithResolution: vi.fn().mockReturnValue({
-      adapter: {
-        name: 'fixtures',
-        model: 'test-model',
-        chat: llmChatMock,
-        chatWithTools: llmChatMock,
-      },
+      adapter,
       resolution: { model: 'test-model', source: 'default', provider: 'fixtures' },
     }),
     getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
@@ -108,6 +108,10 @@ describe('unified pipeline — CEE_PIPELINE_V4_ENABLED scope independence', () =
     //   (2) The result shape is a UnifiedPipelineResult (has statusCode +
     //       body) — the function's public contract survived the flag-off
     //       environment.
+    //   (3) The internal LLM adapter mock WAS reached — proves execution
+    //       entered the pipeline's parse stage rather than being
+    //       intercepted by a feature-flag gate. This is the strongest
+    //       evidence that the V1 flag is not gating V5's draft path.
     // We do NOT assert the statusCode value itself — the LLM mock may
     // surface as 4xx/5xx inside the parse stage, which is irrelevant to
     // flag-scope. The contract is: the function returned a typed result
@@ -116,5 +120,11 @@ describe('unified pipeline — CEE_PIPELINE_V4_ENABLED scope independence', () =
     expect(result).toHaveProperty('statusCode');
     expect(result.statusCode).toBeTypeOf('number');
     expect(result).toHaveProperty('body');
+    // Downstream-invocation proof: the pipeline called the LLM adapter
+    // (stage 1 parse), which it cannot do if any V1-flag gate
+    // short-circuits at the pipeline entry. If this assertion fails, the
+    // scope-narrowing premise is violated and the draft/edit V5
+    // dispatchers would silently stop working.
+    expect(llmChatMock).toHaveBeenCalled();
   });
 });
