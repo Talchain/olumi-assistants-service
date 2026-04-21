@@ -314,6 +314,76 @@ describe('SupabaseSessionStore.checkScenarioExists (Group 3 Task A pre-flight)',
   });
 });
 
+describe('SupabaseSessionStore.checkScenarioOwnership (Group 3 P0 follow-up)', () => {
+  it('calls check_scenario_ownership RPC with canonical args and returns true', async () => {
+    const { client, rpcCalls } = makeClient({ rpcResult: { data: true, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.checkScenarioOwnership(SCENARIO, USER)).resolves.toBe(true);
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].fn).toBe('check_scenario_ownership');
+    expect(rpcCalls[0].args).toEqual({ p_scenario_id: SCENARIO, p_user_id: USER });
+  });
+
+  it('returns false when RPC reports ownership mismatch', async () => {
+    const { client } = makeClient({ rpcResult: { data: false, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.checkScenarioOwnership(SCENARIO, USER)).resolves.toBe(false);
+  });
+
+  it('throws SessionReadError on RPC transport failure', async () => {
+    const { client } = makeClient({
+      rpcResult: { error: { message: 'function does not exist', code: '42883' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.checkScenarioOwnership(SCENARIO, USER)).rejects.toBeInstanceOf(
+      SessionReadError,
+    );
+  });
+});
+
+describe('SupabaseSessionStore.append v1 vs v2 routing (Group 3 P0 follow-up)', () => {
+  it('calls append_turn_atomic (v1) when caller_user_id is absent', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.append(WRITE);
+    expect(rpcCalls[0].fn).toBe('append_turn_atomic');
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_user_id).toBeUndefined();
+  });
+
+  it('calls append_turn_atomic_v2 when caller_user_id is present, threading p_user_id', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.append({ ...WRITE, caller_user_id: USER });
+    expect(rpcCalls[0].fn).toBe('append_turn_atomic_v2');
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_user_id).toBe(USER);
+    // All the other args remain identical to the v1 shape.
+    expect(args.p_scenario_id).toBe(SCENARIO);
+    expect(args.p_turn_id).toBe('turn-xyz');
+  });
+});
+
 describe('SupabaseSessionStore invalidation delegation', () => {
   it('invalidateScoped delegates to the cache layer', async () => {
     const { client } = makeClient();

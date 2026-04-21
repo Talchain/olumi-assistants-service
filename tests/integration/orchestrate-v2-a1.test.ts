@@ -217,6 +217,10 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     // Group 3 Task A: scenario pre-flight. A1 fixtures assume the scenario
     // exists, so the mock returns true — pre-flight passes.
     checkScenarioExists: async () => true,
+    // Group 3 P0 follow-up: owner-scoped variant. Not exercised by A1
+    // tests (v5CrossTenantEnforcement flag off) but mocked defensively so
+    // future test additions don't hit a TypeError.
+    checkScenarioOwnership: async () => true,
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
@@ -350,10 +354,26 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
       process.env[k] = v;
     }
     phaseState.narrate.output = fx.mock.narrate_output!;
-    // A2: classifier is the first LLM call — make it the slow one so the
-    // outer budget trips while classifier waits. Fixture already sets an
-    // aggressive TURN_BUDGET_MS.
-    phaseState.classify.delayMs = fx.mock.narrate_delay_ms ?? 100;
+    // Group 3 P1 follow-up (two-part fix):
+    //
+    // (1) Drive the LIVE tool-use routing path, NOT the dead Phase-1
+    //     classifier path. Prior to this change the test set
+    //     phaseState.classify.delayMs, but V5 Phase 1 no longer calls
+    //     the classifier (routeWithToolUse replaced it — see
+    //     Docs/v5/v5-llm-call-site-inventory.md). The old assertion
+    //     happened to be green for other reasons, not because the
+    //     outer abort actually fired on the live path.
+    //
+    // (2) The fixture's TURN_BUDGET_MS=1 is unrealistically aggressive:
+    //     setTimeout(abort, 1) fires on a later macrotask than the
+    //     narrate-delay, so the turn can complete before the abort
+    //     fires. Use narrate_delay=500ms + TURN_BUDGET_MS=50 so the
+    //     budget deterministically wins the race. This makes the test
+    //     a genuine regression guard for the live-path abort-signal
+    //     plumbing — a future regression that lets chatWithTools
+    //     ignore opts.signal will surface as a 200 here.
+    phaseState.narrate.delayMs = 500;
+    process.env.TURN_BUDGET_MS = '50';
 
     const res = await app.inject({
       method: 'POST',

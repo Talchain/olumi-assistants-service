@@ -30,6 +30,15 @@ export interface SessionTurnWrite {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /**
+   * Group 3 P0 follow-up: caller user_id for cross-tenant enforcement.
+   * When present AND config.features.v5CrossTenantEnforcement is true, the
+   * store uses `append_turn_atomic_v2` which asserts `scenarios.user_id =
+   * p_user_id` in SQL. When absent or the flag is off, the store uses the
+   * legacy `append_turn_atomic` (no ownership check). Optional so existing
+   * tests and non-enforced flows continue to work unchanged.
+   */
+  readonly caller_user_id?: string;
 }
 
 export interface SessionStore {
@@ -47,8 +56,24 @@ export interface SessionStore {
    * should fail-closed on ambiguity (the pre-flight treats a read error as
    * "pass" so an outage doesn't block traffic; the later RPC will still fail
    * loudly if the row is genuinely missing).
+   *
+   * ⚠ Does NOT enforce caller ownership — see checkScenarioOwnership for
+   * the user-scoped variant (Group 3 P0 follow-up).
    */
   checkScenarioExists(scenarioId: string): Promise<boolean>;
+  /**
+   * Group 3 P0 follow-up: caller-scoped existence check. Returns true iff
+   * the scenario exists AND belongs to `callerUserId`. Returns false for
+   * both "missing" and "foreign owner" without distinguishing — the
+   * distinction would leak ownership information across tenants.
+   *
+   * Requires the 20260422000000_v5_cross_tenant_enforcement.sql migration
+   * to be applied; otherwise the RPC call throws and the route's
+   * preflight treats it as a transient error and passes. Callers should
+   * only invoke this method when config.features.v5CrossTenantEnforcement
+   * is true.
+   */
+  checkScenarioOwnership(scenarioId: string, callerUserId: string): Promise<boolean>;
 }
 
 /**

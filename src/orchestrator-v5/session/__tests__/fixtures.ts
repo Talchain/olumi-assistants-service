@@ -30,6 +30,9 @@ export interface NoopSessionStoreOptions {
   /** Default true — most tests assume the scenario exists. */
   readonly scenarioExists?: boolean;
   readonly throwOnCheckScenarioExists?: Error;
+  /** Default true — most tests assume caller owns the scenario. */
+  readonly scenarioOwnershipMatches?: boolean;
+  readonly throwOnCheckScenarioOwnership?: Error;
 }
 
 export function createNoopSessionStore(
@@ -62,6 +65,10 @@ export function createNoopSessionStore(
     async checkScenarioExists(_scenarioId: string): Promise<boolean> {
       if (opts.throwOnCheckScenarioExists) throw opts.throwOnCheckScenarioExists;
       return opts.scenarioExists ?? true;
+    },
+    async checkScenarioOwnership(_scenarioId: string, _callerUserId: string): Promise<boolean> {
+      if (opts.throwOnCheckScenarioOwnership) throw opts.throwOnCheckScenarioOwnership;
+      return opts.scenarioOwnershipMatches ?? true;
     },
   };
 }

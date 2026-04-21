@@ -1,29 +1,62 @@
 /**
  * POST /orchestrate/v2/turn — V5 orchestrator endpoint.
  *
- * HTTP status / body matrix (Group 3 Task B + P0 follow-up):
+ * ─────────────────────────────────────────────────────────────────
+ * HTTP status / body matrix (Group 3 Task B + P0 follow-up)
+ * ─────────────────────────────────────────────────────────────────
  *
- *   422 + BoundaryError      — B1 ingress validation failed, OR pre-flight
- *                              scenario check rejected the turn (Task A)
- *   500 + BoundaryError      — commit_performed === false (Task B); retryable
- *                              flag preserved on the wire so the UI can
- *                              render a typed actionable error
- *   200 + OlumiResponse      — happy path OR schema-drift fallback from
- *                              B1 egress validator (internal contract
- *                              violation; response is still well-formed
- *                              OlumiResponse per boundary contract §3.2.3)
+ *   422 + BoundaryError    INGRESS_CONTRACT_VIOLATION
+ *                          - B1 ingress validation failed, OR
+ *                          - pre-flight scenario check (Task A) rejected
+ *                            the turn (missing scenario; or, when
+ *                            v5CrossTenantEnforcement is on, foreign
+ *                            scenario)
  *
- * Ordering within the handler is deliberate:
+ *   500 + BoundaryError    ANY runtime failure that left
+ *                          commit_performed === false. That is a
+ *                          DELIBERATELY UNIFORM STATUS across:
+ *                            - STATE_COMMIT_FAILED (RPC failure)
+ *                            - UPSTREAM_TIMEOUT   (LLM timeout)
+ *                            - TURN_BUDGET_EXCEEDED (outer budget)
+ *                            - INTERNAL_ERROR (UNHANDLED, handler
+ *                              invocation / result failures)
+ *                          Rationale: (a) the UI parser treats every
+ *                          non-ok status as BoundaryError — mixing 500
+ *                          / 503 / 504 would bifurcate client error-
+ *                          handling without adding actionable info the
+ *                          user can use; (b) the `retryable` flag on
+ *                          the wire already carries the "try again vs
+ *                          give up" distinction clients actually need;
+ *                          (c) future HTTP-semantic splits (503 for
+ *                          upstream, 504 for timeout) can layer on
+ *                          without changing the fail-closed invariant.
+ *
+ *   200 + OlumiResponse    Happy path. Also used for B1 egress
+ *                          validator's schema-drift fallback — an
+ *                          internal contract violation where the
+ *                          TurnExecutor's OWN output drifted from
+ *                          OlumiResponseSchema. That fallback body is
+ *                          still a well-formed OlumiResponse per
+ *                          boundary contract §3.2.3. Reachable ONLY
+ *                          when commit_performed === true (see ordering
+ *                          below — the commit-status check runs first).
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * Ordering within the handler is deliberate
+ * ─────────────────────────────────────────────────────────────────
  *
  *   1. Extension parse (graph_state / analysis_state)
  *   2. B1 ingress (core payload)
- *   3. Pre-flight scenario check (Task A)
- *   4. runTurnExecutor
- *   5. commit-status check (Task B — BEFORE egress so the invariant is
- *      total; a TurnExecutor whose output AND commit both fail takes
- *      the 500 path, not the 200-fallback path)
- *   6. B1 egress validator
- *   7. 200 + OlumiResponse
+ *   3. Auth hook — extract caller user_id (Group 3 P0 scaffold;
+ *      currently a stub, inert when v5CrossTenantEnforcement is off)
+ *   4. Pre-flight scenario check (Task A; ownership-checked when
+ *      v5CrossTenantEnforcement is on)
+ *   5. runTurnExecutor
+ *   6. Commit-status check (Task B — BEFORE egress so the invariant
+ *      is total; a TurnExecutor whose output AND commit both fail
+ *      takes the 500 path, not the 200-fallback path)
+ *   7. B1 egress validator
+ *   8. 200 + OlumiResponse
  *
  * Route registration is gated on config.features.orchestratorV5. When the
  * flag is off, this route is not registered and the endpoint returns 404.
@@ -34,9 +67,10 @@
  * No imports from V4 pipeline (pipeline-v4, response-assembler, handlers).
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
+import { config } from '../config/index.js';
 import { getOrGenerateRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 import { validateIngress, validateEgress } from '../validators/b1.js';
@@ -92,6 +126,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(422).send(ingress.error);
     }
 
+    // Auth hook (Group 3 P0 scaffold): extract the caller's user_id from
+    // the request. This is the single seam that future auth plumbing will
+    // fill in (Supabase JWT, Fastify auth plugin, signed header, etc.).
+    // Today it returns undefined — see extractCallerUserId below for the
+    // full TODO. Tests inject a user_id via the X-Olumi-User-Id header so
+    // the cross-tenant integration test can exercise the enforced path
+    // without a real auth stack.
+    const callerUserId = extractCallerUserId(req);
+    const enforceCrossTenant = config.features.v5CrossTenantEnforcement === true;
+
     // Task A pre-flight (Group 3): surface missing scenarios as a typed 422 at
     // ingress rather than letting `append_turn_atomic` surface them as an
     // opaque `STATE_COMMIT_FAILED` → `INTERNAL_ERROR` at commit. V5 depends on
@@ -101,16 +145,37 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // store is not configured (e.g. local tests without SUPABASE_*), skip; if
     // a transient read error occurs, skip (the commit path is still the last
     // line of defence).
-    const preflightFailure = await preflightScenarioCheck(ingress.value.scenario_id, requestId);
+    //
+    // Ownership mode (Group 3 P0 follow-up): when v5CrossTenantEnforcement
+    // is true AND a caller user_id is available, the preflight uses the
+    // user-scoped `check_scenario_ownership` RPC instead of the service-
+    // role `scenarios` SELECT. Absent owner check falls back to the legacy
+    // existence check so we don't accidentally block the happy path if the
+    // auth hook isn't wired yet.
+    const preflightFailure = await preflightScenarioCheck(
+      ingress.value.scenario_id,
+      requestId,
+      enforceCrossTenant ? callerUserId : undefined,
+    );
     if (preflightFailure) {
       return reply.code(422).send(preflightFailure);
     }
 
-    // TurnExecutor produces an OlumiResponse (success or typed error block).
-    // It never throws past this boundary — every runtime failure → 200 + envelope.
+    // TurnExecutor returns a well-formed OlumiResponse envelope on every
+    // path (success, typed error block, or commit failure). The HTTP
+    // status on the wire is decided here by the route, NOT by the
+    // TurnExecutor — see the status/body matrix in the file header. The
+    // executor never throws past this boundary.
     const run = await runTurnExecutor(ingress.value, requestId, {
       graphState: extensions.value.graphState,
       analysisState: extensions.value.analysisState,
+      // Thread caller_user_id to commit only when enforcement is on.
+      // The store picks `append_turn_atomic_v2` iff caller_user_id is
+      // present on the write; leaving it undefined preserves legacy
+      // behaviour.
+      ...(enforceCrossTenant && callerUserId !== undefined
+        ? { callerUserId }
+        : {}),
     });
 
     // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
@@ -149,6 +214,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           retryable,
           reason: 'state_commit_failed_or_turn_runtime_failure',
           failure_type: failureType,
+          // Group 3 follow-up: stage aids client-side triage — a
+          // commit failure in `analyse` stage vs `frame` stage has
+          // different user implications ("the analysis ran but didn't
+          // save" vs "we couldn't frame the decision").
+          stage: ingress.value.stage,
           stages_completed: run.telemetry.stages_completed,
         },
         request_id: requestId,
@@ -216,19 +286,26 @@ function extractRetryableFlag(response: unknown): boolean {
 async function preflightScenarioCheck(
   scenarioId: string,
   requestId: string,
+  callerUserId: string | undefined,
 ): Promise<BoundaryError | null> {
   let exists: boolean;
+  const ownershipMode = callerUserId !== undefined;
   try {
     const store = getSessionStore();
-    exists = await store.checkScenarioExists(scenarioId);
+    exists = ownershipMode
+      ? await store.checkScenarioOwnership(scenarioId, callerUserId as string)
+      : await store.checkScenarioExists(scenarioId);
   } catch (e) {
-    // Store not configured (missing SUPABASE_*) OR a transient read error.
-    // Do NOT block the turn — the RPC will surface genuinely missing rows.
-    // Log at debug so the absence of pre-flight is observable without noise.
+    // Store not configured (missing SUPABASE_*) OR a transient read error
+    // OR (in ownership mode) the check_scenario_ownership RPC not installed
+    // yet. Do NOT block the turn — the commit RPC is the last line of
+    // defence. Log at debug so the absence of pre-flight is observable
+    // without noise.
     log.debug(
       {
         request_id: requestId,
         scenario_id: scenarioId,
+        ownership_mode: ownershipMode,
         err_name: e instanceof Error ? e.name : 'unknown',
         err_message: e instanceof Error ? e.message : String(e),
       },
@@ -240,16 +317,61 @@ async function preflightScenarioCheck(
   if (exists) return null;
 
   log.warn(
-    { request_id: requestId, scenario_id: scenarioId },
-    'V5 pre-flight: scenario row not found — rejecting turn with 422',
+    { request_id: requestId, scenario_id: scenarioId, ownership_mode: ownershipMode },
+    'V5 pre-flight: scenario not found — rejecting turn with 422',
   );
   return {
     error: 'INGRESS_CONTRACT_VIOLATION',
     boundary: 'B1',
     direction: 'ingress',
     validator: 'scenario_preflight',
+    // Uniform reason for both "missing" and "foreign owner" — telling a
+    // non-owner "exists but not yours" is a cross-tenant leak.
     details: { reason: 'scenario_not_found', scenario_id: scenarioId },
     request_id: requestId,
     retryable: false,
   };
+}
+
+/**
+ * Extract the caller's user_id from the request. Group 3 P0 follow-up
+ * scaffold — the real auth story is Paul-owned and gated on the
+ * v5CrossTenantEnforcement feature flag + the
+ * 20260422000000_v5_cross_tenant_enforcement.sql migration.
+ *
+ * Today this helper reads an `X-Olumi-User-Id` header ONLY when the
+ * feature flag is on. In production, that header is trivially
+ * spoofable — the real implementation will be one of:
+ *
+ *   (A) Fastify auth plugin that parses a Supabase JWT from the
+ *       `Authorization: Bearer <jwt>` header, validates the signature
+ *       against Supabase's JWKS endpoint, and sets `request.user = {
+ *       id, ... }`. This helper then returns `(request as any).user.id`.
+ *
+ *   (B) A shared signed-header contract between the BFF proxy
+ *       (Netlify edge function) and CEE, where the BFF rewrites the
+ *       UI's JWT into a CEE-trusted signed header. Preserves the
+ *       performance of no-JWT-parse in CEE while keeping the auth
+ *       source of truth in one place.
+ *
+ * Either way, this helper becomes the single seam. Tests can override
+ * via the header (which is inert in production if the auth plugin sets
+ * request.user). Not yet in the test harness — will be wired in the
+ * Paul-owned auth commit that accompanies the migration rollout.
+ *
+ * Returns undefined when the flag is off OR the header is missing.
+ */
+function extractCallerUserId(req: FastifyRequest): string | undefined {
+  // Inert when the flag is off: no auth-source lookup, no header read.
+  if (!config.features.v5CrossTenantEnforcement) return undefined;
+  const raw = req.headers['x-olumi-user-id'];
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  // Basic UUID shape check — lets typos fail cleanly at the pre-flight
+  // instead of surfacing as an RPC syntax error deeper in the stack.
+  // Paul's real auth plugin will replace this with a validated JWT
+  // subject claim.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) {
+    return undefined;
+  }
+  return raw;
 }

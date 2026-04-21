@@ -37,6 +37,15 @@ export interface CommitMetadata {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /**
+   * Group 3 P0 follow-up: optional caller user_id. When present, the
+   * session store routes the write to `append_turn_atomic_v2`
+   * (ownership-enforced). When absent, the legacy `append_turn_atomic`
+   * is used. The route layer (route-v2.ts) decides whether to set this
+   * based on config.features.v5CrossTenantEnforcement + the request's
+   * authenticated user_id.
+   */
+  readonly caller_user_id?: string;
 }
 
 export interface CommitResult {
@@ -70,6 +79,9 @@ export async function commitDirectAnswer(
     llm_calls_used: metadata.llm_calls_used,
     duration_ms: metadata.duration_ms,
     handler_facts: metadata.handler_facts,
+    ...(metadata.caller_user_id !== undefined
+      ? { caller_user_id: metadata.caller_user_id }
+      : {}),
   });
 
   return { response, performed: true, persisted_row_id: persistedRowId };

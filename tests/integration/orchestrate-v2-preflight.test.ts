@@ -61,6 +61,13 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
       if (storeState.throwOnCheck) throw storeState.throwOnCheck;
       return storeState.existsByScenarioId.get(id) ?? false;
     },
+    // Group 3 P0 follow-up: owner-scoped pre-flight. Not exercised by
+    // this test file (flag is off in the config mock); the cross-tenant
+    // behaviour is covered by orchestrate-v2-cross-tenant.test.ts.
+    checkScenarioOwnership: async (id: string) => {
+      if (storeState.throwOnCheck) throw storeState.throwOnCheck;
+      return storeState.existsByScenarioId.get(id) ?? false;
+    },
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {

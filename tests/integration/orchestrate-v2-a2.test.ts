@@ -176,6 +176,7 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     // Group 3 Task A: scenario pre-flight passes for all A2 fixtures.
     checkScenarioExists: async () => true,
+    checkScenarioOwnership: async () => true,
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
