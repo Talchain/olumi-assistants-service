@@ -77,6 +77,7 @@ import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-exte
 import { preflightScenarioCheck } from '../orchestrator-v5/build-turn-context.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
+import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
@@ -286,6 +287,90 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           details: {
             retryable: true,
             reason: 'draft_graph_pipeline_threw',
+            stage: ingress.value.stage,
+            message: err instanceof Error ? err.message : String(err),
+          },
+          request_id: requestId,
+          retryable: true,
+        };
+        return reply.code(500).send(boundaryError);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Edit_graph pre-Sonnet dispatch (v5-handler-surface brief Task 3)
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // Same reasoning as draft_graph: `edit_graph` is not in v0.7.0
+    // V5ActionType, so Sonnet's validator cannot propose it. Detect
+    // natural-language edits deterministically BEFORE TurnExecutor.
+    //
+    // Conservative trigger — false positives mutate the graph, so err
+    // toward NOT dispatching. False negatives fall through to Sonnet's
+    // text_only branch (WORKING per the matrix).
+    //   - kind: 'message' (branched above for system events).
+    //   - graph_state present (something to edit).
+    //   - stage in {analyse, decide} (edit happens after drafting).
+    //   - EDIT_INTENT_REGEX: positive match on edit verbs.
+    //   - NON_EDIT_INTENT_REGEX: NO match. Explicit guards against
+    //     "explain this", "compare options", "what would" — those are
+    //     meta-questions that might contain an edit verb incidentally.
+    const EDIT_INTENT_REGEX =
+      /\b(change|update|edit|modify|remove|delete|add|adjust|set|reduce|increase|decrease|tweak|raise|lower)\b/i;
+    const NON_EDIT_INTENT_REGEX =
+      /\b(explain|compare|what would|flip|why|how does|tell me|show me|describe)\b/i;
+    const isEditGraphShape =
+      extensions.value.graphState != null &&
+      (ingress.value.stage === 'analyse' || ingress.value.stage === 'decide') &&
+      EDIT_INTENT_REGEX.test(ingress.value.message) &&
+      !NON_EDIT_INTENT_REGEX.test(ingress.value.message);
+    if (isEditGraphShape) {
+      try {
+        // graphState confirmed non-null by the `isEditGraphShape` guard.
+        const eg = await dispatchEditGraph({
+          payload: ingress.value,
+          requestId,
+          request: req,
+          graphState: extensions.value.graphState!,
+          analysisState:
+            (extensions.value.analysisState as unknown as
+              | import('../orchestrator/types.js').V2RunResponseEnvelope
+              | null) ?? null,
+        });
+        if (!eg.commitPerformed) {
+          const boundaryError: BoundaryError = {
+            error: 'INTERNAL_ERROR',
+            boundary: 'B1',
+            direction: 'egress',
+            validator: 'turn_commit',
+            details: {
+              retryable: true,
+              reason: 'edit_graph_commit_failed',
+              stage: ingress.value.stage,
+            },
+            request_id: requestId,
+            retryable: true,
+          };
+          return reply.code(500).send(boundaryError);
+        }
+        const egEgress = validateEgress(eg.response, requestId);
+        if (!egEgress.ok) {
+          log.error(
+            { request_id: requestId },
+            'V5 edit_graph dispatch egress validation failed — returning typed fallback envelope',
+          );
+          return reply.code(200).send(egEgress.fallback);
+        }
+        return reply.code(200).send(egEgress.value);
+      } catch (err) {
+        const boundaryError: BoundaryError = {
+          error: 'INTERNAL_ERROR',
+          boundary: 'B1',
+          direction: 'egress',
+          validator: 'edit_graph_pipeline',
+          details: {
+            retryable: true,
+            reason: 'edit_graph_pipeline_threw',
             stage: ingress.value.stage,
             message: err instanceof Error ? err.message : String(err),
           },
