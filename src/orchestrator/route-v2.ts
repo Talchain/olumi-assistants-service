@@ -105,6 +105,27 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(200).send(egress.fallback);
     }
 
+    // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
+    // NEVER appear inside an HTTP 200. When the TurnExecutor did not persist
+    // session state (append_turn_atomic failure → STATE_COMMIT_FAILED → the
+    // failure envelope already sits in `egress.value`), the client should see
+    // a 500 + typed error envelope, not a 200 that implies success. This is
+    // the architectural difference between "the model answered but we could
+    // not remember" (user must retry, state is broken) and "everything worked"
+    // (stored, renderable). Prior to Group 3 both produced 200, masking the
+    // session corruption.
+    if (run.telemetry.commit_performed === false) {
+      log.error(
+        {
+          request_id: requestId,
+          failure_type: run.telemetry.failure_type,
+          stages_completed: run.telemetry.stages_completed,
+        },
+        'V5 turn completed without commit — returning 500 with typed failure envelope',
+      );
+      return reply.code(500).send(egress.value);
+    }
+
     return reply.code(200).send(egress.value);
   });
 }

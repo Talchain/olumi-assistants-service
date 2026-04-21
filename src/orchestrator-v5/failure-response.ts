@@ -13,12 +13,33 @@ import type { StageType } from '@talchain/schemas/boundary';
 
 import { INTERNAL_TO_WIRE, type InternalFailure } from './types.js';
 
+// Group 3 Task B: internal failures that are transient / user can retry and
+// succeed. STATE_COMMIT_FAILED is the flag case — the LLM produced a valid
+// response but persistence failed. LLM_TIMEOUT is also retryable (upstream
+// hiccup). Everything else (UNHANDLED, HANDLER_INVOCATION_FAILED,
+// HANDLER_RESULT_INVALID, LLM_SCHEMA_VIOLATION, BUDGET_EXCEEDED) is either
+// structural or model-pathology; retrying won't help.
+const RETRYABLE_INTERNAL_FAILURES: ReadonlySet<InternalFailure> = new Set([
+  'STATE_COMMIT_FAILED',
+  'LLM_TIMEOUT',
+]);
+
 export function buildFailureResponse(
   internal: InternalFailure,
   stage: StageType,
   details?: Record<string, unknown>,
 ): OlumiResponse {
   const wireCode: FailureTypeLiteral = INTERNAL_TO_WIRE[internal];
+  // Group 3 Task B: surface retryability in the error block's details so the
+  // UI can render a retry affordance and distinguish transient failures from
+  // permanent ones. The shared FAILURE_USER_TEXT[wireCode] generic copy is
+  // acceptable for Group 3 (and flagged in the commit as a UX risk — see
+  // below), but details.retryable is machine-readable and unambiguous.
+  const retryable = RETRYABLE_INTERNAL_FAILURES.has(internal);
+  const mergedDetails: Record<string, unknown> = {
+    retryable,
+    ...(details ?? {}),
+  };
   return {
     response_version: 2,
     assistant_text: FAILURE_USER_TEXT[wireCode],
@@ -27,7 +48,7 @@ export function buildFailureResponse(
         type: 'error',
         error_code: wireCode,
         severity: 'error',
-        ...(details ? { details } : {}),
+        details: mergedDetails,
       },
     ],
     suggested_actions: [],

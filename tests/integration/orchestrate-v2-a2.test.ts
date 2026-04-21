@@ -118,6 +118,46 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
       };
     },
   }),
+  // Group 3 Task C: route-with-tool-use now calls getAdapterWithResolution.
+  // Return the same adapter shape + a stubbed resolution block.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: {
+      name: 'test-a2-mock',
+      chat: async () => ({ content: '', usage: { input_tokens: 0, output_tokens: 0 }, model: 'test-a2-mock', latencyMs: 0 }),
+      chatWithTools: async () => {
+        const m = phaseState.narrate;
+        if (m.throws === 'NarrateTimeoutError') {
+          const errs = await import('../../src/adapters/llm/errors.js');
+          throw new errs.UpstreamTimeoutError('test timeout', 'narrate', 1);
+        }
+        if (m.throws === 'generic') {
+          throw new Error('test generic error');
+        }
+        return {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tu-1',
+              name: 'olumi_action',
+              input: {
+                intent_class: 'clarify',
+                clarification: { ambiguity_type: 'intent', question: m.output },
+              },
+            },
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'test-a2-mock',
+          latencyMs: 0,
+        };
+      },
+    },
+    resolution: {
+      task: task ?? 'orchestrator',
+      resolved_model: 'test-a2-mock',
+      resolution_source: 'task_default' as const,
+    },
+  }),
 }));
 
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
@@ -247,7 +287,8 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    expect(res.statusCode).toBe(200);
+    // Group 3 Task B: commit_performed:false → 500.
+    expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
     const parsed = OlumiResponseSchema.parse(body);
     expect(parsed.blocks).toHaveLength(1);

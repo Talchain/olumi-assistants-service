@@ -153,6 +153,51 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
       };
     },
   }),
+  // Group 3 Task C: route-with-tool-use now calls getAdapterWithResolution
+  // instead of getAdapter. Return the same adapter with a stubbed resolution
+  // so test assertions can verify the task id / resolution source if needed.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: {
+      name: 'test-a1-mock',
+      chat: async () => ({ content: '', usage: { input_tokens: 0, output_tokens: 0 }, model: 'test-a1-mock', latencyMs: 0 }),
+      chatWithTools: async (_args: unknown, opts: { signal?: AbortSignal }) => {
+        const m = phaseState.narrate;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            if (m.throws === 'NarrateTimeoutError') {
+              import('../../src/adapters/llm/errors.js').then((errs) => {
+                reject(new errs.UpstreamTimeoutError('test timeout', 'narrate', 1));
+              });
+              return;
+            }
+            if (m.throws === 'generic') {
+              reject(new Error('test generic error'));
+              return;
+            }
+            resolve();
+          }, m.delayMs);
+          opts.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            const abort = new Error('abort');
+            (abort as Error & { name: string }).name = 'AbortError';
+            reject(abort);
+          });
+        });
+        return {
+          content: [{ type: 'text', text: m.output }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'test-a1-mock',
+          latencyMs: 0,
+        };
+      },
+    },
+    resolution: {
+      task: task ?? 'orchestrator',
+      resolved_model: 'test-a1-mock',
+      resolution_source: 'task_default' as const,
+    },
+  }),
 }));
 
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
@@ -282,7 +327,11 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    expect(res.statusCode).toBe(200);
+    // Group 3 Task B: commit_performed:false → HTTP 500 (was 200 before
+    // Task B shipped; the A0 contract returned 200 for every runtime
+    // failure). The envelope body is unchanged — only the HTTP status
+    // carries the fail-closed signal now.
+    expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
     const parsed = OlumiResponseSchema.parse(body);
     expect(parsed.blocks).toHaveLength(1);
@@ -316,9 +365,11 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    expect(res.statusCode).toBe(200);
+    // Group 3 Task B: commit_performed:false → 500.
+    expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
     const parsed = OlumiResponseSchema.parse(body);
+    expect(parsed.blocks).toHaveLength(1);
     const block = parsed.blocks[0]!;
     expect(block.type).toBe('error');
     if (block.type === 'error') {
