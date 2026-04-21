@@ -749,7 +749,11 @@ describe("buildPatchSummary — T4 semantic summaries (graph-aware)", () => {
     const summary = buildPatchSummary(ops, null, 'edit', graph);
     expect(summary).toContain('Cost');
     expect(summary).toContain('0.4');
-    expect(summary).toMatch(/to 0\.4/);
+    // v5-maintenance: display_value now renders as '<Band> (<raw>)'
+    // (e.g. 'Moderate (0.4)') rather than bare '0.4'. Match either form so
+    // the intent (numeric value appears in the summary) is preserved
+    // regardless of the display-format wrapping.
+    expect(summary).toMatch(/to (?:0\.4|Moderate \(0\.4\)|Low \(0\.4\)|High \(0\.4\))/);
     expect(summary).not.toMatch(/Cost: value/);
     expect(summary.toLowerCase()).not.toContain(' value ');
   });

@@ -30,7 +30,11 @@ import { join } from "path";
 import * as ceeV3Schema from "../../src/schemas/cee-v3.js";
 import { ZodError, ZodIssue } from "zod";
 
-describe("Cross-Service Blocked Response Contract", () => {
+// v5-maintenance: same superseded soft-gate contract as
+// tests/integration/blocked-response.contract.test.ts. runStageBoundary
+// now fails closed on V3 validation errors (502 earlyReturn) rather than
+// populating ctx.finalResponse with a degraded flag.
+describe.skip("Cross-Service Blocked Response Contract [v5-maintenance: superseded by fail-closed]", () => {
   const fixturePath = join(__dirname, "../fixtures/cross-service/blocked-response.fixture.json");
   const fixture = JSON.parse(readFileSync(fixturePath, "utf-8"));
   const blockedResponse = fixture.cee_output;
@@ -274,5 +278,96 @@ describe("Cross-Service Blocked Response Contract", () => {
 
       parseSpy.mockRestore();
     });
+  });
+});
+
+// v5-maintenance regression: replace-in-kind coverage for the current
+// fail-closed cross-service contract. The superseded soft-gate tests
+// above are kept as archive; these tests guard the live 502 +
+// CEE_EGRESS_CONTRACT_VIOLATION shape that downstream services (PLoT,
+// UI) must consume. If the fail-closed envelope shape drifts
+// (reason, error code, details.boundary/validator/direction), these
+// assertions catch it.
+describe("Cross-Service Blocked Response Contract — fail-closed envelope shape", () => {
+  it("502 earlyReturn body is a CEEErrorResponseV1 with typed cross-service fields", async () => {
+    // Dynamic import keeps the failing path's module graph isolated from
+    // the fixture-based tests above.
+    const { runStageBoundary } = await import("../../src/cee/unified-pipeline/stages/boundary.js");
+    const { _resetConfigCache } = await import("../../src/config/index.js");
+
+    _resetConfigCache();
+
+    const fakeIssues: ZodIssue[] = [
+      { code: "custom", path: ["nodes", 0, "id"], message: "cross-service fail-closed guard" },
+    ];
+    const parseSpy = vi.spyOn(ceeV3Schema.CEEGraphResponseV3, "safeParse").mockReturnValue({
+      success: false,
+      error: new ZodError(fakeIssues),
+    } as ReturnType<typeof ceeV3Schema.CEEGraphResponseV3.safeParse>);
+
+    const ctx = {
+      requestId: "cross-service-fail-closed-1",
+      input: { brief: "Test brief" },
+      opts: { schemaVersion: "v3", strictMode: false, includeDebug: false },
+      ceeResponse: {
+        graph: { nodes: [{ id: "goal_1", kind: "goal", label: "Test" }], edges: [] },
+        goal_node_id: "goal_1",
+        options: [],
+        causal_claims: [],
+      },
+      pipelineOutcome: {
+        graph_drafted: false,
+        graph_structurally_valid: false,
+        deterministic_sweep_violations: 0,
+        verification_status: 'skipped' as const,
+        validation_status: 'skipped' as const,
+        enrichment_status: 'skipped' as const,
+        coaching_status: 'partial' as const,
+        warnings: [] as Array<{ stage: string; error: string; degraded: boolean; blocked?: boolean }>,
+        rescue_score: 0,
+        factor_value_coverage: { total: 0, explicit: 0, inferred_with_evidence: 0, fallback_default: 0 },
+        edge_strength_unique_count: 0,
+        llm_repair: { triggered: false, outcome: 'skipped' as const, fallback_reason: null, attempts: 0 },
+        repair_provenance: [] as Array<{ rule: string; code: string; node_or_edge_id: string; field: string; before: unknown; after: unknown; source: string }>,
+      },
+    };
+
+    await runStageBoundary(ctx as unknown as Parameters<typeof runStageBoundary>[0]);
+
+    // Contract for downstream consumers:
+    //   - HTTP status 502 (upstream contract violation).
+    //   - body.schema === 'cee.error.v1' (schema marker clients key on).
+    //   - body.code === 'CEE_EGRESS_CONTRACT_VIOLATION' (typed enum).
+    //   - body.source === 'cee'.
+    //   - body.retryable === false.
+    //   - body.reason === 'egress_contract_violation' (typed reason).
+    //   - body.details.{validator,boundary,direction} name the gate that
+    //     fired so cross-service telemetry can correlate.
+    //   - JSON-serialises cleanly (downstream services parse this body).
+    const earlyReturn = (ctx as unknown as { earlyReturn?: { statusCode: number; body: unknown } }).earlyReturn;
+    expect(earlyReturn).toBeDefined();
+    expect(earlyReturn?.statusCode).toBe(502);
+
+    const body = earlyReturn!.body as Record<string, unknown>;
+    expect(body.schema).toBe("cee.error.v1");
+    expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
+    expect(body.source).toBe("cee");
+    expect(body.retryable).toBe(false);
+    expect(body.reason).toBe("egress_contract_violation");
+
+    const details = body.details as Record<string, unknown>;
+    expect(details.validator).toBe("zod_v3");
+    expect(details.boundary).toBe("B1");
+    expect(details.direction).toBe("response");
+
+    // Downstream-safety: the envelope JSON-serialises without circular
+    // references or undefined keys.
+    let jsonString = "";
+    expect(() => {
+      jsonString = JSON.stringify(earlyReturn!.body);
+    }).not.toThrow();
+    expect(jsonString).not.toContain(":undefined");
+
+    parseSpy.mockRestore();
   });
 });

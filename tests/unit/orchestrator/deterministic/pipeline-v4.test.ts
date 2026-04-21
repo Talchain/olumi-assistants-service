@@ -1029,7 +1029,9 @@ describe("executePipelineV4", () => {
       const events = await collectEvents(executePipelineV4(req, 'req-timeout'));
 
       const complete = events.find((e) => e.type === 'turn_complete') as Extract<OrchestratorStreamEvent, { type: 'turn_complete' }>;
-      expect(complete.envelope.assistant_text).toBe('Building your decision model is taking longer than usual. Please try again — complex decisions can take up to a minute.');
+      // v5-maintenance: message punctuation changed from em-dash to period
+      // to comply with no-em-dash style.
+      expect(complete.envelope.assistant_text).toBe('Building your decision model is taking longer than usual. Please try again. Complex decisions can take up to a minute.');
     });
 
     it("timeout error produces the generic message when a graph with nodes exists", async () => {

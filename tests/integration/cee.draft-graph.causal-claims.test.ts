@@ -108,17 +108,29 @@ const mockDraftGraph = vi.fn().mockResolvedValue({
   meta: DEFAULT_META,
 });
 
+const causalClaimsMockAdapter = {
+  name: "fixtures",
+  model: "fixture-v1",
+  draftGraph: mockDraftGraph,
+  repairGraph: vi.fn().mockResolvedValue({ graph: TEST_GRAPH, rationales: [], usage: DEFAULT_USAGE }),
+  suggestOptions: vi.fn().mockResolvedValue({ options: [] }),
+  clarifyBrief: vi.fn().mockResolvedValue({ questions: [], usage: DEFAULT_USAGE }),
+  critiqueGraph: vi.fn().mockResolvedValue({ critique: "", usage: DEFAULT_USAGE }),
+  chat: vi.fn().mockResolvedValue({ message: "", usage: DEFAULT_USAGE }),
+  explainDiff: vi.fn().mockResolvedValue({ explanation: "", usage: DEFAULT_USAGE }),
+};
 vi.mock("../../src/adapters/llm/router.js", () => ({
-  getAdapter: () => ({
-    name: "fixtures",
-    model: "fixture-v1",
-    draftGraph: mockDraftGraph,
-    repairGraph: vi.fn().mockResolvedValue({ graph: TEST_GRAPH, rationales: [], usage: DEFAULT_USAGE }),
-    suggestOptions: vi.fn().mockResolvedValue({ options: [] }),
-    clarifyBrief: vi.fn().mockResolvedValue({ questions: [], usage: DEFAULT_USAGE }),
-    critiqueGraph: vi.fn().mockResolvedValue({ critique: "", usage: DEFAULT_USAGE }),
-    chat: vi.fn().mockResolvedValue({ message: "", usage: DEFAULT_USAGE }),
-    explainDiff: vi.fn().mockResolvedValue({ explanation: "", usage: DEFAULT_USAGE }),
+  getAdapter: () => causalClaimsMockAdapter,
+  // v5-maintenance: unified pipeline now resolves adapters via
+  // getAdapterWithResolution (see parse stage). Without this export the
+  // pipeline throws at stage 1 and every test in this file returns 500.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: causalClaimsMockAdapter,
+    resolution: {
+      task,
+      resolved_model: "fixture-v1",
+      resolution_source: "task_default" as const,
+    },
   }),
   getAdapterForProvider: vi.fn(),
   getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),

@@ -4,7 +4,14 @@
 
 **Update rule:** any PR that adds, removes, moves, or changes the task ID of a V5 LLM call site MUST update this table. CI has no automated check for the list; maintenance is by convention.
 
-**Last reviewed:** 2026-04-21 (Group 3 P1 follow-up).
+**Last reviewed:** 2026-04-21 (v5-maintenance brief — verified accurate post v5-handler-surface).
+
+**v5-handler-surface additions (2026-04-21):** three new dispatchers were added in `src/orchestrator-v5/handlers/` and `src/orchestrator-v5/system-events/`. None introduce a NEW V5-OWNED LLM call site:
+
+- `dispatchSystemEvent` — no LLM calls (deterministic Layer 0).
+- `dispatchDraftGraph` — calls into `handleDraftGraph` (V4 tool handler), which in turn invokes the unified pipeline's `draftAdapter.draftGraph(...)`. The unified pipeline's LLM usage is outside V5's direct call-site inventory scope; it's cataloged separately in the V4 tool-handler surface.
+- `dispatchEditGraph` — calls `handleEditGraph(adapter=getAdapter('edit_graph'), ...)`. This is a ROUTED call but via the legacy `getAdapter` seam (same pattern as site #5 in the table). Classification: **ROUTED-NO-OBSERVABILITY**. Follow-up to migrate to `getAdapterWithResolution` tracked with site #5.
+- `dispatchChipClickRunAnalysis` — invokes the registered `run_analysis` handler. Its enrichment step fires `enrichRunAnalysisWithDecisionReview` (same as site #5); no new call site.
 
 ## Inventory
 

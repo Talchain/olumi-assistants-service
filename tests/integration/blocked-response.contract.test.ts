@@ -70,7 +70,14 @@ function makeCtx(overrides: Partial<{ requestId: string; ceeResponse: any }>): S
   } as StageContext;
 }
 
-describe("Blocked Response Contract (Stream F)", () => {
+// v5-maintenance (2026-04-21): runStageBoundary's behaviour on V3 validation
+// failure is now FAIL-CLOSED per boundary contract v1.1 §4.2 (Track 1 soft
+// gate was superseded). Validation failure sets ctx.earlyReturn to a 502
+// `CEE_EGRESS_CONTRACT_VIOLATION` envelope instead of ctx.finalResponse
+// with a degraded flag. All of this contract's "soft gate" assertions are
+// now against defunct behaviour. Kept as a change record only — unskip
+// only after a follow-up brief restores a typed soft-gate path.
+describe.skip("Blocked Response Contract (Stream F) [v5-maintenance: superseded by fail-closed]", () => {
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
@@ -314,5 +321,87 @@ describe("Blocked Response Contract (Stream F)", () => {
 
       parseSpy.mockRestore();
     });
+  });
+});
+
+// v5-maintenance regression: replace-in-kind coverage for the current
+// fail-closed contract. The superseded soft-gate tests above are kept as
+// archive; these tests guard the live behaviour (502 + typed
+// CEE_EGRESS_CONTRACT_VIOLATION envelope set on ctx.earlyReturn).
+describe("Blocked Response Contract — fail-closed (boundary contract v1.1 §4.2)", () => {
+  beforeEach(() => {
+    _resetConfigCache();
+  });
+  afterEach(() => {
+    _resetConfigCache();
+  });
+
+  it("V3 validation failure sets ctx.earlyReturn to a 502 BoundaryError envelope", async () => {
+    const parseSpy = mockV3ValidationFailure();
+    const ctx = makeCtx({ requestId: "fail-closed-1" });
+
+    await runStageBoundary(ctx);
+
+    // ctx.finalResponse MUST remain unset — the soft-gate path is gone.
+    expect(ctx.finalResponse).toBeUndefined();
+    // ctx.earlyReturn is the fail-closed signal the pipeline drains into
+    // an HTTP 502 at the route layer.
+    expect(ctx.earlyReturn).toBeDefined();
+    expect(ctx.earlyReturn?.statusCode).toBe(502);
+
+    const body = ctx.earlyReturn!.body as Record<string, unknown>;
+    // CEEErrorResponseV1 shape: typed `code`, human `message`, `source`,
+    // `retryable`, plus typed `reason`. These are the stable client-
+    // consumable fields — see buildCeeErrorResponse in
+    // src/cee/validation/pipeline.ts.
+    expect(body.schema).toBe("cee.error.v1");
+    expect(body.code).toBe("CEE_EGRESS_CONTRACT_VIOLATION");
+    expect(body.source).toBe("cee");
+    expect(body.retryable).toBe(false);
+    // Typed failure reason — not a stringly-typed narrative.
+    expect(body.reason).toBe("egress_contract_violation");
+
+    // Details carry the validator + boundary metadata clients use for triage.
+    const details = body.details as Record<string, unknown>;
+    expect(details.validator).toBe("zod_v3");
+    expect(details.boundary).toBe("B1");
+    expect(details.direction).toBe("response");
+    expect(typeof details.issue_count).toBe("number");
+
+    // pipelineOutcome records a blocked (not degraded) warning so the
+    // observability trail names the fail-closed action.
+    expect(ctx.pipelineOutcome.warnings.length).toBe(1);
+    const warning = ctx.pipelineOutcome.warnings[0] as {
+      stage: string;
+      error: string;
+      degraded: boolean;
+      blocked?: boolean;
+    };
+    expect(warning.stage).toBe("boundary_v3_validation");
+    expect(warning.degraded).toBe(false);
+    expect(warning.blocked).toBe(true);
+
+    parseSpy.mockRestore();
+  });
+
+  it("dev escape hatch (CEE_BOUNDARY_ALLOW_INVALID) bypasses fail-closed and populates finalResponse", async () => {
+    // The dev escape hatch is config-gated to local/test environments only.
+    // When enabled, V3 validation failure falls back to passing the raw body
+    // through via ctx.finalResponse — kept as a regression guard so the
+    // escape hatch does not atrophy.
+    vi.stubEnv("CEE_BOUNDARY_ALLOW_INVALID", "true");
+    _resetConfigCache();
+
+    const parseSpy = mockV3ValidationFailure();
+    const ctx = makeCtx({ requestId: "fail-closed-escape-1" });
+
+    await runStageBoundary(ctx);
+
+    // Escape hatch active: finalResponse IS set, earlyReturn is NOT.
+    expect(ctx.finalResponse).toBeDefined();
+    expect(ctx.earlyReturn).toBeUndefined();
+
+    parseSpy.mockRestore();
+    vi.unstubAllEnvs();
   });
 });

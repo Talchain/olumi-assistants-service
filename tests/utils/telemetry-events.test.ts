@@ -407,6 +407,22 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         OrchestratorModeDisagreement: "orchestrator.turn.mode_disagreement",
         OrchestratorToolSuppressed: "orchestrator.turn.tool_suppressed",
         OrchestratorContractViolation: "orchestrator.turn.contract_violation",
+
+        // v5-maintenance (2026-04-21): V5 additions. When adding new V5
+        // telemetry events, ALSO add them here so this canary keeps flagging
+        // accidental renames.
+        BoundaryValidation: "boundary.validation",
+        CqeExtraction: "cqe.extraction",
+        SessionReadDegraded: "session.read_degraded",
+        TurnExecutorCompleted: "turn_executor.completed",
+        TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
+        TurnExecutorFailureResponse: "turn_executor.failure_response",
+        TurnExecutorGraphLookup: "turn_executor.graph_lookup",
+        TurnExecutorStarted: "turn_executor.started",
+        V5CoachingSignalFired: "v5.coaching.signal_fired",
+        V5DecisionReviewFailed: "v5.decision_review.failed",
+        V5DecisionReviewInvoked: "v5.decision_review.invoked",
+        V5DecisionReviewSkipped: "v5.decision_review.skipped",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -431,8 +447,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
   describe("Event namespace consistency", () => {
     it("ensures all events start with a valid prefix and namespace", () => {
       const allEvents = Object.values(TelemetryEvents);
+      // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
+      // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$)/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review)\.)/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -883,6 +901,23 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.OrchestratorModeDisagreement,
         TelemetryEvents.OrchestratorToolSuppressed,
         TelemetryEvents.OrchestratorContractViolation,
+
+        // v5-maintenance (2026-04-21): V5 additions are diagnostic-only
+        // (turn-executor, CQE, decision-review, coaching-signal telemetry).
+        // Not yet wired into Datadog dashboards; treating as debug-only
+        // keeps this canary honest until Datadog alignment is explicit.
+        TelemetryEvents.BoundaryValidation,
+        TelemetryEvents.CqeExtraction,
+        TelemetryEvents.SessionReadDegraded,
+        TelemetryEvents.TurnExecutorStarted,
+        TelemetryEvents.TurnExecutorCompleted,
+        TelemetryEvents.TurnExecutorContaminationNarrate,
+        TelemetryEvents.TurnExecutorFailureResponse,
+        TelemetryEvents.TurnExecutorGraphLookup,
+        TelemetryEvents.V5CoachingSignalFired,
+        TelemetryEvents.V5DecisionReviewInvoked,
+        TelemetryEvents.V5DecisionReviewSkipped,
+        TelemetryEvents.V5DecisionReviewFailed,
       ];
 
       for (const event of allEvents) {
@@ -1264,6 +1299,20 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "orchestrator.turn.mode_disagreement",
         "orchestrator.turn.tool_suppressed",
         "orchestrator.turn.contract_violation",
+
+        // v5-maintenance (2026-04-21): V5 additions frozen below.
+        "boundary.validation",
+        "cqe.extraction",
+        "session.read_degraded",
+        "turn_executor.completed",
+        "turn_executor.contamination_narrate",
+        "turn_executor.failure_response",
+        "turn_executor.graph_lookup",
+        "turn_executor.started",
+        "v5.coaching.signal_fired",
+        "v5.decision_review.failed",
+        "v5.decision_review.invoked",
+        "v5.decision_review.skipped",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

@@ -47,18 +47,30 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
 // Mock getAdapter so route-level integration tests don't hit a live provider.
 // The mock exposes chatWithTools — the seam routeWithToolUse uses.
 let nextToolUseResult: ChatWithToolsResult;
-vi.mock('../../src/adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'p1.5-test-mock',
-    chatWithTools: vi.fn(async () => nextToolUseResult),
-    // `chat` stub for any path that still needs it.
-    chat: async () => ({
-      content: '{"turn_class":"direct_answer"}',
-      usage: { input_tokens: 1, output_tokens: 1 },
-      model: 'p1.5-test-mock',
-      latencyMs: 0,
-    }),
+const p15MockAdapter = {
+  name: 'p1.5-test-mock',
+  model: 'p1.5-test-mock',
+  chatWithTools: vi.fn(async () => nextToolUseResult),
+  // `chat` stub for any path that still needs it.
+  chat: async () => ({
+    content: '{"turn_class":"direct_answer"}',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: 'p1.5-test-mock',
+    latencyMs: 0,
   }),
+};
+vi.mock('../../src/adapters/llm/router.js', () => ({
+  getAdapter: () => p15MockAdapter,
+  // Group 3 Task C: routeWithToolUse resolves via getAdapterWithResolution.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: p15MockAdapter,
+    resolution: {
+      task,
+      resolved_model: 'p1.5-test-mock',
+      resolution_source: 'task_default' as const,
+    },
+  }),
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 // Feature flag proxy — enable V5 route for these tests.
@@ -252,8 +264,16 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
       payload,
     });
 
-    expect(res.statusCode).toBe(200);
+    // Post-fail-closed (v5-exclusive-cee Task B): a handler that fails at
+    // scenario_read produces commit_performed=false, which the route
+    // surfaces as 500 BoundaryError. Status 200 is unreachable from this
+    // setup because the production registry has no wired scenarioReader.
+    // The test's purpose is the VALIDATE-stage regression — that the
+    // validator didn't over-reach on real-UI graph_state — so assert on
+    // the telemetry (always emitted) rather than status 200.
+    expect(res.statusCode).toBe(500);
     const completed = events.find((e) => e.event === 'turn_executor.completed');
+    expect(completed).toBeDefined();
     const stages = completed!.data.stages_completed as string[];
     // Regression guards: prove the precondition did NOT misfire on the
     // real wire. A prior precondition revision required canonical options[]
@@ -263,16 +283,12 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
     // read / PLoT) — never a validator over-reach.
     expect(stages).toContain('validate');
     expect(completed!.data.turn_class).toBe('handler'); // routed to handler
-    // The response envelope confirms validation passed — error details (if
-    // any) carry scenario_read_failed or other handler cause_kinds, not the
-    // validator-layer no_options_defined reason.
+    // Confirm the 500's failure originated downstream (handler path), not at
+    // the validator. The wire BoundaryError's reason / cause_kind must not
+    // name the validator-layer over-reach code.
     const body = JSON.parse(res.body);
-    const errBlock = (body.blocks as Array<{ type: string; details?: Record<string, unknown> }>)
-      .find((b) => b.type === 'error');
-    if (errBlock) {
-      expect(errBlock.details?.validation_error_code).toBeUndefined();
-      expect(errBlock.details?.reason).not.toBe('no_options_defined');
-    }
+    expect(body.details?.reason).not.toBe('no_options_defined');
+    expect(body.details?.validation_error_code).toBeUndefined();
   });
 
   it('text_only turn with graph_state — validate stage skipped entirely', async () => {

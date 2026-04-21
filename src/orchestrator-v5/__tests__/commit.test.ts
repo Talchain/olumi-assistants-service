@@ -54,12 +54,18 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
 });
 
 describe('computeRequestHash', () => {
+  // v0.7.0 schema: payload is a discriminated union on `kind`.
+  // computeRequestHash switches on `payload.kind` so the `kind: 'message'`
+  // discriminator must be present for the hash to include `message` as a
+  // distinguishing field.
   const BASE_PAYLOAD = {
+    kind: 'message' as const,
     turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
     message: 'hello',
     turn_class: 'frame' as const,
     stage: 'frame' as const,
+    source: 'composer' as const,
   };
 
   it('produces a non-empty sha256-prefixed string', () => {

@@ -145,6 +145,9 @@ describe('phase 1 routing end-to-end — execute turn via tool-use', () => {
     expect(telemetry.commit_performed).toBe(true);
 
     const stages = telemetry.stages_completed;
+    // v5-maintenance: 'coach' was added as a stage in V5 Group 1 Task C
+    // (deterministic coaching signal detector). It sits between confirm
+    // and compose.
     expect(stages).toEqual([
       'build_turn_context',
       'orient',
@@ -152,6 +155,7 @@ describe('phase 1 routing end-to-end — execute turn via tool-use', () => {
       'validate_skipped_no_graph',
       'execute',
       'confirm',
+      'coach',
       'compose',
       'commit',
     ]);
