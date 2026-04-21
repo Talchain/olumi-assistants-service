@@ -26,7 +26,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { OlumiResponseSchema, BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIX_DIR = join(__dirname, '..', 'fixtures', 'contracts', 'b1', 'slice-a2');
@@ -287,17 +287,12 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    // Group 3 Task B: commit_performed:false → 500.
+    // Group 3 Task B + P0 follow-up: 500 with BoundaryError body.
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-    expect(parsed.blocks).toHaveLength(1);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
-      expect(block.severity).toBe('error');
-    }
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('UPSTREAM_TIMEOUT');
+    expect(parsed.retryable).toBe(true);
 
     const completed = turnExecutorEvents('completed');
     expect(completed).toHaveLength(1);

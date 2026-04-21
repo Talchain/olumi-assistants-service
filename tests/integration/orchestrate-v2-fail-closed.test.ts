@@ -19,7 +19,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 const SCENARIO = 'b0000000-0000-4000-8000-000000000001';
 
@@ -151,7 +151,7 @@ describe('POST /orchestrate/v2/turn — Group 3 Task B fail-closed on commit fai
     expect(completed[0]!.data.commit_performed).toBe(true);
   });
 
-  it('commit failure: HTTP 500 + typed INTERNAL_ERROR envelope with retryable:true', async () => {
+  it('commit failure: HTTP 500 + typed BoundaryError with retryable:true (wire-shape compatible with UI parser)', async () => {
     commitShouldFail = true;
     const res = await app.inject({
       method: 'POST',
@@ -161,14 +161,18 @@ describe('POST /orchestrate/v2/turn — Group 3 Task B fail-closed on commit fai
     // Core Task B assertion: non-200 status on commit failure.
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    // Body is still a well-formed OlumiResponse — the error is in-envelope.
-    const parsed = OlumiResponseSchema.parse(body);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('INTERNAL_ERROR');
-      expect(block.details).toMatchObject({ retryable: true, phase: 'commit' });
-    }
+    // P0 follow-up: body MUST parse as BoundaryError, not OlumiResponse.
+    // The UI parser (DecisionGuideAI/src/v5/responseParser.ts:35) treats
+    // every non-ok status as BoundaryError — sending an OlumiResponse on
+    // 500 would collapse to a generic INTERNAL_ERROR and lose `retryable`.
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('INTERNAL_ERROR');
+    expect(parsed.retryable).toBe(true);
+    expect(parsed.details).toMatchObject({
+      retryable: true,
+      reason: 'state_commit_failed_or_turn_runtime_failure',
+      failure_type: 'INTERNAL_ERROR',
+    });
     const completed = events.filter((e) => e.event === 'turn_executor.completed');
     expect(completed).toHaveLength(1);
     expect(completed[0]!.data.commit_performed).toBe(false);

@@ -96,6 +96,58 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       analysisState: extensions.value.analysisState,
     });
 
+    // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
+    // NEVER appear inside an HTTP 200. When the TurnExecutor did not persist
+    // session state the client should see a non-200 + typed BoundaryError,
+    // not a 200 that implies success. Prior to Group 3 both produced 200,
+    // masking the session corruption.
+    //
+    // Ordering (P1 follow-up): the commit-status check runs BEFORE egress
+    // validation. Otherwise a TurnExecutor whose OWN output drifted from
+    // OlumiResponseSchema AND whose commit failed would take the egress
+    // fallback branch and emit 200 + fallback envelope — silently violating
+    // the invariant. Commit-first keeps the invariant total.
+    //
+    // Body shape (P0 follow-up): non-2xx V5 responses must be BoundaryError
+    // envelopes (BoundaryErrorSchema), not OlumiResponse. The UI parser at
+    // [responseParser.ts:35] treats every non-ok status as BoundaryError;
+    // sending an OlumiResponse on 500 causes it to degrade to a generic
+    // parse_error → INTERNAL_ERROR, losing the typed retryable signal.
+    if (run.telemetry.commit_performed === false) {
+      const failureType = run.telemetry.failure_type;
+      // Retryable per failure class — read from the response envelope's
+      // error-block details (populated by buildFailureResponse), with a
+      // conservative false default if the shape drifts.
+      const retryable = extractRetryableFlag(run.response);
+      const boundaryError: BoundaryError = {
+        // failure_type is either a BoundaryErrorCode enum member or null
+        // (for successful turns — unreachable here because commit_performed
+        // is false). Fall back to INTERNAL_ERROR if null to keep the wire
+        // shape honest.
+        error: failureType ?? 'INTERNAL_ERROR',
+        boundary: 'B1',
+        direction: 'egress',
+        validator: 'turn_commit',
+        details: {
+          retryable,
+          reason: 'state_commit_failed_or_turn_runtime_failure',
+          failure_type: failureType,
+          stages_completed: run.telemetry.stages_completed,
+        },
+        request_id: requestId,
+        retryable,
+      };
+      log.error(
+        {
+          request_id: requestId,
+          failure_type: failureType,
+          stages_completed: run.telemetry.stages_completed,
+        },
+        'V5 turn completed without commit — returning 500 with BoundaryError envelope',
+      );
+      return reply.code(500).send(boundaryError);
+    }
+
     const egress = validateEgress(run.response, requestId);
     if (!egress.ok) {
       log.error(
@@ -105,29 +157,30 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(200).send(egress.fallback);
     }
 
-    // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
-    // NEVER appear inside an HTTP 200. When the TurnExecutor did not persist
-    // session state (append_turn_atomic failure → STATE_COMMIT_FAILED → the
-    // failure envelope already sits in `egress.value`), the client should see
-    // a 500 + typed error envelope, not a 200 that implies success. This is
-    // the architectural difference between "the model answered but we could
-    // not remember" (user must retry, state is broken) and "everything worked"
-    // (stored, renderable). Prior to Group 3 both produced 200, masking the
-    // session corruption.
-    if (run.telemetry.commit_performed === false) {
-      log.error(
-        {
-          request_id: requestId,
-          failure_type: run.telemetry.failure_type,
-          stages_completed: run.telemetry.stages_completed,
-        },
-        'V5 turn completed without commit — returning 500 with typed failure envelope',
-      );
-      return reply.code(500).send(egress.value);
-    }
-
     return reply.code(200).send(egress.value);
   });
+}
+
+/**
+ * Pull the boolean `retryable` flag out of a failure-response envelope's
+ * first error-block details. `buildFailureResponse` stamps this (Group 3
+ * Task B) and the set of retryable internal classes lives in
+ * `src/orchestrator-v5/failure-response.ts`. Defensive: returns false on
+ * any shape drift, which is the safer default (don't advertise retryability
+ * we're not sure about).
+ */
+function extractRetryableFlag(response: unknown): boolean {
+  if (!response || typeof response !== 'object') return false;
+  const blocks = (response as { blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks) || blocks.length === 0) return false;
+  const errBlock = blocks.find(
+    (b: unknown) =>
+      b != null && typeof b === 'object' && (b as { type?: unknown }).type === 'error',
+  );
+  if (!errBlock || typeof errBlock !== 'object') return false;
+  const details = (errBlock as { details?: unknown }).details;
+  if (!details || typeof details !== 'object') return false;
+  return (details as { retryable?: unknown }).retryable === true;
 }
 
 /**

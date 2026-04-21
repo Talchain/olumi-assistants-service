@@ -210,12 +210,28 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async checkScenarioExists(scenarioId: string): Promise<boolean> {
-    // Single-column SELECT keyed on PK; service-role client bypasses RLS, so a
-    // missing row reflects the true state of the table regardless of the
-    // caller's auth context. This is exactly what we want for a pre-flight
-    // existence check — the RPC we guard does the same service-role lookup.
-    // Cross-tenant protection is orthogonal and lives in the RPC itself
-    // (user_id is denormalised onto every v5_conversation_turns row for RLS).
+    // Single-column SELECT keyed on PK. Service-role client bypasses RLS,
+    // so this returns true for ANY row that exists in `public.scenarios`,
+    // regardless of who owns it.
+    //
+    // ⚠ LIMITATION (Group 3 P0 follow-up honesty note) ⚠
+    // This check does NOT enforce caller-scoped ownership. A caller who
+    // knows or guesses a foreign scenario UUID will pass pre-flight; the
+    // subsequent `append_turn_atomic` RPC also does not enforce ownership
+    // (it reads `user_id FROM scenarios WHERE id = p_scenario_id` and
+    // denormalises that value onto the new turn row — without checking
+    // the caller's identity). So in the current architecture, V5 has NO
+    // cross-tenant guard at the CEE layer. The UI-side auth + RLS on
+    // `scenarios` is the effective defence, because the UI's
+    // scenarioService uses the user's JWT, so a UI user never "sees"
+    // another user's scenario_id in the first place.
+    //
+    // TODO(post-Group-3): extend `append_turn_atomic` with a `p_user_id`
+    // parameter (derived from a Fastify auth hook on the V2 route) and
+    // assert `scenarios.user_id = p_user_id` inside the SQL function.
+    // That closes the gap for any future transport (API client, backfill
+    // job, admin tool) that bypasses the UI's auth flow. Gated on Paul
+    // applying the migration.
     const { data, error } = await this.client
       .from('scenarios')
       .select('id')

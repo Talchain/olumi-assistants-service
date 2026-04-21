@@ -38,7 +38,14 @@ const storeState: StoreState = {
   existsByScenarioId: new Map([
     [SCENARIO_EXISTING, true],
     [SCENARIO_MISSING, false],
-    [SCENARIO_FOREIGN, false], // Simulates "not visible to this caller".
+    // SCENARIO_FOREIGN models the honest production behaviour of
+    // `checkScenarioExists`: the service-role client sees ALL rows in
+    // `public.scenarios`, so a scenario belonging to a different user
+    // returns TRUE from this check. Cross-tenant isolation is NOT enforced
+    // at the CEE layer today — see the ⚠ LIMITATION comment on
+    // SupabaseSessionStore.checkScenarioExists and the matching test
+    // below that asserts the current (bounded) behaviour.
+    [SCENARIO_FOREIGN, true],
   ]),
   throwOnCheck: null,
 };
@@ -63,22 +70,32 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
 
 // The LLM adapter mock must be permissive so the happy-path test doesn't
 // bail out inside TurnExecutor after pre-flight passes.
+const preflightMockAdapter = {
+  name: 'preflight-test-mock',
+  chat: async () => ({
+    content: 'ok',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: 'preflight-test-mock',
+    latencyMs: 0,
+  }),
+  chatWithTools: async () => ({
+    content: [{ type: 'text', text: 'pre-flight happy-path narrate' }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: 'preflight-test-mock',
+    latencyMs: 0,
+  }),
+};
+
 vi.mock('../../src/adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'preflight-test-mock',
-    chat: async () => ({
-      content: 'ok',
-      usage: { input_tokens: 1, output_tokens: 1 },
-      model: 'preflight-test-mock',
-      latencyMs: 0,
-    }),
-    chatWithTools: async () => ({
-      content: [{ type: 'text', text: 'pre-flight happy-path narrate' }],
-      stop_reason: 'end_turn',
-      usage: { input_tokens: 1, output_tokens: 1 },
-      model: 'preflight-test-mock',
-      latencyMs: 0,
-    }),
+  getAdapter: () => preflightMockAdapter,
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: preflightMockAdapter,
+    resolution: {
+      task: task ?? 'orchestrator',
+      resolved_model: 'preflight-test-mock',
+      resolution_source: 'task_default' as const,
+    },
   }),
 }));
 
@@ -177,26 +194,45 @@ describe('POST /orchestrate/v2/turn — Group 3 Task A pre-flight scenario check
     expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
   });
 
-  it('rejects a cross-tenant / foreign scenario the same way, leaking no data', async () => {
-    // The service-role client can read across tenants, so `checkScenarioExists`
-    // would return TRUE for any existing row. A future RLS-scoped check would
-    // return FALSE for a row owned by a different user. We simulate the
-    // RLS-aware outcome: the scenario is absent from the caller's view.
-    // The response body must not contain any scenario details beyond the id
-    // the caller already supplied.
+  // ⚠ HONEST LIMITATION TEST ⚠
+  // The Group 3 brief's acceptance criterion asked for an RLS / cross-tenant
+  // test. The honest answer for the current architecture is that V5 has NO
+  // cross-tenant guard at the CEE layer — see the comment on
+  // SupabaseSessionStore.checkScenarioExists. This test asserts that
+  // limitation rather than simulating a stronger guarantee we don't have.
+  // The TODO in supabase-store.ts documents the closure (add p_user_id to
+  // append_turn_atomic + assert ownership in SQL).
+  it('does NOT reject a foreign scenario at the CEE layer (bounded guarantee)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: buildRequest(SCENARIO_FOREIGN),
     });
+    // Current behaviour: service-role pre-flight returns true, TurnExecutor
+    // runs, turn completes. In production this is safe ONLY because the UI
+    // auth flow + RLS on `public.scenarios` prevent a UI user from ever
+    // seeing another user's scenario_id — a non-UI caller with a guessed
+    // UUID would currently bypass the guard. When `append_turn_atomic` is
+    // extended with p_user_id enforcement, this test should flip to assert
+    // 422 + `reason: 'scenario_foreign'` (or a similar typed code).
+    expect(res.statusCode).toBe(200);
+    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+  });
+
+  it('response shape leak-guard: missing-scenario 422 details contain ONLY reason + scenario_id', async () => {
+    // Separate from the cross-tenant story: when pre-flight DOES reject
+    // (missing scenario, not foreign), the 422 body must not include any
+    // server-side metadata beyond what the caller already supplied.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(SCENARIO_MISSING),
+    });
     expect(res.statusCode).toBe(422);
     const body = JSON.parse(res.body);
     BoundaryErrorSchema.parse(body);
-    expect(body.error).toBe('INGRESS_CONTRACT_VIOLATION');
-    expect(body.details.reason).toBe('scenario_not_found');
-    expect(body.details.scenario_id).toBe(SCENARIO_FOREIGN);
-    // Leak guard: no extra keys beyond the documented shape.
     expect(Object.keys(body.details).sort()).toEqual(['reason', 'scenario_id']);
+    expect(body.details.scenario_id).toBe(SCENARIO_MISSING);
   });
 
   it('on a store read error, pre-flight silently passes and TurnExecutor is the last line of defence', async () => {

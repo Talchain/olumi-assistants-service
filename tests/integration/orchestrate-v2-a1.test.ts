@@ -28,7 +28,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { OlumiResponseSchema, BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 // ---------------------------------------------------------------------------
 // Fixture loading
@@ -327,20 +327,15 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    // Group 3 Task B: commit_performed:false → HTTP 500 (was 200 before
-    // Task B shipped; the A0 contract returned 200 for every runtime
-    // failure). The envelope body is unchanged — only the HTTP status
-    // carries the fail-closed signal now.
+    // Group 3 Task B + P0 follow-up: commit_performed:false → HTTP 500 with
+    // BoundaryError body (not OlumiResponse). The UI parser treats every
+    // non-ok status as BoundaryError; sending OlumiResponse here would
+    // collapse to INTERNAL_ERROR on the UI side.
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-    expect(parsed.blocks).toHaveLength(1);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
-      expect(block.severity).toBe('error');
-    }
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('UPSTREAM_TIMEOUT');
+    expect(parsed.retryable).toBe(true);
 
     const completed = turnExecutorEvents('completed');
     expect(completed).toHaveLength(1);
@@ -365,16 +360,14 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    // Group 3 Task B: commit_performed:false → 500.
+    // Group 3 Task B + P0 follow-up: 500 with BoundaryError body.
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-    expect(parsed.blocks).toHaveLength(1);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('TURN_BUDGET_EXCEEDED');
-    }
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('TURN_BUDGET_EXCEEDED');
+    // BUDGET_EXCEEDED is NOT retryable (retry would hit the same budget).
+    expect(parsed.retryable).toBe(false);
+
     const completed = turnExecutorEvents('completed');
     expect(completed).toHaveLength(1);
     expect(completed[0]!.data.failure_type).toBe('TURN_BUDGET_EXCEEDED');
