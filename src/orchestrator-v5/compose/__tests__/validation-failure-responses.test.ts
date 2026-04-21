@@ -308,8 +308,41 @@ describe('composeValidationFailure — response shape', () => {
       expect(block.error_code).toBe('INTERNAL_ERROR');
       expect(block.details?.failure_origin).toBe('validator');
       expect(block.details?.error_code).toBe('ENTITY_NOT_FOUND');
-      expect(block.details?.retryable).toBe(true);
     }
+  });
+
+  // v5-exclusive-cee P1 follow-up: retryability is false by default for
+  // validator failures. All 7 current validator codes are deterministic
+  // input faults — retrying the same turn with the same inputs will
+  // always fail. A client that sees retryable:true would enter a
+  // pointless retry loop. The previous implementation had the default
+  // inverted (retryable:true unless HANDLER_NOT_FOUND); this test locks
+  // in the corrected semantics per validator code.
+  describe('retryability per validator code', () => {
+    const allValidatorCodes: Array<{
+      code: ValidationError['code'];
+      details?: Record<string, unknown>;
+    }> = [
+      { code: 'HANDLER_NOT_FOUND', details: { handler_id: 'set_factor_value' } },
+      { code: 'ENTITY_NOT_FOUND', details: { entity_id: 'opt-x', entity_kind: 'option' } },
+      { code: 'ENTITY_KIND_MISMATCH', details: { entity_kind: 'node' } },
+      { code: 'ENTITY_RESOLUTION_AMBIGUOUS', details: { entity_kind: 'option' } },
+      { code: 'ENTITY_RESOLUTION_SUSPICIOUS', details: { entity_kind: 'option' } },
+      { code: 'PARAMETER_INVALID', details: { parameter_name: 'value' } },
+      { code: 'PRECONDITION_UNMET', details: { reason: 'no_options_defined' } },
+    ];
+
+    it.each(allValidatorCodes)(
+      '$code → retryable=false (deterministic input fault)',
+      ({ code, details }) => {
+        const { response } = composeFor({ code, message: `test ${code}`, details: details ?? {} });
+        const block = response.blocks[0];
+        expect(block?.type).toBe('error');
+        if (block?.type === 'error') {
+          expect(block.details?.retryable).toBe(false);
+        }
+      },
+    );
   });
 
   it('every reachable code returns at least one chip and a typed chip_type', () => {

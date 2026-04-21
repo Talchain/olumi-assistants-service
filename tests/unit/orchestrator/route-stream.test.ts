@@ -25,8 +25,16 @@ vi.mock("../../../src/utils/telemetry.js", () => ({
   TelemetryEvents: {},
 }));
 
+// Rate-limit mock — controllable. The tests that don't care leave it
+// as a no-op (default). The precedence test flips `mockRateLimit429` to
+// true and the preHandler responds 429 before reaching the route body.
+let mockRateLimit429 = false;
 vi.mock("../../../src/middleware/rate-limit.js", () => ({
-  createOrchestratorRateLimitHook: () => async () => {},
+  createOrchestratorRateLimitHook: () => async (_req: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => {
+    if (mockRateLimit429) {
+      return reply.code(429).send({ error: 'RATE_LIMITED', retryable: true });
+    }
+  },
 }));
 
 vi.mock("../../../src/utils/request-id.js", () => ({
@@ -232,6 +240,32 @@ describe("ceeOrchestratorStreamRouteV1", () => {
         expect(res.json()).toEqual({ error: "Not found" });
       } finally {
         (config.features as any).orchestratorStreaming = true;
+      }
+    });
+
+    // P1-4 follow-up: rate-limit precedence. Fastify runs preHandlers
+    // before the route handler body, so the overall precedence a request
+    // actually experiences is (1) rate-limit 429 → (2) V4_DISABLED 410
+    // → (3) streaming-gate 404 → (4) validation 400 → (5) SSE 200. A
+    // client caught in BOTH rate-limit and V4-disabled sees 429 first,
+    // backs off, and on retry sees 410 and migrates. This preserves
+    // rate-limit as a uniform load-protection invariant regardless of
+    // downstream migration state. Test documents the intended order.
+    it("rate-limit 429 takes precedence over V4_DISABLED 410 (preHandler wins)", async () => {
+      mockRateLimit429 = true;
+      mockPipelineV4Enabled = false;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+        expect(res.statusCode).toBe(429);
+        const body = res.json();
+        expect(body.error).toBe('RATE_LIMITED');
+      } finally {
+        mockRateLimit429 = false;
+        mockPipelineV4Enabled = true;
       }
     });
   });

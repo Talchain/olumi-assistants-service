@@ -164,7 +164,7 @@ The V1 routes are on a deprecation path; the 410 body is a deliberate transport-
 ### Task 1 — implemented
 
 - `POST /orchestrate/v1/turn` ([route.ts](../../src/orchestrator/route.ts)) — pre-validation V4_DISABLED guard. Returns 410 + `{ error: 'V4_DISABLED', message: 'V4 orchestration is disabled. Use /orchestrate/v2/turn.', retryable: false }` when `config.features.pipelineV4Enabled === false`.
-- `POST /orchestrate/v1/turn/stream` ([route-stream.ts](../../src/orchestrator/route-stream.ts)) — same guard, placed AFTER the `orchestratorStreaming` feature gate but BEFORE any SSE header emission so the client gets plain JSON, not a half-opened stream.
+- `POST /orchestrate/v1/turn/stream` ([route-stream.ts](../../src/orchestrator/route-stream.ts)) — same guard, placed BEFORE both the `orchestratorStreaming` feature gate and any SSE header emission (P1 follow-up: reversed the original ordering). When both `orchestratorStreaming=false` and `pipelineV4Enabled=false`, the client sees the 410 `V4_DISABLED` migration signal rather than the ambiguous 404 "Not found" — the permanent "go elsewhere" message dominates the transient "not available here" message. A 404 only surfaces when V4 is ON but streaming is OFF.
 - Both guards log-at-warn and never fall through.
 - Tests:
   - [tests/unit/orchestrator/route-stream.test.ts](../../tests/unit/orchestrator/route-stream.test.ts) — new `V4_DISABLED guard` describe block asserts 410 body + that `executePipelineStream` is never invoked.

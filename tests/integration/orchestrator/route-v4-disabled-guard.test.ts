@@ -48,15 +48,32 @@ vi.mock("../../../src/middleware/rate-limit.js", () => ({
   _resetStore: vi.fn(),
 }));
 
+// P1-5 follow-up: mock the V4 executor so the "flag on" sanity test
+// can assert the V4 branch actually executes (a concrete downstream
+// signal), not just "status != 410". The route dynamically imports
+// this module; Vitest's `vi.mock` intercepts the dynamic import for
+// any specifier that resolves to the same module.
+const mockExecutePipelineV4 = vi.fn();
+vi.mock("../../../src/orchestrator/deterministic/pipeline-v4.js", () => ({
+  executePipelineV4: mockExecutePipelineV4,
+}));
+
 const { ceeOrchestratorRouteV1 } = await import("../../../src/orchestrator/route.js");
 
 function makeValidRequest() {
+  // Shape mirrors tests/integration/orchestrator/route.test.ts:62 —
+  // TurnRequestSchema is strict about context's sub-fields.
   return {
-    message: "Hello",
-    stage: "frame",
-    scenario_id: "00000000-0000-4000-8000-000000000001",
-    client_turn_id: "11111111-1111-4111-8111-111111111111",
-    context: { messages: [] },
+    message: "Hello, how can you help?",
+    context: {
+      graph: null,
+      analysis_response: null,
+      framing: { stage: "frame" },
+      messages: [],
+      scenario_id: "test-scenario",
+    },
+    scenario_id: "test-scenario",
+    client_turn_id: "test-turn-001",
   };
 }
 
@@ -89,38 +106,47 @@ describe("POST /orchestrate/v1/turn — V4_DISABLED guard (v5-exclusive-cee Task
     });
   });
 
-  it("takes the V4 pipeline path when pipelineV4Enabled is true — asserts downstream V4 signals, not just != 410 (P1-6)", async () => {
-    // Flag ON: the guard must NOT fire AND the request must actually
-    // reach the V4 pipeline branch. Downstream may then fail for other
-    // reasons in this minimal env (no PLoT, no LLM adapter), but the
-    // outcome MUST be something the V4 pipeline produces, not the
-    // guard's 410 JSON shape.
+  it("takes the V4 pipeline path when pipelineV4Enabled is true — asserts executePipelineV4 actually runs (P1-5 follow-up)", async () => {
+    // Flag ON: the guard must NOT fire AND the V4 executor must actually
+    // run. Previous assertion was shape-based (had `turn_id` or
+    // `error.code`), which a non-V4 path could satisfy. With mocked
+    // executePipelineV4, we assert the concrete invocation — if the
+    // route ever refactored to skip the V4 branch while pipelineV4Enabled
+    // is true, this test would catch it.
     mockPipelineV4Enabled = true;
+    mockExecutePipelineV4.mockReset();
+    // Mock returns an async generator that yields a single
+    // turn_complete event — matches the shape route.ts:263-267 expects.
+    mockExecutePipelineV4.mockImplementation(async function* () {
+      yield {
+        type: 'turn_complete' as const,
+        seq: 0,
+        envelope: {
+          turn_id: 'test-v4-turn',
+          assistant_text: 'mocked V4 response',
+          blocks: [],
+          lineage: { context_hash: 'h1' },
+        },
+      };
+    });
+
     const res = await app.inject({
       method: "POST",
       url: "/orchestrate/v1/turn",
       payload: makeValidRequest(),
     });
 
-    // Concrete downstream signals (P1-6 tightening):
-    //   1. Status code is never 410 (the guard's status).
-    //   2. Response body is NOT the V4_DISABLED JSON shape — even if an
-    //      unrelated downstream path happens to return 410 for some reason
-    //      in the future, it MUST NOT masquerade as V4_DISABLED.
+    // Core P1-5 assertion: V4 executor was actually invoked. This is
+    // the concrete branch signal — not the shape of the response.
+    expect(mockExecutePipelineV4).toHaveBeenCalledTimes(1);
+    // Sanity: response is NOT the 410 V4_DISABLED envelope.
     expect(res.statusCode).not.toBe(410);
     const body = res.json();
     expect(body?.error).not.toBe("V4_DISABLED");
-    expect(body?.message).not.toBe(
-      "V4 orchestration is disabled. Use /orchestrate/v2/turn.",
-    );
-    // 3. Response must carry SOME V4-pipeline shape signal: V4 produces
-    //    either a TurnResponseV1 envelope (with `turn_id`) or an error
-    //    envelope with `error.code` (validation, tool-failure, etc).
-    //    Both are shape-distinguishable from the 410 {error, message,
-    //    retryable} tuple.
-    const hasV4Envelope =
-      typeof body?.turn_id === 'string' ||
-      (typeof body?.error === 'object' && body?.error !== null);
-    expect(hasV4Envelope).toBe(true);
+    // With the mocked V4 executor, the 200 envelope carries the mocked
+    // turn_id — proves the route plumbed our mock through, not a
+    // different pipeline.
+    expect(res.statusCode).toBe(200);
+    expect(body.turn_id).toBe('test-v4-turn');
   });
 });

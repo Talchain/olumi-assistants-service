@@ -292,6 +292,24 @@ function composeBody(error: ValidationError, ctx: ComposeContext): BranchResult 
 // Response wrapper
 // ---------------------------------------------------------------------------
 
+// Validator error codes that are genuinely transient — retrying the
+// same input could succeed because some server-side state may change
+// between attempts. Everything NOT in this set is a deterministic input
+// fault (the user / routing LLM sent something the server cannot act
+// on); retrying unchanged inputs will always fail and retryable=true
+// would mislead clients into pointless retry loops.
+//
+// Today this set is empty: all 7 validator codes
+// (HANDLER_NOT_FOUND, ENTITY_NOT_FOUND, ENTITY_KIND_MISMATCH,
+//  ENTITY_RESOLUTION_AMBIGUOUS, ENTITY_RESOLUTION_SUSPICIOUS,
+//  PARAMETER_INVALID, PRECONDITION_UNMET)
+// are deterministic input faults. If a future validator code IS
+// transient (e.g. a graph lookup that depends on a race condition),
+// add it here. The empty Set is kept to preserve the shape — adding
+// a transient code later requires exactly one line change, not a
+// design.
+const TRANSIENT_VALIDATOR_CODES: ReadonlySet<ValidationError['code']> = new Set<ValidationError['code']>();
+
 function wrapResponse(
   error: ValidationError,
   body: FailureComposeResult,
@@ -307,9 +325,14 @@ function wrapResponse(
   const wireCode = error.code === 'HANDLER_NOT_FOUND'
     ? ('FEATURE_NOT_ENABLED' as const)
     : ('INTERNAL_ERROR' as const);
-  // Retryable when the failure has no permanent "this feature isn't
-  // here" signature. HANDLER_NOT_FOUND is permanent (until deploy).
-  const retryable = error.code !== 'HANDLER_NOT_FOUND';
+  // Retryability: default false. All validator codes today are
+  // deterministic input faults; retrying unchanged inputs always fails.
+  // A future transient validator code would opt in via the
+  // TRANSIENT_VALIDATOR_CODES set. (v5-exclusive-cee P1 follow-up —
+  // the prior default was `true unless HANDLER_NOT_FOUND`, which
+  // mislabelled ENTITY_NOT_FOUND / PRECONDITION_UNMET / etc. as
+  // retryable and risked the client into pointless retry loops.)
+  const retryable = TRANSIENT_VALIDATOR_CODES.has(error.code);
   return {
     response_version: 2,
     assistant_text: body.assistant_text,
