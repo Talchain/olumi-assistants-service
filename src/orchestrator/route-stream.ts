@@ -54,10 +54,64 @@ const SSE_HEADERS = {
 // ============================================================================
 
 export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promise<void> {
+  // ── Guard precedence on this route ──────────────────────────────────
+  //
+  // Fastify runs preHandlers before the route handler body, so the
+  // overall precedence that a request actually experiences is:
+  //
+  //   1. Rate-limit preHandler  → 429 (transient, client should retry
+  //      after the Retry-After window).
+  //   2. V4_DISABLED guard      → 410 (permanent migration signal —
+  //      `/orchestrate/v2/turn` is the new endpoint).
+  //   3. orchestratorStreaming  → 404 (feature gate; streaming is off
+  //      in this deployment).
+  //   4. Body validation        → 400 (malformed payload).
+  //   5. SSE stream opens       → 200 text/event-stream.
+  //
+  // The choice to let rate-limit (429) win over V4_DISABLED (410) is
+  // deliberate: rate-limit is a load-protection invariant that applies
+  // uniformly regardless of which pipeline would have handled the
+  // request, and a burst-throttled client should back off regardless
+  // of the migration signal. A client caught in BOTH conditions
+  // (V4-disabled and rate-limited) gets 429 first, then on retry sees
+  // the 410 and migrates to V2. This is the intended operator
+  // behaviour; the alternative (bypassing rate-limit on V4-disabled
+  // routes) would let V4 clients escape throttling during the
+  // migration window.
   app.post(
     "/orchestrate/v1/turn/stream",
     { preHandler: createOrchestratorRateLimitHook() },
     async (req, reply) => {
+      // We always have a request_id available for logs — compute it up
+      // front so both the V4_DISABLED guard and the feature-gate branch
+      // can include it consistently (P1-10 follow-up).
+      const requestId = getOrGenerateRequestId(req);
+
+      // V4_DISABLED guard (v5-exclusive-cee brief §3 Task 1). Runs BEFORE
+      // the orchestratorStreaming feature gate so that a client calling
+      // a V4-disabled, streaming-disabled endpoint gets the migration
+      // signal (410) rather than an ambiguous "not found" (404). The
+      // V4_DISABLED signal is permanent ("go to /orchestrate/v2/turn");
+      // a 404 could mean almost anything. Precedence was reversed in
+      // the follow-up review (P1-5).
+      //
+      // Returning plain JSON before ANY SSE header is written keeps the
+      // wire contract predictable — the UI parser never sees a half-
+      // opened SSE connection that it then has to reconcile with an
+      // error body.
+      if (!config.features.pipelineV4Enabled) {
+        log.warn(
+          { request_id: requestId, route: '/orchestrate/v1/turn/stream' },
+          'V1 streaming turn rejected: V4 disabled — use /orchestrate/v2/turn',
+        );
+        reply.code(410);
+        return reply.send({
+          error: 'V4_DISABLED',
+          message: 'V4 orchestration is disabled. Use /orchestrate/v2/turn.',
+          retryable: false,
+        });
+      }
+
       // Feature gate
       if (!config.features.orchestratorStreaming) {
         reply.code(404);
@@ -65,7 +119,6 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
       }
 
       const startTime = Date.now();
-      const requestId = getOrGenerateRequestId(req);
       const streamMetrics = {
         time_to_first_event_ms: 0,
         time_to_first_text_delta_ms: 0,

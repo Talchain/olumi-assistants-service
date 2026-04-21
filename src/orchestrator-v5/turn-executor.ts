@@ -447,7 +447,16 @@ export async function runTurnExecutor(
           },
           'V5 TurnExecutor validation rejected tool-call proposal',
         );
-        failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
+        // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND is semantically
+        // "the routing LLM proposed a declared-but-not-enabled action" —
+        // same class as the dispatch-level handler_not_registered. Use
+        // the typed UNSUPPORTED_ACTION → FEATURE_NOT_ENABLED wire code
+        // rather than the generic HANDLER_INVOCATION_FAILED so clients
+        // can distinguish. All other validator codes remain on the
+        // existing HANDLER_INVOCATION_FAILED → INTERNAL_ERROR mapping.
+        failureType = validationResult.error.code === 'HANDLER_NOT_FOUND'
+          ? INTERNAL_TO_WIRE.UNSUPPORTED_ACTION
+          : INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
         const composeCtx: ComposeContext = {
           graph: graphLookupForValidate,
           handlerRegistry: validationRegistry,
@@ -827,15 +836,40 @@ export async function runTurnExecutor(
       return finalizeRun();
     }
     if (error instanceof UnhandledTurnClassError) {
+      // Two reasons collapse into this branch, but they have different wire
+      // semantics (v5-exclusive-cee P0 follow-up):
+      //   - `handler_not_registered`: the action IS in V5ActionType but no
+      //     handler is registered in this deployment. Typed FEATURE_NOT_ENABLED
+      //     (via UNSUPPORTED_ACTION) so clients can distinguish a declared-
+      //     but-unbuilt feature from a generic internal bug.
+      //   - `unhandled_turn_class`: the classifier returned a turn_class value
+      //     not in the C1TurnClass union — a true internal invariant breach.
+      //     Stays on UNHANDLED → INTERNAL_ERROR (P0 alert class).
+      const isUnsupported = error.reason === 'handler_not_registered';
       log.error(
-        { request_id: requestId, reason: error.reason, message: error.message },
-        'V5 TurnExecutor handler not registered',
+        {
+          request_id: requestId,
+          reason: error.reason,
+          attempted: error.attempted,
+          message: error.message,
+        },
+        isUnsupported
+          ? 'V5 TurnExecutor unsupported action — handler not registered for declared V5ActionType'
+          : 'V5 TurnExecutor unhandled turn class — classifier invariant breach',
       );
-      failureType = INTERNAL_TO_WIRE.UNHANDLED;
-      response = buildFailureResponse('UNHANDLED', context.stage, {
-        reason: 'handler_not_registered',
-        handler_id: error.attempted,
-      });
+      if (isUnsupported) {
+        failureType = INTERNAL_TO_WIRE.UNSUPPORTED_ACTION;
+        response = buildFailureResponse('UNSUPPORTED_ACTION', context.stage, {
+          reason: 'handler_not_registered',
+          handler_id: error.attempted,
+        });
+      } else {
+        failureType = INTERNAL_TO_WIRE.UNHANDLED;
+        response = buildFailureResponse('UNHANDLED', context.stage, {
+          reason: error.reason,
+          attempted: error.attempted,
+        });
+      }
       return finalizeRun();
     }
     if (error instanceof HandlerInvocationFailedError) {

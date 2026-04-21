@@ -367,6 +367,108 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
   });
 
   // -------------------------------------------------------------------
+  // v5-exclusive-cee: UNSUPPORTED_ACTION — routing LLM proposed a
+  // handler_id that IS in V5ActionType but has no registered handler /
+  // validator entry in this deployment. Typed FEATURE_NOT_ENABLED wire
+  // code so clients can distinguish "declared-but-unbuilt" from generic
+  // internal bugs. Two entry points: (a) the validator's
+  // HANDLER_NOT_FOUND path, and (b) the dispatch-level registry miss.
+  // -------------------------------------------------------------------
+  describe('UNSUPPORTED_ACTION — unregistered handler (v5-exclusive-cee)', () => {
+    it('validator path: HANDLER_NOT_FOUND maps to FEATURE_NOT_ENABLED on the wire', async () => {
+      // Routing LLM proposes `set_factor_value` — an action declared in the
+      // V5ActionType union but NOT in HANDLER_VALIDATION_REGISTRY (which
+      // only has run_analysis today). Validator returns HANDLER_NOT_FOUND.
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult({
+          intent_class: 'execute',
+          action: {
+            handler_id: 'set_factor_value',
+            entity: {
+              id: 'factor-x',
+              kind: 'node',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        }),
+      );
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-unsupp-v', {
+        routingAdapter,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      const block = parsed.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        // Core assertion: typed FEATURE_NOT_ENABLED, not generic INTERNAL_ERROR.
+        expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
+        const details = block.details as Record<string, unknown>;
+        expect(details.retryable).toBe(false);
+      }
+      expect(telemetry.validation_error_code).toBe('HANDLER_NOT_FOUND');
+      expect(telemetry.failure_type).toBe('FEATURE_NOT_ENABLED');
+      expectBI01();
+    });
+
+    it('dispatch path: registry miss (handler_not_registered) maps to FEATURE_NOT_ENABLED', async () => {
+      // Bypass the validator by passing a validation registry that DOES know
+      // about set_factor_value, then a runtime handler registry that does
+      // NOT. This exercises the turn-executor.ts EXECUTE-step registry miss
+      // (UnhandledTurnClassError reason='handler_not_registered').
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult({
+          intent_class: 'execute',
+          action: {
+            handler_id: 'set_factor_value',
+            entity: {
+              id: 'factor-x',
+              kind: 'node',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        }),
+      );
+      const permissiveValidationRegistry = {
+        set_factor_value: {
+          handler_id: 'set_factor_value',
+          accepted_entity_kinds: ['node'],
+          preconditions: () => ({ ok: true as const }),
+          confirmation_template: 'set_factor_value confirmed',
+        },
+      } as unknown as Parameters<typeof runTurnExecutor>[2]['validationRegistry'];
+      const emptyHandlerRegistry = new Map() as unknown as Parameters<
+        typeof runTurnExecutor
+      >[2]['handlerRegistry'];
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-unsupp-d', {
+        routingAdapter,
+        validationRegistry: permissiveValidationRegistry,
+        handlerRegistry: emptyHandlerRegistry,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      const block = parsed.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
+        const details = block.details as Record<string, unknown>;
+        expect(details.retryable).toBe(false);
+        expect(details.reason).toBe('handler_not_registered');
+        expect(details.handler_id).toBe('set_factor_value');
+      }
+      expect(telemetry.failure_type).toBe('FEATURE_NOT_ENABLED');
+      expectBI01();
+    });
+  });
+
+  // -------------------------------------------------------------------
   // Routing error paths
   // -------------------------------------------------------------------
   describe('routing error paths', () => {

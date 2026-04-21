@@ -1,9 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock config before all imports
+// Mock config before all imports. `pipelineV4Enabled: true` matches the
+// production default — existing tests assume the V4 pipeline is active,
+// so the V4_DISABLED guard added in claude/v5-exclusive-cee should not
+// fire. A dedicated test lower in this file flips the flag to verify the
+// 410 response.
+let mockPipelineV4Enabled = true;
 vi.mock("../../../src/config/index.js", () => ({
   config: {
-    features: { orchestratorStreaming: true, contextFabric: false },
+    features: {
+      orchestratorStreaming: true,
+      contextFabric: false,
+      get pipelineV4Enabled() {
+        return mockPipelineV4Enabled;
+      },
+    },
   },
   isProduction: () => false,
 }));
@@ -14,8 +25,16 @@ vi.mock("../../../src/utils/telemetry.js", () => ({
   TelemetryEvents: {},
 }));
 
+// Rate-limit mock — controllable. The tests that don't care leave it
+// as a no-op (default). The precedence test flips `mockRateLimit429` to
+// true and the preHandler responds 429 before reaching the route body.
+let mockRateLimit429 = false;
 vi.mock("../../../src/middleware/rate-limit.js", () => ({
-  createOrchestratorRateLimitHook: () => async () => {},
+  createOrchestratorRateLimitHook: () => async (_req: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => {
+    if (mockRateLimit429) {
+      return reply.code(429).send({ error: 'RATE_LIMITED', retryable: true });
+    }
+  },
 }));
 
 vi.mock("../../../src/utils/request-id.js", () => ({
@@ -145,6 +164,109 @@ describe("ceeOrchestratorStreamRouteV1", () => {
       });
 
       expect(res.statusCode).toBe(200);
+    });
+  });
+
+  // v5-exclusive-cee brief §3 Task 1: when V4 is disabled, the V1 streaming
+  // route must return a plain-JSON 410 instead of opening the SSE stream.
+  describe("V4_DISABLED guard (v5-exclusive-cee)", () => {
+    it("returns 410 V4_DISABLED with non-retryable signal when pipelineV4Enabled is false", async () => {
+      mockPipelineV4Enabled = false;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+
+        // Plain JSON, not SSE — the stream must NOT open. Clients migrate
+        // to /orchestrate/v2/turn on this signal.
+        expect(res.statusCode).toBe(410);
+        const body = res.json();
+        expect(body).toEqual({
+          error: "V4_DISABLED",
+          message: "V4 orchestration is disabled. Use /orchestrate/v2/turn.",
+          retryable: false,
+        });
+        // P1-11 follow-up: wire-level check — response must be plain JSON,
+        // NOT a half-opened SSE stream. Fastify sets application/json on
+        // reply.send() with an object; the SSE_HEADERS (text/event-stream)
+        // are only written by reply.raw.writeHead — and our guard returns
+        // before that. Asserting content-type ensures a future refactor
+        // that accidentally opens the SSE stream and THEN writes JSON
+        // would be caught here.
+        expect(res.headers['content-type']).toMatch(/application\/json/);
+        expect(res.headers['content-type']).not.toMatch(/event-stream/);
+        // executePipelineStream must NOT have been called.
+        expect(executePipelineStream).not.toHaveBeenCalled();
+      } finally {
+        mockPipelineV4Enabled = true;
+      }
+    });
+
+    // P1-5 follow-up: V4_DISABLED precedence over orchestratorStreaming 404.
+    // When both flags disable the endpoint, a client should see the loud
+    // migration signal (410 V4_DISABLED) not the ambiguous "not found"
+    // (404). Only with V4 ON and streaming OFF does the 404 surface.
+    it("V4_DISABLED takes precedence over orchestratorStreaming OFF", async () => {
+      (config.features as any).orchestratorStreaming = false;
+      mockPipelineV4Enabled = false;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+        // 410 migration signal wins; 404 suppressed.
+        expect(res.statusCode).toBe(410);
+        const body = res.json();
+        expect(body.error).toBe("V4_DISABLED");
+      } finally {
+        (config.features as any).orchestratorStreaming = true;
+        mockPipelineV4Enabled = true;
+      }
+    });
+
+    it("orchestratorStreaming OFF with V4 ON still returns 404 (precedence regression)", async () => {
+      (config.features as any).orchestratorStreaming = false;
+      mockPipelineV4Enabled = true;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+        expect(res.statusCode).toBe(404);
+        expect(res.json()).toEqual({ error: "Not found" });
+      } finally {
+        (config.features as any).orchestratorStreaming = true;
+      }
+    });
+
+    // P1-4 follow-up: rate-limit precedence. Fastify runs preHandlers
+    // before the route handler body, so the overall precedence a request
+    // actually experiences is (1) rate-limit 429 → (2) V4_DISABLED 410
+    // → (3) streaming-gate 404 → (4) validation 400 → (5) SSE 200. A
+    // client caught in BOTH rate-limit and V4-disabled sees 429 first,
+    // backs off, and on retry sees 410 and migrates. This preserves
+    // rate-limit as a uniform load-protection invariant regardless of
+    // downstream migration state. Test documents the intended order.
+    it("rate-limit 429 takes precedence over V4_DISABLED 410 (preHandler wins)", async () => {
+      mockRateLimit429 = true;
+      mockPipelineV4Enabled = false;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+        expect(res.statusCode).toBe(429);
+        const body = res.json();
+        expect(body.error).toBe('RATE_LIMITED');
+      } finally {
+        mockRateLimit429 = false;
+        mockPipelineV4Enabled = true;
+      }
     });
   });
 
