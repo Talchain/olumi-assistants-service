@@ -169,8 +169,12 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    // Group 3 Task A: scenario pre-flight. A1 fixtures assume the scenario
+    // exists, so the mock returns true — pre-flight passes.
+    checkScenarioExists: async () => true,
   }),
   resetSessionStoreForTests: () => {},
+  SessionReadError: class SessionReadError extends Error {},
 }));
 
 let v5Enabled = true;

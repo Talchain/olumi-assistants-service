@@ -208,6 +208,28 @@ export class SupabaseSessionStore implements SessionStore {
   async invalidateAll(scenarioId: string): Promise<InvalidationResult> {
     return this.cache.invalidateAll(scenarioId);
   }
+
+  async checkScenarioExists(scenarioId: string): Promise<boolean> {
+    // Single-column SELECT keyed on PK; service-role client bypasses RLS, so a
+    // missing row reflects the true state of the table regardless of the
+    // caller's auth context. This is exactly what we want for a pre-flight
+    // existence check — the RPC we guard does the same service-role lookup.
+    // Cross-tenant protection is orthogonal and lives in the RPC itself
+    // (user_id is denormalised onto every v5_conversation_turns row for RLS).
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('id')
+      .eq('id', scenarioId)
+      .limit(1);
+
+    if (error) {
+      throw new SessionReadError(
+        `checkScenarioExists(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    return Array.isArray(data) && data.length > 0;
+  }
 }
 
 /**

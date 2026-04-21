@@ -18,12 +18,14 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { BoundaryError } from '@talchain/schemas/boundary';
 
 import { getOrGenerateRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 import { validateIngress, validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
+import { getSessionStore, SessionReadError } from '../orchestrator-v5/session/index.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
 // keys), so we cannot pass `graph_state` / `analysis_state` straight through
@@ -73,6 +75,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(422).send(ingress.error);
     }
 
+    // Task A pre-flight (Group 3): surface missing scenarios as a typed 422 at
+    // ingress rather than letting `append_turn_atomic` surface them as an
+    // opaque `STATE_COMMIT_FAILED` → `INTERNAL_ERROR` at commit. V5 depends on
+    // the UI having inserted the `scenarios` row during scenario creation
+    // (DecisionGuideAI's scenarioService); this check makes that architectural
+    // dependency fail loudly for the user. Best-effort by design — if the
+    // store is not configured (e.g. local tests without SUPABASE_*), skip; if
+    // a transient read error occurs, skip (the commit path is still the last
+    // line of defence).
+    const preflightFailure = await preflightScenarioCheck(ingress.value.scenario_id, requestId);
+    if (preflightFailure) {
+      return reply.code(422).send(preflightFailure);
+    }
+
     // TurnExecutor produces an OlumiResponse (success or typed error block).
     // It never throws past this boundary — every runtime failure → 200 + envelope.
     const run = await runTurnExecutor(ingress.value, requestId, {
@@ -91,4 +107,58 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
 
     return reply.code(200).send(egress.value);
   });
+}
+
+/**
+ * Pre-flight check that returns a typed 422 BoundaryError when the requested
+ * scenario does not exist in `public.scenarios`. Returns `null` on either
+ * "scenario exists" or "check could not run" (store not configured, transient
+ * read error) — the TurnExecutor commit path remains the last line of defence.
+ *
+ * The error code must be a member of the pinned `BoundaryErrorCode` enum from
+ * `@talchain/schemas/boundary` (§6.4). We reuse `INGRESS_CONTRACT_VIOLATION`
+ * — the payload passed ingress Zod validation but references a row the server
+ * cannot act on, which is a contract violation at the ingress boundary. The
+ * free-form `details.reason = 'scenario_not_found'` distinguishes it from a
+ * Zod shape failure.
+ */
+async function preflightScenarioCheck(
+  scenarioId: string,
+  requestId: string,
+): Promise<BoundaryError | null> {
+  let exists: boolean;
+  try {
+    const store = getSessionStore();
+    exists = await store.checkScenarioExists(scenarioId);
+  } catch (e) {
+    // Store not configured (missing SUPABASE_*) OR a transient read error.
+    // Do NOT block the turn — the RPC will surface genuinely missing rows.
+    // Log at debug so the absence of pre-flight is observable without noise.
+    log.debug(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err_name: e instanceof Error ? e.name : 'unknown',
+        err_message: e instanceof Error ? e.message : String(e),
+      },
+      'V5 pre-flight scenario check skipped (store unavailable or read error)',
+    );
+    return null;
+  }
+
+  if (exists) return null;
+
+  log.warn(
+    { request_id: requestId, scenario_id: scenarioId },
+    'V5 pre-flight: scenario row not found — rejecting turn with 422',
+  );
+  return {
+    error: 'INGRESS_CONTRACT_VIOLATION',
+    boundary: 'B1',
+    direction: 'ingress',
+    validator: 'scenario_preflight',
+    details: { reason: 'scenario_not_found', scenario_id: scenarioId },
+    request_id: requestId,
+    retryable: false,
+  };
 }

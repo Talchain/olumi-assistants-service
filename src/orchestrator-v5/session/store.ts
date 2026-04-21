@@ -38,6 +38,17 @@ export interface SessionStore {
   readFactsFor(turnIds: readonly string[], handlerId?: V5ActionType): Promise<readonly HandlerFact[]>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
+  /**
+   * Returns true when a row exists in `public.scenarios` with `id = scenarioId`.
+   * Used by the V2 route's pre-flight check (Task A) to surface a missing
+   * scenario as a typed 422 at ingress rather than letting `append_turn_atomic`
+   * surface it as an opaque `STATE_COMMIT_FAILED` at commit. Read failures
+   * propagate as `SessionReadError` — callers treat them as "unknown" and
+   * should fail-closed on ambiguity (the pre-flight treats a read error as
+   * "pass" so an outage doesn't block traffic; the later RPC will still fail
+   * loudly if the row is genuinely missing).
+   */
+  checkScenarioExists(scenarioId: string): Promise<boolean>;
 }
 
 /**
