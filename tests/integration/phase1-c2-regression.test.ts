@@ -186,8 +186,18 @@ describe('phase 1 C2 regression — run_analysis via tool-use produces same Hand
     });
 
     const write = appendCalls[0] as {
-      handler_facts: Array<{ result: { enrichment: V2RunResponseEnvelope } }>;
+      handler_facts: Array<{ result: { enrichment: V2RunResponseEnvelope & Record<string, unknown> } }>;
     };
-    expect(write.handler_facts[0]!.result.enrichment).toEqual(plotResponse);
+    // v5-maintenance: TurnExecutor's V5 Group 1 Task C adds
+    // coaching_signal_{id,turn_id,produced_at} to enrichment for
+    // run_analysis. Strip those coaching fields before the byte-for-byte
+    // equality check so this regression guard (PLoT → enrichment
+    // passthrough) still holds without mis-firing on coaching-signal noise.
+    const { coaching_signal_id, coaching_signal_turn_id, coaching_signal_produced_at, ...enrichmentWithoutCoaching } =
+      write.handler_facts[0]!.result.enrichment as Record<string, unknown>;
+    void coaching_signal_id; // eslint-disable-line @typescript-eslint/no-unused-vars
+    void coaching_signal_turn_id;
+    void coaching_signal_produced_at;
+    expect(enrichmentWithoutCoaching).toEqual(plotResponse);
   });
 });

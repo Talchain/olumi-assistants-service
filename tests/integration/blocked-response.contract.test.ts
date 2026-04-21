@@ -70,7 +70,14 @@ function makeCtx(overrides: Partial<{ requestId: string; ceeResponse: any }>): S
   } as StageContext;
 }
 
-describe("Blocked Response Contract (Stream F)", () => {
+// v5-maintenance (2026-04-21): runStageBoundary's behaviour on V3 validation
+// failure is now FAIL-CLOSED per boundary contract v1.1 §4.2 (Track 1 soft
+// gate was superseded). Validation failure sets ctx.earlyReturn to a 502
+// `CEE_EGRESS_CONTRACT_VIOLATION` envelope instead of ctx.finalResponse
+// with a degraded flag. All of this contract's "soft gate" assertions are
+// now against defunct behaviour. Kept as a change record only — unskip
+// only after a follow-up brief restores a typed soft-gate path.
+describe.skip("Blocked Response Contract (Stream F) [v5-maintenance: superseded by fail-closed]", () => {
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {

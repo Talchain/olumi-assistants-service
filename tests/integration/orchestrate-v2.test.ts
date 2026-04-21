@@ -134,6 +134,23 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'test system prompt',
 }));
 
+// v5-maintenance Task 1: mock the session store so fixture 1 (valid payload)
+// can exercise the B1 ingress + egress happy path without requiring
+// SUPABASE_* env vars. Without this mock, commitDirectAnswer throws at
+// getSessionStore() and the route returns 500 instead of 200.
+vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
+  getSessionStore: () => ({
+    append: async () => ({ id: 'mock-row-id' }),
+    readRecent: async () => [],
+    readFactsFor: async () => [],
+    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    checkScenarioExists: async () => true,
+  }),
+  resetSessionStoreForTests: () => {},
+  SessionReadError: class SessionReadError extends Error {},
+}));
+
 // Import AFTER the mock is set up.
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
 

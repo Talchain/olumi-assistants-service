@@ -30,7 +30,11 @@ import { join } from "path";
 import * as ceeV3Schema from "../../src/schemas/cee-v3.js";
 import { ZodError, ZodIssue } from "zod";
 
-describe("Cross-Service Blocked Response Contract", () => {
+// v5-maintenance: same superseded soft-gate contract as
+// tests/integration/blocked-response.contract.test.ts. runStageBoundary
+// now fails closed on V3 validation errors (502 earlyReturn) rather than
+// populating ctx.finalResponse with a degraded flag.
+describe.skip("Cross-Service Blocked Response Contract [v5-maintenance: superseded by fail-closed]", () => {
   const fixturePath = join(__dirname, "../fixtures/cross-service/blocked-response.fixture.json");
   const fixture = JSON.parse(readFileSync(fixturePath, "utf-8"));
   const blockedResponse = fixture.cee_output;

@@ -29,47 +29,58 @@ const phaseState = {
   classify: { output: '{"turn_class":"handler","handler_id":"run_analysis"}' },
 };
 
-vi.mock('../../src/adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'test-mock',
-    chat: async (args: { responseFormat?: string }) => {
-      const isClassify = args.responseFormat === 'json_object';
-      return {
-        content: isClassify ? phaseState.classify.output : 'narrate MUST NOT run',
-        usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'test-mock',
-        latencyMs: 0,
-      };
-    },
-    // V5 Phase 1: tool-use routing path emits a handler-class tool call.
-    chatWithTools: async () => ({
-      content: [
-        {
-          type: 'tool_use',
-          id: 'tu-1',
-          name: 'olumi_action',
-          input: {
-            intent_class: 'execute',
-            action: {
-              handler_id: 'run_analysis',
-              entity: {
-                id: 'opt_a',
-                kind: 'option',
-                resolution_status: 'resolved',
-                resolution_method: 'id_match',
-              },
-              parameters: [],
-              cited_context_fields: ['graph.options'],
-            },
-          },
-        },
-      ],
-      stop_reason: 'tool_use',
+const c2MockAdapter = {
+  name: 'test-mock',
+  model: 'test-mock',
+  chat: async (args: { responseFormat?: string }) => {
+    const isClassify = args.responseFormat === 'json_object';
+    return {
+      content: isClassify ? phaseState.classify.output : 'narrate MUST NOT run',
       usage: { input_tokens: 1, output_tokens: 1 },
       model: 'test-mock',
       latencyMs: 0,
-    }),
+    };
+  },
+  // V5 Phase 1: tool-use routing path emits a handler-class tool call.
+  chatWithTools: async () => ({
+    content: [
+      {
+        type: 'tool_use' as const,
+        id: 'tu-1',
+        name: 'olumi_action',
+        input: {
+          intent_class: 'execute',
+          action: {
+            handler_id: 'run_analysis',
+            entity: {
+              id: 'opt_a',
+              kind: 'option',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [],
+            cited_context_fields: ['graph.options'],
+          },
+        },
+      },
+    ],
+    stop_reason: 'tool_use' as const,
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: 'test-mock',
+    latencyMs: 0,
   }),
+};
+vi.mock('../../src/adapters/llm/router.js', () => ({
+  getAdapter: () => c2MockAdapter,
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: c2MockAdapter,
+    resolution: {
+      task,
+      resolved_model: 'test-mock',
+      resolution_source: 'task_default' as const,
+    },
+  }),
+  getMaxTokensFromConfig: () => undefined,
 }));
 
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
@@ -204,8 +215,10 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
     const fact = (write.handler_facts as Array<Record<string, unknown>>)[0]!;
     expect(fact.fact_type).toBe('run_analysis');
 
-    // Response verbatim assertion
-    expect(response.assistant_text).toBe('Ran analysis on your current scenario.');
+    // v5-maintenance: the V5 Group 1 Task C coaching signal detector may
+    // append a FIRST_ANALYSIS_COMPLETE coaching line after the template
+    // text. Assert the template prefix rather than verbatim equality.
+    expect(response.assistant_text.startsWith('Ran analysis on your current scenario.')).toBe(true);
     expect(telemetry.response_emitted).toBe(true);
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.llm_calls_used).toBe(1); // classifier only
@@ -239,7 +252,20 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
     const fact = (write.handler_facts as Array<Record<string, unknown>>)[0] as {
       result: { enrichment: Record<string, unknown> };
     };
-    expect(fact.result.enrichment).toEqual(largerFixture);
+    // v5-maintenance: strip V5 Group 1 Task C coaching-signal fields
+    // before byte-for-byte comparison. The regression guard (PLoT
+    // envelope → enrichment passthrough) is preserved; only the test's
+    // expected shape needed to account for coaching metadata.
+    const {
+      coaching_signal_id,
+      coaching_signal_turn_id,
+      coaching_signal_produced_at,
+      ...enrichmentWithoutCoaching
+    } = fact.result.enrichment;
+    void coaching_signal_id; // eslint-disable-line @typescript-eslint/no-unused-vars
+    void coaching_signal_turn_id;
+    void coaching_signal_produced_at;
+    expect(enrichmentWithoutCoaching).toEqual(largerFixture);
     expect(fact.result.enrichment.decision_brief).toBeDefined();
     expect(Array.isArray(fact.result.enrichment.fact_objects)).toBe(true);
     expect(Array.isArray(fact.result.enrichment.factor_sensitivity)).toBe(true);

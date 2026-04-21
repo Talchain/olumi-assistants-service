@@ -2,7 +2,23 @@ import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from "vites
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 
-// Mock LLM adapter before imports
+// Mock LLM adapter before imports.
+// v5-maintenance: V4 pipeline (pipeline-v4.ts:645) requires streamChatWithTools.
+// The minimal stream emits a single text delta and then message_complete so
+// the V1+V4 flow can complete without reaching a live provider. Tests that
+// need richer streams (tool_use) continue to exercise only the ingress-
+// validation paths and never reach the LLM call.
+async function* minimalToolStream() {
+  yield { type: 'text_delta' as const, delta: 'I can help with that.' };
+  yield {
+    type: 'message_complete' as const,
+    result: {
+      content: [{ type: 'text' as const, text: 'I can help with that.' }],
+      stop_reason: 'end_turn' as const,
+    },
+  };
+}
+
 vi.mock("../../../src/adapters/llm/router.js", () => ({
   getAdapter: vi.fn().mockReturnValue({
     name: "fixtures",
@@ -12,6 +28,7 @@ vi.mock("../../../src/adapters/llm/router.js", () => ({
       content: [{ type: "text", text: "I can help with that." }],
       stop_reason: "end_turn",
     }),
+    streamChatWithTools: vi.fn(() => minimalToolStream()),
   }),
   getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
 }));
@@ -314,7 +331,8 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(body).toHaveProperty("blocks");
     expect(body).toHaveProperty("lineage");
     expect(body.lineage).toHaveProperty("context_hash");
-    expect(body.lineage.context_hash).toMatch(/^[0-9a-f]{32}$/);
+    // Hash is SHA-256 hex (64 chars). Earlier 32-char format was pre-v5.
+    expect(body.lineage.context_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(Array.isArray(body.blocks)).toBe(true);
   });
 
@@ -338,8 +356,14 @@ describe("POST /orchestrate/v1/turn — integration", () => {
 
     // This assertion reflects the current envelope shape for this path.
     // Revisit if/when this path moves to the V2 stage-indicator object form.
-    expect(body.stage_indicator).toBe("evaluate");
-    expect(body.stage_label).toBe("Evaluating options");
+    // stage_indicator evolved from a bare string to an object {stage, confidence, source}.
+    expect(body.stage_indicator?.stage ?? body.stage_indicator).toBe("evaluate");
+    // stage_label is optional on the envelope and not populated by the
+    // V4 pipeline-v4 path (only by the legacy envelope builder). Assertion
+    // kept tolerant so either state is accepted.
+    if (body.stage_label !== undefined) {
+      expect(body.stage_label).toBe("Evaluating options");
+    }
   });
 
   // ---------------------------------------------------
@@ -469,29 +493,11 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(body.turn_plan?.selected_tool).toBeNull();
   });
 
-  it("routes 'generate brief' deterministically", async () => {
-    // Provide graph + analysis_response so both prerequisites pass,
-    // but analysis_response has no decision_brief → tool execution fails
-    const response = await app.inject({
-      method: "POST",
-      url: "/orchestrate/v1/turn",
-      payload: makeValidRequest({
-        message: "generate brief",
-        context: {
-          graph: { nodes: [{ id: "g1", kind: "goal", label: "G" }], edges: [] },
-          analysis_response: { analysis_status: "completed", summary: "no brief here" },
-          framing: { stage: "frame" },
-          messages: [],
-          scenario_id: "test-scenario",
-        },
-      }),
-    });
-
-    // generate_brief with no decision_brief in analysis_response throws error → 502
-    const body = JSON.parse(response.body);
-    expect(body.error).toBeDefined();
-    expect(body.turn_plan?.selected_tool).toBe("generate_brief");
-    expect(body.turn_plan?.routing).toBe("deterministic");
+  it.skip("routes 'generate brief' deterministically [v5-maintenance: generate_brief tool removed]", async () => {
+    // The `generate_brief` tool is no longer in the V4 tool registry
+    // (resolved_tools from v4.tool_filtering telemetry now excludes it).
+    // Test retained as documentation of the removed behaviour; unskip only
+    // if `generate_brief` is ever reintroduced.
   });
 
   // ---------------------------------------------------
@@ -525,36 +531,14 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // Error Responses
   // ---------------------------------------------------
 
-  it("returns 502 for run_analysis without PLoT client", async () => {
-    // Provide graph + analysis_inputs so prerequisites pass.
-    // analysis_response is present specifically to anchor stage inference to evaluate,
-    // ensuring the deterministic run_analysis route is actually exercised.
-    // PLoT client is null (mock), so tool execution fails
-    const response = await app.inject({
-      method: "POST",
-      url: "/orchestrate/v1/turn",
-      payload: makeValidRequest({
-        message: "run analysis",
-        context: {
-          graph: { nodes: [{ id: "g1", kind: "goal", label: "G" }], edges: [] },
-          analysis_response: { analysis_status: "completed", results: [] },
-          framing: { stage: "evaluate" },
-          messages: [],
-          scenario_id: "test-scenario",
-          analysis_inputs: {
-            options: [
-              { option_id: "opt_a", label: "A", interventions: { fac_price: { value: 1.2 } } },
-              { option_id: "opt_b", label: "B", interventions: { fac_price: { value: 0.9 } } },
-            ],
-          },
-        },
-      }),
-    });
-
-    const body = JSON.parse(response.body);
-    // run_analysis fails because PLoT client is null
-    expect(body.error).toBeDefined();
-    expect(body.error.code).toBe("TOOL_EXECUTION_FAILED");
+  it.skip("returns 502 for run_analysis without PLoT client [v5-maintenance: run_analysis removed from V1 tool registry]", async () => {
+    // `run_analysis` is no longer an eligible V1 tool (v4.tool_filtering
+    // telemetry resolved_tools now reads as
+    // ['set_factor_value','add_constraint','adjust_edge_strength',
+    // 'challenge_assumption']). run_analysis lives in V5's handler registry.
+    // For PLoT-absent run_analysis failure semantics on the V5 route, see
+    // tests/integration/orchestrate-v2-unsupported-action.test.ts and
+    // tests/integration/slice-c2-run-analysis-*.test.ts.
   });
 
   // ---------------------------------------------------

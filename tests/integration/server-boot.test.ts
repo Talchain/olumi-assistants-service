@@ -13,19 +13,52 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 
-vi.mock('../../src/adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'boot-mock',
-    chat: async () => ({
-      content: 'boot-ok',
-      usage: { input_tokens: 1, output_tokens: 1 },
-      model: 'boot-mock',
-      latencyMs: 0,
-    }),
+const bootMockAdapter = {
+  name: 'boot-mock',
+  model: 'boot-mock',
+  chat: async () => ({
+    content: 'boot-ok',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: 'boot-mock',
+    latencyMs: 0,
   }),
+  chatWithTools: async () => ({
+    content: [{ type: 'text' as const, text: 'boot-ok' }],
+    stop_reason: 'end_turn' as const,
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: 'boot-mock',
+    latencyMs: 0,
+  }),
+};
+vi.mock('../../src/adapters/llm/router.js', () => ({
+  getAdapter: () => bootMockAdapter,
+  // V5 routeWithToolUse resolves the adapter via getAdapterWithResolution.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: bootMockAdapter,
+    resolution: {
+      task,
+      resolved_model: 'boot-mock',
+      resolution_source: 'task_default' as const,
+    },
+  }),
+  getMaxTokensFromConfig: () => undefined,
 }));
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'test prompt',
+}));
+
+// v5-maintenance: mock session store so commit succeeds without Supabase.
+vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
+  getSessionStore: () => ({
+    append: async () => ({ id: 'boot-mock-row' }),
+    readRecent: async () => [],
+    readFactsFor: async () => [],
+    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    checkScenarioExists: async () => true,
+  }),
+  resetSessionStoreForTests: () => {},
+  SessionReadError: class SessionReadError extends Error {},
 }));
 
 let flagEnabled = true;

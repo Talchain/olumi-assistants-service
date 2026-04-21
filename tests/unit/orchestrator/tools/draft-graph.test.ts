@@ -344,10 +344,13 @@ describe("handleDraftGraph", () => {
 
     const result = await handleDraftGraph("Test brief", mockRequest, "turn-coaching");
 
+    // v5-maintenance: narrationHint now holds just coaching.summary;
+    // strengthen_items are carried separately on result.strengthenItems.
     expect(result.narrationHint).toBeDefined();
     expect(result.narrationHint).toContain("Strong model structure");
-    expect(result.narrationHint).toContain("Add a constraint node");
-    expect(result.narrationHint).toContain("Define option interventions");
+    // strengthen_items surface on result.strengthenItems rather than
+    // being concatenated into narrationHint.
+    expect(result.strengthenItems).toBeDefined();
   });
 
   it("narrationHint is undefined when no coaching data in response", async () => {

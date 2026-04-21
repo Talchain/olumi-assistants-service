@@ -209,7 +209,9 @@ describe("computeChips — post-analysis, dominant factor", () => {
     const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, [], ALL_TOOLS);
     expect(chips.some(c => /How confident in/i.test(c.label))).toBe(true);
     expect(chips.some(c => c.label === 'What would flip this?')).toBe(true);
-    expect(chips.some(c => c.label === 'Generate a decision brief')).toBe(true);
+    // v5-maintenance: 'Generate a decision brief' chip was removed along
+    // with the generate_brief tool. Remaining chips still validated by
+    // assertChipShape below.
     for (const chip of chips) assertChipShape(chip);
   });
 });
@@ -233,7 +235,9 @@ describe("computeChips — post-analysis, stable result (no dominant factor)", (
     });
     const chips = computeChips(coaching, defaultSessionState(), makeTurnContext({ stage: 'evaluate' }), null, [], ALL_TOOLS);
     expect(chips.some(c => c.label === 'Run a pre-mortem')).toBe(true);
-    expect(chips.some(c => c.label === 'Generate a decision brief')).toBe(true);
+    // v5-maintenance: 'Generate a decision brief' chip was removed along
+    // with the generate_brief tool. Remaining chips still validated by
+    // assertChipShape below.
     for (const chip of chips) assertChipShape(chip);
   });
 });

@@ -22,9 +22,15 @@ const envReady = Boolean(SUPABASE_URL && SERVICE_ROLE_KEY && TEST_SCENARIO_ID);
 const suite = envReady ? describe : describe.skip;
 
 suite('Slice B preflight — staging Supabase state', () => {
-  const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  // v5-maintenance: createClient call guarded by envReady. Previously
+  // the call executed during describe-body evaluation even when the
+  // suite was skipped, which threw 'supabaseUrl is required' and failed
+  // the file before vitest's skip semantics could take effect.
+  const client = envReady
+    ? createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+    : (null as unknown as ReturnType<typeof createClient>);
 
   it('v5_conversation_turns is reachable via PostgREST (migration applied)', async () => {
     const { error } = await client.from('v5_conversation_turns').select('id').limit(0);

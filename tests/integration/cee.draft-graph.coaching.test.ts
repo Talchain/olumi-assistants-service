@@ -191,17 +191,27 @@ const mockRepairGraph = vi.fn().mockResolvedValue({
 });
 
 // Override full router module — provides all exports needed by server build
+const coachingMockAdapter = {
+  name: "fixtures",
+  model: "fixture-v1",
+  draftGraph: mockDraftGraph,
+  repairGraph: mockRepairGraph,
+  suggestOptions: vi.fn().mockResolvedValue({ options: [] }),
+  clarifyBrief: vi.fn().mockResolvedValue({ questions: [], usage: { input_tokens: 0, output_tokens: 0 } }),
+  critiqueGraph: vi.fn().mockResolvedValue({ critique: "", usage: { input_tokens: 0, output_tokens: 0 } }),
+  chat: vi.fn().mockResolvedValue({ message: "", usage: { input_tokens: 0, output_tokens: 0 } }),
+  explainDiff: vi.fn().mockResolvedValue({ explanation: "", usage: { input_tokens: 0, output_tokens: 0 } }),
+};
 vi.mock("../../src/adapters/llm/router.js", () => ({
-  getAdapter: () => ({
-    name: "fixtures",
-    model: "fixture-v1",
-    draftGraph: mockDraftGraph,
-    repairGraph: mockRepairGraph,
-    suggestOptions: vi.fn().mockResolvedValue({ options: [] }),
-    clarifyBrief: vi.fn().mockResolvedValue({ questions: [], usage: { input_tokens: 0, output_tokens: 0 } }),
-    critiqueGraph: vi.fn().mockResolvedValue({ critique: "", usage: { input_tokens: 0, output_tokens: 0 } }),
-    chat: vi.fn().mockResolvedValue({ message: "", usage: { input_tokens: 0, output_tokens: 0 } }),
-    explainDiff: vi.fn().mockResolvedValue({ explanation: "", usage: { input_tokens: 0, output_tokens: 0 } }),
+  getAdapter: () => coachingMockAdapter,
+  // v5-maintenance: pipeline parse stage needs getAdapterWithResolution.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: coachingMockAdapter,
+    resolution: {
+      task,
+      resolved_model: "fixture-v1",
+      resolution_source: "task_default" as const,
+    },
   }),
   getAdapterForProvider: vi.fn(),
   getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
