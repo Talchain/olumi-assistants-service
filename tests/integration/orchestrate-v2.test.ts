@@ -95,19 +95,38 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 // direct_answer classification — the A0 valid-turn-payload fixture is
 // direct_answer-shaped, matching the A1 replacement envelope.
 let mockNarrateOutput = '';
+const a0MockAdapter = {
+  name: 'a0-test-mock',
+  chat: async (args: { responseFormat?: string }) => {
+    const content = args.responseFormat === 'json_object'
+      ? '{"turn_class":"direct_answer"}'
+      : mockNarrateOutput;
+    return {
+      content,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'a0-test-mock',
+      latencyMs: 0,
+    };
+  },
+  // V5 Phase 1: tool-use routing path. Returns a text-only tool result driven
+  // by mockNarrateOutput (the A0 fixture is direct_answer-shaped).
+  chatWithTools: async () => ({
+    content: [{ type: 'text', text: mockNarrateOutput }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    model: 'a0-test-mock',
+    latencyMs: 0,
+  }),
+};
 vi.mock('../../src/adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'a0-test-mock',
-    chat: async (args: { responseFormat?: string }) => {
-      const content = args.responseFormat === 'json_object'
-        ? '{"turn_class":"direct_answer"}'
-        : mockNarrateOutput;
-      return {
-        content,
-        usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'a0-test-mock',
-        latencyMs: 0,
-      };
+  getAdapter: () => a0MockAdapter,
+  // Group 3 Task C: route-with-tool-use resolves via getAdapterWithResolution.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: a0MockAdapter,
+    resolution: {
+      task,
+      resolved_model: 'a0-test-mock',
+      resolution_source: 'task_default' as const,
     },
   }),
 }));

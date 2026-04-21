@@ -260,6 +260,60 @@ describe('SupabaseSessionStore.readFactsFor', () => {
   });
 });
 
+describe('SupabaseSessionStore.checkScenarioExists (Group 3 Task A pre-flight)', () => {
+  it('returns true when the scenarios table row exists', async () => {
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [{ id: SCENARIO }], error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.checkScenarioExists(SCENARIO)).resolves.toBe(true);
+    // Verify the lookup hit the correct table with the correct PK filter.
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0].table).toBe('scenarios');
+    expect(selectCalls[0].cols).toBe('id');
+    const filters = selectCalls[0].filters as Record<string, unknown>;
+    expect(filters['eq:id']).toBe(SCENARIO);
+    expect(filters.limit).toBe(1);
+  });
+
+  it('returns false when the scenarios row does not exist', async () => {
+    const { client } = makeClient({ selectResult: { data: [], error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.checkScenarioExists(SCENARIO)).resolves.toBe(false);
+  });
+
+  it('returns false when the driver returns data:null (defensive)', async () => {
+    const { client } = makeClient({ selectResult: { data: null, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.checkScenarioExists(SCENARIO)).resolves.toBe(false);
+  });
+
+  it('throws SessionReadError on a Supabase-reported SELECT error', async () => {
+    const { client } = makeClient({
+      selectResult: { error: { message: 'connection reset', code: 'ECONNRESET' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.checkScenarioExists(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
+    await expect(store.checkScenarioExists(SCENARIO)).rejects.toMatchObject({ code: 'ECONNRESET' });
+  });
+});
+
 describe('SupabaseSessionStore invalidation delegation', () => {
   it('invalidateScoped delegates to the cache layer', async () => {
     const { client } = makeClient();

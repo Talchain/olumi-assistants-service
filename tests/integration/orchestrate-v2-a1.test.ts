@@ -28,7 +28,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { OlumiResponseSchema, BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 // ---------------------------------------------------------------------------
 // Fixture loading
@@ -153,6 +153,51 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
       };
     },
   }),
+  // Group 3 Task C: route-with-tool-use now calls getAdapterWithResolution
+  // instead of getAdapter. Return the same adapter with a stubbed resolution
+  // so test assertions can verify the task id / resolution source if needed.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: {
+      name: 'test-a1-mock',
+      chat: async () => ({ content: '', usage: { input_tokens: 0, output_tokens: 0 }, model: 'test-a1-mock', latencyMs: 0 }),
+      chatWithTools: async (_args: unknown, opts: { signal?: AbortSignal }) => {
+        const m = phaseState.narrate;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            if (m.throws === 'NarrateTimeoutError') {
+              import('../../src/adapters/llm/errors.js').then((errs) => {
+                reject(new errs.UpstreamTimeoutError('test timeout', 'narrate', 1));
+              });
+              return;
+            }
+            if (m.throws === 'generic') {
+              reject(new Error('test generic error'));
+              return;
+            }
+            resolve();
+          }, m.delayMs);
+          opts.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            const abort = new Error('abort');
+            (abort as Error & { name: string }).name = 'AbortError';
+            reject(abort);
+          });
+        });
+        return {
+          content: [{ type: 'text', text: m.output }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'test-a1-mock',
+          latencyMs: 0,
+        };
+      },
+    },
+    resolution: {
+      task: task ?? 'orchestrator',
+      resolved_model: 'test-a1-mock',
+      resolution_source: 'task_default' as const,
+    },
+  }),
 }));
 
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
@@ -169,8 +214,12 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    // Group 3 Task A: scenario pre-flight. A1 fixtures assume the scenario
+    // exists, so the mock returns true — pre-flight passes.
+    checkScenarioExists: async () => true,
   }),
   resetSessionStoreForTests: () => {},
+  SessionReadError: class SessionReadError extends Error {},
 }));
 
 let v5Enabled = true;
@@ -278,16 +327,15 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    expect(res.statusCode).toBe(200);
+    // Group 3 Task B + P0 follow-up: commit_performed:false → HTTP 500 with
+    // BoundaryError body (not OlumiResponse). The UI parser treats every
+    // non-ok status as BoundaryError; sending OlumiResponse here would
+    // collapse to INTERNAL_ERROR on the UI side.
+    expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-    expect(parsed.blocks).toHaveLength(1);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
-      expect(block.severity).toBe('error');
-    }
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('UPSTREAM_TIMEOUT');
+    expect(parsed.retryable).toBe(true);
 
     const completed = turnExecutorEvents('completed');
     expect(completed).toHaveLength(1);
@@ -302,24 +350,40 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
       process.env[k] = v;
     }
     phaseState.narrate.output = fx.mock.narrate_output!;
-    // A2: classifier is the first LLM call — make it the slow one so the
-    // outer budget trips while classifier waits. Fixture already sets an
-    // aggressive TURN_BUDGET_MS.
-    phaseState.classify.delayMs = fx.mock.narrate_delay_ms ?? 100;
+    // Group 3 P1 follow-up (two-part fix):
+    //
+    // (1) Drive the LIVE tool-use routing path, NOT the dead Phase-1
+    //     classifier path. Prior to this change the test set
+    //     phaseState.classify.delayMs, but V5 Phase 1 no longer calls
+    //     the classifier (routeWithToolUse replaced it — see
+    //     Docs/v5/v5-llm-call-site-inventory.md). The old assertion
+    //     happened to be green for other reasons, not because the
+    //     outer abort actually fired on the live path.
+    //
+    // (2) The fixture's TURN_BUDGET_MS=1 is unrealistically aggressive:
+    //     setTimeout(abort, 1) fires on a later macrotask than the
+    //     narrate-delay, so the turn can complete before the abort
+    //     fires. Use narrate_delay=500ms + TURN_BUDGET_MS=50 so the
+    //     budget deterministically wins the race. This makes the test
+    //     a genuine regression guard for the live-path abort-signal
+    //     plumbing — a future regression that lets chatWithTools
+    //     ignore opts.signal will surface as a 200 here.
+    phaseState.narrate.delayMs = 500;
+    process.env.TURN_BUDGET_MS = '50';
 
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    expect(res.statusCode).toBe(200);
+    // Group 3 Task B + P0 follow-up: 500 with BoundaryError body.
+    expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('TURN_BUDGET_EXCEEDED');
-    }
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('TURN_BUDGET_EXCEEDED');
+    // BUDGET_EXCEEDED is NOT retryable (retry would hit the same budget).
+    expect(parsed.retryable).toBe(false);
+
     const completed = turnExecutorEvents('completed');
     expect(completed).toHaveLength(1);
     expect(completed[0]!.data.failure_type).toBe('TURN_BUDGET_EXCEEDED');

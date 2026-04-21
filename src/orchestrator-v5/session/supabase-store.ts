@@ -208,6 +208,54 @@ export class SupabaseSessionStore implements SessionStore {
   async invalidateAll(scenarioId: string): Promise<InvalidationResult> {
     return this.cache.invalidateAll(scenarioId);
   }
+
+  async checkScenarioExists(scenarioId: string): Promise<boolean> {
+    // Single-column SELECT keyed on PK. Service-role client bypasses RLS,
+    // so this returns true for ANY row that exists in `public.scenarios`,
+    // regardless of who owns it.
+    //
+    // ⚠ CROSS-TENANT LIMITATION (Group 3 honesty note) ⚠
+    //
+    // This check does NOT enforce caller-scoped ownership. A caller who
+    // knows or guesses a foreign scenario UUID will pass pre-flight;
+    // `append_turn_atomic` also does not enforce ownership (it reads
+    // user_id FROM scenarios WHERE id = p_scenario_id and denormalises
+    // that value onto the turn row). UI-side auth + RLS on `scenarios`
+    // is the effective defence today because the UI's scenarioService
+    // uses the user's JWT and the UI user never sees another user's
+    // scenario_id in the first place.
+    //
+    // The WRONG way to close this gap (and an audit tripwire — see
+    // scripts/validate-docs-consistency.sh §2): extend append_turn_atomic
+    // with a `p_user_id` PARAMETER. Under SECURITY DEFINER the function
+    // would trust any user_id the service-role caller supplies, which
+    // re-opens a user-impersonation vector without actually verifying
+    // the caller IS that user.
+    //
+    // The CORRECT close uses PostgREST's request-level JWT propagation:
+    // mint a scoped Supabase client per request from the caller's
+    // Authorization bearer token, and query/call RPCs with that client
+    // so `auth.uid()` inside SQL resolves to the authenticated caller.
+    // Scenarios row reads then honour RLS automatically, and any
+    // SECURITY DEFINER function can read the real caller via
+    // `auth.uid()` rather than trusting a parameter. That is a
+    // substantive auth-stack change (Fastify hook to parse the bearer
+    // token, per-request Supabase client factory, RLS review) and lives
+    // beyond Group 3 scope. Tracked separately; Paul owns the design.
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('id')
+      .eq('id', scenarioId)
+      .limit(1);
+
+    if (error) {
+      throw new SessionReadError(
+        `checkScenarioExists(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    return Array.isArray(data) && data.length > 0;
+  }
 }
 
 /**

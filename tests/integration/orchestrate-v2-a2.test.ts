@@ -26,7 +26,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { OlumiResponseSchema, BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIX_DIR = join(__dirname, '..', 'fixtures', 'contracts', 'b1', 'slice-a2');
@@ -118,6 +118,46 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
       };
     },
   }),
+  // Group 3 Task C: route-with-tool-use now calls getAdapterWithResolution.
+  // Return the same adapter shape + a stubbed resolution block.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: {
+      name: 'test-a2-mock',
+      chat: async () => ({ content: '', usage: { input_tokens: 0, output_tokens: 0 }, model: 'test-a2-mock', latencyMs: 0 }),
+      chatWithTools: async () => {
+        const m = phaseState.narrate;
+        if (m.throws === 'NarrateTimeoutError') {
+          const errs = await import('../../src/adapters/llm/errors.js');
+          throw new errs.UpstreamTimeoutError('test timeout', 'narrate', 1);
+        }
+        if (m.throws === 'generic') {
+          throw new Error('test generic error');
+        }
+        return {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tu-1',
+              name: 'olumi_action',
+              input: {
+                intent_class: 'clarify',
+                clarification: { ambiguity_type: 'intent', question: m.output },
+              },
+            },
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'test-a2-mock',
+          latencyMs: 0,
+        };
+      },
+    },
+    resolution: {
+      task: task ?? 'orchestrator',
+      resolved_model: 'test-a2-mock',
+      resolution_source: 'task_default' as const,
+    },
+  }),
 }));
 
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
@@ -134,8 +174,11 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    // Group 3 Task A: scenario pre-flight passes for all A2 fixtures.
+    checkScenarioExists: async () => true,
   }),
   resetSessionStoreForTests: () => {},
+  SessionReadError: class SessionReadError extends Error {},
 }));
 
 let v5Enabled = true;
@@ -244,16 +287,12 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
       url: '/orchestrate/v2/turn',
       payload: fx.request,
     });
-    expect(res.statusCode).toBe(200);
+    // Group 3 Task B + P0 follow-up: 500 with BoundaryError body.
+    expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-    expect(parsed.blocks).toHaveLength(1);
-    const block = parsed.blocks[0]!;
-    expect(block.type).toBe('error');
-    if (block.type === 'error') {
-      expect(block.error_code).toBe('UPSTREAM_TIMEOUT');
-      expect(block.severity).toBe('error');
-    }
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('UPSTREAM_TIMEOUT');
+    expect(parsed.retryable).toBe(true);
 
     const completed = turnExecutorEvents('completed');
     expect(completed).toHaveLength(1);

@@ -12,8 +12,9 @@ import type {
   LLMAdapterResponse,
 } from '@talchain/schemas/orchestrator';
 
-import { getAdapter } from '../adapters/llm/router.js';
+import { getAdapterWithResolution } from '../adapters/llm/router.js';
 import { UpstreamTimeoutError } from '../adapters/llm/errors.js';
+import { recordModelResolution } from './debug/turn-debug-store.js';
 
 // Internal failure signals the wrapper raises. TurnExecutor maps each to a
 // FailureType before egress.
@@ -45,6 +46,11 @@ export class NarrateEmptyOutputError extends Error {
 export interface InvokeNarrateOpts {
   /** External AbortSignal — TurnExecutor passes its wall-clock budget signal. */
   signal?: AbortSignal;
+  /** Optional — enables per-call model_resolution recording to turn-debug.
+   *  The LLMAdapterRequest schema is pinned, so we can't stuff session_id
+   *  into the request payload; options is the seam. Unreachable in Phase 1
+   *  (TurnExecutor uses routeWithToolUse, not invokeNarrate). */
+  session_id?: string;
 }
 
 /**
@@ -62,7 +68,17 @@ export async function invokeNarrate(
   request: LLMAdapterRequest,
   opts?: InvokeNarrateOpts,
 ): Promise<LLMAdapterResponse> {
-  const adapter = getAdapter('direct_answer_narrate');
+  // Group 3 Task C: route through getAdapterWithResolution. Prior to the fix
+  // this site called `getAdapter('direct_answer_narrate')`, which is NOT a
+  // CeeTask member and therefore short-circuited to llm_model_fallback.
+  // `explainer` is the nearest fit for single-turn narrate prose (fast tier).
+  // Paul should confirm this mapping if invokeNarrate is ever wired back
+  // into the live path; for now the site remains unreachable from V5 Phase 1
+  // (routeWithToolUse replaced it), so this correction is a forward-fix.
+  const { adapter, resolution } = getAdapterWithResolution('explainer');
+  if (opts?.session_id) {
+    recordModelResolution(request.request_id, opts.session_id, resolution);
+  }
   try {
     const result = await adapter.chat(
       {

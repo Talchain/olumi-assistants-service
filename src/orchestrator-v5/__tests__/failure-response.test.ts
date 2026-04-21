@@ -33,12 +33,14 @@ describe('buildFailureResponse', () => {
     expect(env.assistant_text).toBe(FAILURE_USER_TEXT.UPSTREAM_TIMEOUT);
   });
 
-  it('attaches optional details to the error block', () => {
+  it('attaches optional details to the error block (alongside the Group 3 retryable flag)', () => {
     const env = buildFailureResponse('LLM_TIMEOUT', 'frame', { phase: 'narrate' });
     const block = env.blocks[0]!;
     expect(block.type).toBe('error');
     if (block.type === 'error') {
-      expect(block.details).toEqual({ phase: 'narrate' });
+      // Group 3 Task B: retryable is now always present; caller-provided
+      // details are merged on top.
+      expect(block.details).toMatchObject({ phase: 'narrate', retryable: true });
     }
   });
 
@@ -51,5 +53,56 @@ describe('buildFailureResponse', () => {
   it('carries the caller-provided stage on the envelope', () => {
     const env = buildFailureResponse('STATE_COMMIT_FAILED', 'decide');
     expect(env.stage_indicator).toBe('decide');
+  });
+
+  // Group 3 Task B — retryable flag on details.
+  describe('retryable flag (Group 3 Task B)', () => {
+    it('sets retryable:true for STATE_COMMIT_FAILED (transient persistence failure)', () => {
+      const env = buildFailureResponse('STATE_COMMIT_FAILED', 'frame');
+      const block = env.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.details).toMatchObject({ retryable: true });
+      }
+    });
+
+    it('sets retryable:true for LLM_TIMEOUT (transient upstream failure)', () => {
+      const env = buildFailureResponse('LLM_TIMEOUT', 'frame');
+      const block = env.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.details).toMatchObject({ retryable: true });
+      }
+    });
+
+    it('sets retryable:false for UNHANDLED (permanent / structural)', () => {
+      const env = buildFailureResponse('UNHANDLED', 'frame');
+      const block = env.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.details).toMatchObject({ retryable: false });
+      }
+    });
+
+    it('sets retryable:false for BUDGET_EXCEEDED (retry will hit the same budget)', () => {
+      const env = buildFailureResponse('BUDGET_EXCEEDED', 'frame');
+      const block = env.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.details).toMatchObject({ retryable: false });
+      }
+    });
+
+    it('sets retryable:false for LLM_SCHEMA_VIOLATION (model-pathology)', () => {
+      const env = buildFailureResponse('LLM_SCHEMA_VIOLATION', 'frame');
+      const block = env.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.details).toMatchObject({ retryable: false });
+      }
+    });
+
+    it('preserves caller details when retryable is added', () => {
+      const env = buildFailureResponse('STATE_COMMIT_FAILED', 'frame', { phase: 'commit' });
+      const block = env.blocks[0]!;
+      if (block.type === 'error') {
+        expect(block.details).toEqual({ retryable: true, phase: 'commit' });
+      }
+    });
   });
 });

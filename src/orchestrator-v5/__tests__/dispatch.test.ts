@@ -29,38 +29,50 @@ const phaseMocks: Record<Phase, PhaseMock> = {
   narrate: { content: '' },
 };
 
-vi.mock('../../adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'test-dispatch-mock',
-    chat: async (
-      args: { responseFormat?: string },
-      opts: { signal?: AbortSignal },
-    ) => {
-      const phase: Phase = args.responseFormat === 'json_object' ? 'classify' : 'narrate';
-      const m = phaseMocks[phase];
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (m.throws === 'upstream_timeout') {
-            import('../../adapters/llm/errors.js').then((errs) => {
-              reject(new errs.UpstreamTimeoutError('test', phase, 1));
-            });
-            return;
-          }
-          resolve();
-        }, m.delayMs ?? 0);
-        opts.signal?.addEventListener('abort', () => {
-          clearTimeout(timer);
-          const abortError = new Error('aborted');
-          (abortError as Error & { name: string }).name = 'AbortError';
-          reject(abortError);
-        });
+const dispatchMockAdapter = {
+  name: 'test-dispatch-mock',
+  chat: async (
+    args: { responseFormat?: string },
+    opts: { signal?: AbortSignal },
+  ) => {
+    const phase: Phase = args.responseFormat === 'json_object' ? 'classify' : 'narrate';
+    const m = phaseMocks[phase];
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (m.throws === 'upstream_timeout') {
+          import('../../adapters/llm/errors.js').then((errs) => {
+            reject(new errs.UpstreamTimeoutError('test', phase, 1));
+          });
+          return;
+        }
+        resolve();
+      }, m.delayMs ?? 0);
+      opts.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        const abortError = new Error('aborted');
+        (abortError as Error & { name: string }).name = 'AbortError';
+        reject(abortError);
       });
-      return {
-        content: m.content,
-        usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'test-dispatch-mock',
-        latencyMs: 0,
-      };
+    });
+    return {
+      content: m.content,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'test-dispatch-mock',
+      latencyMs: 0,
+    };
+  },
+};
+
+vi.mock('../../adapters/llm/router.js', () => ({
+  getAdapter: () => dispatchMockAdapter,
+  // Group 3 Task C: classify.ts and llm-adapter.ts now call
+  // getAdapterWithResolution. Mirror the mock with a stub resolution block.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: dispatchMockAdapter,
+    resolution: {
+      task,
+      resolved_model: 'test-dispatch-mock',
+      resolution_source: 'task_default' as const,
     },
   }),
 }));

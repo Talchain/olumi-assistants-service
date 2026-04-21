@@ -21,43 +21,55 @@ type ClassifierMock = {
 };
 const classifierMock: ClassifierMock = { content: '' };
 
-vi.mock('../../adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'test-classifier-mock',
-    chat: async (_args: unknown, opts: { signal?: AbortSignal }) => {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (classifierMock.throws === 'upstream_timeout') {
-            import('../../adapters/llm/errors.js').then((errs) => {
-              reject(new errs.UpstreamTimeoutError('test timeout', 'classify', 1));
-            });
-            return;
-          }
-          if (classifierMock.throws === 'abort') {
-            const abortError = new Error('abort');
-            (abortError as Error & { name: string }).name = 'AbortError';
-            reject(abortError);
-            return;
-          }
-          if (classifierMock.throws === 'generic') {
-            reject(new Error('generic failure'));
-            return;
-          }
-          resolve();
-        }, classifierMock.delayMs ?? 0);
-        opts.signal?.addEventListener('abort', () => {
-          clearTimeout(timer);
-          const abortError = new Error('aborted');
+const classifyMockAdapter = {
+  name: 'test-classifier-mock',
+  chat: async (_args: unknown, opts: { signal?: AbortSignal }) => {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (classifierMock.throws === 'upstream_timeout') {
+          import('../../adapters/llm/errors.js').then((errs) => {
+            reject(new errs.UpstreamTimeoutError('test timeout', 'classify', 1));
+          });
+          return;
+        }
+        if (classifierMock.throws === 'abort') {
+          const abortError = new Error('abort');
           (abortError as Error & { name: string }).name = 'AbortError';
           reject(abortError);
-        });
+          return;
+        }
+        if (classifierMock.throws === 'generic') {
+          reject(new Error('generic failure'));
+          return;
+        }
+        resolve();
+      }, classifierMock.delayMs ?? 0);
+      opts.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        const abortError = new Error('aborted');
+        (abortError as Error & { name: string }).name = 'AbortError';
+        reject(abortError);
       });
-      return {
-        content: classifierMock.content,
-        usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'test-classifier-mock',
-        latencyMs: 0,
-      };
+    });
+    return {
+      content: classifierMock.content,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'test-classifier-mock',
+      latencyMs: 0,
+    };
+  },
+};
+
+vi.mock('../../adapters/llm/router.js', () => ({
+  getAdapter: () => classifyMockAdapter,
+  // Group 3 Task C: classify.ts now calls getAdapterWithResolution. Return
+  // the same mock adapter with a minimal resolution block.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: classifyMockAdapter,
+    resolution: {
+      task: task ?? 'clarification',
+      resolved_model: 'test-classifier-mock',
+      resolution_source: 'task_default' as const,
     },
   }),
 }));

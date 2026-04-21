@@ -19,33 +19,45 @@ type Mock = {
 };
 const m: Mock = { output: '' };
 
-vi.mock('../../adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'test-clarify-mock',
-    chat: async (_args: unknown, opts: { signal?: AbortSignal }) => {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (m.throws === 'upstream_timeout') {
-            import('../../adapters/llm/errors.js').then((errs) => {
-              reject(new errs.UpstreamTimeoutError('test', 'narrate', 1));
-            });
-            return;
-          }
-          resolve();
-        }, m.delayMs ?? 0);
-        opts.signal?.addEventListener('abort', () => {
-          clearTimeout(timer);
-          const abortError = new Error('aborted');
-          (abortError as Error & { name: string }).name = 'AbortError';
-          reject(abortError);
-        });
+const clarifyMockAdapter = {
+  name: 'test-clarify-mock',
+  chat: async (_args: unknown, opts: { signal?: AbortSignal }) => {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (m.throws === 'upstream_timeout') {
+          import('../../adapters/llm/errors.js').then((errs) => {
+            reject(new errs.UpstreamTimeoutError('test', 'narrate', 1));
+          });
+          return;
+        }
+        resolve();
+      }, m.delayMs ?? 0);
+      opts.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        const abortError = new Error('aborted');
+        (abortError as Error & { name: string }).name = 'AbortError';
+        reject(abortError);
       });
-      return {
-        content: m.output,
-        usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'test-clarify-mock',
-        latencyMs: 0,
-      };
+    });
+    return {
+      content: m.output,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'test-clarify-mock',
+      latencyMs: 0,
+    };
+  },
+};
+
+vi.mock('../../adapters/llm/router.js', () => ({
+  getAdapter: () => clarifyMockAdapter,
+  // Group 3 Task C: llm-adapter.ts (invokeNarrate) now calls
+  // getAdapterWithResolution. Stub the new export with a minimal resolution.
+  getAdapterWithResolution: (task?: string) => ({
+    adapter: clarifyMockAdapter,
+    resolution: {
+      task,
+      resolved_model: 'test-clarify-mock',
+      resolution_source: 'task_default' as const,
     },
   }),
 }));

@@ -353,6 +353,7 @@ export async function runTurnExecutor(
       });
       routingResult = await routeWithToolUse(contextPack, payload.message, {
         requestId,
+        sessionId: context.session_id,
         signal: turnAbort.signal,
         adapter: options.routingAdapter,
       });

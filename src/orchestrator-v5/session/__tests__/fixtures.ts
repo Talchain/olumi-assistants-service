@@ -27,6 +27,9 @@ export interface NoopSessionStoreOptions {
   readonly facts?: readonly HandlerFact[];
   readonly throwOnRead?: Error;
   readonly throwOnAppend?: Error;
+  /** Default true — most tests assume the scenario exists. */
+  readonly scenarioExists?: boolean;
+  readonly throwOnCheckScenarioExists?: Error;
 }
 
 export function createNoopSessionStore(
@@ -55,6 +58,10 @@ export function createNoopSessionStore(
     },
     async invalidateAll(_scenarioId: string): Promise<InvalidationResult> {
       return { scope: { kind: 'structural' }, entries_invalidated: [] };
+    },
+    async checkScenarioExists(_scenarioId: string): Promise<boolean> {
+      if (opts.throwOnCheckScenarioExists) throw opts.throwOnCheckScenarioExists;
+      return opts.scenarioExists ?? true;
     },
   };
 }
