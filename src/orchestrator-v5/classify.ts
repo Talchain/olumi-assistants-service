@@ -46,9 +46,10 @@ import {
   type V5ActionType,
 } from '@talchain/schemas/orchestrator';
 
-import { getAdapter } from '../adapters/llm/router.js';
+import { getAdapterWithResolution } from '../adapters/llm/router.js';
 import { UpstreamTimeoutError } from '../adapters/llm/errors.js';
 import { getSystemPrompt } from '../adapters/llm/prompt-loader.js';
+import { recordModelResolution } from './debug/turn-debug-store.js';
 import { NarrateTimeoutError } from './llm-adapter.js';
 import {
   type C1TurnClass,
@@ -92,6 +93,11 @@ const ClassifierOutputSchema = z
 export interface ClassifyTurnInput {
   /** Latest user message (already extracted from TurnContext.messages). */
   user_message: string;
+  /** Optional — when present, the classify call records its model_resolution
+   *  to turn-debug. Plumbed-but-unreachable in Phase 1 (TurnExecutor uses
+   *  routeWithToolUse instead), so the field is optional until Phase 2 wires
+   *  it through. */
+  session_id?: string;
   request_id: string;
   /** Inner narrate-mode budget in ms. Classifier shares this window
    *  independently of the downstream narrate call. */
@@ -125,7 +131,18 @@ export async function classifyTurn(
   opts?: ClassifyTurnOpts,
 ): Promise<ClassifyTurnResult> {
   const system = await getSystemPrompt('turn_classifier');
-  const adapter = getAdapter('turn_classifier');
+  // Group 3 Task C: route through the full precedence chain. Prior to the
+  // fix this site called `getAdapter('turn_classifier')`, which is NOT a
+  // valid CeeTask member and therefore short-circuited to llm_model_fallback.
+  // We now use `clarification` — the fast-tier CeeTask task (gpt-4.1) — as
+  // the nearest fit for JSON-mode classification. Paul should confirm this
+  // mapping if classify is ever wired back into the live path; for now the
+  // site remains unreachable from V5 Phase 1 (routeWithToolUse replaced it),
+  // so this correction is a forward-fix.
+  const { adapter, resolution } = getAdapterWithResolution('clarification');
+  if (input.session_id) {
+    recordModelResolution(input.request_id, input.session_id, resolution);
+  }
 
   let content: string;
   try {

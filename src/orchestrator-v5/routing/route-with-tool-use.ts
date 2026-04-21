@@ -30,7 +30,7 @@
  *   - author the full orchestrator prompt (Claude drafts that separately)
  */
 
-import { getAdapter } from '../../adapters/llm/router.js';
+import { getAdapterWithResolution, type ModelResolution } from '../../adapters/llm/router.js';
 import {
   UpstreamHTTPError,
   UpstreamTimeoutError,
@@ -41,6 +41,7 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
+import { recordModelResolution } from '../debug/turn-debug-store.js';
 
 import type { ContextPack } from '../context/context-pack-assembler.js';
 
@@ -146,6 +147,13 @@ export interface RouteWithToolUseOptions {
   readonly timeoutMs?: number;
   /** Request id threaded through telemetry and adapter logs. */
   readonly requestId: string;
+  /**
+   * Session id (V5 alias for scenario_id). When present alongside an
+   * uninjected adapter, the routing call records a model_resolutions entry
+   * on the turn-debug store. Omitted only by tests that inject their own
+   * adapter.
+   */
+  readonly sessionId?: string;
   /** External abort signal (turn budget). */
   readonly signal?: AbortSignal;
   /** Injected adapter — tests pass a mock; production resolves via router. */
@@ -162,8 +170,23 @@ export async function routeWithToolUse(
   message: string,
   options: RouteWithToolUseOptions,
 ): Promise<RoutingResult> {
-  const adapter = options.adapter ?? resolveDefaultAdapter();
+  // Production path: resolve via the router with the 'orchestrator' task ID so
+  // store_model_config, CEE_MODEL_ORCHESTRATOR, and TASK_MODEL_DEFAULTS['orchestrator']
+  // are respected in that order. Group 3 Task C fix — previously this site used
+  // getAdapter('direct_answer_narrate'), which is NOT a valid CeeTask and
+  // therefore fell through to LLM_PROVIDER/LLM_MODEL (gpt-4o-mini on staging).
+  const { adapter, resolution } = options.adapter
+    ? { adapter: options.adapter, resolution: null as ModelResolution | null }
+    : resolveRoutingAdapter();
   const timeoutMs = options.timeoutMs ?? ORCHESTRATOR_TIMEOUT_MS;
+
+  // Record the resolution once per call (not per LLM invocation) so each turn
+  // gets exactly one model_resolutions entry for ORIENT regardless of
+  // REPAIR_ONCE. Skip when we have no session_id (test-injected adapters) —
+  // recordModelResolution requires turn_id + session_id.
+  if (resolution && options.sessionId) {
+    recordModelResolution(options.requestId, options.sessionId, resolution);
+  }
 
   const userMessage = buildUserMessage(contextPack, message);
 
@@ -361,17 +384,26 @@ interface MinimalToolUseAdapter {
   ) => Promise<ChatWithToolsResult>;
 }
 
-function resolveDefaultAdapter(): MinimalToolUseAdapter {
-  // 'direct_answer_narrate' is the established V5 narrate task id — same
-  // routing key the replaced classifier used. The adapter must expose
-  // chatWithTools; Anthropic does, fixtures may not. Fixtures/E2E paths
-  // need to pass an explicit adapter override.
-  const adapter = getAdapter('direct_answer_narrate');
+/**
+ * Resolve the adapter for V5 ORIENT (tool-use routing). Group 3 Task C:
+ * uses `getAdapterWithResolution('orchestrator', ...)` so the precedence chain
+ * (per_call → store_model_config → env_var CEE_MODEL_ORCHESTRATOR →
+ * task_default gpt-4o → providers_json → llm_model_fallback) is honoured and
+ * observable. The returned `resolution` is forwarded to turn-debug by the
+ * caller. Prior to this fix the site called `getAdapter('direct_answer_narrate')`
+ * — a non-CeeTask string that caused the router to short-circuit to
+ * llm_model_fallback (observed as gpt-4o-mini on 20 April 2026 staging).
+ */
+function resolveRoutingAdapter(): {
+  adapter: MinimalToolUseAdapter;
+  resolution: ModelResolution;
+} {
+  const { adapter, resolution } = getAdapterWithResolution('orchestrator');
   if (!adapter.chatWithTools) {
     throw new RoutingError(
       'api_error',
-      `Resolved adapter does not implement chatWithTools (task: direct_answer_narrate)`,
+      `Resolved adapter does not implement chatWithTools (task: orchestrator, resolved_model: ${resolution.resolved_model})`,
     );
   }
-  return adapter as unknown as MinimalToolUseAdapter;
+  return { adapter: adapter as unknown as MinimalToolUseAdapter, resolution };
 }
