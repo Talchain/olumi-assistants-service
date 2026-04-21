@@ -78,6 +78,7 @@ import { preflightScenarioCheck } from '../orchestrator-v5/build-turn-context.js
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
+import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
@@ -287,6 +288,73 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           details: {
             retryable: true,
             reason: 'draft_graph_pipeline_threw',
+            stage: ingress.value.stage,
+            message: err instanceof Error ? err.message : String(err),
+          },
+          request_id: requestId,
+          retryable: true,
+        };
+        return reply.code(500).send(boundaryError);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Chip-click run_analysis dispatch (v5-handler-surface brief Task 4)
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // When the UI sends source='chip_click' with chip.action_type='run_analysis',
+    // skip Sonnet routing entirely and invoke the registered run_analysis
+    // handler directly. source='chip' (inline chip metadata on a normal
+    // message) does NOT shortcut — it falls through to TurnExecutor.
+    //
+    // Other chip action types fall through to TurnExecutor which returns a
+    // typed FEATURE_NOT_ENABLED via the existing UNSUPPORTED_ACTION path
+    // (v5-exclusive-cee P0 follow-up).
+    const isChipClickRunAnalysis =
+      ingress.value.source === 'chip_click' &&
+      ingress.value.chip?.action_type === 'run_analysis';
+    if (isChipClickRunAnalysis) {
+      try {
+        const cc = await dispatchChipClickRunAnalysis({
+          payload: ingress.value,
+          requestId,
+          graphState: extensions.value.graphState ?? null,
+          analysisState: extensions.value.analysisState ?? null,
+        });
+        if (!cc.commitPerformed) {
+          const boundaryError: BoundaryError = {
+            error: 'INTERNAL_ERROR',
+            boundary: 'B1',
+            direction: 'egress',
+            validator: 'turn_commit',
+            details: {
+              retryable: true,
+              reason: 'chip_click_run_analysis_commit_failed',
+              stage: ingress.value.stage,
+            },
+            request_id: requestId,
+            retryable: true,
+          };
+          return reply.code(500).send(boundaryError);
+        }
+        const ccEgress = validateEgress(cc.response, requestId);
+        if (!ccEgress.ok) {
+          log.error(
+            { request_id: requestId },
+            'V5 chip_click run_analysis dispatch egress validation failed — returning typed fallback envelope',
+          );
+          return reply.code(200).send(ccEgress.fallback);
+        }
+        return reply.code(200).send(ccEgress.value);
+      } catch (err) {
+        const boundaryError: BoundaryError = {
+          error: 'INTERNAL_ERROR',
+          boundary: 'B1',
+          direction: 'egress',
+          validator: 'chip_click_dispatch',
+          details: {
+            retryable: true,
+            reason: 'chip_click_run_analysis_handler_threw',
             stage: ingress.value.stage,
             message: err instanceof Error ? err.message : String(err),
           },
