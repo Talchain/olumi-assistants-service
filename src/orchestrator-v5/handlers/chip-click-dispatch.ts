@@ -42,6 +42,10 @@ import {
 } from '../tools/registry.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import {
+  HandlerInvocationFailedError,
+  HandlerResultInvalidError,
+} from '../tools/handler-errors.js';
 
 /**
  * Note on ingress state (graphState / analysisState):
@@ -62,10 +66,30 @@ export interface DispatchChipClickRunAnalysisParams {
   readonly handlerRegistry?: HandlerRegistry;
 }
 
-export interface DispatchChipClickRunAnalysisResult {
-  readonly response: OlumiResponse;
-  readonly commitPerformed: boolean;
-}
+/**
+ * Richer-than-boolean failure carrier. On commit success the discriminator
+ * is 'ok'. On typed handler failure it is 'handler_failure' — the route
+ * maps these to specific BoundaryError codes (e.g. FEATURE_NOT_ENABLED
+ * for unreachable-upstream cases) rather than collapsing everything into
+ * INTERNAL_ERROR. This mirrors TurnExecutor's handling of
+ * HandlerInvocationFailedError / HandlerResultInvalidError and keeps the
+ * chip-click path observationally consistent with the Sonnet-routed path.
+ */
+export type DispatchChipClickRunAnalysisResult =
+  | { readonly outcome: 'ok'; readonly response: OlumiResponse; readonly commitPerformed: true }
+  | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false }
+  | {
+      readonly outcome: 'handler_failure';
+      readonly response: OlumiResponse;
+      readonly commitPerformed: false;
+      readonly causeKind: string;
+      readonly retryable: boolean;
+    }
+  | {
+      readonly outcome: 'handler_result_invalid';
+      readonly response: OlumiResponse;
+      readonly commitPerformed: false;
+    };
 
 export async function dispatchChipClickRunAnalysis(
   params: DispatchChipClickRunAnalysisParams,
@@ -87,9 +111,10 @@ export async function dispatchChipClickRunAnalysis(
       'V5 chip_click dispatch — run_analysis handler missing from registry',
     );
     return {
+      outcome: 'commit_failed',
       response: composeToolCallResponse({
         orientation: '',
-        confirmation: 'Could not run analysis — handler not available.',
+        confirmation: 'Could not run analysis. The analysis service is temporarily unavailable.',
         coaching: null,
         stage: payload.stage,
         handlerFacts: [],
@@ -101,13 +126,64 @@ export async function dispatchChipClickRunAnalysis(
   const turnAbort = new AbortController();
   const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
 
+  // Response skeleton used for typed-failure paths where the handler never
+  // produced a usable outcome.
+  const failureResponse = composeToolCallResponse({
+    orientation: '',
+    confirmation: 'Analysis could not complete.',
+    coaching: null,
+    stage: payload.stage,
+    handlerFacts: [],
+  });
+
   try {
-    const outcome = await handlerFn({
-      context,
-      payload,
-      requestId,
-      signal: turnAbort.signal,
-    });
+    let outcome;
+    try {
+      outcome = await handlerFn({
+        context,
+        payload,
+        requestId,
+        signal: turnAbort.signal,
+      });
+    } catch (err) {
+      // Mirror TurnExecutor's catch ladder so chip-click errors surface
+      // with the same typed granularity as Sonnet-routed errors.
+      if (err instanceof HandlerInvocationFailedError) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            cause_kind: err.cause_kind,
+            retryable: err.retryable,
+            message: err.message,
+          },
+          'V5 chip_click run_analysis — handler invocation failed (typed)',
+        );
+        return {
+          outcome: 'handler_failure',
+          response: failureResponse,
+          commitPerformed: false,
+          causeKind: err.cause_kind,
+          retryable: err.retryable,
+        };
+      }
+      if (err instanceof HandlerResultInvalidError) {
+        log.error(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            message: err.message,
+          },
+          'V5 chip_click run_analysis — handler result invalid',
+        );
+        return {
+          outcome: 'handler_result_invalid',
+          response: failureResponse,
+          commitPerformed: false,
+        };
+      }
+      throw err;
+    }
 
     // Decision_review enrichment — same behaviour as TurnExecutor's EXECUTE
     // branch for run_analysis (V5 Group 1 Task B). Non-blocking; enricher
@@ -146,7 +222,7 @@ export async function dispatchChipClickRunAnalysis(
         duration_ms: Date.now() - startedAt,
         handler_facts: enrichedFacts,
       });
-      return { response, commitPerformed: true };
+      return { outcome: 'ok', response, commitPerformed: true };
     } catch (err) {
       log.error(
         {
@@ -156,7 +232,7 @@ export async function dispatchChipClickRunAnalysis(
         },
         'V5 chip_click run_analysis dispatch — commit failed',
       );
-      return { response, commitPerformed: false };
+      return { outcome: 'commit_failed', response, commitPerformed: false };
     }
   } finally {
     clearTimeout(turnTimer);

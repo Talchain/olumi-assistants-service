@@ -201,6 +201,7 @@ describe('V5 golden path — brief → edit → analysis chip, V4 flag OFF', () 
 
     // ------ Turn 3: run_analysis chip click → chip_click dispatch ------
     dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      outcome: 'ok' as const,
       response: {
         response_version: 2 as const,
         assistant_text: 'Ran analysis on your current scenario. Option A leads.',

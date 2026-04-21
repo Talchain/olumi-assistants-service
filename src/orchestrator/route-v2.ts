@@ -96,6 +96,33 @@ function stripExtensionFields(body: unknown): unknown {
   return copy;
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Dispatch-trigger regexes (hoisted to module scope — constructing these
+// inside the request handler would rebuild RegExp objects on every turn).
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Positive decision-brief regex for draft_graph dispatch. Matches common
+ * decision verbs or a trailing question mark. See
+ * `tests/integration/orchestrator/route-v2-draft-graph.test.ts` for
+ * regression cases including known false negatives.
+ */
+const DRAFT_GRAPH_DECISION_BRIEF_REGEX =
+  /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
+
+/** Positive edit-intent regex for edit_graph dispatch. */
+const EDIT_GRAPH_POSITIVE_REGEX =
+  /\b(change|update|edit|modify|remove|delete|add|adjust|set|reduce|increase|decrease|tweak|raise|lower)\b/i;
+
+/**
+ * Negative guard for edit_graph dispatch. If a message contains any of
+ * these phrases it is a meta-question, not an edit command, and must NOT
+ * dispatch even if a positive edit-verb also appears. Mutating the graph
+ * on a meta-question is the worst failure mode.
+ */
+const EDIT_GRAPH_NEGATIVE_REGEX =
+  /\b(explain|compare|what would|flip|why|how does|tell me|show me|describe)\b/i;
+
 export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void> {
   app.post('/orchestrate/v2/turn', async (req, reply) => {
     const requestId = getOrGenerateRequestId(req);
@@ -218,6 +245,119 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // Chip-click run_analysis dispatch (v5-handler-surface brief Task 4)
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // This branch runs BEFORE the heuristic-based draft_graph and edit_graph
+    // branches because a chip click is an EXPLICIT user signal — no
+    // ambiguity, no heuristic. If a chip click arrives with a message that
+    // would also match draft_graph's decision-brief regex (e.g. stage=frame
+    // + long message + decision keywords), the chip takes precedence. A
+    // future refactor that changed dispatch order must keep chip-click
+    // first.
+    //
+    // Scope: ONLY source='chip_click' + chip.action_type='run_analysis'.
+    // source='chip' (inline chip metadata on a normal message) falls
+    // through to TurnExecutor. Other chip action types fall through to
+    // TurnExecutor which returns a typed FEATURE_NOT_ENABLED via the
+    // existing UNSUPPORTED_ACTION path (v5-exclusive-cee P0 follow-up).
+    const isChipClickRunAnalysis =
+      ingress.value.source === 'chip_click' &&
+      ingress.value.chip?.action_type === 'run_analysis';
+    if (isChipClickRunAnalysis) {
+      try {
+        const cc = await dispatchChipClickRunAnalysis({
+          payload: ingress.value,
+          requestId,
+        });
+        // Discriminated outcome — each case maps to a distinct wire
+        // response. Parallels TurnExecutor's catch ladder so chip-click
+        // errors surface with the same typed granularity.
+        if (cc.outcome === 'handler_failure') {
+          const boundaryError: BoundaryError = {
+            error: 'INTERNAL_ERROR',
+            boundary: 'B1',
+            direction: 'egress',
+            validator: 'chip_click_dispatch',
+            details: {
+              retryable: cc.retryable,
+              reason: 'chip_click_run_analysis_handler_failed',
+              cause_kind: cc.causeKind,
+              stage: ingress.value.stage,
+            },
+            request_id: requestId,
+            retryable: cc.retryable,
+          };
+          return reply.code(500).send(boundaryError);
+        }
+        if (cc.outcome === 'handler_result_invalid') {
+          const boundaryError: BoundaryError = {
+            error: 'INTERNAL_ERROR',
+            boundary: 'B1',
+            direction: 'egress',
+            validator: 'chip_click_dispatch',
+            details: {
+              retryable: false,
+              reason: 'chip_click_run_analysis_handler_result_invalid',
+              stage: ingress.value.stage,
+            },
+            request_id: requestId,
+            retryable: false,
+          };
+          return reply.code(500).send(boundaryError);
+        }
+        if (cc.outcome === 'commit_failed') {
+          const boundaryError: BoundaryError = {
+            error: 'INTERNAL_ERROR',
+            boundary: 'B1',
+            direction: 'egress',
+            validator: 'turn_commit',
+            details: {
+              retryable: true,
+              reason: 'chip_click_run_analysis_commit_failed',
+              stage: ingress.value.stage,
+            },
+            request_id: requestId,
+            retryable: true,
+          };
+          return reply.code(500).send(boundaryError);
+        }
+        // outcome === 'ok'
+        const ccEgress = validateEgress(cc.response, requestId);
+        if (!ccEgress.ok) {
+          log.error(
+            { request_id: requestId },
+            'V5 chip_click run_analysis dispatch egress validation failed — returning typed fallback envelope',
+          );
+          return reply.code(200).send(ccEgress.fallback);
+        }
+        return reply.code(200).send(ccEgress.value);
+      } catch (err) {
+        log.error(
+          {
+            request_id: requestId,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'V5 chip_click run_analysis handler threw — returning 500 BoundaryError',
+        );
+        const boundaryError: BoundaryError = {
+          error: 'INTERNAL_ERROR',
+          boundary: 'B1',
+          direction: 'egress',
+          validator: 'chip_click_dispatch',
+          details: {
+            retryable: true,
+            reason: 'chip_click_run_analysis_handler_threw',
+            stage: ingress.value.stage,
+          },
+          request_id: requestId,
+          retryable: true,
+        };
+        return reply.code(500).send(boundaryError);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Draft_graph pre-Sonnet dispatch (v5-handler-surface brief Task 2)
     // ────────────────────────────────────────────────────────────────────
     //
@@ -238,13 +378,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //     per the matrix. False positives would mis-invoke the pipeline
     //     on a conversational message, so we err on the side of NOT
     //     dispatching.
-    const DECISION_BRIEF_REGEX =
-      /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
     const isDraftGraphShape =
       ingress.value.stage === 'frame' &&
       extensions.value.graphState == null &&
       ingress.value.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-      DECISION_BRIEF_REGEX.test(ingress.value.message);
+      DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.value.message);
     if (isDraftGraphShape) {
       try {
         const dg = await dispatchDraftGraph({
@@ -308,77 +446,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
 
     // ────────────────────────────────────────────────────────────────────
-    // Chip-click run_analysis dispatch (v5-handler-surface brief Task 4)
-    // ────────────────────────────────────────────────────────────────────
-    //
-    // When the UI sends source='chip_click' with chip.action_type='run_analysis',
-    // skip Sonnet routing entirely and invoke the registered run_analysis
-    // handler directly. source='chip' (inline chip metadata on a normal
-    // message) does NOT shortcut — it falls through to TurnExecutor.
-    //
-    // Other chip action types fall through to TurnExecutor which returns a
-    // typed FEATURE_NOT_ENABLED via the existing UNSUPPORTED_ACTION path
-    // (v5-exclusive-cee P0 follow-up).
-    const isChipClickRunAnalysis =
-      ingress.value.source === 'chip_click' &&
-      ingress.value.chip?.action_type === 'run_analysis';
-    if (isChipClickRunAnalysis) {
-      try {
-        const cc = await dispatchChipClickRunAnalysis({
-          payload: ingress.value,
-          requestId,
-        });
-        if (!cc.commitPerformed) {
-          const boundaryError: BoundaryError = {
-            error: 'INTERNAL_ERROR',
-            boundary: 'B1',
-            direction: 'egress',
-            validator: 'turn_commit',
-            details: {
-              retryable: true,
-              reason: 'chip_click_run_analysis_commit_failed',
-              stage: ingress.value.stage,
-            },
-            request_id: requestId,
-            retryable: true,
-          };
-          return reply.code(500).send(boundaryError);
-        }
-        const ccEgress = validateEgress(cc.response, requestId);
-        if (!ccEgress.ok) {
-          log.error(
-            { request_id: requestId },
-            'V5 chip_click run_analysis dispatch egress validation failed — returning typed fallback envelope',
-          );
-          return reply.code(200).send(ccEgress.fallback);
-        }
-        return reply.code(200).send(ccEgress.value);
-      } catch (err) {
-        log.error(
-          {
-            request_id: requestId,
-            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-          },
-          'V5 chip_click run_analysis handler threw — returning 500 BoundaryError',
-        );
-        const boundaryError: BoundaryError = {
-          error: 'INTERNAL_ERROR',
-          boundary: 'B1',
-          direction: 'egress',
-          validator: 'chip_click_dispatch',
-          details: {
-            retryable: true,
-            reason: 'chip_click_run_analysis_handler_threw',
-            stage: ingress.value.stage,
-          },
-          request_id: requestId,
-          retryable: true,
-        };
-        return reply.code(500).send(boundaryError);
-      }
-    }
-
-    // ────────────────────────────────────────────────────────────────────
     // Edit_graph pre-Sonnet dispatch (v5-handler-surface brief Task 3)
     // ────────────────────────────────────────────────────────────────────
     //
@@ -393,18 +460,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //   - graph_state present (something to edit).
     //   - stage in {analyse, decide} (edit happens after drafting).
     //   - EDIT_INTENT_REGEX: positive match on edit verbs.
-    //   - NON_EDIT_INTENT_REGEX: NO match. Explicit guards against
+    //   - EDIT_GRAPH_NEGATIVE_REGEX: NO match. Explicit guards against
     //     "explain this", "compare options", "what would" — those are
     //     meta-questions that might contain an edit verb incidentally.
-    const EDIT_INTENT_REGEX =
-      /\b(change|update|edit|modify|remove|delete|add|adjust|set|reduce|increase|decrease|tweak|raise|lower)\b/i;
-    const NON_EDIT_INTENT_REGEX =
-      /\b(explain|compare|what would|flip|why|how does|tell me|show me|describe)\b/i;
     const isEditGraphShape =
       extensions.value.graphState != null &&
       (ingress.value.stage === 'analyse' || ingress.value.stage === 'decide') &&
-      EDIT_INTENT_REGEX.test(ingress.value.message) &&
-      !NON_EDIT_INTENT_REGEX.test(ingress.value.message);
+      EDIT_GRAPH_POSITIVE_REGEX.test(ingress.value.message) &&
+      !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.value.message);
     if (isEditGraphShape) {
       try {
         // graphState confirmed non-null by the `isEditGraphShape` guard.

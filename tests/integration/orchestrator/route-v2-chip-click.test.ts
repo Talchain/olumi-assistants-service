@@ -113,6 +113,7 @@ const SCENARIO_ID = '22222222-2222-4222-8222-222222222222';
 
 function makeMockResult() {
   return {
+    outcome: 'ok' as const,
     response: {
       response_version: 2 as const,
       assistant_text: 'Ran analysis on your current scenario.',
@@ -235,6 +236,7 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
 
   it('chip_click run_analysis commit failure → 500 BoundaryError', async () => {
     dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      outcome: 'commit_failed',
       response: makeMockResult().response,
       commitPerformed: false,
     });
@@ -278,5 +280,95 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
     const body = JSON.parse(res.body);
     expect(body.error).toBe('INTERNAL_ERROR');
     expect(body.details.reason).toBe('chip_click_run_analysis_handler_threw');
+  });
+
+  it('typed handler_failure outcome → 500 with cause_kind preserved', async () => {
+    // Dispatcher caught HandlerInvocationFailedError and returned a
+    // discriminated outcome. The route must surface cause_kind + retryable
+    // on the BoundaryError wire shape so observability and clients can
+    // distinguish PLoT-timeout from scenario-read-failure.
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      outcome: 'handler_failure',
+      response: makeMockResult().response,
+      commitPerformed: false,
+      causeKind: 'plot_timeout',
+      retryable: true,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111cc07',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('chip_click_run_analysis_handler_failed');
+    expect(body.details.cause_kind).toBe('plot_timeout');
+    expect(body.details.retryable).toBe(true);
+    expect(body.retryable).toBe(true);
+  });
+
+  it('typed handler_result_invalid outcome → 500 retryable:false', async () => {
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      outcome: 'handler_result_invalid',
+      response: makeMockResult().response,
+      commitPerformed: false,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111cc08',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('chip_click_run_analysis_handler_result_invalid');
+    expect(body.details.retryable).toBe(false);
+    expect(body.retryable).toBe(false);
+  });
+
+  it('chip_click at stage=frame with decision-keyword message → chip wins over draft_graph', async () => {
+    // Regression for the reordering fix: if both triggers would match
+    // (chip_click + decision-brief shape), the chip branch must fire first.
+    // Without this, a user who clicked the "Run analysis" chip early in the
+    // flow would accidentally invoke the unified pipeline.
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce(makeMockResult());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111cc09',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        // Message is both long enough AND contains decision keywords —
+        // would match DRAFT_GRAPH_DECISION_BRIEF_REGEX if the ordering
+        // were wrong.
+        message: 'Should we launch the new product this quarter or delay?',
+        turn_class: 'frame',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchChipClickRunAnalysisMock).toHaveBeenCalledTimes(1);
   });
 });

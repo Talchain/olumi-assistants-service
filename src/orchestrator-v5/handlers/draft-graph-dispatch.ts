@@ -105,13 +105,18 @@ export async function dispatchDraftGraph(
   const response = draftResultToOlumiResponse(draftResult, payload);
 
   try {
+    // llm_calls_used: the unified pipeline's draft stage makes at least one
+    // LLM call (see src/cee/unified-pipeline/stages/parse.ts). V4's
+    // DraftGraphResult exposes this via `toolLLMTelemetry` but not as a
+    // simple integer count. Using 1 as an honest minimum rather than 0
+    // (zero would misrepresent the turn as a no-LLM deterministic event).
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'direct_answer',
       handler_id: null,
       request_hash: computeRequestHash(payload),
-      llm_calls_used: 0,
+      llm_calls_used: 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
     });

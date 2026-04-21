@@ -25,7 +25,11 @@
  * pattern in src/orchestrator/deterministic/system-event-handler.ts.
  */
 
-import type { OlumiResponse, SystemEventTurnPayload } from '@talchain/schemas/boundary';
+import type {
+  OlumiResponse,
+  SystemEventTurnPayload,
+  SystemEventKindLiteral,
+} from '@talchain/schemas/boundary';
 
 import { log } from '../../utils/telemetry.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
@@ -45,8 +49,13 @@ export interface DispatchSystemEventParams {
 
 // Events that produce no server state change. Skipping commit for these
 // matches V4's deterministic handler behaviour — undo/redo are realised in
-// the client's graph history, not in Supabase turn state.
-const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<string> = new Set(['undo', 'redo']);
+// the client's graph history, not in Supabase turn state. Typed against
+// `SystemEventKindLiteral` so adding a new kind to the schema without
+// updating this list is a compile-time error (not a silent runtime miss).
+const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<SystemEventKindLiteral> = new Set<SystemEventKindLiteral>([
+  'undo',
+  'redo',
+]);
 
 function buildAcknowledgementResponse(
   payload: SystemEventTurnPayload,

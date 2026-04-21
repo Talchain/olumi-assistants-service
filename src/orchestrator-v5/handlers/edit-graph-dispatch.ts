@@ -218,13 +218,15 @@ export async function dispatchEditGraph(
   const response = editResultToOlumiResponse(editResult, payload);
 
   try {
+    // llm_calls_used: handleEditGraph makes at least one LLM call for the
+    // edit classification + repair loop. Using 1 as an honest minimum.
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'direct_answer',
       handler_id: null,
       request_hash: computeRequestHash(payload),
-      llm_calls_used: 0,
+      llm_calls_used: 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
     });
