@@ -7,16 +7,18 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.5.1.tgz`
+### `talchain-schemas-0.7.0.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.5.0 for
-V5 slices B + C + D1 + D2 (session + handler-fact + per-handler arg/result
-+ handler-result block schemas, on top of the A1 `/boundary` +
-`/orchestrator` surface). Authored at `~/Documents/GitHub/olumi-schemas/`;
-not yet published to a private registry.
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.7.0 for
+V5 slices A through D2 + the v5-handler-surface expansion (discriminated
+`kind: 'message' | 'system_event'` turn payload, SystemEventKind, chip
+action types, system events, per-handler arg/result schemas). Authored
+at `~/Documents/GitHub/olumi-schemas/`; not yet published to a private
+registry.
 
-Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1) are removed on each
-bump — only the currently-pinned version lives in `vendor/`.
+Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at B+C,
+0.6.0 at D) are removed on each bump — only the currently-pinned version
+lives in `vendor/`.
 
 **How to update:**
 

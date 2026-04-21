@@ -1,11 +1,22 @@
 # V5 UI-switch investigation
 
-**Date:** 2026-04-21
+**Date:** 2026-04-21 (original v5-group3-live-path). Re-reviewed 2026-04-21 post v5-handler-surface.
 **Brief:** v5-group3-live-path (Task D)
 **Scope:** investigation only — read-only across two repos. No code changes.
 **Repos:**
 - CEE: `olumi-assistants-service` at branch `staging`
 - UI: `DecisionGuideAI` (read-only investigation)
+
+> **v5-maintenance delta (2026-04-21):** the v5-handler-surface brief
+> widened V5's handler surface substantially. What the "V5 handles vs what
+> falls through to V4" section below describes is the **UI eligibility
+> filter** that still restricts which turns the UI sends to V5, NOT the
+> CEE-side capability envelope. The CEE now handles draft_graph,
+> edit_graph, run_analysis chip clicks, and all six system events at
+> `/orchestrate/v2/turn` (see `v5-turn-shape-matrix.md` for the matrix).
+> For the UI to exercise the widened surface, the UI's eligibility
+> predicate must be relaxed — tracked as the "UI brief that follows"
+> referenced in v5-handler-surface §Context.
 
 ## Summary
 
