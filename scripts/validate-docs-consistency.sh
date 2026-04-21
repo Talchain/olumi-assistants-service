@@ -42,15 +42,22 @@ check_substring_absent 'superuser-like' 'Docs/v5' \
   'P1-1 regression: grant-model Notes bullet reverted to pre-P1-2 language.'
 
 # ---------------------------------------------------------------------------
-# 2. P0-3 regression: migration must not carry the spoofable p_user_id
-# parameter. The RPC signature is audit-verbatim; if this parameter reappears
-# in the migration file, the SECURITY DEFINER user-impersonation vector is
-# back.
+# 2. P0-3 regression: `append_turn_atomic` must NOT carry a spoofable
+# `p_user_id` parameter. That RPC derives user_id from scenarios.user_id by
+# design; adding a caller-supplied user_id would re-open the SECURITY
+# DEFINER impersonation vector (see supabase/migrations/…_v5_session_store
+# .sql file header).
+#
+# Scope note (2026-04-21): the tripwire is narrowed to `append_turn_atomic`
+# only. `ensure_scenario_exists` intentionally accepts `p_user_id` as a
+# PoC trade-off — production will upgrade to a JWT-scoped client that
+# reads identity from auth.uid(). See the ensure_scenario_exists migration
+# file header for the full accepted-risk discussion.
 # ---------------------------------------------------------------------------
-migration_hits="$(grep -rIn --include='*.sql' 'p_user_id' "${REPO_ROOT}/supabase/migrations" 2>/dev/null || true)"
+migration_hits="$(grep -rInz --include='*.sql' -E 'CREATE( OR REPLACE)? FUNCTION[[:space:]]+(public\.)?append_turn_atomic[^$]*p_user_id' "${REPO_ROOT}/supabase/migrations" 2>/dev/null || true)"
 if [ -n "$migration_hits" ]; then
-  echo "TRIPWIRE: 'p_user_id' present in supabase/migrations"
-  echo "  reason: P0-3 regression: RPC was redesigned to drop this parameter."
+  echo "TRIPWIRE: 'p_user_id' parameter detected on append_turn_atomic"
+  echo "  reason: P0-3 regression: append_turn_atomic derives user_id from scenarios.user_id; a caller-supplied p_user_id re-opens SECURITY DEFINER impersonation."
   echo "  hits:"
   echo "$migration_hits" | sed 's/^/    /'
   echo

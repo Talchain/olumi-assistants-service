@@ -4,14 +4,22 @@
  * `@talchain/schemas` v0.7.0 `OrchestratorTurnPayload` is a discriminated
  * union on `kind: 'message' | 'system_event'`. The `kind: 'message'` variant
  * declares base fields (turn_id, scenario_id, message, turn_class, stage,
- * source, and optional chip / retry_of). The UI ALSO sends `graph_state`
- * and `analysis_state` on the same request body, but they bypass B1
- * boundary validation because the base schema (`.strict()`) does not
+ * source, and optional chip / retry_of). The UI ALSO sends `graph_state`,
+ * `analysis_state`, and `user_id` on the same request body, but they bypass
+ * B1 boundary validation because the base schema (`.strict()`) does not
  * declare them.
  *
  * This module adds a second, independent Zod parse over the same request body
- * — extracting `graph_state` + `analysis_state` with permissive content
- * schemas that match the ACTUAL wire shape (not the CEE response envelope).
+ * — extracting `graph_state`, `analysis_state`, and `user_id` with permissive
+ * content schemas that match the ACTUAL wire shape (not the CEE response
+ * envelope).
+ *
+ * `user_id` was added 2026-04-21 as part of the upsert-on-append pre-flight
+ * (see supabase/migrations/20260421000000_v5_ensure_scenario_exists.sql).
+ * It carries the caller-trusted Supabase Auth user_id that CEE writes into
+ * scenarios.user_id when creating a row on-demand. ⚠ Trust-the-caller is
+ * PoC scope only; production must upgrade to a JWT-scoped client that
+ * derives identity from auth.uid(). See migration-file header.
  *
  * The contract:
  *   - Structural failures (missing id/kind/label on a node, missing from/to on
@@ -96,9 +104,17 @@ export const AnalysisStateIngressSchema = z
 export type GraphStateIngress = z.infer<typeof GraphStateIngressSchema>;
 export type AnalysisStateIngress = z.infer<typeof AnalysisStateIngressSchema>;
 
+/**
+ * UUID shape for user_id. Zod's `.uuid()` accepts both v4 and the Supabase-
+ * issued variant formats. Absence is allowed and callers MUST treat `null`
+ * as "upsert pre-flight skipped, fall back to existence check".
+ */
+export const UserIdIngressSchema = z.string().uuid();
+
 export type ParsedRequestExtensions = {
   graphState: GraphStateIngress | null;
   analysisState: AnalysisStateIngress | null;
+  userId: string | null;
 };
 
 export type ParseExtensionsResult =
@@ -134,12 +150,13 @@ export function parseRequestExtensions(
     // Shouldn't happen after B1 ingress validation passed, but guard anyway.
     return {
       ok: true,
-      value: { graphState: null, analysisState: null },
+      value: { graphState: null, analysisState: null, userId: null },
     };
   }
 
   const rawGraph = body.graph_state;
   const rawAnalysis = body.analysis_state;
+  const rawUserId = body.user_id;
 
   let graphState: GraphStateIngress | null = null;
   if (rawGraph !== undefined && rawGraph !== null) {
@@ -205,11 +222,43 @@ export function parseRequestExtensions(
     analysisState = parsed.data;
   }
 
+  let userId: string | null = null;
+  if (rawUserId !== undefined && rawUserId !== null) {
+    const parsed = UserIdIngressSchema.safeParse(rawUserId);
+    if (!parsed.success) {
+      emit(TelemetryEvents.BoundaryValidation, {
+        boundary: 'B1',
+        direction: 'ingress',
+        validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+        contract_version: '1.5.0',
+        pass: false,
+        request_id: requestId,
+        field: 'user_id',
+      });
+      return {
+        ok: false,
+        error: {
+          error: 'INGRESS_CONTRACT_VIOLATION',
+          boundary: 'B1',
+          direction: 'ingress',
+          validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+          details: {
+            field: 'user_id',
+            issues: trimIssues(parsed.error.issues),
+          },
+          request_id: requestId,
+          retryable: false,
+        },
+      };
+    }
+    userId = parsed.data;
+  }
+
   // Emit a success event only when at least one extension field was actually
   // validated. This keeps the telemetry trace aligned with what happened:
-  // a body with no graph_state / analysis_state has nothing for this
-  // validator to check, so we don't inflate boundary.validation counts.
-  if (graphState !== null || analysisState !== null) {
+  // a body with no extension fields has nothing for this validator to check,
+  // so we don't inflate boundary.validation counts.
+  if (graphState !== null || analysisState !== null || userId !== null) {
     emit(TelemetryEvents.BoundaryValidation, {
       boundary: 'B1',
       direction: 'ingress',
@@ -219,8 +268,9 @@ export function parseRequestExtensions(
       request_id: requestId,
       graph_present: graphState !== null,
       analysis_present: analysisState !== null,
+      user_id_present: userId !== null,
     });
   }
 
-  return { ok: true, value: { graphState, analysisState } };
+  return { ok: true, value: { graphState, analysisState, userId } };
 }

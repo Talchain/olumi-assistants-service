@@ -161,47 +161,64 @@ async function fetchPriorFacts(
 }
 
 /**
- * Group 3 Task A pre-flight: check that the scenario row exists BEFORE
- * running the turn executor. Surfaces a missing scenario as a clean 422
- * at the ingress boundary rather than as an opaque STATE_COMMIT_FAILED
- * at commit time.
+ * V5 ingress pre-flight: ensure the scenarios row exists, creating it on-
+ * demand if the caller supplied a `userId`. Replaces the 2026-04-20
+ * existence-only check (dbd59c9e) which rejected valid traffic when the
+ * UI's INSERT race-landed after the first V5 turn.
  *
  * Lives alongside buildTurnContext because this file is the declared
  * session-layer integration point (per the state-write invariant at
  * scripts/validate-state-write-invariant.sh — only session/, commit.ts,
  * and build-turn-context.ts are allowed to import the SessionStore).
- * Keeping the pre-flight here preserves the narrow-write-surface
- * invariant without the route needing a SessionStore import.
  *
- * Return contract:
- *   - `{ ok: true }`             scenario exists, turn can proceed
- *   - `{ ok: false, reason: 'scenario_not_found' }`
- *                                scenario is genuinely absent from the
- *                                table; route emits 422 with typed
- *                                BoundaryError
- *   - `{ ok: true, skipped: true }`
- *                                store unreachable or read error; route
- *                                passes the turn through (the commit
- *                                RPC is the last line of defence, and
- *                                we must not block traffic on a session
- *                                outage)
+ * Behaviour matrix:
  *
- * ⚠ Does NOT enforce caller ownership. See ⚠ CROSS-TENANT LIMITATION
- * on SupabaseSessionStore.checkScenarioExists.
+ *   userId PRESENT (new UI path):
+ *     - RPC INSERTs row if missing, no-ops if present, returns
+ *       authoritative user_id. Match → `{ ok: true }`.
+ *     - Returned user_id differs from caller's → cross-tenant attempt;
+ *       `{ ok: false, reason: 'scenario_owned_by_other_user' }` and the
+ *       route emits 422.
+ *     - RPC errors (network, DB down, permission) → treated as skipped
+ *       and the turn proceeds. `append_turn_atomic` is the last line of
+ *       defence and will still surface a genuine missing-scenario as
+ *       STATE_COMMIT_FAILED.
+ *
+ *   userId ABSENT (older UI or system events without identity):
+ *     - Skip the RPC entirely. We CANNOT upsert without a user_id (the
+ *       scenarios.user_id column is NOT NULL and the FK demands a real
+ *       auth.users row). Pre-flight is a best-effort optimisation, not
+ *       a correctness requirement — return `{ ok: true, skipped: true }`
+ *       and let `append_turn_atomic` surface a missing scenario with
+ *       its native "scenario X not found" error.
+ *
+ * ⚠ Caller-ownership check is PoC-grade only. See ensureScenarioExists
+ * on SessionStore and the migration file header for the production-
+ * upgrade path (JWT-scoped client + auth.uid()).
  */
 export type PreflightResult =
   | { readonly ok: true; readonly skipped?: boolean }
-  | { readonly ok: false; readonly reason: 'scenario_not_found' };
+  | { readonly ok: false; readonly reason: 'scenario_owned_by_other_user' };
 
-export async function preflightScenarioCheck(
+export async function preflightEnsureScenario(
   scenarioId: string,
+  userId: string | null,
   requestId: string,
   sessionStore?: SessionStore,
 ): Promise<PreflightResult> {
-  let exists: boolean;
+  if (userId === null) {
+    log.debug(
+      { request_id: requestId, scenario_id: scenarioId },
+      'V5 pre-flight: no user_id on request — upsert skipped, letting commit RPC be the last line of defence',
+    );
+    return { ok: true, skipped: true };
+  }
+
+  let authoritativeUserId: string;
   try {
     const store = sessionStore ?? getSessionStore();
-    exists = await store.checkScenarioExists(scenarioId);
+    const result = await store.ensureScenarioExists(scenarioId, userId);
+    authoritativeUserId = result.user_id;
   } catch (e) {
     log.debug(
       {
@@ -210,16 +227,23 @@ export async function preflightScenarioCheck(
         err_name: e instanceof Error ? e.name : 'unknown',
         err_message: e instanceof Error ? e.message : String(e),
       },
-      'V5 pre-flight scenario check skipped (store unavailable or read error)',
+      'V5 pre-flight ensureScenarioExists skipped (store unavailable or RPC error)',
     );
     return { ok: true, skipped: true };
   }
 
-  if (exists) return { ok: true };
+  if (authoritativeUserId !== userId) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        caller_user_id_prefix: userId.slice(0, 8),
+        owner_user_id_prefix: authoritativeUserId.slice(0, 8),
+      },
+      'V5 pre-flight: scenario owned by a different user — rejecting turn as cross-tenant attempt',
+    );
+    return { ok: false, reason: 'scenario_owned_by_other_user' };
+  }
 
-  log.warn(
-    { request_id: requestId, scenario_id: scenarioId },
-    'V5 pre-flight: scenario not found — rejecting turn',
-  );
-  return { ok: false, reason: 'scenario_not_found' };
+  return { ok: true };
 }

@@ -174,8 +174,10 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    // Group 3 Task A: scenario pre-flight passes for all A2 fixtures.
-    checkScenarioExists: async () => true,
+    // Upsert-on-append pre-flight: A2 fixtures don't send user_id, so the
+    // preflight short-circuits to skipped before this stub is reached, but
+    // the SessionStore interface still requires the method.
+    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},

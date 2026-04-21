@@ -1,20 +1,26 @@
 /**
- * V5 Group 3 Task A — pre-flight scenario check.
+ * V5 upsert-on-append pre-flight (replaces 2026-04-20 existence-only check).
  *
- * Verifies that `POST /orchestrate/v2/turn` calls `SessionStore.
- * checkScenarioExists` BEFORE invoking the TurnExecutor, and that a missing
- * scenario row is surfaced as a typed 422 BoundaryError at the ingress
- * boundary rather than an opaque `STATE_COMMIT_FAILED` at commit time.
+ * Verifies that `POST /orchestrate/v2/turn` now calls
+ * `SessionStore.ensureScenarioExists` BEFORE invoking the TurnExecutor, with
+ * the following semantics:
  *
- * Covers the brief's acceptance criteria:
- *   - Missing scenario → 422 with `error: 'INGRESS_CONTRACT_VIOLATION'` and
- *     `details.reason === 'scenario_not_found'`.
- *   - Existing scenario → 200 (happy path preserved).
- *   - Cross-tenant row ownership → 422 with no data leak (simulated by
- *     `checkScenarioExists` returning false, mirroring service-role-level
- *     absence or a future RLS-aware check).
- *   - Store read error → pre-flight silently passes (TurnExecutor is still
- *     the last line of defence).
+ *   userId PRESENT on the request body
+ *     ─ row absent → RPC inserts → pre-flight passes → 200
+ *     ─ row present, caller is owner → RPC no-ops → pre-flight passes → 200
+ *     ─ row present, DIFFERENT owner → pre-flight rejects → 422
+ *       `INGRESS_CONTRACT_VIOLATION` / `reason=scenario_owned_by_other_user`
+ *
+ *   userId ABSENT (old UI path / system events without identity)
+ *     ─ pre-flight skipped → TurnExecutor runs → 200
+ *       (commit path is the last line of defence)
+ *
+ *   RPC throws (transient outage)
+ *     ─ pre-flight skipped → 200 (same rationale)
+ *
+ * ⚠ PoC trust-the-caller posture. See
+ * supabase/migrations/…_v5_ensure_scenario_exists.sql for the production
+ * upgrade (JWT-scoped client + auth.uid()).
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -24,52 +30,71 @@ import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 
-// Fixtures — stable IDs so tests are deterministic.
-const SCENARIO_EXISTING = 'e0000000-0000-4000-8000-000000000001';
-const SCENARIO_MISSING = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
-const SCENARIO_FOREIGN = 'f1111111-1111-4111-8111-111111111111';
+const SCENARIO_NEW = 'e0000000-0000-4000-8000-000000000001';
+const SCENARIO_OWNED_BY_CALLER = 'e0000000-0000-4000-8000-000000000002';
+const SCENARIO_OWNED_BY_OTHER = 'e0000000-0000-4000-8000-000000000003';
+const USER_CALLER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const USER_OTHER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-// Mutable state so each test drives the store behaviour.
+// RPC state — the stub returns the scenario's authoritative user_id exactly
+// the way the real `ensure_scenario_exists` RPC does: INSERT-if-missing
+// (DO NOTHING on conflict), then SELECT the stored user_id.
 interface StoreState {
-  existsByScenarioId: Map<string, boolean>;
-  throwOnCheck: Error | null;
+  rows: Map<string, string>; // scenario_id → owner user_id
+  throwOnEnsure: Error | null;
+  throwOnAppend: Error | null;
 }
 const storeState: StoreState = {
-  existsByScenarioId: new Map([
-    [SCENARIO_EXISTING, true],
-    [SCENARIO_MISSING, false],
-    // SCENARIO_FOREIGN models the honest production behaviour of
-    // `checkScenarioExists`: the service-role client sees ALL rows in
-    // `public.scenarios`, so a scenario belonging to a different user
-    // returns TRUE from this check. Cross-tenant isolation is NOT enforced
-    // at the CEE layer today — see the ⚠ LIMITATION comment on
-    // SupabaseSessionStore.checkScenarioExists and the matching test
-    // below that asserts the current (bounded) behaviour.
-    [SCENARIO_FOREIGN, true],
+  rows: new Map([
+    [SCENARIO_OWNED_BY_CALLER, USER_CALLER],
+    [SCENARIO_OWNED_BY_OTHER, USER_OTHER],
   ]),
-  throwOnCheck: null,
+  throwOnEnsure: null,
+  throwOnAppend: null,
 };
+
+// Locally-defined StateCommitFailedError that parrots the real one's shape.
+// We can't import the real class because vi.mock replaces the whole module
+// and importing from within the mock factory creates a hoist loop.
+class MockStateCommitFailedError extends Error {
+  readonly rpc_code: string | undefined;
+  constructor(msg: string, opts?: { rpc_code?: string }) {
+    super(msg);
+    this.name = 'StateCommitFailedError';
+    this.rpc_code = opts?.rpc_code;
+  }
+}
 
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
+    append: async () => {
+      if (storeState.throwOnAppend) throw storeState.throwOnAppend;
+      return { id: 'mock-row-id' };
+    },
     readRecent: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    checkScenarioExists: async (id: string) => {
-      if (storeState.throwOnCheck) throw storeState.throwOnCheck;
-      return storeState.existsByScenarioId.get(id) ?? false;
+    ensureScenarioExists: async (
+      scenarioId: string,
+      userId: string,
+    ): Promise<{ user_id: string }> => {
+      if (storeState.throwOnEnsure) throw storeState.throwOnEnsure;
+      const existing = storeState.rows.get(scenarioId);
+      if (existing !== undefined) return { user_id: existing };
+      // Simulate the RPC's INSERT ... ON CONFLICT DO NOTHING.
+      storeState.rows.set(scenarioId, userId);
+      return { user_id: userId };
     },
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {
     constructor(msg: string) { super(msg); this.name = 'SessionReadError'; }
   },
+  StateCommitFailedError: MockStateCommitFailedError,
 }));
 
-// The LLM adapter mock must be permissive so the happy-path test doesn't
-// bail out inside TurnExecutor after pre-flight passes.
+// LLM adapter mock: permissive so happy-path tests run all the way through.
 const preflightMockAdapter = {
   name: 'preflight-test-mock',
   chat: async () => ({
@@ -129,7 +154,7 @@ const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
-function buildRequest(scenarioId: string) {
+function buildRequest(scenarioId: string, userId?: string) {
   return {
     kind: 'message' as const,
     turn_id: 'a1111111-1111-4111-8111-111111111111',
@@ -138,10 +163,11 @@ function buildRequest(scenarioId: string) {
     turn_class: 'frame' as const,
     stage: 'frame' as const,
     source: 'composer' as const,
+    ...(userId !== undefined ? { user_id: userId } : {}),
   };
 }
 
-describe('POST /orchestrate/v2/turn — Group 3 Task A pre-flight scenario check', () => {
+describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -159,18 +185,47 @@ describe('POST /orchestrate/v2/turn — Group 3 Task A pre-flight scenario check
 
   beforeEach(() => {
     events = [];
-    storeState.throwOnCheck = null;
+    storeState.throwOnEnsure = null;
+    storeState.throwOnAppend = null;
+    // Reset rows to the baseline between tests so the "creates on-demand"
+    // test below doesn't accumulate state across runs.
+    storeState.rows = new Map([
+      [SCENARIO_OWNED_BY_CALLER, USER_CALLER],
+      [SCENARIO_OWNED_BY_OTHER, USER_OTHER],
+    ]);
   });
 
-  it('rejects a missing scenario with 422 INGRESS_CONTRACT_VIOLATION / reason=scenario_not_found', async () => {
+  it('creates a missing scenario on-demand when user_id is supplied (200)', async () => {
+    expect(storeState.rows.has(SCENARIO_NEW)).toBe(false);
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: buildRequest(SCENARIO_MISSING),
+      payload: buildRequest(SCENARIO_NEW, USER_CALLER),
+    });
+    expect(res.statusCode).toBe(200);
+    // RPC stub inserted the row.
+    expect(storeState.rows.get(SCENARIO_NEW)).toBe(USER_CALLER);
+    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+  });
+
+  it('passes pre-flight for an existing scenario owned by the caller (200)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(SCENARIO_OWNED_BY_CALLER, USER_CALLER),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+  });
+
+  it('rejects a cross-tenant attempt (existing scenario, different owner) with 422', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(SCENARIO_OWNED_BY_OTHER, USER_CALLER),
     });
     expect(res.statusCode).toBe(422);
     const body = JSON.parse(res.body);
-    // Must be a valid BoundaryError — schema pinned in @talchain/schemas.
     const parsed = BoundaryErrorSchema.parse(body);
     expect(parsed.error).toBe('INGRESS_CONTRACT_VIOLATION');
     expect(parsed.boundary).toBe('B1');
@@ -178,80 +233,166 @@ describe('POST /orchestrate/v2/turn — Group 3 Task A pre-flight scenario check
     expect(parsed.validator).toBe('scenario_preflight');
     expect(parsed.retryable).toBe(false);
     expect(parsed.details).toMatchObject({
-      reason: 'scenario_not_found',
-      scenario_id: SCENARIO_MISSING,
+      reason: 'scenario_owned_by_other_user',
+      scenario_id: SCENARIO_OWNED_BY_OTHER,
     });
-    // Pre-flight runs BEFORE TurnExecutor — no turn executor events should fire.
+    // Pre-flight ran BEFORE TurnExecutor — no turn_executor events.
     expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(0);
   });
 
-  it('passes pre-flight for an existing scenario and runs the turn (200)', async () => {
+  it('leak-guard: cross-tenant 422 details contain ONLY reason + scenario_id (no owner info)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: buildRequest(SCENARIO_EXISTING),
-    });
-    expect(res.statusCode).toBe(200);
-    // TurnExecutor DID run.
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
-  });
-
-  // ⚠ HONEST LIMITATION TEST ⚠
-  // The Group 3 brief asked for an RLS / cross-tenant test. The honest
-  // answer for the current architecture is that V5 has NO cross-tenant
-  // guard at the CEE layer — see the ⚠ CROSS-TENANT LIMITATION block on
-  // SupabaseSessionStore.checkScenarioExists for why a `p_user_id` RPC
-  // parameter is NOT the right close (it re-opens the SECURITY DEFINER
-  // impersonation vector that scripts/validate-docs-consistency.sh §2
-  // guards against). The correct close is a per-request JWT-scoped
-  // Supabase client so `auth.uid()` inside RPCs resolves to the real
-  // caller; that is a substantive auth-stack change and lives beyond
-  // Group 3 scope. This test asserts the current (bounded) behaviour
-  // rather than simulating a stronger guarantee we don't have.
-  it('does NOT reject a foreign scenario at the CEE layer (bounded guarantee)', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: buildRequest(SCENARIO_FOREIGN),
-    });
-    // Current behaviour: service-role pre-flight returns true, TurnExecutor
-    // runs, turn completes. In production this is safe ONLY because the UI
-    // auth flow + RLS on `public.scenarios` prevent a UI user from ever
-    // seeing another user's scenario_id — a non-UI caller with a guessed
-    // UUID would currently bypass the guard. When a per-request JWT-scoped
-    // Supabase client is wired in (so `auth.uid()` propagates into RPCs),
-    // this test should flip to assert 422 + `reason: 'scenario_not_found'`
-    // (leak-proof — we do NOT reveal that the scenario exists under a
-    // different owner).
-    expect(res.statusCode).toBe(200);
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
-  });
-
-  it('response shape leak-guard: missing-scenario 422 details contain ONLY reason + scenario_id', async () => {
-    // Separate from the cross-tenant story: when pre-flight DOES reject
-    // (missing scenario, not foreign), the 422 body must not include any
-    // server-side metadata beyond what the caller already supplied.
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: buildRequest(SCENARIO_MISSING),
+      payload: buildRequest(SCENARIO_OWNED_BY_OTHER, USER_CALLER),
     });
     expect(res.statusCode).toBe(422);
     const body = JSON.parse(res.body);
     BoundaryErrorSchema.parse(body);
     expect(Object.keys(body.details).sort()).toEqual(['reason', 'scenario_id']);
-    expect(body.details.scenario_id).toBe(SCENARIO_MISSING);
+    expect(body.details.scenario_id).toBe(SCENARIO_OWNED_BY_OTHER);
+    // Critically: no `owner_user_id` or similar field on the wire.
+    expect(body.details).not.toHaveProperty('owner_user_id');
+    expect(body.details).not.toHaveProperty('user_id');
+    // Belt-and-braces: scan the raw wire bytes for the owner's UUID.
+    // The caller's own user_id (USER_CALLER) must NOT appear either —
+    // the caller already knows it, but including it would make the
+    // response shape-dependent on caller state and complicate log review.
+    expect(res.body).not.toContain(USER_OTHER);
+    expect(res.body).not.toContain(USER_CALLER);
   });
 
-  it('on a store read error, pre-flight silently passes and TurnExecutor is the last line of defence', async () => {
-    storeState.throwOnCheck = new Error('transient supabase outage');
+  it('skips pre-flight when user_id is absent (old UI path): TurnExecutor runs', async () => {
+    // SCENARIO_OWNED_BY_OTHER deliberately — without a caller user_id we
+    // cannot detect cross-tenant. The commit path is the last line of
+    // defence. This test verifies the skip, not the defence.
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: buildRequest(SCENARIO_EXISTING),
+      payload: buildRequest(SCENARIO_OWNED_BY_OTHER),
     });
-    // Pre-flight skipped → TurnExecutor ran → 200 (happy-path LLM mock).
     expect(res.statusCode).toBe(200);
+    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+  });
+
+  it('rejects a malformed user_id (non-UUID) at the ingress boundary with 422', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(SCENARIO_NEW, 'not-a-uuid'),
+    });
+    expect(res.statusCode).toBe(422);
+    const body = JSON.parse(res.body);
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('INGRESS_CONTRACT_VIOLATION');
+    expect(parsed.validator).toBe('V5RequestExtensions');
+    expect(parsed.details).toMatchObject({ field: 'user_id' });
+  });
+
+  it('on an RPC error, pre-flight silently skips and TurnExecutor is the last line of defence', async () => {
+    storeState.throwOnEnsure = new Error('transient supabase outage');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(SCENARIO_OWNED_BY_CALLER, USER_CALLER),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Edge-case verification (pre-merge review)
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('edge case 2 — preflight RPC fails AND commit RPC fails: 500 BoundaryError, NOT silent 200', async () => {
+    // Simulates realistic "Supabase outage": ensure_scenario_exists errors,
+    // then append_turn_atomic also errors. Without the fail-closed invariant
+    // (route-v2.ts commit-check), a TurnExecutor whose commit failed would
+    // otherwise emit 200 + well-formed OlumiResponse, silently corrupting
+    // the session. The commit-check guarantees 500 + typed BoundaryError.
+    storeState.throwOnEnsure = new Error('ensure_scenario_exists: transient outage');
+    storeState.throwOnAppend = new MockStateCommitFailedError(
+      'append_turn_atomic RPC failed: transient outage',
+      { rpc_code: '57P03' },
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(SCENARIO_OWNED_BY_CALLER, USER_CALLER),
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    const parsed = BoundaryErrorSchema.parse(body);
+    // The internal class STATE_COMMIT_FAILED maps to wire code
+    // INTERNAL_ERROR (see INTERNAL_TO_WIRE in orchestrator-v5/types.ts).
+    // The original class is preserved in details.failure_type so clients
+    // that want the granular signal can read it there.
+    expect(parsed.error).toBe('INTERNAL_ERROR');
+    expect(parsed.boundary).toBe('B1');
+    expect(parsed.direction).toBe('egress');
+    expect(parsed.validator).toBe('turn_commit');
+    // STATE_COMMIT_FAILED is a retryable class — the wire flag must say so.
+    expect(parsed.retryable).toBe(true);
+    expect(parsed.details).toMatchObject({
+      reason: 'state_commit_failed_or_turn_runtime_failure',
+      failure_type: 'INTERNAL_ERROR',
+    });
+    // Belt-and-braces: the response must NEVER be a 200 with an
+    // OlumiResponse body under these conditions.
+    expect(body).not.toHaveProperty('turn_id');
+    expect(body).not.toHaveProperty('blocks');
+  });
+
+  it('edge case 3 — no user_id + non-existent scenario: 500 STATE_COMMIT_FAILED (typed, not silent)', async () => {
+    // The UI path WITHOUT user_id: preflight short-circuits to skipped,
+    // TurnExecutor runs and eventually calls append_turn_atomic, which
+    // raises `scenario X not found` because the scenarios row was never
+    // created. Expected user-visible behaviour:
+    //
+    //   HTTP 500
+    //   Body: BoundaryError {
+    //     error: 'INTERNAL_ERROR',   // wire code; internal class
+    //                                // STATE_COMMIT_FAILED is stamped
+    //                                // in details.failure_type.
+    //     retryable: true,           // retryable by class — but a retry
+    //                                // without user_id will loop; UI should
+    //                                // upgrade to send user_id per this
+    //                                // migration's wire contract.
+    //     validator: 'turn_commit',
+    //     details: {
+    //       reason: 'state_commit_failed_or_turn_runtime_failure',
+    //       failure_type: 'INTERNAL_ERROR',
+    //       stage: '<request stage>',
+    //       stages_completed: [...],
+    //     }
+    //   }
+    //
+    // Critically NOT: 200 + empty body, 200 + OlumiResponse with empty
+    // blocks, silent drop, or a generic 500 without a typed envelope.
+    storeState.throwOnAppend = new MockStateCommitFailedError(
+      'append_turn_atomic RPC failed: scenario 00000000-0000-0000-0000-000000000000 not found',
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest('00000000-0000-4000-8000-000000000000'),
+      // ^ deliberately no user_id
+    });
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('INTERNAL_ERROR');
+    expect(parsed.validator).toBe('turn_commit');
+    expect(parsed.retryable).toBe(true);
+    expect(parsed.details).toMatchObject({
+      reason: 'state_commit_failed_or_turn_runtime_failure',
+      failure_type: 'INTERNAL_ERROR',
+    });
+    // The response is a typed envelope, not an empty body.
+    expect(Object.keys(body).length).toBeGreaterThan(0);
+    expect(body).toHaveProperty('request_id');
+    expect(body).toHaveProperty('error');
+    // TurnExecutor DID start (preflight was skipped for want of user_id).
     expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
   });
 });
