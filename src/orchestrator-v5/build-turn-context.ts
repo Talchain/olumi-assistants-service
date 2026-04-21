@@ -154,3 +154,67 @@ async function fetchPriorFacts(
     return [];
   }
 }
+
+/**
+ * Group 3 Task A pre-flight: check that the scenario row exists BEFORE
+ * running the turn executor. Surfaces a missing scenario as a clean 422
+ * at the ingress boundary rather than as an opaque STATE_COMMIT_FAILED
+ * at commit time.
+ *
+ * Lives alongside buildTurnContext because this file is the declared
+ * session-layer integration point (per the state-write invariant at
+ * scripts/validate-state-write-invariant.sh — only session/, commit.ts,
+ * and build-turn-context.ts are allowed to import the SessionStore).
+ * Keeping the pre-flight here preserves the narrow-write-surface
+ * invariant without the route needing a SessionStore import.
+ *
+ * Return contract:
+ *   - `{ ok: true }`             scenario exists, turn can proceed
+ *   - `{ ok: false, reason: 'scenario_not_found' }`
+ *                                scenario is genuinely absent from the
+ *                                table; route emits 422 with typed
+ *                                BoundaryError
+ *   - `{ ok: true, skipped: true }`
+ *                                store unreachable or read error; route
+ *                                passes the turn through (the commit
+ *                                RPC is the last line of defence, and
+ *                                we must not block traffic on a session
+ *                                outage)
+ *
+ * ⚠ Does NOT enforce caller ownership. See ⚠ CROSS-TENANT LIMITATION
+ * on SupabaseSessionStore.checkScenarioExists.
+ */
+export type PreflightResult =
+  | { readonly ok: true; readonly skipped?: boolean }
+  | { readonly ok: false; readonly reason: 'scenario_not_found' };
+
+export async function preflightScenarioCheck(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<PreflightResult> {
+  let exists: boolean;
+  try {
+    const store = sessionStore ?? getSessionStore();
+    exists = await store.checkScenarioExists(scenarioId);
+  } catch (e) {
+    log.debug(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err_name: e instanceof Error ? e.name : 'unknown',
+        err_message: e instanceof Error ? e.message : String(e),
+      },
+      'V5 pre-flight scenario check skipped (store unavailable or read error)',
+    );
+    return { ok: true, skipped: true };
+  }
+
+  if (exists) return { ok: true };
+
+  log.warn(
+    { request_id: requestId, scenario_id: scenarioId },
+    'V5 pre-flight: scenario not found — rejecting turn',
+  );
+  return { ok: false, reason: 'scenario_not_found' };
+}

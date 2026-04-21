@@ -74,7 +74,7 @@ import { log } from '../utils/telemetry.js';
 import { validateIngress, validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
-import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { preflightScenarioCheck } from '../orchestrator-v5/build-turn-context.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
 // keys), so we cannot pass `graph_state` / `analysis_state` straight through
@@ -140,12 +140,21 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // client (so auth.uid() inside RPCs resolves to the real caller),
     // NOT a `p_user_id` parameter (which is an audit tripwire — see
     // scripts/validate-docs-consistency.sh §2).
-    const preflightFailure = await preflightScenarioCheck(
+    const preflight = await preflightScenarioCheck(
       ingress.value.scenario_id,
       requestId,
     );
-    if (preflightFailure) {
-      return reply.code(422).send(preflightFailure);
+    if (!preflight.ok) {
+      const preflightError: BoundaryError = {
+        error: 'INGRESS_CONTRACT_VIOLATION',
+        boundary: 'B1',
+        direction: 'ingress',
+        validator: 'scenario_preflight',
+        details: { reason: preflight.reason, scenario_id: ingress.value.scenario_id },
+        request_id: requestId,
+        retryable: false,
+      };
+      return reply.code(422).send(preflightError);
     }
 
     // TurnExecutor returns a well-formed OlumiResponse envelope on every
@@ -250,57 +259,3 @@ function extractRetryableFlag(response: unknown): boolean {
   return (details as { retryable?: unknown }).retryable === true;
 }
 
-/**
- * Pre-flight check that returns a typed 422 BoundaryError when the requested
- * scenario does not exist in `public.scenarios`. Returns `null` on either
- * "scenario exists" or "check could not run" (store not configured, transient
- * read error) — the TurnExecutor commit path remains the last line of defence.
- *
- * The error code must be a member of the pinned `BoundaryErrorCode` enum from
- * `@talchain/schemas/boundary` (§6.4). We reuse `INGRESS_CONTRACT_VIOLATION`
- * — the payload passed ingress Zod validation but references a row the server
- * cannot act on, which is a contract violation at the ingress boundary. The
- * free-form `details.reason = 'scenario_not_found'` distinguishes it from a
- * Zod shape failure.
- */
-async function preflightScenarioCheck(
-  scenarioId: string,
-  requestId: string,
-): Promise<BoundaryError | null> {
-  let exists: boolean;
-  try {
-    const store = getSessionStore();
-    exists = await store.checkScenarioExists(scenarioId);
-  } catch (e) {
-    // Store not configured (missing SUPABASE_*) OR a transient read error.
-    // Do NOT block the turn — the commit RPC will surface genuinely missing
-    // rows. Log at debug so the absence of pre-flight is observable without
-    // noise.
-    log.debug(
-      {
-        request_id: requestId,
-        scenario_id: scenarioId,
-        err_name: e instanceof Error ? e.name : 'unknown',
-        err_message: e instanceof Error ? e.message : String(e),
-      },
-      'V5 pre-flight scenario check skipped (store unavailable or read error)',
-    );
-    return null;
-  }
-
-  if (exists) return null;
-
-  log.warn(
-    { request_id: requestId, scenario_id: scenarioId },
-    'V5 pre-flight: scenario not found — rejecting turn with 422',
-  );
-  return {
-    error: 'INGRESS_CONTRACT_VIOLATION',
-    boundary: 'B1',
-    direction: 'ingress',
-    validator: 'scenario_preflight',
-    details: { reason: 'scenario_not_found', scenario_id: scenarioId },
-    request_id: requestId,
-    retryable: false,
-  };
-}
