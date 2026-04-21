@@ -71,6 +71,10 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
       // A plain-JSON 410 before the stream opens lets clients migrate
       // to `/orchestrate/v2/turn` with a loud, typed signal.
       if (!config.features.pipelineV4Enabled) {
+        log.warn(
+          { route: '/orchestrate/v1/turn/stream' },
+          'V1 streaming turn rejected: V4 disabled — use /orchestrate/v2/turn',
+        );
         reply.code(410);
         return reply.send({
           error: 'V4_DISABLED',

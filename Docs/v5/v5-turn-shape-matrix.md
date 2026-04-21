@@ -113,6 +113,10 @@ Paul-owned decisions before this brief can proceed:
 - **Did:** investigated Task 0 end-to-end, produced this document, and implemented the Task 1 V4_DISABLED guard on BOTH V1 route entry points (streaming + non-streaming) — the minimal safe piece of the brief that does not depend on schema changes or handler-surface expansion. Added dedicated tests.
 - **Did not:** implement Tasks 2–5 (system-event routing, draft_graph/edit_graph through V5, ingress widening). All of those depend on the Paul-decisions in §5 — specifically, whether `@talchain/schemas` can be widened to include new action types (brief §6 currently forbids it).
 
+### Rollback
+
+Task 1 is fully rolled back by setting `CEE_PIPELINE_V4_ENABLED=true` on Render staging and redeploying. The guard is a single pre-validation `if` branch; flipping the flag restores the prior V4-dispatch behaviour with zero data-migration and zero state-change cost. No additional code revert or database migration is required.
+
 ### Task 1 — implemented
 
 - `POST /orchestrate/v1/turn` ([route.ts](../../src/orchestrator/route.ts)) — pre-validation V4_DISABLED guard. Returns 410 + `{ error: 'V4_DISABLED', message: 'V4 orchestration is disabled. Use /orchestrate/v2/turn.', retryable: false }` when `config.features.pipelineV4Enabled === false`.
