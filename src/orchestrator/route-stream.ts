@@ -64,6 +64,21 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         return reply.send({ error: "Not found" });
       }
 
+      // V4_DISABLED guard (v5-exclusive-cee brief §3 Task 1). When the V4
+      // flag is off, do NOT open the SSE stream — the pipeline-stream
+      // executor would fall through to legacy V2 / V1 paths that
+      // nobody tests, which would surface as blank turns or timeouts.
+      // A plain-JSON 410 before the stream opens lets clients migrate
+      // to `/orchestrate/v2/turn` with a loud, typed signal.
+      if (!config.features.pipelineV4Enabled) {
+        reply.code(410);
+        return reply.send({
+          error: 'V4_DISABLED',
+          message: 'V4 orchestration is disabled. Use /orchestrate/v2/turn.',
+          retryable: false,
+        });
+      }
+
       const startTime = Date.now();
       const requestId = getOrGenerateRequestId(req);
       const streamMetrics = {

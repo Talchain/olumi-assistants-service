@@ -89,6 +89,29 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
     const startTime = Date.now();
     const requestId = getOrGenerateRequestId(req);
 
+    // ── V4_DISABLED guard (v5-exclusive-cee brief §3 Task 1) ────────────
+    // Runs BEFORE payload validation so a V1 client calling a disabled
+    // endpoint gets the migration signal regardless of what shape its
+    // payload has. The staging-rollout intent is that V4 off means V5
+    // is the only supported path; any V1-route caller is looking at a
+    // stale UI or a direct API client that must migrate to
+    // `/orchestrate/v2/turn`. A loud 410 surfaces the migration gap
+    // immediately — silently falling through to the legacy V2/V1
+    // pipelines would route traffic to degraded legacy code nobody
+    // has tested in months.
+    if (!config.features.pipelineV4Enabled) {
+      log.warn(
+        { request_id: requestId, route: '/orchestrate/v1/turn' },
+        'V1 non-streaming turn rejected: V4 disabled — use /orchestrate/v2/turn',
+      );
+      reply.code(410);
+      return reply.send({
+        error: 'V4_DISABLED',
+        message: 'V4 orchestration is disabled. Use /orchestrate/v2/turn.',
+        retryable: false,
+      });
+    }
+
     // Validate request
     const parsed = TurnRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -209,6 +232,10 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
       // ── Pipeline V4: native tool-use (highest priority) ──────────────
       // When enabled, ALL turns route to the V4 pipeline — no fall-through
       // to V2 or V1. Mirrors the streaming path (pipeline-stream.ts:109).
+      // The pre-validation V4_DISABLED guard above (brief §3 Task 1)
+      // ensures we never reach here when the flag is false, so the inner
+      // check is now structurally redundant but kept for diff minimality
+      // until a later clean-up.
       if (config.features.pipelineV4Enabled) {
         // Idempotency — return cached envelope on retry (parity with streaming path)
         const cached = getIdempotentResponse(turnRequest.scenario_id, turnRequest.client_turn_id);

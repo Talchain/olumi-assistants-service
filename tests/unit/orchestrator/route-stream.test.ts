@@ -1,9 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock config before all imports
+// Mock config before all imports. `pipelineV4Enabled: true` matches the
+// production default — existing tests assume the V4 pipeline is active,
+// so the V4_DISABLED guard added in claude/v5-exclusive-cee should not
+// fire. A dedicated test lower in this file flips the flag to verify the
+// 410 response.
+let mockPipelineV4Enabled = true;
 vi.mock("../../../src/config/index.js", () => ({
   config: {
-    features: { orchestratorStreaming: true, contextFabric: false },
+    features: {
+      orchestratorStreaming: true,
+      contextFabric: false,
+      get pipelineV4Enabled() {
+        return mockPipelineV4Enabled;
+      },
+    },
   },
   isProduction: () => false,
 }));
@@ -145,6 +156,35 @@ describe("ceeOrchestratorStreamRouteV1", () => {
       });
 
       expect(res.statusCode).toBe(200);
+    });
+  });
+
+  // v5-exclusive-cee brief §3 Task 1: when V4 is disabled, the V1 streaming
+  // route must return a plain-JSON 410 instead of opening the SSE stream.
+  describe("V4_DISABLED guard (v5-exclusive-cee)", () => {
+    it("returns 410 V4_DISABLED with non-retryable signal when pipelineV4Enabled is false", async () => {
+      mockPipelineV4Enabled = false;
+      try {
+        const res = await app.inject({
+          method: "POST",
+          url: "/orchestrate/v1/turn/stream",
+          payload: makeBody(),
+        });
+
+        // Plain JSON, not SSE — the stream must NOT open. Clients migrate
+        // to /orchestrate/v2/turn on this signal.
+        expect(res.statusCode).toBe(410);
+        const body = res.json();
+        expect(body).toEqual({
+          error: "V4_DISABLED",
+          message: "V4 orchestration is disabled. Use /orchestrate/v2/turn.",
+          retryable: false,
+        });
+        // executePipelineStream must NOT have been called.
+        expect(executePipelineStream).not.toHaveBeenCalled();
+      } finally {
+        mockPipelineV4Enabled = true;
+      }
     });
   });
 
