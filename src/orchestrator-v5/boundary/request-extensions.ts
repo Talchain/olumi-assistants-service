@@ -1,11 +1,13 @@
 /**
  * V5 Phase 1.5 — HTTP boundary request extensions.
  *
- * `@talchain/schemas` v0.5.1 `OrchestratorTurnPayload` declares only the five
- * base fields (turn_id, scenario_id, message, turn_class, stage). The UI
- * actually sends `graph_state` and `analysis_state` on the same request body,
- * but they bypass B1 boundary validation because the base schema doesn't
- * mention them.
+ * `@talchain/schemas` v0.7.0 `OrchestratorTurnPayload` is a discriminated
+ * union on `kind: 'message' | 'system_event'`. The `kind: 'message'` variant
+ * declares base fields (turn_id, scenario_id, message, turn_class, stage,
+ * source, and optional chip / retry_of). The UI ALSO sends `graph_state`
+ * and `analysis_state` on the same request body, but they bypass B1
+ * boundary validation because the base schema (`.strict()`) does not
+ * declare them.
  *
  * This module adds a second, independent Zod parse over the same request body
  * — extracting `graph_state` + `analysis_state` with permissive content
