@@ -1,19 +1,22 @@
 # V5 turn-shape matrix — Task 0 investigation
 
 **Brief:** v5-cee-exclusive-path (claude/v5-exclusive-cee)
-**Status:** Task 0 complete + Task 1 shipped + P0 follow-up applied (UNSUPPORTED_ACTION → FEATURE_NOT_ENABLED). Tasks 2–5 HALTED pending Paul-decisions on brief §6 schema constraint — but matrix §4 now shows zero NEEDS_FIX rows; every turn shape either WORKs or returns a clean TYPED_ERROR.
+**Status:** Task 0 complete + Task 1 shipped + P0/P1 follow-ups applied. **Wire-contract readiness** satisfied (brief §4). **Exclusive-path readiness** NOT satisfied — core user turn shapes still fail by design and would break the UI if V4 were turned off today. Tasks 2–5 HALTED pending Paul-decisions on brief §6 schema constraint.
 **Date:** 2026-04-22.
 
 ## Executive summary
 
-The brief's premise — *"setting `CEE_PIPELINE_V4_ENABLED=false` makes V5 the exclusive orchestration path"* — is not how the V4 flag actually behaves. It also assumes V5 today has handlers for `draft_graph`, `edit_graph`, and system events. It does not. Making V5 the *exclusive host* for those turn types (i.e. 200 responses) requires schema and handler work out of scope for this brief (explicitly excluded by §6).
+The brief's premise has TWO distinct readiness questions that were being conflated:
 
-However, "V5 either handles or cleanly rejects every turn shape" — the weaker §4 invariant the brief actually requires — **is satisfied**. Shipped on this branch:
+- **Wire-contract readiness (brief §4):** does V5 return a typed response — WORKING or TYPED_ERROR — for every turn shape the route can receive? **YES** after this branch: V1 routes emit typed 410 `V4_DISABLED`; V2 unregistered actions emit typed `FEATURE_NOT_ENABLED`; schema-invalid ingress emits typed 422. Every row of §4's matrix is WORKING or TYPED_ERROR.
+- **Exclusive-path readiness (brief §1):** can V5 actually REPLACE V4 for the UI's in-use turn vocabulary — i.e. do users get 200 responses on the turns they routinely submit? **NO.** See §4b below: turning off V4 today would break brief submission (draft_graph), graph editing (edit_graph), chip-click actions, and all system events. Those are TYPED_ERROR in the matrix — brief-§4-compliant wire-wise, but hard blockers for rollout.
 
+Widening V5 to host draft_graph, edit_graph, system events, and chip payloads as 200 responses requires schema and handler work out of scope here (brief §6 explicitly excludes `@talchain/schemas` changes).
+
+Shipped on this branch:
 1. Task 1: V1 routes return 410 `V4_DISABLED` when the flag is off (clients get a loud migration signal, not a silent fall-through to legacy pipelines).
-2. P0 follow-up: unregistered V5ActionType handlers surface as typed `FEATURE_NOT_ENABLED` (via a new `UNSUPPORTED_ACTION` internal class), not generic `INTERNAL_ERROR`. Distinguishes "feature not built yet" from "server bug" on the wire.
-
-After these two changes, every row of §4's matrix is WORKING or TYPED_ERROR — no NEEDS_FIX remains.
+2. P0 follow-up: unregistered `V5ActionType` handlers surface as typed `FEATURE_NOT_ENABLED` via a new `UNSUPPORTED_ACTION` internal class.
+3. P1 follow-ups: streaming guard ordering, request_id in logs, JSON content-type assertion, tightened V4 branch-execution test, rate-limit precedence documented + tested, validator retryability semantics corrected (default false; empty transient set).
 
 Three specific discoveries below remain Paul-decisions for future expansion of V5's surface.
 
@@ -121,11 +124,50 @@ Status taxonomy (brief §2):
 
 Before the P0 follow-up (first pass of this branch), rows 13 + 14 were NEEDS_FIX — they produced a generic `INTERNAL_ERROR` wire code with no way for the client to distinguish "feature not built yet" from "server bug." The UNSUPPORTED_ACTION internal class + typed `FEATURE_NOT_ENABLED` wire code now surfaces this state cleanly: the client sees a stable typed signal it can handle distinctly (hide the affordance, suggest an alternative) vs "something broke, please retry." That moves them into TYPED_ERROR per brief §4.
 
-Zero rows are NEEDS_FIX today. Every turn shape the matrix enumerates either succeeds (WORKING) or returns a typed non-200 boundary error (TYPED_ERROR) — the brief §4 hard failure-semantics invariant is satisfied for the V5 route today.
+Zero rows are NEEDS_FIX today. Every turn shape the matrix enumerates either succeeds (WORKING) or returns a typed non-200 boundary error (TYPED_ERROR) — the brief §4 hard wire-contract failure-semantics invariant is satisfied for the V5 route today.
 
-### What this DOES NOT mean
+## 4b. Exclusive-path readiness gate (brief §1 intent)
 
-TYPED_ERROR is the BRIEF-COMPLIANT outcome — but if Paul's intent is "V5 should HANDLE draft_graph / system events / chip clicks with a 200" rather than "V5 should REJECT them cleanly," that's an expansion-of-V5 question, not a compliance question. It requires widening `@talchain/schemas` (forbidden by brief §6), implementing new handlers, and building a V5-side deterministic event layer. That work stays out of scope here and is documented in §5 as a Paul-decision.
+Brief §4 ("every V5 turn either 200 or typed non-200") is a **wire contract** — it rules out silent drops, blank turns, and hangs. Brief §1 is a **rollout goal** — "V5 is the exclusive orchestration path" — which requires the turns a real user actually submits to succeed (WORKING), not merely fail cleanly.
+
+**Wire-contract readiness — SATISFIED** ✅. See §4: every row is WORKING or TYPED_ERROR.
+
+**Exclusive-path readiness — NOT SATISFIED** ❌. A row's status alone doesn't tell you whether it's a user-facing turn. This §4b cross-references §4 against the UI's actual turn vocabulary.
+
+### Rollout-blocking rows (user-facing, TYPED_ERROR today)
+
+| # | Turn type | User journey this blocks | Blocker? |
+|---|---|---|---|
+| 2 | Draft_graph | First-run brief submission — a brand-new user's first interaction. | **BLOCKER** |
+| 3b | run_analysis via chip_click | Chip affordance post-analysis ("Explain this result"). | **BLOCKER** |
+| 4 | System event: patch_accepted | User accepts a suggested graph change. | **BLOCKER** |
+| 5 | System event: patch_dismissed | User dismisses a suggested graph change. | **BLOCKER** |
+| 6 | System event: direct_graph_edit | User edits the graph via the canvas UI. | **BLOCKER** |
+| 7 | System event: chip_click | User taps any chip in the UI (clarification, confirmation, action). | **BLOCKER** |
+| 8 | System event: undo/redo | User presses undo/redo. | **BLOCKER** |
+| 12 | Edit_graph (natural language) | User types "reduce factor X". | **BLOCKER** |
+| 13 | set_factor_value via tool call | Any user turn where the routing LLM emits this action. | **BLOCKER** |
+| 14 | add_constraint, etc. | Same as #13 for the other 5 unregistered actions. | **BLOCKER** |
+
+### Non-blocking rows
+
+| # | Turn type | Status | Why non-blocking |
+|---|---|---|---|
+| 1 | Free-text conversation | WORKING | User-facing, happy path. |
+| 3 | run_analysis via message text | WORKING | User-facing, happy path. |
+| 9 | analysis_state passthrough | WORKING | Server-side concern, not a user turn. |
+| 10 | graph_state passthrough | WORKING | Same. |
+| 11 | session_state passthrough | TYPED_ERROR | NOT a user turn; UI should not send it. The 422 is a correctness signal, not a blocker. |
+
+### Readiness verdict
+
+Based on the rollout-blocking table: **10 of 14 row classes are exclusive-path BLOCKERS**. The brief's Tasks 2–5 cannot proceed without either widening `@talchain/schemas` (brief §6 forbids) or narrowing the UI's turn vocabulary to the 2 WORKING user rows (free-text + natural-language run_analysis).
+
+### Implication for CEE_PIPELINE_V4_ENABLED=false deployment
+
+The V4_DISABLED guard shipped on this branch (Task 1) is wire-contract-safe — V1 clients get a loud 410 — but it does NOT mean the staging environment is safe to operate without V4. If the UI continues to send brief submissions, chip clicks, or system events to the V5 route after V4 is disabled, users will see typed errors on every non-trivial turn. The wire contract is honoured; the user experience is broken.
+
+**Recommendation:** do not flip `CEE_PIPELINE_V4_ENABLED=false` on staging until EITHER the UI is restricted to the 2 WORKING turn shapes OR V5's handler surface is widened. Paul owns both choices.
 
 ## 5. Recommendation (halt point)
 
