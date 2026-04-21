@@ -272,7 +272,13 @@ describe('composeValidationFailure — PARAMETER_INVALID', () => {
 });
 
 describe('composeValidationFailure — response shape', () => {
-  it('always returns an INTERNAL_ERROR block with failure_origin=validator + error_code', () => {
+  // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND is now the ONE
+  // validation-error branch that surfaces with a different wire code —
+  // FEATURE_NOT_ENABLED (via UNSUPPORTED_ACTION) — because the semantic
+  // is "the action is declared in the contract but no handler is
+  // registered in this deployment." All other validator codes keep
+  // the INTERNAL_ERROR wire code.
+  it('HANDLER_NOT_FOUND returns FEATURE_NOT_ENABLED with reason + handler_id + retryable:false', () => {
     const { response } = composeFor({
       code: 'HANDLER_NOT_FOUND',
       message: 'unknown',
@@ -281,9 +287,28 @@ describe('composeValidationFailure — response shape', () => {
     const block = response.blocks[0];
     expect(block?.type).toBe('error');
     if (block?.type === 'error') {
-      expect(block.error_code).toBe('INTERNAL_ERROR');
+      expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
       expect(block.details?.failure_origin).toBe('validator');
       expect(block.details?.error_code).toBe('HANDLER_NOT_FOUND');
+      expect(block.details?.reason).toBe('handler_not_registered');
+      expect(block.details?.handler_id).toBe('x');
+      expect(block.details?.retryable).toBe(false);
+    }
+  });
+
+  it('other validator codes still return INTERNAL_ERROR with failure_origin=validator', () => {
+    const { response } = composeFor({
+      code: 'ENTITY_NOT_FOUND',
+      message: 'no such entity',
+      details: { entity_id: 'opt-a', entity_kind: 'option' },
+    });
+    const block = response.blocks[0];
+    expect(block?.type).toBe('error');
+    if (block?.type === 'error') {
+      expect(block.error_code).toBe('INTERNAL_ERROR');
+      expect(block.details?.failure_origin).toBe('validator');
+      expect(block.details?.error_code).toBe('ENTITY_NOT_FOUND');
+      expect(block.details?.retryable).toBe(true);
     }
   });
 

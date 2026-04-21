@@ -297,17 +297,37 @@ function wrapResponse(
   body: FailureComposeResult,
   stage: StageType,
 ): OlumiResponse {
+  // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND surfaces as the typed
+  // FEATURE_NOT_ENABLED wire code (via UNSUPPORTED_ACTION internal class)
+  // so clients can distinguish a declared-but-unbuilt action from a
+  // generic internal bug. All other validator failures keep the existing
+  // INTERNAL_ERROR wire code — their semantics are client-correctable
+  // (entity ambiguity, missing options, etc.) and don't benefit from a
+  // permanent "feature not enabled" framing.
+  const wireCode = error.code === 'HANDLER_NOT_FOUND'
+    ? ('FEATURE_NOT_ENABLED' as const)
+    : ('INTERNAL_ERROR' as const);
+  // Retryable when the failure has no permanent "this feature isn't
+  // here" signature. HANDLER_NOT_FOUND is permanent (until deploy).
+  const retryable = error.code !== 'HANDLER_NOT_FOUND';
   return {
     response_version: 2,
     assistant_text: body.assistant_text,
     blocks: [
       {
         type: 'error',
-        error_code: 'INTERNAL_ERROR',
+        error_code: wireCode,
         severity: 'error',
         details: {
           failure_origin: 'validator',
           error_code: error.code,
+          retryable,
+          ...(error.code === 'HANDLER_NOT_FOUND' && error.details
+            ? {
+                reason: 'handler_not_registered',
+                handler_id: error.details.handler_id,
+              }
+            : {}),
         },
       },
     ],

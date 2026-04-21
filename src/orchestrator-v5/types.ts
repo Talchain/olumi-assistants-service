@@ -120,7 +120,15 @@ export type InternalFailure =
   | 'STATE_COMMIT_FAILED'
   | 'HANDLER_INVOCATION_FAILED'
   | 'HANDLER_RESULT_INVALID'
-  | 'UNHANDLED';
+  | 'UNHANDLED'
+  // v5-exclusive-cee: routing proposed a handler_id that IS in V5ActionType
+  // (schema-declared) but has no registered HandlerFn in this deployment.
+  // Distinct from UNHANDLED: UNHANDLED covers truly unknown classifier
+  // output + catch-all dispatch errors. UNSUPPORTED_ACTION says "the action
+  // is declared in the contract but not enabled in this build." Maps to
+  // wire FEATURE_NOT_ENABLED so clients see a stable typed code rather
+  // than a generic INTERNAL_ERROR.
+  | 'UNSUPPORTED_ACTION';
 
 // Mapping internal → wire code. The contamination case is NOT listed here —
 // sanitiser handles it in-band, response remains a success.
@@ -143,6 +151,7 @@ export const INTERNAL_TO_WIRE: Record<InternalFailure, FailureTypeLiteral> = {
   HANDLER_INVOCATION_FAILED: 'INTERNAL_ERROR',
   HANDLER_RESULT_INVALID: 'INTERNAL_ERROR',
   UNHANDLED: 'INTERNAL_ERROR',
+  UNSUPPORTED_ACTION: 'FEATURE_NOT_ENABLED',
 };
 
 // Telemetry shape for `turn_executor.started` and `turn_executor.completed`.
