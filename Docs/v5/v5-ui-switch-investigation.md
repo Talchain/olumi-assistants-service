@@ -134,13 +134,25 @@ Both flag reversions together constitute the complete rollback. There is no runt
 
 See the table in the "What V5 handles vs what falls through to V4" section above. Only free-text frame-stage user messages with no prior tool calls reach V5. Everything else — chips, retries, post-analysis, tool results — goes to V4 unchanged. V5 never intercepts a turn that V4 needs to handle.
 
-### 6b. Silent fall-through on V5 failure
+### 6b. Fall-through scope (precise)
 
-At [src/canvas/conversation/useConversation.ts:2485-2491](../../../../DecisionGuideAI/src/canvas/conversation/useConversation.ts), if the V5 adapter returns `fall_through_v4` OR any exception is caught from the V5 code path, the conversation hook silently proceeds to the V4 path. A broken V5 cannot break the user experience — it degrades to V4.
+The UI falls through to V4 in exactly two cases:
+
+1. **`fall_through_v4` sentinel** — the V5 adapter returns this when `isV5Enabled()` is false OR when the UI eligibility filter rejects the turn. See [v5Adapter.ts:43-44](../../../../DecisionGuideAI/src/v5/v5Adapter.ts).
+2. **Caught exception from the V5 code path** — if any V5 call throws (network error, adapter crash), the `try/catch` in the conversation hook falls through to V4.
+
+The UI does **NOT** fall through on:
+
+- **`typed_error` render targets** — V5 returned a valid BoundaryError or an OlumiResponse with an error block. The UI renders the error text directly via `FAILURE_USER_TEXT[code]` at [useConversation.ts:2473-2479](../../../../DecisionGuideAI/src/canvas/conversation/useConversation.ts). A retryable typed error (e.g. Task B's commit-failure `retryable: true`) stays on V5 and the user retries the turn; it does NOT silently switch the session to V4.
+- **Pre-flight 422 (`scenario_not_found`)** — same as above; rendered as a typed error on V5.
+
+Operational consequence: a persistent V5 fault (e.g. a broken adapter returning BoundaryError on every request) will NOT quietly migrate users to V4. The user will see repeated retryable errors until the CEE-side flag is flipped off. This is the intended fail-closed behaviour — a silent degradation here would mask the underlying defect.
 
 ### 6c. Typed-error handling at the UI
 
 Every non-2xx V5 response is mapped to a typed error and rendered as a user-facing assistant message (see §3). The UI never crashes on a V5 error envelope; it never shows a raw HTTP status code; it never loses state.
+
+**Wire shape invariant (Group 3 P0 follow-up):** non-2xx V5 responses MUST be `BoundaryError` envelopes, not `OlumiResponse`. The UI parser at [responseParser.ts:35](../../../../DecisionGuideAI/src/v5/responseParser.ts#L35) treats every non-ok status as BoundaryError; sending an OlumiResponse on non-2xx collapses to a generic `parse_error` → `INTERNAL_ERROR` on the UI, losing typed `error_code` and `retryable`. The CEE V2 route honours this invariant for pre-flight failures (422), egress-validation failures (200 + fallback OlumiResponse by design), and commit failures (500 + BoundaryError).
 
 ### 6d. No shared state between V4 and V5
 

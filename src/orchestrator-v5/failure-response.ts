@@ -2,9 +2,19 @@
  * Maps an internal failure class to a well-formed OlumiResponse with an
  * ErrorBlock, using `FAILURE_USER_TEXT` for the user-visible string.
  *
- * Every runtime failure → HTTP 200 + typed `OlumiResponse` per addendum §2.1.5.
- * B1 contract failures (ingress/egress Zod parse) are handled by `validators/b1.ts`
- * and return HTTP 422 — this module is for TurnExecutor runtime failures only.
+ * This module builds the ENVELOPE; the HTTP STATUS is decided by the route
+ * handler. Group 3 Task B changed the status contract:
+ *
+ *   - Happy path (commit_performed === true) → 200 + OlumiResponse
+ *   - Egress validation failure              → 200 + OlumiResponse fallback
+ *     (schema-drift fallback from validators/b1.ts — NOT a runtime failure)
+ *   - Commit failure (commit_performed === false) → 500 + BoundaryError
+ *     (route-v2.ts wraps this envelope's `retryable` flag into a
+ *     BoundaryError body so the UI parser preserves the typed error_code)
+ *
+ * B1 contract failures (ingress Zod parse) are handled by validators/b1.ts
+ * and return HTTP 422 + BoundaryError — this module is only invoked for
+ * TurnExecutor runtime failures.
  */
 
 import type { OlumiResponse, FailureTypeLiteral } from '@talchain/schemas/boundary';

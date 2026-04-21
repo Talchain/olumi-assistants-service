@@ -70,6 +70,7 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
         task,
         resolved_model: 'claude-sonnet-4-6',
         resolution_source: 'store_model_config' as const,
+        provider: 'anthropic' as const,
       },
     };
   },
@@ -199,6 +200,9 @@ describe('POST /orchestrate/v2/turn — Group 3 Task C model resolution', () => 
       expect(r.task).toBe('orchestrator');
       expect(r.resolved_model).toBe('claude-sonnet-4-6');
       expect(r.resolution_source).toBe('store_model_config');
+      // Group 3 follow-up: provider is now included so operators can tell
+      // anthropic gpt-routed from openai claude-routed in resolution logs.
+      expect(r.provider).toBe('anthropic');
       expect(typeof r.timestamp).toBe('number');
     }
   });

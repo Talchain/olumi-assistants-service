@@ -47,6 +47,14 @@ export interface ModelResolutionRecord {
   readonly task?: string;
   readonly resolved_model: string;
   readonly resolution_source: ResolutionSource;
+  /**
+   * Provider that served the request. Group 3 follow-up — without this
+   * field an operator looking at model_resolutions can confirm a model
+   * string was used but cannot distinguish (say) an openai-routed
+   * gpt-4.1 from a misrouted one via a proxy. Optional because pre-
+   * Group-3 entries in long-lived fixtures may not have it.
+   */
+  readonly provider?: 'anthropic' | 'openai' | 'fixtures';
   /** Unix timestamp (ms) when the resolution was recorded. */
   readonly timestamp: number;
 }
@@ -193,6 +201,7 @@ export function recordModelResolution(
     task: resolution.task,
     resolved_model: resolution.resolved_model,
     resolution_source: resolution.resolution_source,
+    ...(resolution.provider !== undefined ? { provider: resolution.provider } : {}),
     timestamp: resolution.timestamp ?? Date.now(),
   };
   turnDebugStore.appendModelResolution(turn_id, session_id, record);

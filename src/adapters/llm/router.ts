@@ -645,6 +645,13 @@ export interface ModelResolution {
   readonly resolved_model: string;
   readonly resolution_source: ResolutionSource;
   readonly modelOverride?: string;
+  /**
+   * Provider that will actually serve the request (anthropic / openai /
+   * fixtures). Group 3 follow-up — surfaces on model_resolutions telemetry
+   * so operators can confirm the right provider was selected end-to-end,
+   * not just the right model string.
+   */
+  readonly provider?: 'anthropic' | 'openai' | 'fixtures';
 }
 
 export interface AdapterWithResolution {
@@ -685,6 +692,7 @@ export function getAdapterWithResolution(
         resolved_model: adapter.model,
         resolution_source: 'llm_model_fallback',
         modelOverride,
+        provider: adapter.name as 'anthropic' | 'openai' | 'fixtures',
       },
     };
   }
@@ -710,6 +718,7 @@ export function getAdapterWithResolution(
         resolved_model: adapter.model,
         resolution_source: 'llm_model_fallback',
         modelOverride,
+        provider: adapter.name as 'anthropic' | 'openai' | 'fixtures',
       },
     };
   }
@@ -856,6 +865,7 @@ export function getAdapterWithResolution(
       resolved_model: selectedModel ?? adapter.model,
       resolution_source: winningSource,
       modelOverride,
+      provider: selectedProvider,
     },
   };
 }

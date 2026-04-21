@@ -1,15 +1,32 @@
 /**
- * POST /orchestrate/v2/turn — V5 orchestrator endpoint (slice A1).
+ * POST /orchestrate/v2/turn — V5 orchestrator endpoint.
  *
- * A1 scope:
- *   - B1 ingress validator (OrchestratorTurnPayload, strict) → 422 + BoundaryError on failure
- *   - TurnExecutor runs direct_answer only (others → UNHANDLED ErrorBlock)
- *   - B1 egress validator (OlumiResponse) → typed fallback envelope on failure (never 500)
- *   - boundary.validation telemetry on every ingress + egress attempt
- *   - turn_executor.started / completed telemetry around TurnExecutor
+ * HTTP status / body matrix (Group 3 Task B + P0 follow-up):
  *
- * Route registration is gated on config.features.orchestratorV5. When the flag
- * is off, this route is not registered and the endpoint returns 404.
+ *   422 + BoundaryError      — B1 ingress validation failed, OR pre-flight
+ *                              scenario check rejected the turn (Task A)
+ *   500 + BoundaryError      — commit_performed === false (Task B); retryable
+ *                              flag preserved on the wire so the UI can
+ *                              render a typed actionable error
+ *   200 + OlumiResponse      — happy path OR schema-drift fallback from
+ *                              B1 egress validator (internal contract
+ *                              violation; response is still well-formed
+ *                              OlumiResponse per boundary contract §3.2.3)
+ *
+ * Ordering within the handler is deliberate:
+ *
+ *   1. Extension parse (graph_state / analysis_state)
+ *   2. B1 ingress (core payload)
+ *   3. Pre-flight scenario check (Task A)
+ *   4. runTurnExecutor
+ *   5. commit-status check (Task B — BEFORE egress so the invariant is
+ *      total; a TurnExecutor whose output AND commit both fail takes
+ *      the 500 path, not the 200-fallback path)
+ *   6. B1 egress validator
+ *   7. 200 + OlumiResponse
+ *
+ * Route registration is gated on config.features.orchestratorV5. When the
+ * flag is off, this route is not registered and the endpoint returns 404.
  *
  * Transport invariant: buffered JSON only (no raw-stream writes, no SSE
  * Content-Type). Enforced by scripts/validate-transport-invariants.sh in CI.
