@@ -5,18 +5,25 @@
     "source_environment": "synthetic",
     "contract_version": "0.4.0",
     "capture_date": "2026-04-16",
-    "scenario_tags": ["a1", "direct_answer", "failure", "budget_exceeded"],
+    "scenario_tags": [
+      "a1",
+      "direct_answer",
+      "failure",
+      "budget_exceeded"
+    ],
     "expected_result_class": "pass",
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
     "expected_v5_outcome_class": "typed_error"
   },
   "request": {
+    "kind": "message",
     "turn_id": "a1111111-1111-4111-8111-111111111113",
     "scenario_id": "a2222222-2222-4222-8222-222222222224",
     "message": "Narrate; tests trigger TURN_BUDGET_MS=1 to force outer abort.",
     "turn_class": "frame",
-    "stage": "frame"
+    "stage": "frame",
+    "source": "composer"
   },
   "mock": {
     "env": {

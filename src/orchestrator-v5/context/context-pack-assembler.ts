@@ -24,11 +24,9 @@
  *     in Phase 1b D9 if time permits)
  */
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
-import type {
-  QuantityExtractionResult,
-  SessionTurn,
-} from '@talchain/schemas/orchestrator';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { SessionTurn } from '@talchain/schemas/orchestrator';
+import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
@@ -124,7 +122,9 @@ export interface ContextPack {
 }
 
 export interface AssembleContextPackInput {
-  readonly payload: OrchestratorTurnPayload;
+  // v0.7.0: assembler only operates on message-kind turns (system events
+  // take a deterministic pre-TurnExecutor path in route-v2.ts).
+  readonly payload: MessageTurnPayload;
   readonly priorTurns: readonly SessionTurn[];
   readonly graph?: GraphWithOptions | null;
   readonly analysis?: AnalysisResponseSummary | null;

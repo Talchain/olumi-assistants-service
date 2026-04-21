@@ -1,6 +1,6 @@
 import nlp from 'compromise';
 import compromiseNumbers from 'compromise-numbers';
-import type { QuantityExtractionResult } from '@talchain/schemas/orchestrator';
+import type { QuantityExtractionResult } from './schema-types.js';
 import type { CqePatternMatch } from './rules.js';
 
 // compromise-numbers augments the compromise View at runtime with `.numbers()`

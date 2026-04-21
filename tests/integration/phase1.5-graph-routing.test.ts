@@ -146,11 +146,13 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
     // carries the EXACT graph_state from the UI fixture — which is what
     // this test is really exercising end-to-end.
     const payload = {
+      kind: 'message' as const,
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       message: UI_FIXTURE.message as string,
       turn_class: 'frame',
       stage: 'frame',
+      source: 'composer' as const,
       graph_state: UI_FIXTURE.graph_state,
     };
 
@@ -176,11 +178,13 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
 
   it('malformed graph_state → 422 boundary error, route never invokes executor', async () => {
     const payload = {
+      kind: 'message' as const,
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       message: 'bad graph',
       turn_class: 'frame',
       stage: 'frame',
+      source: 'composer' as const,
       graph_state: {
         nodes: [{ label: 'no id or kind' }],
         edges: [],
@@ -211,11 +215,13 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
     // this setup → UNHANDLED, which is the signal the validator let it
     // through).
     const payload = {
+      kind: 'message' as const,
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       message: UI_FIXTURE.message as string,
       turn_class: 'frame',
       stage: 'frame',
+      source: 'composer' as const,
       // EXACT fixture graph_state — no synthetic options, no status fields.
       graph_state: UI_FIXTURE.graph_state,
     };
@@ -271,11 +277,13 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
 
   it('text_only turn with graph_state — validate stage skipped entirely', async () => {
     const payload = {
+      kind: 'message' as const,
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       message: UI_FIXTURE.message as string,
       turn_class: 'frame',
       stage: 'frame',
+      source: 'composer' as const,
       graph_state: UI_FIXTURE.graph_state,
     };
     nextToolUseResult = textResult('The model shows 9 factors driving profit.');
@@ -353,11 +361,13 @@ describe('Phase 1.5 — direct runTurnExecutor with graph and real fixture graph
     const logs: RoutingLog[] = [];
 
     const payload: OrchestratorTurnPayload = {
+      kind: 'message' as const,
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       message: 'analyse',
       turn_class: 'decide',
       stage: 'analyse',
+      source: 'composer' as const,
     };
 
     // The fixture's graph_state has 13 nodes + 16 edges, and an option node.

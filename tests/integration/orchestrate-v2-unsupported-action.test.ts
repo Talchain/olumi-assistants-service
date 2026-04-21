@@ -140,11 +140,13 @@ let events: Event[] = [];
 
 function buildRequest() {
   return {
+    kind: 'message' as const,
     turn_id: 'b1111111-1111-4111-8111-111111111111',
     scenario_id: SCENARIO_ID,
     message: 'please set factor X to 0.5',
     turn_class: 'frame' as const,
     stage: 'frame' as const,
+    source: 'composer' as const,
   };
 }
 

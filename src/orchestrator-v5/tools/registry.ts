@@ -72,7 +72,7 @@
  * initialisation).
  */
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type {
   HandlerFact,
   TurnContext,
@@ -93,7 +93,9 @@ import {
  */
 export interface HandlerInvocation {
   readonly context: TurnContext;
-  readonly payload: OrchestratorTurnPayload;
+  // v0.7.0: handlers only fire on message-kind turns (system events
+  // bypass the handler registry entirely via route-v2's deterministic branch).
+  readonly payload: MessageTurnPayload;
   readonly requestId: string;
   readonly signal: AbortSignal;
 }

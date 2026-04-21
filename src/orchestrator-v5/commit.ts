@@ -84,10 +84,18 @@ export async function commitDirectAnswer(
  * debugging.
  */
 export function computeRequestHash(payload: OrchestratorTurnPayload): string {
+  // v0.7.0 union: message-kind carries `.message`; system-event carries `.event`.
+  // Both variants hash the variant-specific distinguishing fields so two
+  // genuinely different turns produce distinct hashes (hash is informational,
+  // not the idempotency key — that's `(scenario_id, turn_id)`).
+  const variant =
+    payload.kind === 'message'
+      ? { kind: 'message' as const, message: payload.message }
+      : { kind: 'system_event' as const, event: payload.event };
   const canonical = JSON.stringify({
     scenario_id: payload.scenario_id,
     stage: payload.stage,
-    message: payload.message,
+    ...variant,
   });
   const digest = createHash('sha256').update(canonical).digest('hex').slice(0, 32);
   return `sha256:${digest}`;

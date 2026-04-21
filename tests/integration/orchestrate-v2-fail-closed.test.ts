@@ -108,11 +108,13 @@ let events: Event[] = [];
 
 function buildRequest(turnId: string) {
   return {
+    kind: 'message' as const,
     turn_id: turnId,
     scenario_id: SCENARIO,
     message: 'fail-closed test message',
     turn_class: 'frame' as const,
     stage: 'frame' as const,
+    source: 'composer' as const,
   };
 }
 

@@ -138,11 +138,13 @@ describe('Actionable failure responses — HTTP boundary', () => {
     });
 
     const payload = {
+      kind: 'message' as const,
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       message: 'run the analysis on the missing plan',
       turn_class: 'decide',
       stage: 'analyse',
+      source: 'composer' as const,
       graph_state: {
         nodes: [
           { id: 'goal_1', kind: 'goal', label: 'Profit' },

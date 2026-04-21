@@ -1,0 +1,131 @@
+/**
+ * V5 deterministic system-event dispatch.
+ *
+ * v0.7.0 introduced `kind: 'system_event'` on OrchestratorTurnPayload. System
+ * events (patch_accepted, patch_dismissed, direct_graph_edit, chip_click,
+ * undo, redo) are deterministic Layer 0 operations — no LLM routing, no
+ * handler dispatch. The route (route-v2.ts) intercepts them BEFORE calling
+ * runTurnExecutor because:
+ *   (1) system-event payloads have no `message` field, so TurnExecutor's
+ *       ORIENT step (which needs a user message) cannot fire.
+ *   (2) these events map to UI state changes the server records without
+ *       LLM involvement.
+ *
+ * Persistence (Paul decision in planning round, matching V4 semantics):
+ *   - patch_accepted, patch_dismissed, direct_graph_edit, chip_click
+ *     → commit via commitDirectAnswer (append_turn_atomic).
+ *   - undo, redo → no commit; return commitPerformed: false with
+ *     commitSkippedReason: 'client_only_event'. The route recognises this
+ *     reason and still returns 200 — the skip is honest, not a fake
+ *     success. See src/orchestrator/route-v2.ts for the skip-reason
+ *     allowlist.
+ *
+ * Response envelope: empty assistant_text, no blocks, no actions — the UI
+ * renders the state change visually. Mirrors the silent-acknowledgement
+ * pattern in src/orchestrator/deterministic/system-event-handler.ts.
+ */
+
+import type {
+  OlumiResponse,
+  SystemEventTurnPayload,
+  SystemEventKindLiteral,
+} from '@talchain/schemas/boundary';
+
+import { log } from '../../utils/telemetry.js';
+import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+
+export type SystemEventCommitSkipReason = 'client_only_event';
+
+export interface DispatchSystemEventResult {
+  readonly response: OlumiResponse;
+  readonly commitPerformed: boolean;
+  readonly commitSkippedReason?: SystemEventCommitSkipReason;
+}
+
+export interface DispatchSystemEventParams {
+  readonly payload: SystemEventTurnPayload;
+  readonly requestId: string;
+}
+
+// Events that produce no server state change. Skipping commit for these
+// matches V4's deterministic handler behaviour — undo/redo are realised in
+// the client's graph history, not in Supabase turn state. Typed against
+// `SystemEventKindLiteral` so adding a new kind to the schema without
+// updating this list is a compile-time error (not a silent runtime miss).
+const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<SystemEventKindLiteral> = new Set<SystemEventKindLiteral>([
+  'undo',
+  'redo',
+]);
+
+function buildAcknowledgementResponse(
+  payload: SystemEventTurnPayload,
+): OlumiResponse {
+  // Silent acknowledgement. V4's handleSystemEvent follows the same
+  // convention — UI-visible confirmation is rendered by the UI's own
+  // patch/history components, not by a message bubble.
+  return {
+    response_version: 2,
+    assistant_text: '',
+    blocks: [],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: payload.stage,
+  };
+}
+
+export async function dispatchSystemEvent(
+  params: DispatchSystemEventParams,
+): Promise<DispatchSystemEventResult> {
+  const { payload, requestId } = params;
+  const startedAt = Date.now();
+  const response = buildAcknowledgementResponse(payload);
+
+  if (CLIENT_ONLY_EVENT_KINDS.has(payload.event.kind)) {
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: payload.event.kind,
+        scenario_id: payload.scenario_id,
+      },
+      'V5 system event — client-only, skipping commit',
+    );
+    return {
+      response,
+      commitPerformed: false,
+      commitSkippedReason: 'client_only_event',
+    };
+  }
+
+  try {
+    await commitDirectAnswer(response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: [],
+    });
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: payload.event.kind,
+        scenario_id: payload.scenario_id,
+      },
+      'V5 system event committed',
+    );
+    return { response, commitPerformed: true };
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: payload.event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 system event commit failed',
+    );
+    return { response, commitPerformed: false };
+  }
+}
