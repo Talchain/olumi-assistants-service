@@ -76,7 +76,7 @@ import { log } from '../utils/telemetry.js';
 import { validateIngress, validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { parseRequestExtensions } from '../orchestrator-v5/boundary/request-extensions.js';
-import { getSessionStore, SessionReadError } from '../orchestrator-v5/session/index.js';
+import { getSessionStore } from '../orchestrator-v5/session/index.js';
 
 // Phase 1.5: B1's OrchestratorTurnPayload schema is `strict` (rejects unknown
 // keys), so we cannot pass `graph_state` / `analysis_state` straight through
