@@ -36,6 +36,7 @@ cp talchain-schemas-<version>.tgz \
 shasum -a 256 /path/to/olumi-assistants-service/vendor/talchain-schemas-<version>.tgz \
   | awk '{print $1}' \
   > /path/to/olumi-assistants-service/vendor/talchain-schemas-<version>.tgz.sha256
+# On Linux: use `sha256sum` in place of `shasum -a 256` (same output format)
 # 5. Update package.json `file:` reference if the filename changed
 # 6. pnpm install (reinstalls from the new tarball)
 # 7. Delete the old tarball and its .sha256 from vendor/
