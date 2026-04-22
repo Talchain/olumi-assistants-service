@@ -37,6 +37,7 @@ vi.mock('../../commit.js', () => ({
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { Stage } from '@talchain/schemas/boundary';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.stage_indicator).toBe('analyse');
     });
 
-    it('passes graphToStore with scenarioId and graph to commitDirectAnswer', async () => {
+    it('passes graph directly in CommitMetadata to commitDirectAnswer', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -124,7 +125,9 @@ describe('dispatchDraftGraph', () => {
 
       expect(commitDirectAnswer).toHaveBeenCalledOnce();
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      expect(metadata.graphToStore).toEqual({ scenarioId: SCENARIO_ID, graph: MINIMAL_GRAPH });
+      // graph is passed directly (not wrapped in graphToStore); the store
+      // layer forwards it to append_turn_atomic as p_graph.
+      expect(metadata.graph).toEqual(MINIMAL_GRAPH);
     });
 
     it('sets commitPerformed=true', async () => {
@@ -141,13 +144,17 @@ describe('dispatchDraftGraph', () => {
     });
   });
 
-  describe('when persistence fails (commitDirectAnswer returns graphPersisted=false)', () => {
+  describe('when the atomic commit fails (commitDirectAnswer throws — graph and turn both roll back)', () => {
     beforeEach(() => {
+      // With atomic commit, there is no "graph failed but turn committed" case.
+      // If append_turn_atomic throws, both graph and turn are rolled back and
+      // commitDirectAnswer re-throws as StateCommitFailedError. The dispatcher
+      // catches this, logs it, and returns commitPerformed=false.
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
-        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+        .mockRejectedValue(new Error('StateCommitFailedError: RPC error'));
     });
 
-    it('keeps stage_indicator=frame (does not advance stage)', async () => {
+    it('keeps stage_indicator=frame (no advancement when commit failed)', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -160,7 +167,24 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.stage_indicator).toBe('frame');
     });
 
-    it('does not throw — persistence failure is non-fatal', async () => {
+    it('assistant_text uses pipeline narration (route discards it — client sees 500 INTERNAL_ERROR)', async () => {
+      // Route maps commitPerformed=false → HTTP 500 BoundaryError; dg.response
+      // is never sent. The dispatcher still builds a valid OlumiResponse for
+      // the success path — on failure, it falls back to the pipeline narration.
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-2',
+        request: STUB_REQUEST,
+      });
+
+      // Narration from makeDraftResult — not a save-failure message.
+      expect(result.response.assistant_text).toBe('Drafted a decision graph with 1 nodes and 1 edges.');
+    });
+
+    it('does not throw — commit failure is caught, commitPerformed=false returned', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -173,7 +197,7 @@ describe('dispatchDraftGraph', () => {
       ).resolves.toBeDefined();
     });
 
-    it('still commits the turn (commitPerformed=true)', async () => {
+    it('returns commitPerformed=false when the RPC throws', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -183,7 +207,7 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.commitPerformed).toBe(true);
+      expect(result.commitPerformed).toBe(false);
     });
   });
 
@@ -206,7 +230,7 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.stage_indicator).toBe('frame');
     });
 
-    it('passes no graphToStore when graphOutput is null', async () => {
+    it('passes no graph in CommitMetadata when graphOutput is null', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -218,7 +242,9 @@ describe('dispatchDraftGraph', () => {
 
       expect(commitDirectAnswer).toHaveBeenCalledOnce();
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      expect(metadata.graphToStore).toBeUndefined();
+      // No graph produced — metadata.graph must be undefined so p_graph is
+      // omitted from the RPC call, leaving scenarios.graph unchanged.
+      expect(metadata.graph).toBeUndefined();
     });
   });
 
@@ -249,5 +275,21 @@ describe('dispatchDraftGraph', () => {
 
       expect(commitDirectAnswer).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ── Schema canonical value guard ──────────────────────────────────────────────
+
+describe('stage_indicator canonical values', () => {
+  it("Stage enum accepts 'analyse' — the value used on graph-persist success", () => {
+    expect(() => Stage.parse('analyse')).not.toThrow();
+  });
+
+  it("Stage enum accepts 'frame' — the value used on graph-persist failure", () => {
+    expect(() => Stage.parse('frame')).not.toThrow();
+  });
+
+  it("Stage enum rejects unknown values such as 'evaluate'", () => {
+    expect(() => Stage.parse('evaluate')).toThrow();
   });
 });

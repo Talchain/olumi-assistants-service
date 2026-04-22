@@ -160,6 +160,7 @@ If `validateIngress` / `parseRequestExtensions` / `preflightEnsureScenario` need
 | Criterion | Evidence |
 |---|---|
 | Brief submission (draft_graph) succeeds with `commit_performed: true` | [tests/integration/orchestrator/route-v2-draft-graph.test.ts](../../tests/integration/orchestrator/route-v2-draft-graph.test.ts), [route-v2-golden-path.test.ts](../../tests/integration/orchestrator/route-v2-golden-path.test.ts) green |
+| Draft_graph graph persisted atomically with turn commit — `scenarios.graph` + turn row in one PL/pgSQL transaction; `stage_indicator: 'analyse'` on success; route returns 500 `draft_graph_commit_failed` (retryable) on atomic rollback (2026-04-22, `claude/v5-graph-persistence-hardening`) | Route-level: `route-v2-draft-graph.test.ts` (commit failure → 500). Dispatcher + store contract: [route-v2-draft-graph-persistence.test.ts](../../tests/integration/orchestrator/route-v2-draft-graph-persistence.test.ts) (17 tests — graph in RPC args, rollback, overwrite, commit ordering) |
 | System events succeed | [route-v2-system-events.test.ts](../../tests/integration/orchestrator/route-v2-system-events.test.ts) green |
 | Chip click run_analysis succeeds | [route-v2-chip-click.test.ts](../../tests/integration/orchestrator/route-v2-chip-click.test.ts) green |
 | Conversation message succeeds | [orchestrate-v2.test.ts](../../tests/integration/orchestrate-v2.test.ts) green |

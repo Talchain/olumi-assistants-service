@@ -107,7 +107,7 @@ const WRITE: SessionTurnWrite = {
 };
 
 describe('SupabaseSessionStore.append', () => {
-  it('calls append_turn_atomic with the canonical argument shape', async () => {
+  it('calls append_turn_atomic with the canonical argument shape (no graph)', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -127,6 +127,22 @@ describe('SupabaseSessionStore.append', () => {
     expect(args.p_llm_calls_used).toBe(2);
     expect(args.p_duration_ms).toBe(40);
     expect(args.p_handler_facts).toEqual([]);
+    // p_graph must be absent (not null) when no graph in write — the RPC
+    // uses DEFAULT NULL and omitting it is the correct way to signal "no graph".
+    expect(args.p_graph).toBeUndefined();
+  });
+
+  it('passes p_graph when write.graph is provided (atomic graph commit)', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const graph = { nodes: [{ id: 'n1', kind: 'decision', label: 'Launch?' }], edges: [] };
+    await store.append({ ...WRITE, graph });
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_graph).toEqual(graph);
   });
 
   it('returns the persisted row id from the RPC', async () => {

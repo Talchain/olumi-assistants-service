@@ -15,6 +15,11 @@
  * don't occur. A retry of the same request (same request_id) is idempotent
  * by construction.
  *
+ * Graph atomicity: when CommitMetadata.graph is provided, it is passed to
+ * append_turn_atomic as p_graph. The RPC writes scenarios.graph and inserts
+ * the turn row in the same PL/pgSQL transaction — both succeed or both roll
+ * back. This eliminates the split-state risk of two separate RPC calls.
+ *
  * Shape: deliberately preserves the `commitDirectAnswer` name so the diff
  * against turn-executor.ts stays surgical. The function now also handles
  * `clarify` (the schema enum narrows this safely).
@@ -25,7 +30,6 @@ import { createHash } from 'node:crypto';
 import type { OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
-import { log } from '../utils/telemetry.js';
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
 
@@ -39,12 +43,12 @@ export interface CommitMetadata {
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
   /**
-   * When present, store_draft_graph is called before appending the turn row.
-   * Persistence failure is non-fatal — the turn is still committed and the
-   * caller receives graphPersisted=false so it can set stage_indicator
-   * appropriately.
+   * Draft graph to persist atomically with the turn insert via
+   * append_turn_atomic(p_graph). Both the graph write and the turn row commit
+   * or roll back together. Omit for non-draft turns — the RPC leaves
+   * scenarios.graph unchanged when p_graph is null.
    */
-  readonly graphToStore?: { scenarioId: string; graph: unknown } | undefined;
+  readonly graph?: unknown;
 }
 
 export interface CommitResult {
@@ -52,8 +56,10 @@ export interface CommitResult {
   readonly performed: true;
   readonly persisted_row_id: string;
   /**
-   * True when graphToStore was provided and store_draft_graph succeeded.
-   * False when graphToStore was absent or persistence threw (non-fatal).
+   * True when CommitMetadata.graph was provided and the atomic commit
+   * succeeded (both graph and turn row written). False when graph was absent.
+   * On commit failure, commitDirectAnswer throws rather than returning false
+   * here — the caller's catch block handles that path.
    */
   readonly graphPersisted: boolean;
 }
@@ -62,6 +68,11 @@ export interface CommitResult {
  * Slice B commit: persist the turn via the session store, return the
  * unchanged response. Throws `StateCommitFailedError` on RPC failure;
  * TurnExecutor's existing catch handles the mapping to `STATE_COMMIT_FAILED`.
+ *
+ * When metadata.graph is provided, the graph is written atomically with the
+ * turn row via append_turn_atomic(p_graph). On success, graphPersisted=true
+ * is returned so the caller can set stage_indicator='analyse'. On RPC failure
+ * the whole call throws (StateCommitFailedError) — there is no partial state.
  */
 export async function commitDirectAnswer(
   response: OlumiResponse,
@@ -74,29 +85,6 @@ export async function commitDirectAnswer(
 
   const store = sessionStore ?? getSessionStore();
 
-  // Persist graph before appending the turn row so the caller can read
-  // graphPersisted to decide stage_indicator before the response is sent.
-  let graphPersisted = false;
-  if (metadata.graphToStore) {
-    const { scenarioId, graph } = metadata.graphToStore;
-    try {
-      await store.storeDraftGraph(scenarioId, graph);
-      log.info(
-        { scenario_id: scenarioId, node_count: (graph as { nodes?: unknown[] }).nodes?.length ?? 0 },
-        'V5 commit: draft graph persisted to scenarios table',
-      );
-      graphPersisted = true;
-    } catch (err) {
-      log.error(
-        {
-          scenario_id: scenarioId,
-          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-        },
-        'V5 commit: draft graph persistence failed — stage_indicator will remain at frame',
-      );
-    }
-  }
-
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
@@ -107,8 +95,10 @@ export async function commitDirectAnswer(
     llm_calls_used: metadata.llm_calls_used,
     duration_ms: metadata.duration_ms,
     handler_facts: metadata.handler_facts,
+    graph: metadata.graph,
   });
 
+  const graphPersisted = metadata.graph !== undefined;
   return { response, performed: true, persisted_row_id: persistedRowId, graphPersisted };
 }
 

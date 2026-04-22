@@ -30,6 +30,12 @@ export interface SessionTurnWrite {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /**
+   * When present, the graph JSONB is persisted to scenarios.graph atomically
+   * with the turn insert inside append_turn_atomic. Both writes commit or roll
+   * back together — no split-state risk. Omit for non-draft turns.
+   */
+  readonly graph?: unknown;
 }
 
 export interface SessionStore {
@@ -40,11 +46,10 @@ export interface SessionStore {
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**
    * Persist a draft graph to the scenarios.graph column via the
-   * store_draft_graph RPC. Called by dispatchDraftGraph after the CEE
-   * pipeline succeeds; the stage_indicator in the OlumiResponse is set
-   * to 'analyse' only when this call resolves without error, signalling
-   * to the client that a graph is ready to fetch from the scenario row.
-   * Throws StateCommitFailedError on RPC failure.
+   * store_draft_graph RPC. Not on the critical V5 path — graph persistence
+   * now happens atomically inside append_turn_atomic via SessionTurnWrite.graph.
+   * Retained for out-of-band use (admin tooling, migrations). Throws
+   * StateCommitFailedError on RPC failure.
    */
   storeDraftGraph(scenarioId: string, graph: unknown): Promise<void>;
   /**
