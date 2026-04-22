@@ -174,4 +174,19 @@ describe('curatedHandlerChips', () => {
   it('USER_FACING_HANDLERS lists run_analysis', () => {
     expect(USER_FACING_HANDLERS).toContain('run_analysis');
   });
+
+  it('USER_FACING_HANDLERS excludes actions that would return FEATURE_NOT_ENABLED', () => {
+    // These handlers either don't exist or return FEATURE_NOT_ENABLED on the V5 path.
+    // They must never appear in the allowlist so they cannot be emitted as chips.
+    const notFunctional = [
+      'explain_result',
+      'compare_options',
+      'what_would_flip',
+      'challenge_assumption',
+      'run_premortem',
+    ];
+    for (const action of notFunctional) {
+      expect(USER_FACING_HANDLERS).not.toContain(action);
+    }
+  });
 });

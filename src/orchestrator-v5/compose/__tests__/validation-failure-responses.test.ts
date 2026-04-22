@@ -423,6 +423,31 @@ describe('composeValidationFailure — chip_type classification', () => {
   });
 });
 
+describe('composeValidationFailure — chip emit invariant (P0)', () => {
+  it('never emits explain_result or other non-functional actions even when registry contains them', () => {
+    // Registry deliberately includes non-functional handlers to test that
+    // curatedHandlerChips's USER_FACING_HANDLERS gate blocks them at emit time.
+    const fullRegistry: HandlerValidationRegistry = {
+      run_analysis: { handler_id: 'run_analysis', accepted_entity_kinds: ['option'], confirmation_template: 'ok' },
+      explain_result: { handler_id: 'explain_result', accepted_entity_kinds: [], confirmation_template: 'nope' },
+      compare_options: { handler_id: 'compare_options', accepted_entity_kinds: [], confirmation_template: 'nope' },
+      what_would_flip: { handler_id: 'what_would_flip', accepted_entity_kinds: [], confirmation_template: 'nope' },
+    };
+    const { response } = composeFor(
+      { code: 'HANDLER_NOT_FOUND', message: 'test', details: { handler_id: 'explain_result' } },
+      { handlerRegistry: fullRegistry },
+    );
+    const emittedActionTypes = response.suggested_actions
+      .map((c) => c.action_type)
+      .filter(Boolean);
+    expect(emittedActionTypes).not.toContain('explain_result');
+    expect(emittedActionTypes).not.toContain('compare_options');
+    expect(emittedActionTypes).not.toContain('what_would_flip');
+    // run_analysis is the only functional action and must be present
+    expect(emittedActionTypes).toContain('run_analysis');
+  });
+});
+
 describe('composeValidationFailure — ENTITY_NOT_FOUND cap', () => {
   it('caps sibling chips at 4', () => {
     const graph = graphWith([
