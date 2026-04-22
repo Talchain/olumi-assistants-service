@@ -3,7 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import * as invokeMod from '../../../cee/decision-review/invoke.js';
+import type { ModelResolution } from '../../../adapters/llm/router.js';
+import * as turnDebugMod from '../../debug/turn-debug-store.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
+
+/**
+ * Fixture resolution returned alongside the mocked invoke result. Matches
+ * what `getAdapterWithResolution('decision_review')` would produce when
+ * routing via CEE_MODEL_DECISION_REVIEW → gpt-4.1 on openai. Kept here so
+ * every mockResolvedValue site shares one canonical shape (audit follow-up
+ * UU-16: resolution is now required on DecisionReviewInvokeResult).
+ */
+const MOCK_RESOLUTION: ModelResolution = {
+  task: 'decision_review',
+  resolved_model: 'gpt-4.1',
+  resolution_source: 'task_default',
+  provider: 'openai',
+};
 
 function runAnalysisFact(overrides: {
   enrichment?: Record<string, unknown>;
@@ -145,6 +161,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 100,
       output_tokens: 200,
       prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
     });
 
     const fact = runAnalysisFact({ enrichment: minimalEnrichment() });
@@ -196,6 +213,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 5,
       prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
     });
     const facts: readonly HandlerFact[] = [
       runAnalysisFact({ enrichment: minimalEnrichment() }),
@@ -256,6 +274,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 20,
       prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
     });
 
     const enrichment = {
@@ -301,6 +320,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       input_tokens: 10,
       output_tokens: 20,
       prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
     });
 
     const before = Date.now();
@@ -331,5 +351,63 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
     expect(producedAtMs).toBeGreaterThanOrEqual(before);
     expect(producedAtMs).toBeLessThanOrEqual(after);
     expect(dr!.produced_at).not.toBe('1970-01-01T00:00:00.000Z');
+  });
+
+  // V5 holistic audit UU-16: the enricher must call recordModelResolution
+  // exactly once per invokeDecisionReview return (whether output is non-null
+  // or null). Previously the decision_review site was ROUTED-NO-OBSERVABILITY
+  // — the LLM call landed but its resolution never surfaced on the
+  // `model_resolutions` dashboard. This regression guard locks in the fix.
+  it('records model resolution on successful invoke', async () => {
+    const recordSpy = vi.spyOn(turnDebugMod, 'recordModelResolution').mockImplementation(() => {});
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: { narrative_summary: 'ok' },
+      raw: '{}',
+      model: 'gpt-4.1',
+      provider: 'openai',
+      llm_latency_ms: 100,
+      input_tokens: 10,
+      output_tokens: 20,
+      prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
+    });
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment() }),
+    ];
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-1',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(recordSpy).toHaveBeenCalledTimes(1);
+    expect(recordSpy).toHaveBeenCalledWith('req-1', 'scen-a', MOCK_RESOLUTION);
+  });
+
+  it('records model resolution even when shape extraction failed (tokens spent)', async () => {
+    const recordSpy = vi.spyOn(turnDebugMod, 'recordModelResolution').mockImplementation(() => {});
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: null,
+      raw: 'not-json',
+      model: 'gpt-4.1',
+      provider: 'openai',
+      llm_latency_ms: 50,
+      input_tokens: 10,
+      output_tokens: 5,
+      prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
+    });
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment() }),
+    ];
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-1',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(recordSpy).toHaveBeenCalledTimes(1);
   });
 });
