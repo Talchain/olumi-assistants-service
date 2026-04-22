@@ -231,9 +231,10 @@ export class SupabaseSessionStore implements SessionStore {
     //     service-role caller can already bypass RLS entirely. The
     //     parameterised user_id here does not widen that blast
     //     radius for the PoC.
-    //   - Partial guardrail: scenarios.user_id FK → auth.users(id)
-    //     rejects arbitrary UUIDs; spoofing is narrowed to
-    //     "impersonate an existing auth user".
+    //   - Note: the FK from scenarios.user_id → auth.users(id) was
+    //     dropped by migration 20260422000000_v5_guest_mode_nullable_user_id
+    //     to support guest sessions (user_id IS NULL). The FK is no
+    //     longer a guardrail.
     //
     // TODO(production): replace with per-request JWT-scoped Supabase
     // client so `auth.uid()` resolves to the authenticated caller,

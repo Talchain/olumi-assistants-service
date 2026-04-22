@@ -11,9 +11,9 @@
  *     ─ row present, DIFFERENT owner → pre-flight rejects → 422
  *       `INGRESS_CONTRACT_VIOLATION` / `reason=scenario_owned_by_other_user`
  *
- *   userId ABSENT (old UI path / system events without identity)
- *     ─ pre-flight skipped → TurnExecutor runs → 200
- *       (commit path is the last line of defence)
+ *   userId ABSENT (guest mode — VITE_AUTH_MODE=guest)
+ *     ─ pre-flight runs with null userId → row created with user_id = NULL
+ *     ─ ownership check skipped → TurnExecutor runs → 200
  *
  *   RPC throws (transient outage)
  *     ─ pre-flight skipped → 200 (same rationale)
@@ -39,8 +39,9 @@ const USER_OTHER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 // RPC state — the stub returns the scenario's authoritative user_id exactly
 // the way the real `ensure_scenario_exists` RPC does: INSERT-if-missing
 // (DO NOTHING on conflict), then SELECT the stored user_id.
+// user_id is null for guest rows (VITE_AUTH_MODE=guest).
 interface StoreState {
-  rows: Map<string, string>; // scenario_id → owner user_id
+  rows: Map<string, string | null>; // scenario_id → owner user_id (null = guest)
   throwOnEnsure: Error | null;
   throwOnAppend: Error | null;
 }
@@ -77,12 +78,13 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (
       scenarioId: string,
-      userId: string,
-    ): Promise<{ user_id: string }> => {
+      userId: string | null,
+    ): Promise<{ user_id: string | null }> => {
       if (storeState.throwOnEnsure) throw storeState.throwOnEnsure;
       const existing = storeState.rows.get(scenarioId);
       if (existing !== undefined) return { user_id: existing };
       // Simulate the RPC's INSERT ... ON CONFLICT DO NOTHING.
+      // userId is null for guest sessions.
       storeState.rows.set(scenarioId, userId);
       return { user_id: userId };
     },
@@ -262,17 +264,20 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     expect(res.body).not.toContain(USER_CALLER);
   });
 
-  it('skips pre-flight when user_id is absent (old UI path): TurnExecutor runs', async () => {
-    // SCENARIO_OWNED_BY_OTHER deliberately — without a caller user_id we
-    // cannot detect cross-tenant. The commit path is the last line of
-    // defence. This test verifies the skip, not the defence.
+  it('guest mode (no user_id): pre-flight runs, creates row with null user_id, TurnExecutor runs', async () => {
+    // Guest requests (VITE_AUTH_MODE=guest) send no user_id. The RPC is
+    // still called and inserts the row with user_id = NULL. Ownership check
+    // is skipped. TurnExecutor proceeds normally.
+    const SCENARIO_GUEST = 'e0000000-0000-4000-8000-000000000099';
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: buildRequest(SCENARIO_OWNED_BY_OTHER),
+      payload: buildRequest(SCENARIO_GUEST),
     });
     expect(res.statusCode).toBe(200);
     expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+    // The stub should have recorded the guest scenario with null user_id.
+    expect(storeState.rows.get(SCENARIO_GUEST)).toBeNull();
   });
 
   it('rejects a malformed user_id (non-UUID) at the ingress boundary with 422', async () => {
@@ -343,27 +348,21 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     expect(body).not.toHaveProperty('blocks');
   });
 
-  it('edge case 3 — no user_id + non-existent scenario: 500 STATE_COMMIT_FAILED (typed, not silent)', async () => {
-    // The UI path WITHOUT user_id: preflight short-circuits to skipped,
-    // TurnExecutor runs and eventually calls append_turn_atomic, which
-    // raises `scenario X not found` because the scenarios row was never
-    // created. Expected user-visible behaviour:
+  it('edge case 3 — no user_id + RPC insert succeeds but append_turn_atomic fails: 500 STATE_COMMIT_FAILED (typed, not silent)', async () => {
+    // Guest request: preflight calls the RPC (upsert), which succeeds. But
+    // if append_turn_atomic then fails (e.g. the stub simulates an outage),
+    // the typed BoundaryError must surface — not a silent 200.
     //
     //   HTTP 500
     //   Body: BoundaryError {
     //     error: 'INTERNAL_ERROR',   // wire code; internal class
     //                                // STATE_COMMIT_FAILED is stamped
     //                                // in details.failure_type.
-    //     retryable: true,           // retryable by class — but a retry
-    //                                // without user_id will loop; UI should
-    //                                // upgrade to send user_id per this
-    //                                // migration's wire contract.
+    //     retryable: true,
     //     validator: 'turn_commit',
     //     details: {
     //       reason: 'state_commit_failed_or_turn_runtime_failure',
     //       failure_type: 'INTERNAL_ERROR',
-    //       stage: '<request stage>',
-    //       stages_completed: [...],
     //     }
     //   }
     //
