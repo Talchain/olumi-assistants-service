@@ -162,6 +162,27 @@ export default [
           message:
             'route-v2.ts must not access preflightEnsureScenario via namespace import; use runPreFlight.',
         },
+        // Computed bracket access: `b1['validateIngress']`. Matches
+        // `MemberExpression` with `computed: true` and a string-literal
+        // property value equal to one of the three forbidden symbol names.
+        {
+          selector:
+            'MemberExpression[computed=true][property.type="Literal"][property.value="validateIngress"]',
+          message:
+            'route-v2.ts must not access validateIngress via bracket notation; use runPreFlight.',
+        },
+        {
+          selector:
+            'MemberExpression[computed=true][property.type="Literal"][property.value="parseRequestExtensions"]',
+          message:
+            'route-v2.ts must not access parseRequestExtensions via bracket notation; use runPreFlight.',
+        },
+        {
+          selector:
+            'MemberExpression[computed=true][property.type="Literal"][property.value="preflightEnsureScenario"]',
+          message:
+            'route-v2.ts must not access preflightEnsureScenario via bracket notation; use runPreFlight.',
+        },
       ],
     },
   },

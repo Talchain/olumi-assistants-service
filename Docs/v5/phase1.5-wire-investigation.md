@@ -159,7 +159,7 @@ None of these are cross-boundary contract breakers. All are resolvable at the CE
 
 **Wire entry points:**
 - V5 route registration: [src/server.ts:355](../../src/server.ts#L355)
-- V5 route handler: [src/orchestrator/route-v2.ts:28-54](../../src/orchestrator/route-v2.ts#L28-L54)
+- V5 route handler: [src/orchestrator/route-v2.ts](../../src/orchestrator/route-v2.ts) (pre-flight extracted 2026-04-22 to [route-v2-preflight.ts](../../src/orchestrator/route-v2-preflight.ts); see [Docs/v5/route-v2-branch-audit.md](route-v2-branch-audit.md))
 - B1 ingress: [src/validators/b1.ts:61-85](../../src/validators/b1.ts#L61-L85)
 
 **Executor + context pack:**
