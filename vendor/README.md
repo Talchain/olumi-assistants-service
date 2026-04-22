@@ -7,18 +7,18 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.7.0.tgz`
+### `talchain-schemas-0.8.1.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.7.0 for
-V5 slices A through D2 + the v5-handler-surface expansion (discriminated
-`kind: 'message' | 'system_event'` turn payload, SystemEventKind, chip
-action types, system events, per-handler arg/result schemas). Authored
-at `~/Documents/GitHub/olumi-schemas/`; not yet published to a private
-registry.
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.8.1.
+Adds `DraftGraphBlockSchema` to the `Block` discriminated union (v0.8.0)
+and `draft_graph` + `analysis_ready` optional top-level fields to
+`OlumiResponseSchema` (v0.8.1). Source lives at
+`~/Documents/GitHub/olumi-schemas/`; built via `npm pack` from source
+(not patched in-place). Not yet published to a private registry.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at B+C,
-0.6.0 at D) are removed on each bump — only the currently-pinned version
-lives in `vendor/`.
+0.6.0 at D, 0.7.0 at E) are removed on each bump — only the
+currently-pinned version lives in `vendor/`.
 
 **How to update:**
 
@@ -30,14 +30,20 @@ npm run build
 #    (additive → patch/minor; breaking → major)
 # 3. Pack
 npm pack  # produces talchain-schemas-<version>.tgz
-# 4. Replace the vendored copy here
+# 4. Replace the vendored copy here and update the sha256 manifest
 cp talchain-schemas-<version>.tgz \
    /path/to/olumi-assistants-service/vendor/
+shasum -a 256 /path/to/olumi-assistants-service/vendor/talchain-schemas-<version>.tgz \
+  | awk '{print $1}' \
+  > /path/to/olumi-assistants-service/vendor/talchain-schemas-<version>.tgz.sha256
+# On Linux: use `sha256sum` in place of `shasum -a 256` (same output format)
 # 5. Update package.json `file:` reference if the filename changed
 # 6. pnpm install (reinstalls from the new tarball)
+# 7. Delete the old tarball and its .sha256 from vendor/
+# 8. Update the "Current contents" section of this README
 ```
 
 **Removal criterion:** delete this tarball + the vendor entry and switch
-`package.json` to a registry version (`"@talchain/schemas": "^0.3.0"`)
+`package.json` to a registry version (`"@talchain/schemas": "^0.8.1"`)
 once `olumi-schemas` publishes to the private npm registry. Until then,
 every consuming repo is expected to carry its own `vendor/` copy.

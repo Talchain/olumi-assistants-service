@@ -210,13 +210,12 @@ export async function dispatchDraftGraph(
   } catch (err) {
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
     // Client sees the generic retry prompt; the response built below is server-side only.
-    const graphProduced = draftResult.graphOutput !== null;
     log.error(
       {
         request_id: requestId,
         scenario_id: payload.scenario_id,
-        graph_produced: graphProduced,
-        node_count: graphProduced ? (draftResult.graphOutput!.nodes?.length ?? 0) : 0,
+        graph_produced: draftResult.graphOutput !== null,
+        node_count: draftResult.graphOutput?.nodes?.length ?? 0,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
       'V5 draft_graph dispatch — commit failed; route returns 500 INTERNAL_ERROR',
