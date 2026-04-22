@@ -105,6 +105,87 @@ export default [
       'no-restricted-syntax': 'off',
     },
   },
+  // Structural guard: route-v2.ts must invoke the three shared pre-flight
+  // primitives (validateIngress, parseRequestExtensions, preflightEnsureScenario)
+  // ONLY via the runPreFlight helper in route-v2-preflight.ts. This keeps the
+  // "all dispatch branches share pre-flight" invariant structurally enforced
+  // rather than preserved by convention. Selectors cover the three escape
+  // routes: direct call, imported symbol, namespace-import member access.
+  // See Docs/v5/route-v2-branch-audit.md.
+  {
+    files: ['src/orchestrator/route-v2.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'CallExpression[callee.name="validateIngress"]',
+          message:
+            'route-v2.ts must invoke ingress validation via runPreFlight only. See Docs/v5/route-v2-branch-audit.md.',
+        },
+        {
+          selector: 'CallExpression[callee.name="parseRequestExtensions"]',
+          message:
+            'route-v2.ts must invoke extension parsing via runPreFlight only. See Docs/v5/route-v2-branch-audit.md.',
+        },
+        {
+          selector: 'CallExpression[callee.name="preflightEnsureScenario"]',
+          message:
+            'route-v2.ts must invoke scenario pre-flight via runPreFlight only. See Docs/v5/route-v2-branch-audit.md.',
+        },
+        {
+          selector: 'ImportSpecifier[imported.name="validateIngress"]',
+          message:
+            'route-v2.ts must not import validateIngress directly; use runPreFlight.',
+        },
+        {
+          selector: 'ImportSpecifier[imported.name="parseRequestExtensions"]',
+          message:
+            'route-v2.ts must not import parseRequestExtensions directly; use runPreFlight.',
+        },
+        {
+          selector: 'ImportSpecifier[imported.name="preflightEnsureScenario"]',
+          message:
+            'route-v2.ts must not import preflightEnsureScenario directly; use runPreFlight.',
+        },
+        {
+          selector: 'MemberExpression[property.name="validateIngress"]',
+          message:
+            'route-v2.ts must not access validateIngress via namespace import; use runPreFlight.',
+        },
+        {
+          selector: 'MemberExpression[property.name="parseRequestExtensions"]',
+          message:
+            'route-v2.ts must not access parseRequestExtensions via namespace import; use runPreFlight.',
+        },
+        {
+          selector: 'MemberExpression[property.name="preflightEnsureScenario"]',
+          message:
+            'route-v2.ts must not access preflightEnsureScenario via namespace import; use runPreFlight.',
+        },
+        // Computed bracket access: `b1['validateIngress']`. Matches
+        // `MemberExpression` with `computed: true` and a string-literal
+        // property value equal to one of the three forbidden symbol names.
+        {
+          selector:
+            'MemberExpression[computed=true][property.type="Literal"][property.value="validateIngress"]',
+          message:
+            'route-v2.ts must not access validateIngress via bracket notation; use runPreFlight.',
+        },
+        {
+          selector:
+            'MemberExpression[computed=true][property.type="Literal"][property.value="parseRequestExtensions"]',
+          message:
+            'route-v2.ts must not access parseRequestExtensions via bracket notation; use runPreFlight.',
+        },
+        {
+          selector:
+            'MemberExpression[computed=true][property.type="Literal"][property.value="preflightEnsureScenario"]',
+          message:
+            'route-v2.ts must not access preflightEnsureScenario via bracket notation; use runPreFlight.',
+        },
+      ],
+    },
+  },
   // Apply to JavaScript files (without TypeScript parser)
   {
     files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
