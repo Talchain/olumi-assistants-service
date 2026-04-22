@@ -134,6 +134,29 @@ describe('runPreFlight — 422 envelope shapes', () => {
     expect(details.issues!.some((i) => i.path.includes('scenario_id'))).toBe(true);
   });
 
+  it('guest mode (no user_id): pre-flight calls store with null, skips ownership check, returns ok', async () => {
+    ensureScenarioExistsSpy.mockReset();
+    ensureScenarioExistsSpy.mockResolvedValueOnce({ user_id: null });
+
+    const req = makeReq({
+      kind: 'message',
+      turn_id: '22222222-2222-4222-8222-222222222222',
+      scenario_id: SCENARIO_ID,
+      message: 'test',
+      turn_class: 'frame',
+      stage: 'frame',
+      source: 'composer',
+      // no user_id — guest session
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await runPreFlight(req as any);
+
+    expect(result.ok).toBe(true);
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
+  });
+
   it('scenario-preflight failure: cross-tenant ownership mismatch produces a scenario_preflight BoundaryError', async () => {
     // Store returns a different owner than the caller — cross-tenant.
     ensureScenarioExistsSpy.mockReset();
