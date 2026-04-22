@@ -299,7 +299,7 @@ export async function handleDraftGraph(
     coachingBiasSignals,
     draftWarnings,
     graphOutput,
-    analysisReady: analysisReady ?? undefined,
+    analysisReady,
     toolLLMTelemetry,
     pipelineOutcome,
   };

@@ -19,6 +19,7 @@
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import type { DraftGraphResult } from '../../../orchestrator/tools/draft-graph.js';
 
 // ── module-level mocks ────────────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ const MINIMAL_ANALYSIS_READY = {
   goal_node_id: 'goal_revenue',
 } as const;
 
-function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH, analysisReady?: typeof MINIMAL_ANALYSIS_READY) {
+function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH, analysisReady?: DraftGraphResult['analysisReady']) {
   return {
     blocks: [],
     assistantText: 'Drafted a decision graph with 1 nodes and 1 edges.',

@@ -201,6 +201,8 @@ export async function dispatchDraftGraph(
         scenario_id: payload.scenario_id,
         latency_ms: draftResult.latencyMs,
         graph_persisted: commitResult.graphPersisted,
+        analysis_ready_present: draftResult.analysisReady != null,
+        analysis_ready_status: draftResult.analysisReady?.status ?? null,
       },
       'V5 draft_graph dispatch committed',
     );
