@@ -39,6 +39,15 @@ export interface SessionStore {
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**
+   * Persist a draft graph to the scenarios.graph column via the
+   * store_draft_graph RPC. Called by dispatchDraftGraph after the CEE
+   * pipeline succeeds; the stage_indicator in the OlumiResponse is set
+   * to 'analyse' only when this call resolves without error, signalling
+   * to the client that a graph is ready to fetch from the scenario row.
+   * Throws StateCommitFailedError on RPC failure.
+   */
+  storeDraftGraph(scenarioId: string, graph: unknown): Promise<void>;
+  /**
    * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
    * creating it with `userId` as the owner if absent. `userId` may be null
    * for guest sessions (VITE_AUTH_MODE=guest) — the row is created with a

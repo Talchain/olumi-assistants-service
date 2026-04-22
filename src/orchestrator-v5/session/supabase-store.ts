@@ -209,6 +209,19 @@ export class SupabaseSessionStore implements SessionStore {
     return this.cache.invalidateAll(scenarioId);
   }
 
+  async storeDraftGraph(scenarioId: string, graph: unknown): Promise<void> {
+    const { error } = await this.client.rpc('store_draft_graph', {
+      p_scenario_id: scenarioId,
+      p_graph: graph,
+    });
+    if (error) {
+      throw new StateCommitFailedError(
+        `store_draft_graph RPC failed for scenario ${scenarioId}: ${errMsg(error)}`,
+        { cause: error, rpc_code: errCode(error) },
+      );
+    }
+  }
+
   async ensureScenarioExists(
     scenarioId: string,
     userId: string | null,

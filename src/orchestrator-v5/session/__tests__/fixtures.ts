@@ -71,5 +71,8 @@ export function createNoopSessionStore(
       if (opts.throwOnEnsureScenarioExists) throw opts.throwOnEnsureScenarioExists;
       return { user_id: opts.scenarioOwnerUserId ?? userId };
     },
+    async storeDraftGraph(_scenarioId: string, _graph: unknown): Promise<void> {
+      // Noop — tests that care about persistence inject their own stub.
+    },
   };
 }

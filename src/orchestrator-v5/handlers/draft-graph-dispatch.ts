@@ -39,6 +39,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { getSessionStore, type SessionStore } from '../session/index.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -56,11 +57,17 @@ export interface DispatchDraftGraphResult {
  *
  * The mapping deliberately drops V4-specific fields that have no v0.7.0
  * equivalent (see file header). The UI obtains graph content via the
- * scenarios read path, not via blocks on this response.
+ * scenarios read path (scenarios.graph), written by storeDraftGraph.
+ *
+ * stage_indicator advances to 'analyse' ONLY when graph persistence
+ * succeeded — this is the client's signal that a graph exists to fetch.
+ * On persistence failure we stay on 'frame' so the client does not attempt
+ * a fetch against an empty scenarios.graph column.
  */
 function draftResultToOlumiResponse(
   result: DraftGraphResult,
   payload: MessageTurnPayload,
+  graphPersisted: boolean,
 ): OlumiResponse {
   // Prefer the handler's narration; fall back to a minimal confirmation so
   // assistant_text is never empty on success (empty assistant_text is reserved
@@ -68,14 +75,55 @@ function draftResultToOlumiResponse(
   const fallback = result.graphOutput
     ? `Drafted a decision graph with ${result.graphOutput.nodes?.length ?? 0} nodes and ${result.graphOutput.edges?.length ?? 0} edges.`
     : 'Drafted a decision graph.';
+  // Only advance to 'analyse' when persistence actually succeeded. If
+  // graphPersisted is false the graph was not written to scenarios.graph and
+  // the client must not try to fetch it — keep the current stage so the
+  // frame stays visible and the operator can investigate the persistence log.
+  const stageIndicator = graphPersisted ? 'analyse' : payload.stage;
   return {
     response_version: 2,
     assistant_text: result.assistantText ?? fallback,
     blocks: [],
     suggested_actions: [],
     insights: [],
-    stage_indicator: payload.stage,
+    stage_indicator: stageIndicator,
   };
+}
+
+/**
+ * Attempt to persist the draft graph to scenarios.graph.
+ * Returns true on success, false on failure (after logging).
+ * Never throws — persistence failure is non-fatal to the turn commit.
+ */
+async function tryStoreDraftGraph(
+  store: SessionStore,
+  scenarioId: string,
+  graph: DraftGraphResult['graphOutput'],
+  requestId: string,
+): Promise<boolean> {
+  try {
+    await store.storeDraftGraph(scenarioId, graph);
+    log.info(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        node_count: graph!.nodes.length,
+        edge_count: graph!.edges.length,
+      },
+      'V5 draft_graph: graph persisted to scenarios table',
+    );
+    return true;
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 draft_graph: graph persistence failed — stage kept at frame, client will not see graph on canvas',
+    );
+    return false;
+  }
 }
 
 export async function dispatchDraftGraph(
@@ -102,7 +150,16 @@ export async function dispatchDraftGraph(
     throw err;
   }
 
-  const response = draftResultToOlumiResponse(draftResult, payload);
+  // Resolve the store once — used for both graph persistence and turn commit.
+  const store = getSessionStore();
+
+  // Persist graph first — the stage_indicator in the response depends on
+  // whether this succeeds, so it must complete before building the response.
+  const graphPersisted = draftResult.graphOutput
+    ? await tryStoreDraftGraph(store, payload.scenario_id, draftResult.graphOutput, requestId)
+    : false;
+
+  const response = draftResultToOlumiResponse(draftResult, payload, graphPersisted);
 
   try {
     // llm_calls_used: the unified pipeline's draft stage makes at least one
@@ -119,7 +176,7 @@ export async function dispatchDraftGraph(
       llm_calls_used: 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
-    });
+    }, store);
     log.info(
       {
         request_id: requestId,

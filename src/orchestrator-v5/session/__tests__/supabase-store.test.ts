@@ -352,3 +352,53 @@ describe('SupabaseSessionStore invalidation delegation', () => {
     expect(cache.getScenario(SCENARIO)).toBeNull();
   });
 });
+
+describe('SupabaseSessionStore.storeDraftGraph', () => {
+  const GRAPH = {
+    nodes: [{ id: 'dec_launch', kind: 'decision', label: 'Launch?' }],
+    edges: [{ from: 'dec_launch', to: 'goal_revenue', kind: 'influences', weight: 1 }],
+  };
+
+  it('calls store_draft_graph RPC with p_scenario_id and p_graph', async () => {
+    const { client, rpcCalls } = makeClient({ rpcResult: { data: null, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.storeDraftGraph(SCENARIO, GRAPH);
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].fn).toBe('store_draft_graph');
+    expect(rpcCalls[0].args).toEqual({
+      p_scenario_id: SCENARIO,
+      p_graph: GRAPH,
+    });
+  });
+
+  it('resolves without returning a value on success', async () => {
+    const { client } = makeClient({ rpcResult: { data: null, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.storeDraftGraph(SCENARIO, GRAPH)).resolves.toBeUndefined();
+  });
+
+  it('throws StateCommitFailedError with rpc_code on RPC error', async () => {
+    const { client } = makeClient({
+      rpcResult: { error: { message: 'scenario not found', code: 'P0001' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.storeDraftGraph(SCENARIO, GRAPH)).rejects.toBeInstanceOf(
+      StateCommitFailedError,
+    );
+    await expect(store.storeDraftGraph(SCENARIO, GRAPH)).rejects.toMatchObject({
+      rpc_code: 'P0001',
+    });
+  });
+});
