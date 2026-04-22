@@ -157,6 +157,7 @@ export function validateEgress(response: unknown, request_id: string): EgressRes
     pass: false,
     error_code: 'EGRESS_CONTRACT_VIOLATION',
     issue_count: issues.length,
+    issues,
     request_id,
   });
   return { ok: false, fallback: buildEgressFallback() };
