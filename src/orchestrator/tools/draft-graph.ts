@@ -86,6 +86,8 @@ export interface DraftGraphResult {
   draftWarnings: CEEDraftWarning[];
   /** The drafted graph, for post-draft structural analysis */
   graphOutput: GraphV3T | null;
+  /** Analysis-ready payload from the pipeline boundary stage. Threaded to V5 for OlumiResponse. */
+  analysisReady?: GraphPatchBlockData['analysis_ready'];
   /** Tool-level LLM telemetry extracted from the pipeline response. */
   toolLLMTelemetry?: {
     tool: string;
@@ -297,6 +299,7 @@ export async function handleDraftGraph(
     coachingBiasSignals,
     draftWarnings,
     graphOutput,
+    analysisReady: analysisReady ?? undefined,
     toolLLMTelemetry,
     pipelineOutcome,
   };

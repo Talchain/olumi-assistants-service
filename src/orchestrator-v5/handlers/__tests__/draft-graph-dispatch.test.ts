@@ -18,6 +18,7 @@
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 
 // ── module-level mocks ────────────────────────────────────────────────────────
 
@@ -60,7 +61,16 @@ const MINIMAL_GRAPH = {
   edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
 };
 
-function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH) {
+const MINIMAL_ANALYSIS_READY = {
+  status: 'ready',
+  options: [
+    { option_id: 'opt_launch_now', label: 'Launch now', status: 'ready', interventions: { fac_revenue: 0.8 } },
+    { option_id: 'opt_delay',      label: 'Delay 6mo',  status: 'ready', interventions: { fac_revenue: 0.3 } },
+  ],
+  goal_node_id: 'goal_revenue',
+} as const;
+
+function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH, analysisReady?: typeof MINIMAL_ANALYSIS_READY) {
   return {
     blocks: [],
     assistantText: 'Drafted a decision graph with 1 nodes and 1 edges.',
@@ -71,6 +81,7 @@ function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH) {
     coachingBiasSignals: null,
     draftWarnings: [],
     graphOutput,
+    ...(analysisReady !== undefined && { analysisReady }),
   };
 }
 
@@ -363,6 +374,144 @@ describe('dispatchDraftGraph', () => {
 
       expect(commitDirectAnswer).not.toHaveBeenCalled();
     });
+  });
+
+  // ── analysis_ready threading ──────────────────────────────────────────────
+
+  describe('analysis_ready field', () => {
+    it('is present in response when persistence succeeds and result.analysisReady is set', async () => {
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-5',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.analysis_ready).toBeDefined();
+      expect(result.response.analysis_ready?.status).toBe('ready');
+      expect(result.response.analysis_ready?.goal_node_id).toBe('goal_revenue');
+      expect(Array.isArray(result.response.analysis_ready?.options)).toBe(true);
+      expect((result.response.analysis_ready?.options?.length ?? 0) > 0).toBe(true);
+    });
+
+    it('is absent when commit fails (graphPersisted=false)', async () => {
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockRejectedValue(new Error('StateCommitFailedError: RPC error'));
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-5',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.analysis_ready).toBeUndefined();
+    });
+
+    it('is absent when result.analysisReady is undefined (no pipeline payload)', async () => {
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+      // makeDraftResult with no analysisReady arg → analysisReady undefined
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH) as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-5',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.analysis_ready).toBeUndefined();
+    });
+  });
+});
+
+// ── B1 egress: OlumiResponseSchema parse ─────────────────────────────────────
+//
+// Verifies the vendor tarball schema (the B1 egress validator) accepts a full
+// draft_graph turn response containing both `draft_graph` and `analysis_ready`.
+// This catches the class of deployment failure where the tarball is patched in
+// source but the integrity hash in pnpm-lock.yaml was not updated (Render
+// would then install the old tarball and the egress parse would throw).
+
+describe('B1 egress: OlumiResponseSchema.parse', () => {
+  it('accepts a complete draft_graph turn response with both draft_graph and analysis_ready', () => {
+    const wireResponse = {
+      response_version: 2 as const,
+      assistant_text: 'Drafted a decision graph with 13 nodes and 24 edges.',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse' as const,
+      draft_graph: {
+        nodes: [
+          { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
+          { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        ],
+        edges: [
+          { from: 'dec_launch', to: 'goal_revenue', strength: 0.8 },
+        ],
+        node_count: 2,
+        edge_count: 1,
+      },
+      analysis_ready: {
+        status: 'ready',
+        options: [
+          {
+            option_id: 'opt_launch_now',
+            label: 'Launch now',
+            status: 'ready',
+            interventions: { fac_revenue: 0.8 },
+          },
+        ],
+        goal_node_id: 'goal_revenue',
+      },
+    };
+
+    expect(() => OlumiResponseSchema.parse(wireResponse)).not.toThrow();
+    const parsed = OlumiResponseSchema.parse(wireResponse);
+    expect(parsed.analysis_ready?.status).toBe('ready');
+    expect(parsed.analysis_ready?.goal_node_id).toBe('goal_revenue');
+    expect(parsed.draft_graph?.node_count).toBe(2);
+  });
+
+  it('still accepts a response with only draft_graph (no analysis_ready) — backward compat', () => {
+    const wireResponse = {
+      response_version: 2 as const,
+      assistant_text: 'Drafted a decision graph.',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse' as const,
+      draft_graph: {
+        nodes: [{ id: 'dec_launch', kind: 'decision', label: 'Launch?' }],
+        edges: [],
+        node_count: 1,
+        edge_count: 0,
+      },
+    };
+
+    expect(() => OlumiResponseSchema.parse(wireResponse)).not.toThrow();
+    const parsed = OlumiResponseSchema.parse(wireResponse);
+    expect(parsed.analysis_ready).toBeUndefined();
+  });
+
+  it('still accepts a plain conversational response (no draft_graph, no analysis_ready)', () => {
+    const wireResponse = {
+      response_version: 2 as const,
+      assistant_text: 'Here is some information.',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'frame' as const,
+    };
+
+    expect(() => OlumiResponseSchema.parse(wireResponse)).not.toThrow();
   });
 });
 

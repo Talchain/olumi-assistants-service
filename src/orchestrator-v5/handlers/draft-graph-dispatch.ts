@@ -123,6 +123,12 @@ function draftResultToOlumiResponse(
         }
       : undefined;
 
+  // Include analysis_ready so the UI pre-analysis panel can populate without a
+  // separate /graph-readiness call. Conditioned on the same graphPersisted gate
+  // as draft_graph — only meaningful when a graph actually landed in the store.
+  const analysisReadyField =
+    graphPersisted && result.analysisReady ? result.analysisReady : undefined;
+
   return {
     response_version: 2,
     assistant_text: assistantText,
@@ -131,6 +137,7 @@ function draftResultToOlumiResponse(
     insights: [],
     stage_indicator: stageIndicator,
     ...(draftGraphField && { draft_graph: draftGraphField }),
+    ...(analysisReadyField && { analysis_ready: analysisReadyField }),
   };
 }
 
