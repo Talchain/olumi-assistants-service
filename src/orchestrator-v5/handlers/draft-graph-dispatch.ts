@@ -12,20 +12,17 @@
  * Adapter checkpoint (per brief review): V4's DraftGraphResult.blocks is a
  * `TypedConversationBlock[]` that includes V4-internal `GraphPatchBlock`
  * variants (patch_type: 'full_draft'). v0.7.0's OlumiResponseSchema only
- * permits a narrow `graph_patch` block (single-target edits:
- * set_factor_value, add_constraint, adjust_edge_strength) — there is NO
- * v0.7.0 block variant that can carry a full initial graph draft.
+ * permitted narrow graph_patch blocks. v0.8.0 adds an optional top-level
+ * `draft_graph` field to OlumiResponse carrying the full post-repair graph
+ * inline so the UI can render immediately without a Supabase re-fetch.
  *
- * Decision: the adapter produces a TEXT-ONLY OlumiResponse. The graph is
- * persisted atomically with the turn commit via CommitMetadata.graph, which
- * is passed to append_turn_atomic as p_graph. The RPC writes scenarios.graph
- * and inserts the turn row in the same transaction — both succeed or both roll
- * back. The UI re-fetches via the existing scenario/graph read paths. We drop
- * V4's GraphPatchBlock, applied_graph, strengthen_items, draft warnings, and
- * telemetry — dropping is deliberate, not accidental: these were V4 surface
- * that the new V5+UI contract does not yet need to thread through OlumiResponse.
- * When Paul widens @talchain/schemas to carry a full_draft block, this adapter
- * can be extended without call-site changes.
+ * Decision: the adapter now includes `draft_graph` in the response when
+ * graphOutput is available. The graph is also persisted atomically via
+ * CommitMetadata.graph → append_turn_atomic → scenarios.graph for session
+ * resume. The inline graph is the primary render path; Supabase is the
+ * fallback for session resume. We still drop V4's GraphPatchBlock,
+ * strengthen_items, draft warnings, and telemetry — those remain V4-only
+ * surface not yet in the V5+UI contract.
  *
  * V4 column audit (2026-04-22): V4's handleDraftGraph does not write to the
  * scenarios table directly — it returns graphOutput in its result and the
@@ -69,16 +66,16 @@ export interface DispatchDraftGraphResult {
 }
 
 /**
- * Map V4 DraftGraphResult → v0.7.0 OlumiResponse.
+ * Map V4 DraftGraphResult → OlumiResponse (v0.8.0 contract).
  *
- * The mapping deliberately drops V4-specific fields that have no v0.7.0
- * equivalent (see file header). The UI obtains graph content via the
- * scenarios read path (scenarios.graph), written atomically by the commit
- * stage (append_turn_atomic with p_graph).
+ * Includes the FINAL post-repair graph in `draft_graph` when graphOutput is
+ * present so the UI can render immediately without a Supabase re-fetch. The
+ * graph is also persisted atomically via CommitMetadata.graph for session
+ * resume — Supabase remains the fallback, not the primary path.
  *
  * assistant_text contract:
- *   - graphPersisted=true: use handler narration, falling back to node/edge
- *     count confirmation — graph is on canvas.
+ *   - graphPersisted=true: use handler narration, falling back to FINAL
+ *     node/edge count (post-repair) — graph is on canvas.
  *   - graphPersisted=false (commit threw, caught by caller): the route maps
  *     commitPerformed=false to HTTP 500 INTERNAL_ERROR with retryable=true.
  *     The response text here is never sent to the client; use the pipeline's
@@ -89,11 +86,16 @@ function draftResultToOlumiResponse(
   payload: MessageTurnPayload,
   graphPersisted: boolean,
 ): OlumiResponse {
+  // Derive node/edge counts from the FINAL graph (post-repair, post-validation)
+  // to ensure the assistant_text matches what the UI will render.
+  const finalNodeCount = result.graphOutput?.nodes?.length ?? 0;
+  const finalEdgeCount = result.graphOutput?.edges?.length ?? 0;
+
   let assistantText: string;
   if (graphPersisted) {
-    // Success path: prefer handler narration, fall back to node/edge summary.
+    // Success path: prefer handler narration, fall back to FINAL node/edge count.
     const successFallback = result.graphOutput
-      ? `Drafted a decision graph with ${result.graphOutput.nodes?.length ?? 0} nodes and ${result.graphOutput.edges?.length ?? 0} edges.`
+      ? `Drafted a decision graph with ${finalNodeCount} nodes and ${finalEdgeCount} edges.`
       : 'Drafted a decision graph.';
     assistantText = result.assistantText ?? successFallback;
   } else {
@@ -107,6 +109,20 @@ function draftResultToOlumiResponse(
   // the client must not try to fetch it — keep the current stage so the
   // frame stays visible and the operator can investigate the persistence log.
   const stageIndicator = graphPersisted ? 'analyse' : payload.stage;
+
+  // Include the FINAL graph inline so the UI can apply it directly without a
+  // Supabase re-fetch. Only present when graphOutput is available and
+  // persistence succeeded — on failure the client never sees this response.
+  const draftGraphField =
+    graphPersisted && result.graphOutput
+      ? {
+          nodes: (result.graphOutput.nodes ?? []) as unknown[],
+          edges: (result.graphOutput.edges ?? []) as unknown[],
+          node_count: finalNodeCount,
+          edge_count: finalEdgeCount,
+        }
+      : undefined;
+
   return {
     response_version: 2,
     assistant_text: assistantText,
@@ -114,6 +130,7 @@ function draftResultToOlumiResponse(
     suggested_actions: [],
     insights: [],
     stage_indicator: stageIndicator,
+    ...(draftGraphField && { draft_graph: draftGraphField }),
   };
 }
 
