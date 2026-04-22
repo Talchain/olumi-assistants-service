@@ -162,9 +162,9 @@ async function fetchPriorFacts(
 
 /**
  * V5 ingress pre-flight: ensure the scenarios row exists, creating it on-
- * demand if the caller supplied a `userId`. Replaces the 2026-04-20
- * existence-only check (dbd59c9e) which rejected valid traffic when the
- * UI's INSERT race-landed after the first V5 turn.
+ * demand. Replaces the 2026-04-20 existence-only check (dbd59c9e) which
+ * rejected valid traffic when the UI's INSERT race-landed after the first
+ * V5 turn.
  *
  * Lives alongside buildTurnContext because this file is the declared
  * session-layer integration point (per the state-write invariant at
@@ -173,7 +173,7 @@ async function fetchPriorFacts(
  *
  * Behaviour matrix:
  *
- *   userId PRESENT (new UI path):
+ *   userId PRESENT (authenticated UI path):
  *     - RPC INSERTs row if missing, no-ops if present, returns
  *       authoritative user_id. Match → `{ ok: true }`.
  *     - Returned user_id differs from caller's → cross-tenant attempt;
@@ -184,13 +184,11 @@ async function fetchPriorFacts(
  *       defence and will still surface a genuine missing-scenario as
  *       STATE_COMMIT_FAILED.
  *
- *   userId ABSENT (older UI or system events without identity):
- *     - Skip the RPC entirely. We CANNOT upsert without a user_id (the
- *       scenarios.user_id column is NOT NULL and the FK demands a real
- *       auth.users row). Pre-flight is a best-effort optimisation, not
- *       a correctness requirement — return `{ ok: true, skipped: true }`
- *       and let `append_turn_atomic` surface a missing scenario with
- *       its native "scenario X not found" error.
+ *   userId ABSENT (guest mode — VITE_AUTH_MODE=guest):
+ *     - RPC is STILL called. scenarios.user_id is nullable; the row is
+ *       created with user_id = NULL. Ownership check is skipped (no
+ *       ownership concept in guest mode). Returns `{ ok: true }`.
+ *     - RPC errors → same fail-open behaviour as the authenticated path.
  *
  * ⚠ Caller-ownership check is PoC-grade only. See ensureScenarioExists
  * on SessionStore and the migration file header for the production-
@@ -206,15 +204,7 @@ export async function preflightEnsureScenario(
   requestId: string,
   sessionStore?: SessionStore,
 ): Promise<PreflightResult> {
-  if (userId === null) {
-    log.debug(
-      { request_id: requestId, scenario_id: scenarioId },
-      'V5 pre-flight: no user_id on request — upsert skipped, letting commit RPC be the last line of defence',
-    );
-    return { ok: true, skipped: true };
-  }
-
-  let authoritativeUserId: string;
+  let authoritativeUserId: string | null;
   try {
     const store = sessionStore ?? getSessionStore();
     const result = await store.ensureScenarioExists(scenarioId, userId);
@@ -232,7 +222,8 @@ export async function preflightEnsureScenario(
     return { ok: true, skipped: true };
   }
 
-  if (authoritativeUserId !== userId) {
+  // Skip ownership check in guest mode (either side null means no auth identity).
+  if (userId !== null && authoritativeUserId !== null && authoritativeUserId !== userId) {
     log.warn(
       {
         request_id: requestId,

@@ -211,8 +211,8 @@ export class SupabaseSessionStore implements SessionStore {
 
   async ensureScenarioExists(
     scenarioId: string,
-    userId: string,
-  ): Promise<{ user_id: string }> {
+    userId: string | null,
+  ): Promise<{ user_id: string | null }> {
     // Upsert-on-append: the `ensure_scenario_exists` RPC runs
     // `INSERT … ON CONFLICT (id) DO NOTHING` and returns the
     // AUTHORITATIVE user_id from the stored row. When a row pre-
@@ -250,12 +250,13 @@ export class SupabaseSessionStore implements SessionStore {
         { cause: error, code: errCode(error) },
       );
     }
-    if (typeof data !== 'string') {
+    // data is a UUID string for authenticated users or null for guest rows.
+    if (data !== null && typeof data !== 'string') {
       throw new SessionReadError(
-        `ensure_scenario_exists returned non-string user_id: ${JSON.stringify(data)}`,
+        `ensure_scenario_exists returned unexpected value: ${JSON.stringify(data)}`,
       );
     }
-    return { user_id: data };
+    return { user_id: data as string | null };
   }
 }
 

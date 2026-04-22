@@ -40,16 +40,14 @@ export interface SessionStore {
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**
    * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
-   * creating it with `userId` as the owner if absent. Replaces the 2026-04-20
-   * existence-only `checkScenarioExists` pre-flight: real user traffic had
-   * the UI's scenarios INSERT land after or concurrently with the first V5
-   * turn, so strict existence rejected valid traffic.
+   * creating it with `userId` as the owner if absent. `userId` may be null
+   * for guest sessions (VITE_AUTH_MODE=guest) — the row is created with a
+   * NULL user_id in that case.
    *
    * Returns the AUTHORITATIVE `user_id` (as stored in `public.scenarios`).
-   * This may differ from the caller-supplied `userId` when the row pre-
-   * existed with a different owner — callers MUST compare returned
-   * `user_id` against the caller's `userId` and reject cross-tenant
-   * access. The RPC does NOT overwrite an existing row's user_id.
+   * Returns null for guest rows. Callers should skip the cross-tenant
+   * ownership check when either the caller userId or the returned value
+   * is null (no ownership concept in guest mode).
    *
    * Read/RPC failures propagate as `SessionReadError`. The pre-flight
    * treats those as "unknown" and fails-open (traffic continues; the
@@ -63,7 +61,7 @@ export interface SessionStore {
    * JWT-scoped client + an RPC that reads identity from `auth.uid()`.
    * See supabase/migrations/…_v5_ensure_scenario_exists.sql header.
    */
-  ensureScenarioExists(scenarioId: string, userId: string): Promise<{ user_id: string }>;
+  ensureScenarioExists(scenarioId: string, userId: string | null): Promise<{ user_id: string | null }>;
 }
 
 /**

@@ -289,11 +289,11 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, USER_ID);
   });
 
-  it('null user_id: pre-flight short-circuits and ensureScenarioExists is NOT called', async () => {
-    // When user_id is absent the helper cannot upsert (scenarios.user_id is
-    // NOT NULL), so preflightEnsureScenario returns `{ ok: true, skipped: true }`
-    // without touching the store. The turn still proceeds — append_turn_atomic
-    // is the last line of defence. The spy must remain unused.
+  it('null user_id (guest mode): pre-flight still calls ensureScenarioExists with null', async () => {
+    // Guest mode (VITE_AUTH_MODE=guest) sends no user_id. scenarios.user_id is
+    // now nullable, so the RPC is still called and creates the row with user_id
+    // = NULL. The ownership check is skipped (no auth identity to compare).
+    // The turn proceeds normally.
     dispatchDraftGraphSpy.mockResolvedValueOnce({
       response: happyOlumiResponse('frame'),
       commitPerformed: true,
@@ -309,11 +309,12 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
         message: 'Should we expand into Germany next quarter or delay to Q3?',
         turn_class: 'frame',
         source: 'composer',
-        // no user_id
+        // no user_id — guest mode
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
   });
 
   it('order invariant: pre-flight runs BEFORE dispatch (draft_graph case)', async () => {
