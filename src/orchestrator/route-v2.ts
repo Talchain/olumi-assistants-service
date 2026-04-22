@@ -84,7 +84,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { BoundaryError } from '@talchain/schemas/boundary';
+import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { log } from '../utils/telemetry.js';
 import { validateEgress } from '../validators/b1.js';
@@ -95,6 +95,55 @@ import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispat
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
+
+// ───────────────────────────────────────────────────────────────────
+// Commit-failure BoundaryError helper
+// ───────────────────────────────────────────────────────────────────
+//
+// Every 500 path in this file ends in the same wire contract: a
+// BoundaryError envelope with `boundary: 'B1'`, `direction: 'egress'`,
+// and `retryable` duplicated at both the top level and inside `details`
+// (the former is the canonical Zod-schema field; the latter preserves
+// historic UI parsing). The V5 holistic audit (UU-15) flagged six-plus
+// inline constructors that drifted from each other on details-key
+// ordering and extras. This helper is a pure refactor: it produces the
+// same JSON shape and insertion order as the original inline objects.
+//
+// `preStageExtras` and `postStageExtras` preserve the two historical
+// positions of per-site extras relative to `stage` inside `details`:
+//   - `preStageExtras`  goes after `reason` and before `stage`
+//     (used for `event_kind`, `cause_kind`, `failure_type`).
+//   - `postStageExtras` goes after `stage`
+//     (used for `stages_completed`).
+// Sites that emit neither keep empty buckets. Key insertion order
+// matters for JSON.stringify determinism — the UI parser and contract
+// fixtures depend on it.
+export function buildCommitFailureBoundaryError(params: {
+  readonly validator: string;
+  readonly reason: string;
+  readonly retryable: boolean;
+  readonly requestId: string;
+  readonly stage: OrchestratorTurnPayload['stage'];
+  readonly errorCode?: BoundaryError['error'];
+  readonly preStageExtras?: Record<string, unknown>;
+  readonly postStageExtras?: Record<string, unknown>;
+}): BoundaryError {
+  return {
+    error: params.errorCode ?? 'INTERNAL_ERROR',
+    boundary: 'B1',
+    direction: 'egress',
+    validator: params.validator,
+    details: {
+      retryable: params.retryable,
+      reason: params.reason,
+      ...(params.preStageExtras ?? {}),
+      stage: params.stage,
+      ...(params.postStageExtras ?? {}),
+    },
+    request_id: params.requestId,
+    retryable: params.retryable,
+  };
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Dispatch-trigger regexes (hoisted to module scope — constructing these
@@ -158,20 +207,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestId,
       });
       if (!sysResult.commitPerformed && sysResult.commitSkippedReason !== 'client_only_event') {
-        const boundaryError: BoundaryError = {
-          error: 'INTERNAL_ERROR',
-          boundary: 'B1',
-          direction: 'egress',
+        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'turn_commit',
-          details: {
-            retryable: true,
-            reason: 'system_event_commit_failed',
-            event_kind: ingress.event.kind,
-            stage: ingress.stage,
-          },
-          request_id: requestId,
+          reason: 'system_event_commit_failed',
           retryable: true,
-        };
+          requestId,
+          stage: ingress.stage,
+          preStageExtras: { event_kind: ingress.event.kind },
+        });
         log.error(
           {
             request_id: requestId,
@@ -222,52 +265,34 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // response. Parallels TurnExecutor's catch ladder so chip-click
         // errors surface with the same typed granularity.
         if (cc.outcome === 'handler_failure') {
-          const boundaryError: BoundaryError = {
-            error: 'INTERNAL_ERROR',
-            boundary: 'B1',
-            direction: 'egress',
+          const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'chip_click_dispatch',
-            details: {
-              retryable: cc.retryable,
-              reason: 'chip_click_run_analysis_handler_failed',
-              cause_kind: cc.causeKind,
-              stage: ingress.stage,
-            },
-            request_id: requestId,
+            reason: 'chip_click_run_analysis_handler_failed',
             retryable: cc.retryable,
-          };
+            requestId,
+            stage: ingress.stage,
+            preStageExtras: { cause_kind: cc.causeKind },
+          });
           return reply.code(500).send(boundaryError);
         }
         if (cc.outcome === 'handler_result_invalid') {
-          const boundaryError: BoundaryError = {
-            error: 'INTERNAL_ERROR',
-            boundary: 'B1',
-            direction: 'egress',
+          const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'chip_click_dispatch',
-            details: {
-              retryable: false,
-              reason: 'chip_click_run_analysis_handler_result_invalid',
-              stage: ingress.stage,
-            },
-            request_id: requestId,
+            reason: 'chip_click_run_analysis_handler_result_invalid',
             retryable: false,
-          };
+            requestId,
+            stage: ingress.stage,
+          });
           return reply.code(500).send(boundaryError);
         }
         if (cc.outcome === 'commit_failed') {
-          const boundaryError: BoundaryError = {
-            error: 'INTERNAL_ERROR',
-            boundary: 'B1',
-            direction: 'egress',
+          const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
-            details: {
-              retryable: true,
-              reason: 'chip_click_run_analysis_commit_failed',
-              stage: ingress.stage,
-            },
-            request_id: requestId,
+            reason: 'chip_click_run_analysis_commit_failed',
             retryable: true,
-          };
+            requestId,
+            stage: ingress.stage,
+          });
           return reply.code(500).send(boundaryError);
         }
         // outcome === 'ok'
@@ -288,19 +313,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           },
           'V5 chip_click run_analysis handler threw — returning 500 BoundaryError',
         );
-        const boundaryError: BoundaryError = {
-          error: 'INTERNAL_ERROR',
-          boundary: 'B1',
-          direction: 'egress',
+        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'chip_click_dispatch',
-          details: {
-            retryable: true,
-            reason: 'chip_click_run_analysis_handler_threw',
-            stage: ingress.stage,
-          },
-          request_id: requestId,
+          reason: 'chip_click_run_analysis_handler_threw',
           retryable: true,
-        };
+          requestId,
+          stage: ingress.stage,
+        });
         return reply.code(500).send(boundaryError);
       }
     }
@@ -339,19 +358,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           request: req,
         });
         if (!dg.commitPerformed) {
-          const boundaryError: BoundaryError = {
-            error: 'INTERNAL_ERROR',
-            boundary: 'B1',
-            direction: 'egress',
+          const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
-            details: {
-              retryable: true,
-              reason: 'draft_graph_commit_failed',
-              stage: ingress.stage,
-            },
-            request_id: requestId,
+            reason: 'draft_graph_commit_failed',
             retryable: true,
-          };
+            requestId,
+            stage: ingress.stage,
+          });
           return reply.code(500).send(boundaryError);
         }
         const dgEgress = validateEgress(dg.response, requestId);
@@ -376,19 +389,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         );
         // Wire body carries only stable, typed fields. Raw exception text
         // stays in server logs (above).
-        const boundaryError: BoundaryError = {
-          error: 'INTERNAL_ERROR',
-          boundary: 'B1',
-          direction: 'egress',
+        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'draft_graph_pipeline',
-          details: {
-            retryable: true,
-            reason: 'draft_graph_pipeline_threw',
-            stage: ingress.stage,
-          },
-          request_id: requestId,
+          reason: 'draft_graph_pipeline_threw',
           retryable: true,
-        };
+          requestId,
+          stage: ingress.stage,
+        });
         return reply.code(500).send(boundaryError);
       }
     }
@@ -431,19 +438,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisState: extensions.analysisState ?? null,
         });
         if (!eg.commitPerformed) {
-          const boundaryError: BoundaryError = {
-            error: 'INTERNAL_ERROR',
-            boundary: 'B1',
-            direction: 'egress',
+          const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
-            details: {
-              retryable: true,
-              reason: 'edit_graph_commit_failed',
-              stage: ingress.stage,
-            },
-            request_id: requestId,
+            reason: 'edit_graph_commit_failed',
             retryable: true,
-          };
+            requestId,
+            stage: ingress.stage,
+          });
           return reply.code(500).send(boundaryError);
         }
         const egEgress = validateEgress(eg.response, requestId);
@@ -463,19 +464,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           },
           'V5 edit_graph pipeline threw — returning 500 BoundaryError',
         );
-        const boundaryError: BoundaryError = {
-          error: 'INTERNAL_ERROR',
-          boundary: 'B1',
-          direction: 'egress',
+        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'edit_graph_pipeline',
-          details: {
-            retryable: true,
-            reason: 'edit_graph_pipeline_threw',
-            stage: ingress.stage,
-          },
-          request_id: requestId,
+          reason: 'edit_graph_pipeline_threw',
           retryable: true,
-        };
+          requestId,
+          stage: ingress.stage,
+        });
         return reply.code(500).send(boundaryError);
       }
     }
@@ -513,29 +508,26 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // error-block details (populated by buildFailureResponse), with a
       // conservative false default if the shape drifts.
       const retryable = extractRetryableFlag(run.response);
-      const boundaryError: BoundaryError = {
-        // failure_type is either a BoundaryErrorCode enum member or null
-        // (for successful turns — unreachable here because commit_performed
-        // is false). Fall back to INTERNAL_ERROR if null to keep the wire
-        // shape honest.
-        error: failureType ?? 'INTERNAL_ERROR',
-        boundary: 'B1',
-        direction: 'egress',
+      // failure_type is either a BoundaryErrorCode enum member or null
+      // (for successful turns — unreachable here because commit_performed
+      // is false). Fall back to INTERNAL_ERROR if null to keep the wire
+      // shape honest.
+      //
+      // Note: `stage` aids client-side triage — a commit failure in
+      // `analyse` stage vs `frame` stage has different user implications
+      // ("the analysis ran but didn't save" vs "we couldn't frame the
+      // decision"). `stages_completed` is positioned *after* stage inside
+      // details, preserving the pre-refactor insertion order.
+      const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
         validator: 'turn_commit',
-        details: {
-          retryable,
-          reason: 'state_commit_failed_or_turn_runtime_failure',
-          failure_type: failureType,
-          // Group 3 follow-up: stage aids client-side triage — a
-          // commit failure in `analyse` stage vs `frame` stage has
-          // different user implications ("the analysis ran but didn't
-          // save" vs "we couldn't frame the decision").
-          stage: ingress.stage,
-          stages_completed: run.telemetry.stages_completed,
-        },
-        request_id: requestId,
+        reason: 'state_commit_failed_or_turn_runtime_failure',
         retryable,
-      };
+        requestId,
+        stage: ingress.stage,
+        errorCode: failureType ?? 'INTERNAL_ERROR',
+        preStageExtras: { failure_type: failureType },
+        postStageExtras: { stages_completed: run.telemetry.stages_completed },
+      });
       log.error(
         {
           request_id: requestId,
