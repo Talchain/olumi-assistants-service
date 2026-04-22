@@ -17,14 +17,25 @@
  * v0.7.0 block variant that can carry a full initial graph draft.
  *
  * Decision: the adapter produces a TEXT-ONLY OlumiResponse. The graph is
- * persisted via CommitMetadata.graphToStore (commit.ts calls store_draft_graph
- * before appending the turn row). The UI re-fetches via the existing
- * scenario/graph read paths. We drop V4's GraphPatchBlock, applied_graph,
- * strengthen_items, draft warnings, and telemetry — dropping is deliberate,
- * not accidental: these were V4 surface that the new V5+UI contract does not
- * yet need to thread through OlumiResponse. When Paul widens @talchain/schemas
- * to carry a full_draft block, this adapter can be extended without call-site
- * changes.
+ * persisted atomically with the turn commit via CommitMetadata.graph, which
+ * is passed to append_turn_atomic as p_graph. The RPC writes scenarios.graph
+ * and inserts the turn row in the same transaction — both succeed or both roll
+ * back. The UI re-fetches via the existing scenario/graph read paths. We drop
+ * V4's GraphPatchBlock, applied_graph, strengthen_items, draft warnings, and
+ * telemetry — dropping is deliberate, not accidental: these were V4 surface
+ * that the new V5+UI contract does not yet need to thread through OlumiResponse.
+ * When Paul widens @talchain/schemas to carry a full_draft block, this adapter
+ * can be extended without call-site changes.
+ *
+ * V4 column audit (2026-04-22): V4's handleDraftGraph does not write to the
+ * scenarios table directly — it returns graphOutput in its result and the
+ * caller decides what to persist. The scenarios table has columns for framing,
+ * brief, analysis_status, analysis, events, etc. but none of these are written
+ * by the V4 draft_graph handler: framing is set by the intent-gate path,
+ * analysis_status by the run_analysis handler, events by a separate event log.
+ * Only scenarios.graph needs to be persisted here. Other columns are either
+ * populated by their own handlers or are not relevant to the draft turn.
+ * Re-audit if run_analysis returns "no graph found" after a V5 draft turn.
  *
  * commit_performed signal: always true on success (append_turn_atomic
  * fires with handler_id=null, handler_facts=[]). handler_facts is empty
@@ -62,20 +73,38 @@ export interface DispatchDraftGraphResult {
  *
  * The mapping deliberately drops V4-specific fields that have no v0.7.0
  * equivalent (see file header). The UI obtains graph content via the
- * scenarios read path (scenarios.graph), written by storeDraftGraph via
- * CommitMetadata.graphToStore.
+ * scenarios read path (scenarios.graph), written atomically by the commit
+ * stage (append_turn_atomic with p_graph).
+ *
+ * assistant_text contract:
+ *   - graphPersisted=true: use handler narration, falling back to node/edge
+ *     count confirmation — graph is on canvas.
+ *   - graphPersisted=false AND a graph was produced: explicit save-failure
+ *     message — the user must not see "Drafted a graph" when no graph appears.
+ *   - graphPersisted=false AND no graphOutput: pipeline produced no graph;
+ *     use handler narration or a neutral confirmation.
  */
 function draftResultToOlumiResponse(
   result: DraftGraphResult,
   payload: MessageTurnPayload,
   graphPersisted: boolean,
 ): OlumiResponse {
-  // Prefer the handler's narration; fall back to a minimal confirmation so
-  // assistant_text is never empty on success (empty assistant_text is reserved
-  // for system events).
-  const fallback = result.graphOutput
-    ? `Drafted a decision graph with ${result.graphOutput.nodes?.length ?? 0} nodes and ${result.graphOutput.edges?.length ?? 0} edges.`
-    : 'Drafted a decision graph.';
+  let assistantText: string;
+  if (graphPersisted) {
+    // Success path: prefer handler narration, fall back to node/edge summary.
+    const successFallback = result.graphOutput
+      ? `Drafted a decision graph with ${result.graphOutput.nodes?.length ?? 0} nodes and ${result.graphOutput.edges?.length ?? 0} edges.`
+      : 'Drafted a decision graph.';
+    assistantText = result.assistantText ?? successFallback;
+  } else if (result.graphOutput) {
+    // Persistence failed after the pipeline produced a graph. Saying "Drafted
+    // a graph" while nothing appears on canvas violates the quality contract.
+    assistantText = 'I generated a decision graph, but it could not be saved. Please try submitting your brief again.';
+  } else {
+    // Pipeline produced no graph — narration stands.
+    assistantText = result.assistantText ?? 'Drafted a decision graph.';
+  }
+
   // Only advance to 'analyse' when persistence actually succeeded. If
   // graphPersisted is false the graph was not written to scenarios.graph and
   // the client must not try to fetch it — keep the current stage so the
@@ -83,7 +112,7 @@ function draftResultToOlumiResponse(
   const stageIndicator = graphPersisted ? 'analyse' : payload.stage;
   return {
     response_version: 2,
-    assistant_text: result.assistantText ?? fallback,
+    assistant_text: assistantText,
     blocks: [],
     suggested_actions: [],
     insights: [],
@@ -122,14 +151,14 @@ export async function dispatchDraftGraph(
     // simple integer count. Using 1 as an honest minimum rather than 0
     // (zero would misrepresent the turn as a no-LLM deterministic event).
     //
-    // graphToStore: if the pipeline produced a graph, commit.ts will call
-    // store_draft_graph before appending the turn row. The returned
-    // graphPersisted boolean drives stage_indicator in the response.
+    // graph: when graphOutput is present, it is passed to append_turn_atomic
+    // as p_graph and persisted atomically with the turn insert. If the RPC
+    // throws (StateCommitFailedError), both graph and turn roll back together
+    // and the catch below returns commitPerformed=false.
     const commitResult = await commitDirectAnswer(
-      // We build a provisional response with graphPersisted=false here; the
-      // real response is rebuilt below after we know the persistence outcome.
-      // This placeholder is never sent — the store-write result determines
-      // the actual stage_indicator.
+      // Provisional response — the real response is built below once we know
+      // graphPersisted. This value is recorded in the turn row but is NOT
+      // sent to the client (the caller uses the response we return).
       { response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
@@ -140,9 +169,7 @@ export async function dispatchDraftGraph(
         llm_calls_used: 1,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
-        graphToStore: draftResult.graphOutput
-          ? { scenarioId: payload.scenario_id, graph: draftResult.graphOutput }
-          : undefined,
+        graph: draftResult.graphOutput ?? undefined,
       },
     );
 

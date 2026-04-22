@@ -81,6 +81,10 @@ export class SupabaseSessionStore implements SessionStore {
       p_llm_calls_used: write.llm_calls_used,
       p_duration_ms: write.duration_ms,
       p_handler_facts: serialiseHandlerFacts(write.handler_facts),
+      // p_graph is optional — only set for draft_graph turns. When present the
+      // RPC atomically writes scenarios.graph in the same transaction as the
+      // turn insert. Omitting it (DEFAULT NULL) leaves scenarios.graph unchanged.
+      ...(write.graph !== undefined && { p_graph: write.graph }),
     });
 
     if (error) {
