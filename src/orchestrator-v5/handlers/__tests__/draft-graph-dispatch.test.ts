@@ -140,6 +140,70 @@ describe('dispatchDraftGraph', () => {
 
       expect(result.commitPerformed).toBe(true);
     });
+
+    it('includes draft_graph in response with non-empty nodes and edges', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.draft_graph).toBeDefined();
+      expect(Array.isArray(result.response.draft_graph?.nodes)).toBe(true);
+      expect(Array.isArray(result.response.draft_graph?.edges)).toBe(true);
+      expect((result.response.draft_graph?.nodes?.length ?? 0) > 0).toBe(true);
+    });
+
+    it('draft_graph node_count and edge_count match the FINAL graph arrays', async () => {
+      const graph = {
+        nodes: [
+          { id: 'n1', kind: 'decision', label: 'Launch?' },
+          { id: 'n2', kind: 'goal', label: 'Revenue' },
+          { id: 'n3', kind: 'factor', label: 'Market size' },
+        ],
+        edges: [
+          { from: 'n1', to: 'n2' },
+          { from: 'n3', to: 'n2' },
+        ],
+      };
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(graph) as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.draft_graph?.node_count).toBe(3);
+      expect(result.response.draft_graph?.edge_count).toBe(2);
+      expect(result.response.draft_graph?.nodes).toHaveLength(3);
+      expect(result.response.draft_graph?.edges).toHaveLength(2);
+    });
+
+    it('assistant_text uses FINAL node/edge counts (post-repair) when handler returns null assistantText', async () => {
+      const graph = {
+        nodes: [
+          { id: 'n1', kind: 'decision', label: 'A' },
+          { id: 'n2', kind: 'goal', label: 'B' },
+        ],
+        edges: [{ from: 'n1', to: 'n2' }],
+      };
+      const draftResult = { ...makeDraftResult(graph), assistantText: null };
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(draftResult as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.assistant_text).toBe('Drafted a decision graph with 2 nodes and 1 edges.');
+    });
   });
 
   describe('when the atomic commit fails (commitDirectAnswer throws — graph and turn both roll back)', () => {
@@ -207,6 +271,19 @@ describe('dispatchDraftGraph', () => {
 
       expect(result.commitPerformed).toBe(false);
     });
+
+    it('response does NOT include draft_graph when commit failed (route discards the response anyway)', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-2',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.draft_graph).toBeUndefined();
+    });
   });
 
   describe('when handleDraftGraph produces no graphOutput', () => {
@@ -243,6 +320,19 @@ describe('dispatchDraftGraph', () => {
       // No graph produced — metadata.graph must be undefined so p_graph is
       // omitted from the RPC call, leaving scenarios.graph unchanged.
       expect(metadata.graph).toBeUndefined();
+    });
+
+    it('response does NOT include draft_graph when no graphOutput', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-3',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.draft_graph).toBeUndefined();
     });
   });
 
