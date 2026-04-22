@@ -311,6 +311,9 @@ const ConfigSchema = z.object({
     // V1 handlers (e.g. src/orchestrator/tools/explain-results.ts) are
     // stubbed to throw if reached. Set to false only for emergency rollback
     // of V1 AND revert the V1 stubs.
+    // ⚠️ INVERTED SEMANTICS: CEE_PIPELINE_V4_ENABLED=true DISABLES V4 on /v1 routes
+    // (returns 410 V4_DISABLED). CEE_PIPELINE_V4_ENABLED=false ENABLES V4 execution.
+    // This is a known naming issue. Rename to CEE_V1_ROUTE_DISABLED planned post-pilot.
     pipelineV4Enabled: booleanString.default(true),
     orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
   }),
