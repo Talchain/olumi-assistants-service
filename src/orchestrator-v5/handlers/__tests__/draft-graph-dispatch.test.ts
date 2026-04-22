@@ -5,13 +5,16 @@
  * change:
  *
  *  1. Persist success   → stage_indicator='analyse', commitPerformed=true
+ *                         (commitDirectAnswer returns graphPersisted=true)
  *  2. Persist failure   → stage_indicator='frame' (no advancement),
  *                         commitPerformed=true (turn commit is independent),
  *                         error is swallowed (non-fatal)
+ *                         (commitDirectAnswer returns graphPersisted=false)
  *  3. No graphOutput    → stage_indicator stays at payload.stage,
- *                         storeDraftGraph never called
+ *                         commitDirectAnswer called with no graphToStore
  *
- * Both LLM I/O (handleDraftGraph) and Supabase I/O (getSessionStore) are
+ * Graph persistence is delegated to commitDirectAnswer via CommitMetadata.graphToStore.
+ * Both LLM I/O (handleDraftGraph) and the commit stage (commitDirectAnswer) are
  * mocked at module level so no network calls are made.
  */
 
@@ -25,19 +28,15 @@ vi.mock('../../../orchestrator/tools/draft-graph.js', () => ({
 }));
 
 vi.mock('../../commit.js', () => ({
-  commitDirectAnswer: vi.fn().mockResolvedValue({ response: {}, performed: true, persisted_row_id: 'row-1' }),
+  commitDirectAnswer: vi.fn(),
   computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
-}));
-
-vi.mock('../../session/index.js', () => ({
-  getSessionStore: vi.fn(),
 }));
 
 // ── imports after mocks ───────────────────────────────────────────────────────
 
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
-import { getSessionStore } from '../../session/index.js';
+import { commitDirectAnswer } from '../../commit.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -76,23 +75,30 @@ function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH) {
   };
 }
 
+function makeCommitResult(graphPersisted: boolean) {
+  return {
+    response: {},
+    performed: true as const,
+    persisted_row_id: 'row-1',
+    graphPersisted,
+  };
+}
+
 const STUB_REQUEST = {} as FastifyRequest;
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('dispatchDraftGraph', () => {
-  let mockStoreDraftGraph: MockedFunction<(s: string, g: unknown) => Promise<void>>;
-
   beforeEach(() => {
     vi.clearAllMocks();
-
-    mockStoreDraftGraph = vi.fn().mockResolvedValue(undefined);
-    (getSessionStore as MockedFunction<typeof getSessionStore>).mockReturnValue({
-      storeDraftGraph: mockStoreDraftGraph,
-    } as ReturnType<typeof getSessionStore>);
   });
 
-  describe('when persistence succeeds', () => {
+  describe('when persistence succeeds (commitDirectAnswer returns graphPersisted=true)', () => {
+    beforeEach(() => {
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    });
+
     it('returns stage_indicator=analyse', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
@@ -106,7 +112,7 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.stage_indicator).toBe('analyse');
     });
 
-    it('calls storeDraftGraph with the scenario_id and graph', async () => {
+    it('passes graphToStore with scenarioId and graph to commitDirectAnswer', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -116,8 +122,9 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(mockStoreDraftGraph).toHaveBeenCalledOnce();
-      expect(mockStoreDraftGraph).toHaveBeenCalledWith(SCENARIO_ID, MINIMAL_GRAPH);
+      expect(commitDirectAnswer).toHaveBeenCalledOnce();
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.graphToStore).toEqual({ scenarioId: SCENARIO_ID, graph: MINIMAL_GRAPH });
     });
 
     it('sets commitPerformed=true', async () => {
@@ -134,9 +141,10 @@ describe('dispatchDraftGraph', () => {
     });
   });
 
-  describe('when persistence fails', () => {
+  describe('when persistence fails (commitDirectAnswer returns graphPersisted=false)', () => {
     beforeEach(() => {
-      mockStoreDraftGraph.mockRejectedValue(new Error('RPC error: scenario not found'));
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     });
 
     it('keeps stage_indicator=frame (does not advance stage)', async () => {
@@ -180,6 +188,11 @@ describe('dispatchDraftGraph', () => {
   });
 
   describe('when handleDraftGraph produces no graphOutput', () => {
+    beforeEach(() => {
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    });
+
     it('keeps stage_indicator=frame', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>);
@@ -193,7 +206,7 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.stage_indicator).toBe('frame');
     });
 
-    it('never calls storeDraftGraph', async () => {
+    it('passes no graphToStore when graphOutput is null', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -203,7 +216,9 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(mockStoreDraftGraph).not.toHaveBeenCalled();
+      expect(commitDirectAnswer).toHaveBeenCalledOnce();
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.graphToStore).toBeUndefined();
     });
   });
 
@@ -222,7 +237,7 @@ describe('dispatchDraftGraph', () => {
       ).rejects.toBe(boom);
     });
 
-    it('never calls storeDraftGraph on pipeline failure', async () => {
+    it('never calls commitDirectAnswer on pipeline failure', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockRejectedValue(new Error('pipeline failure'));
 
@@ -232,7 +247,7 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       }).catch(() => {});
 
-      expect(mockStoreDraftGraph).not.toHaveBeenCalled();
+      expect(commitDirectAnswer).not.toHaveBeenCalled();
     });
   });
 });

@@ -17,19 +17,25 @@
  * v0.7.0 block variant that can carry a full initial graph draft.
  *
  * Decision: the adapter produces a TEXT-ONLY OlumiResponse. The graph is
- * persisted via the CEE pipeline's own side channels (it writes to the
- * scenarios table as part of its V3 boundary stage); the UI re-fetches via
- * the existing scenario/graph read paths. We drop V4's GraphPatchBlock,
- * applied_graph, strengthen_items, draft warnings, and telemetry —
- * dropping is deliberate, not accidental: these were V4 surface that the
- * new V5+UI contract does not yet need to thread through OlumiResponse.
- * When Paul widens @talchain/schemas to carry a full_draft block, this
- * adapter can be extended without call-site changes.
+ * persisted via CommitMetadata.graphToStore (commit.ts calls store_draft_graph
+ * before appending the turn row). The UI re-fetches via the existing
+ * scenario/graph read paths. We drop V4's GraphPatchBlock, applied_graph,
+ * strengthen_items, draft warnings, and telemetry — dropping is deliberate,
+ * not accidental: these were V4 surface that the new V5+UI contract does not
+ * yet need to thread through OlumiResponse. When Paul widens @talchain/schemas
+ * to carry a full_draft block, this adapter can be extended without call-site
+ * changes.
  *
  * commit_performed signal: always true on success (append_turn_atomic
  * fires with handler_id=null, handler_facts=[]). handler_facts is empty
  * because v0.7.0's HandlerFact union has no draft_graph variant — adding
  * one is a schema extension out of scope for this brief.
+ *
+ * stage_indicator advances to 'analyse' ONLY when graph persistence
+ * succeeded (CommitResult.graphPersisted === true) — this is the client's
+ * signal that a graph exists to fetch. On persistence failure the stage
+ * stays at 'frame' so the client does not attempt a fetch against an empty
+ * scenarios.graph column.
  */
 
 import type { FastifyRequest } from 'fastify';
@@ -39,7 +45,6 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
-import { getSessionStore, type SessionStore } from '../session/index.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -57,12 +62,8 @@ export interface DispatchDraftGraphResult {
  *
  * The mapping deliberately drops V4-specific fields that have no v0.7.0
  * equivalent (see file header). The UI obtains graph content via the
- * scenarios read path (scenarios.graph), written by storeDraftGraph.
- *
- * stage_indicator advances to 'analyse' ONLY when graph persistence
- * succeeded — this is the client's signal that a graph exists to fetch.
- * On persistence failure we stay on 'frame' so the client does not attempt
- * a fetch against an empty scenarios.graph column.
+ * scenarios read path (scenarios.graph), written by storeDraftGraph via
+ * CommitMetadata.graphToStore.
  */
 function draftResultToOlumiResponse(
   result: DraftGraphResult,
@@ -90,42 +91,6 @@ function draftResultToOlumiResponse(
   };
 }
 
-/**
- * Attempt to persist the draft graph to scenarios.graph.
- * Returns true on success, false on failure (after logging).
- * Never throws — persistence failure is non-fatal to the turn commit.
- */
-async function tryStoreDraftGraph(
-  store: SessionStore,
-  scenarioId: string,
-  graph: DraftGraphResult['graphOutput'],
-  requestId: string,
-): Promise<boolean> {
-  try {
-    await store.storeDraftGraph(scenarioId, graph);
-    log.info(
-      {
-        request_id: requestId,
-        scenario_id: scenarioId,
-        node_count: graph!.nodes.length,
-        edge_count: graph!.edges.length,
-      },
-      'V5 draft_graph: graph persisted to scenarios table',
-    );
-    return true;
-  } catch (err) {
-    log.error(
-      {
-        request_id: requestId,
-        scenario_id: scenarioId,
-        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-      },
-      'V5 draft_graph: graph persistence failed — stage kept at frame, client will not see graph on canvas',
-    );
-    return false;
-  }
-}
-
 export async function dispatchDraftGraph(
   params: DispatchDraftGraphParams,
 ): Promise<DispatchDraftGraphResult> {
@@ -150,38 +115,44 @@ export async function dispatchDraftGraph(
     throw err;
   }
 
-  // Resolve the store once — used for both graph persistence and turn commit.
-  const store = getSessionStore();
-
-  // Persist graph first — the stage_indicator in the response depends on
-  // whether this succeeds, so it must complete before building the response.
-  const graphPersisted = draftResult.graphOutput
-    ? await tryStoreDraftGraph(store, payload.scenario_id, draftResult.graphOutput, requestId)
-    : false;
-
-  const response = draftResultToOlumiResponse(draftResult, payload, graphPersisted);
-
   try {
     // llm_calls_used: the unified pipeline's draft stage makes at least one
     // LLM call (see src/cee/unified-pipeline/stages/parse.ts). V4's
     // DraftGraphResult exposes this via `toolLLMTelemetry` but not as a
     // simple integer count. Using 1 as an honest minimum rather than 0
     // (zero would misrepresent the turn as a no-LLM deterministic event).
-    await commitDirectAnswer(response, {
-      scenario_id: payload.scenario_id,
-      turn_id: payload.turn_id,
-      turn_class: 'direct_answer',
-      handler_id: null,
-      request_hash: computeRequestHash(payload),
-      llm_calls_used: 1,
-      duration_ms: Date.now() - startedAt,
-      handler_facts: [],
-    }, store);
+    //
+    // graphToStore: if the pipeline produced a graph, commit.ts will call
+    // store_draft_graph before appending the turn row. The returned
+    // graphPersisted boolean drives stage_indicator in the response.
+    const commitResult = await commitDirectAnswer(
+      // We build a provisional response with graphPersisted=false here; the
+      // real response is rebuilt below after we know the persistence outcome.
+      // This placeholder is never sent — the store-write result determines
+      // the actual stage_indicator.
+      { response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
+      {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 1,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        graphToStore: draftResult.graphOutput
+          ? { scenarioId: payload.scenario_id, graph: draftResult.graphOutput }
+          : undefined,
+      },
+    );
+
+    const response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted);
     log.info(
       {
         request_id: requestId,
         scenario_id: payload.scenario_id,
         latency_ms: draftResult.latencyMs,
+        graph_persisted: commitResult.graphPersisted,
       },
       'V5 draft_graph dispatch committed',
     );
@@ -195,6 +166,7 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch — commit failed',
     );
+    const response = draftResultToOlumiResponse(draftResult, payload, false);
     return { response, commitPerformed: false };
   }
 }

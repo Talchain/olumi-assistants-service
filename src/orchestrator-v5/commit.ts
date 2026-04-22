@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto';
 import type { OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
+import { log } from '../utils/telemetry.js';
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
 
@@ -37,12 +38,24 @@ export interface CommitMetadata {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /**
+   * When present, store_draft_graph is called before appending the turn row.
+   * Persistence failure is non-fatal — the turn is still committed and the
+   * caller receives graphPersisted=false so it can set stage_indicator
+   * appropriately.
+   */
+  readonly graphToStore?: { scenarioId: string; graph: unknown } | undefined;
 }
 
 export interface CommitResult {
   readonly response: OlumiResponse;
   readonly performed: true;
   readonly persisted_row_id: string;
+  /**
+   * True when graphToStore was provided and store_draft_graph succeeded.
+   * False when graphToStore was absent or persistence threw (non-fatal).
+   */
+  readonly graphPersisted: boolean;
 }
 
 /**
@@ -60,6 +73,30 @@ export async function commitDirectAnswer(
   }
 
   const store = sessionStore ?? getSessionStore();
+
+  // Persist graph before appending the turn row so the caller can read
+  // graphPersisted to decide stage_indicator before the response is sent.
+  let graphPersisted = false;
+  if (metadata.graphToStore) {
+    const { scenarioId, graph } = metadata.graphToStore;
+    try {
+      await store.storeDraftGraph(scenarioId, graph);
+      log.info(
+        { scenario_id: scenarioId, node_count: (graph as { nodes?: unknown[] }).nodes?.length ?? 0 },
+        'V5 commit: draft graph persisted to scenarios table',
+      );
+      graphPersisted = true;
+    } catch (err) {
+      log.error(
+        {
+          scenario_id: scenarioId,
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'V5 commit: draft graph persistence failed — stage_indicator will remain at frame',
+      );
+    }
+  }
+
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
@@ -72,7 +109,7 @@ export async function commitDirectAnswer(
     handler_facts: metadata.handler_facts,
   });
 
-  return { response, performed: true, persisted_row_id: persistedRowId };
+  return { response, performed: true, persisted_row_id: persistedRowId, graphPersisted };
 }
 
 /**
