@@ -79,10 +79,6 @@ export async function commitDirectAnswer(
   metadata: CommitMetadata,
   sessionStore?: SessionStore,
 ): Promise<CommitResult> {
-  if (!response) {
-    throw new Error('commitDirectAnswer called with falsy response — invariant violation');
-  }
-
   const store = sessionStore ?? getSessionStore();
 
   const { id: persistedRowId } = await store.append({

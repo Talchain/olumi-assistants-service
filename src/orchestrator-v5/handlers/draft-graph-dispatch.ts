@@ -182,21 +182,18 @@ export async function dispatchDraftGraph(
     );
     return { response, commitPerformed: true };
   } catch (err) {
-    const graphProduced = draftResult.graphOutput != null;
+    // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
+    // Client sees the generic retry prompt; the response built below is server-side only.
+    const graphProduced = draftResult.graphOutput !== null;
     log.error(
       {
         request_id: requestId,
         scenario_id: payload.scenario_id,
         graph_produced: graphProduced,
-        node_count: graphProduced ? ((draftResult.graphOutput as { nodes?: unknown[] }).nodes?.length ?? 0) : 0,
+        node_count: graphProduced ? (draftResult.graphOutput!.nodes?.length ?? 0) : 0,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-        // Intended UX: route returns HTTP 500 INTERNAL_ERROR (retryable: true).
-        // The client renders the generic retry prompt; the text below is server-side only.
-        intended_ux: graphProduced
-          ? 'Graph produced but not saved — user sees retryable INTERNAL_ERROR'
-          : 'No graph produced — user sees retryable INTERNAL_ERROR',
       },
-      'V5 draft_graph dispatch — commit failed',
+      'V5 draft_graph dispatch — commit failed; route returns 500 INTERNAL_ERROR',
     );
     const response = draftResultToOlumiResponse(draftResult, payload, false);
     return { response, commitPerformed: false };

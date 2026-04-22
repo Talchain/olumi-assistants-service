@@ -1,21 +1,19 @@
 /**
  * Unit tests for dispatchDraftGraph.
  *
- * Covers the three critical behaviours introduced by the graph-persistence
- * change:
+ * Covers the three critical behaviours of the atomic graph-persistence path:
  *
  *  1. Persist success   → stage_indicator='analyse', commitPerformed=true
- *                         (commitDirectAnswer returns graphPersisted=true)
- *  2. Persist failure   → stage_indicator='frame' (no advancement),
- *                         commitPerformed=true (turn commit is independent),
- *                         error is swallowed (non-fatal)
- *                         (commitDirectAnswer returns graphPersisted=false)
+ *                         (commitDirectAnswer resolves with graphPersisted=true)
+ *  2. Atomic commit failure → stage_indicator='frame' (no advancement),
+ *                         commitPerformed=false, dispatcher does not throw
+ *                         (commitDirectAnswer throws → dispatcher catch returns)
  *  3. No graphOutput    → stage_indicator stays at payload.stage,
- *                         commitDirectAnswer called with no graphToStore
+ *                         commitDirectAnswer called with graph=undefined
  *
- * Graph persistence is delegated to commitDirectAnswer via CommitMetadata.graphToStore.
- * Both LLM I/O (handleDraftGraph) and the commit stage (commitDirectAnswer) are
- * mocked at module level so no network calls are made.
+ * Graph persistence is atomic: CommitMetadata.graph is forwarded to
+ * append_turn_atomic as p_graph. Both LLM I/O (handleDraftGraph) and the
+ * commit stage (commitDirectAnswer) are mocked at module level.
  */
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
