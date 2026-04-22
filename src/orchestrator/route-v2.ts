@@ -47,18 +47,32 @@
  * Ordering within the handler is deliberate
  * ─────────────────────────────────────────────────────────────────
  *
- *   1. Extension parse (graph_state / analysis_state / user_id)
- *   2. B1 ingress (core payload)
- *   3. Upsert-on-append pre-flight — idempotently creates the scenarios
- *      row from caller-supplied user_id; rejects with 422 only on cross-
- *      tenant ownership mismatch. See ⚠ block on
- *      SessionStore.ensureScenarioExists for the PoC security posture.
- *   4. runTurnExecutor
- *   5. Commit-status check (Task B — BEFORE egress so the invariant
- *      is total; a TurnExecutor whose output AND commit both fail
- *      takes the 500 path, not the 200-fallback path)
- *   6. B1 egress validator
- *   7. 200 + OlumiResponse
+ *   1. Shared pre-flight via `runPreFlight` (see route-v2-preflight.ts):
+ *        a. Extension parse (graph_state / analysis_state / user_id)
+ *        b. B1 ingress (core payload)
+ *        c. Upsert-on-append scenario pre-flight — idempotently creates
+ *           the scenarios row from caller-supplied user_id; rejects with
+ *           422 only on cross-tenant ownership mismatch. See ⚠ block on
+ *           SessionStore.ensureScenarioExists for the PoC security posture.
+ *      Helper returns a discriminated outcome; on failure the route emits
+ *      422. Every dispatch branch below runs AFTER pre-flight has passed,
+ *      enforced structurally by the helper extraction plus the file-scoped
+ *      ESLint rule. See Docs/v5/route-v2-branch-audit.md.
+ *
+ *   2. Dispatch branch — one of:
+ *        a. system_event (deterministic, no LLM)
+ *        b. chip_click run_analysis (deterministic handler)
+ *        c. draft_graph (pre-Sonnet pipeline)
+ *        d. edit_graph (pre-Sonnet pipeline)
+ *        e. TurnExecutor fallthrough (Sonnet routing)
+ *
+ *   3. Branch-local commit-status check (each branch owns a subtly different
+ *      shape — see per-branch comments below) — BEFORE egress so the fail-
+ *      closed invariant is total; a run whose output AND commit both fail
+ *      takes the 500 path, not the 200-fallback path.
+ *
+ *   4. B1 egress validator → 200 + OlumiResponse (success OR schema-drift
+ *      fallback), else 500 + BoundaryError.
  *
  * Route registration is gated on config.features.orchestratorV5. When the
  * flag is off, this route is not registered and the endpoint returns 404.

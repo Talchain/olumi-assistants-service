@@ -49,6 +49,34 @@ Branch map:
 | `isEditGraphShape` | 470–537 | `graphState != null && stage in {analyse, decide} && edit-regex && !negative-regex` |
 | TurnExecutor fallthrough | 544–615 | default |
 
+### Per-branch audit matrix (pre-refactor)
+
+"Inherited" means the branch does not run the check directly — it runs once at module scope (lines 135–194) upstream of every branch. "Branch-local" means the branch runs it itself.
+
+| Branch | Extension parse | B1 ingress | Scenario pre-flight | Commit path | Egress validation | BoundaryError construction |
+|---|---|---|---|---|---|---|
+| `system_event` (211–249) | ✓ inherited (141) | ✓ inherited (157) | ✓ inherited (178) | Inside `dispatchSystemEvent`; `commitSkippedReason === 'client_only_event'` permits `commitPerformed:false` | ✓ branch-local (240) | Manual literal (217–230) |
+| `isChipClickRunAnalysis` (268–362) | ✓ inherited (141) | ✓ inherited (157) | ✓ inherited (178) | Inside `dispatchChipClickRunAnalysis`; 4-way discriminated `outcome` with per-case `validator`/`cause_kind`/`retryable` | ✓ branch-local (330) | Manual literal × 4 (281–294, 298–310, 313–326, 347–359) |
+| `isDraftGraphShape` (385–450) | ✓ inherited (141) | ✓ inherited (157) | ✓ inherited (178) | Inside `dispatchDraftGraph`; simple `commitPerformed` check + try/catch for pipeline throws | ✓ branch-local (413) | Manual literal × 2 (398–410, 435–447) |
+| `isEditGraphShape` (470–537) | ✓ inherited (141) | ✓ inherited (157) | ✓ inherited (178) | Inside `dispatchEditGraph`; same shape as draft_graph | ✓ branch-local (505) | Manual literal × 2 (490–502, 522–534) |
+| TurnExecutor fallthrough (544–615) | ✓ inherited (141) | ✓ inherited (157) | ✓ inherited (178) | Inside TurnExecutor; `telemetry.commit_performed` + `failure_type` + `extractRetryableFlag(response)` | ✓ branch-local (606) | Manual literal (572–594) |
+
+**Key invariant:** every branch inherits the three ingress-side checks; no branch runs them locally. That invariant is what the refactor locks structurally.
+
+**Deliberate non-uniformity:** the commit path and BoundaryError construction differ per branch, because the typed failure granularity on the wire differs per branch (different `validator` values, different `cause_kind` enum, different `retryable` policy). Unifying those would change the response shape — explicitly forbidden by the brief's §8 "What must NOT change".
+
+### Per-branch audit matrix (post-refactor)
+
+| Branch | Extension parse | B1 ingress | Scenario pre-flight | Commit path | Egress validation | BoundaryError construction |
+|---|---|---|---|---|---|---|
+| `system_event` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | unchanged | unchanged | unchanged |
+| `isChipClickRunAnalysis` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | unchanged | unchanged | unchanged |
+| `isDraftGraphShape` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | unchanged | unchanged | unchanged |
+| `isEditGraphShape` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | unchanged | unchanged | unchanged |
+| TurnExecutor fallthrough | ✓ via `runPreFlight` | ✓ via `runPreFlight` | ✓ via `runPreFlight` | unchanged | unchanged | unchanged |
+
+Every branch now reads the results from the destructured `PreFlightContext` (`ingress`, `extensions`, `requestId`) rather than from inline primitive returns. No branch calls the three primitives directly. The file-scoped ESLint rule enforces that no future branch can.
+
 Existing `tests/integration/orchestrator/route-v2-*.test.ts` covered each branch's dispatcher behaviour but mocked `ensureScenarioExists` with an inline arrow that always resolves — so the tests would have passed even if a branch had silently skipped the pre-flight. The shared-pre-flight invariant was therefore not actually guarded at test time.
 
 ## After state (post-refactor)
