@@ -79,10 +79,10 @@ export interface DispatchDraftGraphResult {
  * assistant_text contract:
  *   - graphPersisted=true: use handler narration, falling back to node/edge
  *     count confirmation — graph is on canvas.
- *   - graphPersisted=false AND a graph was produced: explicit save-failure
- *     message — the user must not see "Drafted a graph" when no graph appears.
- *   - graphPersisted=false AND no graphOutput: pipeline produced no graph;
- *     use handler narration or a neutral confirmation.
+ *   - graphPersisted=false (commit threw, caught by caller): the route maps
+ *     commitPerformed=false to HTTP 500 INTERNAL_ERROR with retryable=true.
+ *     The response text here is never sent to the client; use the pipeline's
+ *     own narration as a neutral fallback for server-side logging only.
  */
 function draftResultToOlumiResponse(
   result: DraftGraphResult,
@@ -96,12 +96,9 @@ function draftResultToOlumiResponse(
       ? `Drafted a decision graph with ${result.graphOutput.nodes?.length ?? 0} nodes and ${result.graphOutput.edges?.length ?? 0} edges.`
       : 'Drafted a decision graph.';
     assistantText = result.assistantText ?? successFallback;
-  } else if (result.graphOutput) {
-    // Persistence failed after the pipeline produced a graph. Saying "Drafted
-    // a graph" while nothing appears on canvas violates the quality contract.
-    assistantText = 'I generated a decision graph, but it could not be saved. Please try submitting your brief again.';
   } else {
-    // Pipeline produced no graph — narration stands.
+    // Failure path: route discards this response and returns 500 INTERNAL_ERROR.
+    // Use neutral narration; the client never sees this text.
     assistantText = result.assistantText ?? 'Drafted a decision graph.';
   }
 
@@ -185,11 +182,19 @@ export async function dispatchDraftGraph(
     );
     return { response, commitPerformed: true };
   } catch (err) {
+    const graphProduced = draftResult.graphOutput != null;
     log.error(
       {
         request_id: requestId,
         scenario_id: payload.scenario_id,
+        graph_produced: graphProduced,
+        node_count: graphProduced ? ((draftResult.graphOutput as { nodes?: unknown[] }).nodes?.length ?? 0) : 0,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        // Intended UX: route returns HTTP 500 INTERNAL_ERROR (retryable: true).
+        // The client renders the generic retry prompt; the text below is server-side only.
+        intended_ux: graphProduced
+          ? 'Graph produced but not saved — user sees retryable INTERNAL_ERROR'
+          : 'No graph produced — user sees retryable INTERNAL_ERROR',
       },
       'V5 draft_graph dispatch — commit failed',
     );

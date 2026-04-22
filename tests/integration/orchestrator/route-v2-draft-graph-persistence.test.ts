@@ -12,10 +12,11 @@
  *
  * Five scenarios:
  *  1. First-turn draft success: graph persisted atomically, stage='analyse', turn committed
- *  2. Atomic commit failure: commitDirectAnswer throws → stage='frame', commitPerformed=false, assistant_text mentions failure
+ *  2. Atomic commit failure: commitDirectAnswer throws → stage='frame', commitPerformed=false, route returns 500
  *  3. No graphOutput produced: metadata.graph=undefined, scenarios.graph unchanged, stage='frame'
  *  4. Second draft on same scenario: store called again with new graph (overwrite, not duplicate)
- *  5. run_analysis after draft: verifies no hidden metadata is lost; store readable after draft turn
+ *  5. Commit ordering: store.append fires before readRecent; simulates build-turn-context observing
+ *     the draft turn on a subsequent run_analysis. Does NOT exercise chip-click routing.
  */
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
@@ -228,16 +229,18 @@ describe('V5 draft_graph persistence integration', () => {
       expect(result.response.stage_indicator).toBe('frame');
     });
 
-    it('assistant_text explicitly acknowledges save failure (quality contract)', async () => {
-      // The user must not see "Drafted a decision graph" when nothing appears
-      // on canvas. The failure message sets correct expectation.
+    it('assistant_text uses pipeline narration — route discards response, client sees 500 INTERNAL_ERROR', async () => {
+      // commitPerformed=false causes route-v2.ts to return HTTP 500 BoundaryError
+      // (reason: 'draft_graph_commit_failed', retryable: true). The dispatcher's
+      // dg.response is never sent to the client on this path.
       const result = await dispatchDraftGraph({
         payload: makePayload(TURN_ID_1),
         requestId: 'req-scenario-2',
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toContain('could not be saved');
+      // Fallback narration from the pipeline — not a save-failure message.
+      expect(result.response.assistant_text).toContain('Drafted');
     });
 
     it('store.append was called exactly once (dispatcher attempted the commit)', async () => {
@@ -365,10 +368,16 @@ describe('V5 draft_graph persistence integration', () => {
     });
   });
 
-  // ── Scenario 5: run_analysis after draft ───────────────────────────────────
+  // ── Scenario 5: commit ordering and store readability ─────────────────────
+  // NOTE: this scenario does NOT exercise chip-click run_analysis routing.
+  // It verifies the store-layer contract: after dispatchDraftGraph calls
+  // store.append, a subsequent readRecent (as called by build-turn-context
+  // on a run_analysis turn) can observe the committed draft turn. A true
+  // two-turn route-level test (brief POST → chip-click POST) belongs in a
+  // separate end-to-end suite with full route injection.
 
-  describe('Scenario 5 — store is readable after draft turn (run_analysis can proceed)', () => {
-    it('readRecent returns the committed draft turn after a successful draft', async () => {
+  describe('Scenario 5 — commit ordering: store.append fires before readRecent is possible', () => {
+    it('store.readRecent can observe the committed draft turn (simulates build-turn-context lookup)', async () => {
       // The draft turn commits a row; subsequent readRecent should return it.
       // We simulate the store returning the written row on the next read.
       const committedTurn = {

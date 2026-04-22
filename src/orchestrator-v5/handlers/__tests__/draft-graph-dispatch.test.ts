@@ -167,7 +167,10 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.stage_indicator).toBe('frame');
     });
 
-    it('sets assistant_text to the save-failure message (quality contract)', async () => {
+    it('assistant_text uses pipeline narration (route discards it — client sees 500 INTERNAL_ERROR)', async () => {
+      // Route maps commitPerformed=false → HTTP 500 BoundaryError; dg.response
+      // is never sent. The dispatcher still builds a valid OlumiResponse for
+      // the success path — on failure, it falls back to the pipeline narration.
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -177,7 +180,8 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toContain('could not be saved');
+      // Narration from makeDraftResult — not a save-failure message.
+      expect(result.response.assistant_text).toBe('Drafted a decision graph with 1 nodes and 1 edges.');
     });
 
     it('does not throw — commit failure is caught, commitPerformed=false returned', async () => {
