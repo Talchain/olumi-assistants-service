@@ -141,8 +141,8 @@ Pure type alias `(typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES)[keyof ...]`. Declared
 
 ### 2.4 Pre-existing `as unknown` casts in V5 production — **M / track / low**
 
-5 pre-existing `as unknown as` sites in `src/orchestrator-v5/**` (none introduced by Phase 1.5):
-- [dispatch.ts:175](../../src/orchestrator-v5/dispatch.ts#L175) — narrow cast for error constructor literal
+4 pre-existing `as unknown as` sites in `src/orchestrator-v5/**` (none introduced by Phase 1.5):
+- ~~[dispatch.ts:175](../../src/orchestrator-v5/dispatch.ts#L175) — narrow cast for error constructor literal~~ **— retired in the A2 stack deletion on 2026-04-22 (UU-17); `dispatch.ts` no longer exists.**
 - [routing/route-with-tool-use.ts:376](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L376) — adapter narrowing after validation
 - [session/supabase-store.ts:137](../../src/orchestrator-v5/session/supabase-store.ts#L137) — narrow cast for DB rows
 - [session/store.ts:57, 76](../../src/orchestrator-v5/session/store.ts#L57-L76) — error.cause property assignment (standard Node pattern)
@@ -167,9 +167,9 @@ Full grep over `src/orchestrator-v5/**` (excluding tests) returns zero hits for 
 | `routing/types.ts` | 172 | No | **Indirect — Zod schemas consumed by validator, router, routing-log tests. Each schema exercised end-to-end.** OK. |
 | `types.ts` | 171 | No | Shared types + `A2_TURN_CLASSES` const + `isA2TurnClass` guard. `isA2TurnClass` used by turn-executor tests via enum membership. OK. |
 | `tools/handler-errors.ts` | 84 | No | Error classes exercised via `turn-executor.test.ts` handler-error paths (HandlerInvocationFailedError, HandlerResultInvalidError). OK. |
-| `llm-adapter.ts` | 109 | No | A1 narrate-mode wrapper with `NarrateTimeoutError`, `NarrateEmptyOutputError`. Exercised via `turn-executor.test.ts` routing-error paths. **Minor gap: no unit test for the wrapper itself.** Complexity to add: S. |
+| ~~`llm-adapter.ts`~~ | — | — | **RETIRED** in the A2 stack deletion on 2026-04-22 (UU-17). File deleted; the A1 narrate-mode wrapper is no longer a live code path (replaced by the Slice C1 `runTurnExecutor` spine). |
 
-**Recommendation.** Add a direct test for `llm-adapter.ts` (S) in the next sprint. All other "no direct test" files are adequately covered indirectly.
+**Recommendation.** All remaining "no direct test" files are adequately covered indirectly. The previous recommendation to add a direct test for `llm-adapter.ts` is superseded by its retirement.
 
 **Phase 1.5 specifically adds:** 5 unit test files, 4 integration test files, 49 new V5 unit tests. Zero deletions. Zero skip-count increase.
 
@@ -303,7 +303,7 @@ No gaps identified.
 | P3 | §1.4 — adapter-to-native validator cleanup | Bundle with next validator-logic change |
 | P4 | §1.6 — provenance-based staleness | Cross-team contract change |
 | P4 | §6.1 — `CoachingMode` name collision | Opportunistic rename |
-| P4 | §3 — direct unit test for `llm-adapter.ts` | Low-value-add; track |
+| ~~P4~~ | ~~§3 — direct unit test for `llm-adapter.ts`~~ | ~~Low-value-add; track~~ **Closed:** `llm-adapter.ts` retired in the A2 stack deletion on 2026-04-22 (UU-17). |
 
 ---
 
