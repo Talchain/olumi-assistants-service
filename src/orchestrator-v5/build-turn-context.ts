@@ -238,3 +238,32 @@ export async function preflightEnsureScenario(
 
   return { ok: true };
 }
+
+/**
+ * Load the persisted graph for a scenario from the session store.
+ *
+ * Called by TurnExecutor when no graphState was supplied in the request
+ * body (follow-up turns in guest mode). Returns null when the scenario
+ * has no persisted graph or when the load fails — callers treat null as
+ * "no graph available" and continue with no_graph context.
+ *
+ * Centralised here (rather than in turn-executor.ts) so the session
+ * store access surface stays bounded to the three declared integration
+ * points: session/, commit.ts, build-turn-context.ts.
+ */
+export async function loadPersistedGraph(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<unknown | null> {
+  try {
+    const store = sessionStore ?? getSessionStore();
+    return await store.loadGraph(scenarioId);
+  } catch (e) {
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, err: e instanceof Error ? e.message : String(e) },
+      'V5 build-turn-context: loadPersistedGraph failed, returning null',
+    );
+    return null;
+  }
+}

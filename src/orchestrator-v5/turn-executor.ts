@@ -50,7 +50,7 @@ import {
   composeToolCallResponse,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext } from './build-turn-context.js';
+import { buildTurnContext, loadPersistedGraph } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
 import { composeValidationFailure } from './compose/validation-failure-responses.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
@@ -67,7 +67,7 @@ import {
 } from './tools/registry.js';
 import { sanitiseNarrateOutput } from './sanitise.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
-import { getSessionStore } from './session/index.js';
+
 
 import { readCoachingCache } from './coaching/coaching-cache-reader.js';
 import { enrichRunAnalysisWithDecisionReview } from './coaching/decision-review-enricher.js';
@@ -261,38 +261,26 @@ export async function runTurnExecutor(
         dropped_by_missing_id: 0,
       });
     } else {
-      // Fallback: when graphState is absent (follow-up turns), try to load
-      // the persisted graph from the database. This is critical for guest-mode
-      // scenarios where the UI may not send graph_state on every turn.
+      // Fallback: when graphState is absent (follow-up turns), load the
+      // persisted graph via build-turn-context (the declared session access
+      // boundary). Errors are absorbed there; null means no graph available.
       let graphStateForLookup = options.graphState ?? null;
       if (!graphStateForLookup) {
-        try {
-          const sessionStore = getSessionStore();
-          const persistedGraph = await sessionStore.loadGraph(payload.scenario_id);
-          if (persistedGraph) {
-            // The persisted graph is stored as raw JSONB. We need to validate
-            // it against the ingress schema before passing to buildGraphLookup.
-            // If it fails validation, we fall back to null (no_graph).
-            const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
-            if (parsed.success) {
-              graphStateForLookup = parsed.data;
-              log.info(
-                { request_id: requestId, scenario_id: payload.scenario_id },
-                'V5 TurnExecutor loaded persisted graph from database for graph lookup fallback',
-              );
-            } else {
-              log.warn(
-                { request_id: requestId, scenario_id: payload.scenario_id, issues: parsed.error.issues },
-                'V5 TurnExecutor persisted graph failed ingress schema validation, falling back to no_graph',
-              );
-            }
+        const persistedGraph = await loadPersistedGraph(payload.scenario_id, requestId);
+        if (persistedGraph) {
+          const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
+          if (parsed.success) {
+            graphStateForLookup = parsed.data;
+            log.info(
+              { request_id: requestId, scenario_id: payload.scenario_id },
+              'V5 TurnExecutor loaded persisted graph from database for graph lookup fallback',
+            );
+          } else {
+            log.warn(
+              { request_id: requestId, scenario_id: payload.scenario_id, issues: parsed.error.issues },
+              'V5 TurnExecutor persisted graph failed ingress schema validation, falling back to no_graph',
+            );
           }
-        } catch (error) {
-          // Load errors are not fatal — we fall back to no_graph and continue
-          log.warn(
-            { request_id: requestId, scenario_id: payload.scenario_id, error },
-            'V5 TurnExecutor loadGraph failed, falling back to no_graph',
-          );
         }
       }
 
