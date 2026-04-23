@@ -4,7 +4,7 @@
 
 **Update rule:** any PR that adds, removes, moves, or changes the task ID of a V5 LLM call site MUST update this table. CI has no automated check for the list; maintenance is by convention.
 
-**Last reviewed:** 2026-04-22 (v5-audit-followup — UU-16 closed, UU-17 A2 dispatch stack retired).
+**Last reviewed:** 2026-04-23 (v5-audit-followup-p1-review — UU-16/UU-17 anchors debrittled; row numbers preserved).
 
 **v5-handler-surface additions (2026-04-21):** three new dispatchers were added in `src/orchestrator-v5/handlers/` and `src/orchestrator-v5/system-events/`. None introduce a NEW V5-OWNED LLM call site:
 
@@ -21,7 +21,7 @@
 | 2 | ORIENT (repair) | [src/orchestrator-v5/routing/route-with-tool-use.ts:211](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L211) | `adapter.chatWithTools` | `orchestrator` | ROUTED | Phase 1+ | Same adapter instance as #1 (REPAIR_ONCE). One resolution log entry per turn regardless of repair. |
 | ~~3~~ | ~~narrate~~ | _(retired)_ | — | — | RETIRED | Not invoked in any phase | **RETIRED** in the A2 stack deletion on 2026-04-22 (UU-17). The dormant A2 dispatch stack (`dispatch.ts`, `classify.ts`, `clarify.ts`, `llm-adapter.ts`) was deleted after the Slice C1 `runTurnExecutor` spine replaced it. No V5 code reaches this path; the row is preserved (not renumbered) so external references to row numbers remain stable. |
 | ~~4~~ | ~~classify~~ | _(retired)_ | — | — | RETIRED | Not invoked in any phase | **RETIRED** in the A2 stack deletion on 2026-04-22 (UU-17). See row #3. |
-| 5 | decision_review (post-run_analysis) | [src/cee/decision-review/invoke.ts:167](../../src/cee/decision-review/invoke.ts#L167) | `adapter.chat` | `decision_review` | ROUTED | Fires from V5 via `enrichRunAnalysisWithDecisionReview` | Migrated to `getAdapterWithResolution('decision_review')` in `claude/v5-audit-followup` commit `dd0b3b80` (UU-16). `DecisionReviewInvokeResult` now carries `resolution` and the V5 enricher forwards it to `recordModelResolution(requestId, scenarioId, resolution)` post-call, so the `model_resolutions` dashboard covers decision_review alongside ORIENT. Regression guarded by `src/cee/decision-review/__tests__/invoke.test.ts` (direct invoke coverage) and `src/orchestrator-v5/coaching/__tests__/decision-review-enricher.test.ts` (end-to-end recordModelResolution assertions). |
+| 5 | decision_review (post-run_analysis) | [src/cee/decision-review/invoke.ts:167](../../src/cee/decision-review/invoke.ts#L167) | `adapter.chat` | `decision_review` | ROUTED | Fires from V5 via `enrichRunAnalysisWithDecisionReview` | Migrated to `getAdapterWithResolution('decision_review')` in the decision_review observability migration on 2026-04-22 (UU-16). `DecisionReviewInvokeResult` now carries `resolution` and the V5 enricher forwards it to `recordModelResolution(requestId, scenarioId, resolution)` post-call, so the `model_resolutions` dashboard covers decision_review alongside ORIENT. Regression guarded by `src/cee/decision-review/__tests__/invoke.test.ts` (direct invoke coverage) and `src/orchestrator-v5/coaching/__tests__/decision-review-enricher.test.ts` (end-to-end recordModelResolution assertions). |
 
 ## Classification definitions
 

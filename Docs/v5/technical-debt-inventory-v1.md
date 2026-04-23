@@ -139,16 +139,25 @@ Pure type alias `(typeof RUN_ANALYSIS_ASSISTANT_TEMPLATES)[keyof ...]`. Declared
 
 ---
 
-### 2.4 Pre-existing `as unknown` casts in V5 production — **M / track / low**
+### 2.4 Pre-existing `as unknown as` double-casts in V5 production — **M / track / low**
 
-4 pre-existing `as unknown as` sites in `src/orchestrator-v5/**` (none introduced by Phase 1.5):
-- ~~[dispatch.ts:175](../../src/orchestrator-v5/dispatch.ts#L175) — narrow cast for error constructor literal~~ **— retired in the A2 stack deletion on 2026-04-22 (UU-17); `dispatch.ts` no longer exists.**
-- [routing/route-with-tool-use.ts:376](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L376) — adapter narrowing after validation
-- [session/supabase-store.ts:137](../../src/orchestrator-v5/session/supabase-store.ts#L137) — narrow cast for DB rows
-- [session/store.ts:57, 76](../../src/orchestrator-v5/session/store.ts#L57-L76) — error.cause property assignment (standard Node pattern)
-- [tools/handlers/run-analysis.ts:279](../../src/orchestrator-v5/tools/handlers/run-analysis.ts#L279) — comment only (not a live cast)
+**Recomputed 2026-04-23** from `grep -rn "as unknown as" src/orchestrator-v5/ --include="*.ts" | grep -v __tests__ | grep -v \.test\.ts`. Live `as unknown as` double-cast count in non-test production code: **3 sites** (the previous 4-entry list was stale against the current tree — line numbers had drifted and two of the listed files contained no matching cast).
 
-Each is narrow and documented. Refactor would be M-complexity per site and risks changing runtime semantics. **Phase:** track; revisit during adapter-to-native cleanup (§1.4).
+Live sites:
+- [routing/route-with-tool-use.ts:416](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L416) — adapter narrowing after validation (`adapter as unknown as MinimalToolUseAdapter`).
+- [session/store.ts:103](../../src/orchestrator-v5/session/store.ts#L103) — `StateCommitFailedError` constructor cause-property assignment (standard Node pattern for typed `.cause` on custom Error subclasses).
+- [session/store.ts:122](../../src/orchestrator-v5/session/store.ts#L122) — `SessionReadError` constructor cause-property assignment (same pattern).
+
+Corrected / retired entries (previous list was stale against the tree):
+- ~~`dispatch.ts:175`~~ — retired in the A2 stack deletion on 2026-04-22 (UU-17); file no longer exists.
+- ~~`routing/route-with-tool-use.ts:376`~~ — line number drifted; the cast is now at line 416 (same intent — adapter narrowing after validation). Listed above.
+- ~~`session/supabase-store.ts:137`~~ — no `as unknown as` double-cast exists at this location (or anywhere) in the current `supabase-store.ts`. The file contains a single-step `(data ?? []) as unknown[]` at line 141 (DB-row narrowing), which is a different pattern and is intentionally not tracked in this double-cast inventory.
+- ~~`session/store.ts:57, 76`~~ — line numbers drifted; the two cause-property casts are now at lines 103 and 122 (listed above).
+- ~~`tools/handlers/run-analysis.ts:279`~~ — verified absent; no `as unknown` appears in this file at any line. The previous "comment only (not a live cast)" annotation masked a drifted reference.
+
+Each remaining live site is narrow and documented. Refactor would be M-complexity per site and risks changing runtime semantics. **Phase:** track; revisit during adapter-to-native cleanup (§1.4).
+
+*Next re-verification: bundle with the next refactor that touches `routing/route-with-tool-use.ts` or `session/store.ts`. A CI docs-link guard (scoped as future work) would catch this drift automatically.*
 
 ---
 
