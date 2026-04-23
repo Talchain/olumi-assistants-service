@@ -141,14 +141,23 @@ export type InternalFailure =
 // text ("The model is temporarily unavailable. Please retry shortly.") is the
 // correct user action for a transient LLM structured-output malfunction.
 //
-// LLM_REQUEST_INVALID maps to LLM_UNAVAILABLE: 400-level errors from the
-// Anthropic API indicate our request was malformed (e.g., invalid tool schema).
-// This is not retryable without fixing the request, but we use the same wire
-// code as 500-level for user messaging simplicity.
+// LLM_REQUEST_INVALID maps to INTERNAL_ERROR: 400-level errors from the
+// Anthropic API indicate OUR request was malformed (e.g., invalid tool
+// schema). The problem is on our side, not the model's, so presenting the
+// user with "The model is temporarily unavailable" (LLM_UNAVAILABLE) is
+// both inaccurate and invites a pointless retry loop. INTERNAL_ERROR
+// ("Something went wrong on our side. Please retry.") communicates
+// non-retryable "we messed up" semantics instead. `translateRoutingError`
+// also stamps `retryable: false` in the failure context so downstream
+// clients can distinguish.
 //
-// LLM_RATE_LIMITED maps to LLM_UNAVAILABLE: 429 errors are retryable after
-// the retry-after period. We use the same wire code but include retry_after_seconds
-// in the failure context.
+// LLM_RATE_LIMITED maps to LLM_UNAVAILABLE as an INTENTIONAL TEMPORARY
+// COMPROMISE: there is no dedicated rate-limit wire code in the shared
+// `@talchain/schemas` BoundaryErrorCode enum yet. LLM_UNAVAILABLE's copy
+// ("temporarily unavailable, please retry shortly") is acceptable for 429,
+// and `retry_after_seconds` is already carried in the failure context.
+// Follow-up (out of scope for this fix): add a dedicated
+// UPSTREAM_RATE_LIMITED wire code via a schemas package bump.
 //
 // HANDLER_INVOCATION_FAILED + HANDLER_RESULT_INVALID: reserved for C2+ when
 // real handlers register. C1 ships with an empty registry, so these codes
@@ -157,7 +166,7 @@ export type InternalFailure =
 export const INTERNAL_TO_WIRE: Record<InternalFailure, FailureTypeLiteral> = {
   LLM_TIMEOUT: 'UPSTREAM_TIMEOUT',
   LLM_SCHEMA_VIOLATION: 'LLM_UNAVAILABLE',
-  LLM_REQUEST_INVALID: 'LLM_UNAVAILABLE',
+  LLM_REQUEST_INVALID: 'INTERNAL_ERROR',
   LLM_RATE_LIMITED: 'LLM_UNAVAILABLE',
   BUDGET_EXCEEDED: 'TURN_BUDGET_EXCEEDED',
   STATE_COMMIT_FAILED: 'INTERNAL_ERROR',

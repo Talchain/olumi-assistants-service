@@ -33,7 +33,7 @@ import type {
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
-import { UpstreamTimeoutError } from '../../adapters/llm/errors.js';
+import { UpstreamHTTPError, UpstreamTimeoutError } from '../../adapters/llm/errors.js';
 import type { RunTurnExecutorOptions } from '../turn-executor.js';
 
 // ---------------------------------------------------------------------------
@@ -558,6 +558,107 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       expect(parsed.blocks[0]!.type).toBe('error');
       if (parsed.blocks[0]!.type === 'error') {
         expect(parsed.blocks[0]!.error_code).toBe('LLM_UNAVAILABLE');
+      }
+      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+      expectBI01();
+    });
+
+    // -----------------------------------------------------------------
+    // HTTP-status-aware classification for upstream api_error (brief
+    // requirement for the 23 April 2026 follow-up failure path):
+    //   400-class (non-429) → LLM_REQUEST_INVALID → wire INTERNAL_ERROR,
+    //                        retryable: false
+    //   429                → LLM_RATE_LIMITED   → wire LLM_UNAVAILABLE,
+    //                        retryable: true, retry_after_seconds: 60
+    //   5xx                → LLM_SCHEMA_VIOLATION → wire LLM_UNAVAILABLE,
+    //                        retryable: true
+    // These tests assert BOTH the internal failure_type AND the final wire
+    // envelope the UI receives.
+    // -----------------------------------------------------------------
+    it('400 invalid_request_error → INTERNAL_ERROR envelope, non-retryable', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => {
+        throw new UpstreamHTTPError(
+          'tools.0.custom: Empty schema ({}) that accepts any JSON value is not supported',
+          'anthropic',
+          400,
+          'invalid_request_error',
+          'req-400-id',
+          30,
+        );
+      });
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-400', {
+        routingAdapter,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.blocks[0]!.type).toBe('error');
+      if (parsed.blocks[0]!.type === 'error') {
+        // Wire envelope: 400-class upstream errors are OUR fault; surface as
+        // INTERNAL_ERROR rather than LLM_UNAVAILABLE ("temporarily
+        // unavailable") which misleads the user into retrying.
+        expect(parsed.blocks[0]!.error_code).toBe('INTERNAL_ERROR');
+        const details = parsed.blocks[0]!.details as Record<string, unknown>;
+        expect(details.retryable).toBe(false);
+        expect(details.http_status).toBe(400);
+        expect(details.routing_error_cause).toBe('api_error');
+      }
+      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+      expectBI01();
+    });
+
+    it('429 rate_limited → LLM_UNAVAILABLE envelope, retryable with retry_after_seconds', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => {
+        throw new UpstreamHTTPError(
+          'rate_limit_error',
+          'anthropic',
+          429,
+          'rate_limit_error',
+          'req-429-id',
+          15,
+        );
+      });
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-429', {
+        routingAdapter,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.blocks[0]!.type).toBe('error');
+      if (parsed.blocks[0]!.type === 'error') {
+        expect(parsed.blocks[0]!.error_code).toBe('LLM_UNAVAILABLE');
+        const details = parsed.blocks[0]!.details as Record<string, unknown>;
+        expect(details.retryable).toBe(true);
+        expect(details.retry_after_seconds).toBe(60);
+        expect(details.http_status).toBe(429);
+      }
+      expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+      expectBI01();
+    });
+
+    it('503 upstream unavailable → LLM_UNAVAILABLE envelope, retryable', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => {
+        throw new UpstreamHTTPError(
+          'service unavailable',
+          'anthropic',
+          503,
+          'overloaded_error',
+          'req-503-id',
+          42,
+        );
+      });
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-503', {
+        routingAdapter,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.blocks[0]!.type).toBe('error');
+      if (parsed.blocks[0]!.type === 'error') {
+        expect(parsed.blocks[0]!.error_code).toBe('LLM_UNAVAILABLE');
+        const details = parsed.blocks[0]!.details as Record<string, unknown>;
+        expect(details.retryable).toBe(true);
+        expect(details.http_status).toBe(503);
       }
       expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
       expectBI01();

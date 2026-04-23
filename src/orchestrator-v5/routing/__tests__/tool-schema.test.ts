@@ -93,6 +93,8 @@ describe('OLUMI_ACTION_TOOL definition', () => {
     }
   });
 
+  // Simple empty-object guard: walks the whole input_schema and fails on
+  // any `{}` node. Catches accidental regressions at source-object level.
   it('contains no empty object schema nodes that Anthropic rejects', () => {
     const emptyObjectPaths: string[] = [];
 
@@ -111,6 +113,95 @@ describe('OLUMI_ACTION_TOOL definition', () => {
     walk(OLUMI_ACTION_TOOL.input_schema, 'input_schema');
 
     expect(emptyObjectPaths).toEqual([]);
+  });
+
+  // Regression guard for the 23 April 2026 staging incident: Anthropic's
+  // strict custom-tool validator rejects any subschema that serialises to
+  // `{}` with:
+  //   tools.0.custom: Empty schema ({}) that accepts any JSON value is not
+  //   supported.
+  // A previous P1 fix added additionalProperties:false everywhere but left
+  // `value: {}` inside parameters.items.properties unchanged. This test
+  // walks the FINAL emitted JSON (after JSON.parse/JSON.stringify — the
+  // exact transform the Anthropic SDK forwards) and fails if any subschema
+  // position is `{}` or has only `description` with no type-ish keyword.
+  // Stronger than the simple walker above: it understands schema positions
+  // (oneOf/anyOf/allOf/items/properties children) and catches
+  // description-only subschemas that Anthropic also treats as empty.
+  it('emits no empty {} subschemas anywhere in the final tool JSON (Anthropic strict-tool guard)', () => {
+    // Mirror what buildStrictAnthropicTools produces on the wire.
+    const emitted = JSON.parse(
+      JSON.stringify({
+        name: OLUMI_ACTION_TOOL.name,
+        description: OLUMI_ACTION_TOOL.description,
+        strict: true,
+        input_schema: { ...OLUMI_ACTION_TOOL.input_schema, additionalProperties: false },
+      }),
+    ) as { input_schema: Record<string, unknown> };
+
+    const TYPE_KEYWORDS = new Set([
+      'type',
+      'enum',
+      'const',
+      'oneOf',
+      'anyOf',
+      'allOf',
+      '$ref',
+      'not',
+    ]);
+
+    const violations: string[] = [];
+
+    function isObject(v: unknown): v is Record<string, unknown> {
+      return !!v && typeof v === 'object' && !Array.isArray(v);
+    }
+
+    function checkSchemaPosition(node: unknown, path: string): void {
+      if (!isObject(node)) return;
+      const keys = Object.keys(node);
+      if (keys.length === 0) {
+        violations.push(`${path}: empty schema {}`);
+        return;
+      }
+      // Guard against description-only subschemas which Anthropic treats as
+      // equivalent to `{}`.
+      const nonDescriptionKeys = keys.filter((k) => k !== 'description');
+      if (
+        nonDescriptionKeys.length > 0 &&
+        !nonDescriptionKeys.some((k) => TYPE_KEYWORDS.has(k)) &&
+        // properties-only / items-only containers are fine — they carry
+        // structural info even without an explicit "type" keyword. Detect
+        // those so we don't false-positive.
+        !nonDescriptionKeys.some((k) => k === 'properties' || k === 'items' || k === 'required' || k === 'additionalProperties')
+      ) {
+        violations.push(
+          `${path}: subschema has no type-ish keyword (keys=${JSON.stringify(keys)})`,
+        );
+      }
+      if (isObject(node.properties)) {
+        for (const [k, v] of Object.entries(node.properties)) {
+          checkSchemaPosition(v, `${path}.properties.${k}`);
+        }
+      }
+      if (node.items !== undefined) checkSchemaPosition(node.items, `${path}.items`);
+      if (Array.isArray(node.oneOf)) {
+        node.oneOf.forEach((s, i) => checkSchemaPosition(s, `${path}.oneOf[${i}]`));
+      }
+      if (Array.isArray(node.anyOf)) {
+        node.anyOf.forEach((s, i) => checkSchemaPosition(s, `${path}.anyOf[${i}]`));
+      }
+      if (Array.isArray(node.allOf)) {
+        node.allOf.forEach((s, i) => checkSchemaPosition(s, `${path}.allOf[${i}]`));
+      }
+    }
+
+    checkSchemaPosition(emitted.input_schema, 'input_schema');
+
+    if (violations.length > 0) {
+      throw new Error(
+        `Final emitted Anthropic tool JSON contains empty/type-less subschemas:\n${violations.join('\n')}`,
+      );
+    }
   });
 });
 

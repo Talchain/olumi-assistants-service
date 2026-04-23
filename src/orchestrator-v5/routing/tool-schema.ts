@@ -97,6 +97,19 @@ export const OLUMI_ACTION_TOOL = {
               additionalProperties: false,
               properties: {
                 name: { type: 'string' },
+                // `value` is open-typed in Zod (`z.unknown()`) because handler-
+                // specific validation happens downstream in the validator.
+                // Anthropic's strict custom-tool validator, however, rejects
+                // an empty `{}` schema with `tools.0.custom: Empty schema
+                // ({}) that accepts any JSON value is not supported`. The
+                // `anyOf` below is the narrowest concrete non-empty schema
+                // that covers today's registered handlers: primitives (for
+                // simple set/increase parameters) or a structured wrapper
+                // `{ value, raw_value?, unit?, cap? }` for handlers that
+                // need to carry unit/cap alongside the numeric value.
+                // Future handlers that emit arrays or other shapes must
+                // extend this union explicitly so the contract is visible
+                // to Sonnet.
                 value: {
                   anyOf: [
                     { type: 'number' },
