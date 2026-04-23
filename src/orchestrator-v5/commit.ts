@@ -79,6 +79,21 @@ export async function commitDirectAnswer(
   metadata: CommitMetadata,
   sessionStore?: SessionStore,
 ): Promise<CommitResult> {
+  // Invariant guard: the TurnExecutor seven-step assembly must produce a
+  // composed OlumiResponse before reaching COMMIT. A falsy response here
+  // means an upstream step returned null/undefined instead of throwing —
+  // committing that would persist a turn row whose wire response never
+  // materialised, silently violating BI-01 (exactly-one-response). Fail
+  // loud so TurnExecutor's catch ladder maps the failure to the typed
+  // INTERNAL_ERROR path instead of emitting an undefined body.
+  //
+  // Guarded explicitly in `commit.test.ts > throws on falsy response` so a
+  // future refactor that deletes the guard trips the test before a silent
+  // wire-contract breach can land.
+  if (!response) {
+    throw new Error('commit invariant violated: response must be a composed OlumiResponse');
+  }
+
   const store = sessionStore ?? getSessionStore();
 
   const { id: persistedRowId } = await store.append({
