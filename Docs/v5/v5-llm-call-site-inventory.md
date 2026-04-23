@@ -4,13 +4,13 @@
 
 **Update rule:** any PR that adds, removes, moves, or changes the task ID of a V5 LLM call site MUST update this table. CI has no automated check for the list; maintenance is by convention.
 
-**Last reviewed:** 2026-04-21 (v5-maintenance brief — verified accurate post v5-handler-surface).
+**Last reviewed:** 2026-04-22 (v5-audit-followup — UU-16 closed, UU-17 A2 dispatch stack retired).
 
 **v5-handler-surface additions (2026-04-21):** three new dispatchers were added in `src/orchestrator-v5/handlers/` and `src/orchestrator-v5/system-events/`. None introduce a NEW V5-OWNED LLM call site:
 
 - `dispatchSystemEvent` — no LLM calls (deterministic Layer 0).
 - `dispatchDraftGraph` — calls into `handleDraftGraph` (V4 tool handler), which in turn invokes the unified pipeline's `draftAdapter.draftGraph(...)`. The unified pipeline's LLM usage is outside V5's direct call-site inventory scope; it's cataloged separately in the V4 tool-handler surface.
-- `dispatchEditGraph` — calls `handleEditGraph(adapter=getAdapter('edit_graph'), ...)`. This is a ROUTED call but via the legacy `getAdapter` seam (same pattern as site #5 in the table). Classification: **ROUTED-NO-OBSERVABILITY**. Follow-up to migrate to `getAdapterWithResolution` tracked with site #5.
+- `dispatchEditGraph` — calls `handleEditGraph(adapter=getAdapter('edit_graph'), ...)`. This is a ROUTED call but via the legacy `getAdapter` seam. Classification: **ROUTED-NO-OBSERVABILITY**. Note: the sibling `decision_review` site (row #5) has been migrated to `getAdapterWithResolution` (UU-16 closed); `edit_graph` remains on the legacy seam pending a parallel migration.
 - `dispatchChipClickRunAnalysis` — invokes the registered `run_analysis` handler. Its enrichment step fires `enrichRunAnalysisWithDecisionReview` (same as site #5); no new call site.
 
 ## Inventory
@@ -19,9 +19,9 @@
 |---|------|-----------|------|---------|----------------|---------------|-------|
 | 1 | ORIENT (first) | [src/orchestrator-v5/routing/route-with-tool-use.ts:180](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L180) | `adapter.chatWithTools` | `orchestrator` | ROUTED | Phase 1+ | Tool-use routing. Resolves via `getAdapterWithResolution('orchestrator')`. Group 3 Task C fix — was `direct_answer_narrate` (not a `CeeTask`). |
 | 2 | ORIENT (repair) | [src/orchestrator-v5/routing/route-with-tool-use.ts:211](../../src/orchestrator-v5/routing/route-with-tool-use.ts#L211) | `adapter.chatWithTools` | `orchestrator` | ROUTED | Phase 1+ | Same adapter instance as #1 (REPAIR_ONCE). One resolution log entry per turn regardless of repair. |
-| 3 | narrate | [src/orchestrator-v5/llm-adapter.ts:65](../../src/orchestrator-v5/llm-adapter.ts#L65) | `adapter.chat` | `explainer` | ROUTED | Not invoked in Phase 1 | Plumbed-but-unreachable. `routeWithToolUse` replaces it. If wired back in Phase 2, Paul should confirm `explainer` is the intended tier. |
-| 4 | classify | [src/orchestrator-v5/classify.ts:128](../../src/orchestrator-v5/classify.ts#L128) | `adapter.chat` | `clarification` | ROUTED | Not invoked in Phase 1 | Plumbed-but-unreachable. `routeWithToolUse` replaces the classifier pattern. If wired back, Paul should confirm `clarification` is the intended tier. |
-| 5 | decision_review (post-run_analysis) | [src/cee/decision-review/invoke.ts:155](../../src/cee/decision-review/invoke.ts#L155) | `adapter.chat` | `decision_review` | ROUTED | Fires from V5 via `enrichRunAnalysisWithDecisionReview` | **Migrated in `claude/v5-audit-followup` Task 2 (2026-04-22).** Now uses `getAdapterWithResolution('decision_review')` and the V5 enricher (`src/orchestrator-v5/coaching/decision-review-enricher.ts`) calls `recordModelResolution` unconditionally after the adapter returns, so this site now contributes a `model_resolutions` entry per turn exactly like sites #1 and #2. Closes V5 holistic audit UU-16. |
+| ~~3~~ | ~~narrate~~ | _(retired)_ | — | — | RETIRED | Not invoked in any phase | **RETIRED** in `claude/v5-audit-followup` commit `2caa3cab` (UU-17). The dormant A2 dispatch stack (`dispatch.ts`, `classify.ts`, `clarify.ts`, `llm-adapter.ts`) was deleted after the Slice C1 `runTurnExecutor` spine replaced it. No V5 code reaches this path; the row is preserved (not renumbered) so external references to row numbers remain stable. |
+| ~~4~~ | ~~classify~~ | _(retired)_ | — | — | RETIRED | Not invoked in any phase | **RETIRED** in `claude/v5-audit-followup` commit `2caa3cab` (UU-17). See row #3. |
+| 5 | decision_review (post-run_analysis) | [src/cee/decision-review/invoke.ts:167](../../src/cee/decision-review/invoke.ts#L167) | `adapter.chat` | `decision_review` | ROUTED | Fires from V5 via `enrichRunAnalysisWithDecisionReview` | Migrated to `getAdapterWithResolution('decision_review')` in `claude/v5-audit-followup` commit `dd0b3b80` (UU-16). `DecisionReviewInvokeResult` now carries `resolution` and the V5 enricher forwards it to `recordModelResolution(requestId, scenarioId, resolution)` post-call, so the `model_resolutions` dashboard covers decision_review alongside ORIENT. Regression guarded by `src/cee/decision-review/__tests__/invoke.test.ts` (direct invoke coverage) and `src/orchestrator-v5/coaching/__tests__/decision-review-enricher.test.ts` (end-to-end recordModelResolution assertions). |
 
 ## Classification definitions
 
@@ -29,6 +29,7 @@
 - **ROUTED-NO-OBSERVABILITY** — uses the legacy `getAdapter(task, ...)` seam with a valid `CeeTask` member. The precedence chain is correct (per_call → store_model_config → env_var → task_default → providers_json → llm_model_fallback) so the right model is used, but the call site does NOT emit a `model_resolutions` entry because it predates the Group 2 observability seam. Safe, but opaque in turn-debug. Target for future migration as the observability coverage expands.
 - **BYPASSING** — calls an adapter directly with either an invalid `CeeTask` string (short-circuits precedence to `llm_model_fallback`), a direct provider SDK, or a hardcoded model string. Currently zero sites — the Group 3 Task C fix brought the count to zero.
 - **NOT-LLM** — grep false positive.
+- **RETIRED** — the source file that hosted this call site has been deleted. Row preserved (not renumbered) to keep external references to row numbers stable. The commit that deleted the site is linked in the row's Notes.
 
 ## How to verify there are zero BYPASSING sites
 
