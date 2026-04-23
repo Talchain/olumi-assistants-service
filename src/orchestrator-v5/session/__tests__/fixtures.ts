@@ -74,5 +74,13 @@ export function createNoopSessionStore(
     async storeDraftGraph(_scenarioId: string, _graph: unknown): Promise<void> {
       // Noop — tests that care about persistence inject their own stub.
     },
+    async loadGraph(_scenarioId: string): Promise<unknown | null> {
+      // Noop — tests that care about graph retrieval inject their own stub.
+      // Returning null mirrors the "no graph stored" branch of the real
+      // Supabase-backed implementation so callers exercise the
+      // graph-absent code path by default. See
+      // src/orchestrator-v5/session/store.ts for the interface contract.
+      return null;
+    },
   };
 }
