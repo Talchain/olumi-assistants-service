@@ -53,6 +53,7 @@ import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import { buildTurnContext, loadPersistedGraph } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
 import { composeValidationFailure } from './compose/validation-failure-responses.js';
+import { composeUnsupportedActionResponse } from './compose/unsupported-action-response.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
 import type { ComposeContext } from './compose/types.js';
 import {
@@ -477,20 +478,77 @@ export async function runTurnExecutor(
           },
           'V5 TurnExecutor validation rejected tool-call proposal',
         );
-        // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND is semantically
-        // "the routing LLM proposed a declared-but-not-enabled action" —
-        // same class as the dispatch-level handler_not_registered. Use
-        // the typed UNSUPPORTED_ACTION → FEATURE_NOT_ENABLED wire code
-        // rather than the generic HANDLER_INVOCATION_FAILED so clients
-        // can distinguish. All other validator codes remain on the
-        // existing HANDLER_INVOCATION_FAILED → INTERNAL_ERROR mapping.
-        failureType = validationResult.error.code === 'HANDLER_NOT_FOUND'
-          ? INTERNAL_TO_WIRE.UNSUPPORTED_ACTION
-          : INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
         const composeCtx: ComposeContext = {
           graph: graphLookupForValidate,
           handlerRegistry: validationRegistry,
         };
+        // V5 golden-path completion: HANDLER_NOT_FOUND is the "not yet
+        // available" case — routing proposed a sensible action this
+        // deployment hasn't implemented. Return a 200 coaching response
+        // (clean body, no error block) committed as a direct_answer turn,
+        // rather than a 500 BoundaryError that surfaces "Something went
+        // wrong" in the UI. All other validator codes still go through
+        // the existing error-block composer + 500 path.
+        if (validationResult.error.code === 'HANDLER_NOT_FOUND') {
+          const unsupported = composeUnsupportedActionResponse({
+            handlerId: action.handler_id,
+            context: composeCtx,
+            stage: context.stage,
+            hasAnalysis: options.analysisState != null,
+          });
+          response = unsupported.response;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          stagesCompleted.push('unsupported_action_fallback');
+          // chip_type reflects what the composer actually emitted: 'action'
+          // when the registry had a user-facing handler to point at,
+          // 'text_prompt' when we fell back to a free-text chip.
+          const chipType: 'action' | 'text_prompt' =
+            unsupported.response.suggested_actions.some((c) => c.action_type != null)
+              ? 'action'
+              : 'text_prompt';
+          emit(TelemetryEvents.TurnExecutorFailureResponse, {
+            request_id: requestId,
+            session_id: context.session_id,
+            stage: context.stage,
+            failure_origin: 'validator',
+            error_code: validationResult.error.code,
+            template_used: unsupported.templateId,
+            chip_attached: unsupported.response.suggested_actions.length > 0,
+            chip_type: chipType,
+            chip_count: unsupported.response.suggested_actions.length,
+          });
+          // Commit as a direct_answer so route-v2 sees commit_performed=true
+          // and returns 200 — not 500. Commit failures still fall through
+          // to the typed STATE_COMMIT_FAILED path (which returns 500, a
+          // real infrastructure fault, distinct from the graceful fallback).
+          try {
+            const committed = await commitDirectAnswer(response, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: llmCallsUsed,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              { request_id: requestId, err: serialiseError(error) },
+              'V5 TurnExecutor commit failure on unsupported-action fallback',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, {
+              phase: 'commit',
+            });
+          }
+          return finalizeRun();
+        }
+        failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
         const composed = composeValidationFailure(
           validationResult.error,
           composeCtx,

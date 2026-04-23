@@ -407,18 +407,20 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
   });
 
   // -------------------------------------------------------------------
-  // v5-exclusive-cee: UNSUPPORTED_ACTION — routing LLM proposed a
-  // handler_id that IS in V5ActionType but has no registered handler /
-  // validator entry in this deployment. Typed FEATURE_NOT_ENABLED wire
-  // code so clients can distinguish "declared-but-unbuilt" from generic
-  // internal bugs. Two entry points: (a) the validator's
-  // HANDLER_NOT_FOUND path, and (b) the dispatch-level registry miss.
+  // v5 golden-path completion: HANDLER_NOT_FOUND from the validator is
+  // no longer a 500 BoundaryError — it is a graceful 200 coaching
+  // response committed as a direct_answer turn. The dispatch-level
+  // registry miss (handler_not_registered) still fails with the typed
+  // FEATURE_NOT_ENABLED error block for the internal-invariant case.
   // -------------------------------------------------------------------
-  describe('UNSUPPORTED_ACTION — unregistered handler (v5-exclusive-cee)', () => {
-    it('validator path: HANDLER_NOT_FOUND maps to FEATURE_NOT_ENABLED on the wire', async () => {
+  describe('UNSUPPORTED_ACTION — unregistered handler', () => {
+    it('validator path: HANDLER_NOT_FOUND → 200 coaching response (no error block, commit_performed=true)', async () => {
       // Routing LLM proposes `set_factor_value` — an action declared in the
       // V5ActionType union but NOT in HANDLER_VALIDATION_REGISTRY (which
       // only has run_analysis today). Validator returns HANDLER_NOT_FOUND.
+      // The graceful fallback returns a 200 coaching response so the user
+      // is pointed at what they can do, rather than a 500 "Something went
+      // wrong" envelope.
       const routingAdapter = mockRoutingAdapter(async () =>
         mkToolUseResult({
           intent_class: 'execute',
@@ -441,16 +443,26 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       });
 
       const parsed = OlumiResponseSchema.parse(response);
-      const block = parsed.blocks[0]!;
-      expect(block.type).toBe('error');
-      if (block.type === 'error') {
-        // Core assertion: typed FEATURE_NOT_ENABLED, not generic INTERNAL_ERROR.
-        expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
-        const details = block.details as Record<string, unknown>;
-        expect(details.retryable).toBe(false);
-      }
+      // No error block — body is a normal OlumiResponse with coaching text.
+      expect(parsed.blocks.filter((b) => b.type === 'error')).toHaveLength(0);
+      expect(parsed.assistant_text.length).toBeGreaterThan(0);
+      // Developer terminology must not leak into the user-facing text.
+      expect(parsed.assistant_text.toLowerCase()).not.toMatch(
+        /\b(feature|enabled|environment|handler_id|registry|session)\b/,
+      );
+      // At least one chip to keep the user moving.
+      expect(parsed.suggested_actions.length).toBeGreaterThan(0);
+      // run_analysis is the only registered handler today — the chip must
+      // point there, since chips are derived from the live registry.
+      expect(parsed.suggested_actions[0]!.action_type).toBe('run_analysis');
+
+      // Telemetry: validator classification preserved, but no boundary-level
+      // failure_type — this is a successful turn from the wire's POV.
       expect(telemetry.validation_error_code).toBe('HANDLER_NOT_FOUND');
-      expect(telemetry.failure_type).toBe('FEATURE_NOT_ENABLED');
+      expect(telemetry.failure_type).toBeNull();
+      expect(telemetry.commit_performed).toBe(true);
+      expect(telemetry.turn_class).toBe('direct_answer');
+      expect(telemetry.intent_class).toBe('converse');
       expectBI01();
     });
 

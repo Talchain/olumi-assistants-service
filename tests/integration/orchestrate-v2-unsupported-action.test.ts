@@ -1,42 +1,30 @@
 /**
- * V5 exclusive-cee brief — UNSUPPORTED_ACTION end-to-end (route-level).
+ * V5 golden-path completion — unsupported-action graceful fallback (route-level).
  *
- * Previous UNSUPPORTED_ACTION tests exercised `runTurnExecutor` directly
- * (src/orchestrator-v5/__tests__/turn-executor.test.ts). That proves the
- * executor-level translation from HANDLER_NOT_FOUND to the typed wire
- * code, but not that the full HTTP stack wires through correctly.
+ * The previous contract wrapped the validator's HANDLER_NOT_FOUND as a 500
+ * BoundaryError with wire code FEATURE_NOT_ENABLED. The UI parser treats
+ * every non-ok status as a BoundaryError, so users saw "Something went
+ * wrong" when they asked for a perfectly sensible action (add an option,
+ * set a factor value) that this deployment hasn't implemented yet.
  *
- * This file hits `POST /orchestrate/v2/turn` via Fastify `.inject()`.
+ * The new contract: when routing proposes a handler that isn't registered,
+ * the turn commits as a direct_answer and returns a 200 OlumiResponse with
+ *   - contextual coaching text (pointing at the canvas / inspector / the
+ *     next logical action)
+ *   - a chip derived from the live registry
+ *   - NO error block
+ *   - NO BoundaryError envelope
  *
- * Wire-contract trajectory for an unsupported action:
- *
- *   1. TurnExecutor validates the routing LLM's tool_use.
- *   2. Validator returns HANDLER_NOT_FOUND (or UnhandledTurnClassError
- *      if dispatch misses).
- *   3. TurnExecutor sets failure_type = FEATURE_NOT_ENABLED (via the
- *      UNSUPPORTED_ACTION internal class) and commit_performed = false.
- *   4. Route (route-v2.ts) sees commit_performed=false and — per Group 3
- *      Task B fail-closed invariant — wraps the failure as a 500 plus a
- *      BoundaryError envelope, NOT as a 200 OlumiResponse. This is
- *      deliberate: any turn with `commit_performed: false` is a
- *      fail-closed outcome, and the UI parser treats every non-ok status
- *      as a BoundaryError.
- *
- * Assertions:
- *   - HTTP status 500 (fail-closed per Group 3 Task B)
- *   - Body parses as BoundaryError
- *   - error === 'FEATURE_NOT_ENABLED'
- *   - retryable === false
- *   - details.failure_type === 'FEATURE_NOT_ENABLED'
- *   - turn_executor.completed telemetry has commit_performed:false and
- *     validation_error_code:'HANDLER_NOT_FOUND'
- *
- * Covered for every unregistered V5ActionType member.
+ * This is "guided not yet available", not an internal error. The
+ * dispatch-level registry miss (handler_not_registered via
+ * UnhandledTurnClassError) is still a 500 — it's an internal invariant
+ * breach (validation registry and handler registry diverged), which
+ * deserves an operator alert, not user-facing coaching.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 
@@ -150,7 +138,9 @@ function buildRequest() {
   };
 }
 
-describe('POST /orchestrate/v2/turn — UNSUPPORTED_ACTION end-to-end (v5-exclusive-cee)', () => {
+const FORBIDDEN_DEV_TERMS = /\b(feature|enabled|environment|handler_id|registry|session)\b/i;
+
+describe('POST /orchestrate/v2/turn — unsupported-action graceful fallback', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -171,7 +161,7 @@ describe('POST /orchestrate/v2/turn — UNSUPPORTED_ACTION end-to-end (v5-exclus
     mockHandlerId = 'set_factor_value';
   });
 
-  it('validator-miss: unregistered handler_id surfaces FEATURE_NOT_ENABLED + retryable:false at the route (500 BoundaryError per fail-closed Task B)', async () => {
+  it('validator miss: unregistered handler_id returns 200 OlumiResponse with coaching (not 500 BoundaryError)', async () => {
     mockHandlerId = 'set_factor_value';
     const res = await app.inject({
       method: 'POST',
@@ -179,43 +169,53 @@ describe('POST /orchestrate/v2/turn — UNSUPPORTED_ACTION end-to-end (v5-exclus
       payload: buildRequest(),
     });
 
-    // commit_performed:false → 500 BoundaryError per Group 3 Task B
-    // fail-closed invariant. UNSUPPORTED_ACTION is a commit-never-reached
-    // case, so it takes the same wire path as any other runtime failure.
-    expect(res.statusCode).toBe(500);
+    // Core wire-contract flip: 200 OlumiResponse, not 500 BoundaryError.
+    // This is the whole point of the fix — users asking for a sensible but
+    // not-yet-implemented action should see guided coaching, not an
+    // internal-error envelope.
+    expect(res.statusCode).toBe(200);
     const body = res.json();
-    const parsed = BoundaryErrorSchema.parse(body);
-    // Core route-level assertion: typed FEATURE_NOT_ENABLED wire code.
-    expect(parsed.error).toBe('FEATURE_NOT_ENABLED');
-    expect(parsed.retryable).toBe(false);
-    expect(parsed.details).toMatchObject({
-      retryable: false,
-      failure_type: 'FEATURE_NOT_ENABLED',
-      // stage is stamped by route-v2.ts for operator triage. Asserting
-      // it here locks the wire contract so a future refactor cannot
-      // silently drop the field.
-      stage: 'frame',
-    });
+    const parsed = OlumiResponseSchema.parse(body);
 
-    // Turn telemetry carries the typed wire code so operators can filter
-    // for UNSUPPORTED_ACTION incidents end-to-end. Note
-    // `validation_error_code` lives on the routing log (not the
-    // turn_executor.completed broadcast event), so we assert the wire-
-    // surfaced signals only.
+    // No error block — the response body is a clean OlumiResponse. The UI
+    // parser would otherwise render the "Something went wrong" fallback
+    // regardless of status code if an error block were present with
+    // FEATURE_NOT_ENABLED semantics.
+    const errorBlocks = parsed.blocks.filter((b) => b.type === 'error');
+    expect(errorBlocks).toHaveLength(0);
+
+    // Coaching text must be present and non-empty.
+    expect(parsed.assistant_text.length).toBeGreaterThan(0);
+
+    // No developer-facing terminology. This is the §1b quality bar from
+    // the CEE brief.
+    expect(parsed.assistant_text).not.toMatch(FORBIDDEN_DEV_TERMS);
+
+    // At least one chip to keep the user moving. run_analysis is the only
+    // registered handler today, so it's the chip we surface.
+    expect(parsed.suggested_actions.length).toBeGreaterThan(0);
+    expect(parsed.suggested_actions[0]!.action_type).toBe('run_analysis');
+
+    // Turn telemetry: commit_performed=true, failure_type=null. This is
+    // a successful turn from the wire's POV — validator_error_code is
+    // preserved on the routing log (not this telemetry) for post-hoc
+    // debugging.
     const completed = events.filter((e) => e.event === 'turn_executor.completed');
     expect(completed).toHaveLength(1);
-    expect(completed[0]!.data.failure_type).toBe('FEATURE_NOT_ENABLED');
-    expect(completed[0]!.data.commit_performed).toBe(false);
+    expect(completed[0]!.data.failure_type).toBeNull();
+    expect(completed[0]!.data.commit_performed).toBe(true);
   });
 
   it.each([
+    'add_option',
+    'edit_graph',
     'add_constraint',
     'adjust_edge_strength',
     'explain_result',
     'compare_options',
     'what_would_flip',
   ])(
-    'all declared-but-unregistered V5ActionType members return 500 FEATURE_NOT_ENABLED via route: %s',
+    'every unregistered handler_id routes to the 200 coaching fallback: %s',
     async (handlerId) => {
       mockHandlerId = handlerId;
       const res = await app.inject({
@@ -223,14 +223,13 @@ describe('POST /orchestrate/v2/turn — UNSUPPORTED_ACTION end-to-end (v5-exclus
         url: '/orchestrate/v2/turn',
         payload: buildRequest(),
       });
-      expect(res.statusCode).toBe(500);
+      expect(res.statusCode).toBe(200);
       const body = res.json();
-      const parsed = BoundaryErrorSchema.parse(body);
-      expect(parsed.error).toBe('FEATURE_NOT_ENABLED');
-      expect(parsed.retryable).toBe(false);
-      // Every unregistered action converges on the same typed wire code,
-      // so clients can handle the whole class uniformly (hide the
-      // affordance, surface an explain-we-don't-support-that message).
+      const parsed = OlumiResponseSchema.parse(body);
+      expect(parsed.blocks.filter((b) => b.type === 'error')).toHaveLength(0);
+      expect(parsed.assistant_text.length).toBeGreaterThan(0);
+      expect(parsed.assistant_text).not.toMatch(FORBIDDEN_DEV_TERMS);
+      expect(parsed.suggested_actions.length).toBeGreaterThan(0);
     },
   );
 });
