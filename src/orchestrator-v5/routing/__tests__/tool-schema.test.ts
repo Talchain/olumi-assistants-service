@@ -56,8 +56,41 @@ describe('OLUMI_ACTION_TOOL definition', () => {
   });
 
   it('lists all four intent_class enum values', () => {
-    const enumValues = (OLUMI_ACTION_TOOL.input_schema.properties.intent_class as { enum: string[] }).enum;
-    expect(enumValues).toEqual(['execute', 'clarify', 'converse', 'coach']);
+    const enumValues = OLUMI_ACTION_TOOL.input_schema.properties.intent_class as { enum: readonly string[] };
+    expect(enumValues.enum).toEqual(['execute', 'clarify', 'converse', 'coach']);
+  });
+
+  it('validates Anthropic API requirement: every object has additionalProperties: false', () => {
+    const violations: string[] = [];
+    
+    function validateObject(obj: unknown, path: string): void {
+      if (!obj || typeof obj !== 'object') return;
+      const schema = obj as Record<string, unknown>;
+      
+      if (schema.type === 'object') {
+        if (schema.additionalProperties !== false) {
+          violations.push(`${path}: type:"object" but additionalProperties is ${schema.additionalProperties}`);
+        }
+      }
+      
+      // Recursively check nested properties
+      if (schema.properties && typeof schema.properties === 'object') {
+        for (const [key, value] of Object.entries(schema.properties)) {
+          validateObject(value, `${path}.properties.${key}`);
+        }
+      }
+      
+      // Check array items
+      if (schema.items && typeof schema.items === 'object') {
+        validateObject(schema.items, `${path}.items`);
+      }
+    }
+    
+    validateObject(OLUMI_ACTION_TOOL.input_schema, 'input_schema');
+    
+    if (violations.length > 0) {
+      throw new Error(`Anthropic schema violations:\n${violations.join('\n')}`);
+    }
   });
 });
 

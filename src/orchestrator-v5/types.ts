@@ -116,6 +116,8 @@ export type DispatchInvariantViolation = {
 export type InternalFailure =
   | 'LLM_TIMEOUT'
   | 'LLM_SCHEMA_VIOLATION'
+  | 'LLM_REQUEST_INVALID'
+  | 'LLM_RATE_LIMITED'
   | 'BUDGET_EXCEEDED'
   | 'STATE_COMMIT_FAILED'
   | 'HANDLER_INVOCATION_FAILED'
@@ -139,6 +141,15 @@ export type InternalFailure =
 // text ("The model is temporarily unavailable. Please retry shortly.") is the
 // correct user action for a transient LLM structured-output malfunction.
 //
+// LLM_REQUEST_INVALID maps to LLM_UNAVAILABLE: 400-level errors from the
+// Anthropic API indicate our request was malformed (e.g., invalid tool schema).
+// This is not retryable without fixing the request, but we use the same wire
+// code as 500-level for user messaging simplicity.
+//
+// LLM_RATE_LIMITED maps to LLM_UNAVAILABLE: 429 errors are retryable after
+// the retry-after period. We use the same wire code but include retry_after_seconds
+// in the failure context.
+//
 // HANDLER_INVOCATION_FAILED + HANDLER_RESULT_INVALID: reserved for C2+ when
 // real handlers register. C1 ships with an empty registry, so these codes
 // are plumbed but dormant — a registry miss raises UnhandledTurnClassError
@@ -146,6 +157,8 @@ export type InternalFailure =
 export const INTERNAL_TO_WIRE: Record<InternalFailure, FailureTypeLiteral> = {
   LLM_TIMEOUT: 'UPSTREAM_TIMEOUT',
   LLM_SCHEMA_VIOLATION: 'LLM_UNAVAILABLE',
+  LLM_REQUEST_INVALID: 'LLM_UNAVAILABLE',
+  LLM_RATE_LIMITED: 'LLM_UNAVAILABLE',
   BUDGET_EXCEEDED: 'TURN_BUDGET_EXCEEDED',
   STATE_COMMIT_FAILED: 'INTERNAL_ERROR',
   HANDLER_INVOCATION_FAILED: 'INTERNAL_ERROR',

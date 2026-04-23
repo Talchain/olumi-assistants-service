@@ -41,6 +41,7 @@ export const OLUMI_ACTION_TOOL = {
     'respond with text only for conversational/coaching turns.',
   input_schema: {
     type: 'object' as const,
+    additionalProperties: false,
     properties: {
       intent_class: {
         type: 'string',
@@ -55,11 +56,13 @@ export const OLUMI_ACTION_TOOL = {
       },
       action: {
         type: 'object',
+        additionalProperties: false,
         description: 'Concrete action payload. Required when intent_class === "execute".',
         properties: {
           handler_id: { type: 'string' },
           entity: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               id: { type: 'string' },
               kind: {
@@ -79,6 +82,7 @@ export const OLUMI_ACTION_TOOL = {
                 type: 'array',
                 items: {
                   type: 'object',
+                  additionalProperties: false,
                   properties: { id: { type: 'string' }, label: { type: 'string' } },
                   required: ['id', 'label'],
                 },
@@ -90,6 +94,7 @@ export const OLUMI_ACTION_TOOL = {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
                 name: { type: 'string' },
                 value: {},
@@ -109,6 +114,7 @@ export const OLUMI_ACTION_TOOL = {
       },
       clarification: {
         type: 'object',
+        additionalProperties: false,
         description: 'Clarification payload. Required when intent_class === "clarify".',
         properties: {
           ambiguity_type: {
@@ -120,6 +126,7 @@ export const OLUMI_ACTION_TOOL = {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: { id: { type: 'string' }, label: { type: 'string' } },
               required: ['id', 'label'],
             },

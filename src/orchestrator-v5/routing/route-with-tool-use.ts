@@ -92,6 +92,12 @@ export class RoutingError extends Error {
   readonly cause: RoutingErrorCause;
   readonly provider_message?: string | undefined;
   /**
+   * HTTP status code from upstream error (if available). Used to distinguish
+   * between 400-level (client error, our fault) and 500-level (server error,
+   * API unavailable) errors for proper error classification.
+   */
+  readonly status?: number | undefined;
+  /**
    * Total Anthropic chatWithTools invocations attempted before this error
    * fired. 0 if the failure happened before the first call (e.g. defensive
    * pre-check). 1 on a single-call failure. 2 when REPAIR_ONCE was used and
@@ -102,12 +108,13 @@ export class RoutingError extends Error {
   constructor(
     cause: RoutingErrorCause,
     message: string,
-    opts?: { provider_message?: string; llmCallCount?: number },
+    opts?: { provider_message?: string; status?: number; llmCallCount?: number },
   ) {
     super(message);
     this.name = 'RoutingError';
     this.cause = cause;
     this.provider_message = opts?.provider_message;
+    this.status = opts?.status;
     this.llmCallCount = opts?.llmCallCount ?? 0;
   }
 }
@@ -354,6 +361,7 @@ function translateAdapterError(err: unknown, llmCallCount: number): RoutingError
   if (err instanceof UpstreamHTTPError) {
     return new RoutingError('api_error', `Provider HTTP error during routing: ${err.message}`, {
       provider_message: err.message,
+      status: err.status,
       llmCallCount,
     });
   }
