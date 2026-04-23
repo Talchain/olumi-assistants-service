@@ -219,6 +219,15 @@ export function assertAnthropicMessageProtocol(messages: AnthropicMessage[]): vo
         `Anthropic protocol: duplicate tool_result IDs in message ${i + 1}`,
       );
     }
+
+    const toolUseIdSet = new Set(toolUseIds);
+    for (const rid of allResultIds) {
+      if (!toolUseIdSet.has(rid)) {
+        throw new Error(
+          `Anthropic protocol: tool_result ${rid} in message ${i + 1} has no matching tool_use in message ${i}`,
+        );
+      }
+    }
   }
 }
 

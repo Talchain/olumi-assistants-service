@@ -481,4 +481,26 @@ describe('assertAnthropicMessageProtocol', () => {
     ];
     expect(() => assertAnthropicMessageProtocol(messages)).not.toThrow();
   });
+
+  it('catches orphaned tool_result with no matching tool_use', () => {
+    const messages: ChatWithToolsArgs['messages'] = [
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu-1', name: 'olumi_action', input: {} },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu-1', content: 'ok' },
+          { type: 'tool_result', tool_use_id: 'tu-orphan', content: 'no match' },
+        ],
+      },
+    ];
+    expect(() => assertAnthropicMessageProtocol(messages)).toThrow(
+      /tool_result tu-orphan.*has no matching tool_use/,
+    );
+  });
 });
