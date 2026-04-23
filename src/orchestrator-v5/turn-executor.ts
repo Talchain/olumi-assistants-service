@@ -861,7 +861,7 @@ export async function runTurnExecutor(
         };
         if (err.status) {
           errorContext.http_status = err.status;
-        if (err.status >= 400 && err.status < 500) {
+          if (err.status >= 400 && err.status < 500) {
             if (err.status === 429) {
               failureType = INTERNAL_TO_WIRE.LLM_RATE_LIMITED;
               // 429 is retryable after the retry-after window; surface both

@@ -1663,14 +1663,14 @@ ${brief}
       const apiClient = getClient();
       const modelParams = buildModelParams(this.model, temperature, { maxTokens });
 
-      // Convert messages: ToolResponseBlock[] content → OpenAI format
-      const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
-        { role: 'system', content: args.system },
-        ...args.messages.map((msg): OpenAI.ChatCompletionMessageParam => {
+      // Convert messages: ToolResponseBlock[] content → OpenAI format.
+      // flatMap handles user messages with tool_result blocks that expand
+      // into multiple OpenAI messages (one `tool` per result + optional text).
+      const mappedMessages: OpenAI.ChatCompletionMessageParam[] = args.messages.flatMap(
+        (msg): OpenAI.ChatCompletionMessageParam[] => {
           if (typeof msg.content === 'string') {
-            return { role: msg.role, content: msg.content };
+            return [{ role: msg.role, content: msg.content }];
           }
-          // Array of ToolResponseBlock — map assistant blocks (text + tool_use)
           if (msg.role === 'assistant') {
             const parts: OpenAI.ChatCompletionContentPartText[] = [];
             const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
@@ -1685,19 +1685,40 @@ ${brief}
                 });
               }
             }
-            return {
+            return [{
               role: 'assistant',
               ...(parts.length > 0 ? { content: parts.map(p => p.text).join('') } : { content: null }),
               ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-            };
+            }];
           }
-          // User message with block content — flatten to text
-          const text = msg.content
-            .filter((b): b is Extract<ToolResponseBlock, { type: 'text' }> => b.type === 'text')
-            .map(b => b.text)
-            .join('');
-          return { role: 'user', content: text };
-        }),
+          // User message with block content — may contain tool_result + text.
+          // OpenAI requires tool results as separate { role: 'tool' } messages.
+          const result: OpenAI.ChatCompletionMessageParam[] = [];
+          const textParts: string[] = [];
+          for (const block of msg.content) {
+            if (block.type === 'tool_result') {
+              result.push({
+                role: 'tool' as const,
+                tool_call_id: block.tool_use_id,
+                content: block.content,
+              });
+            } else if (block.type === 'text') {
+              textParts.push(block.text);
+            }
+          }
+          const joined = textParts.join('');
+          if (result.length === 0) {
+            return [{ role: 'user', content: joined }];
+          }
+          if (joined) {
+            result.push({ role: 'user', content: joined });
+          }
+          return result;
+        },
+      );
+      const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
+        { role: 'system', content: args.system },
+        ...mappedMessages,
       ];
 
       // Convert tool definitions: ToolDefinition → OpenAI function tool format

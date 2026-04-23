@@ -143,6 +143,86 @@ Rules:
 - Do not invent entities or parameters not present in the ContextPack.`;
 
 // -----------------------------------------------------------------------
+// Anthropic message protocol helpers
+// -----------------------------------------------------------------------
+
+type AnthropicMessage = ChatWithToolsArgs['messages'][number];
+
+function buildRepairMessages(
+  originalMessages: AnthropicMessage[],
+  assistantContent: ToolResponseBlock[],
+  validationDetail: string,
+): AnthropicMessage[] {
+  const messages: AnthropicMessage[] = [...originalMessages];
+
+  messages.push({ role: 'assistant', content: assistantContent });
+
+  const toolUseBlocks = assistantContent.filter(
+    (b): b is Extract<ToolResponseBlock, { type: 'tool_use' }> => b.type === 'tool_use',
+  );
+
+  const userContent: ToolResponseBlock[] = toolUseBlocks.map((tu) => ({
+    type: 'tool_result' as const,
+    tool_use_id: tu.id,
+    content: `Validation failed: ${validationDetail}`,
+    is_error: true,
+  }));
+
+  userContent.push({
+    type: 'text' as const,
+    text: 'Emit one corrected olumi_action call that strictly matches the tool\'s input_schema.',
+  });
+
+  messages.push({ role: 'user', content: userContent });
+
+  return messages;
+}
+
+export function assertAnthropicMessageProtocol(messages: AnthropicMessage[]): void {
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+
+    const toolUseIds = msg.content
+      .filter((b): b is Extract<ToolResponseBlock, { type: 'tool_use' }> => b.type === 'tool_use')
+      .map((b) => b.id);
+
+    if (toolUseIds.length === 0) continue;
+
+    const next = messages[i + 1];
+    if (!next || next.role !== 'user') {
+      throw new Error(
+        `Anthropic protocol: assistant tool_use at index ${i} not followed by user message`,
+      );
+    }
+
+    const nextContent = Array.isArray(next.content) ? next.content : [];
+    const resultIds = new Set(
+      nextContent
+        .filter((b): b is Extract<ToolResponseBlock, { type: 'tool_result' }> => b.type === 'tool_result')
+        .map((b) => b.tool_use_id),
+    );
+
+    for (const tuId of toolUseIds) {
+      if (!resultIds.has(tuId)) {
+        throw new Error(
+          `Anthropic protocol: tool_use ${tuId} has no matching tool_result in message ${i + 1}`,
+        );
+      }
+    }
+
+    const allResultIds = nextContent
+      .filter((b): b is Extract<ToolResponseBlock, { type: 'tool_result' }> => b.type === 'tool_result')
+      .map((b) => b.tool_use_id);
+    if (new Set(allResultIds).size !== allResultIds.length) {
+      throw new Error(
+        `Anthropic protocol: duplicate tool_result IDs in message ${i + 1}`,
+      );
+    }
+  }
+}
+
+// -----------------------------------------------------------------------
 // Invocation
 // -----------------------------------------------------------------------
 
@@ -205,6 +285,8 @@ export async function routeWithToolUse(
     temperature: 0,
   };
 
+  assertAnthropicMessageProtocol(firstCallArgs.messages);
+
   let firstResult: ChatWithToolsResult;
   try {
     firstResult = await adapter.chatWithTools(firstCallArgs, {
@@ -220,20 +302,18 @@ export async function routeWithToolUse(
   if (parsedOrError.kind === 'ok') return parsedOrError.result;
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
 
-  // REPAIR_ONCE — parse failed. Ask Sonnet to re-emit with structured
-  // error feedback; if it fails again, abort.
+  // REPAIR_ONCE — parse failed. Build protocol-compliant retry messages
+  // with tool_result blocks matching every tool_use in the assistant response.
+  const repairMessages = buildRepairMessages(
+    firstCallArgs.messages,
+    firstResult.content,
+    parsedOrError.detail,
+  );
+  assertAnthropicMessageProtocol(repairMessages);
+
   const repairArgs: ChatWithToolsArgs = {
     ...firstCallArgs,
-    messages: [
-      { role: 'user', content: userMessage },
-      { role: 'assistant', content: firstResult.content as ToolResponseBlock[] },
-      {
-        role: 'user',
-        content:
-          `Your previous olumi_action tool call failed schema validation: ` +
-          `${parsedOrError.detail}. Emit one more attempt that strictly matches the tool's input_schema.`,
-      },
-    ],
+    messages: repairMessages,
   };
 
   let repairResult: ChatWithToolsResult;

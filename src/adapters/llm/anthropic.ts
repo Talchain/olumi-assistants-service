@@ -2605,13 +2605,20 @@ export async function chatWithToolsAnthropic(
         if (block.type === 'text') {
           return { type: 'text' as const, text: block.text };
         }
-        // tool_use blocks in assistant messages
         if (block.type === 'tool_use') {
           return {
             type: 'tool_use' as const,
             id: block.id,
             name: block.name,
             input: block.input,
+          };
+        }
+        if (block.type === 'tool_result') {
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: block.tool_use_id,
+            content: block.content,
+            is_error: block.is_error,
           };
         }
         return block as Anthropic.ContentBlockParam;
@@ -2840,6 +2847,14 @@ export async function* streamChatWithToolsAnthropic(
             id: block.id,
             name: block.name,
             input: block.input,
+          };
+        }
+        if (block.type === 'tool_result') {
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: block.tool_use_id,
+            content: block.content,
+            is_error: block.is_error,
           };
         }
         return block as Anthropic.ContentBlockParam;

@@ -25,6 +25,7 @@ import {
   ROUTING_SYSTEM_PROMPT,
   RoutingError,
   routeWithToolUse,
+  assertAnthropicMessageProtocol,
 } from '../route-with-tool-use.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../tool-schema.js';
 
@@ -287,12 +288,30 @@ describe('routeWithToolUse — REPAIR_ONCE', () => {
     }
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
 
-    // The repair prompt must include the failure detail so Sonnet knows what to fix
+    // Repair messages must include tool_result blocks matching the tool_use IDs
     const repairArgs = adapter.chatWithTools.mock.calls[1]![0];
-    const lastUserMessage = repairArgs.messages[repairArgs.messages.length - 1]!;
-    expect(lastUserMessage.role).toBe('user');
-    expect(typeof lastUserMessage.content).toBe('string');
-    expect(lastUserMessage.content as string).toMatch(/olumi_action tool call failed/);
+    const messages = repairArgs.messages;
+
+    // assistant message at index 1 should contain the tool_use block
+    const assistantMsg = messages[1]!;
+    expect(assistantMsg.role).toBe('assistant');
+    const assistantContent = assistantMsg.content as ToolResponseBlock[];
+    const toolUseBlock = assistantContent.find((b) => b.type === 'tool_use');
+    expect(toolUseBlock).toBeDefined();
+
+    // user message at index 2 should contain a tool_result with matching ID
+    const userMsg = messages[2]!;
+    expect(userMsg.role).toBe('user');
+    expect(Array.isArray(userMsg.content)).toBe(true);
+    const userContent = userMsg.content as ToolResponseBlock[];
+    const toolResultBlock = userContent.find((b) => b.type === 'tool_result');
+    expect(toolResultBlock).toBeDefined();
+    if (toolResultBlock?.type === 'tool_result' && toolUseBlock?.type === 'tool_use') {
+      expect(toolResultBlock.tool_use_id).toBe(toolUseBlock.id);
+      expect(toolResultBlock.is_error).toBe(true);
+      expect(typeof toolResultBlock.content).toBe('string');
+      expect(toolResultBlock.content).toContain('Validation failed');
+    }
   });
 
   it('second schema failure → RoutingError{cause:"schema_repair_failed"}', async () => {
@@ -321,5 +340,145 @@ describe('routeWithToolUse — REPAIR_ONCE', () => {
     await expect(
       routeWithToolUse(minimalContextPack(), 'x', { requestId: 'req-r3', adapter }),
     ).rejects.toMatchObject({ name: 'RoutingError', cause: 'aborted' });
+  });
+
+  it('includes tool_result for each tool_use when multiple are returned', async () => {
+    const multiToolContent: ToolResponseBlock[] = [
+      { type: 'tool_use', id: 'tu-A', name: OLUMI_ACTION_TOOL_NAME, input: { intent_class: 'execute' } },
+      { type: 'tool_use', id: 'tu-B', name: OLUMI_ACTION_TOOL_NAME, input: { intent_class: 'execute' } },
+    ];
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult(multiToolContent))
+        .mockResolvedValueOnce(mkResult([toolCallBlock(VALID_EXECUTE_INPUT)])),
+    };
+
+    await routeWithToolUse(minimalContextPack(), 'go', { requestId: 'req-multi', adapter });
+
+    const repairArgs = adapter.chatWithTools.mock.calls[1]![0];
+    const userMsg = repairArgs.messages[2]!;
+    expect(Array.isArray(userMsg.content)).toBe(true);
+    const userContent = userMsg.content as ToolResponseBlock[];
+    const resultBlocks = userContent.filter((b) => b.type === 'tool_result');
+    expect(resultBlocks).toHaveLength(2);
+    const resultIds = resultBlocks.map((b) => b.type === 'tool_result' ? b.tool_use_id : '');
+    expect(resultIds).toContain('tu-A');
+    expect(resultIds).toContain('tu-B');
+    expect(new Set(resultIds).size).toBe(2);
+  });
+
+  it('does not insert tool_result when first call returns valid tool_use', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([toolCallBlock(VALID_EXECUTE_INPUT)])),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'go', { requestId: 'req-noop', adapter });
+
+    expect(result.type).toBe('tool_call');
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops after one repair attempt and returns failure envelope', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([toolCallBlock({ intent_class: 'execute' })]))
+        .mockResolvedValueOnce(mkResult([toolCallBlock({ intent_class: 'execute' })])),
+    };
+
+    await expect(
+      routeWithToolUse(minimalContextPack(), 'x', { requestId: 'req-ceil', adapter }),
+    ).rejects.toMatchObject({ name: 'RoutingError', cause: 'schema_repair_failed' });
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+  });
+});
+
+// -----------------------------------------------------------------------
+// assertAnthropicMessageProtocol
+// -----------------------------------------------------------------------
+
+describe('assertAnthropicMessageProtocol', () => {
+  it('catches missing tool_result after assistant tool_use', () => {
+    const messages: ChatWithToolsArgs['messages'] = [
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu-1', name: 'olumi_action', input: {} },
+        ],
+      },
+      { role: 'user', content: 'next turn' },
+    ];
+    expect(() => assertAnthropicMessageProtocol(messages)).toThrow(
+      /tool_use tu-1 has no matching tool_result/,
+    );
+  });
+
+  it('catches duplicate tool_result IDs', () => {
+    const messages: ChatWithToolsArgs['messages'] = [
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu-1', name: 'olumi_action', input: {} },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu-1', content: 'ok', is_error: false },
+          { type: 'tool_result', tool_use_id: 'tu-1', content: 'dup', is_error: false },
+        ],
+      },
+    ];
+    expect(() => assertAnthropicMessageProtocol(messages)).toThrow(
+      /duplicate tool_result IDs/,
+    );
+  });
+
+  it('catches missing user message after assistant tool_use at end', () => {
+    const messages: ChatWithToolsArgs['messages'] = [
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu-1', name: 'olumi_action', input: {} },
+        ],
+      },
+    ];
+    expect(() => assertAnthropicMessageProtocol(messages)).toThrow(
+      /not followed by user message/,
+    );
+  });
+
+  it('passes valid sequence: user → assistant(tool_use) → user(tool_result) → assistant(text)', () => {
+    const messages: ChatWithToolsArgs['messages'] = [
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu-1', name: 'olumi_action', input: {} },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu-1', content: 'ok', is_error: false },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+    ];
+    expect(() => assertAnthropicMessageProtocol(messages)).not.toThrow();
+  });
+
+  it('passes when assistant message has no tool_use blocks', () => {
+    const messages: ChatWithToolsArgs['messages'] = [
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Hello!' }] },
+    ];
+    expect(() => assertAnthropicMessageProtocol(messages)).not.toThrow();
   });
 });
