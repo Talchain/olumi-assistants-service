@@ -1967,7 +1967,7 @@ packages:
     engines: {node: '>=10'}
 
   '@talchain/schemas@file:vendor/talchain-schemas-0.8.1.tgz':
-    resolution: {integrity: sha512-6ZfHGZZr7Exlh+LthxkwDHU90FowP/dWrmDmflQR9bBDVflBE4FWa4PI2jBWCHN6EjQCyBPbfQy4ZM7Hvzm0Fw==, tarball: file:vendor/talchain-schemas-0.8.1.tgz}
+    resolution: {integrity: sha512-CjCtmKzH228SCACjEYkBlhkNgTdzcMEZ43DC4BCyyKmwq0TwMiH0eZW/VoC7rwtJqlbFqy/jphXy1v/WHGzu9A==, tarball: file:vendor/talchain-schemas-0.8.1.tgz}
     version: 0.8.1
     engines: {node: '>=18.0.0'}
 
