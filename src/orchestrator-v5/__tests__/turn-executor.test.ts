@@ -222,6 +222,21 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-c2', { routingAdapter });
       expect((response as Record<string, unknown>).updated_session_state).toBeUndefined();
     });
+
+    it('uses orientation text when Sonnet returns a converse tool call', async () => {
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult({ intent_class: 'converse' }, 'Here are the practical trade-offs.'),
+      );
+
+      const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-c3', {
+        routingAdapter,
+      });
+
+      const parsed = OlumiResponseSchema.parse(response);
+      expect(parsed.assistant_text).toBe('Here are the practical trade-offs.');
+      expect(telemetry.turn_class).toBe('direct_answer');
+      expect(telemetry.intent_class).toBe('converse');
+    });
   });
 
   // -------------------------------------------------------------------

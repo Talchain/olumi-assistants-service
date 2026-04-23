@@ -667,7 +667,9 @@ export async function runTurnExecutor(
       stagesCompleted.push('compose');
     } else {
       // text_only → inferred converse.
-      const text = routingResult.type === 'text_only' ? routingResult.text : '';
+      const text = routingResult.type === 'text_only'
+        ? routingResult.text
+        : routingResult.orientationText;
       const sanitised = sanitiseNarrateOutput(text);
       if (sanitised.contamination_detected) {
         emit(TelemetryEvents.TurnExecutorContaminationNarrate, {
