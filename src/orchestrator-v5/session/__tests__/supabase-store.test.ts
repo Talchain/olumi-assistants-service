@@ -22,11 +22,11 @@ import {
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const USER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-function validRow(turnId: string, createdAt = '2026-04-17T10:00:00.000+00:00') {
+function validRow(turnId: string, createdAt = '2026-04-17T10:00:00.000+00:00', userId: string | null = USER) {
   return {
     id: randomUUID(),
     scenario_id: SCENARIO,
-    user_id: USER,
+    user_id: userId,
     turn_id: turnId,
     turn_class: 'direct_answer' as const,
     handler_id: null,
@@ -81,6 +81,8 @@ function makeClient(cfg: MockConfig = {}): {
           // Terminal — return the promise result
           return Promise.resolve(cfg.selectResult ?? { data: [], error: null });
         },
+        maybeSingle: () =>
+          Promise.resolve(cfg.selectResult ?? { data: null, error: null }),
         // Non-terminal .in followed by terminal awaitable
         then: (resolve: (v: unknown) => void) =>
           resolve(cfg.selectResult ?? { data: [], error: null }),
@@ -243,6 +245,20 @@ describe('SupabaseSessionStore.readRecent', () => {
     await expect(store.readRecent(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
   });
 
+  it('accepts rows with user_id: null (guest mode)', async () => {
+    const guestRow = validRow('t1', '2026-04-17T10:00:00.000+00:00', null);
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [guestRow], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+
+    const got = await store.readRecent(SCENARIO);
+    expect(got).toHaveLength(1);
+    expect(got[0].user_id).toBeNull();
+    expect(selectCalls).toHaveLength(1);
+  });
+
   it('defaults limit to defaultReadLimit when not passed', async () => {
     const { client, selectCalls } = makeClient({
       selectResult: { data: [], error: null },
@@ -273,6 +289,56 @@ describe('SupabaseSessionStore.readFactsFor', () => {
     const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
     const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
     await expect(store.readFactsFor(['row-1'])).rejects.toBeInstanceOf(SessionReadError);
+  });
+});
+
+describe('SupabaseSessionStore.loadGraph', () => {
+  it('returns null when scenarios.graph is null (no graph stored yet)', async () => {
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: { graph: null }, error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const result = await store.loadGraph(SCENARIO);
+    expect(result).toBeNull();
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0].table).toBe('scenarios');
+  });
+
+  it('returns null when maybeSingle returns no row (scenario row absent)', async () => {
+    const { client } = makeClient({ selectResult: { data: null, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    expect(await store.loadGraph(SCENARIO)).toBeNull();
+  });
+
+  it('returns the graph when present', async () => {
+    const graph = { nodes: [{ id: 'n1', kind: 'factor', label: 'Churn' }], edges: [] };
+    const { client } = makeClient({ selectResult: { data: { graph }, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    expect(await store.loadGraph(SCENARIO)).toEqual(graph);
+  });
+
+  it('throws SessionReadError on DB error', async () => {
+    const { client } = makeClient({
+      selectResult: { error: { message: 'permission denied', code: '42501' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.loadGraph(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
   });
 });
 

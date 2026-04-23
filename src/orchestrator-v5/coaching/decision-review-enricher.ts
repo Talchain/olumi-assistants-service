@@ -25,6 +25,7 @@ import {
   invokeDecisionReview,
   type DecisionReviewInvokeInput,
 } from '../../cee/decision-review/invoke.js';
+import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
 import type { DecisionReviewOutput } from './types.js';
@@ -108,6 +109,13 @@ export async function enrichRunAnalysisWithDecisionReview(
       timeoutMs: DECISION_REVIEW_TIMEOUT_MS,
       signal: childAbort.signal,
     });
+    // V5 holistic audit UU-16: record model resolution unconditionally once
+    // the adapter call returned. The decision_review site was previously
+    // ROUTED-NO-OBSERVABILITY — the LLM call landed but its resolution
+    // never surfaced on the `model_resolutions` dashboard. Recording here
+    // (rather than only on output !== null) keeps the attribution honest
+    // even when shape extraction failed downstream: the tokens were spent.
+    recordModelResolution(input.requestId, input.scenarioId, result.resolution);
     if (result.output === null) {
       emit(TelemetryEvents.V5DecisionReviewFailed, {
         request_id: input.requestId,

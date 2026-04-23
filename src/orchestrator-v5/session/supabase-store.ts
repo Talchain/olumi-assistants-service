@@ -226,6 +226,23 @@ export class SupabaseSessionStore implements SessionStore {
     }
   }
 
+  async loadGraph(scenarioId: string): Promise<unknown | null> {
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('graph')
+      .eq('id', scenarioId)
+      .maybeSingle();
+    
+    if (error) {
+      throw new SessionReadError(
+        `loadGraph failed for scenario ${scenarioId}: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    
+    return data?.graph ?? null;
+  }
+
   async ensureScenarioExists(
     scenarioId: string,
     userId: string | null,

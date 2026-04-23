@@ -25,7 +25,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { OrchestratorTurnPayload, MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import type {
@@ -34,6 +34,7 @@ import type {
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
 import { UpstreamTimeoutError } from '../../adapters/llm/errors.js';
+import type { RunTurnExecutorOptions } from '../turn-executor.js';
 
 // ---------------------------------------------------------------------------
 // Session store mock — no Supabase
@@ -41,13 +42,32 @@ import { UpstreamTimeoutError } from '../../adapters/llm/errors.js';
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
+    append: async (write: { graph?: unknown }) => {
+      (global as any).__test_append_calls = (global as any).__test_append_calls || [];
+      (global as any).__test_append_calls.push(write);
+      return { id: 'mock-row-id' };
+    },
     readRecent: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    storeDraftGraph: async (_scenarioId: string, graph: unknown) => {
+      (global as any).__test_storeDraftGraph_calls = (global as any).__test_storeDraftGraph_calls || [];
+      (global as any).__test_storeDraftGraph_calls.push(graph);
+    },
+    loadGraph: async (scenarioId: string) => {
+      (global as any).__test_loadGraph_calls = (global as any).__test_loadGraph_calls || [];
+      (global as any).__test_loadGraph_calls.push(scenarioId);
+      return (global as any).__test_persisted_graph || null;
+    },
+    ensureScenarioExists: async () => ({ user_id: null }),
   }),
-  resetSessionStoreForTests: () => {},
+  resetSessionStoreForTests: () => {
+    delete (global as any).__test_append_calls;
+    delete (global as any).__test_storeDraftGraph_calls;
+    delete (global as any).__test_loadGraph_calls;
+    delete (global as any).__test_persisted_graph;
+  },
 }));
 
 const { runTurnExecutor } = await import('../turn-executor.js');
@@ -128,7 +148,9 @@ function uninstallSink(): void {
   setTestSink(null);
 }
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD: MessageTurnPayload = {
+  kind: 'message',
+  source: 'composer',
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   message: 'frame the decision',
@@ -274,7 +296,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
             llm_calls_used: 1,
           })) as never,
         ],
-      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+      ]) as unknown as RunTurnExecutorOptions['handlerRegistry'];
 
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-ex1', {
         routingAdapter,
@@ -314,7 +336,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
             llm_calls_used: 0,
           })) as never,
         ],
-      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+      ]) as unknown as RunTurnExecutorOptions['handlerRegistry'];
 
       const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-ex2', {
         routingAdapter,
@@ -343,8 +365,11 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       };
 
       const fakeRegistry = new Map<string, never>([
-        ['run_analysis', (async () => { throw new Error('handler should not be called'); }) as never],
-      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+        [
+          'run_analysis',
+          (async () => { throw new Error('handler should not be called'); }) as never,
+        ],
+      ]) as unknown as RunTurnExecutorOptions['handlerRegistry'];
 
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-v1', {
         routingAdapter,
@@ -442,10 +467,8 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
           preconditions: () => ({ ok: true as const }),
           confirmation_template: 'set_factor_value confirmed',
         },
-      } as unknown as Parameters<typeof runTurnExecutor>[2]['validationRegistry'];
-      const emptyHandlerRegistry = new Map() as unknown as Parameters<
-        typeof runTurnExecutor
-      >[2]['handlerRegistry'];
+      } as unknown as RunTurnExecutorOptions['validationRegistry'];
+      const emptyHandlerRegistry = new Map() as unknown as RunTurnExecutorOptions['handlerRegistry'];
 
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-unsupp-d', {
         routingAdapter,
@@ -474,7 +497,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
   describe('routing error paths', () => {
     it('UpstreamTimeoutError → LLM_TIMEOUT envelope + BI-01 preserved', async () => {
       const routingAdapter = mockRoutingAdapter(async () => {
-        throw new UpstreamTimeoutError('read timeout');
+        throw new UpstreamTimeoutError('read timeout', 'anthropic', 'chat', 'body', 5000);
       });
 
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-r1', {
@@ -580,7 +603,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
           handler_facts: [],
           llm_calls_used: 0,
         })) as never],
-      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+      ]) as unknown as RunTurnExecutorOptions['handlerRegistry'];
       const writer = vi.fn().mockResolvedValue(undefined);
 
       await runTurnExecutor(BASE_PAYLOAD, 'req-log1', {
@@ -608,7 +631,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
 
     it('emits a routing log record on routing failure (LLM_TIMEOUT path)', async () => {
       const routingAdapter = mockRoutingAdapter(async () => {
-        throw new UpstreamTimeoutError('read timeout');
+        throw new UpstreamTimeoutError('read timeout', 'anthropic', 'chat', 'body', 5000);
       });
       const writer = vi.fn().mockResolvedValue(undefined);
 
@@ -649,7 +672,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
       const writer = vi.fn(() => {
         throw new Error('writer blew up sync');
-      }) as unknown as Parameters<typeof runTurnExecutor>[2]['routingLogWriter'];
+      }) as unknown as RunTurnExecutorOptions['routingLogWriter'];
 
       let unhandled: unknown = null;
       const handler = (err: unknown): void => { unhandled = err; };
@@ -732,7 +755,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
             llm_calls_used: 0,
           })) as never,
         ],
-      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+      ]) as unknown as RunTurnExecutorOptions['handlerRegistry'];
 
       const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-san1', {
         routingAdapter,
@@ -759,7 +782,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
             llm_calls_used: 1,
           })) as never,
         ],
-      ]) as unknown as Parameters<typeof runTurnExecutor>[2]['handlerRegistry'];
+      ]) as unknown as RunTurnExecutorOptions['handlerRegistry'];
 
       const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-b1', {
         routingAdapter,
@@ -771,6 +794,105 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       // handler's "improvised" assistant_text (WINNER:...) does NOT appear.
       expect(parsed.assistant_text.startsWith(orientation)).toBe(true);
       expect(parsed.assistant_text).not.toContain('WINNER');
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Graph lookup fallback for guest-mode follow-up turns
+  // -------------------------------------------------------------------
+  describe('graph lookup fallback — guest-mode follow-up turns', () => {
+    beforeEach(async () => {
+      const { resetSessionStoreForTests } = await import('../session/index.js');
+      (resetSessionStoreForTests as () => void)();
+    });
+
+    it('turn 1 persists graph via append when graphState is provided', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
+      const graphState = { nodes: [{ id: 'node-1', kind: 'factor', label: 'Node 1' }], edges: [] };
+
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, message: 'turn 1' },
+        'req-guest-1',
+        {
+          routingAdapter,
+          graphState,
+        },
+      );
+
+      expect((global as any).__test_append_calls).toHaveLength(1);
+      expect((global as any).__test_append_calls[0].graph).toEqual(graphState);
+    });
+
+    it('turn 2 loads persisted graph via loadGraph when graphState is absent', async () => {
+      const persistedGraph = { nodes: [{ id: 'node-1', kind: 'factor', label: 'Option A' }], edges: [] };
+      (global as any).__test_persisted_graph = persistedGraph;
+
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('follow-up response'));
+
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, message: 'turn 2 follow-up' },
+        'req-guest-2',
+        {
+          routingAdapter,
+          // No graphState provided - should trigger loadGraph fallback
+        },
+      );
+
+      expect((global as any).__test_loadGraph_calls).toHaveLength(1);
+      expect((global as any).__test_loadGraph_calls[0]).toBe(BASE_PAYLOAD.scenario_id);
+    });
+
+    it('two-turn sequence: turn 1 persists, turn 2 loads the same graph', async () => {
+      const graphState = { nodes: [{ id: 'node-1', kind: 'factor', label: 'Option A' }], edges: [] };
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('response'));
+
+      // Turn 1: with graphState
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, message: 'turn 1' },
+        'req-seq-1',
+        {
+          routingAdapter,
+          graphState,
+        },
+      );
+
+      // Verify graph was persisted via append
+      expect((global as any).__test_append_calls).toHaveLength(1);
+      const persistedGraph = (global as any).__test_append_calls[0].graph;
+      expect(persistedGraph).toEqual(graphState);
+
+      // Set up the persisted graph for turn 2 to load
+      (global as any).__test_persisted_graph = persistedGraph;
+
+      // Turn 2: without graphState (follow-up)
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, message: 'turn 2 follow-up' },
+        'req-seq-2',
+        {
+          routingAdapter,
+          // No graphState - should load from DB
+        },
+      );
+
+      // Verify loadGraph was called and returned the persisted graph
+      expect((global as any).__test_loadGraph_calls).toHaveLength(1);
+      expect((global as any).__test_loadGraph_calls[0]).toBe(BASE_PAYLOAD.scenario_id);
+    });
+
+    it('loadGraph is NOT called when graphState is provided in the request', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
+      const graphState = { nodes: [{ id: 'node-1', kind: 'factor', label: 'Node 1' }], edges: [] };
+
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, message: 'turn with graph' },
+        'req-no-load',
+        {
+          routingAdapter,
+          graphState,
+        },
+      );
+
+      expect((global as any).__test_loadGraph_calls).toBeUndefined();
     });
   });
 });

@@ -53,6 +53,14 @@ export interface SessionStore {
    */
   storeDraftGraph(scenarioId: string, graph: unknown): Promise<void>;
   /**
+   * Load the persisted graph from scenarios.graph for a given scenario.
+   * Returns null if no graph is stored. Throws SessionReadError on DB/RPC failure.
+   * Uses the same service-role client access pattern as storeDraftGraph (bypasses RLS).
+   * Used by follow-up turns when the UI does not send graph_state in the
+   * request body.
+   */
+  loadGraph(scenarioId: string): Promise<unknown | null>;
+  /**
    * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
    * creating it with `userId` as the owner if absent. `userId` may be null
    * for guest sessions (VITE_AUTH_MODE=guest) — the row is created with a

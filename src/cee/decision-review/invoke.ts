@@ -19,7 +19,11 @@
  */
 
 import { getSystemPrompt, getSystemPromptMeta } from '../../adapters/llm/prompt-loader.js';
-import { getAdapter, getMaxTokensFromConfig } from '../../adapters/llm/router.js';
+import {
+  getAdapterWithResolution,
+  getMaxTokensFromConfig,
+  type ModelResolution,
+} from '../../adapters/llm/router.js';
 import type { CallOpts } from '../../adapters/llm/types.js';
 import { extractJsonFromResponse } from '../../utils/json-extractor.js';
 import {
@@ -71,6 +75,16 @@ export interface DecisionReviewInvokeResult {
   readonly input_tokens: number;
   readonly output_tokens: number;
   readonly prompt_version: string | undefined;
+  /**
+   * Model-routing resolution for this call. Closes the V5 holistic audit
+   * UU-16 observability gap: previously this site used `getAdapter(...)`
+   * which does not surface the precedence-chain outcome, leaving the only
+   * post-run_analysis LLM call invisible on the `model_resolutions`
+   * dashboard. Callers that have per-turn context (the V5 enricher does)
+   * forward this into `recordModelResolution` so turn-debug attributions
+   * cover decision_review alongside ORIENT.
+   */
+  readonly resolution: ModelResolution;
 }
 
 // ============================================================================
@@ -150,7 +164,7 @@ export async function invokeDecisionReview(
 
   const userMessage = buildDecisionReviewUserMessage(input, margin);
 
-  const adapter = getAdapter('decision_review');
+  const { adapter, resolution } = getAdapterWithResolution('decision_review');
   const configuredMaxTokens = getMaxTokensFromConfig('decision_review');
   const maxTokens = configuredMaxTokens ?? 4096;
 
@@ -191,5 +205,6 @@ export async function invokeDecisionReview(
     input_tokens: llmResult.usage.input_tokens,
     output_tokens: llmResult.usage.output_tokens,
     prompt_version: promptMeta.prompt_version,
+    resolution,
   };
 }
