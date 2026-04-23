@@ -92,6 +92,26 @@ describe('OLUMI_ACTION_TOOL definition', () => {
       throw new Error(`Anthropic schema violations:\n${violations.join('\n')}`);
     }
   });
+
+  it('contains no empty object schema nodes that Anthropic rejects', () => {
+    const emptyObjectPaths: string[] = [];
+
+    function walk(node: unknown, path: string): void {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+      const entries = Object.entries(node as Record<string, unknown>);
+      if (entries.length === 0) {
+        emptyObjectPaths.push(path);
+        return;
+      }
+      for (const [key, value] of entries) {
+        walk(value, `${path}.${key}`);
+      }
+    }
+
+    walk(OLUMI_ACTION_TOOL.input_schema, 'input_schema');
+
+    expect(emptyObjectPaths).toEqual([]);
+  });
 });
 
 describe('parseToolCallResponse', () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TurnContextSchema, type SessionTurn } from '@talchain/schemas/orchestrator';
 
 import { setTestSink } from '../../utils/telemetry.js';
-import { buildTurnContext } from '../build-turn-context.js';
+import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { SessionReadError } from '../session/store.js';
 
@@ -152,5 +152,41 @@ describe('buildTurnContext slice B — prior_turns population', () => {
     await buildTurnContext(BASE, 'req-1', { sessionStore: store });
     const event = events.find((e) => e.name === 'session.read_degraded');
     expect(event!.data.error_code).toBe('unknown');
+  });
+});
+
+describe('loadScenarioSnapshotForRunAnalysis', () => {
+  it('loads persisted graph and derives ready options for run_analysis', async () => {
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Ship AI Features Within 6 Months' },
+        { id: 'dec_1', kind: 'decision', label: 'Hiring Decision' },
+        { id: 'opt_lead', kind: 'option', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
+        { id: 'opt_devs', kind: 'option', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
+        { id: 'fac_cost', kind: 'factor', label: 'Hiring Cost', category: 'controllable', observed_state: { value: 120000, unit: 'GBP', extractionType: 'explicit', factor_type: 'cost' } },
+        { id: 'fac_velocity', kind: 'factor', label: 'Team Velocity', category: 'controllable', observed_state: { value: 0.7, extractionType: 'inferred', factor_type: 'other' } },
+        { id: 'out_delivery', kind: 'outcome', label: 'Feature Delivery Rate' },
+      ],
+      edges: [
+        { from: 'dec_1', to: 'opt_lead', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'dec_1', to: 'opt_devs', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_lead', to: 'fac_cost', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_lead', to: 'fac_velocity', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_devs', to: 'fac_cost', strength: { mean: 0.6, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_devs', to: 'fac_velocity', strength: { mean: 0.7, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_cost', to: 'out_delivery', strength: { mean: -0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' },
+        { from: 'fac_velocity', to: 'out_delivery', strength: { mean: 0.75, std: 0.08 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'out_delivery', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    };
+
+    const store = createNoopSessionStore({ loadGraphResult: graph });
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(BASE.scenario_id, 'req-snap-1', store);
+
+    expect(snapshot.goal_node_id).toBe('goal_1');
+    expect(snapshot.options).toEqual([
+      { option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
+      { option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
+    ]);
   });
 });

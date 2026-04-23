@@ -97,7 +97,36 @@ export const OLUMI_ACTION_TOOL = {
               additionalProperties: false,
               properties: {
                 name: { type: 'string' },
-                value: {},
+                value: {
+                  anyOf: [
+                    { type: 'number' },
+                    { type: 'string' },
+                    { type: 'boolean' },
+                    {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        value: {
+                          anyOf: [
+                            { type: 'number' },
+                            { type: 'string' },
+                            { type: 'boolean' },
+                          ],
+                        },
+                        raw_value: {
+                          anyOf: [
+                            { type: 'number' },
+                            { type: 'string' },
+                            { type: 'boolean' },
+                          ],
+                        },
+                        unit: { type: 'string' },
+                        cap: { type: 'number' },
+                      },
+                      required: ['value'],
+                    },
+                  ],
+                },
                 operator: {
                   type: 'string',
                   enum: ['set', 'increase', 'decrease', 'multiply'],

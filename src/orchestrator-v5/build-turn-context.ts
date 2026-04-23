@@ -25,6 +25,8 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact, SessionTurn, TurnContext } from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
+import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
+import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
 import { SessionReadError, type SessionStore } from './session/store.js';
@@ -55,6 +57,16 @@ export interface BuildTurnContextOptions {
    * real Supabase.
    */
   readonly sessionStore?: SessionStore;
+}
+
+export interface RunAnalysisScenarioSnapshot {
+  readonly graph: GraphV3T;
+  readonly options: Array<{
+    readonly option_id: string;
+    readonly label: string;
+    readonly interventions: Record<string, number>;
+  }>;
+  readonly goal_node_id: string;
 }
 
 // v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
@@ -266,4 +278,57 @@ export async function loadPersistedGraph(
     );
     return null;
   }
+}
+
+export async function loadScenarioSnapshotForRunAnalysis(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<RunAnalysisScenarioSnapshot> {
+  const persistedGraph = await loadPersistedGraph(scenarioId, requestId, sessionStore);
+  if (!persistedGraph) {
+    throw new Error(`No persisted graph found for scenario ${scenarioId}`);
+  }
+
+  const parsedGraph = GraphV3.safeParse(persistedGraph);
+  if (!parsedGraph.success) {
+    throw new Error(`Persisted graph failed GraphV3 validation for scenario ${scenarioId}`);
+  }
+
+  const readiness = computeStructuralReadiness(parsedGraph.data);
+  if (!readiness?.goal_node_id) {
+    throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
+  }
+
+  return {
+    graph: parsedGraph.data,
+    options: readiness.options.map((option) => ({
+      option_id: option.option_id,
+      label: option.label,
+      interventions: normaliseNumericInterventions(option.interventions),
+    })),
+    goal_node_id: readiness.goal_node_id,
+  };
+}
+
+function normaliseNumericInterventions(
+  interventions: Record<string, unknown>,
+): Record<string, number> {
+  const entries: Array<[string, number]> = [];
+  for (const [factorId, rawValue] of Object.entries(interventions)) {
+    const numeric = extractNumericInterventionValue(rawValue);
+    if (numeric !== null) entries.push([factorId, numeric]);
+  }
+  return Object.fromEntries(entries);
+}
+
+function extractNumericInterventionValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = (value as Record<string, unknown>).value;
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
 }

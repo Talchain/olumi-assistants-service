@@ -85,6 +85,7 @@ import {
   createRunAnalysisHandler,
   type ScenarioReader,
 } from './handlers/run-analysis.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 
 /**
  * Input to a handler invocation. Populated by dispatch.ts from the same
@@ -147,12 +148,8 @@ export interface RegistryOverrides {
  * The error message is deliberately explicit so production logs pinpoint
  * the missing wiring rather than surfacing a generic `TypeError`.
  */
-const NOT_WIRED_SCENARIO_READER: ScenarioReader = () => {
-  return Promise.reject(
-    new Error(
-      'run_analysis scenarioReader not injected — tests must pass a mock via createRegistry({scenarioReader}); production wiring is scope for a later slice',
-    ),
-  );
+const DEFAULT_SCENARIO_READER: ScenarioReader = (scenarioId) => {
+  return loadScenarioSnapshotForRunAnalysis(scenarioId, `run_analysis:${scenarioId}`);
 };
 
 /**
@@ -168,7 +165,7 @@ const NOT_WIRED_SCENARIO_READER: ScenarioReader = () => {
 export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
   const plotClient =
     overrides?.plotClient ?? resolvePlotClient();
-  const scenarioReader = overrides?.scenarioReader ?? NOT_WIRED_SCENARIO_READER;
+  const scenarioReader = overrides?.scenarioReader ?? DEFAULT_SCENARIO_READER;
 
   const runAnalysis = createRunAnalysisHandler({ plotClient, scenarioReader });
 
