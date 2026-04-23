@@ -842,6 +842,34 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       expect((global as any).__test_loadGraph_calls[0]).toBe(BASE_PAYLOAD.scenario_id);
     });
 
+    it('threads the persisted graph into the routing context pack for follow-up turns', async () => {
+      (global as any).__test_persisted_graph = {
+        nodes: [
+          { id: 'goal_launch', kind: 'goal', label: 'Ship on time' },
+          { id: 'opt_launch_now', kind: 'option', label: 'Launch now' },
+        ],
+        edges: [],
+      };
+
+      let routedPrompt = '';
+      const routingAdapter = mockRoutingAdapter(async (args) => {
+        routedPrompt = String(args.messages?.[0]?.content ?? '');
+        return mkTextResult('follow-up response');
+      });
+
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, message: 'What are the trade-offs?' },
+        'req-guest-pack',
+        {
+          routingAdapter,
+        },
+      );
+
+      expect(routedPrompt).toContain('"label": "Launch now"');
+      expect(routedPrompt).toContain('"goal_launch"');
+      expect(routedPrompt).toContain('"options": 1');
+    });
+
     it('two-turn sequence: turn 1 persists, turn 2 loads the same graph', async () => {
       const graphState = { nodes: [{ id: 'node-1', kind: 'factor', label: 'Option A' }], edges: [] };
       const routingAdapter = mockRoutingAdapter(async () => mkTextResult('response'));

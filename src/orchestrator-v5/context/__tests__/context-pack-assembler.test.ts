@@ -139,6 +139,25 @@ describe('assembleContextPack', () => {
     expect(pack.graph.counts.constraints).toBe(1);
   });
 
+  it('derives graph.options from option-kind nodes when persisted graph has no explicit options[]', () => {
+    const graph: GraphWithOptions = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Ship on time' },
+        { id: 'opt_launch_now', kind: 'option', label: 'Launch now' },
+        { id: 'opt_delay', kind: 'option', label: 'Delay' },
+      ],
+      edges: [],
+    };
+
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], graph });
+
+    expect(pack.graph.counts.options).toBe(2);
+    expect(pack.graph.options).toEqual([
+      { id: 'opt_launch_now', label: 'Launch now' },
+      { id: 'opt_delay', label: 'Delay' },
+    ]);
+  });
+
   it('conversation is capped at CONTEXT_PACK_RECENT_TURNS_CAP (5)', () => {
     const priorTurns = Array.from({ length: 8 }, (_, idx) =>
       makeSessionTurn({ turn_id: `t-prev-${idx}`, created_at: `2026-04-18T23:${String(idx).padStart(2, '0')}:00.000Z` }),

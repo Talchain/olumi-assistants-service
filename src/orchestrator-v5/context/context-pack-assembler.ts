@@ -199,7 +199,9 @@ function projectGraph(graph: GraphWithOptions | null): ContextPackGraph {
 
   const nodes = graph.nodes;
   const edges = graph.edges;
-  const options = graph.options ?? [];
+  const options = graph.options ?? nodes
+    .filter((node) => node.kind === 'option')
+    .map((node) => ({ id: node.id, label: typeof node.label === 'string' ? node.label : null }));
   const goals = nodes.filter((n) => (n as { kind?: string }).kind === 'goal');
   const constraints = graph.goal_constraints ?? [];
 

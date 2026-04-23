@@ -62,6 +62,7 @@ export interface BuildTurnContextOptions {
 export interface RunAnalysisScenarioSnapshot {
   readonly graph: GraphV3T;
   readonly options: Array<{
+    readonly id: string;
     readonly option_id: string;
     readonly label: string;
     readonly interventions: Record<string, number>;
@@ -303,6 +304,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   return {
     graph: parsedGraph.data,
     options: readiness.options.map((option) => ({
+      id: option.option_id,
       option_id: option.option_id,
       label: option.label,
       interventions: normaliseNumericInterventions(option.interventions),

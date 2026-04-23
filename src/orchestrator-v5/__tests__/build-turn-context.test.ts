@@ -185,8 +185,8 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
 
     expect(snapshot.goal_node_id).toBe('goal_1');
     expect(snapshot.options).toEqual([
-      { option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
-      { option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
+      { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
+      { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
     ]);
   });
 });

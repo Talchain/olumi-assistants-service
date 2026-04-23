@@ -243,6 +243,7 @@ export async function runTurnExecutor(
   let graphLookupStatsForLog: GraphLookupStats | undefined;
   let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
     'no_graph';
+  let graphStateForTurn: GraphStateIngress | null = options.graphState ?? null;
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -264,13 +265,12 @@ export async function runTurnExecutor(
       // Fallback: when graphState is absent (follow-up turns), load the
       // persisted graph via build-turn-context (the declared session access
       // boundary). Errors are absorbed there; null means no graph available.
-      let graphStateForLookup = options.graphState ?? null;
-      if (!graphStateForLookup) {
+      if (!graphStateForTurn) {
         const persistedGraph = await loadPersistedGraph(payload.scenario_id, requestId);
         if (persistedGraph) {
           const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
           if (parsed.success) {
-            graphStateForLookup = parsed.data;
+            graphStateForTurn = parsed.data;
             log.info(
               { request_id: requestId, scenario_id: payload.scenario_id },
               'V5 TurnExecutor loaded persisted graph from database for graph lookup fallback',
@@ -284,7 +284,7 @@ export async function runTurnExecutor(
         }
       }
 
-      const adapterResult = buildGraphLookup(graphStateForLookup);
+      const adapterResult = buildGraphLookup(graphStateForTurn);
       graphLookupBuildReason = adapterResult.kind;
       if (adapterResult.kind === 'ok') {
         graphLookupForValidate = adapterResult.lookup;
@@ -355,7 +355,7 @@ export async function runTurnExecutor(
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
-        graph: options.graphState ?? null,
+        graph: graphStateForTurn,
         analysis: analysisSummary,
         coaching: coachingCache,
       });
@@ -745,15 +745,15 @@ export async function runTurnExecutor(
     // adapter stats + raw ingress arrays to preserve ingress counts.
     // Without this, dashboards querying "turns with graph > N nodes"
     // would miss fail-fast turns that DID carry a graph payload.
-    const ingressNodeCount = options.graphState?.nodes.length ?? 0;
-    const ingressEdgeCount = options.graphState?.edges.length ?? 0;
+    const ingressNodeCount = graphStateForTurn?.nodes.length ?? 0;
+    const ingressEdgeCount = graphStateForTurn?.edges.length ?? 0;
     const graphNodeCount =
       contextPackForLog?.graph.counts.nodes
       ?? graphLookupStatsForLog?.total_nodes
       ?? ingressNodeCount;
     const graphEdgeCount =
       contextPackForLog?.graph.counts.edges ?? ingressEdgeCount;
-    const graphHash = computeDeterministicGraphHash(options.graphState ?? null);
+    const graphHash = computeDeterministicGraphHash(graphStateForTurn);
     const record = buildRoutingLog({
       turn_id: context.request_id,
       scenario_id: context.session_id,
