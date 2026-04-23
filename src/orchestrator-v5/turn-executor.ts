@@ -67,6 +67,7 @@ import {
 } from './tools/registry.js';
 import { sanitiseNarrateOutput } from './sanitise.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
+import { getSessionStore } from './session/index.js';
 
 import { readCoachingCache } from './coaching/coaching-cache-reader.js';
 import { enrichRunAnalysisWithDecisionReview } from './coaching/decision-review-enricher.js';
@@ -95,9 +96,10 @@ import {
   type GraphLookupStats,
 } from './routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
-import type {
-  GraphStateIngress,
-  AnalysisStateIngress,
+import {
+  GraphStateIngressSchema,
+  type GraphStateIngress,
+  type AnalysisStateIngress,
 } from './boundary/request-extensions.js';
 import type { V2RunResponseEnvelope } from '../orchestrator/types.js';
 import { compactAnalysis } from '../orchestrator/context/analysis-compact.js';
@@ -259,7 +261,42 @@ export async function runTurnExecutor(
         dropped_by_missing_id: 0,
       });
     } else {
-      const adapterResult = buildGraphLookup(options.graphState ?? null);
+      // Fallback: when graphState is absent (follow-up turns), try to load
+      // the persisted graph from the database. This is critical for guest-mode
+      // scenarios where the UI may not send graph_state on every turn.
+      let graphStateForLookup = options.graphState ?? null;
+      if (!graphStateForLookup) {
+        try {
+          const sessionStore = getSessionStore();
+          const persistedGraph = await sessionStore.loadGraph(payload.scenario_id);
+          if (persistedGraph) {
+            // The persisted graph is stored as raw JSONB. We need to validate
+            // it against the ingress schema before passing to buildGraphLookup.
+            // If it fails validation, we fall back to null (no_graph).
+            const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
+            if (parsed.success) {
+              graphStateForLookup = parsed.data;
+              log.info(
+                { request_id: requestId, scenario_id: payload.scenario_id },
+                'V5 TurnExecutor loaded persisted graph from database for graph lookup fallback',
+              );
+            } else {
+              log.warn(
+                { request_id: requestId, scenario_id: payload.scenario_id, issues: parsed.error.issues },
+                'V5 TurnExecutor persisted graph failed ingress schema validation, falling back to no_graph',
+              );
+            }
+          }
+        } catch (error) {
+          // Load errors are not fatal — we fall back to no_graph and continue
+          log.warn(
+            { request_id: requestId, scenario_id: payload.scenario_id, error },
+            'V5 TurnExecutor loadGraph failed, falling back to no_graph',
+          );
+        }
+      }
+
+      const adapterResult = buildGraphLookup(graphStateForLookup);
       graphLookupBuildReason = adapterResult.kind;
       if (adapterResult.kind === 'ok') {
         graphLookupForValidate = adapterResult.lookup;
@@ -672,6 +709,7 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
+        graph: options.graphState,
       });
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
@@ -818,17 +856,42 @@ export async function runTurnExecutor(
           routing_error_cause: err.cause,
         });
         return finalizeRun();
-      case 'api_error':
+      case 'api_error': {
         log.warn(
-          { request_id: requestId, cause: err.cause, provider_message: err.provider_message },
+          { request_id: requestId, cause: err.cause, provider_message: err.provider_message, status: err.status },
           'V5 TurnExecutor routing api_error',
         );
-        failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
-        response = buildFailureResponse('LLM_SCHEMA_VIOLATION', context.stage, {
+        // 400-level → LLM_REQUEST_INVALID (not retryable; bad request from our side)
+        // 429       → LLM_RATE_LIMITED (retryable after backoff)
+        // 500-level → LLM_SCHEMA_VIOLATION (maps to LLM_UNAVAILABLE; server unavailable)
+        // unknown   → LLM_SCHEMA_VIOLATION (fail-safe)
+        const errorContext: Record<string, unknown> = {
           phase: 'orient',
           routing_error_cause: err.cause,
-        });
+        };
+        if (err.status) {
+          errorContext.http_status = err.status;
+          if (err.status >= 400 && err.status < 500) {
+            if (err.status === 429) {
+              failureType = INTERNAL_TO_WIRE.LLM_RATE_LIMITED;
+              errorContext.retry_after_seconds = 60;
+              response = buildFailureResponse('LLM_RATE_LIMITED', context.stage, errorContext);
+            } else {
+              failureType = INTERNAL_TO_WIRE.LLM_REQUEST_INVALID;
+              errorContext.retryable = false;
+              response = buildFailureResponse('LLM_REQUEST_INVALID', context.stage, errorContext);
+            }
+          } else {
+            failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
+            errorContext.retryable = true;
+            response = buildFailureResponse('LLM_SCHEMA_VIOLATION', context.stage, errorContext);
+          }
+        } else {
+          failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
+          response = buildFailureResponse('LLM_SCHEMA_VIOLATION', context.stage, errorContext);
+        }
         return finalizeRun();
+      }
     }
   }
 
