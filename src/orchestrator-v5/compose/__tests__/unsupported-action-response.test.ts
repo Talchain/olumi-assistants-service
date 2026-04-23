@@ -89,6 +89,7 @@ describe('composeUnsupportedActionResponse', () => {
       });
       expect(category).toBe('value_change');
       expect(response.assistant_text).toMatch(/inspector/i);
+      expect(response.assistant_text).toMatch(/set factor value/i);
     });
 
     it('analysis-dependent handlers with no analysis ask the user to run it first', () => {

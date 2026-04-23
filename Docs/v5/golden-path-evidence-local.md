@@ -71,7 +71,7 @@ Test: 8 integration test assertions in [tests/integration/orchestrate-v2-unsuppo
 **Quality examples** (rendered text verbatim from unit-test assertions):
 
 - `add_option` → *"I can't make structural changes to the model through chat in this version. You can make this change (add option) directly on the canvas, then come back and I can run the analysis on the updated model."*
-- `set_factor_value` → *"Direct value updates aren't available through chat yet. You can adjust values in the inspector panel on the right, and once updated I can run the analysis with your new numbers."*
+- `set_factor_value` → *"Direct value updates like set factor value aren't available through chat yet. You can adjust values in the inspector panel on the right, and once updated I can run the analysis with your new numbers."*
 - `explain_result` (no analysis present) → *"That needs analysis results first. Run the analysis, and then I can dig into explain result for you."*
 - `explain_result` (analysis present) → *"I can't run explain result as a separate step yet, but the analysis has already produced results for this decision. Ask a follow-up question about the options or drivers and I'll work from those results."*
 

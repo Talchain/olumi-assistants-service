@@ -130,7 +130,7 @@ function buildText(
       );
     case 'value_change':
       return (
-        "Direct value updates aren't available through chat yet. " +
+        `Direct value updates like ${safeHandlerId.replace(/_/g, ' ')} aren't available through chat yet. ` +
         'You can adjust values in the inspector panel on the right, and once updated ' +
         "I can run the analysis with your new numbers."
       );
