@@ -78,7 +78,7 @@ Narrowly enumerated. Every fatal case returns HTTP 500 with a typed `BoundaryErr
 
 **Derived minimum "usable result fields" contract** (verified against the above capture):
 - `option_comparison[]` OR `results[]`, length ≥1
-- At least one entry carrying `option_id` (string) AND `option_label` (string) AND `win_probability` (finite number)
+- At least one entry carrying a non-empty `option_id` (string) **OR** `option_label` (string), AND a finite numeric `win_probability`. The handler's winner-selection reads `option_label` first and falls back to `option_id` (see `run-analysis.ts` line 576–580), so either identifier is sufficient floor.
 - Top-level `winner` MAY be null — the handler MUST derive winner from `option_comparison` via `selectLeadingOptionId`
 
 ### Status matrix

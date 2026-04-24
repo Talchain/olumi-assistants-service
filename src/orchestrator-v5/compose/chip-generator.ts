@@ -135,7 +135,8 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
   // present (some options vs none) so the user always has a visible
   // next step.
   if (input.stage === 'analyse' && !hasAnalysis && handlerJustRan == null) {
-    const isReady = input.analysisReady?.status === 'ready';
+    const readyStatus = input.analysisReady?.status;
+    const isReady = readyStatus === 'ready';
     const hasOptions = (input.graphOptionCount ?? 0) > 0;
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
@@ -151,10 +152,25 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
         ),
       ]);
     }
-    // Options exist but readiness is not 'ready' (or readiness is
-    // unknown). Conversational fallback — the user's next move is to
-    // configure what's missing, not to fire a handler that will
-    // PRECONDITION_UNMET.
+    // Follow-up review: when readiness is KNOWN but not ready (e.g.
+    // needs_user_mapping / needs_encoding), the user's real next step
+    // is to configure missing intervention values — NOT to retry an
+    // analysis the precondition won't let run. Emitting "Run the analysis"
+    // in this branch loop-baited Sonnet back toward a run_analysis call
+    // that validator would reject (200 coaching under hardening, but a
+    // wasted round-trip either way). Only the truly-unknown readiness
+    // case (analysisReady undefined, e.g. no graph at all) keeps the
+    // generic run-analysis prompt — the user may not yet know which
+    // configuration is missing.
+    if (readyStatus != null && readyStatus !== 'ready') {
+      return cap([
+        promptChip(
+          'set_option_values',
+          'Set values for options',
+          'Help me set up the options for this decision so the analysis can run.',
+        ),
+      ]);
+    }
     return cap([
       promptChip(
         'ask_run_analysis',

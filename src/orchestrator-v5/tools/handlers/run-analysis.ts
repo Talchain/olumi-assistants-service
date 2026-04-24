@@ -94,6 +94,15 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
     'Ran analysis on your current scenario. Some results may be incomplete — treat with caution.',
   UNKNOWN_STATUS:
     'Ran analysis on your current scenario. The analysis engine reported an unfamiliar status — treat the result with caution.',
+  // V5 alpha hardening follow-up: partial status with zero result
+  // records. Pre-follow-up this fell through to NO_RESULTS silently,
+  // dropping the partial-run caveat. The user needs to know the run
+  // was flagged partial AND produced no comparable options so they can
+  // distinguish "analysis ran cleanly, nothing to compare" from
+  // "analysis was cut short and produced nothing". Contract Part C
+  // requires a caveat for partial regardless of record count.
+  PARTIAL_NO_RESULTS:
+    'Ran analysis on your current scenario. The engine flagged the run as partial and produced no option comparisons — treat with caution.',
 } as const;
 
 // ============================================================================
@@ -528,9 +537,21 @@ function selectTemplate(
   outcomeKind: 'ok' | 'partial' | 'unknown',
   resultCount: number,
 ): string {
+  // Caveat-bearing outcomes take precedence over the bare NO_RESULTS
+  // template — the user needs to know the run was flagged partial /
+  // unknown-status regardless of whether any records survived to be
+  // compared. Contract Part C: partial REQUIRES a caveat.
+  if (outcomeKind === 'partial') {
+    return resultCount === 0
+      ? RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL_NO_RESULTS
+      : RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL;
+  }
+  if (outcomeKind === 'unknown') {
+    // Unknown with zero records is a fatal path (see evaluateAnalysisStatus)
+    // and does not reach here. Kept for exhaustiveness.
+    return RUN_ANALYSIS_ASSISTANT_TEMPLATES.UNKNOWN_STATUS;
+  }
   if (resultCount === 0) return RUN_ANALYSIS_ASSISTANT_TEMPLATES.NO_RESULTS;
-  if (outcomeKind === 'partial') return RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL;
-  if (outcomeKind === 'unknown') return RUN_ANALYSIS_ASSISTANT_TEMPLATES.UNKNOWN_STATUS;
   return RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT;
 }
 

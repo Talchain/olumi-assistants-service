@@ -106,10 +106,11 @@ describe('generateChips', () => {
     expect(chips[0].label).toBe('Set values for options');
   });
 
-  it('analyse stage with analysisReady=needs_user_mapping → conversational prompt (options exist)', () => {
-    // Options exist but interventions are missing → conversational prompt,
-    // never the executable variant (which would PRECONDITION_UNMET or
-    // options_not_configured at the handler).
+  it('analyse stage with analysisReady=needs_user_mapping → "Set values for options" (not "Run the analysis")', () => {
+    // Follow-up review: when readiness is KNOWN but not ready, steer
+    // the user toward the configuration they're missing. Pre-follow-up
+    // this emitted "Run the analysis" which loop-baited Sonnet back
+    // toward a run_analysis call that validator would reject.
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
@@ -124,10 +125,10 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Run the analysis');
+    expect(chips[0].label).toBe('Set values for options');
   });
 
-  it('analyse stage with analysisReady=needs_encoding → conversational prompt', () => {
+  it('analyse stage with analysisReady=needs_encoding → "Set values for options"', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
@@ -142,6 +143,24 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
+    expect(chips[0].label).toBe('Set values for options');
+  });
+
+  it('analyse stage with analysisReady=undefined + options present → generic "Run the analysis" prompt', () => {
+    // Distinct from known-not-ready: when readiness is UNKNOWN (no
+    // graph / unparseable graph) we preserve the generic prompt because
+    // we can\'t tell the user which specific configuration is missing.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      graphOptionCount: 2,
+      // analysisReady intentionally omitted (unknown)
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBeUndefined();
+    expect(chips[0].label).toBe('Run the analysis');
   });
 
   it('analyse stage with analysisReady=undefined (unknown readiness) → never executable', () => {

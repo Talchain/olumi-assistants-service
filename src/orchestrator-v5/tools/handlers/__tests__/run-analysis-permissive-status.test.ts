@@ -224,15 +224,24 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     expect((warnCall![0] as Record<string, unknown>).usable_fields).toBe(false);
   });
 
-  it('partial status with no result records falls through to NO_RESULTS template', async () => {
-    // Edge case: PLoT reports partial but results array is empty. The
-    // NO_RESULTS template still wins — no results to caveat about.
+  it('partial status with no result records emits PARTIAL_NO_RESULTS caveat', async () => {
+    // Follow-up review: pre-follow-up this fell through to NO_RESULTS
+    // silently, dropping the partial-run caveat. Contract Part C requires
+    // a caveat for partial regardless of record count — the user needs to
+    // distinguish "analysis ran cleanly, nothing to compare" from
+    // "analysis was cut short and produced nothing".
     const handler = createRunAnalysisHandler({
       plotClient: mkPlot(withStatus('partial', { option_comparison: [] })),
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.NO_RESULTS);
+    expect(outcome.assistant_text).toBe(
+      RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL_NO_RESULTS,
+    );
+    // Caveat copy mentions both "partial" and the zero-comparisons fact
+    // so users can't misread this as a clean empty run.
+    expect(outcome.assistant_text.toLowerCase()).toContain('partial');
+    expect(outcome.assistant_text.toLowerCase()).toMatch(/no option comparisons|incomplete/);
   });
 
   it('does NOT extend the handler fact schema for partial/unknown status', async () => {

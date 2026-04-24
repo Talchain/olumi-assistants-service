@@ -339,6 +339,12 @@ export async function routeWithToolUse(
   // JSON-stringify cost is a few ms on typical packs.
   const contextPackChars = JSON.stringify(contextPack).length;
   const systemPromptChars = (firstCallArgs.system as string).length;
+  // V5 alpha hardening follow-up: emit the full primary-event obs
+  // schema with nulls for fields unknown at routing-call time
+  // (handler_proposed / validator_outcome / response_type are populated
+  // by later lifecycle events). Schema consistency across every
+  // primary event means one log query joins cleanly on any of the
+  // obs fields.
   log.debug(
     {
       event: 'v5.routing.calling_anthropic',
@@ -349,6 +355,9 @@ export async function routeWithToolUse(
       prompt_hash: ROUTING_PROMPT_HASH,
       system_chars: systemPromptChars,
       context_pack_chars: contextPackChars,
+      handler_proposed: null,
+      validator_outcome: null,
+      response_type: null,
       message_length: message.length,
     },
     'V5 routing call (initial)',
@@ -393,6 +402,9 @@ export async function routeWithToolUse(
       prompt_hash: ROUTING_PROMPT_HASH,
       system_chars: systemPromptChars,
       context_pack_chars: contextPackChars,
+      handler_proposed: null,
+      validator_outcome: null,
+      response_type: null,
       repair: true,
     },
     'V5 routing call (repair)',
