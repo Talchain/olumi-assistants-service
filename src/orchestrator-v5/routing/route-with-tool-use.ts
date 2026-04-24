@@ -124,9 +124,28 @@ export class RoutingError extends Error {
 // -----------------------------------------------------------------------
 
 /**
- * Minimal routing system prompt. Intentionally narrow: this module is the
- * routing spine, not the full orchestrator. The production orchestrator
- * prompt is authored separately (spec v2 §4 — Claude drafts).
+ * Routing system prompt — loaded as a single hardcoded constant and handed
+ * verbatim to `adapter.chatWithTools` as `system:`. There is no PMS or
+ * templating indirection on this path (V5 routing does not go through the
+ * prompt-store infrastructure that the unified pipeline uses).
+ *
+ * **Prompt installation point (V5 Task 3.1).** When a new routing prompt
+ * text is approved, replace this constant in full. No mechanism changes
+ * required: the adapter accepts arbitrary system-prompt length up to the
+ * model's input window (Claude 4.x ~200K tokens). The single-user-message
+ * assembly in `buildUserMessage` reserves the rest of the budget for
+ * ContextPack + user turn; a ~5K-token routing prompt still leaves ~195K
+ * tokens of runway, well above the observed ~7-10K token ContextPack.
+ *
+ * **Single-turn constraint.** Conversation history text is NOT yet in the
+ * ContextPack (Task 1.1 deferred — requires a Supabase migration + schema
+ * change). Any prompt installed here must be designed for single-turn
+ * self-containment: never assume prior user messages, never say "as we
+ * discussed", never treat the current turn as continuing a multi-turn
+ * coaching arc. Each response must work as a freestanding answer.
+ *
+ * Intentionally narrow in its current form: this module is the routing
+ * spine, not the full orchestrator.
  */
 export const ROUTING_SYSTEM_PROMPT = `You are Olumi's routing layer. You receive a ContextPack and a user turn. \
 Your single job is to decide the intent:

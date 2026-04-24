@@ -88,6 +88,7 @@ import {
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import { computeDeterministicGraphHash } from './context/graph-hash.js';
 import {
+  ROUTING_SYSTEM_PROMPT,
   RoutingError,
   routeWithToolUse,
   type RoutingResult,
@@ -406,6 +407,27 @@ export async function runTurnExecutor(
         ...cqeSummary,
       });
       contextPackForLog = contextPack;
+
+      // V5 Task 3.2: observability — one debug log per turn after ContextPack
+      // assembly. Fields confirm context + compose changes are active in
+      // production without adding noise to production error/warn streams.
+      // Chip count is logged separately at compose time (implicit via the
+      // response payload size; audited from Supabase if required).
+      log.debug(
+        {
+          request_id: requestId,
+          session_id: context.session_id,
+          system_chars: ROUTING_SYSTEM_PROMPT.length,
+          context_pack_chars: JSON.stringify(contextPack).length,
+          conversation_history_turns: contextPack.conversation.recent_turns.length,
+          graph_compacted: compactOutcome.kind === 'compacted',
+          graph_compact_via:
+            compactOutcome.kind === 'compacted' ? compactOutcome.via : null,
+          analysis_state_source: analysisStateSource,
+          analysis_staleness_reason: analysisStalenessReason,
+        },
+        'V5 TurnExecutor context pack assembled',
+      );
       storeTurnDebug({
         turn_id: requestId,
         session_id: context.session_id,
