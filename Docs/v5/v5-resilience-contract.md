@@ -163,6 +163,21 @@ Each mismatch below becomes a Phase 2 sub-task.
 
 ---
 
+## Part F — Routing-log redaction (principle 3 specifics)
+
+Routing log JSONL sink (`logs/v5-routing-logs.jsonl`) redacts user decision text by default per principle 3 ("no user decision text in logs"). Opt-in raw capture (`routingLogRedacted: false`) is permitted for debugging only — never the production default. When redacted:
+
+- `raw_user_message` → `null`
+- `sonnet_text` → `null`
+- `sonnet_text_hash` → SHA-256 of the original Sonnet text (one-way, preserved for offline eval correlation)
+
+When opt-in raw capture is set, `raw_user_message` and `sonnet_text` carry the original strings and `sonnet_text_hash` is `null`. Structural fields (scenario_id, intent_class, handler_id, validation_error_code, graph hash, CQE stats, coaching_signal_id) land in both modes — redaction only affects the two user-text fields.
+
+**Caller contract:**
+- Production traffic MUST NOT set `routingLogRedacted: false`.
+- Evaluation tooling / staging audit runs MAY opt in, with explicit comment-level justification at the call site.
+- Tests covering opt-in behaviour SHOULD assert `redacted === false` explicitly so a default-flip regression is caught immediately.
+
 ## Non-goals (explicitly out of scope)
 
 - Context+compose layer changes (just deployed).

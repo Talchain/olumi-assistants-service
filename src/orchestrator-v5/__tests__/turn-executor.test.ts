@@ -757,6 +757,11 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
 
       expect(writer).toHaveBeenCalledTimes(1);
       const record = writer.mock.calls[0]![0];
+      // V5 alpha hardening follow-up: default redaction is now TRUE.
+      // Structural signals (scenario_id, intent_class, handler_id,
+      // resolution_status, error codes) still land; user decision text
+      // and Sonnet text are dropped/hashed by default. A dedicated
+      // opt-in test below covers the raw-capture debug path.
       expect(record).toMatchObject({
         scenario_id: BASE_PAYLOAD.scenario_id,
         intent_class: 'execute',
@@ -764,9 +769,75 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         resolution_status: 'resolved',
         validation_error_code: null,
         routing_error_cause: null,
-        raw_user_message: BASE_PAYLOAD.message,
-        sonnet_text: 'pre-action context',
       });
+      expect(record.raw_user_message).toBeNull();
+      expect(record.sonnet_text).toBeNull();
+      expect(record.sonnet_text_hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(record.redacted).toBe(true);
+    });
+
+    it('default is redaction: raw_user_message + sonnet_text absent from JSONL sink without opt-in', async () => {
+      // P1-2 regression guard. Principle 3 of the resilience contract
+      // forbids user decision text in logs; the JSONL sink must drop
+      // raw fields unless the caller explicitly opts into raw capture.
+      const secretText = 'should-not-leak-acquire-company-x-for-50m-usd';
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkTextResult('internal sonnet narration — ought to be hashed only'),
+      );
+      const writer = vi.fn().mockResolvedValue(undefined);
+
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, message: secretText },
+        'req-redact-default',
+        {
+          routingAdapter,
+          routingLogWriter: writer,
+          // No routingLogRedacted — default applies.
+        },
+      );
+      await new Promise((r) => setImmediate(r));
+
+      expect(writer).toHaveBeenCalledTimes(1);
+      const record = writer.mock.calls[0]![0];
+      expect(record.redacted).toBe(true);
+      expect(record.raw_user_message).toBeNull();
+      expect(record.sonnet_text).toBeNull();
+      // SHA-256 hash of the sonnet text is retained for offline eval
+      // correlation — hash is one-way, so no user text is recoverable.
+      expect(record.sonnet_text_hash).toMatch(/^[0-9a-f]{64}$/);
+
+      // Full payload sanity scan: the user's decision text MUST NOT
+      // appear anywhere in the serialised routing log record.
+      expect(JSON.stringify(record)).not.toContain(secretText);
+    });
+
+    it('opt-in routingLogRedacted=false: raw fields preserved for debugging', async () => {
+      // P1-2 override test. Raw capture is permitted for debugging and
+      // staging audits only. This test proves the opt-in path still
+      // works — callers who want to correlate decision text with
+      // routing behaviour (e.g. evaluation tooling on a pre-prod
+      // staging clone) can explicitly opt in.
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(VALID_EXECUTE_INPUT, 'pre-action context'),
+      );
+      const writer = vi.fn().mockResolvedValue(undefined);
+
+      await runTurnExecutor(BASE_PAYLOAD, 'req-redact-off', {
+        routingAdapter,
+        routingLogWriter: writer,
+        routingLogRedacted: false,
+      });
+      await new Promise((r) => setImmediate(r));
+
+      expect(writer).toHaveBeenCalledTimes(1);
+      const record = writer.mock.calls[0]![0];
+      expect(record.redacted).toBe(false);
+      expect(record.raw_user_message).toBe(BASE_PAYLOAD.message);
+      expect(record.sonnet_text).toBe('pre-action context');
+      // When redacted=false, sonnet_text_hash is null (no point hashing
+      // when the raw text is already captured) — this is the existing
+      // contract in routing-log.ts wrapRecord.
+      expect(record.sonnet_text_hash).toBeNull();
     });
 
     it('emits a routing log record on routing failure (LLM_TIMEOUT path)', async () => {

@@ -190,8 +190,13 @@ export interface RunTurnExecutorOptions {
    */
   readonly routingLogWriter?: (record: RoutingLog) => Promise<void>;
   /**
-   * Privacy override for the routing log. When true, raw_user_message is
-   * dropped and sonnet_text is hashed. Defaults to false in this PoC.
+   * Privacy override for the routing log. When true (the default), the
+   * JSONL sink drops `raw_user_message` and replaces `sonnet_text` with
+   * a SHA-256 hash (`sonnet_text_hash`). Opt-in raw capture
+   * (`routingLogRedacted: false`) is permitted for debugging only —
+   * never the production default. See principle 3 of the V5 resilience
+   * contract ("no user decision text in logs") and Part F for the
+   * routing-log-specific statement.
    */
   readonly routingLogRedacted?: boolean;
   /**
@@ -1153,7 +1158,13 @@ export async function runTurnExecutor(
       compound_pattern_matched: contextPackForLog?.compound_pattern_matched ?? null,
       raw_user_message: payload.message,
       sonnet_text: sonnetTextForLog,
-      redacted: options.routingLogRedacted ?? false,
+      // V5 alpha hardening follow-up: default flipped from false to true.
+      // Principle 3 of the resilience contract forbids user decision text
+      // in logs; the JSONL sink used to retain raw fields unless the
+      // caller opted in to redaction. The opt-in direction is now reversed
+      // — callers must explicitly set `routingLogRedacted: false` to
+      // capture raw fields (debugging / staging-log audits only).
+      redacted: options.routingLogRedacted ?? true,
       created_at: new Date(startedAt).toISOString(),
       graph_node_count: graphNodeCount,
       graph_edge_count: graphEdgeCount,

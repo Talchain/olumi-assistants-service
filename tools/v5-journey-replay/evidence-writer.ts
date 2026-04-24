@@ -107,6 +107,26 @@ export function renderEvidencePack(
   );
   lines.push('');
 
+  // Discoveries section — items surfaced during review that are
+  // intentionally deferred outside this branch's scope. Each carries a
+  // one-line follow-up recommendation so Paul's next planning pass can
+  // slot them in. Kept in the pack (not a separate doc) so the next
+  // staging replay run has the deferred items visible in the same
+  // artefact.
+  lines.push('## Discoveries (deferred for follow-up)');
+  lines.push('');
+  lines.push(
+    '| area | observation | follow-up recommendation |',
+  );
+  lines.push('|---|---|---|');
+  lines.push(
+    '| Handler failure recovery (P1-1) | `translateExecuteError` composes a coaching response for `HandlerInvocationFailedError` but returns via `failureType = HANDLER_INVOCATION_FAILED` → HTTP 500. Principle 1 ("default recoverable") suggests retryable handler failures (plot_timeout, plot_error, scenario_read_failed, options_not_configured) should commit as direct_answer and return 200, mirroring the Phase 2.2 validator pattern. | Extend Part B of the resilience contract to enumerate handler-failure fatals (only analysis_blocked / analysis_failed remain fatal) and port the `commitDirectAnswer` pattern to `translateExecuteError`. One table-driven test per retryable cause_kind. |',
+  );
+  lines.push(
+    '| PLoT usable-fields enforcement on known statuses | `hasUsableResultFields` is only consulted for unknown statuses. Known statuses (`completed`, `computed`, `partial`) succeed regardless of whether records carry a usable id/label + finite probability. Contract Part C reads as a floor for ALL success paths; code enforces it selectively. | Thread `hasUsableResultFields` into the `ok` and `partial` branches of `evaluateAnalysisStatus`. When a known status arrives with no usable fields, demote to fatal (`analysis_not_completed`) with a dedicated cause_kind, or (softer) surface a caveat via assistant_text. Requires a decision on how strict to be. |',
+  );
+  lines.push('');
+
   const serverUnreachable = localRows.some((r) =>
     r.failing_contract === 'local server not running',
   );
