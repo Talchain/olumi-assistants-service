@@ -1,18 +1,20 @@
 # V5 Context + Compose Layer Evidence
 
-**Date:** 2026-04-24
+**Date:** 2026-04-24 (last updated after review-response cycle)
 **Branch:** `claude/v5-context-compose`
 **Baseline commit:** `5a4f1a6e` (staging HEAD at branch creation)
-**Final commit:** (see `git log claude/v5-context-compose --oneline` — 4 commits on top of baseline)
+**Final commits:** 6 on top of baseline (see `git log claude/v5-context-compose --oneline`)
 **Baseline tests (pre-branch):** 12,248 pass / 1 fail / 228 skipped / 1 todo (12,478 total)
-**Final tests:** 12,287 pass / 1 fail / 228 skipped / 1 todo (12,518 total)
-**Delta:** +39 passes (new V5 tests); 0 new failures. The one baseline failure (`tools/graph-evaluator/tests/adapters.test.ts` — fixture count mismatch) is pre-existing and unrelated to V5.
-**New tests added:** 40
-- 11 `compact-graph-for-contextpack.test.ts`
-- 13 `analysis-fallback.test.ts`
+**Final tests after review-response:** 12,294 pass / 0 fail / 228 skipped / 1 todo (12,523 total)
+**Delta:** +46 new passes; 0 new failures. The one pre-existing `adapters.test.ts` failure in the baseline was fixture-dependent and resolved independently of this branch.
+**New tests added (total):** 48
+- 12 `compact-graph-for-contextpack.test.ts` (was 11; +1 for `goal_constraints` passthrough)
+- 16 `analysis-fallback.test.ts` (was 13; +3 for label resolution)
 - 2 new in `tool-schema.test.ts` (enum + permissive parser)
-- 12 `chip-generator.test.ts`
-- 2 `route-with-tool-use-prompt-size.test.ts`
+- 14 `chip-generator.test.ts` (was 12; +2 for options-gating + setup-prompt fallback)
+- 2 `route-with-tool-use-prompt-size.test.ts` (content tightened post-review)
+- 1 updated in `turn-executor-failure-responses.test.ts` (chips-on-success)
+- 2 fixture updates in `tests/fixtures/contracts/b1/valid-turn-payload.json`
 
 ---
 
@@ -121,6 +123,27 @@ Chip count is observable via the response payload in Supabase (`v5_conversation_
 6. **Chip fixture regression resolved.** The B1 contract fixture `tests/fixtures/contracts/b1/valid-turn-payload.json` previously expected `suggested_actions: []` on an analyse-stage turn. Task 2.1 rules now emit a `Run analysis` chip in that context. Fixture updated in the same commit as the test change to keep the rule visible.
 
 ---
+
+## Review response (post-initial-commit)
+
+External review identified 5 P1 findings + 3 improvements. Each was critically analysed and addressed in-scope or rejected with reasoning. All 5 P1s addressed; 3 of 4 improvements addressed; 1 improvement (V4→V5 extraction refactor) rejected per the brief's explicit anti-cleanup scope lock.
+
+| # | Finding | Action | Commit |
+|---|---------|--------|--------|
+| P1.1 | `draft-graph-dispatch.ts` success path had `suggested_actions: []` despite the brief's chip-mapping table including post-draft chips | **Addressed** — new `buildPostDraftChips` helper emits executable Run analysis when `analysis_ready.status === "ready"`, else a `Set values for options` prompt, else `[]` on failed persistence | review-response |
+| P1.2 | Executable Run analysis chip emitted whenever analyse stage + no analysis, even when `run_analysis` would hit PRECONDITION_UNMET (no options) | **Addressed** — `generateChips` now takes `graphOptionCount` and gates the executable chip on `> 0`, otherwise falls back to `Set values for options` | review-response |
+| P1.3 | Compact path dropped `goal_constraints` | **Addressed** — assembler accepts `compactedConstraints` passthrough; turn-executor threads `graphStateForTurn.goal_constraints` alongside the compact graph | review-response |
+| P1.4 | `readFactsFor` had no `ORDER BY`; `buildAnalysisFromPriorFacts` trusted `find()` first match | **Addressed** — `.order('created_at', { ascending: false })` added to the Supabase query (covered by existing composite index) | review-response |
+| P1.5 | Task 3.2 required `chip_count` logging; only failure-response telemetry carried it | **Addressed** — new debug log emitted for every successful compose path with `chip_count` + `turn_class` | review-response |
+| Imp-1 | Evidence pack commit count / test count stale | **Addressed** — this section and the test totals updated after the final suite run | review-response |
+| Imp-2 | Prompt-size test had dead `longSystem` variable; didn't actually prove a large prompt survives | **Addressed** — test rewritten to import `ROUTING_SYSTEM_PROMPT` and assert the adapter receives exactly its length (regression guard for the eventual drop-in) | review-response |
+| Imp-3 | Fallback analysis used raw option IDs as labels | **Addressed** — `buildAnalysisFromPriorFacts` accepts an optional `OptionLabelSource[]`; turn-executor passes current graph option nodes | review-response |
+| Imp-4 | Consider extracting V5→V4 graph-compact dependency | **Rejected** — brief's anti-cleanup scope lock forbids restructuring modules or changing import patterns when not directly required by a task. The V5→V4 bridge is an accepted pattern (same as `compactAnalysis`). |
+
+### Behavioural changes from review-response
+
+- **B1 contract fixture** (`tests/fixtures/contracts/b1/valid-turn-payload.json`) now expects the `Set values for options` prompt chip instead of an executable Run analysis chip. The fixture carries no graph, so `graphOptionCount = 0` correctly routes to the safer prompt.
+- **`prior_facts` semantics** — now deterministic newest-first at the session-store layer. Any other callers reading prior facts benefit; no caller relied on the previous arbitrary order.
 
 ## Commits on this branch (off staging `5a4f1a6e`)
 

@@ -368,7 +368,22 @@ export async function runTurnExecutor(
       analysisSummary = compactAnalysis(coerceIngressAnalysis(options.analysisState));
       analysisStateSource = 'request';
     } else {
-      const fallback = buildAnalysisFromPriorFacts(context.prior_facts);
+      // Resolve option labels from the current graph so the fallback doesn't
+      // leak raw option_ids into Sonnet's user-facing prose. Filter to
+      // option nodes only; the fallback builder uses id → label lookups.
+      const optionLabelSource = (graphStateForTurn?.nodes ?? [])
+        .filter((n) => (n as { kind?: unknown }).kind === 'option')
+        .map((n) => {
+          const node = n as { id: string; label?: unknown };
+          return {
+            id: node.id,
+            label: typeof node.label === 'string' ? node.label : null,
+          };
+        });
+      const fallback = buildAnalysisFromPriorFacts(
+        context.prior_facts,
+        optionLabelSource,
+      );
       if (fallback) {
         analysisSummary = fallback;
         analysisStalenessReason = FALLBACK_STALENESS_REASON;
@@ -390,11 +405,17 @@ export async function runTurnExecutor(
       });
       const compactedGraph =
         compactOutcome.kind === 'compacted' ? compactOutcome.compact : null;
+      // V5 review: carry raw goal_constraints alongside the compact graph so
+      // Sonnet does not lose decision constraints in the compact path.
+      const compactedConstraints = compactedGraph
+        ? (graphStateForTurn?.goal_constraints ?? null)
+        : null;
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
         graph: compactedGraph ? undefined : graphStateForTurn,
         compactedGraph,
+        compactedConstraints,
         analysis: analysisSummary,
         analysisStalenessReason,
         coaching: coachingCache,
@@ -732,6 +753,7 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         analysis: contextPackForLog?.analysis ?? null,
+        graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeToolCallResponse({
@@ -768,6 +790,7 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: [],
         analysis: contextPackForLog?.analysis ?? null,
+        graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeClarifyResponse({
@@ -801,6 +824,7 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: [],
         analysis: contextPackForLog?.analysis ?? null,
+        graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeDirectAnswerResponse({
@@ -829,6 +853,7 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: [],
         analysis: contextPackForLog?.analysis ?? null,
+        graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeDirectAnswerResponse({
@@ -838,6 +863,21 @@ export async function runTurnExecutor(
       });
       stagesCompleted.push('compose');
     }
+
+    // V5 review: chip_count on every successful compose path, not only on
+    // failure-response telemetry. This is the canonical signal that
+    // success-path chips are active in production — the failure-response
+    // event fires only on validator/handler failures, which would leave
+    // the happy path unobservable.
+    log.debug(
+      {
+        request_id: requestId,
+        session_id: context.session_id,
+        turn_class: resolvedTurnClass,
+        chip_count: composedOk.suggested_actions.length,
+      },
+      'V5 TurnExecutor composed response chips',
+    );
 
     // ==================================================================
     // STEP 7 — COMMIT (unchanged contract)

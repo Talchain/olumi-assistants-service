@@ -74,24 +74,43 @@ describe('generateChips', () => {
     }
   });
 
-  it('analyse stage with no analysis and no handler → executable run_analysis chip', () => {
+  it('analyse stage with no analysis, options present → executable run_analysis chip', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
       analysis: null,
       validationRegistry: REGISTRY,
+      graphOptionCount: 2,
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBe('run_analysis');
     expect(chips[0].label).toBe('Run analysis');
   });
 
-  it('analyse stage with no analysis but run_analysis not registered → prompt chip fallback', () => {
+  it('analyse stage with no analysis AND no options → setup prompt (no executable chip)', () => {
+    // V5 review gate: run_analysis has a precondition requiring at least
+    // one option node. Offering the executable chip when options are
+    // absent produces a handler-failure response on click. Fall back to
+    // a conversational setup prompt.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      graphOptionCount: 0,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBeUndefined();
+    expect(chips[0].label).toBe('Set values for options');
+  });
+
+  it('analyse stage with no analysis but run_analysis not registered (options present) → prompt chip fallback', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
       analysis: null,
       validationRegistry: {},
+      graphOptionCount: 3,
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
@@ -194,9 +213,11 @@ describe('generateChips', () => {
       handlerFacts: [noopFact],
       analysis: null,
       validationRegistry: REGISTRY,
+      graphOptionCount: 2,
     });
     // Not the post-run_analysis chips, because the fact was a noop.
-    // Should follow the "analyse + no analysis + no handler ran" rule.
+    // Should follow the "analyse + no analysis + no handler ran" rule,
+    // which emits the executable Run analysis chip when options exist.
     expect(chips[0].action_type).toBe('run_analysis');
   });
 

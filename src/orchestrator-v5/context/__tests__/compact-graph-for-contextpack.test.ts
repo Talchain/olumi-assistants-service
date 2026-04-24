@@ -157,4 +157,38 @@ describe('compactGraphForContextPack', () => {
     if (a.kind !== 'compacted' || b.kind !== 'compacted') throw new Error('expected compacted');
     expect(JSON.stringify(a.compact)).toBe(JSON.stringify(b.compact));
   });
+
+  it('goal_constraints survive the compact path via compactedConstraints', async () => {
+    // V5 review: compactGraph itself drops goal_constraints. The assembler
+    // threads them separately via `compactedConstraints` so Sonnet still
+    // sees the decision constraints in the compact path. Verified end-to-end
+    // through assembleContextPack.
+    const { assembleContextPack } = await import('../context-pack-assembler.js');
+    const graph = makeStrictGraph(5, 4);
+    const graphWithConstraints = {
+      ...graph,
+      goal_constraints: [
+        { id: 'c-budget', label: 'Budget ≤ $100k' },
+        { id: 'c-timeline', label: 'Launch before Q3' },
+      ],
+    };
+    const outcome = compactGraphForContextPack(graphWithConstraints, { requestId: 'req-c' });
+    if (outcome.kind !== 'compacted') throw new Error('expected compacted');
+
+    const pack = assembleContextPack({
+      payload: {
+        turn_id: 't-1',
+        scenario_id: 's-1',
+        message: 'x',
+        turn_class: 'frame',
+        stage: 'frame',
+      } as never,
+      priorTurns: [],
+      compactedGraph: outcome.compact,
+      compactedConstraints: graphWithConstraints.goal_constraints,
+    });
+
+    expect(pack.graph.constraints).toHaveLength(2);
+    expect(pack.graph.counts.constraints).toBe(2);
+  });
 });

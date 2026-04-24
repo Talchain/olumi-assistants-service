@@ -73,14 +73,14 @@ describe('routeWithToolUse — system prompt loading (Task 3.1)', () => {
     expect(capturedSystem).toContain("Olumi's routing layer");
   });
 
-  it('does not silently truncate system prompts up to 20K characters', async () => {
-    // We cannot swap ROUTING_SYSTEM_PROMPT at runtime without exported
-    // mutation, but we CAN verify the adapter-path itself does not truncate.
-    // The adapter mock captures whatever the adapter was given; if the
-    // executor wrapper truncates, we'd see a shorter string. This is a
-    // path-level assertion for the future prompt drop-in.
+  it('passes the routing system prompt through at its full length (no truncation)', async () => {
+    // Imports the actual constant so the assertion is tied to what would
+    // land in production. When the constant is replaced with a 19K-char
+    // prompt, this assertion still holds — the test becomes a regression
+    // guard that the loading path never truncates.
+    const { ROUTING_SYSTEM_PROMPT } = await import('../route-with-tool-use.js');
+
     let capturedLength = 0;
-    const longSystem = 'LOREM '.repeat(4000); // ~24K chars
     const mockAdapter = {
       async chatWithTools(args: ChatWithToolsArgs): Promise<ChatWithToolsResult> {
         capturedLength = (args.system as string).length;
@@ -92,25 +92,15 @@ describe('routeWithToolUse — system prompt loading (Task 3.1)', () => {
       },
     };
 
-    // Indirect: route-with-tool-use uses ROUTING_SYSTEM_PROMPT, but the
-    // mock adapter receives the actual system string. Since our mock
-    // captures what the adapter is called with, and the route module
-    // passes system: through without mutation, any truncation would be
-    // observable in capturedLength. We assert it's at least as long as the
-    // known constant length — regression defence for the loading path.
     await routeWithToolUse(makeContextPack(), 'hello', {
       requestId: 'req-size-2',
       adapter: mockAdapter,
     });
-    expect(capturedLength).toBeGreaterThan(100);
 
-    // Length smoke: no silent truncation to an arbitrary small value
-    // (e.g. 1024 chars). The hardcoded constant is ~700 chars today; a
-    // future ~19K-char prompt must still land unchanged.
-    expect(capturedLength).toBeLessThanOrEqual(longSystem.length + 5000);
-    // Reference the long system variable so the test is self-documenting
-    // even though we can't inject it; documents the intent for the
-    // eventual prompt drop-in.
-    void longSystem;
+    // Adapter receives exactly the constant's length — no truncation, no
+    // padding. This test survives prompt-content churn as long as the
+    // loading mechanism stays intact.
+    expect(capturedLength).toBe(ROUTING_SYSTEM_PROMPT.length);
+    expect(capturedLength).toBeGreaterThan(100);
   });
 });

@@ -53,6 +53,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import type { SuggestedAction } from '../compose/types.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -129,16 +130,52 @@ function draftResultToOlumiResponse(
   const analysisReadyField =
     graphPersisted && result.analysisReady ? result.analysisReady : undefined;
 
+  // V5 review: post-draft_graph chips. The draft path produces its own
+  // response envelope (not through the standard composers) so it needs its
+  // own deterministic chip rule, matching the brief's chip mapping table:
+  //   - graph persisted + analysis_ready === "ready" → executable Run analysis
+  //   - graph persisted + analysis not ready → conversational setup prompt
+  //   - draft failed to persist → no chips (the route returns 500 anyway)
+  const suggestedActions = buildPostDraftChips({ graphPersisted, analysisReadyField });
+
   return {
     response_version: 2,
     assistant_text: assistantText,
     blocks: [],
-    suggested_actions: [],
+    suggested_actions: [...suggestedActions],
     insights: [],
     stage_indicator: stageIndicator,
     ...(draftGraphField && { draft_graph: draftGraphField }),
     ...(analysisReadyField && { analysis_ready: analysisReadyField }),
   };
+}
+
+function buildPostDraftChips(params: {
+  readonly graphPersisted: boolean;
+  readonly analysisReadyField: DraftGraphResult['analysisReady'] | undefined;
+}): readonly SuggestedAction[] {
+  if (!params.graphPersisted) return [];
+  const readyStatus =
+    typeof params.analysisReadyField === 'object' && params.analysisReadyField !== null
+      ? (params.analysisReadyField as { status?: unknown }).status
+      : undefined;
+  if (readyStatus === 'ready') {
+    return [
+      {
+        id: 'chip_action_run_analysis',
+        label: 'Run analysis',
+        message: 'Run analysis.',
+        action_type: 'run_analysis',
+      },
+    ];
+  }
+  return [
+    {
+      id: 'chip_prompt_set_option_values',
+      label: 'Set values for options',
+      message: 'Help me set up the options for this decision so the analysis can run.',
+    },
+  ];
 }
 
 export async function dispatchDraftGraph(

@@ -41,6 +41,16 @@ export interface ChipGeneratorInput {
   /** Validation registry — used to verify executable chips only point at
    *  handlers that are actually registered. */
   readonly validationRegistry: HandlerValidationRegistry;
+  /**
+   * V5 review: count of option nodes in the current ContextPack graph. Used
+   * to gate the executable `Run analysis` chip — the `run_analysis` handler
+   * has a precondition requiring at least one option node
+   * (`src/orchestrator-v5/routing/validation-registry.ts:37`), and offering
+   * the chip when none exist would produce a PRECONDITION_UNMET handler
+   * failure on click. When zero, we fall back to a conversational setup
+   * chip instead.
+   */
+  readonly graphOptionCount?: number;
 }
 
 const MAX_CHIPS = 3;
@@ -73,13 +83,29 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
     ]);
   }
 
-  // Rule: analyse stage, no analysis yet → run analysis (executable if
-  // registered, else a prompt chip that says "I want to run the analysis").
+  // Rule: analyse stage, no analysis yet → run analysis.
+  //
+  // Executable variant is only safe when the precondition will hold — at
+  // least one option node must exist in the graph. Otherwise run_analysis
+  // returns PRECONDITION_UNMET on click and the user sees a handler-failure
+  // coaching response instead of the analysis they expected. When options
+  // are absent we emit a conversational setup prompt instead, steering the
+  // user toward the canvas UI to define options.
   if (input.stage === 'analyse' && !hasAnalysis && handlerJustRan == null) {
+    const hasOptions = (input.graphOptionCount ?? 0) > 0;
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
-    if (runAnalysis) {
+    if (runAnalysis && hasOptions) {
       return cap([executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label)]);
+    }
+    if (!hasOptions) {
+      return cap([
+        promptChip(
+          'set_option_values',
+          'Set values for options',
+          'Help me set up the options for this decision so the analysis can run.',
+        ),
+      ]);
     }
     return cap([
       promptChip(

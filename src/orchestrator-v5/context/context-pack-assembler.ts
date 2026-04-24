@@ -131,14 +131,22 @@ export interface AssembleContextPackInput {
   /**
    * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
    * uses this to populate ContextPack.graph (nodes/edges/derived lists and
-   * counts) instead of the raw `graph` passthrough. Options/goals/constraints
-   * are still derived from the compact nodes by kind. The full graph remains
-   * available to the validator via `graphLookupForValidate` in turn-executor.
+   * counts) instead of the raw `graph` passthrough. Options/goals are
+   * derived from the compact nodes by kind; constraints come through via
+   * `compactedConstraints` below when the caller has them (compactGraph
+   * itself drops `goal_constraints`). The full graph remains available to
+   * the validator via `graphLookupForValidate` in turn-executor.
    *
    * Absent / null falls back to the raw passthrough projection, preserving
    * the pre-1.2 behaviour for callers that haven't adopted compaction.
    */
   readonly compactedGraph?: GraphV3Compact | null;
+  /**
+   * V5 review: raw `goal_constraints` from the ingress carried alongside
+   * the compact graph so Sonnet does not lose decision constraints in the
+   * compact path. Passthrough only — assembler does not introspect.
+   */
+  readonly compactedConstraints?: readonly unknown[] | null;
   readonly analysis?: AnalysisResponseSummary | null;
   /**
    * V5 Task 1.4: when the analysis came from a server-side fallback
@@ -200,7 +208,7 @@ export function assembleContextPackWithSummary(
     version: CONTEXT_PACK_VERSION,
     stage: input.payload.stage,
     graph: input.compactedGraph
-      ? projectCompactGraph(input.compactedGraph)
+      ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
       : projectGraph(input.graph ?? null),
     analysis: projectAnalysis(
       input.analysis ?? null,
@@ -223,33 +231,36 @@ export function assembleContextPackWithSummary(
 /**
  * Project a compacted graph (output of `compactGraphForContextPack`) into
  * the ContextPackGraph shape. Options / goals are derived from the compact
- * nodes by kind; constraints remain empty because the compactor drops
- * `goal_constraints` (the raw-passthrough branch carries them through when
- * the caller supplies a `graph`, but the compact path is the Sonnet-facing
- * projection where we lean on the compact intervention summaries instead).
+ * nodes by kind; constraints are passed through from the caller (the
+ * compactor itself drops `goal_constraints`, so they must be threaded here
+ * explicitly or Sonnet loses them on every turn).
  *
  * The returned object uses the compact shapes for nodes and edges — callers
  * that typed these as `readonly unknown[]` consume them unchanged. Downstream
  * uses (turn-executor routing-log counts, JSON serialisation to Sonnet) are
  * both shape-agnostic.
  */
-function projectCompactGraph(compact: GraphV3Compact): ContextPackGraph {
+function projectCompactGraph(
+  compact: GraphV3Compact,
+  constraints: readonly unknown[] | null,
+): ContextPackGraph {
   const options = compact.nodes
     .filter((n) => n.kind === 'option')
     .map((n) => ({ id: n.id, label: n.label }));
   const goals = compact.nodes.filter((n) => n.kind === 'goal');
+  const safeConstraints = constraints ?? [];
   return {
     nodes: compact.nodes,
     edges: compact.edges,
     options,
     goals,
-    constraints: [],
+    constraints: safeConstraints,
     counts: {
       nodes: compact.nodes.length,
       edges: compact.edges.length,
       options: options.length,
       goals: goals.length,
-      constraints: 0,
+      constraints: safeConstraints.length,
     },
   };
 }

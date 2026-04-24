@@ -167,10 +167,17 @@ export class SupabaseSessionStore implements SessionStore {
   ): Promise<readonly HandlerFact[]> {
     if (turnIds.length === 0) return [];
 
+    // V5 review: facts must come back newest-first so callers (e.g. the
+    // run_analysis fallback in `buildAnalysisFromPriorFacts`) can pick the
+    // most recent entry deterministically via `.find()`. The prior
+    // implementation relied on undefined Supabase row order, which made the
+    // selection non-deterministic. The composite index
+    // `v5_handler_facts_scenario_handler_idx` covers this ORDER BY.
     let query = this.client
       .from('v5_handler_facts')
       .select('payload, handler_id, action_type, noop')
-      .in('v5_conversation_turn_id', turnIds as string[]);
+      .in('v5_conversation_turn_id', turnIds as string[])
+      .order('created_at', { ascending: false });
 
     if (handlerId) {
       query = query.eq('handler_id', handlerId);

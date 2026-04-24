@@ -148,4 +148,45 @@ describe('buildAnalysisFromPriorFacts', () => {
   it('exports the staleness reason constant for caller use', () => {
     expect(FALLBACK_STALENESS_REASON).toBe('loaded_from_prior_run_freshness_unknown');
   });
+
+  it('resolves option labels from the current graph when provided', () => {
+    const fact = runAnalysisFact({
+      leadingOptionId: 'opt-a',
+      winProbabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
+    });
+    const summary = buildAnalysisFromPriorFacts([fact], [
+      { id: 'opt-a', label: 'Plan A: Expand EU' },
+      { id: 'opt-b', label: 'Plan B: Hold' },
+    ])!;
+    expect(summary.winner.option_label).toBe('Plan A: Expand EU');
+    expect(summary.options.map((o) => o.option_label)).toEqual([
+      'Plan A: Expand EU',
+      'Plan B: Hold',
+    ]);
+  });
+
+  it('falls back to option_id when the graph has no matching label', () => {
+    const fact = runAnalysisFact({
+      leadingOptionId: 'opt-a',
+      winProbabilities: { 'opt-a': 0.6, 'opt-unknown': 0.4 },
+    });
+    const summary = buildAnalysisFromPriorFacts([fact], [
+      { id: 'opt-a', label: 'Plan A' },
+      // opt-unknown has no label source entry
+    ])!;
+    expect(summary.winner.option_label).toBe('Plan A');
+    const unknown = summary.options.find((o) => o.option_id === 'opt-unknown')!;
+    expect(unknown.option_label).toBe('opt-unknown');
+  });
+
+  it('trims whitespace labels and falls back to id when label is empty', () => {
+    const fact = runAnalysisFact({
+      leadingOptionId: 'opt-a',
+      winProbabilities: { 'opt-a': 1.0 },
+    });
+    const summary = buildAnalysisFromPriorFacts([fact], [
+      { id: 'opt-a', label: '   ' },
+    ])!;
+    expect(summary.winner.option_label).toBe('opt-a');
+  });
 });

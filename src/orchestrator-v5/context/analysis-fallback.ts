@@ -33,6 +33,28 @@ import type { AnalysisResponseSummary } from '../../orchestrator/context/analysi
 export const FALLBACK_STALENESS_REASON = 'loaded_from_prior_run_freshness_unknown';
 
 /**
+ * V5 review: option-label lookup for the fallback projection. The fact
+ * carries only option IDs, but when the current ContextPack graph has a
+ * matching option node we prefer its user-facing label — otherwise Sonnet
+ * could surface raw IDs like "opt_a" in responses.
+ */
+export interface OptionLabelSource {
+  readonly id: string;
+  readonly label?: string | null;
+}
+
+function buildLabelMap(
+  optionNodes: readonly OptionLabelSource[] | undefined,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const node of optionNodes ?? []) {
+    const label = typeof node.label === 'string' ? node.label.trim() : '';
+    if (label.length > 0) map.set(node.id, label);
+  }
+  return map;
+}
+
+/**
  * Scan prior facts (newest-first, same order as `readRecent`) for the most
  * recent non-noop `run_analysis` fact and project it into an
  * `AnalysisResponseSummary`. Returns null when no usable prior analysis
@@ -44,6 +66,7 @@ export const FALLBACK_STALENESS_REASON = 'loaded_from_prior_run_freshness_unknow
  */
 export function buildAnalysisFromPriorFacts(
   priorFacts: readonly HandlerFact[],
+  optionLabelSource?: readonly OptionLabelSource[],
 ): AnalysisResponseSummary | null {
   const fact = priorFacts.find(
     (f) => f.fact_type === 'run_analysis' && f.noop === false,
@@ -52,6 +75,9 @@ export function buildAnalysisFromPriorFacts(
 
   const result = fact.result;
   const winProbabilities = result.win_probabilities ?? {};
+  const labelMap = buildLabelMap(optionLabelSource);
+  const labelFor = (optionId: string): string =>
+    labelMap.get(optionId) ?? optionId;
 
   // Sort option entries by probability desc, tiebreak by option_id lex.
   const sortedEntries = Object.entries(winProbabilities).sort((a, b) => {
@@ -72,14 +98,14 @@ export function buildAnalysisFromPriorFacts(
         : 0;
     winner = {
       option_id: leadingFromFact,
-      option_label: leadingFromFact,
+      option_label: labelFor(leadingFromFact),
       win_probability: leadingProb,
     };
   } else if (sortedEntries.length > 0) {
     const [optionId, prob] = sortedEntries[0]!;
     winner = {
       option_id: optionId,
-      option_label: optionId,
+      option_label: labelFor(optionId),
       win_probability: prob,
     };
   } else {
@@ -90,7 +116,7 @@ export function buildAnalysisFromPriorFacts(
   const options: AnalysisResponseSummary['options'] = sortedEntries.map(
     ([optionId, prob]) => ({
       option_id: optionId,
-      option_label: optionId,
+      option_label: labelFor(optionId),
       win_probability: prob,
       outcome_mean: 0,
     }),
