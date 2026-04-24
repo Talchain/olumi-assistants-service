@@ -92,7 +92,6 @@ import {
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import { computeDeterministicGraphHash } from './context/graph-hash.js';
 import {
-  ROUTING_SYSTEM_PROMPT,
   ROUTING_PROMPT_VERSION,
   ROUTING_PROMPT_HASH,
   ROUTING_PROMPT_SYSTEM_CHARS,

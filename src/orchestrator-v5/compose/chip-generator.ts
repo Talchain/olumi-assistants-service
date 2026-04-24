@@ -158,10 +158,9 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
     // analysis the precondition won't let run. Emitting "Run the analysis"
     // in this branch loop-baited Sonnet back toward a run_analysis call
     // that validator would reject (200 coaching under hardening, but a
-    // wasted round-trip either way). Only the truly-unknown readiness
-    // case (analysisReady undefined, e.g. no graph at all) keeps the
-    // generic run-analysis prompt — the user may not yet know which
-    // configuration is missing.
+    // wasted round-trip either way). The truly-unknown readiness case
+    // (analysisReady undefined) is handled in the final branch below
+    // with a distinct neutral decision-framing prompt.
     if (readyStatus != null && readyStatus !== 'ready') {
       return cap([
         promptChip(
