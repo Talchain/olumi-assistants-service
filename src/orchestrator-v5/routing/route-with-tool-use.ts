@@ -52,6 +52,8 @@ import {
   parseToolCallResponse,
   type ToolCallResponse,
 } from './tool-schema.js';
+import { LOADED_PROMPT } from './prompt-loader.js';
+import { log } from '../../utils/telemetry.js';
 
 // -----------------------------------------------------------------------
 // Result + error types
@@ -144,22 +146,29 @@ export class RoutingError extends Error {
  * discussed", never treat the current turn as continuing a multi-turn
  * coaching arc. Each response must work as a freestanding answer.
  *
- * Intentionally narrow in its current form: this module is the routing
- * spine, not the full orchestrator.
+ * V5 alpha hardening Phase 2.1: the system prompt is now the content of
+ * `Prompts/v38.2.txt`, loaded at module init via `./prompt-loader.ts`.
+ * The previous 662-char hardcoded constant was the routing-only scaffolding
+ * from earlier slices; v38.2 is the full orchestrator persona + reasoning
+ * prompt. Observability primitives (version, hash, systemChars) are
+ * exported alongside for lifecycle logs.
  */
-export const ROUTING_SYSTEM_PROMPT = `You are Olumi's routing layer. You receive a ContextPack and a user turn. \
-Your single job is to decide the intent:
+export const ROUTING_SYSTEM_PROMPT: string = LOADED_PROMPT.text;
+export const ROUTING_PROMPT_VERSION: string = LOADED_PROMPT.version;
+export const ROUTING_PROMPT_HASH: string = LOADED_PROMPT.hash;
+export const ROUTING_PROMPT_SYSTEM_CHARS: number = LOADED_PROMPT.systemChars;
 
-- Call the olumi_action tool with intent_class="execute" when an action is needed.
-- Call the olumi_action tool with intent_class="clarify" when the turn is ambiguous and you cannot safely act.
-- Respond with plain text (no tool call) for conversational turns.
-- Call the olumi_action tool with intent_class="coach" to mark the turn as coaching — the user-facing text you emit alongside is the coaching response.
-
-Rules:
-- When calling the tool on execute turns, you may accompany it with SHORT pre-action orientation text (context, not outcomes). Never narrate results you have not seen.
-- When resolving entities, cite which ContextPack fields you used in cited_context_fields.
-- When the user's request is ambiguous (entity, parameter, intent, scope, or missing context), prefer clarify over a guessed execute.
-- Do not invent entities or parameters not present in the ContextPack.`;
+// One-time module-init log so every deploy records the installed prompt.
+// Keep payload minimal — no user text, no secrets. Fires once per process.
+log.info(
+  {
+    event: 'v5.routing_prompt_loaded',
+    prompt_version: ROUTING_PROMPT_VERSION,
+    prompt_hash: ROUTING_PROMPT_HASH,
+    system_chars: ROUTING_PROMPT_SYSTEM_CHARS,
+  },
+  'V5 routing prompt loaded',
+);
 
 // -----------------------------------------------------------------------
 // Anthropic message protocol helpers
@@ -323,6 +332,28 @@ export async function routeWithToolUse(
 
   assertAnthropicMessageProtocol(firstCallArgs.messages);
 
+  // V5 alpha hardening Phase 2.1: per-call observability. Debug level so
+  // production info streams stay clean; captured by the Phase 3 replay
+  // harness via stdout. v5_journey_id aliases scenario_id (sessionId here).
+  // context_pack_chars is a synthetic char-count proxy for quick sanity —
+  // JSON-stringify cost is a few ms on typical packs.
+  const contextPackChars = JSON.stringify(contextPack).length;
+  const systemPromptChars = (firstCallArgs.system as string).length;
+  log.debug(
+    {
+      event: 'v5.routing.calling_anthropic',
+      request_id: options.requestId,
+      v5_journey_id: options.sessionId ?? null,
+      llm_call: 1,
+      prompt_version: ROUTING_PROMPT_VERSION,
+      prompt_hash: ROUTING_PROMPT_HASH,
+      system_chars: systemPromptChars,
+      context_pack_chars: contextPackChars,
+      message_length: message.length,
+    },
+    'V5 routing call (initial)',
+  );
+
   let firstResult: ChatWithToolsResult;
   try {
     firstResult = await adapter.chatWithTools(firstCallArgs, {
@@ -351,6 +382,21 @@ export async function routeWithToolUse(
     ...firstCallArgs,
     messages: repairMessages,
   };
+
+  log.debug(
+    {
+      event: 'v5.routing.calling_anthropic',
+      request_id: options.requestId,
+      v5_journey_id: options.sessionId ?? null,
+      llm_call: 2,
+      prompt_version: ROUTING_PROMPT_VERSION,
+      prompt_hash: ROUTING_PROMPT_HASH,
+      system_chars: systemPromptChars,
+      context_pack_chars: contextPackChars,
+      repair: true,
+    },
+    'V5 routing call (repair)',
+  );
 
   let repairResult: ChatWithToolsResult;
   try {

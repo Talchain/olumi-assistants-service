@@ -65,12 +65,13 @@ describe('routeWithToolUse — system prompt loading (Task 3.1)', () => {
       adapter: mockAdapter,
     });
 
-    // Minimal smoke assertion: system prompt reaches the adapter. The actual
-    // prompt content is a hardcoded constant in route-with-tool-use.ts; when
-    // it is swapped for the production prompt, this test continues to hold
-    // as long as the loading path is untouched.
+    // Minimal smoke assertion: system prompt reaches the adapter. After V5
+    // alpha hardening Phase 2.1 the prompt is loaded from Prompts/v38.2.txt;
+    // we assert content known to exist in that prompt without coupling to
+    // the exact phrasing.
     expect(capturedSystem.length).toBeGreaterThan(0);
-    expect(capturedSystem).toContain("Olumi's routing layer");
+    expect(capturedSystem).toContain('Olumi');
+    expect(capturedSystem).toContain('<ROLE>');
   });
 
   it('passes the routing system prompt through at its full length (no truncation)', async () => {
