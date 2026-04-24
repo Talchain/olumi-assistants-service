@@ -21,7 +21,25 @@
  * must work as a freestanding first message — not as a reference to the
  * turn that emitted the chip.
  *
- * Rules are deterministic. Do not call an LLM from here.
+ * Rules are deterministic. **Chips are derived from structured state only —
+ * never from parsing the model's response text.** Reading response text for
+ * chip decisions is a contract violation; see
+ * `Docs/v5/v5-resilience-contract.md` Part D. Do not call an LLM from here.
+ *
+ * V5 alpha hardening Phase 2.4: readiness gate for the executable
+ * `Run analysis` chip. Source order (correction 11):
+ *   1. `input.analysisReady` — pre-computed payload threaded by the call
+ *      site (from draft-graph-dispatch or turn-executor).
+ *   2. Otherwise `computeStructuralReadiness(graph)` — not done here; the
+ *      call site MUST do the computation and pass it in.
+ *   3. If `analysisReady` is undefined, readiness is unknown and the
+ *      executable chip MUST NOT render. Fall back to a conversational
+ *      prompt. The `graphOptionCount` hint still drives fallback copy.
+ *
+ * The executable chip emits iff `analysisReady.status === 'ready'` — the
+ * `computeStructuralReadiness` helper already verifies goal node +
+ * ≥2 options + every non-baseline option having ≥1 numeric intervention.
+ * See `src/orchestrator/tools/analysis-ready-helper.ts`.
  */
 
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
@@ -31,6 +49,9 @@ import type { SuggestedAction } from './types.js';
 import type { HandlerValidationRegistry } from '../routing/validator.js';
 import { curatedHandlerChips } from './helpers.js';
 import type { ContextPackAnalysis } from '../context/context-pack-assembler.js';
+import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+
+type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 export interface ChipGeneratorInput {
   readonly stage: StageType;
@@ -42,13 +63,28 @@ export interface ChipGeneratorInput {
    *  handlers that are actually registered. */
   readonly validationRegistry: HandlerValidationRegistry;
   /**
-   * V5 review: count of option nodes in the current ContextPack graph. Used
-   * to gate the executable `Run analysis` chip — the `run_analysis` handler
-   * has a precondition requiring at least one option node
-   * (`src/orchestrator-v5/routing/validation-registry.ts:37`), and offering
-   * the chip when none exist would produce a PRECONDITION_UNMET handler
-   * failure on click. When zero, we fall back to a conversational setup
-   * chip instead.
+   * V5 alpha hardening Phase 2.4: full structural readiness payload. When
+   * present with `status === 'ready'`, the executable `Run analysis` chip
+   * is safe to render — `computeStructuralReadiness` already verified the
+   * full set of preconditions (goal node present, ≥2 options with numeric
+   * interventions). When present with any other status (`needs_user_input`,
+   * `needs_user_mapping`, `needs_encoding`), the chip falls back to a
+   * conversational prompt. When undefined (graph absent or readiness not
+   * computed), readiness is treated as unknown and the executable variant
+   * MUST NOT render.
+   *
+   * Source order (correction 11 of the alpha hardening plan):
+   *   1. Pre-computed payload threaded by the call site (preferred).
+   *   2. Fallback: the call site calls `computeStructuralReadiness(graph)`
+   *      and passes the result here.
+   *   3. Neither available → leave this field undefined.
+   */
+  readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * Legacy hint: count of option nodes on the graph. Retained for
+   * conversational-fallback copy selection (so "Set values for options"
+   * vs "Run the analysis" depends on whether ANY options exist). NOT a
+   * readiness signal on its own — see `analysisReady` above.
    */
   readonly graphOptionCount?: number;
 }
@@ -85,17 +121,25 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
 
   // Rule: analyse stage, no analysis yet → run analysis.
   //
-  // Executable variant is only safe when the precondition will hold — at
-  // least one option node must exist in the graph. Otherwise run_analysis
-  // returns PRECONDITION_UNMET on click and the user sees a handler-failure
-  // coaching response instead of the analysis they expected. When options
-  // are absent we emit a conversational setup prompt instead, steering the
-  // user toward the canvas UI to define options.
+  // V5 alpha hardening Phase 2.4: the executable variant is gated on the
+  // FULL structural readiness signal — `computeStructuralReadiness`
+  // already verified goal node + ≥2 options + every non-baseline option
+  // having ≥1 numeric intervention. This closes the gap where the old
+  // `graphOptionCount > 0` gate would emit an executable chip on a graph
+  // that had options but no interventions configured, leading to
+  // PRECONDITION_UNMET or an options_not_configured handler failure on
+  // click.
+  //
+  // When readiness is unknown (undefined or any non-'ready' status), we
+  // emit a conversational fallback — steering copy depends on what IS
+  // present (some options vs none) so the user always has a visible
+  // next step.
   if (input.stage === 'analyse' && !hasAnalysis && handlerJustRan == null) {
+    const isReady = input.analysisReady?.status === 'ready';
     const hasOptions = (input.graphOptionCount ?? 0) > 0;
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
-    if (runAnalysis && hasOptions) {
+    if (runAnalysis && isReady) {
       return cap([executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label)]);
     }
     if (!hasOptions) {
@@ -107,6 +151,10 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
         ),
       ]);
     }
+    // Options exist but readiness is not 'ready' (or readiness is
+    // unknown). Conversational fallback — the user's next move is to
+    // configure what's missing, not to fire a handler that will
+    // PRECONDITION_UNMET.
     return cap([
       promptChip(
         'ask_run_analysis',

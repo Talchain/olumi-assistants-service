@@ -74,43 +74,99 @@ describe('generateChips', () => {
     }
   });
 
-  it('analyse stage with no analysis, options present → executable run_analysis chip', () => {
+  it('analyse stage with analysisReady=ready → executable run_analysis chip', () => {
+    // V5 alpha hardening Phase 2.4: the executable chip now requires the
+    // full structural readiness signal, not just option count. This is
+    // the only path that emits the executable variant.
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
       analysis: null,
       validationRegistry: REGISTRY,
       graphOptionCount: 2,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBe('run_analysis');
     expect(chips[0].label).toBe('Run analysis');
   });
 
-  it('analyse stage with no analysis AND no options → setup prompt (no executable chip)', () => {
-    // V5 review gate: run_analysis has a precondition requiring at least
-    // one option node. Offering the executable chip when options are
-    // absent produces a handler-failure response on click. Fall back to
-    // a conversational setup prompt.
+  it('analyse stage with analysisReady=needs_user_input → conversational setup prompt', () => {
+    // Options absent per structural readiness → conversational fallback.
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
       analysis: null,
       validationRegistry: REGISTRY,
       graphOptionCount: 0,
+      analysisReady: { status: 'needs_user_input', options: [], goal_node_id: 'g' } as never,
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
     expect(chips[0].label).toBe('Set values for options');
   });
 
-  it('analyse stage with no analysis but run_analysis not registered (options present) → prompt chip fallback', () => {
+  it('analyse stage with analysisReady=needs_user_mapping → conversational prompt (options exist)', () => {
+    // Options exist but interventions are missing → conversational prompt,
+    // never the executable variant (which would PRECONDITION_UNMET or
+    // options_not_configured at the handler).
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      graphOptionCount: 2,
+      analysisReady: {
+        status: 'needs_user_mapping',
+        options: [],
+        goal_node_id: 'g',
+      } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBeUndefined();
+    expect(chips[0].label).toBe('Run the analysis');
+  });
+
+  it('analyse stage with analysisReady=needs_encoding → conversational prompt', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      graphOptionCount: 2,
+      analysisReady: {
+        status: 'needs_encoding',
+        options: [],
+        goal_node_id: 'g',
+      } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBeUndefined();
+  });
+
+  it('analyse stage with analysisReady=undefined (unknown readiness) → never executable', () => {
+    // Correction 11: when readiness is unknown (graph absent or unparseable),
+    // the executable chip MUST NOT render even if graphOptionCount looks OK.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      graphOptionCount: 2,
+      // analysisReady deliberately omitted
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBeUndefined();
+  });
+
+  it('analyse stage with run_analysis not registered even when ready → conversational fallback', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
       analysis: null,
       validationRegistry: {},
       graphOptionCount: 3,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
@@ -214,10 +270,13 @@ describe('generateChips', () => {
       analysis: null,
       validationRegistry: REGISTRY,
       graphOptionCount: 2,
+      // V5 alpha hardening Phase 2.4: readiness gate — the executable
+      // chip only emits when structural readiness says 'ready'.
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
     });
     // Not the post-run_analysis chips, because the fact was a noop.
     // Should follow the "analyse + no analysis + no handler ran" rule,
-    // which emits the executable Run analysis chip when options exist.
+    // which emits the executable Run analysis chip when readiness is ok.
     expect(chips[0].action_type).toBe('run_analysis');
   });
 

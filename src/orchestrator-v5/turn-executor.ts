@@ -55,6 +55,9 @@ import { buildFailureResponse } from './failure-response.js';
 import { composeValidationFailure } from './compose/validation-failure-responses.js';
 import { composeUnsupportedActionResponse } from './compose/unsupported-action-response.js';
 import { composeRecoverableValidationResponse } from './compose/recoverable-validation-response.js';
+import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import { GraphV3 } from '../schemas/cee-v3.js';
+import type { GraphPatchBlockData } from '../orchestrator/types.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
 import type { ComposeContext } from './compose/types.js';
 import {
@@ -322,6 +325,25 @@ export async function runTurnExecutor(
           dropped_by_unknown_kind: 0,
           dropped_by_missing_id: 0,
         });
+      }
+    }
+
+    // V5 alpha hardening Phase 2.4: compute structural readiness once per
+    // turn so the chip generator can gate the executable `Run analysis`
+    // chip on a full precondition signal (goal + ≥2 options + interventions)
+    // rather than the weaker `graphOptionCount > 0` hint. When graph
+    // state is absent or fails strict GraphV3 parse, readiness is
+    // undefined and the chip generator falls back to the conversational
+    // variant. Cheap: runs in ~hundreds of microseconds on typical graphs.
+    let analysisReadyForTurn:
+      | NonNullable<GraphPatchBlockData['analysis_ready']>
+      | undefined;
+    if (graphStateForTurn) {
+      const parsedGraphForReadiness = GraphV3.safeParse(graphStateForTurn);
+      if (parsedGraphForReadiness.success) {
+        analysisReadyForTurn = computeStructuralReadiness(
+          parsedGraphForReadiness.data,
+        );
       }
     }
 
@@ -816,6 +838,7 @@ export async function runTurnExecutor(
         handlerFacts: handlerFactsForCommit,
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
+        analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeToolCallResponse({
@@ -853,6 +876,7 @@ export async function runTurnExecutor(
         handlerFacts: [],
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
+        analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeClarifyResponse({
@@ -887,6 +911,7 @@ export async function runTurnExecutor(
         handlerFacts: [],
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
+        analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeDirectAnswerResponse({
@@ -916,6 +941,7 @@ export async function runTurnExecutor(
         handlerFacts: [],
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
+        analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeDirectAnswerResponse({
