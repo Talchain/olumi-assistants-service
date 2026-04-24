@@ -516,7 +516,11 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
     });
   });
 
-  it('PLoT response with analysis_status=blocked → cause_kind=analysis_not_completed', async () => {
+  it('PLoT response with analysis_status=blocked → cause_kind=analysis_blocked', async () => {
+    // V5 alpha hardening Phase 2.3: the cause_kind for blocked/failed is
+    // now specific (analysis_blocked vs analysis_failed) rather than a
+    // blanket analysis_not_completed. Permissive status matrix lives in
+    // Docs/v5/v5-resilience-contract.md Part C.
     const response: V2RunResponseEnvelope = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'b' },
       results: [],
@@ -530,11 +534,11 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
 
     await expect(handler(makeInvocation())).rejects.toMatchObject({
       kind: 'HANDLER_INVOCATION_FAILED',
-      cause_kind: 'analysis_not_completed',
+      cause_kind: 'analysis_blocked',
     });
   });
 
-  it('PLoT response with analysis_status=failed → cause_kind=analysis_not_completed', async () => {
+  it('PLoT response with analysis_status=failed → cause_kind=analysis_failed', async () => {
     const response: V2RunResponseEnvelope = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'f' },
       results: [],

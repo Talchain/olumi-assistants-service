@@ -34,6 +34,13 @@ export type HandlerInvocationFailedCause =
   | 'plot_timeout'
   | 'plot_unknown'
   | 'analysis_not_completed'
+  // V5 alpha hardening Phase 2.3: PLoT status matrix split
+  // `analysis_not_completed` into more specific fatal kinds so
+  // observability + composer logic can differentiate "PLoT decided it
+  // cannot answer" from "PLoT errored mid-run" from "unknown status with
+  // no usable fields". See Docs/v5/v5-resilience-contract.md Part C.
+  | 'analysis_blocked'
+  | 'analysis_failed'
   | 'options_not_configured';
 
 /**

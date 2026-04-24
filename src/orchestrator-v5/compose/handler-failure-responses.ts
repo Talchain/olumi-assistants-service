@@ -140,6 +140,35 @@ function composeBody(error: HandlerInvocationFailedError): BranchResult {
       };
     }
 
+    // V5 alpha hardening Phase 2.3: PLoT `analysis_status: "blocked"` is
+    // a semantically different fatal — the engine decided it cannot
+    // answer, rather than crashing. User coaching points at what might
+    // need to change to unblock.
+    case 'analysis_blocked':
+      return {
+        body: {
+          assistant_text:
+            "The analysis engine couldn't proceed with the current scenario. Try simplifying options or constraints, then run again.",
+          suggested_actions: [scenarioStatusChip()],
+        },
+        template_id: 'analysis_blocked',
+        chip_type: 'text_prompt',
+      };
+
+    // V5 alpha hardening Phase 2.3: PLoT `analysis_status: "failed"` —
+    // the engine errored mid-run. Retry chip is appropriate because the
+    // fault may be transient.
+    case 'analysis_failed':
+      return {
+        body: {
+          assistant_text:
+            'The analysis service had a problem running your scenario. Try again in a moment.',
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'analysis_failed',
+        chip_type: 'action',
+      };
+
     case 'options_not_configured': {
       const rawLabel =
         typeof details.first_option_label === 'string' && details.first_option_label.trim().length > 0

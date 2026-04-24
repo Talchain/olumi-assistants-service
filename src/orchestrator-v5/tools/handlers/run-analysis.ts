@@ -60,6 +60,7 @@ import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
 } from '../handler-errors.js';
+import { log } from '../../../utils/telemetry.js';
 
 // Re-export handler-generic errors for backwards compatibility with test
 // modules that imported them directly from run-analysis.js. The canonical
@@ -82,6 +83,17 @@ export {
 export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
   DEFAULT: 'Ran analysis on your current scenario.',
   NO_RESULTS: 'Ran analysis on your current scenario. No options were compared.',
+  // V5 alpha hardening Phase 2.3: permissive PLoT status accept.
+  // `PARTIAL` fires when PLoT reports `analysis_status: "partial"` with
+  // usable result fields present. Factual caveat, no numeric values.
+  // `UNKNOWN_STATUS` fires when PLoT reports an unrecognised status but
+  // still returns usable result fields — we proceed with a warning caveat.
+  // Fatal statuses (`blocked`, `failed`) throw HandlerInvocationFailedError
+  // and never reach the template layer.
+  PARTIAL:
+    'Ran analysis on your current scenario. Some results may be incomplete — treat with caution.',
+  UNKNOWN_STATUS:
+    'Ran analysis on your current scenario. The analysis engine reported an unfamiliar status — treat the result with caution.',
 } as const;
 
 // ============================================================================
@@ -307,34 +319,38 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
-    // --- 5. Check analysis status ----------------------------------------
-    // V4 treats non-completed as a user-visible recovery state; C2 treats
-    // it as HANDLER_INVOCATION_FAILED to keep the happy-path fact shape
-    // uniform. Later slices may add a dedicated fact variant for blocked
-    // analyses; that's out of C2 scope.
+    // --- 5. Check analysis status (V5 alpha hardening Phase 2.3) ---------
+    // Permissive accept matrix per Docs/v5/v5-resilience-contract.md Part C.
+    // Grounded against real staging capture at
+    // tests/staging/artifacts/cross-service-2026-03-15T23-24-53-476Z/step-2-analysis.json
+    // (analysis_status: "computed" with full option_comparison[] — hash
+    // 2d2aab36...). Pre-hardening behaviour hard-matched on 'completed' only
+    // and rejected 'computed' from real staging as analysis_not_completed.
     const analysisStatus = readAnalysisStatus(response);
-    if (analysisStatus !== null && analysisStatus !== 'completed') {
-      throw new HandlerInvocationFailedError(
-        `PLoT analysis did not complete: status=${analysisStatus}`,
-        {
-          cause_kind: 'analysis_not_completed',
-          retryable: true,
-          details: {
-            handler_id: 'run_analysis',
-            analysis_status: analysisStatus,
-          },
-          cause: response,
+    const resultRecords = readResultRecords(response);
+    const statusOutcome = evaluateAnalysisStatus(analysisStatus, resultRecords, {
+      request_id: invocation.requestId,
+    });
+    if (statusOutcome.kind === 'fatal') {
+      throw new HandlerInvocationFailedError(statusOutcome.message, {
+        cause_kind: statusOutcome.cause_kind,
+        retryable: statusOutcome.retryable,
+        details: {
+          handler_id: 'run_analysis',
+          ...(analysisStatus !== null ? { analysis_status: analysisStatus } : {}),
         },
-      );
+        cause: response,
+      });
     }
 
     // --- 6. Build RunAnalysisHandlerFact (Resolution 2) ------------------
-    const resultRecords = readResultRecords(response);
     const winProbabilities = extractWinProbabilities(resultRecords);
     const leadingOptionId = selectLeadingOptionId(resultRecords);
-    const template = resultRecords.length === 0
-      ? RUN_ANALYSIS_ASSISTANT_TEMPLATES.NO_RESULTS
-      : RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT;
+    // Template selection uses the status outcome. Correction 4 of the V5
+    // alpha hardening plan: caveats for partial / unknown-status surface
+    // through the existing `summary` / `assistant_text` fields only — do
+    // NOT extend RunAnalysisHandlerFactSchema.
+    const template = selectTemplate(statusOutcome.kind, resultRecords.length);
 
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
@@ -382,13 +398,140 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
 /**
  * Read the `analysis_status` string from a V2RunResponseEnvelope. Returns
- * `null` when absent (happy path PLoT responses may omit it). A non-null
- * value that isn't `'completed'` triggers HANDLER_INVOCATION_FAILED.
+ * `null` when absent (happy path PLoT responses may omit it). Interpretation
+ * of the value is centralised in `evaluateAnalysisStatus`.
  */
 function readAnalysisStatus(response: V2RunResponseEnvelope): string | null {
   const raw = (response as Record<string, unknown>).analysis_status;
   if (typeof raw === 'string' && raw.length > 0) return raw;
   return null;
+}
+
+// ============================================================================
+// Permissive status matrix (V5 alpha hardening Phase 2.3)
+// ============================================================================
+
+/**
+ * Outcome kinds for the permissive status matrix:
+ *   - `ok`           null | 'completed' | 'computed'
+ *   - `partial`      'partial' — accepted with a caveat template
+ *   - `unknown`      unrecognised status string with usable result fields —
+ *                    accepted with a distinct caveat template + warning log
+ *   - `fatal`        'blocked' | 'failed' | unrecognised with no usable
+ *                    fields → HandlerInvocationFailedError
+ *
+ * Reference: Docs/v5/v5-resilience-contract.md Part C, grounded against the
+ * real staging capture at
+ * tests/staging/artifacts/cross-service-2026-03-15T23-24-53-476Z/step-2-analysis.json
+ */
+export type AnalysisStatusOutcome =
+  | { readonly kind: 'ok' }
+  | { readonly kind: 'partial' }
+  | { readonly kind: 'unknown' }
+  | {
+      readonly kind: 'fatal';
+      readonly cause_kind: 'analysis_blocked' | 'analysis_failed' | 'analysis_not_completed';
+      readonly message: string;
+      readonly retryable: boolean;
+    };
+
+const OK_STATUSES: ReadonlySet<string> = new Set(['completed', 'computed']);
+
+/**
+ * Determine whether result records satisfy the minimum usable-fields
+ * contract from Part C: at least one entry carries a string `option_id` or
+ * `option_label` AND a finite numeric `win_probability`. Matches the
+ * downstream consumer shape in `selectLeadingOptionId` /
+ * `extractWinProbabilities`.
+ */
+function hasUsableResultFields(records: ReadonlyArray<Record<string, unknown>>): boolean {
+  if (records.length === 0) return false;
+  for (const r of records) {
+    const hasLabel =
+      (typeof r.option_label === 'string' && r.option_label.length > 0) ||
+      (typeof r.option_id === 'string' && r.option_id.length > 0);
+    const wp = r.win_probability;
+    const hasFiniteProb = typeof wp === 'number' && Number.isFinite(wp);
+    if (hasLabel && hasFiniteProb) return true;
+  }
+  return false;
+}
+
+export function evaluateAnalysisStatus(
+  status: string | null,
+  resultRecords: ReadonlyArray<Record<string, unknown>>,
+  ctx: { readonly request_id: string },
+): AnalysisStatusOutcome {
+  if (status === null || OK_STATUSES.has(status)) {
+    return { kind: 'ok' };
+  }
+  if (status === 'partial') {
+    return { kind: 'partial' };
+  }
+  if (status === 'blocked') {
+    return {
+      kind: 'fatal',
+      cause_kind: 'analysis_blocked',
+      message: 'PLoT analysis is blocked for this scenario',
+      retryable: false,
+    };
+  }
+  if (status === 'failed') {
+    return {
+      kind: 'fatal',
+      cause_kind: 'analysis_failed',
+      message: 'PLoT analysis failed for this scenario',
+      retryable: true,
+    };
+  }
+  // Unrecognised status — degraded accept when usable fields are present,
+  // fatal when they are not. Emit a warning with enough context to
+  // recognise the new status next time, but NO raw response body (security
+  // gate: no user decision text in logs).
+  if (hasUsableResultFields(resultRecords)) {
+    log.warn(
+      {
+        event: 'external_contract_unknown_status',
+        request_id: ctx.request_id,
+        handler_id: 'run_analysis',
+        analysis_status: status,
+      },
+      'V5 run_analysis: unfamiliar PLoT status — proceeding with usable results',
+    );
+    return { kind: 'unknown' };
+  }
+  log.warn(
+    {
+      event: 'external_contract_unknown_status',
+      request_id: ctx.request_id,
+      handler_id: 'run_analysis',
+      analysis_status: status,
+      usable_fields: false,
+    },
+    'V5 run_analysis: unfamiliar PLoT status with no usable results — raising fatal',
+  );
+  return {
+    kind: 'fatal',
+    cause_kind: 'analysis_not_completed',
+    message: `PLoT analysis returned unrecognised status "${status}" with no usable result fields`,
+    retryable: true,
+  };
+}
+
+/**
+ * Pick the assistant_text template from `RUN_ANALYSIS_ASSISTANT_TEMPLATES`
+ * based on the status outcome + result record count. Partial / unknown-
+ * status outcomes surface their caveat through the `summary` and
+ * `assistant_text` fields only — the handler fact schema is not extended.
+ */
+function selectTemplate(
+  outcomeKind: 'ok' | 'partial' | 'unknown',
+  resultCount: number,
+): string {
+  if (resultCount === 0) return RUN_ANALYSIS_ASSISTANT_TEMPLATES.NO_RESULTS;
+  if (outcomeKind === 'partial') return RUN_ANALYSIS_ASSISTANT_TEMPLATES.PARTIAL;
+  if (outcomeKind === 'unknown') return RUN_ANALYSIS_ASSISTANT_TEMPLATES.UNKNOWN_STATUS;
+  return RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT;
 }
 
 /**

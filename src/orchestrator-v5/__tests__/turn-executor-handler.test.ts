@@ -371,7 +371,11 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
     }
   });
 
-  it('analysis_status=blocked → INTERNAL_ERROR with error_code=analysis_not_completed', async () => {
+  it('analysis_status=blocked → INTERNAL_ERROR with error_code=analysis_blocked', async () => {
+    // V5 alpha hardening Phase 2.3: blocked now maps to a dedicated
+    // cause_kind so composer + UI can differentiate "engine decided it
+    // cannot answer" from "engine crashed mid-run". See
+    // Docs/v5/v5-resilience-contract.md Part C.
     const blockedResponse: V2RunResponseEnvelope = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'b' },
       results: [],
@@ -394,7 +398,7 @@ describe('turn-executor × run_analysis via tool-use — HandlerInvocationFailed
     if (block.type === 'error') {
       expect(block.details).toMatchObject({
         failure_origin: 'handler',
-        error_code: 'analysis_not_completed',
+        error_code: 'analysis_blocked',
       });
     }
   });
