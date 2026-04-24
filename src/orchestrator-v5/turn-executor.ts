@@ -93,6 +93,9 @@ import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import { computeDeterministicGraphHash } from './context/graph-hash.js';
 import {
   ROUTING_SYSTEM_PROMPT,
+  ROUTING_PROMPT_VERSION,
+  ROUTING_PROMPT_HASH,
+  ROUTING_PROMPT_SYSTEM_CHARS,
   RoutingError,
   routeWithToolUse,
   type RoutingResult,
@@ -222,11 +225,32 @@ export async function runTurnExecutor(
   const context = await buildTurnContext(payload, requestId);
   stagesCompleted.push('build_turn_context');
 
-  emit(TelemetryEvents.TurnExecutorStarted, {
+  // V5 alpha hardening Phase 2.5: one-query observability. v5_journey_id
+  // aliases scenario_id (= context.session_id) per Paul's locked-in
+  // decision — no new correlation layer. The lateBound fields get
+  // populated as the turn progresses; obsPayload() snapshots whatever is
+  // known at the emit site.
+  const v5JourneyId: string = context.session_id;
+  let contextPackCharsForObs = 0;
+  let handlerProposedForObs: string | null = null;
+  let validatorOutcomeForObs: 'valid' | ValidationError['code'] | null = null;
+  let responseTypeForObs: C1TurnClass | null = null;
+  const obsPayload = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
     request_id: requestId,
     session_id: context.session_id,
+    v5_journey_id: v5JourneyId,
+    prompt_version: ROUTING_PROMPT_VERSION,
+    prompt_hash: ROUTING_PROMPT_HASH,
+    system_chars: ROUTING_PROMPT_SYSTEM_CHARS,
+    context_pack_chars: contextPackCharsForObs,
+    handler_proposed: handlerProposedForObs,
+    validator_outcome: validatorOutcomeForObs,
+    response_type: responseTypeForObs,
     stage: context.stage,
+    ...extra,
   });
+
+  emit(TelemetryEvents.TurnExecutorStarted, obsPayload());
 
   const turnAbort = new AbortController();
   const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
@@ -451,18 +475,33 @@ export async function runTurnExecutor(
         ...cqeSummary,
       });
       contextPackForLog = contextPack;
+      contextPackCharsForObs = JSON.stringify(contextPack).length;
 
-      // V5 Task 3.2: observability — one debug log per turn after ContextPack
-      // assembly. Fields confirm context + compose changes are active in
-      // production without adding noise to production error/warn streams.
-      // Chip count is logged separately at compose time (implicit via the
-      // response payload size; audited from Supabase if required).
+      // V5 alpha hardening Phase 2.5: primary lifecycle event — carries
+      // the full obs field set so one log query reveals ContextPack
+      // assembly for the whole journey.
+      emit(
+        TelemetryEvents.ContextPackAssembled,
+        obsPayload({
+          conversation_history_turns: contextPack.conversation.recent_turns.length,
+          graph_compacted: compactOutcome.kind === 'compacted',
+          graph_compact_via:
+            compactOutcome.kind === 'compacted' ? compactOutcome.via : null,
+          analysis_state_source: analysisStateSource,
+          analysis_staleness_reason: analysisStalenessReason,
+        }),
+      );
+
+      // V5 Task 3.2: keep the existing debug log for local dev visibility.
+      // Primary event above is the queryable signal; this is extra noise
+      // gated behind debug level and carries only minimal fields.
       log.debug(
         {
           request_id: requestId,
+          v5_journey_id: v5JourneyId,
           session_id: context.session_id,
-          system_chars: ROUTING_SYSTEM_PROMPT.length,
-          context_pack_chars: JSON.stringify(contextPack).length,
+          system_chars: ROUTING_PROMPT_SYSTEM_CHARS,
+          context_pack_chars: contextPackCharsForObs,
           conversation_history_turns: contextPack.conversation.recent_turns.length,
           graph_compacted: compactOutcome.kind === 'compacted',
           graph_compact_via:
@@ -559,6 +598,7 @@ export async function runTurnExecutor(
       //   • validate_skipped_graph_checks — the Phase 1a leak; absent from
       //     production code after Phase 1.5. Guarded by invariant script.
       const validationRegistry = options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+      handlerProposedForObs = proposedHandlerId;
       const validationResult = validateToolCall(
         action,
         graphLookupForValidate,
@@ -568,10 +608,28 @@ export async function runTurnExecutor(
       if (!graphLookupForValidate) {
         stagesCompleted.push('validate_skipped_no_graph');
         log.info(
-          { request_id: requestId, handler_id: proposedHandlerId, stage: context.stage },
+          {
+            request_id: requestId,
+            v5_journey_id: v5JourneyId,
+            handler_id: proposedHandlerId,
+            stage: context.stage,
+          },
           'V5 TurnExecutor graph-dependent validation skipped — no graph on this turn',
         );
       }
+      validatorOutcomeForObs = validationResult.valid
+        ? 'valid'
+        : validationResult.error.code;
+      // V5 alpha hardening Phase 2.5: primary lifecycle event. Fires
+      // exactly once per validator run (valid or error) with the full
+      // obs field set so one query can filter by validator_outcome.
+      emit(
+        TelemetryEvents.ValidatorOutcome,
+        obsPayload({
+          valid: validationResult.valid,
+          graph_available: graphLookupForValidate != null,
+        }),
+      );
       if (!validationResult.valid) {
         validationErrorCode = validationResult.error.code;
         log.warn(
@@ -666,6 +724,7 @@ export async function runTurnExecutor(
 
         response = recoveredResponse;
         resolvedTurnClass = 'direct_answer';
+        responseTypeForObs = 'direct_answer';
         intentClass = 'converse';
         stagesCompleted.push('validator_recovery');
 
@@ -680,6 +739,19 @@ export async function runTurnExecutor(
           chip_type: recoveredChipType,
           chip_count: recoveredResponse.suggested_actions.length,
         });
+        // V5 alpha hardening Phase 2.5: primary lifecycle event —
+        // recovery_response fires when a validator outcome is composed
+        // into a clean-body direct_answer. One query reveals every
+        // recovery across the journey.
+        emit(
+          TelemetryEvents.RecoveryResponse,
+          obsPayload({
+            validation_error_code: recoverableCode,
+            template_used: recoveredTemplateId,
+            chip_type: recoveredChipType,
+            chip_count: recoveredResponse.suggested_actions.length,
+          }),
+        );
 
         // Commit as a direct_answer so route-v2 sees commit_performed=true
         // and returns 200. Commit failure on a recoverable path is still
@@ -752,7 +824,32 @@ export async function runTurnExecutor(
         stagesCompleted.push('execute');
         handlerIdForCommit = proposedHandlerId;
         handlerFactsForCommit = handlerOutcome.handler_facts;
+        // V5 alpha hardening Phase 2.5: primary lifecycle event on
+        // successful handler invocation. Fact count + LLM-call count
+        // are queryable alongside the obs field set.
+        emit(
+          TelemetryEvents.HandlerInvocation,
+          obsPayload({
+            handler_id: proposedHandlerId,
+            outcome: 'success',
+            fact_count: handlerOutcome.handler_facts.length,
+            llm_calls_used: handlerOutcome.llm_calls_used,
+          }),
+        );
       } catch (error) {
+        // Primary lifecycle event on handler failure. `outcome: 'error'`
+        // paired with the cause_kind where known so log queries can
+        // differentiate infrastructure faults from upstream errors.
+        const causeKind =
+          error instanceof HandlerInvocationFailedError ? error.cause_kind : 'unknown';
+        emit(
+          TelemetryEvents.HandlerInvocation,
+          obsPayload({
+            handler_id: proposedHandlerId,
+            outcome: 'error',
+            cause_kind: causeKind,
+          }),
+        );
         return translateExecuteError(error);
       }
 
@@ -999,18 +1096,23 @@ export async function runTurnExecutor(
     }
   } finally {
     clearTimeout(turnTimer);
-    emit(TelemetryEvents.TurnExecutorCompleted, {
-      request_id: requestId,
-      session_id: context.session_id,
-      stage: context.stage,
-      turn_class: resolvedTurnClass,
-      stages_completed: stagesCompleted,
-      response_emitted: true,
-      llm_calls_used: llmCallsUsed,
-      commit_performed: commitPerformed,
-      failure_type: failureType,
-      wall_clock_ms: Date.now() - startedAt,
-    });
+    // V5 alpha hardening Phase 2.5: response_type captures the final
+    // turn_class so one log query on `v5_journey_id` can answer both
+    // "what happened" (response_type, validator_outcome) and "how"
+    // (handler_proposed, prompt_version/hash).
+    responseTypeForObs = resolvedTurnClass;
+    emit(
+      TelemetryEvents.TurnExecutorCompleted,
+      obsPayload({
+        turn_class: resolvedTurnClass,
+        stages_completed: stagesCompleted,
+        response_emitted: true,
+        llm_calls_used: llmCallsUsed,
+        commit_performed: commitPerformed,
+        failure_type: failureType,
+        wall_clock_ms: Date.now() - startedAt,
+      }),
+    );
     // Phase 1b D10 / review-cycle P1-3: emit one routing log record per
     // turn — success or failure — so Phase 2 evaluation has the route-time
     // signals (intent classification, coaching mode, resolution status,

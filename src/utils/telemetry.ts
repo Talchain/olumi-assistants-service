@@ -445,6 +445,16 @@ export const TelemetryEvents = {
   // with response_emitted=true. ContaminationNarrate is informational only.
   TurnExecutorStarted: "turn_executor.started",
   TurnExecutorCompleted: "turn_executor.completed",
+  // V5 alpha hardening Phase 2.5: primary lifecycle events. Every event
+  // on this list carries the full obs field set (v5_journey_id,
+  // prompt_version, prompt_hash, system_chars, context_pack_chars,
+  // handler_proposed, validator_outcome, response_type). Lower-level
+  // debug/warn logs carry only request_id + v5_journey_id. See
+  // Docs/v5/v5-resilience-contract.md Part E.
+  ContextPackAssembled: "v5.context_pack.assembled",
+  ValidatorOutcome: "v5.validator_outcome",
+  RecoveryResponse: "v5.recovery_response",
+  HandlerInvocation: "v5.handler_invocation",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
   // V5 TurnExecutor per-code failure composition.
