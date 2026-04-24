@@ -5,9 +5,9 @@ Phase 3 of V5 alpha hardening. This pack is produced by [tools/v5-journey-replay
 ## Run metadata
 
 - **Branch:** `claude/v5-alpha-hardening`
-- **Commit SHA:** `372537576a92f5fd62f44b46dfa732bf1a8d86a6`
+- **Commit SHA:** `facb76932d5a070ccc45d914e7f9f6bffdb70c84`
 - **Base URL:** http://localhost:3000
-- **Started at:** 2026-04-24T13:54:15.509Z
+- **Started at:** 2026-04-24T14:14:17.765Z
 - **Prompt version:** `v38.2`
 - **Prompt hash:** `2e25001a025e288c`
 
