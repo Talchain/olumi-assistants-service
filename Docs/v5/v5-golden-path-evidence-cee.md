@@ -26,11 +26,33 @@ Harness runs against a locally-started server (`pnpm start`). Log capture is std
 
 ## Post-authorised-deploy gate (staging)
 
-Populated by Paul after authorising the staging push. The harness runs against `https://cee-staging.onrender.com` with the same canonical steps. Staging log lines are pasted manually — no new log-exposure API surface is added.
+Paul's authorisation landed. Push executed 2026-04-24T14:58 UTC: fast-forward `cf1b74f1..4a867777` on `origin/staging` (all 14 pre-push hook checks green — branch-guard, typecheck, lint-changed, smoke-tests, stale-js, dependency-audit, tarball-sha, transport-invariants, data-responsibility, phase-0-complete, docs-consistency, state-write-invariant, handler-ownership, phase-1.5-invariants). Render deploy presumed triggered.
+
+Harness ran against `https://cee-staging.onrender.com` at 2026-04-24T14:59:27 UTC against commit `4a867777`:
 
 | step | status | evidence | failing_contract |
 |---|---|---|---|
-| _pending Paul's authorisation_ | _—_ | _—_ | _—_ |
+| `1_draft_graph` | ❌ failed | status=401 body_error= | HTTP 401 (auth required) |
+| `2_weakest_option` | ⏭ skipped | prerequisite 1_draft_graph failed | — |
+| `3_add_option` | ⏭ skipped | prerequisite 1_draft_graph failed | — |
+| `4_run_analysis` | ⏭ skipped | prerequisite 1_draft_graph failed | — |
+| `5_explain_leader` | ❌ failed | status=401 body_error= | HTTP 401 (auth required) |
+| `6_edit_budget` | ❌ failed | status=401 body_error= | HTTP 401 (auth required) |
+
+### Known blocker — staging authentication
+
+**Branch status: unit-proven, replay-unproven (staging auth blocked).** The staging `/orchestrate/v2/turn` endpoint is API-key-protected. The replay harness's `client.ts` does not currently send authentication headers — it posts as an anonymous client, which staging correctly rejects with HTTP 401 before routing to the V5 code paths.
+
+**Implication:** the replay harness cannot yet exercise V5 behaviour on the live deployment from this machine. The 401 responses are produced by the staging auth layer BEFORE the orchestrator runs, so they do not reflect any V5 regression — they reflect a harness-side gap.
+
+**Halt policy (correction 16):** scope was NOT expanded to hunt for the API key or wire an auth header from local env. The blocker is flagged for Paul's next action.
+
+**Required next step:** one of:
+1. Extend `tools/v5-journey-replay/client.ts` to read an `OLUMI_API_KEY` env var (or equivalent) and send it on every request, then re-run the harness against staging with the key set.
+2. Run the harness from a machine that already has the staging API key configured (e.g. Render shell or a CI runner with secrets).
+3. Confirm V5 behaviour via Render's deploy logs directly — look for the `v5.routing_prompt_loaded` log line with `prompt_version: "v38.2"`, `prompt_hash: "2e25001a025e288c"`, `system_chars: 19314` on service start. That log line alone proves the Phase 2.1 prompt install landed in production.
+
+Only a green staging table above flips the branch status from "replay-unproven" to "replay-proven". The 13 commits have deployed successfully — but the end-to-end six-step journey remains unverified from this machine until one of the above paths is taken.
 
 ## Canonical steps (exact brief)
 
