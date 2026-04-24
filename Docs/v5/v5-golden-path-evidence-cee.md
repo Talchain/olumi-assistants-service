@@ -5,9 +5,9 @@ Phase 3 of V5 alpha hardening. This pack is produced by [tools/v5-journey-replay
 ## Run metadata
 
 - **Branch:** `claude/v5-alpha-hardening`
-- **Commit SHA:** `facb76932d5a070ccc45d914e7f9f6bffdb70c84`
+- **Commit SHA:** `761e9c37bb4fa076a47c8ca75ebbeb818f9e6e52`
 - **Base URL:** http://localhost:3000
-- **Started at:** 2026-04-24T14:14:17.765Z
+- **Started at:** 2026-04-24T14:24:50.621Z
 - **Prompt version:** `v38.2`
 - **Prompt hash:** `2e25001a025e288c`
 
@@ -48,6 +48,13 @@ Unknown PLoT status with no usable result fields → typed fatal, not a misleadi
 ## Halt policy (correction 16)
 
 If the harness uncovers a systemic blocker outside the approved Phase 2 scope, the row is marked `failed` with a specific `failing_contract` and the blocker documented below. Scope is NOT expanded to force green rows.
+
+## Discoveries (deferred for follow-up)
+
+| area | observation | follow-up recommendation |
+|---|---|---|
+| Handler failure recovery (P1-1) | `translateExecuteError` composes a coaching response for `HandlerInvocationFailedError` but returns via `failureType = HANDLER_INVOCATION_FAILED` → HTTP 500. Principle 1 ("default recoverable") suggests retryable handler failures (plot_timeout, plot_error, scenario_read_failed, options_not_configured) should commit as direct_answer and return 200, mirroring the Phase 2.2 validator pattern. | Extend Part B of the resilience contract to enumerate handler-failure fatals (only analysis_blocked / analysis_failed remain fatal) and port the `commitDirectAnswer` pattern to `translateExecuteError`. One table-driven test per retryable cause_kind. |
+| PLoT usable-fields enforcement on known statuses | `hasUsableResultFields` is only consulted for unknown statuses. Known statuses (`completed`, `computed`, `partial`) succeed regardless of whether records carry a usable id/label + finite probability. Contract Part C reads as a floor for ALL success paths; code enforces it selectively. | Thread `hasUsableResultFields` into the `ok` and `partial` branches of `evaluateAnalysisStatus`. When a known status arrives with no usable fields, demote to fatal (`analysis_not_completed`) with a dedicated cause_kind, or (softer) surface a caveat via assistant_text. Requires a decision on how strict to be. |
 
 ### Known blocker — local bootstrap
 
