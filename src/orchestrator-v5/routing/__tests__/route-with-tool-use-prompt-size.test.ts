@@ -103,4 +103,35 @@ describe('routeWithToolUse — system prompt loading (Task 3.1)', () => {
     expect(capturedLength).toBe(ROUTING_SYSTEM_PROMPT.length);
     expect(capturedLength).toBeGreaterThan(100);
   });
+
+  it('passes a 19K-character override prompt through the adapter byte-for-byte', async () => {
+    // V5 Task 3.1 (post-review): prove the loading path survives the
+    // future ~19K-char prompt drop-in. Uses the `systemPromptOverride`
+    // seam so the test doesn't depend on mutating the module-level const.
+    const longPrompt = 'X'.repeat(19_000);
+    expect(longPrompt.length).toBe(19_000);
+
+    let captured: string | null = null;
+    const mockAdapter = {
+      async chatWithTools(args: ChatWithToolsArgs): Promise<ChatWithToolsResult> {
+        captured = args.system as string;
+        return {
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 0, output_tokens: 0 },
+        } as ChatWithToolsResult;
+      },
+    };
+
+    await routeWithToolUse(makeContextPack(), 'hi', {
+      requestId: 'req-size-19k',
+      adapter: mockAdapter,
+      systemPromptOverride: longPrompt,
+    });
+
+    expect(captured).not.toBeNull();
+    // Byte-for-byte equality — no truncation, no collapse, no re-encode.
+    expect(captured!.length).toBe(longPrompt.length);
+    expect(captured).toBe(longPrompt);
+  });
 });

@@ -41,7 +41,25 @@ export interface SessionTurnWrite {
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<{ id: string }>;
   readRecent(scenarioId: string, limit?: number): Promise<readonly SessionTurn[]>;
-  readFactsFor(turnIds: readonly string[], handlerId?: V5ActionType): Promise<readonly HandlerFact[]>;
+  /**
+   * Load handler facts for a set of prior conversation turns.
+   *
+   * **Important:** `conversationTurnRowIds` must be the `v5_conversation_turns.id`
+   * row UUIDs (i.e. `SessionTurn.id`) — NOT the client-supplied `turn_id`
+   * strings. `v5_handler_facts.v5_conversation_turn_id` is a foreign key to
+   * the row `id`, and filtering against `turn_id` silently returns zero
+   * rows. An earlier revision of this API was called with `turn_id` values
+   * and produced empty results in production; renaming the parameter makes
+   * the semantics loud at the call site.
+   *
+   * Results are ordered newest-first by `created_at DESC`. Callers that
+   * need the most recent entry can rely on `.find()` selecting
+   * deterministically.
+   */
+  readFactsFor(
+    conversationTurnRowIds: readonly string[],
+    handlerId?: V5ActionType,
+  ): Promise<readonly HandlerFact[]>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**

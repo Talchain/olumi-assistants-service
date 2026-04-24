@@ -278,6 +278,14 @@ export interface RouteWithToolUseOptions {
       opts: { requestId: string; timeoutMs?: number; signal?: AbortSignal },
     ) => Promise<ChatWithToolsResult>;
   };
+  /**
+   * V5 Task 3.1 review: test-only override for the system prompt passed to
+   * the adapter. Production always uses `ROUTING_SYSTEM_PROMPT`; the
+   * prompt-size test uses this seam to prove that a 19K-char prompt
+   * survives the loading path unchanged. Intentionally undocumented in
+   * routing docs — use sparingly and only in tests.
+   */
+  readonly systemPromptOverride?: string;
 }
 
 export async function routeWithToolUse(
@@ -306,7 +314,7 @@ export async function routeWithToolUse(
   const userMessage = buildUserMessage(contextPack, message);
 
   const firstCallArgs: ChatWithToolsArgs = {
-    system: ROUTING_SYSTEM_PROMPT,
+    system: options.systemPromptOverride ?? ROUTING_SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userMessage }],
     tools: [OLUMI_ACTION_TOOL],
     tool_choice: { type: 'auto' },

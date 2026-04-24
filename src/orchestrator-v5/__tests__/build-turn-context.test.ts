@@ -119,6 +119,33 @@ describe('buildTurnContext slice B — prior_turns population', () => {
     expect(ctx.prior_turns[0].turn_id).toBe('t2');
   });
 
+  it('calls readFactsFor with SessionTurn.id (row UUID), NOT turn_id', async () => {
+    // V5 review regression guard: `v5_handler_facts.v5_conversation_turn_id`
+    // references `v5_conversation_turns.id`. Passing `turn_id` (the client-
+    // generated UUID string) would silently match zero rows and leave
+    // prior_facts empty in production — which broke both the Task 1.4
+    // analysis fallback and the coaching-cache decision_review lookups.
+    const handlerTurn = {
+      ...makeSessionTurn('client-turn-uuid', '2026-04-17T11:00:00.000+00:00'),
+      id: 'db-row-uuid-should-be-passed',
+      turn_class: 'handler' as const,
+      handler_id: 'run_analysis' as const,
+    };
+    const captured: string[][] = [];
+    const capturingStore = {
+      ...createNoopSessionStore({ priorTurns: [handlerTurn] }),
+      readFactsFor: async (ids: readonly string[]) => {
+        captured.push([...ids]);
+        return [];
+      },
+    };
+    await buildTurnContext(BASE, 'req-1', { sessionStore: capturingStore });
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual(['db-row-uuid-should-be-passed']);
+    // Explicit negative: the client turn_id must NOT appear.
+    expect(captured[0]).not.toContain('client-turn-uuid');
+  });
+
   it('returns empty prior_turns when readRecent throws (graceful degradation)', async () => {
     const boom = new SessionReadError('DB offline', { code: '57P03' });
     const store = createNoopSessionStore({ throwOnRead: boom });

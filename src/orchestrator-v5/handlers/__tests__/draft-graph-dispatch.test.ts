@@ -531,3 +531,125 @@ describe('stage_indicator canonical values', () => {
     expect(() => Stage.parse('evaluate')).toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// V5 review: post-draft chip generation
+// ---------------------------------------------------------------------------
+//
+// The brief's chip-mapping table calls for different chips on the draft
+// response depending on analysis_ready status and persistence outcome.
+// These tests exercise buildPostDraftChips end-to-end through the dispatcher
+// and also assert the emitted chips pass the boundary `ActionSchema`, so an
+// egress validator cannot reject the envelope.
+
+describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('emits an executable Run analysis chip when analysis_ready.status === "ready"', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-ready',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions).toHaveLength(1);
+    expect(result.response.suggested_actions[0]).toMatchObject({
+      id: 'chip_action_run_analysis',
+      action_type: 'run_analysis',
+      label: 'Run analysis',
+    });
+  });
+
+  it('emits a conversational setup chip when analysis_ready is absent', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-unready',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions).toHaveLength(1);
+    expect(result.response.suggested_actions[0]).toMatchObject({
+      id: 'chip_prompt_set_option_values',
+      label: 'Set values for options',
+    });
+    // Prompt chip — no action_type.
+    expect(result.response.suggested_actions[0].action_type).toBeUndefined();
+  });
+
+  it('emits a conversational setup chip when analysis_ready.status is not "ready"', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    const pending = { ...MINIMAL_ANALYSIS_READY, status: 'pending_values' } as unknown as typeof MINIMAL_ANALYSIS_READY;
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, pending) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-pending',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions).toHaveLength(1);
+    expect(result.response.suggested_actions[0].label).toBe('Set values for options');
+  });
+
+  it('emits NO chips when graph persistence failed (route returns 500 anyway)', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockRejectedValue(new Error('StateCommitFailedError'));
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-fail',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.commitPerformed).toBe(false);
+    expect(result.response.suggested_actions).toEqual([]);
+  });
+
+  it('emitted chips pass B1 ActionSchema validation', async () => {
+    const { ActionSchema } = await import('@talchain/schemas/boundary');
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const scenarios: Array<[string, unknown]> = [
+      ['ready', MINIMAL_ANALYSIS_READY],
+      ['absent', undefined],
+    ];
+    for (const [label, analysisReady] of scenarios) {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+        makeDraftResult(
+          MINIMAL_GRAPH,
+          analysisReady as typeof MINIMAL_ANALYSIS_READY,
+        ) as Awaited<ReturnType<typeof handleDraftGraph>>,
+      );
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: `req-chip-schema-${label}`,
+        request: STUB_REQUEST,
+      });
+      for (const chip of result.response.suggested_actions) {
+        const parsed = ActionSchema.safeParse(chip);
+        expect(parsed.success).toBe(true);
+      }
+    }
+  });
+});

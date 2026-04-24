@@ -150,12 +150,19 @@ async function fetchPriorFacts(
 ): Promise<readonly HandlerFact[]> {
   if (!store) return [];
   if (priorTurns.length === 0) return [];
-  const handlerTurnIds = priorTurns
+  // Critical correctness fix: `readFactsFor` filters against
+  // `v5_handler_facts.v5_conversation_turn_id`, which is the FK to the
+  // `v5_conversation_turns.id` row UUID — NOT the client-supplied
+  // `turn_id` string. Passing `turn_id` here silently matched zero rows
+  // and made `prior_facts` always empty in production, breaking both the
+  // analysis-fallback feature (Task 1.4) and the coaching-cache decision
+  // review / signal lookups. Use `t.id` so the FK lookup resolves.
+  const handlerRowIds = priorTurns
     .filter((t) => t.turn_class === 'handler')
-    .map((t) => t.turn_id);
-  if (handlerTurnIds.length === 0) return [];
+    .map((t) => t.id);
+  if (handlerRowIds.length === 0) return [];
   try {
-    return await store.readFactsFor(handlerTurnIds);
+    return await store.readFactsFor(handlerRowIds);
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);

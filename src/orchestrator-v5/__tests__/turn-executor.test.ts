@@ -47,8 +47,13 @@ vi.mock('../session/index.js', () => ({
       (global as any).__test_append_calls.push(write);
       return { id: 'mock-row-id' };
     },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
+    readRecent: async () => (global as any).__test_prior_turns ?? [],
+    readFactsFor: async (rowIds: readonly string[]) => {
+      (global as any).__test_readFactsFor_calls =
+        (global as any).__test_readFactsFor_calls || [];
+      (global as any).__test_readFactsFor_calls.push([...rowIds]);
+      return (global as any).__test_prior_facts ?? [];
+    },
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     storeDraftGraph: async (_scenarioId: string, graph: unknown) => {
@@ -67,6 +72,9 @@ vi.mock('../session/index.js', () => ({
     delete (global as any).__test_storeDraftGraph_calls;
     delete (global as any).__test_loadGraph_calls;
     delete (global as any).__test_persisted_graph;
+    delete (global as any).__test_prior_turns;
+    delete (global as any).__test_prior_facts;
+    delete (global as any).__test_readFactsFor_calls;
   },
 }));
 
@@ -1049,6 +1057,95 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       );
 
       expect((global as any).__test_loadGraph_calls).toBeUndefined();
+    });
+  });
+
+  // --------------------------------------------------------------------
+  // V5 review: analysis-fallback e2e
+  // --------------------------------------------------------------------
+  //
+  // Exercises the full fallback loop through the mocked session store:
+  //   1. A prior handler turn exists with a populated run_analysis fact
+  //   2. The request body carries NO analysis_state
+  //   3. fetchPriorFacts must pass SessionTurn.id (row UUID) — not turn_id
+  //   4. Fallback projects the fact into ContextPackAnalysis with the
+  //      unknown-freshness staleness reason
+  //
+  // Before this regression guard, fetchPriorFacts passed client `turn_id`
+  // into readFactsFor which filters the FK column storing the DB row `id`.
+  // Every production lookup returned empty, silently disabling the Task 1.4
+  // fallback. The test fails closed on any recurrence.
+  describe('analysis-fallback e2e (prior run_analysis fact)', () => {
+    const PRIOR_ROW_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    const PRIOR_TURN_ID_CLIENT = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+    beforeEach(() => {
+      (global as any).__test_prior_turns = [
+        {
+          id: PRIOR_ROW_ID,
+          scenario_id: BASE_PAYLOAD.scenario_id,
+          user_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          turn_id: PRIOR_TURN_ID_CLIENT,
+          turn_class: 'handler',
+          handler_id: 'run_analysis',
+          request_hash: 'sha256:prev',
+          response_emitted: true,
+          llm_calls_used: 1,
+          duration_ms: 42,
+          created_at: '2026-04-23T10:00:00.000+00:00',
+        },
+      ];
+      (global as any).__test_prior_facts = [
+        {
+          fact_type: 'run_analysis',
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: BASE_PAYLOAD.scenario_id,
+            leading_option_id: 'opt-a',
+            summary: 'Prior analysis',
+            win_probabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
+          },
+        },
+      ];
+    });
+
+    it('calls readFactsFor with the DB row id (not the client turn_id)', async () => {
+      const routingAdapter = mockRoutingAdapter(async () => mkTextResult('ok'));
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, stage: 'analyse', message: 'what do the results mean?' },
+        'req-fallback-id',
+        { routingAdapter },
+      );
+      const calls = (global as any).__test_readFactsFor_calls as string[][];
+      expect(calls).toBeDefined();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual([PRIOR_ROW_ID]);
+      expect(calls[0]).not.toContain(PRIOR_TURN_ID_CLIENT);
+    });
+
+    it('projects prior run_analysis fact into ContextPack analysis when request has no analysis_state', async () => {
+      // Capture the ContextPack Sonnet receives so we can assert the
+      // analysis projection end-to-end.
+      const seen: { system: unknown; userMessage: string } = { system: null, userMessage: '' };
+      const routingAdapter = mockRoutingAdapter(async (args) => {
+        seen.system = args.system;
+        const userContent = args.messages[0]?.content;
+        seen.userMessage = typeof userContent === 'string' ? userContent : '';
+        return mkTextResult('ok');
+      });
+
+      await runTurnExecutor(
+        { ...BASE_PAYLOAD, stage: 'analyse', message: 'what do the results mean?' },
+        'req-fallback-e2e',
+        { routingAdapter },
+      );
+
+      // The fallback should have populated `analysis.status === "complete"`
+      // and stamped the unknown-freshness staleness reason.
+      expect(seen.userMessage).toContain('"analysis"');
+      expect(seen.userMessage).toContain('"status": "complete"');
+      expect(seen.userMessage).toContain('loaded_from_prior_run_freshness_unknown');
     });
   });
 });

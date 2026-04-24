@@ -162,21 +162,30 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readFactsFor(
-    turnIds: readonly string[],
+    conversationTurnRowIds: readonly string[],
     handlerId?: V5ActionType,
   ): Promise<readonly HandlerFact[]> {
-    if (turnIds.length === 0) return [];
+    if (conversationTurnRowIds.length === 0) return [];
 
     // V5 review: facts must come back newest-first so callers (e.g. the
     // run_analysis fallback in `buildAnalysisFromPriorFacts`) can pick the
     // most recent entry deterministically via `.find()`. The prior
     // implementation relied on undefined Supabase row order, which made the
-    // selection non-deterministic. The composite index
-    // `v5_handler_facts_scenario_handler_idx` covers this ORDER BY.
+    // selection non-deterministic.
+    //
+    // Index note: the existing `v5_handler_facts_turn_idx` on
+    // `v5_conversation_turn_id` covers the `IN` filter; the `ORDER BY
+    // created_at DESC` is done in memory by Postgres after the filtered
+    // rows are fetched. For the expected N (at most a handful of handler
+    // turns per scenario, typically one fact each) this in-memory sort is
+    // negligible. A composite
+    // `(v5_conversation_turn_id, created_at DESC)` index would cover the
+    // ORDER BY if N grows; flagged as a potential follow-up, not required
+    // for the current workload.
     let query = this.client
       .from('v5_handler_facts')
       .select('payload, handler_id, action_type, noop')
-      .in('v5_conversation_turn_id', turnIds as string[])
+      .in('v5_conversation_turn_id', conversationTurnRowIds as string[])
       .order('created_at', { ascending: false });
 
     if (handlerId) {

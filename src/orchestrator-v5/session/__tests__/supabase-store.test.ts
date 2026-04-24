@@ -290,6 +290,35 @@ describe('SupabaseSessionStore.readFactsFor', () => {
     const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
     await expect(store.readFactsFor(['row-1'])).rejects.toBeInstanceOf(SessionReadError);
   });
+
+  // V5 review: regression guards for the correctness fixes introduced
+  // alongside the Task 1.4 analysis fallback.
+  it('orders facts by created_at DESC (newest-first)', async () => {
+    const { client, selectCalls } = makeClient();
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    await store.readFactsFor(['row-a', 'row-b']);
+    expect(selectCalls).toHaveLength(1);
+    const filters = selectCalls[0].filters as Record<string, unknown>;
+    expect(filters['order:created_at']).toEqual({ ascending: false });
+  });
+
+  it('filters against v5_conversation_turn_id (the row id column, not turn_id)', async () => {
+    // Critical correctness guard: the FK column in v5_handler_facts
+    // references v5_conversation_turns.id (the DB-generated row UUID),
+    // NOT v5_conversation_turns.turn_id (the client-generated string).
+    // Callers must pass SessionTurn.id values here.
+    const { client, selectCalls } = makeClient();
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    const rowIds = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+    await store.readFactsFor(rowIds);
+    expect(selectCalls).toHaveLength(1);
+    const filters = selectCalls[0].filters as Record<string, unknown>;
+    expect(filters['in:v5_conversation_turn_id']).toEqual(rowIds);
+    // Must NOT filter on the client-side turn_id column.
+    expect(filters['in:turn_id']).toBeUndefined();
+  });
 });
 
 describe('SupabaseSessionStore.loadGraph', () => {
