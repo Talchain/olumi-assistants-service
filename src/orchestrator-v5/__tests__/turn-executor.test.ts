@@ -378,7 +378,11 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
   // Execute intent with validation active
   // -------------------------------------------------------------------
   describe('execute intent — validation rejects proposal', () => {
-    it('returns HANDLER_INVOCATION_FAILED with validation_error_code in details', async () => {
+    it('recovers as direct_answer when validator rejects (V5 alpha hardening Phase 2.2)', async () => {
+      // Renamed from "HANDLER_INVOCATION_FAILED with validation_error_code
+      // in details" — prior behaviour was 500 with error block. Post-
+      // hardening every validator outcome is recoverable: clean-body
+      // direct_answer + commit + 200.
       const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(VALID_EXECUTE_INPUT));
 
       // Graph has no matching entity → ENTITY_NOT_FOUND
@@ -401,15 +405,15 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       });
 
       const parsed = OlumiResponseSchema.parse(response);
-      expect(parsed.blocks[0]!.type).toBe('error');
-      if (parsed.blocks[0]!.type === 'error') {
-        expect(parsed.blocks[0]!.error_code).toBe('INTERNAL_ERROR');
-        const details = parsed.blocks[0]!.details as { failure_origin?: string; error_code?: string };
-        expect(details?.failure_origin).toBe('validator');
-        expect(details?.error_code).toBe('ENTITY_NOT_FOUND');
-      }
+      // Clean body — no error block under the new recoverable pattern.
+      expect(parsed.blocks.find((b) => b.type === 'error')).toBeUndefined();
+      expect(parsed.suggested_actions.length).toBeGreaterThan(0);
+
+      // Telemetry still captures the typed code for audit.
       expect(telemetry.validation_error_code).toBe('ENTITY_NOT_FOUND');
-      expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+      expect(telemetry.commit_performed).toBe(true);
+      expect(telemetry.failure_type).toBeNull();
+      expect(telemetry.turn_class).toBe('direct_answer');
       expectBI01();
     });
   });

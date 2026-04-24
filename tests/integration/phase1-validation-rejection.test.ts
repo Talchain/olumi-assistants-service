@@ -112,11 +112,14 @@ describe('phase 1 validation rejection — no handler invocation, BI-01 preserve
 
     OlumiResponseSchema.parse(response);
     expect(handlerSpy).not.toHaveBeenCalled();
-    expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+    // V5 alpha hardening Phase 2.2: ENTITY_NOT_FOUND is a recoverable
+    // validator outcome — the turn commits as a direct_answer and returns
+    // 200. The typed code remains queryable via telemetry.
     expect(telemetry.validation_error_code).toBe('ENTITY_NOT_FOUND');
-    expect(telemetry.commit_performed).toBe(false);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.stages_completed).toContain('validator_recovery');
     expect(telemetry.stages_completed).not.toContain('execute');
-    expect(telemetry.stages_completed).not.toContain('compose');
     expectBI01();
   });
 
@@ -236,10 +239,14 @@ describe('phase 1 validation rejection — no handler invocation, BI-01 preserve
     });
 
     expect(handlerSpy).not.toHaveBeenCalled();
+    // V5 alpha hardening Phase 2.2: ENTITY_RESOLUTION_AMBIGUOUS is a
+    // recoverable validator outcome — the turn commits as a direct_answer
+    // (HTTP 200) instead of a 500 BoundaryError.
     expect(telemetry.validation_error_code).toBe('ENTITY_RESOLUTION_AMBIGUOUS');
-    expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
-    expect(telemetry.commit_performed).toBe(false);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
     expect(telemetry.stages_completed).toContain('validate_skipped_no_graph');
+    expect(telemetry.stages_completed).toContain('validator_recovery');
     expect(telemetry.stages_completed).not.toContain('execute');
     expectBI01();
   });

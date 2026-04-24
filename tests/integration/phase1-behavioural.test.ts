@@ -220,29 +220,15 @@ describe('phase 1 behavioural — blocked state / unresolved entity', () => {
 
     OlumiResponseSchema.parse(response);
     expect(telemetry.validation_error_code).toBe('PRECONDITION_UNMET');
-    const block = response.blocks[0]!;
-    if (block.type === 'error') {
-      // v5-maintenance: the error-block details shape evolved. The old
-      // { cause_kind: 'validation_failed' } shape was superseded by
-      // { failure_origin: 'validator', error_code, retryable }. The
-      // specific fix path is now represented by failure_origin + error_code.
-      expect(block.details).toMatchObject({
-        failure_origin: 'validator',
-        error_code: 'PRECONDITION_UNMET',
-      });
-      // `reason` is no longer stamped on the error block directly — the
-      // specific fix path now lives in the assistant_text narration.
-      const responseWithText = response as unknown as { assistant_text?: string };
-      if (responseWithText.assistant_text) {
-        // Assert the narration contains the frozen keyword if the text is
-        // populated; don't fail the test if the narration moved elsewhere.
-        const narration = responseWithText.assistant_text.toLowerCase();
-        if (narration.length > 0) {
-          // Soft check — keeps regression signal without blocking on wording.
-          expect(narration.length).toBeGreaterThan(0);
-        }
-      }
-    }
+    // V5 alpha hardening Phase 2.2: PRECONDITION_UNMET now recovers as a
+    // clean-body direct_answer turn — no error block. The typed code
+    // remains on telemetry. Specific fix path lives in assistant_text.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.turn_class).toBe('direct_answer');
+    expect(response.blocks.find((b) => b.type === 'error')).toBeUndefined();
+    const responseWithText = response as unknown as { assistant_text?: string };
+    expect(responseWithText.assistant_text?.length ?? 0).toBeGreaterThan(0);
   });
 
   it('clarify intent surfaces candidates so user can disambiguate', async () => {

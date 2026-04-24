@@ -135,18 +135,21 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
 
     expect(telemetry.validation_error_code).toBe('ENTITY_NOT_FOUND');
     expect(handler).not.toHaveBeenCalled();
-    // Wire contract: block details name the layer + code (no internal IDs).
-    // Actionable signal lives in suggested_actions + assistant_text.
+    // V5 alpha hardening Phase 2.2: validator outcomes now recover to a
+    // clean-body direct_answer turn (HTTP 200). No error block; the typed
+    // code is captured in telemetry. The user-visible signal lives in
+    // suggested_actions + assistant_text — both MUST stay free of
+    // internal IDs and error codes.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.turn_class).toBe('direct_answer');
     const r = response as {
       assistant_text: string;
       blocks: Array<{ type: string; details?: { failure_origin?: string; error_code?: string } }>;
       suggested_actions: ReadonlyArray<{ label: string; message: string }>;
     };
-    const errBlock = r.blocks.find((b) => b.type === 'error');
-    expect(errBlock?.details?.failure_origin).toBe('validator');
-    expect(errBlock?.details?.error_code).toBe('ENTITY_NOT_FOUND');
+    expect(r.blocks.find((b) => b.type === 'error')).toBeUndefined();
     expect(r.suggested_actions.length).toBeGreaterThan(0);
-    // assistant_text stays generic — no internal ids or error codes.
     expect(r.assistant_text).not.toContain('opt_nonexistent');
     expect(r.assistant_text).not.toContain('ENTITY_NOT_FOUND');
   });
@@ -180,15 +183,17 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
     });
 
     expect(telemetry.validation_error_code).toBe('PRECONDITION_UNMET');
+    // V5 alpha hardening Phase 2.2: recoverable validator outcome —
+    // direct_answer turn, HTTP 200, no error block. Fix-path signal
+    // still lives in assistant_text + chip label.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
     const r = response as {
       assistant_text: string;
       blocks: Array<{ type: string; details?: { failure_origin?: string; error_code?: string } }>;
       suggested_actions: ReadonlyArray<{ label: string }>;
     };
-    const errBlock = r.blocks.find((b) => b.type === 'error');
-    expect(errBlock?.details?.failure_origin).toBe('validator');
-    expect(errBlock?.details?.error_code).toBe('PRECONDITION_UNMET');
-    // User-facing signal lives in assistant_text + chips, not raw reason.
+    expect(r.blocks.find((b) => b.type === 'error')).toBeUndefined();
     expect(r.assistant_text).not.toContain('no_options_defined');
     expect(r.suggested_actions[0]?.label).toBe('Add an option');
   });
@@ -271,15 +276,17 @@ describe('Phase 1.5 — validator rejection (graph threaded)', () => {
     });
 
     expect(telemetry.validation_error_code).toBe('ENTITY_RESOLUTION_SUSPICIOUS');
+    // V5 alpha hardening Phase 2.2: recoverable validator outcome —
+    // clean-body direct_answer + 200. Both candidate chips still render
+    // for disambiguation.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
     const r = response as {
       assistant_text: string;
       blocks: Array<{ type: string; details?: { failure_origin?: string; error_code?: string } }>;
       suggested_actions: ReadonlyArray<{ label: string; message: string }>;
     };
-    const errBlock = r.blocks.find((b) => b.type === 'error');
-    expect(errBlock?.details?.failure_origin).toBe('validator');
-    expect(errBlock?.details?.error_code).toBe('ENTITY_RESOLUTION_SUSPICIOUS');
-    // Both candidates render as chips for UI disambiguation.
+    expect(r.blocks.find((b) => b.type === 'error')).toBeUndefined();
     const labels = r.suggested_actions.map((a) => a.label);
     expect(labels).toContain('Expand UK');
     expect(labels).toContain('Expand into the United Kingdom');

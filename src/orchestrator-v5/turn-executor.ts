@@ -54,6 +54,7 @@ import { buildTurnContext, loadPersistedGraph } from './build-turn-context.js';
 import { buildFailureResponse } from './failure-response.js';
 import { composeValidationFailure } from './compose/validation-failure-responses.js';
 import { composeUnsupportedActionResponse } from './compose/unsupported-action-response.js';
+import { composeRecoverableValidationResponse } from './compose/recoverable-validation-response.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
 import type { ComposeContext } from './compose/types.js';
 import {
@@ -563,90 +564,151 @@ export async function runTurnExecutor(
           graph: graphLookupForValidate,
           handlerRegistry: validationRegistry,
         };
-        // V5 golden-path completion: HANDLER_NOT_FOUND is the "not yet
-        // available" case — routing proposed a sensible action this
-        // deployment hasn't implemented. Return a 200 coaching response
-        // (clean body, no error block) committed as a direct_answer turn,
-        // rather than a 500 BoundaryError that surfaces "Something went
-        // wrong" in the UI. All other validator codes still go through
-        // the existing error-block composer + 500 path.
-        if (validationResult.error.code === 'HANDLER_NOT_FOUND') {
+
+        // V5 alpha hardening Phase 2.2: EVERY validator outcome is a
+        // Sonnet imperfection, not an infrastructure fault. Per principle 1
+        // (deterministic layer is a safety net, not a cage) and per Paul's
+        // locked-in decision, all 7 codes recover as 200 + coaching
+        // committed as a direct_answer turn. HANDLER_NOT_FOUND continues to
+        // use its dedicated category-aware composer
+        // (`composeUnsupportedActionResponse`); the other 6 share the
+        // per-code composer map via `composeRecoverableValidationResponse`.
+        // Commit failure remains fatal (Part B of the resilience contract).
+        //
+        // The `composeValidationFailure` + 500 path is kept as an
+        // impossible-state safety net: if the composer map ever returns
+        // `template_id: 'unknown_validation_code'` we fail loudly with a
+        // BoundaryError rather than silently committing a generic reply.
+        const recoverableCode = validationResult.error.code;
+        let recoveredResponse: OlumiResponse;
+        let recoveredTemplateId: string;
+        let recoveredChipType: 'action' | 'text_prompt' | 'entity_suggestion' | null;
+
+        if (recoverableCode === 'HANDLER_NOT_FOUND') {
           const unsupported = composeUnsupportedActionResponse({
             handlerId: action.handler_id,
             context: composeCtx,
             stage: context.stage,
             hasAnalysis: options.analysisState != null,
           });
-          response = unsupported.response;
-          resolvedTurnClass = 'direct_answer';
-          intentClass = 'converse';
-          stagesCompleted.push('unsupported_action_fallback');
-          // chip_type reflects what the composer actually emitted: 'action'
-          // when the registry had a user-facing handler to point at,
-          // 'text_prompt' when we fell back to a free-text chip.
-          const chipType: 'action' | 'text_prompt' =
+          recoveredResponse = unsupported.response;
+          recoveredTemplateId = unsupported.templateId;
+          recoveredChipType =
             unsupported.response.suggested_actions.some((c) => c.action_type != null)
               ? 'action'
               : 'text_prompt';
+        } else {
+          const recovered = composeRecoverableValidationResponse(
+            validationResult.error,
+            composeCtx,
+            context.stage,
+          );
+          recoveredResponse = recovered.response;
+          recoveredTemplateId = recovered.template_id;
+          recoveredChipType = recovered.chip_type;
+        }
+
+        // Impossible-state guard (correction 8): if composeBody's fallback
+        // fired, the map is out of sync with ValidationErrorCode. Fail
+        // loudly via the legacy 500 wrapper so the problem surfaces in
+        // deploys instead of masquerading as a normal turn.
+        if (recoveredTemplateId === 'unknown_validation_code') {
+          log.error(
+            {
+              event: 'assert_unknown_validation_code',
+              request_id: requestId,
+              validation_error_code: recoverableCode,
+            },
+            'V5 TurnExecutor hit impossible-state composer fallback — returning 500',
+          );
+          failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
+          const composed = composeValidationFailure(
+            validationResult.error,
+            composeCtx,
+            context.stage,
+          );
+          response = composed.response;
           emit(TelemetryEvents.TurnExecutorFailureResponse, {
             request_id: requestId,
             session_id: context.session_id,
             stage: context.stage,
             failure_origin: 'validator',
-            error_code: validationResult.error.code,
-            template_used: unsupported.templateId,
-            chip_attached: unsupported.response.suggested_actions.length > 0,
-            chip_type: chipType,
-            chip_count: unsupported.response.suggested_actions.length,
+            error_code: recoverableCode,
+            template_used: composed.template_id,
+            chip_attached: composed.response.suggested_actions.length > 0,
+            chip_type: composed.chip_type,
+            chip_count: composed.response.suggested_actions.length,
           });
-          // Commit as a direct_answer so route-v2 sees commit_performed=true
-          // and returns 200 — not 500. Commit failures still fall through
-          // to the typed STATE_COMMIT_FAILED path (which returns 500, a
-          // real infrastructure fault, distinct from the graceful fallback).
-          try {
-            const committed = await commitDirectAnswer(response, {
-              scenario_id: context.session_id,
-              turn_id: context.request_id,
-              turn_class: 'direct_answer',
-              handler_id: null,
-              request_hash: computeRequestHash(payload),
-              llm_calls_used: llmCallsUsed,
-              duration_ms: Date.now() - startedAt,
-              handler_facts: [],
-            });
-            commitPerformed = committed.performed;
-            stagesCompleted.push('commit');
-            response = committed.response;
-          } catch (error) {
-            log.error(
-              { request_id: requestId, err: serialiseError(error) },
-              'V5 TurnExecutor commit failure on unsupported-action fallback',
-            );
-            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
-            response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, {
-              phase: 'commit',
-            });
-          }
           return finalizeRun();
         }
-        failureType = INTERNAL_TO_WIRE.HANDLER_INVOCATION_FAILED;
-        const composed = composeValidationFailure(
-          validationResult.error,
-          composeCtx,
-          context.stage,
-        );
-        response = composed.response;
+
+        response = recoveredResponse;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        stagesCompleted.push('validator_recovery');
+
         emit(TelemetryEvents.TurnExecutorFailureResponse, {
           request_id: requestId,
           session_id: context.session_id,
           stage: context.stage,
           failure_origin: 'validator',
-          error_code: validationResult.error.code,
-          template_used: composed.template_id,
-          chip_attached: composed.response.suggested_actions.length > 0,
-          chip_type: composed.chip_type,
-          chip_count: composed.response.suggested_actions.length,
+          error_code: recoverableCode,
+          template_used: recoveredTemplateId,
+          chip_attached: recoveredResponse.suggested_actions.length > 0,
+          chip_type: recoveredChipType,
+          chip_count: recoveredResponse.suggested_actions.length,
         });
+
+        // Commit as a direct_answer so route-v2 sees commit_performed=true
+        // and returns 200. Commit failure on a recoverable path is still
+        // fatal — BUT the original recoverable outcome is logged
+        // separately from the commit failure so infrastructure issues
+        // are not hidden behind resilience (correction 10 / Part B of
+        // the resilience contract).
+        try {
+          const committed = await commitDirectAnswer(response, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: llmCallsUsed,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          // Log the ORIGINAL recoverable outcome as one record...
+          log.warn(
+            {
+              event: 'v5.recoverable_outcome_pre_commit_failure',
+              request_id: requestId,
+              session_id: context.session_id,
+              validation_error_code: recoverableCode,
+              template_used: recoveredTemplateId,
+            },
+            'V5 TurnExecutor recoverable outcome before commit failure',
+          );
+          // ...and the commit failure as a distinct record. Two lines,
+          // not one combined record, so a log query can find each
+          // independently. Both are queryable by request_id.
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              validation_error_code: recoverableCode,
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on recoverable validator path',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, {
+            phase: 'commit',
+          });
+        }
         return finalizeRun();
       }
 

@@ -212,10 +212,19 @@ describe('TurnExecutor — validation failure path', () => {
     expect(ev!.data.chip_type).toBe('entity_suggestion');
 
     expectBI01();
-    expect(appendCalls.length).toBe(0);
+    // V5 alpha hardening Phase 2.2: validator outcomes commit as
+    // direct_answer turns and return 200. Prior to hardening this
+    // asserted `appendCalls.length === 0` (no commit on 500 failure).
+    expect(appendCalls.length).toBe(1);
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.telemetry.failure_type).toBeNull();
   });
 
-  it('emits INTERNAL_ERROR block with failure_origin=validator details', async () => {
+  it('recoverable validator outcome produces a clean body (no error block)', async () => {
+    // V5 alpha hardening Phase 2.2: renamed from "emits INTERNAL_ERROR
+    // block" — that was the old 500 path. Every validator code now
+    // produces a clean-body OlumiResponse so the UI renders a normal
+    // conversational turn, not the "Something went wrong" fallback.
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(ambiguousToolCallInput(), ''),
     );
@@ -228,12 +237,11 @@ describe('TurnExecutor — validation failure path', () => {
       }),
     });
 
-    const block = result.response.blocks[0];
-    expect(block?.type).toBe('error');
-    if (block?.type === 'error') {
-      expect(block.error_code).toBe('INTERNAL_ERROR');
-      expect(block.details?.failure_origin).toBe('validator');
-    }
+    const errBlock = result.response.blocks.find((b) => b.type === 'error');
+    expect(errBlock).toBeUndefined();
+    expect(result.response.blocks).toEqual([]);
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.telemetry.turn_class).toBe('direct_answer');
   });
 });
 

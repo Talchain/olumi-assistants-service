@@ -272,20 +272,22 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
       graphState: graphNoOptions,
     });
 
+    // V5 alpha hardening Phase 2.2: validator outcomes are recoverable —
+    // PRECONDITION_UNMET routes through commitDirectAnswer to HTTP 200
+    // with a clean coaching body. The validator still fires the typed
+    // code (tracked below) but the turn recovers.
     expect(telemetry.validation_error_code).toBe('PRECONDITION_UNMET');
-    expect(telemetry.commit_performed).toBe(false);
-    expect(telemetry.failure_type).toBe('INTERNAL_ERROR');
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.turn_class).toBe('direct_answer');
 
     const r = response as {
       assistant_text: string;
       blocks: Array<Record<string, unknown>>;
     };
     expect(r.assistant_text).not.toContain('no_options_defined');
-    const errBlock = r.blocks.find((b) => b.type === 'error') as
-      | { details?: { failure_origin?: string; error_code?: string } }
-      | undefined;
-    expect(errBlock?.details?.failure_origin).toBe('validator');
-    expect(errBlock?.details?.error_code).toBe('PRECONDITION_UNMET');
+    // Clean body: no error block — this is the recoverable shape.
+    expect(r.blocks.find((b) => b.type === 'error')).toBeUndefined();
   });
 
   it('P0-2 all_dropped: graph with only unknown kinds fails the turn BEFORE routing', async () => {
@@ -539,7 +541,11 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     });
 
     expect(telemetry.validation_error_code).toBe('ENTITY_KIND_MISMATCH');
-    expect(telemetry.commit_performed).toBe(false);
+    // V5 alpha hardening Phase 2.2: validator outcomes are recoverable —
+    // the turn now commits as a direct_answer and returns 200.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.turn_class).toBe('direct_answer');
   });
 
   it('ENTITY_NOT_FOUND fires when Sonnet proposes an id absent from the graph', async () => {
@@ -566,6 +572,9 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     });
 
     expect(telemetry.validation_error_code).toBe('ENTITY_NOT_FOUND');
-    expect(telemetry.commit_performed).toBe(false);
+    // V5 alpha hardening Phase 2.2: validator outcomes are recoverable.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.turn_class).toBe('direct_answer');
   });
 });
