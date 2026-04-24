@@ -79,6 +79,11 @@ import {
   assembleContextPackWithSummary,
   type ContextPack,
 } from './context/context-pack-assembler.js';
+import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
+import {
+  buildAnalysisFromPriorFacts,
+  FALLBACK_STALENESS_REASON,
+} from './context/analysis-fallback.js';
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
 import { computeDeterministicGraphHash } from './context/graph-hash.js';
 import {
@@ -103,7 +108,10 @@ import {
   type AnalysisStateIngress,
 } from './boundary/request-extensions.js';
 import type { V2RunResponseEnvelope } from '../orchestrator/types.js';
-import { compactAnalysis } from '../orchestrator/context/analysis-compact.js';
+import {
+  compactAnalysis,
+  type AnalysisResponseSummary,
+} from '../orchestrator/context/analysis-compact.js';
 import {
   buildRoutingLog,
   writeRoutingLog,
@@ -345,19 +353,48 @@ export async function runTurnExecutor(
     // (only analysis_status is required; everything else passthrough).
     // coerceIngressAnalysis fills the minimal fields compactAnalysis expects
     // before calling it; compactAnalysis is defensive on missing sub-fields.
-    const analysisSummary = options.analysisState
-      ? compactAnalysis(coerceIngressAnalysis(options.analysisState))
-      : null;
+    // V5 Task 1.4: when the UI does not send analysis_state on a follow-up
+    // turn, fall back to projecting the most recent non-noop run_analysis
+    // handler fact. The fallback is flagged unknown-freshness so the
+    // routing prompt can treat it as reference material rather than fresh
+    // output. prior_facts is already loaded by buildTurnContext — no new
+    // DB call.
+    let analysisSummary: AnalysisResponseSummary | null = null;
+    let analysisStalenessReason: string | null = null;
+    let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
+    if (options.analysisState) {
+      analysisSummary = compactAnalysis(coerceIngressAnalysis(options.analysisState));
+      analysisStateSource = 'request';
+    } else {
+      const fallback = buildAnalysisFromPriorFacts(context.prior_facts);
+      if (fallback) {
+        analysisSummary = fallback;
+        analysisStalenessReason = FALLBACK_STALENESS_REASON;
+        analysisStateSource = 'fallback';
+      }
+    }
     try {
       const coachingCache = await readCoachingCache(
         context.session_id,
         context.prior_facts,
       );
+      // V5 Task 1.2: compact the graph before handing it to Sonnet. Full graph
+      // stays on graphLookupForValidate for validation; only the Sonnet-facing
+      // ContextPack uses the compact projection. `absent` falls through to the
+      // assembler's empty-graph branch — Sonnet sees ContextPack.graph empty,
+      // same as when the turn genuinely has no graph.
+      const compactOutcome = compactGraphForContextPack(graphStateForTurn, {
+        requestId,
+      });
+      const compactedGraph =
+        compactOutcome.kind === 'compacted' ? compactOutcome.compact : null;
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
-        graph: graphStateForTurn,
+        graph: compactedGraph ? undefined : graphStateForTurn,
+        compactedGraph,
         analysis: analysisSummary,
+        analysisStalenessReason,
         coaching: coachingCache,
       });
       cqeSummaryForLog = cqeSummary;

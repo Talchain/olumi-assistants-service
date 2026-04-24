@@ -59,7 +59,23 @@ export const OLUMI_ACTION_TOOL = {
         additionalProperties: false,
         description: 'Concrete action payload. Required when intent_class === "execute".',
         properties: {
-          handler_id: { type: 'string' },
+          // V5 Task 1.3: constrained to the registered-handler set. Only
+          // `run_analysis` is implemented in the TurnExecutor registry; other
+          // V5ActionType values (set_factor_value, add_constraint, etc.) have
+          // no handler and would be rejected by the validator. `draft_graph`
+          // and `edit_graph` are NOT in V5ActionType — they are dispatched
+          // by the system layer before routing and never reach this tool call.
+          // Parse-layer validation against this enum prevents Sonnet from
+          // wasting turns proposing unavailable actions.
+          handler_id: {
+            type: 'string',
+            enum: ['run_analysis'],
+            description:
+              'The action to execute. Only run_analysis is available through ' +
+              'this tool. Graph structural changes (draft_graph, edit_graph) ' +
+              'are dispatched by the system before routing and never reach ' +
+              'this tool call. Value modifications happen on the canvas UI.',
+          },
           entity: {
             type: 'object',
             additionalProperties: false,

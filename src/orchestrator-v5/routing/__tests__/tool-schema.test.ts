@@ -203,6 +203,40 @@ describe('OLUMI_ACTION_TOOL definition', () => {
       );
     }
   });
+
+  // V5 Task 1.3: handler_id is constrained to the registered-handler set
+  // at the tool-schema layer (what Sonnet sees). The Zod parser remains
+  // permissive on purpose — unknown handler_ids fall through to the
+  // HANDLER_NOT_FOUND → graceful coaching fallback in the TurnExecutor,
+  // which returns 200 instead of 500.
+  it('handler_id is constrained to the registered-handler enum', () => {
+    const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
+      properties: { handler_id: { type: string; enum?: readonly string[] } };
+    };
+    expect(action.properties.handler_id.type).toBe('string');
+    expect(action.properties.handler_id.enum).toEqual(['run_analysis']);
+  });
+
+  it('parser remains permissive on unknown handler_ids (validator handles it)', () => {
+    // Sonnet could still emit a non-enum value despite the schema constraint;
+    // the Zod parser must not reject it, because the TurnExecutor relies on
+    // the validator path to return HANDLER_NOT_FOUND → 200 coaching.
+    const unknownHandlerProposal = {
+      intent_class: 'execute' as const,
+      action: {
+        handler_id: 'some_future_handler',
+        entity: {
+          id: 'scen-abc',
+          kind: 'option' as const,
+          resolution_status: 'resolved' as const,
+          resolution_method: 'id_match' as const,
+        },
+        parameters: [],
+        cited_context_fields: [],
+      },
+    };
+    expect(() => parseToolCallResponse(unknownHandlerProposal)).not.toThrow();
+  });
 });
 
 describe('parseToolCallResponse', () => {

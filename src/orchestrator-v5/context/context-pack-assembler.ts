@@ -29,6 +29,7 @@ import type { SessionTurn } from '@talchain/schemas/orchestrator';
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
+import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import { detectCompound } from '../routing/compound-detector.js';
 import {
@@ -127,7 +128,27 @@ export interface AssembleContextPackInput {
   readonly payload: MessageTurnPayload;
   readonly priorTurns: readonly SessionTurn[];
   readonly graph?: GraphWithOptions | null;
+  /**
+   * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
+   * uses this to populate ContextPack.graph (nodes/edges/derived lists and
+   * counts) instead of the raw `graph` passthrough. Options/goals/constraints
+   * are still derived from the compact nodes by kind. The full graph remains
+   * available to the validator via `graphLookupForValidate` in turn-executor.
+   *
+   * Absent / null falls back to the raw passthrough projection, preserving
+   * the pre-1.2 behaviour for callers that haven't adopted compaction.
+   */
+  readonly compactedGraph?: GraphV3Compact | null;
   readonly analysis?: AnalysisResponseSummary | null;
+  /**
+   * V5 Task 1.4: when the analysis came from a server-side fallback
+   * (prior handler facts, not this request's body), the caller supplies a
+   * string describing the reason. It is passed through to
+   * `ContextPackAnalysis.staleness_reason` so Sonnet can treat the results
+   * as potentially-stale reference material rather than fresh output.
+   * Absent/null means analysis is fresh (or absent).
+   */
+  readonly analysisStalenessReason?: string | null;
   readonly systemEvent?: unknown | null;
   readonly pendingConfirmation?: boolean;
   /** Pre-resolved coaching state. Caller reads sidecar / prior facts before
@@ -178,8 +199,13 @@ export function assembleContextPackWithSummary(
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     stage: input.payload.stage,
-    graph: projectGraph(input.graph ?? null),
-    analysis: projectAnalysis(input.analysis ?? null),
+    graph: input.compactedGraph
+      ? projectCompactGraph(input.compactedGraph)
+      : projectGraph(input.graph ?? null),
+    analysis: projectAnalysis(
+      input.analysis ?? null,
+      input.analysisStalenessReason ?? null,
+    ),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
@@ -192,6 +218,40 @@ export function assembleContextPackWithSummary(
       ? { ...base, compound_segments: compound.segments }
       : base;
   return { contextPack, cqeSummary: extraction.summary };
+}
+
+/**
+ * Project a compacted graph (output of `compactGraphForContextPack`) into
+ * the ContextPackGraph shape. Options / goals are derived from the compact
+ * nodes by kind; constraints remain empty because the compactor drops
+ * `goal_constraints` (the raw-passthrough branch carries them through when
+ * the caller supplies a `graph`, but the compact path is the Sonnet-facing
+ * projection where we lean on the compact intervention summaries instead).
+ *
+ * The returned object uses the compact shapes for nodes and edges — callers
+ * that typed these as `readonly unknown[]` consume them unchanged. Downstream
+ * uses (turn-executor routing-log counts, JSON serialisation to Sonnet) are
+ * both shape-agnostic.
+ */
+function projectCompactGraph(compact: GraphV3Compact): ContextPackGraph {
+  const options = compact.nodes
+    .filter((n) => n.kind === 'option')
+    .map((n) => ({ id: n.id, label: n.label }));
+  const goals = compact.nodes.filter((n) => n.kind === 'goal');
+  return {
+    nodes: compact.nodes,
+    edges: compact.edges,
+    options,
+    goals,
+    constraints: [],
+    counts: {
+      nodes: compact.nodes.length,
+      edges: compact.edges.length,
+      options: options.length,
+      goals: goals.length,
+      constraints: 0,
+    },
+  };
 }
 
 function projectGraph(graph: GraphWithOptions | null): ContextPackGraph {
@@ -221,7 +281,10 @@ function projectGraph(graph: GraphWithOptions | null): ContextPackGraph {
   };
 }
 
-function projectAnalysis(analysis: AnalysisResponseSummary | null): ContextPackAnalysis | null {
+function projectAnalysis(
+  analysis: AnalysisResponseSummary | null,
+  stalenessReason: string | null,
+): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
   const sortedOptions = [...analysis.options].sort((a, b) => b.win_probability - a.win_probability);
@@ -235,7 +298,7 @@ function projectAnalysis(analysis: AnalysisResponseSummary | null): ContextPackA
     robustness_band: analysis.robustness_level,
     top_drivers: analysis.top_drivers.map((d) => d.factor_label),
     fragile_edges: (analysis.top_fragile_edges ?? []).map((e) => `${e.from_label} → ${e.to_label}`),
-    staleness_reason: null,
+    staleness_reason: stalenessReason,
   };
 }
 
