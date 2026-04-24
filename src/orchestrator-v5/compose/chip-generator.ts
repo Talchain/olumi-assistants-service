@@ -171,11 +171,20 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
         ),
       ]);
     }
+    // Follow-up review: readiness is UNKNOWN (analysisReady undefined —
+    // typically no graph / unparseable graph). Pre-follow-up this
+    // emitted "Run the analysis" which nudged Sonnet toward an action
+    // whose graph precondition is structurally impossible. Under the
+    // Phase 2.2 recoverable-validator pattern this wouldn't 500, but it
+    // would still waste a round-trip. A neutral decision-framing
+    // prompt keeps the user (and the model) focused on whatever
+    // structural step is actually next — usually "tell me about the
+    // decision" at frame stage.
     return cap([
       promptChip(
-        'ask_run_analysis',
-        'Run the analysis',
-        'I want to run the analysis on this decision.',
+        'describe_decision',
+        'Tell me about your decision',
+        'Tell me about this decision so I can help you work through it.',
       ),
     ]);
   }

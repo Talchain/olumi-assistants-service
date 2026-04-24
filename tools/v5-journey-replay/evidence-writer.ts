@@ -134,27 +134,38 @@ export function renderEvidencePack(
     lines.push('### Known blocker — local bootstrap');
     lines.push('');
     lines.push(
-      'The pre-merge local gate requires `pnpm start` to be reachable at ' +
-        'the `--base-url`. On this developer machine the server did NOT ' +
+      '**Branch status: unit-proven, replay-unproven.** The pre-merge ' +
+        'local gate requires `pnpm start` to be reachable at the ' +
+        '`--base-url`. On this developer machine the server did NOT ' +
         'boot because required credentials (`SUPABASE_URL`, ' +
         '`SUPABASE_SERVICE_ROLE_KEY`) live only in the Render deploy env ' +
         'and are not present in the repo `.env` (see ' +
         '[reference_supabase_env.md](../../.claude/projects/-Users-paulslee-Documents-GitHub-olumi-assistants-service/memory/reference_supabase_env.md)).',
     );
     lines.push('');
-    lines.push('**Implication:** per-step replay assertions could not run locally on this branch. The equivalent coverage for Phase 2 work is:');
+    lines.push(
+      '**Implication:** per-step replay assertions could not run locally ' +
+        'on this branch. Unit + integration coverage verifies each ' +
+        'individual contract is implemented correctly; it is **supporting ' +
+        'coverage**, not a substitute for the six-step end-to-end journey. ' +
+        'The six-step replay gate remains UNPROVEN until the staging ' +
+        'table above is populated.',
+    );
+    lines.push('');
+    lines.push('**Supporting unit + integration coverage per Phase 2 task:**');
     lines.push('');
     lines.push('- Phase 2.1 install: `src/orchestrator-v5/routing/__tests__/prompt-loader.test.ts` (8 tests, 1 conditional dist test)');
     lines.push('- Phase 2.2 recoverable validator: `src/orchestrator-v5/__tests__/turn-executor-recoverable-validator.test.ts` (8 tests, pinned ENTITY_KIND_MISMATCH + commit-failure-per-code)');
     lines.push('- Phase 2.3 PLoT matrix: `src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts` (11 tests)');
-    lines.push('- Phase 2.4 chip gate: `src/orchestrator-v5/compose/__tests__/chip-generator.test.ts` (16 tests)');
+    lines.push('- Phase 2.4 chip gate: `src/orchestrator-v5/compose/__tests__/chip-generator.test.ts` (17 tests)');
     lines.push('- Phase 2.5 observability: `src/orchestrator-v5/__tests__/turn-executor-observability.test.ts` (3 tests)');
+    lines.push('- P1-2 routing-log redaction: `src/orchestrator-v5/__tests__/turn-executor.test.ts` (default + opt-in tests)');
+    lines.push('- P1-2 validator-log privacy: `src/orchestrator-v5/__tests__/turn-executor-validator-log-privacy.test.ts` (4 tests)');
     lines.push('');
     lines.push(
-      '**Recommendation:** run the harness against staging after Paul ' +
-        'authorises the push. The post-authorised-deploy table above is ' +
-        'the real end-to-end gate; the unit + integration tests are the ' +
-        'pre-merge proof that each contract is implemented correctly.',
+      '**Required next step:** run the harness against staging after ' +
+        'push authorisation. Only a green staging table above changes ' +
+        'the branch status from "replay-unproven" to "replay-proven".',
     );
     lines.push('');
   }

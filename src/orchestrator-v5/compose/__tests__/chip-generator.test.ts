@@ -146,10 +146,13 @@ describe('generateChips', () => {
     expect(chips[0].label).toBe('Set values for options');
   });
 
-  it('analyse stage with analysisReady=undefined + options present → generic "Run the analysis" prompt', () => {
-    // Distinct from known-not-ready: when readiness is UNKNOWN (no
-    // graph / unparseable graph) we preserve the generic prompt because
-    // we can\'t tell the user which specific configuration is missing.
+  it('analyse stage with analysisReady=undefined + options present → neutral "Tell me about your decision" prompt', () => {
+    // Follow-up review (P1-4 revisit): when readiness is UNKNOWN (no
+    // graph / unparseable graph), do NOT nudge Sonnet toward an
+    // analysis action whose graph precondition is structurally
+    // impossible. Pre-follow-up this emitted "Run the analysis"; the
+    // neutral decision-framing prompt keeps the model focused on the
+    // structural step that actually comes next.
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
@@ -160,7 +163,7 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Run the analysis');
+    expect(chips[0].label).toBe('Tell me about your decision');
   });
 
   it('analyse stage with analysisReady=undefined (unknown readiness) → never executable', () => {
@@ -179,6 +182,11 @@ describe('generateChips', () => {
   });
 
   it('analyse stage with run_analysis not registered even when ready → conversational fallback', () => {
+    // When the executable variant is unavailable (registry empty) the
+    // chip falls through to the neutral decision-framing prompt rather
+    // than the old "Run the analysis" prompt, which would have
+    // loop-baited Sonnet toward an action whose handler isn't
+    // registered in this deployment.
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
@@ -189,7 +197,7 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Run the analysis');
+    expect(chips[0].label).toBe('Tell me about your decision');
   });
 
   it('decide stage with fragile robustness → flip + pre-mortem prompts', () => {

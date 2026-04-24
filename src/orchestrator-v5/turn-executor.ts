@@ -637,11 +637,19 @@ export async function runTurnExecutor(
       );
       if (!validationResult.valid) {
         validationErrorCode = validationResult.error.code;
+        // V5 alpha hardening follow-up (P1-2): the raw ValidationError
+        // details payload carries user-authored labels (candidates[].label,
+        // proposed_label, entity_label, resolved_label, chosen/closer
+        // label fields) and free-text parameter values (actual_value,
+        // constraint issue strings) — these are user decision text and
+        // MUST NOT land in logs per principle 3. Whitelist-build a safe
+        // subset: codes, enum-valued kinds, system ids, counts, hashes.
         log.warn(
           {
             request_id: requestId,
+            v5_journey_id: v5JourneyId,
             validation_error_code: validationResult.error.code,
-            details: validationResult.error.details,
+            safe_details: buildSafeValidatorLogDetails(validationResult.error),
           },
           'V5 TurnExecutor validation rejected tool-call proposal',
         );
@@ -1475,6 +1483,75 @@ function renderConfirmation(
 function serialiseError(err: unknown): { name?: string; message?: string } {
   if (err instanceof Error) return { name: err.name, message: err.message };
   return { message: String(err) };
+}
+
+/**
+ * V5 alpha hardening follow-up (P1-2): whitelist-build a safe log payload
+ * from a ValidationError's `details`. The raw details object carries
+ * user decision text — candidate labels, proposed/entity labels, raw
+ * parameter values, Zod issue strings — all of which are user-authored
+ * or Sonnet-echoed prose. Principle 3 of the resilience contract forbids
+ * user decision text in logs. This helper retains only:
+ *   - Error code (already in the parent log payload)
+ *   - System identifiers: handler_id, entity_id (graph coordinates,
+ *     schema-defined prefixes like opt_/goal_/fac_, not user prose)
+ *   - Enum-valued kinds: entity_kind, proposed_kind, resolved_kind,
+ *     accepted_kinds, resolution_status, resolution_method
+ *   - Counts (not the items themselves): candidate_count, parameter name
+ *   - Handler-supplied reason strings (e.g. "no_options_defined") which
+ *     are code-level tokens, not user text
+ *   - Dice scores (numbers) and the delta
+ * Labels, raw values, issue strings, and constraint descriptions are
+ * dropped — the downstream composer still renders them for the user,
+ * but they MUST NOT reach the log sink.
+ */
+function buildSafeValidatorLogDetails(
+  error: ValidationError,
+): Record<string, unknown> {
+  const raw = error.details ?? {};
+  const safe: Record<string, unknown> = {};
+  // System identifiers — ids are graph coordinates, not user prose.
+  if (typeof raw.handler_id === 'string') safe.handler_id = raw.handler_id;
+  if (typeof raw.entity_id === 'string') safe.entity_id = raw.entity_id;
+  // Enum-valued kind fields (union over EntityKind).
+  for (const k of ['entity_kind', 'proposed_kind', 'resolved_kind', 'resolution_status', 'resolution_method'] as const) {
+    if (typeof raw[k] === 'string') safe[k] = raw[k];
+  }
+  if (Array.isArray(raw.accepted_kinds)) {
+    safe.accepted_kinds = raw.accepted_kinds.filter((v): v is string => typeof v === 'string');
+  }
+  if (Array.isArray(raw.registered)) {
+    // HANDLER_NOT_FOUND list of registered handler_ids — system ids.
+    safe.registered = raw.registered.filter((v): v is string => typeof v === 'string');
+  }
+  // Counts only — candidate ITEMS carry user labels and are dropped.
+  if (Array.isArray(raw.candidates)) {
+    safe.candidate_count = raw.candidates.length;
+  }
+  // Handler-supplied reason string (PRECONDITION_UNMET) — a code-level
+  // token like "no_options_defined", not user prose.
+  if (typeof raw.reason === 'string') safe.reason = raw.reason;
+  // PARAMETER_INVALID — parameter NAME is handler-declared (safe); the
+  // actual_value and constraint_description may echo user prose (dropped).
+  if (typeof raw.parameter === 'string') safe.parameter = raw.parameter;
+  // ENTITY_RESOLUTION_SUSPICIOUS — keep the id + dice numbers, drop the
+  // label fields on chosen/closer_candidate.
+  if (raw.chosen && typeof raw.chosen === 'object') {
+    const c = raw.chosen as Record<string, unknown>;
+    const entry: Record<string, unknown> = {};
+    if (typeof c.id === 'string') entry.id = c.id;
+    if (typeof c.dice === 'number') entry.dice = c.dice;
+    safe.chosen = entry;
+  }
+  if (raw.closer_candidate && typeof raw.closer_candidate === 'object') {
+    const c = raw.closer_candidate as Record<string, unknown>;
+    const entry: Record<string, unknown> = {};
+    if (typeof c.id === 'string') entry.id = c.id;
+    if (typeof c.dice === 'number') entry.dice = c.dice;
+    safe.closer_candidate = entry;
+  }
+  if (typeof raw.delta === 'number') safe.delta = raw.delta;
+  return safe;
 }
 
 /**
