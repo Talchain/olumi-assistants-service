@@ -347,7 +347,7 @@ describe('TurnExecutor — failure_response telemetry contract', () => {
 });
 
 describe('TurnExecutor — success path is unchanged', () => {
-  it('happy-path tool-call still emits orientation + confirmation, no chips', async () => {
+  it('happy-path tool-call emits orientation + confirmation + chips (Task 2.1)', async () => {
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(resolvedRunAnalysisToolCall(), 'Running the analysis.'),
     );
@@ -360,7 +360,18 @@ describe('TurnExecutor — success path is unchanged', () => {
       }),
     });
 
-    expect(result.response.suggested_actions).toEqual([]);
+    // V5 Task 2.1: successful run_analysis now emits conversational follow-up
+    // chips ("Explain the result", "What could change the outcome?").
+    // All chips are prompts (no action_type) — the user's next turn routes
+    // through Sonnet with the chip message as user text.
+    expect(result.response.suggested_actions.length).toBeGreaterThan(0);
+    expect(result.response.suggested_actions.map((c) => c.label)).toContain(
+      'Explain the result',
+    );
+    for (const chip of result.response.suggested_actions) {
+      expect(chip.action_type).toBeUndefined();
+    }
+
     // V5 Group 1 Task B: successful run_analysis now emits an analysis_result
     // block carrying the PLoT enrichment (and, when the auto-fire completed,
     // enrichment.decision_review). The assistant_text invariant is unchanged.

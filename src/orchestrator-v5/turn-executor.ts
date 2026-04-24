@@ -67,6 +67,7 @@ import {
   type HandlerRegistry,
 } from './tools/registry.js';
 import { sanitiseNarrateOutput } from './sanitise.js';
+import { generateChips } from './compose/chip-generator.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
 
@@ -704,12 +705,20 @@ export async function runTurnExecutor(
           turn_class: 'handler',
         });
       }
+      // V5 Task 2.1: deterministic chip suggestions for the execute branch.
+      const executeChips = generateChips({
+        stage: context.stage,
+        handlerFacts: handlerFactsForCommit,
+        analysis: contextPackForLog?.analysis ?? null,
+        validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+      });
       composedOk = composeToolCallResponse({
         orientation: sanitisedOrientation.output,
         confirmation: confirmationText,
         coaching: coachingText,
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
+        suggested_actions: executeChips,
       });
       stagesCompleted.push('compose');
     } else if (
@@ -731,9 +740,18 @@ export async function runTurnExecutor(
           turn_class: 'clarify',
         });
       }
+      // V5 Task 2.1: clarify turns carry chips so the user has a next step
+      // if they can't articulate the clarification themselves.
+      const clarifyChips = generateChips({
+        stage: context.stage,
+        handlerFacts: [],
+        analysis: contextPackForLog?.analysis ?? null,
+        validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+      });
       composedOk = composeClarifyResponse({
         assistant_text: sanitised.output,
         stage: context.stage,
+        suggested_actions: clarifyChips,
       });
       stagesCompleted.push('compose');
     } else if (
@@ -755,9 +773,18 @@ export async function runTurnExecutor(
           turn_class: 'direct_answer',
         });
       }
+      // V5 Task 2.1: coach turns carry chips aligned to stage + analysis
+      // context (e.g. "Explain the decision" on decide stage).
+      const coachChips = generateChips({
+        stage: context.stage,
+        handlerFacts: [],
+        analysis: contextPackForLog?.analysis ?? null,
+        validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+      });
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
         stage: context.stage,
+        suggested_actions: coachChips,
       });
       stagesCompleted.push('compose');
     } else {
@@ -774,9 +801,18 @@ export async function runTurnExecutor(
           turn_class: 'direct_answer',
         });
       }
+      // V5 Task 2.1: converse turns carry chips so the user has a next
+      // step even when Sonnet only produced a conversational reply.
+      const converseChips = generateChips({
+        stage: context.stage,
+        handlerFacts: [],
+        analysis: contextPackForLog?.analysis ?? null,
+        validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+      });
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
         stage: context.stage,
+        suggested_actions: converseChips,
       });
       stagesCompleted.push('compose');
     }
