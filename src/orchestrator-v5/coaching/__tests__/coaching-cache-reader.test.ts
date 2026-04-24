@@ -67,12 +67,54 @@ describe('readCoachingCache', () => {
       story_headlines: ['A wins'],
     };
     const facts: HandlerFact[] = [
-      runAnalysisFact({ some: 'other' }),
       runAnalysisFact({ decision_review: dr }),
+      runAnalysisFact({ some: 'other' }),
     ];
 
     const cache = await readCoachingCache(uniqueScenario, facts);
     expect(cache.decision_review).toEqual(dr);
+  });
+
+  it('picks the NEWEST decision_review when multiple run_analysis facts carry it (newest-first input order)', async () => {
+    // V5 review cycle 2: SupabaseSessionStore.readFactsFor now orders by
+    // created_at DESC, so priorFacts arrives newest-first. This test pins
+    // the forward-walk semantics so a future refactor that flipped the
+    // loop direction would fail loudly.
+    const uniqueScenario = `scen-dr-newest-${Date.now()}`;
+    const newestDr = {
+      produced_at: '2026-04-21T12:00:00.000Z',
+      narrative_summary: 'newest recommendation',
+    };
+    const olderDr = {
+      produced_at: '2026-04-20T12:00:00.000Z',
+      narrative_summary: 'older recommendation',
+    };
+    const facts: HandlerFact[] = [
+      runAnalysisFact({ decision_review: newestDr }),
+      runAnalysisFact({ decision_review: olderDr }),
+    ];
+
+    const cache = await readCoachingCache(uniqueScenario, facts);
+    expect(cache.decision_review).toEqual(newestDr);
+  });
+
+  it('picks the NEWEST coaching_signal when multiple run_analysis facts carry one', async () => {
+    const uniqueScenario = `scen-sig-newest-${Date.now()}`;
+    const facts: HandlerFact[] = [
+      runAnalysisFact({
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'turn-newest',
+        coaching_signal_produced_at: '2026-04-21T12:00:00.000Z',
+      }),
+      runAnalysisFact({
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'turn-older',
+        coaching_signal_produced_at: '2026-04-20T12:00:00.000Z',
+      }),
+    ];
+
+    const cache = await readCoachingCache(uniqueScenario, facts);
+    expect(cache.last_coaching_signal?.turn_id).toBe('turn-newest');
   });
 
   it('returns null decision_review when run_analysis fact lacks enrichment', async () => {

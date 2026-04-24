@@ -59,13 +59,25 @@ export async function readCoachingCache(
   };
 }
 
-/** Walk facts newest-first to find the most recent run_analysis fact with
- *  enrichment.decision_review set. */
+/**
+ * Walk facts newest-first to find the most recent run_analysis fact with
+ * enrichment.decision_review set.
+ *
+ * Correctness note (V5 review cycle 2): `priorFacts` arrives newest-first
+ * because `SupabaseSessionStore.readFactsFor` now applies
+ * `ORDER BY created_at DESC`. The forward walk therefore returns the NEWEST
+ * matching fact. An earlier revision of this function iterated backward
+ * (`length - 1 → 0`) assuming facts were oldest-first; that assumption was
+ * silently incorrect in production for two reasons: (a) `readFactsFor`
+ * originally had no ORDER BY, so the order was undefined; (b) the upstream
+ * caller passed `turn_id` into a row-id lookup, which made `priorFacts`
+ * always empty. Both pre-existing bugs were fixed in cycle 2, and this
+ * function's walk direction is now corrected to match the documented intent.
+ */
 function extractLatestDecisionReview(
   facts: readonly HandlerFact[],
 ): DecisionReviewOutput | null {
-  for (let i = facts.length - 1; i >= 0; i--) {
-    const fact = facts[i];
+  for (const fact of facts) {
     if (fact.fact_type !== 'run_analysis') continue;
     const enrichment = fact.result.enrichment;
     if (enrichment === undefined) continue;
@@ -75,13 +87,16 @@ function extractLatestDecisionReview(
   return null;
 }
 
-/** Walk facts newest-first for the most recent enrichment.coaching_signal_id.
- *  Returns null for edit-handler turns (their fact shape has no enrichment). */
+/**
+ * Walk facts newest-first for the most recent enrichment.coaching_signal_id.
+ * Returns null for edit-handler turns (their fact shape has no enrichment).
+ * Same correctness note as `extractLatestDecisionReview` — forward walk
+ * over newest-first `priorFacts`.
+ */
 function extractLatestCoachingSignalFromFacts(
   facts: readonly HandlerFact[],
 ): LastCoachingSignal | null {
-  for (let i = facts.length - 1; i >= 0; i--) {
-    const fact = facts[i];
+  for (const fact of facts) {
     if (fact.fact_type !== 'run_analysis') continue;
     const enrichment = fact.result.enrichment;
     if (enrichment === undefined) continue;
