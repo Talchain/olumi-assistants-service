@@ -14,6 +14,7 @@
 
 import { writeFileSync } from 'node:fs';
 
+import { createRedactor } from './redact.js';
 import type { EvidenceRow, HealthzResult } from './types.js';
 
 export interface EvidenceHeader {
@@ -30,7 +31,11 @@ export interface EvidenceHeader {
 
 type Redactor = (v: unknown) => string;
 
-const identityRedact: Redactor = (v) => (typeof v === 'string' ? v : String(v));
+// When no caller-supplied redactor is provided, fall back to a
+// no-secret redactor from `redact.ts` rather than a hand-rolled
+// stringifier. Keeps the rendering behaviour identical whether or
+// not a secret is in play (modulo the actual replacement).
+const identityRedact: Redactor = createRedactor(undefined);
 
 function escapePipes(s: string): string {
   return s.replace(/\|/g, '\\|');

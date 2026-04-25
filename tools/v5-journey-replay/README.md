@@ -50,6 +50,22 @@ The harness runs two preflight probes before burning the six-step replay:
 1. `GET /healthz` (public, no auth) — confirms the service is reachable and records `build`, `version`, `degraded`, and `degraded_reasons` in the evidence pack. Used for Phase 2 deploy confirmation.
 2. `POST /orchestrate/v2/turn` with a minimal body `{}` (authenticated) — confirms the auth header is accepted. The expected outcome is 400 or 422 (auth OK, body rejected). A 401 or 403 halts the run with exit code 3 before any canonical step is attempted.
 
+### Deploy gate
+
+Between healthz and preflight, the harness halts with exit code 3 if any of the following hold (and the URL is not localhost):
+
+- `/healthz` is unreachable or returns no body
+- `build !== 66d1adb` (the expected staging deploy SHA, hard-coded)
+- `degraded === true`
+
+To intentionally run against a different deploy or accept a degraded service, set:
+
+```bash
+export OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true   # also accepts "1" or "yes"
+```
+
+Localhost runs always skip this gate (local builds use arbitrary SHAs).
+
 ### Outcome classes (per row)
 
 - `v5-runtime` — the orchestrator actually ran. Includes success (200), genuine 500, and 200 with an error envelope (`schema: "error.v1"` or BoundaryError shape — both are runtime failures, not successes).
@@ -89,9 +105,9 @@ Regression coverage: see [tests/unit/v5-journey-replay/redact.test.ts](../../tes
 | Code | Meaning |
 |---|---|
 | 0 | All six canonical steps passed |
-| 1 | One or more steps failed (replay ran; some rows failed) |
+| 1 | One or more steps failed (replay ran; some rows failed). **Mid-replay transport errors classify as `failed`, not `skipped`** — exit 1 fires if a network blip prevents any step from completing. |
 | 2 | Fatal harness error (uncaught exception outside the step loop) |
-| 3 | Auth / preflight blocker (halted before the six canonical steps) |
+| 3 | Auth / preflight blocker, or deploy gate halted (build mismatch / degraded / healthz unreachable). Halts before any canonical step is attempted. |
 
 ## Files
 
