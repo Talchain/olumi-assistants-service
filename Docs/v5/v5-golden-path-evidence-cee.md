@@ -1,60 +1,59 @@
 # V5 Golden Path — Evidence Pack (CEE)
 
-Phase 3 of V5 alpha hardening. This pack is produced by [tools/v5-journey-replay](../../tools/v5-journey-replay/) and serves as the V5 regression gate.
+Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools/v5-journey-replay/). This pack is the V5 replay gate.
+
+## Executive summary
+
+| signal | value |
+|---|---|
+| Replay reached orchestrator | yes |
+| v38.2 confirmed (startup / healthz build) | yes |
+| v38.2 confirmed (per-turn) | not capturable |
+| run_analysis passed end-to-end (handler + commit + response) | not externally verified |
+| Analysis persisted into follow-up context | not externally verified |
+| No internal terms in user-facing text | yes |
 
 ## Run metadata
 
-- **Branch:** `claude/v5-alpha-hardening`
-- **Commit SHA:** `d43befe39474f24d61a3790b308ca0768c3a97b0`
-- **Base URL:** http://localhost:3000
-- **Started at:** 2026-04-24T14:57:41.998Z
-- **Prompt version:** `v38.2`
-- **Prompt hash:** `2e25001a025e288c`
+- **Branch:** `claude/v5-replay-proof`
+- **Pack generated from commit SHA:** `0c7618436bad15ddd3fdcf4d9635eb8583ed1565` (if this does not match HEAD, regenerate with the harness)
+- **Base URL:** https://cee-staging.onrender.com
+- **Started at:** 2026-04-25T23:31:42.305Z
+- **Expected prompt version:** `v38.2`
+- **Expected prompt hash:** `2e25001a025e288c`
+- **Auth mode:** authenticated
 
-## Pre-merge gate (local)
+## Deploy confirmation (Phase 2)
 
-Harness runs against a locally-started server (`pnpm start`). Log capture is stdout-only per correction 15 — no remote log API. Step 4 requires a reachable PLoT endpoint; when unreachable locally the step is marked `skipped` with the blocker noted. The unit-level regression for that path lives in [run-analysis-permissive-status.test.ts](../../src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts).
+- **GET /healthz status:** 200
+- **build (commit short):** `66d1adb`
+- **version:** `1.12.0`
+- **service:** `assistants`
+- **degraded:** false
+- **elapsed:** 341ms
 
-| step | status | evidence | failing_contract |
-|---|---|---|---|
-| `1_draft_graph` | [SKIP] skipped | server unreachable: fetch failed | local server not running |
-| `2_weakest_option` | [SKIP] skipped | skipped: prerequisite 1_draft_graph failed | — |
-| `3_add_option` | [SKIP] skipped | skipped: prerequisite 1_draft_graph failed | — |
-| `4_run_analysis` | [SKIP] skipped | skipped: prerequisite 1_draft_graph failed | — |
-| `5_explain_leader` | [SKIP] skipped | server unreachable: fetch failed | local server not running |
-| `6_edit_budget` | [SKIP] skipped | server unreachable: fetch failed | local server not running |
+Deploy confirmed: `/healthz` build matches expected commit `66d1adb`.
 
-## Post-authorised-deploy gate (staging)
+**Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
-Paul's authorisation landed. Push executed 2026-04-24T14:58 UTC: fast-forward `cf1b74f1..4a867777` on `origin/staging` (all 14 pre-push hook checks green — branch-guard, typecheck, lint-changed, smoke-tests, stale-js, dependency-audit, tarball-sha, transport-invariants, data-responsibility, phase-0-complete, docs-consistency, state-write-invariant, handler-ownership, phase-1.5-invariants). Render deploy presumed triggered.
+## Preflight (Phase 3)
 
-Harness ran against `https://cee-staging.onrender.com` at 2026-04-24T14:59:27 UTC against commit `4a867777`:
+Two-stage probe before the six canonical steps: (a) public `/healthz` for reachability, (b) authenticated POST to `/orchestrate/v2/turn` with a minimal body. Halt on 401/403/5xx/exception — do not burn the replay on a known-bad state.
 
-| step | status | evidence | failing_contract |
-|---|---|---|---|
-| `1_draft_graph` | ❌ failed | status=401 body_error= | HTTP 401 (auth required) |
-| `2_weakest_option` | ⏭ skipped | prerequisite 1_draft_graph failed | — |
-| `3_add_option` | ⏭ skipped | prerequisite 1_draft_graph failed | — |
-| `4_run_analysis` | ⏭ skipped | prerequisite 1_draft_graph failed | — |
-| `5_explain_leader` | ❌ failed | status=401 body_error= | HTTP 401 (auth required) |
-| `6_edit_budget` | ❌ failed | status=401 body_error= | HTTP 401 (auth required) |
+- **Auth probe status:** 422 — auth accepted (HTTP 422 as expected for empty body)
 
-### Known blocker — staging authentication
+## Six-step replay
 
-**Branch status: unit-proven, replay-unproven (staging auth blocked).** The staging `/orchestrate/v2/turn` endpoint is API-key-protected. The replay harness's `client.ts` does not currently send authentication headers — it posts as an anonymous client, which staging correctly rejects with HTTP 401 before routing to the V5 code paths.
+| step | status | outcome class | http | evidence | failing_contract |
+|---|---|---|---|---|---|
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=37198ms | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1010 chip_count=1 elapsed=9010ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=201 chip_count=0 elapsed=4224ms stage=frame | — |
+| `4_run_analysis` | [FAIL] failed | v5-runtime | 500 | status=500 body_error=INTERNAL_ERROR reason=chip_click_run_analysis_commit_failed boundary=B1 validator=turn_commit request_id=40e87d14-155d-4f51-bfd3-5b69db3f4915 | HTTP 500 (expected 200) |
+| `5_explain_leader` | [SKIP] skipped | skipped | — | skipped: prerequisite 4_run_analysis did not pass | — |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=160 chip_count=0 elapsed=5576ms stage=frame | — |
 
-**Implication:** the replay harness cannot yet exercise V5 behaviour on the live deployment from this machine. The 401 responses are produced by the staging auth layer BEFORE the orchestrator runs, so they do not reflect any V5 regression — they reflect a harness-side gap.
-
-**Halt policy (correction 16):** scope was NOT expanded to hunt for the API key or wire an auth header from local env. The blocker is flagged for Paul's next action.
-
-**Required next step:** one of:
-1. Extend `tools/v5-journey-replay/client.ts` to read an `OLUMI_API_KEY` env var (or equivalent) and send it on every request, then re-run the harness against staging with the key set.
-2. Run the harness from a machine that already has the staging API key configured (e.g. Render shell or a CI runner with secrets).
-3. Confirm V5 behaviour via Render's deploy logs directly — look for the `v5.routing_prompt_loaded` log line with `prompt_version: "v38.2"`, `prompt_hash: "2e25001a025e288c"`, `system_chars: 19314` on service start. That log line alone proves the Phase 2.1 prompt install landed in production.
-
-Only a green staging table above flips the branch status from "replay-unproven" to "replay-proven". The 13 commits have deployed successfully — but the end-to-end six-step journey remains unverified from this machine until one of the above paths is taken.
-
-## Canonical steps (exact brief)
+## Canonical steps (from brief)
 
 1. POST fresh scenario + decision brief → draft_graph response with post-draft chips
 2. "Which option looks weakest?" → references actual option/factor labels
@@ -65,33 +64,18 @@ Only a green staging table above flips the branch status from "replay-unproven" 
 
 ### 4b — pinned unit regression (handler-level)
 
-Unknown PLoT status with no usable result fields → typed fatal, not a misleading 200. Covered by the unit test `run-analysis-permissive-status.test.ts` (case: "unknown status with NO usable fields is fatal with cause_kind analysis_not_completed"). The handler cannot be exercised through the HTTP boundary without mocking the PLoT response, so this is asserted at the unit level rather than in the replay harness.
+Unknown PLoT status with no usable result fields → typed fatal, not a misleading 200. Covered by the unit test [run-analysis-permissive-status.test.ts](../../src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts). The handler cannot be exercised through the HTTP boundary without mocking the PLoT response, so this is asserted at the unit level.
 
-## Halt policy (correction 16)
+## Halt policy
 
-If the harness uncovers a systemic blocker outside the approved Phase 2 scope, the row is marked `failed` with a specific `failing_contract` and the blocker documented below. Scope is NOT expanded to force green rows.
+If the harness uncovers a systemic blocker outside the approved Phase 2 scope, the row is marked `failed` with a specific `failing_contract` and the blocker documented in Discoveries. Scope is NOT expanded to force green rows.
 
 ## Discoveries (deferred for follow-up)
 
 | area | observation | follow-up recommendation |
 |---|---|---|
-| Handler failure recovery (P1-1) | `translateExecuteError` composes a coaching response for `HandlerInvocationFailedError` but returns via `failureType = HANDLER_INVOCATION_FAILED` → HTTP 500. Principle 1 ("default recoverable") suggests retryable handler failures (plot_timeout, plot_error, scenario_read_failed, options_not_configured) should commit as direct_answer and return 200, mirroring the Phase 2.2 validator pattern. | Extend Part B of the resilience contract to enumerate handler-failure fatals (only analysis_blocked / analysis_failed remain fatal) and port the `commitDirectAnswer` pattern to `translateExecuteError`. One table-driven test per retryable cause_kind. |
-| PLoT usable-fields enforcement on known statuses | `hasUsableResultFields` is only consulted for unknown statuses. Known statuses (`completed`, `computed`, `partial`) succeed regardless of whether records carry a usable id/label + finite probability. Contract Part C reads as a floor for ALL success paths; code enforces it selectively. | Thread `hasUsableResultFields` into the `ok` and `partial` branches of `evaluateAnalysisStatus`. When a known status arrives with no usable fields, demote to fatal (`analysis_not_completed`) with a dedicated cause_kind, or (softer) surface a caveat via assistant_text. Requires a decision on how strict to be. |
-
-### Known blocker — local bootstrap
-
-**Branch status: unit-proven, replay-unproven.** The pre-merge local gate requires `pnpm start` to be reachable at the `--base-url`. On this developer machine the server did NOT boot because required credentials (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) live only in the Render deploy env and are not present in the repo `.env` (see [reference_supabase_env.md](../../.claude/projects/-Users-paulslee-Documents-GitHub-olumi-assistants-service/memory/reference_supabase_env.md)).
-
-**Implication:** per-step replay assertions could not run locally on this branch. Unit + integration coverage verifies each individual contract is implemented correctly; it is **supporting coverage**, not a substitute for the six-step end-to-end journey. The six-step replay gate remains UNPROVEN until the staging table above is populated.
-
-**Supporting unit + integration coverage per Phase 2 task:**
-
-- Phase 2.1 install: `src/orchestrator-v5/routing/__tests__/prompt-loader.test.ts` (8 tests, 1 conditional dist test)
-- Phase 2.2 recoverable validator: `src/orchestrator-v5/__tests__/turn-executor-recoverable-validator.test.ts` (8 tests, pinned ENTITY_KIND_MISMATCH + commit-failure-per-code)
-- Phase 2.3 PLoT matrix: `src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts` (11 tests)
-- Phase 2.4 chip gate: `src/orchestrator-v5/compose/__tests__/chip-generator.test.ts` (17 tests)
-- Phase 2.5 observability: `src/orchestrator-v5/__tests__/turn-executor-observability.test.ts` (3 tests)
-- P1-2 routing-log redaction: `src/orchestrator-v5/__tests__/turn-executor.test.ts` (default + opt-in tests)
-- P1-2 validator-log privacy: `src/orchestrator-v5/__tests__/turn-executor-validator-log-privacy.test.ts` (4 tests)
-
-**Required next step:** run the harness against staging after push authorisation. Only a green staging table above changes the branch status from "replay-unproven" to "replay-proven".
+| Handler failure recovery (P1-1) | `translateExecuteError` composes a coaching response for `HandlerInvocationFailedError` but returns via `failureType = HANDLER_INVOCATION_FAILED` → HTTP 500. Principle 1 ("default recoverable") suggests user-recoverable handler failures (args_validation_failed, options_not_configured, analysis_blocked) should commit as direct_answer and return 200. | See [v5-p1-1-handler-failure-scope.md](v5-p1-1-handler-failure-scope.md) for the full cause-kind classification table. |
+| PLoT usable-fields enforcement on known statuses | `hasUsableResultFields` is only consulted for unknown statuses. Known statuses (`completed`, `computed`, `partial`) succeed regardless of whether records carry a usable id/label + finite probability. | Thread `hasUsableResultFields` into the `ok` / `partial` branches of `evaluateAnalysisStatus`. When a known status arrives with no usable fields, demote to fatal (`analysis_not_completed`) or surface a caveat. |
+| `v5_journey_id` in unknown-status warning | `evaluateAnalysisStatus` logs `event: external_contract_unknown_status` with `request_id` but not `v5_journey_id`. Adding it requires a `ctx` signature change. | Deferred from this branch per the hard "one-liner only" limit. Pick up when the next `evaluateAnalysisStatus` change happens. |
+| Per-step assertions are content-shape only | Step 2 does not assert that the response references actual option/factor labels from step 1's draft. Step 4 cannot verify analysis fact persistence without reading Supabase. Step 5 does not require leading option, probability, driver, or caveat to be present. A generic 200 with non-empty `assistant_text` can pass these. | Strengthen the per-step DSL: thread step 1's parsed labels into step 2's assertion; add Supabase facts-table read for step 4 (or a dedicated unit test); add required-substring matchers (probability percent, "leading", "driver", caveat marker) for step 5. New brief — out of scope here. |
+| Forbidden-term scan tolerates plain `handler` | The brief lists `handler` as forbidden user-facing terminology. Current implementation matches `handler[ _](id\|failed\|error\|registered)` only — plain `handler` in isolation passes. The looser stance was deliberate (avoid false positives on "handles" / legitimate user-facing uses) but diverges from the brief. | Decision required: tighten to brief-strict (and accept some false positives) or document the loose policy in the forbidden-terms.ts header. New brief — out of scope here. |

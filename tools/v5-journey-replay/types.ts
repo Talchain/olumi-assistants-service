@@ -2,6 +2,8 @@
  * V5 alpha hardening Phase 3 — replay harness shared types.
  */
 
+import type { OutcomeClass } from './classify-outcome.js';
+
 export type StepStatus = 'passed' | 'failed' | 'skipped';
 
 export interface EvidenceRow {
@@ -9,6 +11,13 @@ export interface EvidenceRow {
   readonly status: StepStatus;
   readonly evidence: string;
   readonly failing_contract?: string;
+  /** Outcome class per v5-replay-proof brief Phase 3. */
+  readonly outcome_class: OutcomeClass;
+  /** HTTP status received, if the request returned one. */
+  readonly http_status?: number;
+  /** Prompt metadata captured per-turn, if the response envelope exposes it. */
+  readonly prompt_version?: string;
+  readonly system_chars?: number;
 }
 
 export interface TurnResponse {
@@ -23,15 +32,65 @@ export interface TurnResponse {
   }>;
   readonly insights?: ReadonlyArray<unknown>;
   readonly stage_indicator?: string;
-  // For the 5xx BoundaryError shape.
+  // BoundaryError shape (4xx/5xx). All optional — present only on the
+  // error envelope path.
   readonly error?: string;
   readonly boundary?: string;
+  readonly direction?: string;
+  readonly validator?: string;
   readonly details?: Record<string, unknown>;
+  readonly request_id?: string;
   readonly retryable?: boolean;
+  // error.v1 envelope shape (auth + top-level validation errors).
+  readonly schema?: string;
+  readonly code?: string;
+  readonly message?: string;
+  // Sentinel set by client.ts when the response body is non-JSON or
+  // empty and could not be parsed. Distinguishes "200 with empty
+  // body" (where this sentinel is set) from "200 with valid empty
+  // object" (where it isn't).
+  //
+  // We deliberately do NOT carry the raw body bytes — proxy or
+  // runtime error pages can echo user input or other sensitive
+  // content. The fingerprint (length + content-type + sha256 prefix)
+  // is enough to triage without exfiltrating the body into the
+  // committed evidence markdown.
+  readonly __body_parse_failed?: true;
+  readonly __body_length?: number;
+  readonly __body_content_type?: string;
+  readonly __body_sha256_prefix?: string;
 }
+
+/**
+ * Public /healthz response shape emitted by `src/server.ts`.
+ */
+export interface HealthzBody {
+  readonly ok?: boolean;
+  readonly build?: string;
+  readonly version?: string;
+  readonly service?: string;
+  readonly degraded?: boolean;
+  readonly degraded_reasons?: ReadonlyArray<string>;
+}
+
+export interface HealthzResult {
+  readonly status: number;
+  readonly body: HealthzBody | undefined;
+  readonly elapsed_ms: number;
+}
+
+/**
+ * Preflight outcome after a single authenticated probe to
+ * `/orchestrate/v2/turn` with a minimal body. Drives halt vs. advance.
+ */
+export type PreflightVerdict =
+  | { readonly kind: 'advance'; readonly status: number; readonly note: string }
+  | { readonly kind: 'halt'; readonly status: number; readonly reason: string };
 
 export interface HarnessConfig {
   readonly baseUrl: string;
   readonly outPath: string;
   readonly scenarioPrefix: string;
+  /** Loaded from `OLUMI_REPLAY_API_KEY` env var. Undefined for localhost runs. */
+  readonly apiKey?: string;
 }
