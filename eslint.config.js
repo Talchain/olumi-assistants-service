@@ -91,6 +91,7 @@ export default [
       'src/config/**/*.ts',
       'src/version.ts', // Source of SERVICE_VERSION, intentionally reads from package.json with env override
       'scripts/**/*.ts',
+      'tools/**/*.ts', // CLI tools read their own harness-side env vars (e.g. OLUMI_REPLAY_API_KEY) — not service config
       'tests/**/*.ts',
       // Co-located tests alongside production code also need direct process.env
       // access for the same reason as tests/ — setting/deleting env vars to
