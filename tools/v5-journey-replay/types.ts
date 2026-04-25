@@ -49,8 +49,16 @@ export interface TurnResponse {
   // empty and could not be parsed. Distinguishes "200 with empty
   // body" (where this sentinel is set) from "200 with valid empty
   // object" (where it isn't).
+  //
+  // We deliberately do NOT carry the raw body bytes — proxy or
+  // runtime error pages can echo user input or other sensitive
+  // content. The fingerprint (length + content-type + sha256 prefix)
+  // is enough to triage without exfiltrating the body into the
+  // committed evidence markdown.
   readonly __body_parse_failed?: true;
-  readonly __body_raw?: string;
+  readonly __body_length?: number;
+  readonly __body_content_type?: string;
+  readonly __body_sha256_prefix?: string;
 }
 
 /**

@@ -14,6 +14,8 @@
  * for the full three-layer contract.
  */
 
+import { createHash } from 'node:crypto';
+
 import { sanitiseError } from './redact.js';
 import type { HealthzBody, HealthzResult, TurnResponse } from './types.js';
 
@@ -103,11 +105,19 @@ export async function postTurn(
     try {
       body = JSON.parse(raw) as TurnResponse;
     } catch {
-      // Non-JSON / empty body (e.g. proxy error page). Preserve status
-      // and surface a typed `body_parse_failed` sentinel so the
-      // assertion layer can fail the row instead of treating it as a
-      // valid empty envelope.
-      body = { __body_parse_failed: true, __body_raw: raw.slice(0, 200) };
+      // Non-JSON / empty body (e.g. proxy error page). Surface a
+      // FINGERPRINT (length + content-type + sha256 prefix) so the
+      // evidence pack can triage without echoing potentially-sensitive
+      // raw bytes into committed markdown.
+      const contentType =
+        typeof res.headers?.get === 'function' ? (res.headers.get('content-type') ?? '') : '';
+      const sha256Prefix = createHash('sha256').update(raw).digest('hex').slice(0, 8);
+      body = {
+        __body_parse_failed: true,
+        __body_length: raw.length,
+        __body_content_type: contentType,
+        __body_sha256_prefix: sha256Prefix,
+      };
     }
     return { status: res.status, body, elapsed_ms: elapsed };
   } finally {

@@ -11,20 +11,13 @@ import { createRedactor } from '../../../tools/v5-journey-replay/redact.js';
 
 const SENTINEL = 'SENTINEL-LEAK-CANARY-DO-NOT-MATCH-PROD-xyz123';
 
-function mockFetch(handler: (url: string) => Partial<Response> & { jsonValue?: unknown } | Error | Promise<Partial<Response> & { jsonValue?: unknown }>) {
-  const fn = vi.fn(async (url: string) => {
-    const r = await handler(url);
-    if (r instanceof Error) throw r;
-    const jsonBody = r.jsonValue ?? {};
-    return {
-      status: r.status ?? 200,
-      json: async () => jsonBody,
-      text: async () => JSON.stringify(jsonBody),
-    } as unknown as Response;
-  });
-  vi.stubGlobal('fetch', fn);
-  return fn;
-}
+import { stubFetchRouter } from './_test-helpers.js';
+
+// Thin alias — existing test bodies pass closures that return
+// `{ status, jsonValue }` objects, which are shape-compatible with
+// `FetchMockInit`. Wrapping `stubFetchRouter` keeps those bodies
+// untouched.
+const mockFetch = stubFetchRouter;
 
 describe('readApiKey', () => {
   beforeEach(() => {

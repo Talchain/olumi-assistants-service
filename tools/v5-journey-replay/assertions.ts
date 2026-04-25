@@ -44,14 +44,18 @@ function httpOk(result: FetchResult): AssertionResult | null {
 }
 
 // Reject 200 responses with non-JSON or empty body so they cannot pass
-// downstream chip/text assertions as valid empty envelopes.
+// downstream chip/text assertions as valid empty envelopes. Evidence
+// reports a FINGERPRINT only — never raw body bytes — because proxy /
+// runtime error pages can echo user input or other sensitive content.
 function bodyParsedOk(result: FetchResult): AssertionResult | null {
   if (result.body?.__body_parse_failed) {
-    const raw = result.body.__body_raw ?? '';
+    const len = result.body.__body_length ?? 0;
+    const ct = result.body.__body_content_type ?? '';
+    const hash = result.body.__body_sha256_prefix ?? '';
     return {
       ok: false,
       failing_contract: 'body_parse_failed (non-JSON or unreadable response body)',
-      evidence: `status=${result.status} body_parse_failed raw_len=${raw.length} raw_head="${raw.slice(0, 80)}"`,
+      evidence: `status=${result.status} body_parse_failed length=${len} content_type="${ct}" sha256_prefix=${hash}`,
     };
   }
   return null;

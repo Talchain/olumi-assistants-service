@@ -147,7 +147,10 @@ export function renderEvidencePack(
   lines.push('## Run metadata');
   lines.push('');
   lines.push(`- **Branch:** \`${escapePipes(redact(header.branch))}\``);
-  lines.push(`- **Commit SHA:** \`${escapePipes(redact(header.commit_sha))}\``);
+  lines.push(
+    `- **Pack generated from commit SHA:** \`${escapePipes(redact(header.commit_sha))}\` ` +
+      `(if this does not match HEAD, regenerate with the harness)`,
+  );
   lines.push(`- **Base URL:** ${escapePipes(redact(header.base_url))}`);
   lines.push(`- **Started at:** ${header.started_at}`);
   lines.push(`- **Expected prompt version:** \`${header.prompt_version}\``);

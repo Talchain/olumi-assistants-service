@@ -9,16 +9,16 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 | Replay reached orchestrator | yes |
 | v38.2 confirmed (startup / healthz build) | yes |
 | v38.2 confirmed (per-turn) | not capturable |
-| run_analysis reached PLoT | no |
-| Analysis persisted into follow-up context | no |
+| run_analysis passed end-to-end (handler + commit + response) | not externally verified |
+| Analysis persisted into follow-up context | not externally verified |
 | No internal terms in user-facing text | yes |
 
 ## Run metadata
 
 - **Branch:** `claude/v5-replay-proof`
-- **Commit SHA:** `d92174c4ac907ce0b40611377c1ccb09c4c8c1e9`
+- **Pack generated from commit SHA:** `0c7618436bad15ddd3fdcf4d9635eb8583ed1565` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-04-25T01:57:16.361Z
+- **Started at:** 2026-04-25T23:31:42.305Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
@@ -30,7 +30,7 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 340ms
+- **elapsed:** 341ms
 
 Deploy confirmed: `/healthz` build matches expected commit `66d1adb`.
 
@@ -46,12 +46,12 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=30316ms | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=887 chip_count=1 elapsed=7035ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=222 chip_count=0 elapsed=3342ms stage=frame | — |
-| `4_run_analysis` | [FAIL] failed | v5-runtime | 500 | status=500 body_error=INTERNAL_ERROR reason=chip_click_run_analysis_commit_failed boundary=B1 validator=turn_commit request_id=1de17623-1853-4780-8008-4757df4d64ad | HTTP 500 (expected 200) |
-| `5_explain_leader` | [SKIP] skipped | skipped | — | skipped: prerequisite 4_run_analysis failed | — |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=66 chip_count=0 elapsed=4724ms stage=frame | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=37198ms | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1010 chip_count=1 elapsed=9010ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=201 chip_count=0 elapsed=4224ms stage=frame | — |
+| `4_run_analysis` | [FAIL] failed | v5-runtime | 500 | status=500 body_error=INTERNAL_ERROR reason=chip_click_run_analysis_commit_failed boundary=B1 validator=turn_commit request_id=40e87d14-155d-4f51-bfd3-5b69db3f4915 | HTTP 500 (expected 200) |
+| `5_explain_leader` | [SKIP] skipped | skipped | — | skipped: prerequisite 4_run_analysis did not pass | — |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=160 chip_count=0 elapsed=5576ms stage=frame | — |
 
 ## Canonical steps (from brief)
 
@@ -77,3 +77,5 @@ If the harness uncovers a systemic blocker outside the approved Phase 2 scope, t
 | Handler failure recovery (P1-1) | `translateExecuteError` composes a coaching response for `HandlerInvocationFailedError` but returns via `failureType = HANDLER_INVOCATION_FAILED` → HTTP 500. Principle 1 ("default recoverable") suggests user-recoverable handler failures (args_validation_failed, options_not_configured, analysis_blocked) should commit as direct_answer and return 200. | See [v5-p1-1-handler-failure-scope.md](v5-p1-1-handler-failure-scope.md) for the full cause-kind classification table. |
 | PLoT usable-fields enforcement on known statuses | `hasUsableResultFields` is only consulted for unknown statuses. Known statuses (`completed`, `computed`, `partial`) succeed regardless of whether records carry a usable id/label + finite probability. | Thread `hasUsableResultFields` into the `ok` / `partial` branches of `evaluateAnalysisStatus`. When a known status arrives with no usable fields, demote to fatal (`analysis_not_completed`) or surface a caveat. |
 | `v5_journey_id` in unknown-status warning | `evaluateAnalysisStatus` logs `event: external_contract_unknown_status` with `request_id` but not `v5_journey_id`. Adding it requires a `ctx` signature change. | Deferred from this branch per the hard "one-liner only" limit. Pick up when the next `evaluateAnalysisStatus` change happens. |
+| Per-step assertions are content-shape only | Step 2 does not assert that the response references actual option/factor labels from step 1's draft. Step 4 cannot verify analysis fact persistence without reading Supabase. Step 5 does not require leading option, probability, driver, or caveat to be present. A generic 200 with non-empty `assistant_text` can pass these. | Strengthen the per-step DSL: thread step 1's parsed labels into step 2's assertion; add Supabase facts-table read for step 4 (or a dedicated unit test); add required-substring matchers (probability percent, "leading", "driver", caveat marker) for step 5. New brief — out of scope here. |
+| Forbidden-term scan tolerates plain `handler` | The brief lists `handler` as forbidden user-facing terminology. Current implementation matches `handler[ _](id\|failed\|error\|registered)` only — plain `handler` in isolation passes. The looser stance was deliberate (avoid false positives on "handles" / legitimate user-facing uses) but diverges from the brief. | Decision required: tighten to brief-strict (and accept some false positives) or document the loose policy in the forbidden-terms.ts header. New brief — out of scope here. |

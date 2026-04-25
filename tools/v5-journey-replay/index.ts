@@ -53,6 +53,92 @@ const MISSING_KEY_MESSAGE =
   'OLUMI_REPLAY_API_KEY environment variable is required when --base-url ' +
   'points at a remote host. Set it before re-running.';
 
+/** Expected staging deploy commit (short SHA). Hard-coded per the brief. */
+const EXPECTED_STAGING_BUILD = '66d1adb';
+
+/**
+ * Determine whether the operator has authorised running against a
+ * stale or degraded staging deploy. Used to bypass the deploy-halt
+ * gate when intentionally exercising a different commit.
+ */
+function isStaleDeployOverrideEnabled(): boolean {
+  const raw = (process.env.OLUMI_REPLAY_ALLOW_STALE_DEPLOY ?? '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
+}
+
+export interface DeployGateVerdict {
+  readonly halt: boolean;
+  readonly reason?: string;
+}
+
+/**
+ * Inspect a /healthz result and decide whether the run should halt
+ * before preflight. Halts on:
+ *   - missing healthz (cannot externally verify deploy)
+ *   - build mismatch against EXPECTED_STAGING_BUILD
+ *   - degraded === true
+ * Each halt is overridable via OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true.
+ * For localhost runs the gate is skipped entirely (local builds use
+ * arbitrary SHAs).
+ */
+export function evaluateDeployGate(
+  baseUrl: string,
+  healthz: HealthzResult | undefined,
+): DeployGateVerdict {
+  // Local runs: skip the gate. The expected SHA only applies to
+  // staging.
+  try {
+    const url = new URL(baseUrl);
+    if (
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname === '0.0.0.0' ||
+      url.hostname.replace(/^\[/, '').replace(/\]$/, '') === '::1'
+    ) {
+      return { halt: false };
+    }
+  } catch {
+    // Invalid URL — let the auth gate or fetch error path surface it.
+    return { halt: false };
+  }
+
+  const override = isStaleDeployOverrideEnabled();
+
+  if (healthz === undefined || healthz.body === undefined) {
+    if (override) return { halt: false };
+    return {
+      halt: true,
+      reason:
+        '/healthz unreachable or returned no body — cannot externally verify deploy. ' +
+        'Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true to override.',
+    };
+  }
+
+  const build = healthz.body.build;
+  if (build !== EXPECTED_STAGING_BUILD) {
+    if (override) return { halt: false };
+    return {
+      halt: true,
+      reason:
+        `/healthz reports build=${build ?? 'unknown'} but expected ${EXPECTED_STAGING_BUILD}. ` +
+        'Staging may be stale. Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true to override.',
+    };
+  }
+
+  if (healthz.body.degraded === true) {
+    if (override) return { halt: false };
+    const reasons = (healthz.body.degraded_reasons ?? []).join(', ') || 'no reasons reported';
+    return {
+      halt: true,
+      reason:
+        `/healthz reports degraded=true (${reasons}). ` +
+        'Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true to override.',
+    };
+  }
+
+  return { halt: false };
+}
+
 function readApiKey(): string | undefined {
   const raw = process.env.OLUMI_REPLAY_API_KEY;
   if (raw === undefined) return undefined;
@@ -188,6 +274,22 @@ async function run(): Promise<void> {
     );
   }
 
+  // Halt before preflight if the deployed build does not match the
+  // expected SHA, healthz is unreachable on a remote URL, or the
+  // service reports degraded. Operator can override with
+  // OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true.
+  const deployGate = evaluateDeployGate(cfg.baseUrl, healthz.result);
+  if (deployGate.halt) {
+    console.error(`[DEPLOY HALT] ${deployGate.reason}`);
+    const haltHeader = buildEvidenceHeader(cfg, startedAt, healthz.result, {
+      status: 0,
+      note: `deploy gate halted: ${deployGate.reason}`,
+    });
+    writeEvidencePack(cfg.outPath, haltHeader, [], redact);
+    console.log(`Evidence pack written to ${cfg.outPath}`);
+    process.exit(3);
+  }
+
   // Phase 3 preflight: auth probe. Halt on 401/403/5xx/exception — do not
   // burn the replay on a known-bad state.
   const preflight = await runPreflight(cfg, redact);
@@ -281,14 +383,19 @@ async function run(): Promise<void> {
       const rawMsg = err instanceof Error ? err.message : String(err);
       const msg = redactString(rawMsg, cfg.apiKey);
       const isTransport = isTransportError(rawMsg);
+      // Both transport errors and harness exceptions are FAILURES,
+      // not skips. The step was attempted (request sent or in-flight)
+      // and the harness was unable to obtain a response. "Skipped"
+      // means "did not attempt" and is reserved for the
+      // dependency-cascade case above.
       rows.push({
         step: step.name,
-        status: isTransport ? 'skipped' : 'failed',
+        status: 'failed',
         evidence: `${isTransport ? 'transport error' : 'exception'}: ${msg}`,
         failing_contract: isTransport ? 'transport layer' : 'harness exception',
         outcome_class: 'harness-auth-blocker',
       });
-      console.log(`[${isTransport ? 'SKIP' : 'FAIL'}] ${step.name}: ${msg}`);
+      console.log(`[FAIL] ${step.name}: ${msg}`);
       notPassed.add(step.name);
     }
   }
@@ -353,10 +460,13 @@ function safeGit(cmd: string): string {
 
 // Export for unit-test access. The CLI bootstrap below guards against
 // accidental re-invocation on import.
+// (`evaluateDeployGate` is exported inline above — do not re-export.)
 export {
+  EXPECTED_STAGING_BUILD,
   MISSING_KEY_MESSAGE,
   assertAuthForBaseUrl,
   buildEvidenceHeader,
+  isStaleDeployOverrideEnabled,
   parseArgs,
   readApiKey,
   run,

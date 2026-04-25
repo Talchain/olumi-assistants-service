@@ -3,26 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { postTurn } from '../../../tools/v5-journey-replay/client.js';
 import { assertProductShape, assertDraftGraph, assertExplainLeader } from '../../../tools/v5-journey-replay/assertions.js';
 
+import { stubFetchOnce as stubFetchTyped } from './_test-helpers.js';
+
 interface MockedResponseInit {
   readonly status?: number;
   readonly text: string;
+  readonly contentType?: string;
 }
 
 function stubFetchOnce(init: MockedResponseInit) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => {
-      return {
-        status: init.status ?? 200,
-        json: async () => {
-          // Real fetch.json() throws on non-JSON; mirror that here so
-          // postTurn must rely on .text() + JSON.parse to know the body.
-          throw new SyntaxError('Unexpected token in JSON');
-        },
-        text: async () => init.text,
-      } as unknown as Response;
-    }),
-  );
+  return stubFetchTyped({ status: init.status, rawText: init.text, contentType: init.contentType });
 }
 
 describe('postTurn handles non-JSON / empty bodies as typed parse failures', () => {
@@ -34,7 +24,7 @@ describe('postTurn handles non-JSON / empty bodies as typed parse failures', () 
     vi.unstubAllGlobals();
   });
 
-  it('200 with empty body → __body_parse_failed sentinel set', async () => {
+  it('200 with empty body → fingerprint set, no raw bytes captured', async () => {
     stubFetchOnce({ status: 200, text: '' });
     const result = await postTurn(
       'https://example.com',
@@ -51,12 +41,16 @@ describe('postTurn handles non-JSON / empty bodies as typed parse failures', () 
     );
     expect(result.status).toBe(200);
     expect(result.body.__body_parse_failed).toBe(true);
-    expect(result.body.__body_raw).toBe('');
+    expect(result.body.__body_length).toBe(0);
+    expect(result.body.__body_sha256_prefix).toMatch(/^[a-f0-9]{8}$/);
+    // Privacy gate: no raw body field exists.
+    const bodyAsRecord = result.body as Record<string, unknown>;
+    expect(bodyAsRecord.__body_raw).toBeUndefined();
   });
 
-  it('200 with HTML proxy error page → __body_parse_failed sentinel set, raw text captured (truncated)', async () => {
+  it('200 with HTML proxy error page → fingerprint set, raw bytes NOT echoed (privacy gate)', async () => {
     const htmlPage = '<!DOCTYPE html><html><body>502 Bad Gateway from CDN</body></html>';
-    stubFetchOnce({ status: 200, text: htmlPage });
+    stubFetchOnce({ status: 200, text: htmlPage, contentType: 'text/html' });
     const result = await postTurn(
       'https://example.com',
       {
@@ -71,7 +65,17 @@ describe('postTurn handles non-JSON / empty bodies as typed parse failures', () 
       1000,
     );
     expect(result.body.__body_parse_failed).toBe(true);
-    expect(result.body.__body_raw).toContain('502 Bad Gateway');
+    expect(result.body.__body_length).toBe(htmlPage.length);
+    expect(result.body.__body_content_type).toBe('text/html');
+    expect(result.body.__body_sha256_prefix).toMatch(/^[a-f0-9]{8}$/);
+    // CRITICAL privacy invariant: the raw body string never appears in
+    // the parsed envelope. This prevents proxy / runtime error pages
+    // from echoing user input or other sensitive content into the
+    // committed evidence markdown.
+    const bodyAsRecord = result.body as Record<string, unknown>;
+    expect(bodyAsRecord.__body_raw).toBeUndefined();
+    expect(JSON.stringify(result.body)).not.toContain('502 Bad Gateway');
+    expect(JSON.stringify(result.body)).not.toContain('CDN');
   });
 
   it('200 with valid JSON → no sentinel set', async () => {
@@ -101,7 +105,7 @@ describe('assertions reject parse failures and empty product-shape envelopes', (
   it('assertProductShape FAILS on body_parse_failed (200 with empty body)', () => {
     const r = assertProductShape({
       status: 200,
-      body: { __body_parse_failed: true, __body_raw: '' },
+      body: { __body_parse_failed: true, __body_length: 0, __body_content_type: '', __body_sha256_prefix: 'e3b0c442' },
       elapsed_ms: 1,
     });
     expect(r.ok).toBe(false);
@@ -142,7 +146,7 @@ describe('assertions reject parse failures and empty product-shape envelopes', (
   it('assertDraftGraph FAILS on body_parse_failed', () => {
     const r = assertDraftGraph({
       status: 200,
-      body: { __body_parse_failed: true, __body_raw: '<html>err</html>' },
+      body: { __body_parse_failed: true, __body_length: 16, __body_content_type: 'text/html', __body_sha256_prefix: '12345678' },
       elapsed_ms: 1,
     });
     expect(r.ok).toBe(false);
@@ -154,7 +158,7 @@ describe('assertions reject parse failures and empty product-shape envelopes', (
   it('assertExplainLeader FAILS on body_parse_failed', () => {
     const r = assertExplainLeader({
       status: 200,
-      body: { __body_parse_failed: true, __body_raw: '' },
+      body: { __body_parse_failed: true, __body_length: 0, __body_content_type: '', __body_sha256_prefix: 'e3b0c442' },
       elapsed_ms: 1,
     });
     expect(r.ok).toBe(false);

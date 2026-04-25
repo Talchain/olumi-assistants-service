@@ -4,6 +4,7 @@ import { postTurn, getHealthz, preflightAuth } from '../../../tools/v5-journey-r
 import { renderEvidencePack } from '../../../tools/v5-journey-replay/evidence-writer.js';
 import { createRedactor } from '../../../tools/v5-journey-replay/redact.js';
 import type { EvidenceRow, HealthzResult } from '../../../tools/v5-journey-replay/types.js';
+import { stubFetchOnce, type FetchMockInit } from './_test-helpers.js';
 
 const SENTINEL = 'SENTINEL-LEAK-CANARY-DO-NOT-MATCH-PROD-xyz123';
 
@@ -15,31 +16,8 @@ function buildHealthz(build = '66d1adb'): HealthzResult {
   };
 }
 
-interface MockedFetchInit {
-  readonly method?: string;
-  readonly headers?: Record<string, string>;
-  readonly body?: string;
-}
-
-type FetchMock = ReturnType<
-  typeof vi.fn<(input: string | URL, init?: MockedFetchInit) => Promise<Response>>
->;
-
-function mockFetchOnce(
-  response: Partial<Response> & { jsonValue?: unknown } | Error,
-): FetchMock {
-  const fn: FetchMock = vi.fn(async (_input: string | URL, _init?: MockedFetchInit) => {
-    if (response instanceof Error) throw response;
-    const jsonBody = response.jsonValue ?? {};
-    const rawText = JSON.stringify(jsonBody);
-    return {
-      status: response.status ?? 200,
-      json: async () => jsonBody,
-      text: async () => rawText,
-    } as unknown as Response;
-  });
-  vi.stubGlobal('fetch', fn);
-  return fn;
+function mockFetchOnce(response: FetchMockInit | Error) {
+  return stubFetchOnce(response);
 }
 
 describe('auth header injection', () => {
