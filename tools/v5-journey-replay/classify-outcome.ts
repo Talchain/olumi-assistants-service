@@ -58,7 +58,7 @@ export function hasErrorEnvelope(body: TurnResponse | undefined): boolean {
   if (!body) return false;
   // `{ schema: "error.v1", code: "...", message: "..." }` — auth and
   // top-level validation errors.
-  if ((body as Record<string, unknown>).schema === 'error.v1') return true;
+  if (body.schema === 'error.v1') return true;
   // `{ error, boundary, details, retryable }` — BoundaryError shape.
   if (body.error != null && body.boundary != null) return true;
   return false;

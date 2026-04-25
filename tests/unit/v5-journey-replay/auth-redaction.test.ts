@@ -31,9 +31,11 @@ function mockFetchOnce(
   const fn: FetchMock = vi.fn(async (_input: string | URL, _init?: MockedFetchInit) => {
     if (response instanceof Error) throw response;
     const jsonBody = response.jsonValue ?? {};
+    const rawText = JSON.stringify(jsonBody);
     return {
       status: response.status ?? 200,
       json: async () => jsonBody,
+      text: async () => rawText,
     } as unknown as Response;
   });
   vi.stubGlobal('fetch', fn);

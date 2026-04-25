@@ -42,7 +42,9 @@ function statusLabel(s: string): string {
   return '[SKIP]';
 }
 
-function yesNo(v: boolean | 'unverifiable' | 'not capturable'): string {
+function yesNo(
+  v: boolean | 'unverifiable' | 'not capturable' | 'not externally verified',
+): string {
   if (v === true) return 'yes';
   if (v === false) return 'no';
   return v;
@@ -52,8 +54,12 @@ interface ExecutiveSummary {
   readonly reached_orchestrator: boolean;
   readonly v38_2_startup_confirmed: boolean | 'unverifiable';
   readonly v38_2_per_turn_confirmed: boolean | 'not capturable';
-  readonly run_analysis_reached_plot: boolean;
-  readonly analysis_persisted_followup: boolean;
+  // Step 4 ran end-to-end (handler → PLoT → commit → response). The
+  // boolean only flips true when step 4 PASSES — failures earlier in
+  // the chain (commit, persistence, post-PLoT) cannot be distinguished
+  // from "PLoT never called" without server logs.
+  readonly run_analysis_passed_endtoend: boolean | 'not externally verified';
+  readonly analysis_persisted_followup: boolean | 'not externally verified';
   readonly no_internal_terms: boolean;
 }
 
@@ -68,9 +74,16 @@ function computeExecutiveSummary(
   const step4 = rows.find((r) => r.step === '4_run_analysis');
   const step5 = rows.find((r) => r.step === '5_explain_leader');
 
-  const reachedOrchestrator = hadRuntime;
-  const reachedPlot = step4?.status === 'passed';
-  const persistedFollowup = step5?.status === 'passed';
+  // Step 4 only proves run_analysis end-to-end if it passes. A failure
+  // mode like `chip_click_run_analysis_commit_failed` happens AFTER
+  // the handler returns and (likely) after PLoT was called — so
+  // reporting "PLoT = no" on a commit failure would be misleading. We
+  // deliberately collapse to "not externally verified" unless the row
+  // passes.
+  const step4Endtoend: boolean | 'not externally verified' =
+    step4?.status === 'passed' ? true : 'not externally verified';
+  const step5Persisted: boolean | 'not externally verified' =
+    step5?.status === 'passed' ? true : 'not externally verified';
 
   // Deploy confirmation from healthz. We can only verify commit SHA
   // matches the expected short hashes when healthz returned one.
@@ -81,11 +94,11 @@ function computeExecutiveSummary(
       : build === '66d1adb';
 
   return {
-    reached_orchestrator: reachedOrchestrator,
+    reached_orchestrator: hadRuntime,
     v38_2_startup_confirmed: startupConfirmed,
     v38_2_per_turn_confirmed: 'not capturable',
-    run_analysis_reached_plot: reachedPlot,
-    analysis_persisted_followup: persistedFollowup,
+    run_analysis_passed_endtoend: step4Endtoend,
+    analysis_persisted_followup: step5Persisted,
     no_internal_terms: !anyInternalTerm,
   };
 }
@@ -120,7 +133,7 @@ export function renderEvidencePack(
     `| v38.2 confirmed (per-turn) | ${yesNo(summary.v38_2_per_turn_confirmed)} |`,
   );
   lines.push(
-    `| run_analysis reached PLoT | ${yesNo(summary.run_analysis_reached_plot)} |`,
+    `| run_analysis passed end-to-end (handler + commit + response) | ${yesNo(summary.run_analysis_passed_endtoend)} |`,
   );
   lines.push(
     `| Analysis persisted into follow-up context | ${yesNo(summary.analysis_persisted_followup)} |`,
@@ -266,6 +279,12 @@ export function renderEvidencePack(
   );
   lines.push(
     '| `v5_journey_id` in unknown-status warning | `evaluateAnalysisStatus` logs `event: external_contract_unknown_status` with `request_id` but not `v5_journey_id`. Adding it requires a `ctx` signature change. | Deferred from this branch per the hard "one-liner only" limit. Pick up when the next `evaluateAnalysisStatus` change happens. |',
+  );
+  lines.push(
+    '| Per-step assertions are content-shape only | Step 2 does not assert that the response references actual option/factor labels from step 1\'s draft. Step 4 cannot verify analysis fact persistence without reading Supabase. Step 5 does not require leading option, probability, driver, or caveat to be present. A generic 200 with non-empty `assistant_text` can pass these. | Strengthen the per-step DSL: thread step 1\'s parsed labels into step 2\'s assertion; add Supabase facts-table read for step 4 (or a dedicated unit test); add required-substring matchers (probability percent, "leading", "driver", caveat marker) for step 5. New brief — out of scope here. |',
+  );
+  lines.push(
+    '| Forbidden-term scan tolerates plain `handler` | The brief lists `handler` as forbidden user-facing terminology. Current implementation matches `handler[ _](id\\|failed\\|error\\|registered)` only — plain `handler` in isolation passes. The looser stance was deliberate (avoid false positives on "handles" / legitimate user-facing uses) but diverges from the brief. | Decision required: tighten to brief-strict (and accept some false positives) or document the loose policy in the forbidden-terms.ts header. New brief — out of scope here. |',
   );
   lines.push('');
 

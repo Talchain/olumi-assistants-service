@@ -37,7 +37,6 @@ describe('hasErrorEnvelope', () => {
   it('returns true for schema: error.v1 shape', () => {
     expect(
       hasErrorEnvelope({
-        // @ts-expect-error schema is not in TurnResponse — intentional test of runtime shape
         schema: 'error.v1',
         code: 'UNAUTHENTICATED',
       }),

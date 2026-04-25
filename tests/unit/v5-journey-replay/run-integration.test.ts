@@ -23,16 +23,26 @@ class ProcessExitError extends Error {
   }
 }
 
-function stubFetchRouter(router: (url: string) => Partial<Response> & { jsonValue?: unknown } | Error | Promise<Partial<Response> & { jsonValue?: unknown }>) {
+interface MockResponse {
+  readonly status?: number;
+  readonly jsonValue?: unknown;
+  /** When set, overrides the JSON-stringified jsonValue for the text() body. */
+  readonly rawText?: string;
+}
+
+function stubFetchRouter(router: (url: string) => MockResponse | Error | Promise<MockResponse>) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string | URL) => {
       const u = typeof url === 'string' ? url : url.toString();
       const r = await router(u);
       if (r instanceof Error) throw r;
+      const jsonBody = r.jsonValue ?? {};
+      const rawText = r.rawText ?? JSON.stringify(jsonBody);
       return {
         status: r.status ?? 200,
-        json: async () => r.jsonValue ?? {},
+        json: async () => jsonBody,
+        text: async () => rawText,
       } as unknown as Response;
     }),
   );

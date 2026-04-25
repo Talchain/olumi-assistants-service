@@ -207,19 +207,21 @@ async function run(): Promise<void> {
 
   const rows: EvidenceRow[] = [];
   const turnCounter = { value: 0 };
-  let blockedBy: string | null = null;
+  // Track every step that did not pass. A step is skipped if its
+  // direct prerequisite is in this set — this also handles transitive
+  // dependencies because a skipped step adds itself to the set.
+  const notPassed = new Set<string>();
 
   for (const step of CANONICAL_STEPS) {
-    // Dependency-aware skipping: if a prerequisite step failed, skip
-    // with a clear marker rather than producing a misleading evidence row.
-    if (step.depends_on && blockedBy === step.depends_on) {
+    if (step.depends_on && notPassed.has(step.depends_on)) {
       rows.push({
         step: step.name,
         status: 'skipped',
-        evidence: `skipped: prerequisite ${step.depends_on} failed`,
+        evidence: `skipped: prerequisite ${step.depends_on} did not pass`,
         outcome_class: 'skipped',
       });
       console.log(`[SKIP] ${step.name} (depends on ${step.depends_on})`);
+      notPassed.add(step.name);
       continue;
     }
 
@@ -232,10 +234,7 @@ async function run(): Promise<void> {
       // A 200 with an error envelope (schema: "error.v1" or BoundaryError
       // shape) is a V5 runtime failure, NOT a success. Fail the row.
       if (result.status === 200 && hasErrorEnvelope(result.body)) {
-        const errShape =
-          (result.body as Record<string, unknown>).code ??
-          result.body.error ??
-          'unknown';
+        const errShape = result.body.code ?? result.body.error ?? 'unknown';
         rows.push({
           step: step.name,
           status: 'failed',
@@ -248,7 +247,7 @@ async function run(): Promise<void> {
           http_status: result.status,
         });
         console.log(`[FAIL] ${step.name}: 200 with error envelope (${String(errShape)})`);
-        blockedBy = step.name;
+        notPassed.add(step.name);
         continue;
       }
 
@@ -276,7 +275,7 @@ async function run(): Promise<void> {
         console.log(
           `[FAIL] ${step.name}: ${redact(assertion.failing_contract)} | ${redact(assertion.evidence)}`,
         );
-        blockedBy = step.name;
+        notPassed.add(step.name);
       }
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : String(err);
@@ -290,7 +289,7 @@ async function run(): Promise<void> {
         outcome_class: 'harness-auth-blocker',
       });
       console.log(`[${isTransport ? 'SKIP' : 'FAIL'}] ${step.name}: ${msg}`);
-      blockedBy = step.name;
+      notPassed.add(step.name);
     }
   }
 

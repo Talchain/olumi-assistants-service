@@ -32,11 +32,25 @@ export interface TurnResponse {
   }>;
   readonly insights?: ReadonlyArray<unknown>;
   readonly stage_indicator?: string;
-  // For the 5xx BoundaryError shape.
+  // BoundaryError shape (4xx/5xx). All optional — present only on the
+  // error envelope path.
   readonly error?: string;
   readonly boundary?: string;
+  readonly direction?: string;
+  readonly validator?: string;
   readonly details?: Record<string, unknown>;
+  readonly request_id?: string;
   readonly retryable?: boolean;
+  // error.v1 envelope shape (auth + top-level validation errors).
+  readonly schema?: string;
+  readonly code?: string;
+  readonly message?: string;
+  // Sentinel set by client.ts when the response body is non-JSON or
+  // empty and could not be parsed. Distinguishes "200 with empty
+  // body" (where this sentinel is set) from "200 with valid empty
+  // object" (where it isn't).
+  readonly __body_parse_failed?: true;
+  readonly __body_raw?: string;
 }
 
 /**

@@ -22,24 +22,36 @@ export type AssertionResult =
 function httpOk(result: FetchResult): AssertionResult | null {
   if (result.status !== 200) {
     const body = result.body ?? {};
-    const details = (body.details ?? {}) as Record<string, unknown>;
+    const details = body.details ?? {};
     const parts = [
       `status=${result.status}`,
       `body_error=${String(body.error ?? '')}`,
     ];
-    if (typeof details.reason === 'string') parts.push(`reason=${details.reason}`);
+    const reason = details['reason'];
+    if (typeof reason === 'string') parts.push(`reason=${reason}`);
     if (typeof body.boundary === 'string') parts.push(`boundary=${body.boundary}`);
-    // @ts-expect-error BoundaryError ships a validator field not modelled on TurnResponse
     if (typeof body.validator === 'string') parts.push(`validator=${body.validator}`);
     // Include request_id so the evidence pack row is self-sufficient
-    // for post-mortem lookups. The harness never sees the auth header
-    // echoed back, and request_id is not a secret.
-    const reqId = (body as Record<string, unknown>).request_id;
-    if (typeof reqId === 'string') parts.push(`request_id=${reqId}`);
+    // for post-mortem lookups. request_id is not a secret.
+    if (typeof body.request_id === 'string') parts.push(`request_id=${body.request_id}`);
     return {
       ok: false,
       failing_contract: `HTTP ${result.status} (expected 200)`,
       evidence: parts.join(' '),
+    };
+  }
+  return null;
+}
+
+// Reject 200 responses with non-JSON or empty body so they cannot pass
+// downstream chip/text assertions as valid empty envelopes.
+function bodyParsedOk(result: FetchResult): AssertionResult | null {
+  if (result.body?.__body_parse_failed) {
+    const raw = result.body.__body_raw ?? '';
+    return {
+      ok: false,
+      failing_contract: 'body_parse_failed (non-JSON or unreadable response body)',
+      evidence: `status=${result.status} body_parse_failed raw_len=${raw.length} raw_head="${raw.slice(0, 80)}"`,
     };
   }
   return null;
@@ -87,6 +99,7 @@ function noForbiddenTerms(result: FetchResult): AssertionResult | null {
 function coreAssertions(result: FetchResult): AssertionResult | null {
   return (
     httpOk(result) ??
+    bodyParsedOk(result) ??
     noBoundaryError(result) ??
     noForbiddenTerms(result)
   );
@@ -97,10 +110,21 @@ export function assertProductShape(result: FetchResult): AssertionResult {
   if (core) return core;
   const body = result.body;
   const text = body?.assistant_text ?? '';
+  const chipCount = (body?.suggested_actions ?? []).length;
+  // Empty envelope is not a product-shaped response — at least one of
+  // assistant_text or suggested_actions must be present. Without this
+  // floor, a 200 with `{}` would pass as "successful but quiet".
+  if (text.length === 0 && chipCount === 0) {
+    return {
+      ok: false,
+      failing_contract: 'product_shape_empty (no assistant_text and no chips)',
+      evidence: `status=200 text_len=0 chip_count=0 stage=${body?.stage_indicator ?? 'unknown'}`,
+    };
+  }
   return {
     ok: true,
     evidence:
-      `status=200 text_len=${text.length} chip_count=${(body?.suggested_actions ?? []).length} ` +
+      `status=200 text_len=${text.length} chip_count=${chipCount} ` +
       `elapsed=${result.elapsed_ms}ms stage=${body?.stage_indicator ?? 'unknown'}`,
   };
 }

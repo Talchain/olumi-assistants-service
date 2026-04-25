@@ -15,9 +15,11 @@ function mockFetch(handler: (url: string) => Partial<Response> & { jsonValue?: u
   const fn = vi.fn(async (url: string) => {
     const r = await handler(url);
     if (r instanceof Error) throw r;
+    const jsonBody = r.jsonValue ?? {};
     return {
       status: r.status ?? 200,
-      json: async () => r.jsonValue ?? {},
+      json: async () => jsonBody,
+      text: async () => JSON.stringify(jsonBody),
     } as unknown as Response;
   });
   vi.stubGlobal('fetch', fn);

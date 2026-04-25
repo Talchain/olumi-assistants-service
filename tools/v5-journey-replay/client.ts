@@ -90,15 +90,24 @@ export async function postTurn(
       throw sanitiseError(err, apiKey);
     }
     const elapsed = Date.now() - start;
+    // Read text first so we can fall back without locking the body
+    // stream. `Response.json()` consumes the stream — calling text()
+    // afterward throws.
+    let raw = '';
+    try {
+      raw = await res.text();
+    } catch {
+      raw = '';
+    }
     let body: TurnResponse;
     try {
-      body = (await res.json()) as TurnResponse;
-    } catch (err) {
-      // Non-JSON response body (e.g. proxy error page). Preserve status
-      // but emit an empty envelope.
-      body = {} as TurnResponse;
-      // Sanitise and swallow — the status code is the primary signal.
-      void sanitiseError(err, apiKey);
+      body = JSON.parse(raw) as TurnResponse;
+    } catch {
+      // Non-JSON / empty body (e.g. proxy error page). Preserve status
+      // and surface a typed `body_parse_failed` sentinel so the
+      // assertion layer can fail the row instead of treating it as a
+      // valid empty envelope.
+      body = { __body_parse_failed: true, __body_raw: raw.slice(0, 200) };
     }
     return { status: res.status, body, elapsed_ms: elapsed };
   } finally {
