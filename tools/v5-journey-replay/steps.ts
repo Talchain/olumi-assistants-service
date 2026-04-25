@@ -50,11 +50,13 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
     description:
       'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
     buildPayload: (ctx) => ({
+      kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
+      stage: 'frame',
       message: DECISION_BRIEF,
       turn_class: 'frame',
-      stage: 'frame',
+      source: 'composer',
     }),
   },
   {
@@ -63,11 +65,13 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
       '"Which option looks weakest?" → 200, response references actual option/factor labels from the draft.',
     depends_on: '1_draft_graph',
     buildPayload: (ctx) => ({
+      kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
+      stage: 'analyse',
       message: 'Which option looks weakest?',
       turn_class: 'decide',
-      stage: 'analyse',
+      source: 'composer',
     }),
   },
   {
@@ -76,11 +80,13 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
       '"Add another option" → product-shaped: 200, no BoundaryError, no internal terms. May route to converse/clarify/recoverable validation.',
     depends_on: '1_draft_graph',
     buildPayload: (ctx) => ({
+      kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
+      stage: 'frame',
       message: 'Add another option to this decision.',
       turn_class: 'frame',
-      stage: 'frame',
+      source: 'composer',
     }),
   },
   {
@@ -88,12 +94,17 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
     description:
       'Emit chip_click payload for Run analysis → 200, PLoT completes, handler fact persisted.',
     depends_on: '1_draft_graph',
+    // source: 'chip_click' + chip.action_type carries the UI chip-click
+    // dispatch signal per talchain v0.7.0 boundary schema.
     buildPayload: (ctx) => ({
+      kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
+      stage: 'analyse',
       message: 'Run analysis.',
       turn_class: 'decide',
-      stage: 'analyse',
+      source: 'chip_click',
+      chip: { action_type: 'run_analysis' },
     }),
   },
   {
@@ -102,11 +113,13 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
       '"Why does the leading option win?" → 200, response names leading option, probability, a top driver, a caveat. Exercises analysis fallback on follow-up.',
     depends_on: '4_run_analysis',
     buildPayload: (ctx) => ({
+      kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
+      stage: 'decide',
       message: 'Why does the leading option win?',
       turn_class: 'decide',
-      stage: 'decide',
+      source: 'composer',
     }),
   },
   {
@@ -115,11 +128,13 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
       '"Increase the budget factor" → 200, edit proposal or clarifying question. Recoverable validator path is acceptable.',
     depends_on: '1_draft_graph',
     buildPayload: (ctx) => ({
+      kind: 'message',
       turn_id: mkTurnId(),
       scenario_id: ctx.scenario_id,
+      stage: 'frame',
       message: 'Increase the budget factor.',
       turn_class: 'frame',
-      stage: 'frame',
+      source: 'composer',
     }),
   },
 ];

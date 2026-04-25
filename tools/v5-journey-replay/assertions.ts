@@ -21,10 +21,25 @@ export type AssertionResult =
 
 function httpOk(result: FetchResult): AssertionResult | null {
   if (result.status !== 200) {
+    const body = result.body ?? {};
+    const details = (body.details ?? {}) as Record<string, unknown>;
+    const parts = [
+      `status=${result.status}`,
+      `body_error=${String(body.error ?? '')}`,
+    ];
+    if (typeof details.reason === 'string') parts.push(`reason=${details.reason}`);
+    if (typeof body.boundary === 'string') parts.push(`boundary=${body.boundary}`);
+    // @ts-expect-error BoundaryError ships a validator field not modelled on TurnResponse
+    if (typeof body.validator === 'string') parts.push(`validator=${body.validator}`);
+    // Include request_id so the evidence pack row is self-sufficient
+    // for post-mortem lookups. The harness never sees the auth header
+    // echoed back, and request_id is not a secret.
+    const reqId = (body as Record<string, unknown>).request_id;
+    if (typeof reqId === 'string') parts.push(`request_id=${reqId}`);
     return {
       ok: false,
       failing_contract: `HTTP ${result.status} (expected 200)`,
-      evidence: `status=${result.status} body_error=${String(result.body?.error ?? '')}`,
+      evidence: parts.join(' '),
     };
   }
   return null;

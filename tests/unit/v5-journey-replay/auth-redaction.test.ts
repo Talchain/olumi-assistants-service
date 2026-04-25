@@ -57,11 +57,13 @@ describe('auth header injection', () => {
     await postTurn(
       'https://example.com',
       {
+        kind: 'message',
         turn_id: 't',
         scenario_id: 's',
+        stage: 'frame',
         message: 'm',
         turn_class: 'frame',
-        stage: 'frame',
+        source: 'composer',
       },
       1000,
       SENTINEL,
@@ -78,11 +80,13 @@ describe('auth header injection', () => {
     await postTurn(
       'http://localhost:3000',
       {
+        kind: 'message',
         turn_id: 't',
         scenario_id: 's',
+        stage: 'frame',
         message: 'm',
         turn_class: 'frame',
-        stage: 'frame',
+        source: 'composer',
       },
       1000,
     );
@@ -106,7 +110,15 @@ describe('secret never leaks across observable surfaces', () => {
     await expect(
       postTurn(
         'https://example.com',
-        { turn_id: 't', scenario_id: 's', message: 'm', turn_class: 'frame', stage: 'frame' },
+        {
+          kind: 'message',
+          turn_id: 't',
+          scenario_id: 's',
+          stage: 'frame',
+          message: 'm',
+          turn_class: 'frame',
+          source: 'composer',
+        },
         1000,
         SENTINEL,
       ),
@@ -114,7 +126,15 @@ describe('secret never leaks across observable surfaces', () => {
     try {
       await postTurn(
         'https://example.com',
-        { turn_id: 't', scenario_id: 's', message: 'm', turn_class: 'frame', stage: 'frame' },
+        {
+          kind: 'message',
+          turn_id: 't',
+          scenario_id: 's',
+          stage: 'frame',
+          message: 'm',
+          turn_class: 'frame',
+          source: 'composer',
+        },
         1000,
         SENTINEL,
       );
@@ -134,7 +154,15 @@ describe('secret never leaks across observable surfaces', () => {
     try {
       await postTurn(
         'https://example.com',
-        { turn_id: 't', scenario_id: 's', message: 'm', turn_class: 'frame', stage: 'frame' },
+        {
+          kind: 'message',
+          turn_id: 't',
+          scenario_id: 's',
+          stage: 'frame',
+          message: 'm',
+          turn_class: 'frame',
+          source: 'composer',
+        },
         1000,
         SENTINEL,
       );

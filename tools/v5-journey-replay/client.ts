@@ -17,21 +17,36 @@
 import { sanitiseError } from './redact.js';
 import type { HealthzBody, HealthzResult, TurnResponse } from './types.js';
 
+/**
+ * Mirrors `MessageTurnPayloadSchema` from `@talchain/schemas/boundary`
+ * (v0.8.1). The service-side Zod validator rejects with HTTP 422
+ * INGRESS_CONTRACT_VIOLATION on any shape drift; see the schema source
+ * at `node_modules/@talchain/schemas/dist/boundary/turn-payload.js`.
+ *
+ * We only model the `kind: 'message'` branch here — the replay drives
+ * user-text turns and chip-click turns (both carried as messages with
+ * `source: 'chip_click'`). The `kind: 'system_event'` branch is unused.
+ */
 export interface TurnPayload {
+  readonly kind: 'message';
   readonly turn_id: string;
   readonly scenario_id: string;
+  readonly stage: 'frame' | 'analyse' | 'decide' | 'review';
   readonly message: string;
-  readonly turn_class: 'decide' | 'frame' | 'analyse' | 'review';
-  readonly stage: 'frame' | 'analyse' | 'decide' | 'review' | 'evaluate';
-  readonly context?: {
-    readonly graph?: unknown;
-    readonly analysis_response?: unknown;
-    readonly framing?: {
-      readonly stage?: string;
-      readonly goal?: string;
-    };
-    readonly messages?: ReadonlyArray<unknown>;
+  readonly turn_class: 'frame' | 'clarify' | 'propose' | 'decide' | 'review';
+  readonly source: 'composer' | 'chip' | 'chip_click' | 'retry';
+  readonly chip?: {
+    readonly action_type?:
+      | 'run_analysis'
+      | 'set_factor_value'
+      | 'add_constraint'
+      | 'adjust_edge_strength'
+      | 'explain_result'
+      | 'compare_options'
+      | 'what_would_flip';
+    readonly parameters?: Record<string, unknown>;
   };
+  readonly retry_of?: string;
 }
 
 export interface FetchResult {
