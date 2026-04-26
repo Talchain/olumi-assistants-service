@@ -36,6 +36,8 @@
  * timeouts) is preserved.
  */
 
+import { createHash } from 'node:crypto';
+
 import type {
   MessageTurnPayload,
   OlumiResponse,
@@ -1248,8 +1250,26 @@ export async function runTurnExecutor(
         });
         return finalizeRun();
       case 'api_error': {
+        // R-004: do NOT log err.provider_message verbatim. Provider error
+        // strings can include echoed prompt content (validation messages
+        // citing the offending field's value, request snippets) and would
+        // therefore route user decision text into telemetry. Replace with:
+        //  - provider_error_class: the RoutingError cause (typed enum)
+        //  - provider_status: the HTTP status (already non-sensitive)
+        //  - provider_message_hash: sha256 truncated to 12 hex chars, for
+        //    correlation across the error stream when on-call is debugging
+        //    a recurring upstream failure pattern.
+        const providerMessageHash = err.provider_message
+          ? createHash('sha256').update(err.provider_message).digest('hex').slice(0, 12)
+          : null;
         log.warn(
-          { request_id: requestId, cause: err.cause, provider_message: err.provider_message, status: err.status },
+          {
+            request_id: requestId,
+            cause: err.cause,
+            provider_error_class: err.cause,
+            provider_status: err.status,
+            provider_message_hash: providerMessageHash,
+          },
           'V5 TurnExecutor routing api_error',
         );
         // 400-level → LLM_REQUEST_INVALID (not retryable; bad request from our side)

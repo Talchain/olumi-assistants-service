@@ -16,6 +16,8 @@
  * only count retained), and ENTITY_NOT_FOUND (entity_label dropped).
  */
 
+import { createHash } from 'node:crypto';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
@@ -26,6 +28,7 @@ import type {
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { UpstreamHTTPError } from '../../adapters/llm/errors.js';
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -287,5 +290,60 @@ describe('TurnExecutor — validator-log privacy (P1-2)', () => {
     expect(safe).not.toHaveProperty('proposed_label');
     expect(safe).not.toHaveProperty('actual_value');
     expect(safe).not.toHaveProperty('candidates');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-004: provider_message redaction on routing api_error
+// ---------------------------------------------------------------------------
+
+describe('TurnExecutor — provider_message redaction (R-004)', () => {
+  it('logs provider_message_hash + provider_error_class; raw provider_message is absent', async () => {
+    // Distinctive provider error string standing in for a real upstream
+    // message that could echo prompt content (e.g. "tools.0.custom: ...
+    // user-text-leaked-here ..."). If it appears anywhere in the log
+    // payloads, the redaction has regressed.
+    const SECRET_PROVIDER_MESSAGE =
+      'tools.0.custom: leaked-user-decision-text-launch-product-now-at-50M';
+    const expectedHash = createHash('sha256').update(SECRET_PROVIDER_MESSAGE).digest('hex').slice(0, 12);
+
+    const routingAdapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockRejectedValue(
+          new UpstreamHTTPError(
+            SECRET_PROVIDER_MESSAGE,
+            'anthropic',
+            400,
+            'invalid_request_error',
+            'req-upstream-id',
+            10,
+          ),
+        ),
+    };
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-provider-redaction', { routingAdapter });
+
+    const payloads = allLogPayloads();
+
+    // The raw provider_message string MUST NOT appear in any captured log
+    // call (warn / error / info / debug payloads or message strings).
+    expect(payloads).not.toContain(SECRET_PROVIDER_MESSAGE);
+    expect(payloads).not.toContain('leaked-user-decision-text');
+
+    // The redaction is observable: the api_error warn payload must carry
+    // the truncated sha256 hash of the provider message and the typed
+    // error class, so on-call still has correlation handles.
+    const apiErrorWarn = warnSpy.mock.calls.find((c) => {
+      const msg = typeof c[1] === 'string' ? c[1] : '';
+      return msg.includes('routing api_error');
+    });
+    expect(apiErrorWarn).toBeDefined();
+    const payload = apiErrorWarn![0] as Record<string, unknown>;
+    expect(payload.provider_message_hash).toBe(expectedHash);
+    expect(payload.provider_error_class).toBe('api_error');
+    expect(payload.provider_status).toBe(400);
+    // Negative: legacy raw field must be gone.
+    expect(payload).not.toHaveProperty('provider_message');
   });
 });
