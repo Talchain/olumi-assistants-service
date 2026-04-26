@@ -71,6 +71,21 @@ export class SupabaseSessionStore implements SessionStore {
   ) {}
 
   async append(write: SessionTurnWrite): Promise<{ id: string }> {
+    // PostgREST overload disambiguation: always pass all 10 named args,
+    // including p_graph as `null` when absent. Omitting p_graph would
+    // make PostgREST consider any 9-arg overload a candidate, and if a
+    // stale 9-arg version of append_turn_atomic ever coexisted with the
+    // current 10-arg signature, the request would fail with
+    // "Could not choose the best candidate function between …".
+    //
+    // This was the root cause of the V5 Step 4 staging failure (request_id
+    // 99a83f32-…, 2026-04-26): migration 20260422210000 added a 10-arg
+    // overload via CREATE OR REPLACE, which does not drop a different
+    // arity. The fix migration
+    // 20260426160532_v5_drop_stale_append_turn_atomic_overload.sql drops
+    // the stale 9-arg version; this client-side change is defence-in-depth
+    // so any future overload reintroduction does not silently wedge
+    // commits.
     const { data, error } = await this.client.rpc('append_turn_atomic', {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
@@ -81,10 +96,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_llm_calls_used: write.llm_calls_used,
       p_duration_ms: write.duration_ms,
       p_handler_facts: serialiseHandlerFacts(write.handler_facts),
-      // p_graph is optional — only set for draft_graph turns. When present the
-      // RPC atomically writes scenarios.graph in the same transaction as the
-      // turn insert. Omitting it (DEFAULT NULL) leaves scenarios.graph unchanged.
-      ...(write.graph !== undefined && { p_graph: write.graph }),
+      p_graph: write.graph ?? null,
     });
 
     if (error) {

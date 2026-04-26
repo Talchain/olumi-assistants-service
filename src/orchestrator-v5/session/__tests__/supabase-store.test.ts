@@ -129,9 +129,11 @@ describe('SupabaseSessionStore.append', () => {
     expect(args.p_llm_calls_used).toBe(2);
     expect(args.p_duration_ms).toBe(40);
     expect(args.p_handler_facts).toEqual([]);
-    // p_graph must be absent (not null) when no graph in write — the RPC
-    // uses DEFAULT NULL and omitting it is the correct way to signal "no graph".
-    expect(args.p_graph).toBeUndefined();
+    // p_graph must be sent as `null` (not omitted) when the write has no
+    // graph. This is required to keep PostgREST overload resolution
+    // deterministic — see the always-10-args invariant test below and
+    // the comment in supabase-store.ts:append.
+    expect(args.p_graph).toBeNull();
   });
 
   it('passes p_graph when write.graph is provided (atomic graph commit)', async () => {
@@ -196,6 +198,157 @@ describe('SupabaseSessionStore.append', () => {
 
     await store.append(WRITE);
     expect(cache.getScenario(SCENARIO)).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// V5 Step 4 regression suite (2026-04-26)
+//
+// The chip_click run_analysis commit failed in staging with HTTP 500
+// (request_id 99a83f32-…) because two append_turn_atomic overloads
+// coexisted in the database — a 9-arg and a 10-arg signature. The
+// client was sending only 9 named args (p_graph spread conditionally),
+// so PostgREST could not disambiguate and returned:
+//   "Could not choose the best candidate function between:
+//    public.append_turn_atomic(…9 args…),
+//    public.append_turn_atomic(…10 args…)"
+//
+// Fix is two-pronged: (a) migration drops the stale 9-arg overload
+// (supabase/migrations/20260426160532_…sql), (b) this suite locks in
+// the always-10-args invariant on the client so any future overload
+// reintroduction cannot silently wedge commits again.
+// ────────────────────────────────────────────────────────────────────
+
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
+const RUN_ANALYSIS_FACT: HandlerFact = {
+  fact_type: 'run_analysis',
+  fact_version: 1,
+  noop: false,
+  result: {
+    scenario_id: SCENARIO,
+    leading_option_id: 'opt-a',
+    summary: 'Analysis ran with two options compared.',
+    win_probabilities: { 'opt-a': 0.62, 'opt-b': 0.38 },
+  },
+};
+
+describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overload disambiguation)', () => {
+  it('always passes all 10 named args to append_turn_atomic, p_graph=null when absent', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.append(WRITE);
+
+    expect(rpcCalls).toHaveLength(1);
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    const keys = Object.keys(args).sort();
+
+    // The 10-arg invariant. Drift here = PostgREST overload ambiguity
+    // can re-emerge if a future migration ever adds another overload.
+    expect(keys).toEqual([
+      'p_duration_ms',
+      'p_graph',
+      'p_handler_facts',
+      'p_handler_id',
+      'p_llm_calls_used',
+      'p_request_hash',
+      'p_response_emitted',
+      'p_scenario_id',
+      'p_turn_class',
+      'p_turn_id',
+    ]);
+    expect(args.p_graph).toBeNull();
+  });
+
+  it('always passes all 10 named args even when write.graph IS provided', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const graph = { nodes: [{ id: 'n1', kind: 'decision', label: 'Launch?' }], edges: [] };
+    await store.append({ ...WRITE, graph });
+
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(Object.keys(args)).toHaveLength(10);
+    expect(args.p_graph).toEqual(graph);
+  });
+
+  it('serialises a RunAnalysisHandlerFact into the inner-FOR-LOOP payload shape', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.append({
+      ...WRITE,
+      turn_class: 'handler',
+      handler_id: 'run_analysis',
+      handler_facts: [RUN_ANALYSIS_FACT],
+    });
+
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    const facts = args.p_handler_facts as Array<Record<string, unknown>>;
+
+    // The migration's inner FOR LOOP at
+    // 20260422210000_v5_append_turn_atomic_graph_idempotency_fix.sql:113-129
+    // unpacks each entry by these exact keys. Drift here = silent INSERT
+    // shape change.
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      handler_id: 'run_analysis',
+      action_type: 'run_analysis',
+      noop: false,
+    });
+    expect(facts[0].payload).toMatchObject({
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: { scenario_id: SCENARIO, leading_option_id: 'opt-a' },
+    });
+  });
+
+  it('propagates a PostgREST overload-ambiguity error as StateCommitFailedError (the original Step 4 failure mode)', async () => {
+    // Simulates: the 9-arg overload was never dropped, two
+    // append_turn_atomic versions coexist in the database, the client
+    // sends 10 args BUT PostgREST still returns ambiguity (e.g. if a
+    // hypothetical 10-arg AND 11-arg overload coexisted later). This
+    // test asserts the error wrapping stays well-formed regardless of
+    // the underlying ambiguity scenario.
+    const { client } = makeClient({
+      rpcResult: {
+        error: {
+          code: 'PGRST203',
+          message:
+            'Could not choose the best candidate function between: ' +
+            'public.append_turn_atomic(uuid, text, text, text, text, boolean, integer, integer, jsonb), ' +
+            'public.append_turn_atomic(uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb)',
+        },
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+
+    const promise = store.append({
+      ...WRITE,
+      turn_class: 'handler',
+      handler_id: 'run_analysis',
+      handler_facts: [RUN_ANALYSIS_FACT],
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(StateCommitFailedError);
+    await expect(promise).rejects.toMatchObject({
+      rpc_code: 'PGRST203',
+      message: expect.stringMatching(/Could not choose the best candidate function/),
+    });
   });
 });
 
