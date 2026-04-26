@@ -34,6 +34,10 @@ import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 
 import { curatedHandlerChips, sanitiseForUser } from './helpers.js';
 import type { ComposeContext, SuggestedAction } from './types.js';
+import {
+  attachComputedAt,
+  type AnalysisReadyPayload,
+} from './analysis-ready-emit.js';
 
 /** Coarse category used to pick copy. */
 type HandlerCategory = 'structural' | 'value_change' | 'analysis_dep' | 'generic';
@@ -84,6 +88,13 @@ export interface ComposeUnsupportedActionInput {
    * first.
    */
   readonly hasAnalysis: boolean;
+  /**
+   * V5 analysis_ready contract: when the turn had graph state, TurnExecutor
+   * passes the pre-computed structural readiness so the unsupported-action
+   * coaching response also carries it on the wire — keeps the contract
+   * "every graph-bearing response carries analysis_ready" total.
+   */
+  readonly analysisReady?: AnalysisReadyPayload;
 }
 
 export interface ComposedUnsupportedAction {
@@ -95,7 +106,7 @@ export interface ComposedUnsupportedAction {
 export function composeUnsupportedActionResponse(
   input: ComposeUnsupportedActionInput,
 ): ComposedUnsupportedAction {
-  const { handlerId, context, stage, hasAnalysis } = input;
+  const { handlerId, context, stage, hasAnalysis, analysisReady } = input;
   const category = categorise(handlerId);
   const safeHandlerId = sanitiseForUser(handlerId);
 
@@ -110,6 +121,7 @@ export function composeUnsupportedActionResponse(
       suggested_actions: [...chips],
       insights: [],
       stage_indicator: stage,
+      ...(analysisReady && { analysis_ready: attachComputedAt(analysisReady) }),
     },
     templateId: `unsupported_action_${category}`,
     category,

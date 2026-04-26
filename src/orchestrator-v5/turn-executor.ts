@@ -684,6 +684,7 @@ export async function runTurnExecutor(
             context: composeCtx,
             stage: context.stage,
             hasAnalysis: options.analysisState != null,
+            analysisReady: analysisReadyForTurn,
           });
           recoveredResponse = unsupported.response;
           recoveredTemplateId = unsupported.templateId;
@@ -696,6 +697,7 @@ export async function runTurnExecutor(
             validationResult.error,
             composeCtx,
             context.stage,
+            analysisReadyForTurn,
           );
           recoveredResponse = recovered.response;
           recoveredTemplateId = recovered.template_id;
@@ -720,6 +722,7 @@ export async function runTurnExecutor(
             validationResult.error,
             composeCtx,
             context.stage,
+            analysisReadyForTurn,
           );
           response = composed.response;
           emit(TelemetryEvents.TurnExecutorFailureResponse, {
@@ -959,6 +962,7 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         suggested_actions: executeChips,
+        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     } else if (
@@ -994,6 +998,7 @@ export async function runTurnExecutor(
         assistant_text: sanitised.output,
         stage: context.stage,
         suggested_actions: clarifyChips,
+        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     } else if (
@@ -1029,6 +1034,7 @@ export async function runTurnExecutor(
         assistant_text: sanitised.output,
         stage: context.stage,
         suggested_actions: coachChips,
+        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     } else {
@@ -1059,6 +1065,7 @@ export async function runTurnExecutor(
         assistant_text: sanitised.output,
         stage: context.stage,
         suggested_actions: converseChips,
+        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     }
@@ -1209,6 +1216,25 @@ export async function runTurnExecutor(
   // Helpers closured over mutable state
   // ==================================================================
   function finalizeRun(): TurnExecutorRunResult {
+    // V5 analysis_ready contract — soak telemetry for the per-turn emission
+    // rate. Once UI deletion lands, every graph-bearing response should set
+    // emitted=true; investigate any (graph_present=true, emitted=false) to
+    // close the gap. Computed_at is logged so out-of-order debugging can
+    // correlate UI store-write timestamps with server-side emit times.
+    log.info(
+      {
+        event: 'v5.analysis_ready.emit',
+        request_id: requestId,
+        turn_class: resolvedTurnClass,
+        graph_present: graphStateForTurn != null,
+        emitted: response?.analysis_ready != null,
+        analysis_ready_status:
+          (response?.analysis_ready as { status?: string } | undefined)?.status ?? null,
+        computed_at:
+          (response?.analysis_ready as { computed_at?: string } | undefined)?.computed_at ?? null,
+      },
+      'V5 analysis_ready emit telemetry',
+    );
     return {
       response,
       telemetry: {

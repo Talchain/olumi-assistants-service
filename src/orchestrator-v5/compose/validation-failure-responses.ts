@@ -31,6 +31,10 @@ import {
   sanitiseForUser,
   type EntityLike,
 } from './helpers.js';
+import {
+  attachComputedAt,
+  type AnalysisReadyPayload,
+} from './analysis-ready-emit.js';
 
 const ENTITY_SIBLING_CAP = 4;
 const AMBIGUOUS_CANDIDATE_CAP = 5;
@@ -59,10 +63,11 @@ export function composeValidationFailure(
   error: ValidationError,
   ctx: ComposeContext,
   stage: StageType,
+  analysisReady?: AnalysisReadyPayload,
 ): ComposedValidationFailure {
   const result = composeBody(error, ctx);
   return {
-    response: wrapResponse(error, result.body, stage),
+    response: wrapResponse(error, result.body, stage, analysisReady),
     template_id: result.template_id,
     chip_type: result.chip_type,
   };
@@ -381,6 +386,7 @@ function wrapResponse(
   error: ValidationError,
   body: FailureComposeResult,
   stage: StageType,
+  analysisReady?: AnalysisReadyPayload,
 ): OlumiResponse {
   // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND surfaces as the typed
   // FEATURE_NOT_ENABLED wire code (via UNSUPPORTED_ACTION internal class)
@@ -424,6 +430,7 @@ function wrapResponse(
     suggested_actions: [...body.suggested_actions],
     insights: [],
     stage_indicator: stage,
+    ...(analysisReady && { analysis_ready: attachComputedAt(analysisReady) }),
   };
 }
 

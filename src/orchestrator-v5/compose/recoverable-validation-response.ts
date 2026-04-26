@@ -28,6 +28,10 @@ import type { ValidationError } from '../routing/validator.js';
 
 import type { ChipType, ComposeContext } from './types.js';
 import { composeBody } from './validation-failure-responses.js';
+import {
+  attachComputedAt,
+  type AnalysisReadyPayload,
+} from './analysis-ready-emit.js';
 
 export interface ComposedRecoverableValidation {
   readonly response: OlumiResponse;
@@ -40,11 +44,18 @@ export interface ComposedRecoverableValidation {
  * validator outcome. The body + template_id + chip_type come from the
  * shared per-code composer map, so adding a new `ValidationErrorCode`
  * automatically flows through here once the map gains an entry.
+ *
+ * V5 analysis_ready contract: when the turn had graph state, TurnExecutor
+ * passes the pre-computed structural readiness so the recoverable response
+ * carries it on the wire — without it, a validator-rejected turn would
+ * leave the UI without a fresh readiness, forcing it back onto a brittle
+ * local-recompute fallback.
  */
 export function composeRecoverableValidationResponse(
   error: ValidationError,
   ctx: ComposeContext,
   stage: StageType,
+  analysisReady?: AnalysisReadyPayload,
 ): ComposedRecoverableValidation {
   const result = composeBody(error, ctx);
   return {
@@ -55,6 +66,7 @@ export function composeRecoverableValidationResponse(
       suggested_actions: [...result.body.suggested_actions],
       insights: [],
       stage_indicator: stage,
+      ...(analysisReady && { analysis_ready: attachComputedAt(analysisReady) }),
     },
     template_id: result.template_id,
     chip_type: result.chip_type,

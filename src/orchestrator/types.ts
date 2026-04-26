@@ -508,6 +508,14 @@ export interface GraphPatchBlockData {
       explanation?: string;
       code?: string;
     }>;
+    /**
+     * ISO-8601 UTC timestamp attached at emission time. Used by the UI store
+     * as a monotonic ordering guard so out-of-order V5 responses (which now
+     * carry analysis_ready on every graph-bearing turn, not just draft) cannot
+     * overwrite a fresher value with a stale one. Set by the wire-emit helper;
+     * never populated by computation paths internally.
+     */
+    computed_at?: string;
   };
   /**
    * Explicit intervention updates extracted from edit_graph operations.
