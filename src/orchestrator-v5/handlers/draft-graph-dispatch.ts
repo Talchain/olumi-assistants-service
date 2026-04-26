@@ -54,6 +54,7 @@ import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
+import { attachComputedAt, type AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -127,8 +128,17 @@ function draftResultToOlumiResponse(
   // Include analysis_ready so the UI pre-analysis panel can populate without a
   // separate /graph-readiness call. Conditioned on the same graphPersisted gate
   // as draft_graph — only meaningful when a graph actually landed in the store.
-  const analysisReadyField =
-    graphPersisted && result.analysisReady ? result.analysisReady : undefined;
+  //
+  // V5 analysis_ready contract: this dispatch keeps its own response builder
+  // (rather than routing through composeDirectAnswerResponse) because the
+  // draft response also carries the unique top-level `draft_graph` block,
+  // which the standard composers do not emit. The shared `attachComputedAt`
+  // helper still applies so out-of-order debugging sees a consistent
+  // computed_at across draft / edit / TurnExecutor emissions.
+  const analysisReadyField: AnalysisReadyPayload | undefined =
+    graphPersisted && result.analysisReady
+      ? attachComputedAt(result.analysisReady as AnalysisReadyPayload)
+      : undefined;
 
   // V5 review: post-draft_graph chips. The draft path produces its own
   // response envelope (not through the standard composers) so it needs its
