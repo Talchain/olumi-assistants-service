@@ -136,6 +136,17 @@ import { storeTurnDebug } from './debug/turn-debug-store.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
+  /**
+   * V5 finaliser contract: pre-computed structural readiness from the
+   * per-turn graph (`graphStateForTurn` parsed via GraphV3 +
+   * computeStructuralReadiness). Already computed inside this function for
+   * chip-gating; surfaced here so the response-finaliser in route-v2.ts can
+   * stamp `analysis_ready` onto the wire envelope after composition.
+   * Undefined when the turn had no graph state, or the graph failed strict
+   * GraphV3 parse, or readiness derivation found no goal node — same gate
+   * the chip-generator already uses today.
+   */
+  analysisReady?: NonNullable<GraphPatchBlockData['analysis_ready']>;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -289,6 +300,14 @@ export async function runTurnExecutor(
   let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
     'no_graph';
   let graphStateForTurn: GraphStateIngress | null = options.graphState ?? null;
+  // V5 finaliser contract: hoisted to outer scope so `finalizeRun` can
+  // surface it on `TurnExecutorRunResult.analysisReady` for the response
+  // finaliser. Declared here, populated below at the existing
+  // `computeStructuralReadiness` site (chip-gating) — no behavioural change
+  // to chip generation; just makes the value reachable from the closure.
+  let analysisReadyForTurn:
+    | NonNullable<GraphPatchBlockData['analysis_ready']>
+    | undefined;
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -365,9 +384,9 @@ export async function runTurnExecutor(
     // state is absent or fails strict GraphV3 parse, readiness is
     // undefined and the chip generator falls back to the conversational
     // variant. Cheap: runs in ~hundreds of microseconds on typical graphs.
-    let analysisReadyForTurn:
-      | NonNullable<GraphPatchBlockData['analysis_ready']>
-      | undefined;
+    // V5 finaliser contract: `analysisReadyForTurn` is declared in the
+    // outer function scope (above) so `finalizeRun` can surface it on
+    // `TurnExecutorRunResult.analysisReady` for the response finaliser.
     if (graphStateForTurn) {
       const parsedGraphForReadiness = GraphV3.safeParse(graphStateForTurn);
       if (parsedGraphForReadiness.success) {
@@ -684,7 +703,6 @@ export async function runTurnExecutor(
             context: composeCtx,
             stage: context.stage,
             hasAnalysis: options.analysisState != null,
-            analysisReady: analysisReadyForTurn,
           });
           recoveredResponse = unsupported.response;
           recoveredTemplateId = unsupported.templateId;
@@ -697,7 +715,6 @@ export async function runTurnExecutor(
             validationResult.error,
             composeCtx,
             context.stage,
-            analysisReadyForTurn,
           );
           recoveredResponse = recovered.response;
           recoveredTemplateId = recovered.template_id;
@@ -722,7 +739,6 @@ export async function runTurnExecutor(
             validationResult.error,
             composeCtx,
             context.stage,
-            analysisReadyForTurn,
           );
           response = composed.response;
           emit(TelemetryEvents.TurnExecutorFailureResponse, {
@@ -962,7 +978,6 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         suggested_actions: executeChips,
-        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     } else if (
@@ -998,7 +1013,6 @@ export async function runTurnExecutor(
         assistant_text: sanitised.output,
         stage: context.stage,
         suggested_actions: clarifyChips,
-        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     } else if (
@@ -1034,7 +1048,6 @@ export async function runTurnExecutor(
         assistant_text: sanitised.output,
         stage: context.stage,
         suggested_actions: coachChips,
-        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     } else {
@@ -1065,7 +1078,6 @@ export async function runTurnExecutor(
         assistant_text: sanitised.output,
         stage: context.stage,
         suggested_actions: converseChips,
-        analysisReady: analysisReadyForTurn,
       });
       stagesCompleted.push('compose');
     }
@@ -1216,27 +1228,15 @@ export async function runTurnExecutor(
   // Helpers closured over mutable state
   // ==================================================================
   function finalizeRun(): TurnExecutorRunResult {
-    // V5 analysis_ready contract — soak telemetry for the per-turn emission
-    // rate. Once UI deletion lands, every graph-bearing response should set
-    // emitted=true; investigate any (graph_present=true, emitted=false) to
-    // close the gap. Computed_at is logged so out-of-order debugging can
-    // correlate UI store-write timestamps with server-side emit times.
-    log.info(
-      {
-        event: 'v5.analysis_ready.emit',
-        request_id: requestId,
-        turn_class: resolvedTurnClass,
-        graph_present: graphStateForTurn != null,
-        emitted: response?.analysis_ready != null,
-        analysis_ready_status:
-          (response?.analysis_ready as { status?: string } | undefined)?.status ?? null,
-        computed_at:
-          (response?.analysis_ready as { computed_at?: string } | undefined)?.computed_at ?? null,
-      },
-      'V5 analysis_ready emit telemetry',
-    );
+    // V5 finaliser contract: surface `analysisReadyForTurn` on the run
+    // result so route-v2.ts can stamp it via `finaliseV5Response`. The
+    // per-turn emission-rate telemetry that previously lived here moved to
+    // route-v2.ts as `v5.response.finalised` — that's the only point where
+    // the actual emitted vs. computed comparison is meaningful, since the
+    // wire stamping happens after this function returns.
     return {
       response,
+      analysisReady: analysisReadyForTurn,
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,

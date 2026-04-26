@@ -92,6 +92,7 @@ import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
+import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
@@ -118,6 +119,42 @@ import { runPreFlight } from './route-v2-preflight.js';
 // Sites that emit neither keep empty buckets. Key insertion order
 // matters for JSON.stringify determinism — the UI parser and contract
 // fixtures depend on it.
+
+/**
+ * V5 finaliser-emission telemetry. Fires once per request after
+ * `finaliseV5Response` runs (and after egress validation). Replaces the
+ * per-turn `v5.analysis_ready.emit` log that previously lived inside
+ * TurnExecutor (which had to fire pre-finalisation, before the wire
+ * stamping was visible). The exit_path field tags which dispatch family
+ * produced the response so the soak metric can disaggregate by path.
+ *
+ * This is the canonical signal for confirming the finaliser contract holds
+ * across all 200-OK exits. Filter Render logs for
+ * `event: 'v5.response.finalised' AND analysis_ready_emitted: false` to
+ * spot any path that should be carrying readiness but isn't.
+ */
+function logFinalisedResponse(
+  requestId: string,
+  exitPath: 'system_event' | 'chip_click' | 'draft_graph' | 'edit_graph' | 'turn_executor',
+  finalisedResponse: unknown,
+  egressOk: boolean,
+): void {
+  const ar = (finalisedResponse as { analysis_ready?: { status?: string; computed_at?: string } } | undefined)
+    ?.analysis_ready;
+  log.info(
+    {
+      event: 'v5.response.finalised',
+      request_id: requestId,
+      exit_path: exitPath,
+      analysis_ready_emitted: ar != null,
+      analysis_ready_status: ar?.status ?? null,
+      computed_at: ar?.computed_at ?? null,
+      egress_ok: egressOk,
+    },
+    'V5 response finalised',
+  );
+}
+
 export function buildCommitFailureBoundaryError(params: {
   readonly validator: string;
   readonly reason: string;
@@ -182,6 +219,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // Docs/v5/route-v2-branch-audit.md for the rationale and audit.
     const pre = await runPreFlight(req);
     if (!pre.ok) {
+      // 4xx: pre-flight failure — request never reached dispatch, no graph
+      // state to compute readiness from; no analysis_ready stamped.
       return reply.code(pre.status).send(pre.error);
     }
     const { requestId, ingress, extensions } = pre.context;
@@ -222,9 +261,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           },
           'V5 system event commit failed — returning 500 with BoundaryError envelope',
         );
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
-      const sysEgress = validateEgress(sysResult.response, requestId);
+      const sysFinalised = finaliseV5Response(sysResult.response, {
+        analysisReady: sysResult.analysisReady,
+      });
+      const sysEgress = validateEgress(sysFinalised, requestId);
+      logFinalisedResponse(requestId, 'system_event', sysFinalised, sysEgress.ok);
       if (!sysEgress.ok) {
         log.error(
           { request_id: requestId, event_kind: ingress.event.kind },
@@ -273,6 +317,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             stage: ingress.stage,
             preStageExtras: { cause_kind: cc.causeKind },
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
         if (cc.outcome === 'handler_result_invalid') {
@@ -283,6 +328,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
         if (cc.outcome === 'commit_failed') {
@@ -293,10 +339,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
         // outcome === 'ok'
-        const ccEgress = validateEgress(cc.response, requestId);
+        const ccFinalised = finaliseV5Response(cc.response, {
+          analysisReady: cc.analysisReady,
+        });
+        const ccEgress = validateEgress(ccFinalised, requestId);
+        logFinalisedResponse(requestId, 'chip_click', ccFinalised, ccEgress.ok);
         if (!ccEgress.ok) {
           log.error(
             { request_id: requestId },
@@ -320,6 +371,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           stage: ingress.stage,
         });
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
     }
@@ -365,9 +417,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
-        const dgEgress = validateEgress(dg.response, requestId);
+        const dgFinalised = finaliseV5Response(dg.response, {
+          analysisReady: dg.analysisReady,
+        });
+        const dgEgress = validateEgress(dgFinalised, requestId);
+        logFinalisedResponse(requestId, 'draft_graph', dgFinalised, dgEgress.ok);
         if (!dgEgress.ok) {
           log.error(
             { request_id: requestId },
@@ -396,6 +453,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           stage: ingress.stage,
         });
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
     }
@@ -445,9 +503,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
-        const egEgress = validateEgress(eg.response, requestId);
+        const egFinalised = finaliseV5Response(eg.response, {
+          analysisReady: eg.analysisReady,
+        });
+        const egEgress = validateEgress(egFinalised, requestId);
+        logFinalisedResponse(requestId, 'edit_graph', egFinalised, egEgress.ok);
         if (!egEgress.ok) {
           log.error(
             { request_id: requestId },
@@ -471,6 +534,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           stage: ingress.stage,
         });
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
     }
@@ -536,10 +600,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         },
         'V5 turn completed without commit — returning 500 with BoundaryError envelope',
       );
+      // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
       return reply.code(500).send(boundaryError);
     }
 
-    const egress = validateEgress(run.response, requestId);
+    const finalised = finaliseV5Response(run.response, {
+      analysisReady: run.analysisReady,
+    });
+    const egress = validateEgress(finalised, requestId);
+    logFinalisedResponse(requestId, 'turn_executor', finalised, egress.ok);
     if (!egress.ok) {
       log.error(
         { request_id: requestId, failure_type: run.telemetry.failure_type },

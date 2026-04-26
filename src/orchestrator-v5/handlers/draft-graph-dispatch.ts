@@ -54,7 +54,7 @@ import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
-import { attachComputedAt, type AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -65,6 +65,16 @@ export interface DispatchDraftGraphParams {
 export interface DispatchDraftGraphResult {
   readonly response: OlumiResponse;
   readonly commitPerformed: boolean;
+  /**
+   * V5 finaliser contract: pre-computed readiness surfaced for the response
+   * finaliser in route-v2.ts. Draft uses the rich pipeline payload from
+   * `DraftGraphResult.analysisReady` (carries blockers, model_adjustments,
+   * intervention_details, bias_findings — fields the structural fallback
+   * does not produce). Undefined when the draft did not persist a graph;
+   * the finaliser then emits no analysis_ready, which the UI treats as
+   * "no fresh readiness this turn" rather than as a blocker.
+   */
+  readonly analysisReady?: AnalysisReadyPayload;
 }
 
 /**
@@ -125,19 +135,15 @@ function draftResultToOlumiResponse(
         }
       : undefined;
 
-  // Include analysis_ready so the UI pre-analysis panel can populate without a
-  // separate /graph-readiness call. Conditioned on the same graphPersisted gate
-  // as draft_graph — only meaningful when a graph actually landed in the store.
-  //
-  // V5 analysis_ready contract: this dispatch keeps its own response builder
-  // (rather than routing through composeDirectAnswerResponse) because the
-  // draft response also carries the unique top-level `draft_graph` block,
-  // which the standard composers do not emit. The shared `attachComputedAt`
-  // helper still applies so out-of-order debugging sees a consistent
-  // computed_at across draft / edit / TurnExecutor emissions.
+  // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
+  // dispatcher surfaces `result.analysisReady` on `DispatchDraftGraphResult`
+  // (when graphPersisted), and the response-finaliser stamps it onto the
+  // wire envelope after composition, before egress validation. The chip
+  // gate below still reads the raw payload locally to choose the post-draft
+  // chip — that's chip-suggestion logic, not envelope stamping.
   const analysisReadyField: AnalysisReadyPayload | undefined =
     graphPersisted && result.analysisReady
-      ? attachComputedAt(result.analysisReady as AnalysisReadyPayload)
+      ? (result.analysisReady as AnalysisReadyPayload)
       : undefined;
 
   // V5 review: post-draft_graph chips. The draft path produces its own
@@ -156,7 +162,6 @@ function draftResultToOlumiResponse(
     insights: [],
     stage_indicator: stageIndicator,
     ...(draftGraphField && { draft_graph: draftGraphField }),
-    ...(analysisReadyField && { analysis_ready: analysisReadyField }),
   };
 }
 
@@ -242,18 +247,26 @@ export async function dispatchDraftGraph(
     );
 
     const response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted);
+    // V5 finaliser contract: surface the rich pipeline payload on the
+    // dispatch result so route-v2.ts can stamp it via finaliseV5Response.
+    // Only surface when the graph actually persisted — a non-persisted
+    // draft has no canvas state for the UI to apply readiness against.
+    const analysisReady: AnalysisReadyPayload | undefined =
+      commitResult.graphPersisted && draftResult.analysisReady
+        ? (draftResult.analysisReady as AnalysisReadyPayload)
+        : undefined;
     log.info(
       {
         request_id: requestId,
         scenario_id: payload.scenario_id,
         latency_ms: draftResult.latencyMs,
         graph_persisted: commitResult.graphPersisted,
-        analysis_ready_present: draftResult.analysisReady != null,
-        analysis_ready_status: draftResult.analysisReady?.status ?? null,
+        analysis_ready_present: analysisReady != null,
+        analysis_ready_status: analysisReady?.status ?? null,
       },
       'V5 draft_graph dispatch committed',
     );
-    return { response, commitPerformed: true };
+    return { response, commitPerformed: true, analysisReady };
   } catch (err) {
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
     // Client sees the generic retry prompt; the response built below is server-side only.

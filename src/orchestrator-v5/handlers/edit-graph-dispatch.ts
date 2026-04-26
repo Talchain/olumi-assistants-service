@@ -33,7 +33,7 @@ import type {
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { attachComputedAt } from '../compose/analysis-ready-emit.js';
+import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
 // V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
@@ -69,6 +69,14 @@ export interface DispatchEditGraphParams {
 export interface DispatchEditGraphResult {
   readonly response: OlumiResponse;
   readonly commitPerformed: boolean;
+  /**
+   * V5 finaliser contract: pre-computed structural readiness from the
+   * post-edit `appliedGraph`. Surfaced so the response-finaliser in
+   * route-v2.ts can stamp `analysis_ready` after composition. Undefined
+   * for rejected edits (no `appliedGraph`) — the canvas is unchanged so
+   * the UI's prior `ceeAnalysisReady` remains correct.
+   */
+  readonly analysisReady?: AnalysisReadyPayload;
 }
 
 function editResultToOlumiResponse(
@@ -81,17 +89,10 @@ function editResultToOlumiResponse(
       ? `Applied edit. Graph now has ${result.appliedGraph.nodes?.length ?? 0} nodes and ${result.appliedGraph.edges?.length ?? 0} edges.`
       : 'Edit processed.';
 
-  // V5 analysis_ready contract — edit_graph mutates the graph but historically
-  // shipped no readiness, leaving the UI to fall back to its broken legacy
-  // local recompute. Compute structural readiness from the post-edit graph
-  // (when an edit actually applied) and ship it on the wire so the UI store
-  // updates atomically with the graph mutation. computeStructuralReadiness is
-  // intervention-shape-tolerant (mergeInterventionSources handles the V3
-  // shape that the UI fallback cannot read).
-  const analysisReady = result.appliedGraph
-    ? computeStructuralReadiness(result.appliedGraph)
-    : undefined;
-
+  // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
+  // dispatcher computes structural readiness from `editResult.appliedGraph`
+  // and surfaces it on `DispatchEditGraphResult.analysisReady`; the
+  // response-finaliser stamps it onto the wire envelope after composition.
   return {
     response_version: 2,
     assistant_text: result.assistantText ?? fallback,
@@ -99,7 +100,6 @@ function editResultToOlumiResponse(
     suggested_actions: [],
     insights: [],
     stage_indicator: payload.stage,
-    ...(analysisReady && { analysis_ready: attachComputedAt(analysisReady) }),
   };
 }
 
@@ -232,6 +232,16 @@ export async function dispatchEditGraph(
 
   const response = editResultToOlumiResponse(editResult, payload);
 
+  // V5 finaliser contract: compute structural readiness from the post-edit
+  // graph here so route-v2.ts can stamp it onto the wire envelope.
+  // computeStructuralReadiness is intervention-shape-tolerant
+  // (mergeInterventionSources handles the V3 shape that the UI legacy
+  // fallback could not read). Undefined for rejected edits — the canvas is
+  // unchanged so the UI's prior store value remains correct.
+  const analysisReady: AnalysisReadyPayload | undefined = editResult.appliedGraph
+    ? computeStructuralReadiness(editResult.appliedGraph)
+    : undefined;
+
   try {
     // llm_calls_used: handleEditGraph makes at least one LLM call for the
     // edit classification + repair loop. Using 1 as an honest minimum.
@@ -263,7 +273,7 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch committed',
     );
-    return { response, commitPerformed: true };
+    return { response, commitPerformed: true, analysisReady };
   } catch (err) {
     log.error(
       {
@@ -273,6 +283,6 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch — commit failed',
     );
-    return { response, commitPerformed: false };
+    return { response, commitPerformed: false, analysisReady };
   }
 }

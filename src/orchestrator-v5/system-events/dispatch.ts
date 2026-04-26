@@ -40,6 +40,15 @@ export interface DispatchSystemEventResult {
   readonly response: OlumiResponse;
   readonly commitPerformed: boolean;
   readonly commitSkippedReason?: SystemEventCommitSkipReason;
+  /**
+   * V5 finaliser contract: system events (undo / redo / etc.) carry no
+   * graph state, so this is always undefined. Declared for type uniformity
+   * across all dispatch result types so the route-v2.ts call site can pass
+   * `dispatchResult.analysisReady` to `finaliseV5Response` without a
+   * conditional. The finaliser correctly stamps no analysis_ready when the
+   * value is undefined.
+   */
+  readonly analysisReady?: undefined;
 }
 
 export interface DispatchSystemEventParams {

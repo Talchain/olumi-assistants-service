@@ -15,10 +15,6 @@ import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuggestedAction } from './compose/types.js';
-import {
-  attachComputedAt,
-  type AnalysisReadyPayload,
-} from './compose/analysis-ready-emit.js';
 
 export interface ComposeInput {
   assistant_text: string;
@@ -30,15 +26,13 @@ export interface ComposeInput {
    * Every chip must already conform to the boundary `ActionSchema`.
    */
   suggested_actions?: readonly SuggestedAction[];
-  /**
-   * V5 analysis_ready contract: TurnExecutor pre-computes a structural
-   * readiness payload for every turn that has graph state, today only used
-   * for chip gating. When passed here, it ships on the OlumiResponse so the
-   * UI consumes a canonical wire-driven readiness on every turn instead of
-   * recomputing locally. Undefined when no graph is available.
-   */
-  analysisReady?: AnalysisReadyPayload;
 }
+
+// V5 finaliser contract: no composer in this file may set `analysis_ready`.
+// The response-finaliser stamps it from the dispatch path's pre-computed
+// payload after composition, before egress validation. See
+// src/orchestrator-v5/response-finaliser.ts and the grep gate in
+// scripts/check-no-direct-analysis-ready.sh.
 
 export function composeDirectAnswerResponse(input: ComposeInput): OlumiResponse {
   return {
@@ -48,7 +42,6 @@ export function composeDirectAnswerResponse(input: ComposeInput): OlumiResponse 
     suggested_actions: [...(input.suggested_actions ?? [])],
     insights: [],
     stage_indicator: input.stage,
-    ...(input.analysisReady && { analysis_ready: attachComputedAt(input.analysisReady) }),
   };
 }
 
@@ -60,7 +53,6 @@ export function composeClarifyResponse(input: ComposeInput): OlumiResponse {
     suggested_actions: [...(input.suggested_actions ?? [])],
     insights: [],
     stage_indicator: input.stage,
-    ...(input.analysisReady && { analysis_ready: attachComputedAt(input.analysisReady) }),
   };
 }
 
@@ -98,10 +90,6 @@ export interface ComposeToolCallInput {
    * V5 Task 2.1: pre-generated deterministic chips. See `ComposeInput`.
    */
   readonly suggested_actions?: readonly SuggestedAction[];
-  /**
-   * V5 analysis_ready contract: see `ComposeInput.analysisReady`.
-   */
-  readonly analysisReady?: AnalysisReadyPayload;
 }
 
 export function composeToolCallResponse(input: ComposeToolCallInput): OlumiResponse {
@@ -121,7 +109,6 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     suggested_actions: [...(input.suggested_actions ?? [])],
     insights: [],
     stage_indicator: input.stage,
-    ...(input.analysisReady && { analysis_ready: attachComputedAt(input.analysisReady) }),
   };
 }
 
