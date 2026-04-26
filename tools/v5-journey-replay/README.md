@@ -29,6 +29,22 @@ pnpm tsx tools/v5-journey-replay/index.ts \
   --scenario-prefix staging
 ```
 
+#### Strict-mode SHA check
+
+For "I just pushed X, confirm staging is on X" workflows, opt into strict mode by passing the expected short SHA:
+
+```bash
+DEPLOYED_SHA=$(git rev-parse --short HEAD)
+
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --expected-build "$DEPLOYED_SHA" \
+  --out Docs/v5/v5-golden-path-evidence-cee.md \
+  --scenario-prefix staging
+```
+
+The CLI flag takes precedence over the `OLUMI_REPLAY_EXPECTED_BUILD` env var. When neither is set the gate runs in default mode: it confirms `/healthz` returned a well-formed `build` field but does not compare against any reference SHA.
+
 The key is sent as `X-Olumi-Assist-Key` (the existing service contract — see [src/plugins/auth.ts](../../src/plugins/auth.ts)). The service-side env var is `ASSIST_API_KEY` (or `ASSIST_API_KEYS` for a comma-separated list). The harness-side env var is deliberately named differently (`OLUMI_REPLAY_API_KEY`) so rotating one does not silently affect the other.
 
 **The key is env-var only — no CLI flag.** This keeps the secret out of shell history, `ps auxww`, and process-tree telemetry.
@@ -55,10 +71,18 @@ The harness runs two preflight probes before burning the six-step replay:
 Between healthz and preflight, the harness halts with exit code 3 if any of the following hold (and the URL is not localhost):
 
 - `/healthz` is unreachable or returns no body
-- `build !== 66d1adb` (the expected staging deploy SHA, hard-coded)
+- `build` is missing or not a well-formed short SHA (7+ hex chars)
+- `--expected-build` (or `OLUMI_REPLAY_EXPECTED_BUILD`) is set and `build` does not match
 - `degraded === true`
 
-To intentionally run against a different deploy or accept a degraded service, set:
+The gate has two modes:
+
+| Mode | Trigger | Behaviour |
+|---|---|---|
+| Default | neither `--expected-build` nor `OLUMI_REPLAY_EXPECTED_BUILD` set | Confirms `/healthz` returned a well-formed `build` field. No SHA comparison. |
+| Strict | `--expected-build SHA` (CLI; preferred) or `OLUMI_REPLAY_EXPECTED_BUILD=SHA` (env) | Additionally halts when `build !== SHA`. Use for post-deploy verification and formal evidence packs. |
+
+To bypass any halt (well-formed failure, strict mismatch, degraded, unreachable):
 
 ```bash
 export OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true   # also accepts "1" or "yes"

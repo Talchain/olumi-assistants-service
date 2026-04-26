@@ -93,4 +93,12 @@ export interface HarnessConfig {
   readonly scenarioPrefix: string;
   /** Loaded from `OLUMI_REPLAY_API_KEY` env var. Undefined for localhost runs. */
   readonly apiKey?: string;
+  /**
+   * Strict-mode opt-in. When set, the deploy gate halts unless the
+   * /healthz `build` field equals this value. Resolved from
+   * `--expected-build` CLI flag (preferred) or `OLUMI_REPLAY_EXPECTED_BUILD`
+   * env var. When unset, the gate only confirms that `build` is
+   * well-formed.
+   */
+  readonly expectedBuild?: string;
 }

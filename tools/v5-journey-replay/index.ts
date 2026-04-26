@@ -53,8 +53,13 @@ const MISSING_KEY_MESSAGE =
   'OLUMI_REPLAY_API_KEY environment variable is required when --base-url ' +
   'points at a remote host. Set it before re-running.';
 
-/** Expected staging deploy commit (short SHA). Hard-coded per the brief. */
-const EXPECTED_STAGING_BUILD = '66d1adb';
+/**
+ * Well-formed `build` field check. The healthz endpoint returns
+ * `GIT_COMMIT_SHA.slice(0, 7)` (see src/version.ts:59), so a healthy
+ * deploy reports a 7-char hex string. We accept 7+ to remain forward-
+ * compatible with longer slices, and reject `unknown` / empty / non-hex.
+ */
+const WELL_FORMED_BUILD = /^[0-9a-f]{7,}$/i;
 
 /**
  * Determine whether the operator has authorised running against a
@@ -66,6 +71,19 @@ function isStaleDeployOverrideEnabled(): boolean {
   return raw === 'true' || raw === '1' || raw === 'yes';
 }
 
+/**
+ * Read the strict-mode expected SHA from `OLUMI_REPLAY_EXPECTED_BUILD`.
+ * Empty / whitespace-only value behaves as missing. CLI flag takes
+ * precedence over this — see `parseArgs`.
+ */
+function readExpectedBuildEnv(): string | undefined {
+  const raw = process.env.OLUMI_REPLAY_EXPECTED_BUILD;
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed;
+}
+
 export interface DeployGateVerdict {
   readonly halt: boolean;
   readonly reason?: string;
@@ -73,20 +91,28 @@ export interface DeployGateVerdict {
 
 /**
  * Inspect a /healthz result and decide whether the run should halt
- * before preflight. Halts on:
- *   - missing healthz (cannot externally verify deploy)
- *   - build mismatch against EXPECTED_STAGING_BUILD
- *   - degraded === true
- * Each halt is overridable via OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true.
- * For localhost runs the gate is skipped entirely (local builds use
- * arbitrary SHAs).
+ * before preflight. Two-mode contract:
+ *   - Default (no `expectedBuild`): confirm the deploy is alive — halt
+ *     only if `build` is missing or malformed (not 7+ hex chars). Does
+ *     not compare against any reference SHA.
+ *   - Strict (with `expectedBuild`): additionally halt on build
+ *     mismatch. Use this for "I just pushed X, confirm staging is on X"
+ *     workflows.
+ * Always halts on unreachable healthz and on `degraded === true`.
+ * Every halt is overridable via OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true.
+ * Localhost runs skip the gate entirely (local builds use arbitrary
+ * SHAs).
+ *
+ * The healthz `build` field is already `GIT_COMMIT_SHA.slice(0, 7)`
+ * server-side (see src/version.ts:59), so direct equality is the right
+ * comparison in strict mode.
  */
 export function evaluateDeployGate(
   baseUrl: string,
   healthz: HealthzResult | undefined,
+  expectedBuild?: string,
 ): DeployGateVerdict {
-  // Local runs: skip the gate. The expected SHA only applies to
-  // staging.
+  // Local runs: skip the gate. Local builds use arbitrary SHAs.
   try {
     const url = new URL(baseUrl);
     if (
@@ -115,13 +141,25 @@ export function evaluateDeployGate(
   }
 
   const build = healthz.body.build;
-  if (build !== EXPECTED_STAGING_BUILD) {
+  if (build === undefined || !WELL_FORMED_BUILD.test(build)) {
     if (override) return { halt: false };
     return {
       halt: true,
       reason:
-        `/healthz reports build=${build ?? 'unknown'} but expected ${EXPECTED_STAGING_BUILD}. ` +
-        'Staging may be stale. Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true to override.',
+        `/healthz returned build=${build ?? 'unknown'} which is not a well-formed short SHA ` +
+        '(expected 7+ hex chars). Cannot externally verify deploy identity. ' +
+        'Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true to override.',
+    };
+  }
+
+  if (expectedBuild !== undefined && build !== expectedBuild) {
+    if (override) return { halt: false };
+    return {
+      halt: true,
+      reason:
+        `/healthz reports build=${build} but --expected-build (or OLUMI_REPLAY_EXPECTED_BUILD) ` +
+        `requires ${expectedBuild}. Staging may be stale or you may be checking the wrong host. ` +
+        'Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true to override.',
     };
   }
 
@@ -155,6 +193,7 @@ function parseArgs(): HarnessConfig {
   let baseUrl = 'http://localhost:3000';
   let outPath = 'Docs/v5/v5-golden-path-evidence-cee.md';
   let scenarioPrefix = 'local';
+  let expectedBuildCli: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -164,15 +203,32 @@ function parseArgs(): HarnessConfig {
       outPath = args[++i]!;
     } else if (arg === '--scenario-prefix' && i + 1 < args.length) {
       scenarioPrefix = args[++i]!;
+    } else if (arg === '--expected-build' && i + 1 < args.length) {
+      expectedBuildCli = args[++i]!.trim() || undefined;
+    } else if (arg.startsWith('--expected-build=')) {
+      const val = arg.slice('--expected-build='.length).trim();
+      expectedBuildCli = val.length > 0 ? val : undefined;
     } else if (arg === '--help' || arg === '-h') {
       console.log(
-        'Usage: pnpm tsx tools/v5-journey-replay/index.ts [--base-url URL] [--out PATH] [--scenario-prefix TAG]\n' +
-          'Auth: set OLUMI_REPLAY_API_KEY env var for remote URLs (required).',
+        'Usage: pnpm tsx tools/v5-journey-replay/index.ts \\\n' +
+          '         [--base-url URL] [--out PATH] [--scenario-prefix TAG] \\\n' +
+          '         [--expected-build SHA]\n' +
+          '\n' +
+          'Auth: set OLUMI_REPLAY_API_KEY env var for remote URLs (required).\n' +
+          '\n' +
+          'Strict-mode SHA check: --expected-build SHA (or set OLUMI_REPLAY_EXPECTED_BUILD).\n' +
+          'CLI flag takes precedence over the env var. When both are unset, the deploy\n' +
+          'gate only confirms /healthz returned a well-formed build field.',
       );
       process.exit(0);
     }
   }
-  return { baseUrl, outPath, scenarioPrefix, apiKey: readApiKey() };
+
+  // CLI flag wins; fall back to env. Both being unset means default
+  // mode (well-formed-only check, no SHA comparison).
+  const expectedBuild = expectedBuildCli ?? readExpectedBuildEnv();
+
+  return { baseUrl, outPath, scenarioPrefix, apiKey: readApiKey(), expectedBuild };
 }
 
 /**
@@ -257,6 +313,9 @@ async function run(): Promise<void> {
   console.log(`  scenario_prefix  = ${cfg.scenarioPrefix}`);
   console.log(`  out              = ${cfg.outPath}`);
   console.log(`  auth             = ${cfg.apiKey ? 'enabled (key loaded from env)' : 'disabled (localhost or no key)'}`);
+  console.log(
+    `  expected_build   = ${cfg.expectedBuild ?? 'not set (default: well-formed-only check)'}`,
+  );
   console.log('');
 
   // Fail-fast gate. Throws with MISSING_KEY_MESSAGE for remote+no-key.
@@ -274,11 +333,12 @@ async function run(): Promise<void> {
     );
   }
 
-  // Halt before preflight if the deployed build does not match the
-  // expected SHA, healthz is unreachable on a remote URL, or the
+  // Halt before preflight if the deployed build is missing or
+  // malformed, healthz is unreachable on a remote URL, the deployed
+  // build mismatches `--expected-build` (when supplied), or the
   // service reports degraded. Operator can override with
   // OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true.
-  const deployGate = evaluateDeployGate(cfg.baseUrl, healthz.result);
+  const deployGate = evaluateDeployGate(cfg.baseUrl, healthz.result, cfg.expectedBuild);
   if (deployGate.halt) {
     console.error(`[DEPLOY HALT] ${deployGate.reason}`);
     const haltHeader = buildEvidenceHeader(cfg, startedAt, healthz.result, {
@@ -434,6 +494,7 @@ function buildEvidenceHeader(
     healthz,
     preflight,
     auth_mode: cfg.apiKey ? 'authenticated' : 'unauthenticated',
+    expected_build: cfg.expectedBuild,
   };
 }
 
@@ -462,13 +523,14 @@ function safeGit(cmd: string): string {
 // accidental re-invocation on import.
 // (`evaluateDeployGate` is exported inline above — do not re-export.)
 export {
-  EXPECTED_STAGING_BUILD,
   MISSING_KEY_MESSAGE,
+  WELL_FORMED_BUILD,
   assertAuthForBaseUrl,
   buildEvidenceHeader,
   isStaleDeployOverrideEnabled,
   parseArgs,
   readApiKey,
+  readExpectedBuildEnv,
   run,
   runHealthz,
   runPreflight,

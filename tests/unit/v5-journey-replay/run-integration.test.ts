@@ -117,7 +117,10 @@ describe('full replay run (mocked staging service)', () => {
     expect(pack).not.toContain(SENTINEL);
     expect(pack).toMatch(/## Executive summary/);
     expect(pack).toMatch(/Replay reached orchestrator \| yes/);
-    expect(pack).toMatch(/v38\.2 confirmed \(startup \/ healthz build\) \| yes/);
+    // Default mode (no --expected-build) reports "not strict-checked"
+    // because no SHA reference was supplied. Strict-mode coverage lives
+    // in tests/unit/v5-journey-replay/auth-redaction.test.ts.
+    expect(pack).toMatch(/v38\.2 confirmed \(startup \/ healthz build\) \| not strict-checked/);
     expect(pack).toMatch(/## Deploy confirmation \(Phase 2\)/);
     expect(pack).toMatch(/## Preflight \(Phase 3\)/);
     expect(pack).toMatch(/## Six-step replay/);

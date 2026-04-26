@@ -27,6 +27,12 @@ export interface EvidenceHeader {
   readonly healthz: HealthzResult | undefined;
   readonly preflight: { readonly status: number; readonly note: string };
   readonly auth_mode: 'authenticated' | 'unauthenticated';
+  /**
+   * Strict-mode opt-in SHA. When set, the executive summary asserts
+   * `healthz.body.build === expected_build`. When unset, the deploy
+   * row reports "well-formed build observed, no strict comparison".
+   */
+  readonly expected_build?: string;
 }
 
 type Redactor = (v: unknown) => string;
@@ -47,8 +53,10 @@ function statusLabel(s: string): string {
   return '[SKIP]';
 }
 
+type StartupConfirmation = boolean | 'unverifiable' | 'not strict-checked';
+
 function yesNo(
-  v: boolean | 'unverifiable' | 'not capturable' | 'not externally verified',
+  v: boolean | StartupConfirmation | 'not capturable' | 'not externally verified',
 ): string {
   if (v === true) return 'yes';
   if (v === false) return 'no';
@@ -57,7 +65,7 @@ function yesNo(
 
 interface ExecutiveSummary {
   readonly reached_orchestrator: boolean;
-  readonly v38_2_startup_confirmed: boolean | 'unverifiable';
+  readonly v38_2_startup_confirmed: StartupConfirmation;
   readonly v38_2_per_turn_confirmed: boolean | 'not capturable';
   // Step 4 ran end-to-end (handler → PLoT → commit → response). The
   // boolean only flips true when step 4 PASSES — failures earlier in
@@ -71,6 +79,7 @@ interface ExecutiveSummary {
 function computeExecutiveSummary(
   rows: readonly EvidenceRow[],
   healthz: HealthzResult | undefined,
+  expectedBuild: string | undefined,
 ): ExecutiveSummary {
   const hadRuntime = rows.some((r) => r.outcome_class === 'v5-runtime');
   const anyInternalTerm = rows.some((r) =>
@@ -90,13 +99,19 @@ function computeExecutiveSummary(
   const step5Persisted: boolean | 'not externally verified' =
     step5?.status === 'passed' ? true : 'not externally verified';
 
-  // Deploy confirmation from healthz. We can only verify commit SHA
-  // matches the expected short hashes when healthz returned one.
+  // Deploy confirmation. Three states:
+  //   - 'unverifiable' — healthz returned no build field
+  //   - 'not strict-checked' — well-formed build observed, no
+  //     `expected_build` supplied (default mode)
+  //   - true / false — strict mode: build matches / does not match
+  //     `expected_build`
   const build = healthz?.body?.build;
-  const startupConfirmed: boolean | 'unverifiable' =
+  const startupConfirmed: StartupConfirmation =
     build === undefined
       ? 'unverifiable'
-      : build === '66d1adb';
+      : expectedBuild === undefined
+        ? 'not strict-checked'
+        : build === expectedBuild;
 
   return {
     reached_orchestrator: hadRuntime,
@@ -113,7 +128,7 @@ export function renderEvidencePack(
   rows: readonly EvidenceRow[],
   redact: Redactor = identityRedact,
 ): string {
-  const summary = computeExecutiveSummary(rows, header.healthz);
+  const summary = computeExecutiveSummary(rows, header.healthz, header.expected_build);
   const lines: string[] = [];
 
   lines.push(`# V5 Golden Path — Evidence Pack (CEE)`);
@@ -161,6 +176,13 @@ export function renderEvidencePack(
   lines.push(`- **Expected prompt version:** \`${header.prompt_version}\``);
   lines.push(`- **Expected prompt hash:** \`${header.prompt_hash}\``);
   lines.push(`- **Auth mode:** ${header.auth_mode}`);
+  lines.push(
+    `- **Expected build:** ${
+      header.expected_build === undefined
+        ? '_not set (default: well-formed-only check)_'
+        : `\`${escapePipes(redact(header.expected_build))}\``
+    }`,
+  );
   lines.push('');
 
   // ---- Deploy confirmation ----
@@ -179,19 +201,30 @@ export function renderEvidencePack(
       lines.push(`- **degraded_reasons:** ${escapePipes(redact(b.degraded_reasons.join(', ')))}`);
     }
     lines.push(`- **elapsed:** ${header.healthz.elapsed_ms}ms`);
+    const observedBuild = escapePipes(redact(b.build ?? 'unknown'));
     if (summary.v38_2_startup_confirmed === true) {
+      const expected = escapePipes(redact(header.expected_build ?? 'unknown'));
       lines.push('');
       lines.push(
-        `Deploy confirmed: \`/healthz\` build matches expected commit \`66d1adb\`.`,
+        `Deploy confirmed: \`/healthz\` build \`${observedBuild}\` matches \`--expected-build ${expected}\`.`,
+      );
+    } else if (summary.v38_2_startup_confirmed === false) {
+      const expected = escapePipes(redact(header.expected_build ?? 'unknown'));
+      lines.push('');
+      lines.push(
+        `Deploy MISMATCH: \`/healthz\` build \`${observedBuild}\` does NOT match ` +
+          `\`--expected-build ${expected}\`. Staging may be stale or you may be checking the wrong host.`,
       );
     } else if (summary.v38_2_startup_confirmed === 'unverifiable') {
       lines.push('');
       lines.push('Deploy metadata unverifiable (no build field in /healthz body).');
     } else {
+      // 'not strict-checked' — well-formed build observed, no expected supplied.
       lines.push('');
       lines.push(
-        `Deploy MISMATCH: \`/healthz\` build \`${escapePipes(redact(b.build ?? 'unknown'))}\` ` +
-          `does NOT match expected \`66d1adb\`. Staging may be stale.`,
+        `Deploy reachable: \`/healthz\` build \`${observedBuild}\` is well-formed. ` +
+          'No strict-mode comparison run (set `--expected-build` or ' +
+          '`OLUMI_REPLAY_EXPECTED_BUILD` to assert against a specific SHA).',
       );
     }
   }

@@ -319,7 +319,27 @@ describe('evidence pack structural assertions (outcome class + exec summary)', (
     expect(markdown).toMatch(/Replay reached orchestrator \| no/);
   });
 
-  it('v38.2 startup confirmed=yes when healthz build matches 66d1adb', () => {
+  it('strict mode + matching build → "yes" + "Deploy confirmed"', () => {
+    const markdown = renderEvidencePack(
+      {
+        branch: 'b',
+        commit_sha: 'c',
+        base_url: 'https://example.com',
+        started_at: 'x',
+        prompt_version: 'v38.2',
+        prompt_hash: 'h',
+        healthz: buildHealthz('66d1adb'),
+        preflight: { status: 400, note: 'ok' },
+        auth_mode: 'authenticated',
+        expected_build: '66d1adb',
+      },
+      [],
+    );
+    expect(markdown).toMatch(/v38\.2 confirmed \(startup \/ healthz build\) \| yes/);
+    expect(markdown).toMatch(/Deploy confirmed/);
+  });
+
+  it('default mode + well-formed build → "not strict-checked" + reachable note', () => {
     const markdown = renderEvidencePack(
       {
         branch: 'b',
@@ -334,10 +354,12 @@ describe('evidence pack structural assertions (outcome class + exec summary)', (
       },
       [],
     );
-    expect(markdown).toMatch(/v38\.2 confirmed \(startup \/ healthz build\) \| yes/);
+    expect(markdown).toMatch(/v38\.2 confirmed \(startup \/ healthz build\) \| not strict-checked/);
+    expect(markdown).toMatch(/Deploy reachable/);
+    expect(markdown).toMatch(/well-formed/);
   });
 
-  it('v38.2 startup confirmed=unverifiable when healthz has no build field', () => {
+  it('startup confirmed=unverifiable when healthz has no build field', () => {
     const markdown = renderEvidencePack(
       {
         branch: 'b',
@@ -349,13 +371,14 @@ describe('evidence pack structural assertions (outcome class + exec summary)', (
         healthz: { status: 200, elapsed_ms: 10, body: { ok: true } },
         preflight: { status: 400, note: 'ok' },
         auth_mode: 'authenticated',
+        expected_build: '66d1adb',
       },
       [],
     );
     expect(markdown).toMatch(/v38\.2 confirmed \(startup \/ healthz build\) \| unverifiable/);
   });
 
-  it('v38.2 startup confirmed=no when healthz build is different', () => {
+  it('strict mode + mismatched build → "no" + "Deploy MISMATCH"', () => {
     const markdown = renderEvidencePack(
       {
         branch: 'b',
@@ -367,6 +390,7 @@ describe('evidence pack structural assertions (outcome class + exec summary)', (
         healthz: buildHealthz('deadbee'),
         preflight: { status: 400, note: 'ok' },
         auth_mode: 'authenticated',
+        expected_build: '66d1adb',
       },
       [],
     );
