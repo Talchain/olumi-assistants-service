@@ -102,17 +102,49 @@ export async function buildTurnContext(
     budgets,
   };
 
-  const store = options.sessionStore ?? tryGetSessionStore();
+  const store = options.sessionStore ?? tryGetSessionStore(requestId, payload.scenario_id);
   const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, store);
   const priorFacts = await fetchPriorFacts(priorTurns, requestId, payload.scenario_id, store);
 
   return { ...baseContext, prior_turns: priorTurns, prior_facts: priorFacts };
 }
 
-function tryGetSessionStore(): SessionStore | undefined {
+/**
+ * Resolve the session store, returning undefined on factory failure so the
+ * turn can proceed with empty prior_turns/facts (graceful degradation).
+ *
+ * Factory failure is NOT silent: a `session.read_degraded` telemetry event
+ * is emitted with `severity: 'warning'` so ops alerting on
+ * `session.read_degraded_total > 0` catches the case where missing
+ * env/config disables session reads entirely. Without this, a deployment
+ * that lost its Supabase env vars would run for an arbitrary window with
+ * no prior-turn history and no signal that anything was wrong.
+ *
+ * Logged fields are intentionally narrow (error class name + message) —
+ * stack traces are omitted to avoid emitting internal stack frames into
+ * production telemetry.
+ */
+function tryGetSessionStore(requestId: string, scenarioId: string): SessionStore | undefined {
   try {
     return getSessionStore();
-  } catch {
+  } catch (error) {
+    const errorClass = error instanceof Error ? error.name : 'unknown';
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err_class: errorClass,
+        err: errorMessage,
+      },
+      'V5 buildTurnContext: getSessionStore() factory threw — continuing with empty prior_turns/facts',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorClass,
+      severity: 'warning',
+    });
     return undefined;
   }
 }
