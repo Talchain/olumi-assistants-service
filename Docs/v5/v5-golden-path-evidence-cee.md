@@ -9,30 +9,31 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 | Replay reached orchestrator | yes |
 | v38.2 confirmed (startup / healthz build) | yes |
 | v38.2 confirmed (per-turn) | not capturable |
-| run_analysis passed end-to-end (handler + commit + response) | not externally verified |
-| Analysis persisted into follow-up context | not externally verified |
+| run_analysis passed end-to-end (handler + commit + response) | yes |
+| Analysis persisted into follow-up context | yes |
 | No internal terms in user-facing text | yes |
 
 ## Run metadata
 
-- **Branch:** `claude/v5-replay-proof`
-- **Pack generated from commit SHA:** `0c7618436bad15ddd3fdcf4d9635eb8583ed1565` (if this does not match HEAD, regenerate with the harness)
+- **Branch:** `claude/v5-step4-investigation`
+- **Pack generated from commit SHA:** `8d3701e78e2dd081d87e21c005bd695481a33a40` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-04-25T23:31:42.305Z
+- **Started at:** 2026-04-26T16:24:40.827Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
+- **Expected build:** `8d3701e`
 
 ## Deploy confirmation (Phase 2)
 
 - **GET /healthz status:** 200
-- **build (commit short):** `66d1adb`
+- **build (commit short):** `8d3701e`
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 341ms
+- **elapsed:** 374ms
 
-Deploy confirmed: `/healthz` build matches expected commit `66d1adb`.
+Deploy confirmed: `/healthz` build `8d3701e` matches `--expected-build 8d3701e`.
 
 **Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
@@ -46,12 +47,12 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=37198ms | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1010 chip_count=1 elapsed=9010ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=201 chip_count=0 elapsed=4224ms stage=frame | — |
-| `4_run_analysis` | [FAIL] failed | v5-runtime | 500 | status=500 body_error=INTERNAL_ERROR reason=chip_click_run_analysis_commit_failed boundary=B1 validator=turn_commit request_id=40e87d14-155d-4f51-bfd3-5b69db3f4915 | HTTP 500 (expected 200) |
-| `5_explain_leader` | [SKIP] skipped | skipped | — | skipped: prerequisite 4_run_analysis did not pass | — |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=160 chip_count=0 elapsed=5576ms stage=frame | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=32587ms | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1182 chip_count=1 elapsed=9693ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=262 chip_count=0 elapsed=5149ms stage=frame | — |
+| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 elapsed=4191ms | — |
+| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1258 chip_count=0 | — |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=123 chip_count=0 elapsed=7162ms stage=frame | — |
 
 ## Canonical steps (from brief)
 
