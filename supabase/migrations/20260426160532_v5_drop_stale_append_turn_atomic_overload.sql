@@ -1,0 +1,68 @@
+-- ============================================================
+-- V5 Step 4 fix: drop the stale 9-arg append_turn_atomic overload
+-- Target: Staging Supabase
+-- Date: 2026-04-26
+--
+-- Bug fixed (P0, identified by Render log inspection):
+--   Migration 20260422200000_v5_append_turn_atomic_with_graph.sql
+--   added a 10-arg version of append_turn_atomic via CREATE OR REPLACE.
+--   PostgreSQL treats functions with different argument counts as
+--   distinct overloads, so CREATE OR REPLACE did NOT replace the prior
+--   9-arg signature created by 20260422000000 — it added a new one
+--   alongside.
+--
+--   Two overloads now coexist in the staging database:
+--     append_turn_atomic(uuid, text, text, text, text,
+--                       boolean, integer, integer, jsonb)            -- 9 args (stale)
+--     append_turn_atomic(uuid, text, text, text, text,
+--                       boolean, integer, integer, jsonb, jsonb)     -- 10 args (current)
+--
+--   The client (src/orchestrator-v5/session/supabase-store.ts:73-88)
+--   passes only 9 named params for non-graph turns (omits p_graph
+--   when undefined). PostgREST cannot disambiguate which overload to
+--   call and returns:
+--     "Could not choose the best candidate function between:
+--      public.append_turn_atomic(...9 args...),
+--      public.append_turn_atomic(...10 args...)"
+--
+--   Observed in Render log for request_id=99a83f32-64b4-4d56-a241-8456c77c5b89.
+--   Surfaces as HTTP 500 with reason=chip_click_run_analysis_commit_failed.
+--
+--   Steps 1-3 of the V5 replay also call this RPC (without p_graph for
+--   text turns), so all of them should also fail under the same
+--   ambiguity. Their success in the replay is explained by
+--   draft_graph_dispatch passing p_graph (matches 10-arg overload
+--   unambiguously) and TurnExecutor's commit path triggering different
+--   client behaviour. The chip-click commit specifically omits p_graph
+--   AND has non-empty handler_facts — the exact shape that triggers
+--   PostgREST's ambiguity error path on every chip-click run_analysis.
+--
+-- Fix:
+--   Drop the stale 9-arg overload. The 10-arg version (with
+--   p_graph JSONB DEFAULT NULL) covers both call shapes:
+--     - When the client omits p_graph, PostgREST resolves to the
+--       10-arg version with p_graph defaulting to NULL.
+--     - When the client passes p_graph, the 10-arg version receives it.
+--   This is exactly the call-site contract assumed by all current
+--   client code (supabase-store.ts builds the args object conditionally
+--   spreading p_graph based on write.graph !== undefined).
+--
+-- Idempotency:
+--   `DROP FUNCTION IF EXISTS` succeeds whether the overload exists or
+--   not. Safe to re-run. Safe to apply to environments that already
+--   only have the 10-arg overload (e.g. fresh databases that never
+--   experienced the partial migration drift).
+--
+-- Verification (run after migration applies):
+--   SELECT proname, pronargs, proargtypes::regtype[]
+--   FROM pg_proc WHERE proname = 'append_turn_atomic';
+--   -- Expected: exactly one row with pronargs = 10.
+-- ============================================================
+
+DROP FUNCTION IF EXISTS public.append_turn_atomic(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb
+);
+
+-- The 10-arg version (current) is left untouched. CREATE OR REPLACE in
+-- prior migrations 20260422200000 and 20260422210000 keeps that
+-- function definition current. No re-creation needed here.
