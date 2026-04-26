@@ -220,6 +220,14 @@ export async function dispatchEditGraph(
   try {
     // llm_calls_used: handleEditGraph makes at least one LLM call for the
     // edit classification + repair loop. Using 1 as an honest minimum.
+    //
+    // graph: when the edit was actually applied, EditGraphResult.appliedGraph
+    // carries the post-edit GraphV3T. Pass it as p_graph so append_turn_atomic
+    // writes scenarios.graph in the same transaction as the turn row. When the
+    // edit was rejected (or otherwise produced no graph), appliedGraph is null
+    // — `null ?? undefined` resolves to undefined, the RPC receives p_graph =
+    // null, and scenarios.graph is left unchanged. Mirror of the pattern in
+    // draft-graph-dispatch.ts.
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -229,6 +237,7 @@ export async function dispatchEditGraph(
       llm_calls_used: 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
+      graph: editResult.appliedGraph ?? undefined,
     });
     log.info(
       {
