@@ -8,7 +8,7 @@ import {
   readExpectedBuildEnv,
 } from '../../../tools/v5-journey-replay/index.js';
 import type { HealthzResult } from '../../../tools/v5-journey-replay/types.js';
-import { stubFetchRouter } from './_test-helpers.js';
+import { stubFetchRouter, REPLAY_FIXTURE_ANALYSIS_READY } from './_test-helpers.js';
 
 const SENTINEL = 'SENTINEL-LEAK-CANARY-DO-NOT-MATCH-PROD-xyz123';
 
@@ -423,6 +423,10 @@ describe('run() honours the deploy gate', () => {
           response_version: 2,
           assistant_text: 'ok',
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
+          // Step 4 hard-fails when analysis_ready is absent. Including
+          // it on every step is harmless (schema-optional) and lets the
+          // shared fixture serve all 6 canonical steps.
+          analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
         },
       };
     });
@@ -460,6 +464,10 @@ describe('run() honours the deploy gate', () => {
           response_version: 2,
           assistant_text: 'ok',
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
+          // Step 4 hard-fails when analysis_ready is absent. Including
+          // it on every step is harmless (schema-optional) and lets the
+          // shared fixture serve all 6 canonical steps.
+          analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
         },
       };
     });
@@ -530,6 +538,10 @@ describe('run() honours the deploy gate', () => {
           response_version: 2,
           assistant_text: 'ok',
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
+          // Step 4 hard-fails when analysis_ready is absent. Including
+          // it on every step is harmless (schema-optional) and lets the
+          // shared fixture serve all 6 canonical steps.
+          analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
         },
       };
     });

@@ -157,29 +157,109 @@ export function assertDraftGraph(result: FetchResult): AssertionResult {
 export function assertAnalysisRun(result: FetchResult): AssertionResult {
   const core = coreAssertions(result);
   if (core) return core;
-  // Step 4 should produce a handler response (run_analysis fact persisted).
-  // Without reading the Supabase facts table, we verify response_version:2
-  // and that the stage indicator moved to analyse/decide, and assistant_text
-  // is non-empty — the fact-persistence check is implicit (if PLoT + commit
-  // succeeded the response is 200; the handler-level test covers the
-  // persisted fact shape).
+  // Step 4 wire contract: the chip-click run_analysis path MUST stamp
+  // `analysis_ready` on the response so subsequent turns (Step 5
+  // "explain leader") can ground their answers on a runnability signal.
+  // The original baseline regression manifested as a quietly-passing
+  // `assertAnalysisRun` while Step 4's wire body lacked the field —
+  // replay rows looked green but the chain was broken. Hard-fail here.
+  const body = result.body;
+  const ar = body?.analysis_ready as
+    | {
+        readonly status?: unknown;
+        readonly options?: unknown;
+        readonly goal_node_id?: unknown;
+        readonly computed_at?: unknown;
+      }
+    | undefined;
+  if (ar == null) {
+    return {
+      ok: false,
+      failing_contract: 'step_4_analysis_ready_missing',
+      evidence:
+        `status=200 text_len=${(body?.assistant_text ?? '').length} ` +
+        `analysis_ready=absent ` +
+        `chip_count=${(body?.suggested_actions ?? []).length}`,
+    };
+  }
+  if (ar.status !== 'ready') {
+    return {
+      ok: false,
+      failing_contract: `step_4_analysis_ready_unexpected_status (got "${String(ar.status)}", expected "ready")`,
+      evidence:
+        `status=200 analysis_ready_status="${String(ar.status)}" ` +
+        `text_len=${(body?.assistant_text ?? '').length}`,
+    };
+  }
+  const optionCount = Array.isArray(ar.options) ? ar.options.length : -1;
+  if (optionCount < 2) {
+    return {
+      ok: false,
+      failing_contract: `step_4_analysis_ready_options_too_few (got ${optionCount}, expected ≥2)`,
+      evidence: `status=200 analysis_ready_options=${optionCount}`,
+    };
+  }
+  if (typeof ar.goal_node_id !== 'string' || ar.goal_node_id.length === 0) {
+    return {
+      ok: false,
+      failing_contract: 'step_4_analysis_ready_goal_node_id_missing',
+      evidence: `status=200 goal_node_id=${JSON.stringify(ar.goal_node_id)}`,
+    };
+  }
+  if (typeof ar.computed_at !== 'string' || ar.computed_at.length === 0) {
+    return {
+      ok: false,
+      failing_contract: 'step_4_analysis_ready_computed_at_missing',
+      evidence: `status=200 computed_at=${JSON.stringify(ar.computed_at)}`,
+    };
+  }
   return {
     ok: true,
     evidence:
-      `status=200 text_len=${(result.body?.assistant_text ?? '').length} ` +
-      `chip_count=${(result.body?.suggested_actions ?? []).length} ` +
+      `status=200 text_len=${(body?.assistant_text ?? '').length} ` +
+      `chip_count=${(body?.suggested_actions ?? []).length} ` +
+      `analysis_ready=ready options=${optionCount} ` +
       `elapsed=${result.elapsed_ms}ms`,
   };
 }
+
+// Step 5 denial-phrase regression guard. The V5 golden-path baseline showed
+// "results aren't back yet" after the chip-click run_analysis chain shipped
+// without `analysis_ready` on the wire. After the wire fix the assistant
+// MUST NOT emit a denial of analysis availability — those phrases indicate
+// the model gating logic still believes results are not present, which
+// means either analysis_ready is missing or the ContextPack is missing
+// the analysis fact. Encoded as a hard assertion so any regression that
+// re-introduces denial phrasing fails the replay row.
+//
+// Regex design: each pattern targets the specific "I cannot answer
+// because the analysis is unavailable" shape, NOT broader phrases that
+// legitimately discuss analysis state. False-positive shapes that MUST
+// continue to pass:
+//   - "no new analysis needed" / "no further analysis required"
+//   - "no additional analysis is needed"
+//   - "I haven't run a sensitivity analysis on that yet but here's what
+//      we know" (talks about an unrelated sub-analysis after answering)
+// Patterns are anchored on the "results unavailable" framing using
+// negative lookaheads where ambiguity exists.
+const STEP5_DENIAL_PHRASES: readonly RegExp[] = [
+  /results\s+aren'?t\s+back\s+yet/i,
+  /results\s+are\s+not\s+back\s+yet/i,
+  /haven'?t\s+run\s+(?:the|an|any)\s+analysis(?!\s+(?:on|of)\s+\w)/i,
+  /have\s+not\s+run\s+(?:the|an|any)\s+analysis(?!\s+(?:on|of)\s+\w)/i,
+  /analysis\s+(?:isn'?t|is\s+not)\s+(?:ready|complete|done|finished|available)/i,
+  /(?:don'?t|do\s+not)\s+have\s+(?:the|an|any)?\s*analysis\s+(?:result|results|output)/i,
+  /(?:results|analysis)\s+(?:aren'?t|are\s+not|isn'?t|is\s+not)\s+available\s+yet/i,
+  /(?:simulation|computation)\s+(?:hasn'?t|has\s+not)\s+(?:completed|finished|run)/i,
+];
 
 export function assertExplainLeader(result: FetchResult): AssertionResult {
   const core = coreAssertions(result);
   if (core) return core;
   // Step 5 requires prior-run analysis to be accessible via the fallback.
   // We heuristic-check the assistant_text for non-empty content and
-  // absence of "I don't have analysis" hedges which would indicate the
-  // fallback didn't hydrate. Soft: a clarifying question is also valid
-  // if the routing prompt decides the user needs to scope further.
+  // absence of denial phrases which would indicate the fallback didn't
+  // hydrate or analysis_ready never reached the wire.
   const text = result.body?.assistant_text ?? '';
   if (text.length === 0) {
     return {
@@ -187,6 +267,19 @@ export function assertExplainLeader(result: FetchResult): AssertionResult {
       failing_contract: 'empty assistant_text on follow-up turn',
       evidence: `text_len=0`,
     };
+  }
+  for (const pattern of STEP5_DENIAL_PHRASES) {
+    const match = text.match(pattern);
+    if (match) {
+      return {
+        ok: false,
+        failing_contract: `step_5_denial_phrase ("${match[0]}")`,
+        evidence:
+          `status=200 text_len=${text.length} ` +
+          `denial_phrase="${match[0]}" ` +
+          `chip_count=${(result.body?.suggested_actions ?? []).length}`,
+      };
+    }
   }
   return {
     ok: true,

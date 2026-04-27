@@ -83,9 +83,18 @@ import { createPLoTClient, type PLoTClient } from '../../orchestrator/plot-clien
 
 import {
   createRunAnalysisHandler,
+  type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from './handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
+
+// Re-exported for the chip-click dispatch path. The handler-ownership
+// invariant ([scripts/validate-handler-ownership.sh]) restricts direct
+// imports of `tools/handlers/run-analysis` to this file. Chip-click
+// dispatch needs `ScenarioReader` + `RunAnalysisScenarioSnapshot` to
+// inject a one-shot reader (single-source-of-truth snapshot wiring);
+// re-exporting from the sanctioned surface satisfies the invariant.
+export type { ScenarioReader, RunAnalysisScenarioSnapshot };
 
 /**
  * Input to a handler invocation. Populated by dispatch.ts from the same
@@ -193,6 +202,24 @@ function resolvePlotClient(): PLoTClient {
     };
   }
   return client;
+}
+
+let defaultPlotClientCache: PLoTClient | undefined;
+
+/**
+ * Lazy singleton accessor for the production PLoTClient. Used by callers
+ * that need a fresh per-call HandlerRegistry (e.g. chip-click-dispatch's
+ * one-shot ScenarioReader injection) but should NOT construct a fresh
+ * PLoTClientImpl on every call. PLoT clients hold undici dispatchers;
+ * per-call construction would accumulate network resources under load.
+ *
+ * Lazy for the same env-capture reason as `getDefaultRegistry`.
+ */
+export function getDefaultPlotClient(): PLoTClient {
+  if (!defaultPlotClientCache) {
+    defaultPlotClientCache = resolvePlotClient();
+  }
+  return defaultPlotClientCache;
 }
 
 let defaultRegistryCache: HandlerRegistry | undefined;

@@ -170,6 +170,70 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
     expect(body.assistant_text).toContain('analysis');
   });
 
+  it('chip_click run_analysis with analysisReady → wire response carries analysis_ready (full path: dispatch → finaliser → wire)', async () => {
+    // V5 golden-path Step 4 → Step 5 wire fix. Proves the entire chain:
+    // chip-click dispatch surfaces analysisReady on its result → route-v2.ts
+    // sendFinalised200 forwards it to finaliseV5Response → the finaliser
+    // stamps it on the wire body → it survives egress validation.
+    const dispatchAnalysisReady = {
+      status: 'ready' as const,
+      goal_node_id: 'goal_revenue',
+      options: [
+        { option_id: 'opt_a', label: 'Option A', status: 'ready', interventions: { fac_x: 0.6 } },
+        { option_id: 'opt_b', label: 'Option B', status: 'ready', interventions: { fac_x: 0.3 } },
+      ],
+    };
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      ...makeMockResult(),
+      analysisReady: dispatchAnalysisReady,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111cc02',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.analysis_ready).toBeDefined();
+    expect(body.analysis_ready.status).toBe('ready');
+    expect(body.analysis_ready.goal_node_id).toBe('goal_revenue');
+    // Finaliser stamps a fresh ISO-8601 computed_at — proves the field was
+    // routed THROUGH the finaliser, not stamped upstream.
+    const ts = body.analysis_ready.computed_at as string;
+    expect(typeof ts).toBe('string');
+    expect(new Date(ts).toISOString()).toBe(ts);
+  });
+
+  it('chip_click run_analysis without analysisReady → wire response omits analysis_ready (finaliser tolerates absence)', async () => {
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce(makeMockResult());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111cc03',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect('analysis_ready' in body).toBe(false);
+  });
+
   it('source=chip (inline chip metadata on a normal message) → NOT dispatched, falls through to TurnExecutor', async () => {
     const res = await app.inject({
       method: 'POST',

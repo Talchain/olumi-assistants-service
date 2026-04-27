@@ -74,6 +74,26 @@ export function stubFetchOnce(init: FetchMockInit | Error) {
 }
 
 /**
+ * Minimal but schema-valid `analysis_ready` payload. Replay rows for
+ * Step 4 (run_analysis) hard-fail when this field is absent or missing
+ * structural fields (status, options, goal_node_id, computed_at) — the
+ * harness must catch the chip-click → finaliser wire regression that
+ * prompted the V5 baseline. Test fixtures that simulate any step
+ * including run_analysis should include this so the harness assertions
+ * accept the response. Tests that specifically verify behaviour when
+ * the field is ABSENT (e.g. preflight failure paths) should omit it.
+ */
+export const REPLAY_FIXTURE_ANALYSIS_READY = {
+  status: 'ready' as const,
+  goal_node_id: 'goal_test',
+  options: [
+    { option_id: 'opt_a', label: 'Option A', status: 'ready', interventions: { fac_x: 0.6 } },
+    { option_id: 'opt_b', label: 'Option B', status: 'ready', interventions: { fac_x: 0.3 } },
+  ],
+  computed_at: '2026-04-27T15:07:30.000Z',
+};
+
+/**
  * Stub `fetch` with a router that picks a response per URL. Useful
  * for the full-replay integration test where /healthz and
  * /orchestrate/v2/turn need distinct behaviours.

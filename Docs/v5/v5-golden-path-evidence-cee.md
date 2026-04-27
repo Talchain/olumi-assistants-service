@@ -7,7 +7,7 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 | signal | value |
 |---|---|
 | Replay reached orchestrator | yes |
-| v38.2 confirmed (startup / healthz build) | yes |
+| v38.2 confirmed (startup / healthz build) | not strict-checked |
 | v38.2 confirmed (per-turn) | not capturable |
 | run_analysis passed end-to-end (handler + commit + response) | yes |
 | Analysis persisted into follow-up context | yes |
@@ -15,25 +15,25 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 
 ## Run metadata
 
-- **Branch:** `claude/v5-step4-investigation`
-- **Pack generated from commit SHA:** `8d3701e78e2dd081d87e21c005bd695481a33a40` (if this does not match HEAD, regenerate with the harness)
+- **Branch:** `claude/v5-response-finaliser`
+- **Pack generated from commit SHA:** `c5d820d36f0f4537949fc22d1f3669d9a073036e` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-04-26T16:24:40.827Z
+- **Started at:** 2026-04-27T15:07:29.934Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
-- **Expected build:** `8d3701e`
+- **Expected build:** _not set (default: well-formed-only check)_
 
 ## Deploy confirmation (Phase 2)
 
 - **GET /healthz status:** 200
-- **build (commit short):** `8d3701e`
+- **build (commit short):** `38106bd`
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 374ms
+- **elapsed:** 224ms
 
-Deploy confirmed: `/healthz` build `8d3701e` matches `--expected-build 8d3701e`.
+Deploy reachable: `/healthz` build `38106bd` is well-formed. No strict-mode comparison run (set `--expected-build` or `OLUMI_REPLAY_EXPECTED_BUILD` to assert against a specific SHA).
 
 **Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
@@ -47,12 +47,12 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=32587ms | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1182 chip_count=1 elapsed=9693ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=262 chip_count=0 elapsed=5149ms stage=frame | — |
-| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 elapsed=4191ms | — |
-| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1258 chip_count=0 | — |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=123 chip_count=0 elapsed=7162ms stage=frame | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=33839ms | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=866 chip_count=1 elapsed=16569ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=193 chip_count=0 elapsed=4545ms stage=frame | — |
+| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 elapsed=4902ms | — |
+| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=58 chip_count=1 | — |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=131 chip_count=0 elapsed=6450ms stage=frame | — |
 
 ## Canonical steps (from brief)
 
