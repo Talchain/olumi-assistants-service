@@ -104,4 +104,42 @@ if [ -n "$route_matches" ]; then
   exit 1
 fi
 
+# Route-exit invariant: every 200-OK V5 response must ship via the
+# `sendFinalised200` helper (which calls finaliseV5Response, validates
+# egress, finalises the fallback on drift, emits telemetry, and then
+# `reply.code(200).send`). A new dispatch path that calls
+# `reply.code(200).send` directly bypasses the finaliser without ever
+# touching the `analysis_ready` identifier — that's the gap the previous
+# version of this gate missed (see external review, P1 #1).
+#
+# This catches: `reply.code(200).send(`, `.code(200).send(`, and the
+# space-padded variants. The single sanctioned site is INSIDE the body of
+# `sendFinalised200`, which has its own call but is by-design exempt.
+direct_200_sends=$(grep -nE 'reply\.code\(\s*200\s*\)\.send\(|\.code\(\s*200\s*\)\.send\(' \
+  src/orchestrator/route-v2.ts 2>/dev/null \
+  | grep -v "// finaliser-exempt:" \
+  || true)
+
+# Filter out the ONE sanctioned call site inside sendFinalised200 by
+# looking at the line context — the body of sendFinalised200 contains the
+# string `return reply.code(200).send(wireBody);`. We exclude exactly that
+# pattern; any OTHER 200 send is a violation.
+sanctioned_pattern='return reply\.code\(200\)\.send\(wireBody\);'
+direct_200_sends_filtered=$(echo "$direct_200_sends" | grep -vE "$sanctioned_pattern" || true)
+
+if [ -n "$direct_200_sends_filtered" ]; then
+  echo "FAIL: V5 route-v2.ts must route every 200-OK response through"
+  echo "      sendFinalised200(reply, requestId, exitPath, response, ctx)."
+  echo "      Direct reply.code(200).send(...) calls bypass the finaliser"
+  echo "      and break the structural analysis_ready guarantee."
+  echo ""
+  echo "      Offending lines:"
+  echo "$direct_200_sends_filtered" | sed 's/^/        /'
+  echo ""
+  echo "      If a 200 send is intentionally outside the V5 finaliser"
+  echo "      contract (e.g. unrelated route added to this file), add"
+  echo "      // finaliser-exempt: <reason> on the same line."
+  exit 1
+fi
+
 exit 0

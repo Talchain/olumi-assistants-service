@@ -4,6 +4,8 @@
 
 **Verified at:** branch `claude/v5-response-finaliser` HEAD `14e1966b` (off staging `33c2a872` plus the four CEE-1..3 commits from the previous brief). Confirmed with `git diff 33c2a872..HEAD -- src/orchestrator/route-v2.ts` — zero changes to route-v2.ts since the audit fixture, so the line numbers below are authoritative.
 
+> **External review correction (2026-04-27).** An external CC review caught two P1 gaps in the original implementation: (1) the grep gate enforced "do not write `analysis_ready` directly" but did NOT enforce "every 200-OK send must go through the finaliser" — a new `reply.code(200).send` could bypass without writing the field; (2) the egress-drift fallback was sent unfinalised, contradicting this doc's claim that fallbacks are stamped. Both are fixed in commit `<filled in by commit>` by introducing a `sendFinalised200` helper that is the SOLE 200-OK exit site in route-v2.ts. The helper finalises the candidate, validates egress, and on drift finalises the validator-built fallback before sending. The grep gate now also fails when `reply.code(200).send` appears anywhere in route-v2.ts outside the helper body. Sections below describe the post-fix architecture; the original per-site wiring is no longer accurate.
+
 ## Exit-point table
 
 | # | Path | Dispatch / producer | Exit line in `route-v2.ts` | HTTP | Body shape | Goes through finaliser? |
@@ -37,7 +39,20 @@
 
 Every 200-OK V5 HTTP exit passes through `validateEgress()` ([src/validators/b1.ts:137](../../src/validators/b1.ts#L137)) before `reply.code(200).send(...)`. No exit bypasses it. No V5 routes exist outside `src/orchestrator/route-v2.ts` (confirmed by `grep -rn "reply.send\|reply.code" src/` — every V5-relevant site is in route-v2.ts).
 
-This means: **the finaliser only needs to be called at five sites** (one per dispatch family — system-event, chip-click, draft-graph, edit-graph, TurnExecutor), each immediately before the corresponding `validateEgress` call. Validating after finalisation ensures the schema check sees the post-stamped shape (so a future schema tightening that requires `analysis_ready.computed_at` to be ISO-formatted catches drift). This is the design choice over wrapping `validateEgress` itself, which would require threading `FinaliserContext` through the validator and would make the validator path-aware.
+**Post-fix design — `sendFinalised200` helper.** The finaliser is wired at a SINGLE site rather than five: `sendFinalised200(reply, requestId, exitPath, response, ctx)` in route-v2.ts is the sole sanctioned `reply.code(200).send` call. Each of the five dispatch families (system-event, chip-click, draft-graph, edit-graph, TurnExecutor) calls the helper instead of touching `reply` directly. The helper:
+
+1. Finalises the candidate response (`finaliseV5Response(candidate, ctx)`) — stamps `analysis_ready` when `ctx.analysisReady` is provided.
+2. Validates the post-finalise shape (`validateEgress(finalised, requestId)`) — schema check sees the post-stamped shape, so a future schema tightening (e.g. requiring `computed_at` to be ISO-formatted) catches drift in the finaliser itself.
+3. **On egress drift, also finalises the validator-built fallback** before sending, so the wire response carries `analysis_ready` even when the upstream produced a malformed envelope. The fallback is a hard-coded schema-valid `OlumiResponse`; the finaliser only adds the passthrough `analysis_ready` field, so the post-finalise fallback remains schema-valid (we don't re-validate to avoid recursive-failure complexity for negligible safety gain).
+4. Emits `v5.response.finalised` telemetry with the actual wire shape (the soak metric for confirming emission rate).
+5. Sends.
+
+**Enforcement.** The grep gate at `scripts/check-no-direct-analysis-ready.sh` now has TWO rules:
+
+- No composer / handler / TurnExecutor may write `analysis_ready` directly (catches direct property assignment, dot-assignment, dynamic-key assignment, object-literal property).
+- No `reply.code(200).send(...)` may appear in `src/orchestrator/route-v2.ts` outside the body of `sendFinalised200`. Adversarially verified: injecting `return reply.code(200).send({ ... })` anywhere else in route-v2.ts fires the gate with exit code 1.
+
+This closes the route-exit bypass that the previous wiring (one `validateEgress` + `reply.send` per dispatch family) left unenforced.
 
 ## Decision: 500 / BoundaryError paths skip the finaliser
 
@@ -51,7 +66,15 @@ Each 500 site gets a one-line inline comment: `// 500: infrastructure failure �
 
 ## Egress-drift fallback handling
 
-`validateEgress` returns `{ ok: false, fallback }` when the upstream produced a response that fails `OlumiResponseSchema.parse`. The fallback is a hard-coded envelope with `error_code: 'EGRESS_CONTRACT_VIOLATION'`. **The finaliser stamps the fallback too**, because:
+`validateEgress` returns `{ ok: false, fallback }` when the upstream produced a response that fails `OlumiResponseSchema.parse`. The fallback is a hard-coded envelope with `error_code: 'EGRESS_CONTRACT_VIOLATION'`. **The finaliser stamps the fallback too**, implemented inside `sendFinalised200`:
+
+```
+const finalised = finaliseV5Response(candidate, ctx);
+const egress = validateEgress(finalised, requestId);
+const wireBody = egress.ok ? egress.value : finaliseV5Response(egress.fallback, ctx);
+```
+
+This is correct because:
 - It IS an `OlumiResponse` (passes the schema)
 - The user receives a 200 with this fallback; the UI treats it as a normal turn for state-update purposes
 - Without `analysis_ready`, the UI store would lose the wire-driven readiness for this turn — same problem the brief is solving for the success case

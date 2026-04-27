@@ -1,5 +1,27 @@
 # V5 analysis_ready single-source-of-truth — CEE side
 
+> **⚠ SUPERSEDED (2026-04-27).** This document describes the per-composer
+> wiring pattern from the previous brief (`claude/v5-analysis-ready-contract`):
+> compose functions accepted an `analysisReady?` parameter and TurnExecutor
+> emitted a `v5.analysis_ready.emit` log. **That pattern was deliberately
+> reverted by the next brief** (`claude/v5-response-finaliser`) in favour of
+> a single response finaliser stamped by route-v2.ts after composition. The
+> reasons (composer can forget the field; the next new path silently breaks)
+> are written up in the response-finaliser brief itself.
+>
+> **Current authoritative contract:** [v5-response-exit-audit.md](v5-response-exit-audit.md).
+>
+> Specific facts in this document that are NO LONGER TRUE:
+> - Compose functions do not accept `analysisReady?` parameters.
+> - There is no `v5.analysis_ready.emit` log; the equivalent telemetry is
+>   `v5.response.finalised` emitted from route-v2.ts after the finaliser.
+> - The "wire-emission sites" mentioned below (one per dispatch family with
+>   per-composer spreads) are now centralised through `sendFinalised200` in
+>   route-v2.ts.
+>
+> Kept here as historical record so the rationale for the per-composer
+> attempt — and why it was insufficient — stays discoverable.
+
 **Brief reference:** "V5 analysis_ready: single source of truth" (received 2026-04-26).
 **Diagnostic basis:** [v5-readiness-diagnostic.md](v5-readiness-diagnostic.md).
 **Branch:** `claude/v5-analysis-ready-contract` (CEE), off staging HEAD `33c2a872`.
