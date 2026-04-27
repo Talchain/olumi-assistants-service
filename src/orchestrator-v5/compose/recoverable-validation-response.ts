@@ -40,6 +40,10 @@ export interface ComposedRecoverableValidation {
  * validator outcome. The body + template_id + chip_type come from the
  * shared per-code composer map, so adding a new `ValidationErrorCode`
  * automatically flows through here once the map gains an entry.
+ *
+ * V5 finaliser contract: this composer must NOT set `analysis_ready`. The
+ * response-finaliser stamps it from the dispatch path's pre-computed
+ * payload after composition. See src/orchestrator-v5/response-finaliser.ts.
  */
 export function composeRecoverableValidationResponse(
   error: ValidationError,

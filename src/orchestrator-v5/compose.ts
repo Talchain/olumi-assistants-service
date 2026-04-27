@@ -28,6 +28,12 @@ export interface ComposeInput {
   suggested_actions?: readonly SuggestedAction[];
 }
 
+// V5 finaliser contract: no composer in this file may set `analysis_ready`.
+// The response-finaliser stamps it from the dispatch path's pre-computed
+// payload after composition, before egress validation. See
+// src/orchestrator-v5/response-finaliser.ts and the grep gate in
+// scripts/check-no-direct-analysis-ready.sh.
+
 export function composeDirectAnswerResponse(input: ComposeInput): OlumiResponse {
   return {
     response_version: 2,

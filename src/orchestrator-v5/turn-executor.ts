@@ -136,6 +136,17 @@ import { storeTurnDebug } from './debug/turn-debug-store.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
+  /**
+   * V5 finaliser contract: pre-computed structural readiness from the
+   * per-turn graph (`graphStateForTurn` parsed via GraphV3 +
+   * computeStructuralReadiness). Already computed inside this function for
+   * chip-gating; surfaced here so the response-finaliser in route-v2.ts can
+   * stamp `analysis_ready` onto the wire envelope after composition.
+   * Undefined when the turn had no graph state, or the graph failed strict
+   * GraphV3 parse, or readiness derivation found no goal node — same gate
+   * the chip-generator already uses today.
+   */
+  analysisReady?: NonNullable<GraphPatchBlockData['analysis_ready']>;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -289,6 +300,14 @@ export async function runTurnExecutor(
   let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
     'no_graph';
   let graphStateForTurn: GraphStateIngress | null = options.graphState ?? null;
+  // V5 finaliser contract: hoisted to outer scope so `finalizeRun` can
+  // surface it on `TurnExecutorRunResult.analysisReady` for the response
+  // finaliser. Declared here, populated below at the existing
+  // `computeStructuralReadiness` site (chip-gating) — no behavioural change
+  // to chip generation; just makes the value reachable from the closure.
+  let analysisReadyForTurn:
+    | NonNullable<GraphPatchBlockData['analysis_ready']>
+    | undefined;
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -365,9 +384,9 @@ export async function runTurnExecutor(
     // state is absent or fails strict GraphV3 parse, readiness is
     // undefined and the chip generator falls back to the conversational
     // variant. Cheap: runs in ~hundreds of microseconds on typical graphs.
-    let analysisReadyForTurn:
-      | NonNullable<GraphPatchBlockData['analysis_ready']>
-      | undefined;
+    // V5 finaliser contract: `analysisReadyForTurn` is declared in the
+    // outer function scope (above) so `finalizeRun` can surface it on
+    // `TurnExecutorRunResult.analysisReady` for the response finaliser.
     if (graphStateForTurn) {
       const parsedGraphForReadiness = GraphV3.safeParse(graphStateForTurn);
       if (parsedGraphForReadiness.success) {
@@ -1209,8 +1228,15 @@ export async function runTurnExecutor(
   // Helpers closured over mutable state
   // ==================================================================
   function finalizeRun(): TurnExecutorRunResult {
+    // V5 finaliser contract: surface `analysisReadyForTurn` on the run
+    // result so route-v2.ts can stamp it via `finaliseV5Response`. The
+    // per-turn emission-rate telemetry that previously lived here moved to
+    // route-v2.ts as `v5.response.finalised` — that's the only point where
+    // the actual emitted vs. computed comparison is meaningful, since the
+    // wire stamping happens after this function returns.
     return {
       response,
+      analysisReady: analysisReadyForTurn,
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,

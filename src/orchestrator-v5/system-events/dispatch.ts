@@ -33,6 +33,7 @@ import type {
 
 import { log } from '../../utils/telemetry.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 
 export type SystemEventCommitSkipReason = 'client_only_event';
 
@@ -40,6 +41,29 @@ export interface DispatchSystemEventResult {
   readonly response: OlumiResponse;
   readonly commitPerformed: boolean;
   readonly commitSkippedReason?: SystemEventCommitSkipReason;
+  /**
+   * V5 finaliser contract — system event readiness, by event kind:
+   *
+   *   undo / redo / chip_click / patch_dismissed
+   *     No server-side graph state to inspect. analysisReady stays
+   *     undefined; the finaliser stamps no analysis_ready, and the UI's
+   *     prior `ceeAnalysisReady` remains the truth (it was correct before
+   *     the event).
+   *
+   *   patch_accepted / direct_graph_edit
+   *     Graph-MUTATING. The current dispatch produces only a silent
+   *     acknowledgement and has no post-mutation graph snapshot in scope,
+   *     so analysisReady stays undefined here too. The UI is responsible
+   *     for invalidating `ceeAnalysisReady` locally on these events
+   *     (per `invalidateAnalysisReady()` in DecisionGuideAI canvas store).
+   *     If a future change exposes the post-mutation graph at this layer,
+   *     populate this field from `computeStructuralReadiness` so the wire
+   *     refreshes readiness atomically with the mutation acknowledgement.
+   *
+   * Type is `AnalysisReadyPayload | undefined` (not literal `undefined`)
+   * so future implementations can populate it without a type-shape change.
+   */
+  readonly analysisReady?: AnalysisReadyPayload;
 }
 
 export interface DispatchSystemEventParams {

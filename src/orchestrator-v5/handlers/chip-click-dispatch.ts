@@ -74,21 +74,34 @@ export interface DispatchChipClickRunAnalysisParams {
  * INTERNAL_ERROR. This mirrors TurnExecutor's handling of
  * HandlerInvocationFailedError / HandlerResultInvalidError and keeps the
  * chip-click path observationally consistent with the Sonnet-routed path.
+ *
+ * V5 finaliser contract: every variant declares an optional `analysisReady`
+ * for type uniformity at the route-v2.ts call site. Chip-click does not
+ * mutate the canvas — the user clicked "Run analysis" on the existing
+ * graph — so the UI's prior `ceeAnalysisReady` (from the most recent
+ * draft / edit) remains correct. Today every variant leaves this
+ * undefined; if a future product need calls for fresh chip-click
+ * readiness, compute it from the post-handler graph state and set on the
+ * `ok` outcome (the failure outcomes legitimately stay undefined per the
+ * 500-skip rule, even though they currently route through the 200 path
+ * via `commit_failed` etc. — those map to BoundaryError 500 in route-v2).
  */
 export type DispatchChipClickRunAnalysisResult =
-  | { readonly outcome: 'ok'; readonly response: OlumiResponse; readonly commitPerformed: true }
-  | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false }
+  | { readonly outcome: 'ok'; readonly response: OlumiResponse; readonly commitPerformed: true; readonly analysisReady?: undefined }
+  | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined }
   | {
       readonly outcome: 'handler_failure';
       readonly response: OlumiResponse;
       readonly commitPerformed: false;
       readonly causeKind: string;
       readonly retryable: boolean;
+      readonly analysisReady?: undefined;
     }
   | {
       readonly outcome: 'handler_result_invalid';
       readonly response: OlumiResponse;
       readonly commitPerformed: false;
+      readonly analysisReady?: undefined;
     };
 
 export async function dispatchChipClickRunAnalysis(

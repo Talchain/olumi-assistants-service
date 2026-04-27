@@ -92,6 +92,8 @@ import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
+import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { getRequestId } from '../utils/request-id.js';
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
@@ -118,6 +120,109 @@ import { runPreFlight } from './route-v2-preflight.js';
 // Sites that emit neither keep empty buckets. Key insertion order
 // matters for JSON.stringify determinism — the UI parser and contract
 // fixtures depend on it.
+
+type V5ExitPath =
+  | 'system_event'
+  | 'chip_click'
+  | 'draft_graph'
+  | 'edit_graph'
+  | 'turn_executor';
+
+/**
+ * V5 200-OK exit helper — the SOLE sanctioned `reply.code(200).send` site
+ * in this file (per the response-finaliser contract). All five dispatch
+ * families (system-event, chip-click, draft-graph, edit-graph,
+ * TurnExecutor) route their 200-OK exits through here. Adding a new path
+ * that calls `reply.code(200).send` directly is a contract violation
+ * caught by the grep gate at scripts/check-no-direct-analysis-ready.sh.
+ *
+ * Behaviour:
+ *   1. Finalise the candidate response — stamp `analysis_ready` (with a
+ *      fresh `computed_at`) when the dispatch path supplied a payload.
+ *   2. Validate the post-finalise shape against OlumiResponseSchema.
+ *   3. On schema failure, finalise the egress fallback too — the
+ *      validator-built fallback is a hard-coded schema-valid envelope
+ *      with no `analysis_ready` field, so the user would otherwise lose
+ *      readiness on egress drift. We trust the fallback to remain
+ *      schema-valid after finalisation because the finaliser only adds
+ *      the passthrough `analysis_ready` field; re-validating would
+ *      introduce recursive-failure complexity for negligible safety gain.
+ *   4. Emit `v5.response.finalised` telemetry with the actual wire shape.
+ *   5. Send.
+ *
+ * Why finaliser BEFORE validateEgress: the schema check sees the post-
+ * stamped shape, so a future schema tightening (e.g. requiring
+ * computed_at to be ISO-formatted) catches drift in the finaliser itself
+ * rather than letting bad timestamps through.
+ */
+function sendFinalised200(
+  reply: import('fastify').FastifyReply<{ Reply: V5RouteReply }>,
+  requestId: string,
+  exitPath: V5ExitPath,
+  candidate: import('@talchain/schemas/boundary').OlumiResponse,
+  ctx: { readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload },
+): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
+  // Mechanism A in action — the route's `Reply: V5RouteReply` makes
+  // `reply.code(200).send(<non-branded>)` a tsc error. To satisfy that,
+  // `wireBody` MUST be the finaliser's output. There's a subtle wrinkle:
+  // `validateEgress` runs the response through Zod's safeParse, which
+  // returns a fresh object — losing the WeakSet membership and (for the
+  // type-checker) the brand. So we run the validator on a finalised
+  // candidate to surface schema drift, but the wire body is always a
+  // FRESH finalise call against the validated value (or fallback). This
+  // double-finalisation is cheap (WeakSet add + shallow spread + ISO
+  // stamp) and idempotent in observable behaviour; the second computed_at
+  // is sub-ms-different from the first.
+  const candidateFinalised = finaliseV5Response(candidate, ctx);
+  const egress = validateEgress(candidateFinalised, requestId);
+  const wireBody = egress.ok
+    ? finaliseV5Response(egress.value, ctx)
+    : finaliseV5Response(egress.fallback, ctx);
+  if (!egress.ok) {
+    log.error(
+      { request_id: requestId, exit_path: exitPath },
+      'V5 egress validation failed — returning typed fallback envelope (post-finalised)',
+    );
+  }
+  logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);
+  return reply.code(200).send(wireBody);
+}
+
+/**
+ * V5 finaliser-emission telemetry. Fires once per request after
+ * `finaliseV5Response` runs (and after egress validation). Replaces the
+ * per-turn `v5.analysis_ready.emit` log that previously lived inside
+ * TurnExecutor (which had to fire pre-finalisation, before the wire
+ * stamping was visible). The exit_path field tags which dispatch family
+ * produced the response so the soak metric can disaggregate by path.
+ *
+ * This is the canonical signal for confirming the finaliser contract holds
+ * across all 200-OK exits. Filter Render logs for
+ * `event: 'v5.response.finalised' AND analysis_ready_emitted: false` to
+ * spot any path that should be carrying readiness but isn't.
+ */
+function logFinalisedResponse(
+  requestId: string,
+  exitPath: V5ExitPath,
+  finalisedResponse: unknown,
+  egressOk: boolean,
+): void {
+  const ar = (finalisedResponse as { analysis_ready?: { status?: string; computed_at?: string } } | undefined)
+    ?.analysis_ready;
+  log.info(
+    {
+      event: 'v5.response.finalised',
+      request_id: requestId,
+      exit_path: exitPath,
+      analysis_ready_emitted: ar != null,
+      analysis_ready_status: ar?.status ?? null,
+      computed_at: ar?.computed_at ?? null,
+      egress_ok: egressOk,
+    },
+    'V5 response finalised',
+  );
+}
+
 export function buildCommitFailureBoundaryError(params: {
   readonly validator: string;
   readonly reason: string;
@@ -172,8 +277,85 @@ const EDIT_GRAPH_POSITIVE_REGEX =
 const EDIT_GRAPH_NEGATIVE_REGEX =
   /\b(explain|compare|what would|flip|why|how does|tell me|show me|describe)\b/i;
 
+/**
+ * V5 status-keyed Reply contract — the type-system half of the response
+ * finaliser's defence in depth (mechanism A in
+ * src/orchestrator-v5/response-finaliser.ts).
+ *
+ * Fastify 5 supports status-code-keyed Reply types via
+ * `ReplyKeysToCodes<keyof RouteGeneric['Reply']>` and
+ * `ResolveReplyTypeWithRouteGeneric`. Declaring the route with this shape
+ * makes the type-checker enforce status↔body pairing at every send site:
+ *
+ *   - `reply.code(200).send(raw)`           — type error: raw is not branded
+ *   - `reply.code(200).send(boundaryError)` — type error: 200 wants brand
+ *   - `reply.code(500).send(brand)`         — type error: 500 wants BoundaryError
+ *   - `reply.code(500).send(boundaryError)` — OK
+ *   - `reply.send(raw)` (default 200)       — type error: 200 wants brand
+ *
+ * The pre-flight 422 path uses `pre.status` which is typed as the
+ * pre-flight failure status. The `400 | 422 | 500: BoundaryError` mapping
+ * covers every possible pre-status output (per buildBoundaryError /
+ * runPreFlight definitions).
+ */
+export type V5RouteReply = {
+  200: FinalisedV5Response;
+  400: BoundaryError;
+  422: BoundaryError;
+  500: BoundaryError;
+};
+
+/**
+ * Mechanism B body (runtime defence in depth): preSerialization hook that
+ * asserts every 200-OK response body on the V5 route has been processed
+ * by `finaliseV5Response` (WeakSet membership). Catches any cast that
+ * evaded the type-system enforcement of mechanism A. On detection, logs
+ * a violation event and substitutes the egress-violation fallback so the
+ * wire response stays product-safe; production observability fires.
+ *
+ * Extracted as a named function (rather than inline in the hook
+ * registration) so it can be unit-tested directly without spinning up a
+ * Fastify instance. See response-finaliser-hook.test.ts.
+ */
+export const v5FinaliserPreSerializationHook = async (
+  request: import('fastify').FastifyRequest,
+  reply: import('fastify').FastifyReply,
+  payload: unknown,
+): Promise<unknown> => {
+  if (request.routeOptions.url !== '/orchestrate/v2/turn') return payload;
+  if (reply.statusCode !== 200) return payload;
+  if (isFinalisedV5Response(payload)) return payload;
+  log.error(
+    {
+      event: 'v5.finaliser.bypass_detected',
+      request_id: getRequestId(request),
+      route: request.routeOptions.url,
+      status: reply.statusCode,
+    },
+    'V5 200-OK response bypassed finaliser — substituting egress-violation fallback',
+  );
+  // Fail safe: substitute a typed fallback rather than ship the bypassing
+  // body. The fallback envelope is hard-coded schema-valid; no readiness
+  // is set (the bypass means we don't know what readiness should be).
+  return {
+    response_version: 2,
+    assistant_text: 'The server produced a response that failed validation.',
+    blocks: [
+      { type: 'error', error_code: 'EGRESS_CONTRACT_VIOLATION', severity: 'error' },
+    ],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: 'frame',
+  };
+};
+
 export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void> {
-  app.post('/orchestrate/v2/turn', async (req, reply) => {
+  // Scoped to `/orchestrate/v2/turn` only via the URL check inside the
+  // hook function — global registration is simpler than route-scoped
+  // and the cost (one URL comparison per non-V5 send) is negligible.
+  app.addHook('preSerialization', v5FinaliserPreSerializationHook);
+
+  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', async (req, reply) => {
     // Shared pre-flight: extension parse → B1 ingress → scenario upsert.
     // Every dispatch branch in this handler runs AFTER this call. The
     // helper is the only site that may invoke those three primitives in
@@ -182,6 +364,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // Docs/v5/route-v2-branch-audit.md for the rationale and audit.
     const pre = await runPreFlight(req);
     if (!pre.ok) {
+      // 4xx: pre-flight failure — request never reached dispatch, no graph
+      // state to compute readiness from; no analysis_ready stamped.
       return reply.code(pre.status).send(pre.error);
     }
     const { requestId, ingress, extensions } = pre.context;
@@ -222,17 +406,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           },
           'V5 system event commit failed — returning 500 with BoundaryError envelope',
         );
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
-      const sysEgress = validateEgress(sysResult.response, requestId);
-      if (!sysEgress.ok) {
-        log.error(
-          { request_id: requestId, event_kind: ingress.event.kind },
-          'V5 system event egress validation failed — returning typed fallback envelope',
-        );
-        return reply.code(200).send(sysEgress.fallback);
-      }
-      return reply.code(200).send(sysEgress.value);
+      return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
+        analysisReady: sysResult.analysisReady,
+      });
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -273,6 +452,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             stage: ingress.stage,
             preStageExtras: { cause_kind: cc.causeKind },
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
         if (cc.outcome === 'handler_result_invalid') {
@@ -283,6 +463,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
         if (cc.outcome === 'commit_failed') {
@@ -293,18 +474,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
         // outcome === 'ok'
-        const ccEgress = validateEgress(cc.response, requestId);
-        if (!ccEgress.ok) {
-          log.error(
-            { request_id: requestId },
-            'V5 chip_click run_analysis dispatch egress validation failed — returning typed fallback envelope',
-          );
-          return reply.code(200).send(ccEgress.fallback);
-        }
-        return reply.code(200).send(ccEgress.value);
+        return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
+          analysisReady: cc.analysisReady,
+        });
       } catch (err) {
         log.error(
           {
@@ -320,6 +496,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           stage: ingress.stage,
         });
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
     }
@@ -365,17 +542,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
-        const dgEgress = validateEgress(dg.response, requestId);
-        if (!dgEgress.ok) {
-          log.error(
-            { request_id: requestId },
-            'V5 draft_graph dispatch egress validation failed — returning typed fallback envelope',
-          );
-          return reply.code(200).send(dgEgress.fallback);
-        }
-        return reply.code(200).send(dgEgress.value);
+        return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
+          analysisReady: dg.analysisReady,
+        });
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
         // dispatcher already logged the details; re-log here with the
@@ -396,6 +568,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           stage: ingress.stage,
         });
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
     }
@@ -445,17 +618,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             requestId,
             stage: ingress.stage,
           });
+          // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
-        const egEgress = validateEgress(eg.response, requestId);
-        if (!egEgress.ok) {
-          log.error(
-            { request_id: requestId },
-            'V5 edit_graph dispatch egress validation failed — returning typed fallback envelope',
-          );
-          return reply.code(200).send(egEgress.fallback);
-        }
-        return reply.code(200).send(egEgress.value);
+        return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
+          analysisReady: eg.analysisReady,
+        });
       } catch (err) {
         log.error(
           {
@@ -471,6 +639,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           stage: ingress.stage,
         });
+        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
     }
@@ -536,19 +705,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         },
         'V5 turn completed without commit — returning 500 with BoundaryError envelope',
       );
+      // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
       return reply.code(500).send(boundaryError);
     }
 
-    const egress = validateEgress(run.response, requestId);
-    if (!egress.ok) {
-      log.error(
-        { request_id: requestId, failure_type: run.telemetry.failure_type },
-        'V5 B1 egress validation failed — returning typed fallback envelope',
-      );
-      return reply.code(200).send(egress.fallback);
-    }
-
-    return reply.code(200).send(egress.value);
+    return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
+      analysisReady: run.analysisReady,
+    });
   });
 }
 

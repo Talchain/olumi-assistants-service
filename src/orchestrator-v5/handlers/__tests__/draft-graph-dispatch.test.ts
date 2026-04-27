@@ -377,10 +377,17 @@ describe('dispatchDraftGraph', () => {
     });
   });
 
-  // ── analysis_ready threading ──────────────────────────────────────────────
+  // ── analysisReady surfacing (response-finaliser brief) ──────────────────
+  //
+  // After the response-finaliser brief, the dispatcher no longer stamps
+  // analysis_ready onto the response envelope. Instead it surfaces the
+  // raw payload on `DispatchDraftGraphResult.analysisReady`; the
+  // response-finaliser in route-v2.ts stamps it onto the wire envelope
+  // (with a fresh computed_at) just before egress validation. These tests
+  // assert on the dispatch-result field, not on the response.
 
-  describe('analysis_ready field', () => {
-    it('is present in response when persistence succeeds and result.analysisReady is set', async () => {
+  describe('analysisReady surfacing', () => {
+    it('is set on the dispatch result when persistence succeeds and result.analysisReady is set', async () => {
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
         .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
@@ -392,14 +399,19 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.analysis_ready).toBeDefined();
-      expect(result.response.analysis_ready?.status).toBe('ready');
-      expect(result.response.analysis_ready?.goal_node_id).toBe('goal_revenue');
-      expect(Array.isArray(result.response.analysis_ready?.options)).toBe(true);
-      expect((result.response.analysis_ready?.options?.length ?? 0) > 0).toBe(true);
+      // Composer-cleanliness invariant: response itself omits analysis_ready.
+      expect('analysis_ready' in result.response).toBe(false);
+      // Dispatch-result surfaces the raw payload for the finaliser.
+      expect(result.analysisReady).toBeDefined();
+      expect(result.analysisReady?.status).toBe('ready');
+      expect(result.analysisReady?.goal_node_id).toBe('goal_revenue');
+      expect(Array.isArray(result.analysisReady?.options)).toBe(true);
+      expect((result.analysisReady?.options?.length ?? 0) > 0).toBe(true);
+      // Dispatcher does NOT attach computed_at — that's the finaliser's job.
+      expect((result.analysisReady as { computed_at?: string }).computed_at).toBeUndefined();
     });
 
-    it('is absent when commit fails (graphPersisted=false)', async () => {
+    it('is undefined when commit fails (graphPersisted=false)', async () => {
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
         .mockRejectedValue(new Error('StateCommitFailedError: RPC error'));
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
@@ -411,10 +423,11 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.analysis_ready).toBeUndefined();
+      expect('analysis_ready' in result.response).toBe(false);
+      expect(result.analysisReady).toBeUndefined();
     });
 
-    it('is absent when result.analysisReady is undefined (no pipeline payload)', async () => {
+    it('is undefined when result.analysisReady is undefined (no pipeline payload)', async () => {
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
         .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
       // makeDraftResult with no analysisReady arg → analysisReady undefined
@@ -427,7 +440,8 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.analysis_ready).toBeUndefined();
+      expect('analysis_ready' in result.response).toBe(false);
+      expect(result.analysisReady).toBeUndefined();
     });
   });
 });
