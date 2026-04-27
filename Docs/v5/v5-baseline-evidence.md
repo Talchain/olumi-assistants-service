@@ -306,3 +306,77 @@ The ratchet rule is upheld: every step that previously passed still passes; pass
 ### Out of scope — Discoveries (deferred to separate brief)
 
 - **Frame-stage edit intents fall to coaching.** Steps 3 ("Add another option") and 6 ("Increase the budget factor") arrive at `stage='frame'`; the `dispatchEditGraph` gate at [route-v2.ts:594-598](../../src/orchestrator/route-v2.ts#L594-L598) requires `stage ∈ {analyse, decide}` so these messages fall through to TurnExecutor. Sonnet's `olumi_action.handler_id` enum at [routing/tool-schema.ts:62-77](../../src/orchestrator-v5/routing/tool-schema.ts#L62-L77) only exposes `run_analysis`; the registry at [tools/registry.ts:165-173](../../src/orchestrator-v5/tools/registry.ts#L165-L173) only registers `run_analysis`. Result: structural edit intents at frame stage produce coaching responses (~131–193 chars) with stage echoed. **Recommended follow-up brief:** either (a) lower the `dispatchEditGraph` stage gate to allow `frame`, (b) register `add_option`/`edit_factor` handlers and expose them in the tool schema, or (c) hybrid. Each deserves its own scope.
+
+---
+
+## Delta — `claude/v5-step5-grounding-probe` (wiring landed, pre-replay)
+
+Date: 2026-04-28
+Branch: `claude/v5-step5-grounding-probe` off staging `f588320`. **Not yet pushed; pending Paul's authorisation.**
+
+This delta wires up a State→Composition→Prompt triage probe for the residual Step 5 stall (Finding 5.1, post `claude/v5-chip-click-analysis-ready`). The actual Task 4 fix is gated on the probe's read against a staging replay — explicitly NOT applied here. Two adjacent hardening tasks rode along: a nested-scope ceeTrace scrub gap (Finding 4.2) and replay-harness gaps that let the original Step 5 stall pass at the structural level despite shipping a denial phrase.
+
+### What changed (this branch)
+
+| # | Change | File(s) |
+|---|---|---|
+| 1 | **State-layer probe — facts log.** Added `event:"v5_turn_context_facts"` info-level log at `readFactsFor` return inside `fetchPriorFacts`. Carries `request_id`, `scenario_id`, `prior_turn_count`, `handler_row_id_count`, `fact_count`, `fact_types[]`, `has_run_analysis_fact`. | [src/orchestrator-v5/build-turn-context.ts](../../src/orchestrator-v5/build-turn-context.ts) |
+| 2 | **Composition/render probe — projection log.** Added `event:"v5_turn_context_analysis_projection"` info-level log after `assembleContextPackWithSummary` returns. Derived `analysis_projection_status` enum collapses the triage into one grep-friendly value: `facts_absent` \| `projection_empty` \| `projection_populated`. Constituent flags (`has_run_analysis_fact`, `leading_option_populated`, `analysis_section_chars`, `top_drivers_count`, etc.) remain on the same line for forensic detail. | [src/orchestrator-v5/turn-executor.ts](../../src/orchestrator-v5/turn-executor.ts) |
+| 3 | **Nested ceeTrace scrub.** `stripCeeTrace` extended to walk `response.blocks[*].enrichment` and strip `ceeTrace` from each block in addition to top-level. Same opt-out via `CEE_TURN_DEBUG_ENABLED=true`. Closes Finding 4.2 from the post-fix delta — staging f588320 still showed `blocks[0].enrichment.ceeTrace.reason: "Legacy CEE calls skipped"` because the original strip only touched top-level. | [src/orchestrator-v5/response-finaliser.ts](../../src/orchestrator-v5/response-finaliser.ts) |
+| 4 | **Replay harness — assistant_text persisted.** `EvidenceRow` extended with optional `assistant_text` field; harness captures it (redacted via `redactString`) on every passing/failing row that received a response body. Evidence-writer renders per-step text inside fenced blocks under the table. Pre-fix baseline showed harness Step 5 passed (`text_len=1497`) while curl on the same staging build returned a denial phrase — text persistence closes that blind spot. | [tools/v5-journey-replay/types.ts](../../tools/v5-journey-replay/types.ts), [tools/v5-journey-replay/index.ts](../../tools/v5-journey-replay/index.ts), [tools/v5-journey-replay/evidence-writer.ts](../../tools/v5-journey-replay/evidence-writer.ts) |
+| 5 | **Replay harness — denial-phrase regex extended.** Two new `STEP5_DENIAL_PHRASES` patterns close the gap that staging f588320 caught: (a) `aren't available <preposition> <context>` (displaced "yet" anchor), (b) `haven't come through` (separate idiom). The original 8 patterns required "yet" immediately after "available", which missed the production text "aren't available in the current context… haven't come through yet". Verbatim staging text now hard-fails. `STEP5_DENIAL_PHRASES` is now exported (was internal). | [tools/v5-journey-replay/assertions.ts](../../tools/v5-journey-replay/assertions.ts) |
+| 6 | **Replay harness — Step 5 substance gate.** `assertExplainLeader` now hard-fails with `step_5_text_too_short` when `text.length <= 200`. The 200-char threshold is tuned to the staging f588320 baseline (failing curl: 282 chars; legitimate passes: ≥800 chars). | [tools/v5-journey-replay/assertions.ts](../../tools/v5-journey-replay/assertions.ts) |
+| 7 | **Replay harness — Step 1 → Step 5 option label threading.** `JourneyContext` and harness loop now parse `draft_graph.nodes` of kind `option` after Step 1 passes; `step1OptionLabels` is threaded into `assertExplainLeader`. Step 5 hard-fails with `step_5_no_option_label_referenced` when labels are present but none referenced (case-insensitive). Empty labels (Step 1 parse miss or out-of-journey invocation) degrade gracefully — substance check still applies, label gate is skipped. | [tools/v5-journey-replay/index.ts](../../tools/v5-journey-replay/index.ts), [tools/v5-journey-replay/assertions.ts](../../tools/v5-journey-replay/assertions.ts) |
+
+### Tests added / extended (all green locally — 12,643 pass / 0 regressions)
+
+| Test | Coverage |
+|---|---|
+| [response-finaliser.test.ts](../../src/orchestrator-v5/__tests__/response-finaliser.test.ts) | +4 cases: nested scrub when debug disabled (sibling enrichment fields preserved); top-level + nested combined; preserved when `CEE_TURN_DEBUG_ENABLED=true`; no-op when blocks have enrichment without ceeTrace. |
+| [step5-denial-phrases.test.ts](../../tests/unit/v5-journey-replay/step5-denial-phrases.test.ts) | Rewritten. **15 must-trip phrases** (was 15) + **4 new must-trip cases** for the staging-shape patterns + **3 new whitelist cases** for legitimate "available to" / "came through" phrases + **1 verbatim staging-shape case** + **3 new gate cases** for substance + label gates (3c). Existing fixtures padded with neutral filler so each isolates the regex behaviour from the substance gate. |
+| Shared fixture in [_test-helpers.ts](../../tests/unit/v5-journey-replay/_test-helpers.ts) | New `REPLAY_FIXTURE_ASSISTANT_TEXT` constant (≥ 200 chars, references "Option A") used by [deploy-gate.test.ts](../../tests/unit/v5-journey-replay/deploy-gate.test.ts) and [run-integration.test.ts](../../tests/unit/v5-journey-replay/run-integration.test.ts) so existing harness-loop tests still pass under the new Step 5 substance + label gates without invented branching. |
+
+### Local verification (this branch, all green)
+
+- `pnpm exec tsc -p tsconfig.build.json --noEmit` — clean.
+- `pnpm exec vitest run tests/unit/v5-journey-replay/` — 204 / 204 pass.
+- `pnpm exec vitest run src/orchestrator-v5/__tests__/response-finaliser.test.ts` — 34 / 34 pass (was 30; +4 nested scrub).
+- `pnpm exec vitest run --changed --bail=1` — **719 test files, 12,643 tests passed; 32 skipped (network-gated); 1 todo; 0 regressions.**
+- `bash scripts/check-no-direct-analysis-ready.sh` — clean.
+
+The probe is a no-op behaviourally — it adds two info-level log lines per turn and zero changes to user-facing output. The harness changes are pure tightening: replay rows that previously passed structurally on Step 5 must now also clear the substance gate, the denial-phrase regex set, and (when journey context is provided) the option-label gate. The mock fixtures used in unit tests have been adjusted to clear these gates so existing coverage is preserved without inventing scenario branching.
+
+### Pending — Task 4 fix (gated on probe)
+
+The Task 4 grounding fix is **explicitly not applied in this branch**. Per the brief's hard scope cap:
+
+| Probe outcome on Step 5 turn | Layer attribution | Fix scope |
+|---|---|---|
+| `analysis_projection_status: "facts_absent"` | **State** — fact didn't propagate from Step 4's commit to Step 5's read | Trace `run_analysis` handler → `commitDirectAnswer` → Supabase `v5_handler_facts` insert; then `priorTurns` query → `handlerRowIds` → `readFactsFor`. Likely culprits: `turn_class !== 'handler'` filtering at [build-turn-context.ts:192-194](../../src/orchestrator-v5/build-turn-context.ts#L192-L194); commit-vs-read race; RLS policy. Surgical small-fix in this branch. |
+| `analysis_projection_status: "projection_empty"` | **Composition** — fact loaded, projection empty | Bug in `buildAnalysisFromPriorFacts` at [analysis-fallback.ts](../../src/orchestrator-v5/context/analysis-fallback.ts) (payload-shape mismatch) or `projectAnalysis` in [context-pack-assembler.ts](../../src/orchestrator-v5/context/context-pack-assembler.ts) (sort/label resolution). Add fixture-level unit test reproducing the staging shape; fix the mismatch. |
+| `analysis_projection_status: "projection_populated"` | **Prompt** — Sonnet sees the data and ignores it | **STOP.** Document layer attribution and report. Out of scope: prompt iteration on `Prompts/v38.2.txt` and/or registering an `explain_results` handler — both are separate briefs. |
+
+### Replay (deferred to staging deploy)
+
+The probe is a server-side change; it cannot be exercised against localhost (no Supabase locally — Supabase credentials are staging-only). The triage data lands once Paul authorises a push and the harness runs against staging:
+
+```bash
+OLUMI_REPLAY_API_KEY=<staging-key> \
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --expected-build <new-build-hash> \
+  --out Docs/v5/v5-golden-path-evidence-cee.md \
+  --scenario-prefix staging-step5-probe
+```
+
+Render-side filter on the Step 5 turn's `request_id` for `event:"v5_turn_context_facts"` and `event:"v5_turn_context_analysis_projection"`. The single derived `analysis_projection_status` enum identifies the layer; constituent flags on the same log line provide forensic detail. **A post-replay update to this section will record the probe values, layer attribution, and binding-constraint refinement.**
+
+### Updated binding constraint (provisional, awaiting probe)
+
+The wire fix (Finding 4.1) is permanent. Step 5's "explain leader" turn still does not ground in `run_analysis` handler facts even with `analysis_ready={status:"ready"}` on the same envelope — but **the failure point** (State / Composition / Prompt) is unknown until the probe runs. The previous post-fix doc's "Two-stage triage required" framing is now operationalised: the probe is the triage, and only once it speaks should a code fix be authored.
+
+### Ratchet status (post-probe-wiring)
+
+Pre-fix baseline (staging `38106bd`): 6/6 structural pass; 2 chain-blocking findings (4.1, 5.1); 4 non-blocking (1.1, 4.2, 4.3, 5.2).
+Post-fix replay (staging `f588320`): 6/6 structural pass; 1 chain-blocking (5.1); 2 non-blocking (4.2, 4.3); 2 closed (4.1, 5.2).
+This branch (probe wiring, pre-staging-replay): no behavioural delta on the wire (probe is observability only); harness assertions tightened so a future Step 5 denial-phrase regression cannot mascarade as a structural pass; nested ceeTrace scrub closes Finding 4.2. **Pending probe data, the chain-blocking count remains 1 (5.1) — but the next replay will determine whether it stays open as a code-fix item or migrates to a separate prompt-layer brief.**

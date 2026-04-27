@@ -242,7 +242,7 @@ export function assertAnalysisRun(result: FetchResult): AssertionResult {
 //      we know" (talks about an unrelated sub-analysis after answering)
 // Patterns are anchored on the "results unavailable" framing using
 // negative lookaheads where ambiguity exists.
-const STEP5_DENIAL_PHRASES: readonly RegExp[] = [
+export const STEP5_DENIAL_PHRASES: readonly RegExp[] = [
   /results\s+aren'?t\s+back\s+yet/i,
   /results\s+are\s+not\s+back\s+yet/i,
   /haven'?t\s+run\s+(?:the|an|any)\s+analysis(?!\s+(?:on|of)\s+\w)/i,
@@ -251,9 +251,30 @@ const STEP5_DENIAL_PHRASES: readonly RegExp[] = [
   /(?:don'?t|do\s+not)\s+have\s+(?:the|an|any)?\s*analysis\s+(?:result|results|output)/i,
   /(?:results|analysis)\s+(?:aren'?t|are\s+not|isn'?t|is\s+not)\s+available\s+yet/i,
   /(?:simulation|computation)\s+(?:hasn'?t|has\s+not)\s+(?:completed|finished|run)/i,
+  // Staging f588320 captured: "Analysis results aren't available in the
+  // current context, the simulation was run but the results haven't come
+  // through yet." The two pre-existing patterns (`available\s+yet` and
+  // `back\s+yet`) both require the "yet" anchor immediately after the
+  // negated verb, so they both miss when "yet" is displaced by an
+  // intervening prepositional phrase. The two patterns below close
+  // that gap.
+  //
+  // First: "...aren't available in|on|from|within <context>..." —
+  // catches the displaced-anchor variant where the denial framing
+  // ("results not available HERE/NOW") substitutes a context for "yet".
+  // Deliberately omits the preposition "to" so legitimate access-control
+  // speech ("results are available to all stakeholders") does not trip.
+  /(?:results|analysis|findings)\s+(?:aren'?t|are\s+not|isn'?t|is\s+not)\s+available\s+(?:in|on|from|within)\s+\S+/i,
+  // Second: "results haven't come through (yet)" — separate idiom,
+  // unrelated to "available" framing. Past tense ("came through") and
+  // present-affirmative ("results came through cleanly") both pass.
+  /(?:results|analysis|findings|simulation\s+results?)\s+(?:haven'?t|have\s+not)\s+come\s+through/i,
 ];
 
-export function assertExplainLeader(result: FetchResult): AssertionResult {
+export function assertExplainLeader(
+  result: FetchResult,
+  ctx?: { step1OptionLabels?: readonly string[] },
+): AssertionResult {
   const core = coreAssertions(result);
   if (core) return core;
   // Step 5 requires prior-run analysis to be accessible via the fallback.
@@ -281,10 +302,45 @@ export function assertExplainLeader(result: FetchResult): AssertionResult {
       };
     }
   }
+  // Substance gate: a passing Step 5 must have meaningful prose. The
+  // 200-char threshold is tuned to the staging f588320 baseline where
+  // the failing curl returned text_len=282 with a denial phrase, while
+  // legitimate passes routinely exceed 800 chars. A response below
+  // this bar is almost certainly a stub or an evasion that escaped the
+  // denial-phrase regex set.
+  if (text.length <= 200) {
+    return {
+      ok: false,
+      failing_contract: 'step_5_text_too_short',
+      evidence:
+        `status=200 text_len=${text.length} (expected > 200) ` +
+        `chip_count=${(result.body?.suggested_actions ?? []).length}`,
+    };
+  }
+  // Option-label reference gate: a substantive explain-leader response
+  // names at least one option from the journey's drafted graph. This is
+  // gated on `ctx.step1OptionLabels` being populated — when Step 1
+  // wasn't parsed (or the harness was invoked without journey context),
+  // the check is skipped rather than failing spuriously.
+  const labels = ctx?.step1OptionLabels ?? [];
+  if (labels.length > 0) {
+    const lower = text.toLowerCase();
+    const referenced = labels.some((l) => lower.includes(l.toLowerCase()));
+    if (!referenced) {
+      return {
+        ok: false,
+        failing_contract: 'step_5_no_option_label_referenced',
+        evidence:
+          `status=200 text_len=${text.length} ` +
+          `labels_checked=${labels.length} mentioned=0`,
+      };
+    }
+  }
   return {
     ok: true,
     evidence:
       `status=200 text_len=${text.length} ` +
+      `labels_checked=${labels.length} ` +
       `chip_count=${(result.body?.suggested_actions ?? []).length}`,
   };
 }
