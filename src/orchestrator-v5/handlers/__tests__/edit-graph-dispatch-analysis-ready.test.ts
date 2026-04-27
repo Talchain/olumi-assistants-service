@@ -113,12 +113,16 @@ function commitOk() {
 
 const STUB_REQUEST = {} as FastifyRequest;
 
-describe('edit-graph-dispatch — analysis_ready emission (CEE-1.5)', () => {
+describe('edit-graph-dispatch — analysisReady surfacing (response-finaliser brief)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('applied edit emits analysis_ready computed from appliedGraph', async () => {
+  it('applied edit surfaces analysisReady on the dispatch result, not on the response', async () => {
+    // After the response-finaliser brief, the composer no longer stamps
+    // analysis_ready. The dispatcher computes structural readiness from
+    // editResult.appliedGraph and surfaces it on DispatchEditGraphResult
+    // for the route-v2.ts finaliser to stamp.
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(appliedResult());
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
       commitOk() as Awaited<ReturnType<typeof commitDirectAnswer>>,
@@ -132,22 +136,20 @@ describe('edit-graph-dispatch — analysis_ready emission (CEE-1.5)', () => {
       analysisState: null,
     });
 
-    expect(out.response.analysis_ready).toBeDefined();
-    const ar = out.response.analysis_ready as {
-      goal_node_id: string;
-      status: string;
-      options: Array<{ option_id: string }>;
-      computed_at?: string;
-    };
+    // Response itself is clean — composer-cleanliness invariant.
+    expect('analysis_ready' in out.response).toBe(false);
+
+    // Dispatch result carries the pre-computed payload.
+    expect(out.analysisReady).toBeDefined();
+    const ar = out.analysisReady!;
     expect(ar.goal_node_id).toBe('goal_revenue');
-    // Two non-decision options present; ready or needs_user_mapping but not undefined.
     expect(typeof ar.status).toBe('string');
     expect(ar.options.map((o) => o.option_id).sort()).toEqual(['opt_launch', 'opt_status_quo']);
-    expect(ar.computed_at).toBeTypeOf('string');
-    expect(new Date(ar.computed_at!).toISOString()).toBe(ar.computed_at);
+    // The dispatcher does NOT attach computed_at — that's the finaliser's job.
+    expect((ar as { computed_at?: string }).computed_at).toBeUndefined();
   });
 
-  it('rejected edit (no appliedGraph) ships no analysis_ready', async () => {
+  it('rejected edit surfaces no analysisReady — UI retains prior store value', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(rejectedResult());
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
       { response: {}, performed: true as const, persisted_row_id: 'row-2', graphPersisted: false } as Awaited<
@@ -164,5 +166,6 @@ describe('edit-graph-dispatch — analysis_ready emission (CEE-1.5)', () => {
     });
 
     expect('analysis_ready' in out.response).toBe(false);
+    expect(out.analysisReady).toBeUndefined();
   });
 });

@@ -269,6 +269,22 @@ check_phase_1_5_invariants() {
 }
 
 # ---------------------------------------------------------------------------
+# 15. V5 finaliser contract — `analysis_ready` must only be set by the
+#     response-finaliser; route-v2.ts is the sole writer via finaliseV5Response.
+#     Composers, dispatch handlers, and TurnExecutor compose-call sites must
+#     NOT touch the field. See Docs/v5/v5-response-exit-audit.md.
+# ---------------------------------------------------------------------------
+check_response_finaliser_contract() {
+  if bash scripts/check-no-direct-analysis-ready.sh > /dev/null 2>&1; then
+    print_check "response-finaliser-contract" "OK"
+  else
+    print_check "response-finaliser-contract" "FAIL"
+    bash scripts/check-no-direct-analysis-ready.sh 2>&1 | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
 echo ""
@@ -289,6 +305,7 @@ check_docs_consistency
 check_state_write_invariant
 check_handler_ownership
 check_phase_1_5_invariants
+check_response_finaliser_contract
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
