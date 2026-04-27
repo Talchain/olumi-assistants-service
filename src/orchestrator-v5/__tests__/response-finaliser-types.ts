@@ -38,27 +38,18 @@ import type {
 import type { OlumiResponse, BoundaryError } from '@talchain/schemas/boundary';
 
 import { finaliseV5Response } from '../response-finaliser.js';
-
-// ─── Status-keyed Reply mirror ────────────────────────────────────────────
-//
-// The route-v2.ts handler uses `<{ Reply: V5RouteReply }>` to constrain
-// `reply.send`. We re-declare the same mapping here (rather than importing
-// from route-v2.ts, which is not designed for re-export) so this file is a
-// pure type-level fixture with no runtime coupling.
-
-type V5RouteReplyMirror = {
-  200: FinalisedV5Response;
-  400: BoundaryError;
-  422: BoundaryError;
-  500: BoundaryError;
-};
+// finaliser-exempt: type-level fixture imports the actual route Reply
+// shape so this file cannot drift from production. If V5RouteReply
+// changes (e.g. new status code), the fixture's negative cases must be
+// updated here to match — that's the intent.
+import type { V5RouteReply } from '../../orchestrator/route-v2.js';
 
 // Helper — synthetic raw OlumiResponse and BoundaryError for the negative
 // tests. These are unused at runtime; vitest never executes this file.
 declare const _rawResponse: OlumiResponse;
 declare const _boundaryError: BoundaryError;
 declare const _ctx: FinaliserContext;
-declare const _reply: FastifyReply<{ Reply: V5RouteReplyMirror }>;
+declare const _reply: FastifyReply<{ Reply: V5RouteReply }>;
 
 // ─── Positive cases — must compile cleanly ────────────────────────────────
 

@@ -93,6 +93,7 @@ import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.j
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { getRequestId } from '../utils/request-id.js';
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
@@ -297,51 +298,62 @@ const EDIT_GRAPH_NEGATIVE_REGEX =
  * covers every possible pre-status output (per buildBoundaryError /
  * runPreFlight definitions).
  */
-type V5RouteReply = {
+export type V5RouteReply = {
   200: FinalisedV5Response;
   400: BoundaryError;
   422: BoundaryError;
   500: BoundaryError;
 };
 
+/**
+ * Mechanism B body (runtime defence in depth): preSerialization hook that
+ * asserts every 200-OK response body on the V5 route has been processed
+ * by `finaliseV5Response` (WeakSet membership). Catches any cast that
+ * evaded the type-system enforcement of mechanism A. On detection, logs
+ * a violation event and substitutes the egress-violation fallback so the
+ * wire response stays product-safe; production observability fires.
+ *
+ * Extracted as a named function (rather than inline in the hook
+ * registration) so it can be unit-tested directly without spinning up a
+ * Fastify instance. See response-finaliser-hook.test.ts.
+ */
+export const v5FinaliserPreSerializationHook = async (
+  request: import('fastify').FastifyRequest,
+  reply: import('fastify').FastifyReply,
+  payload: unknown,
+): Promise<unknown> => {
+  if (request.routeOptions.url !== '/orchestrate/v2/turn') return payload;
+  if (reply.statusCode !== 200) return payload;
+  if (isFinalisedV5Response(payload)) return payload;
+  log.error(
+    {
+      event: 'v5.finaliser.bypass_detected',
+      request_id: getRequestId(request),
+      route: request.routeOptions.url,
+      status: reply.statusCode,
+    },
+    'V5 200-OK response bypassed finaliser — substituting egress-violation fallback',
+  );
+  // Fail safe: substitute a typed fallback rather than ship the bypassing
+  // body. The fallback envelope is hard-coded schema-valid; no readiness
+  // is set (the bypass means we don't know what readiness should be).
+  return {
+    response_version: 2,
+    assistant_text: 'The server produced a response that failed validation.',
+    blocks: [
+      { type: 'error', error_code: 'EGRESS_CONTRACT_VIOLATION', severity: 'error' },
+    ],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: 'frame',
+  };
+};
+
 export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void> {
-  // Mechanism B (runtime defence in depth): preSerialization hook asserts
-  // every 200-OK response body has been processed by `finaliseV5Response`
-  // (membership in the WeakSet). Catches any cast that evaded the type
-  // system. On detection, logs a violation event and substitutes the
-  // egress-violation fallback so the wire response stays product-safe;
-  // production observability fires.
-  //
-  // Scoped to `/orchestrate/v2/turn` only via path check — global hook is
-  // simpler than route-scoped registration and the cost (one path
-  // comparison per send) is negligible.
-  app.addHook('preSerialization', async (request, reply, payload) => {
-    if (request.routeOptions.url !== '/orchestrate/v2/turn') return payload;
-    if (reply.statusCode !== 200) return payload;
-    if (isFinalisedV5Response(payload)) return payload;
-    log.error(
-      {
-        event: 'v5.finaliser.bypass_detected',
-        request_id: (request.headers['x-request-id'] as string | undefined) ?? null,
-        route: request.routeOptions.url,
-        status: reply.statusCode,
-      },
-      'V5 200-OK response bypassed finaliser — substituting egress-violation fallback',
-    );
-    // Fail safe: substitute a typed fallback rather than ship the bypassing
-    // body. The fallback envelope is hard-coded schema-valid; no readiness
-    // is set (the bypass means we don't know what readiness should be).
-    return {
-      response_version: 2,
-      assistant_text: 'The server produced a response that failed validation.',
-      blocks: [
-        { type: 'error', error_code: 'EGRESS_CONTRACT_VIOLATION', severity: 'error' },
-      ],
-      suggested_actions: [],
-      insights: [],
-      stage_indicator: 'frame',
-    };
-  });
+  // Scoped to `/orchestrate/v2/turn` only via the URL check inside the
+  // hook function — global registration is simpler than route-scoped
+  // and the cost (one URL comparison per non-V5 send) is negligible.
+  app.addHook('preSerialization', v5FinaliserPreSerializationHook);
 
   app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', async (req, reply) => {
     // Shared pre-flight: extension parse → B1 ingress → scenario upsert.

@@ -108,12 +108,15 @@ fi
 #
 # Any other file mentioning the identifier is producing or consuming a brand
 # outside its sanctioned surface — that's a cast-shape bypass.
+# Anchor each exclusion with the trailing `:` that grep -n always emits
+# between path and line number, so a file like `route-v2.ts.bak` cannot
+# match the `route-v2.ts` exclusion by substring.
 brand_refs=$(grep -rn 'FinalisedV5Response' \
   src/ \
   --include="*.ts" 2>/dev/null \
-  | grep -v "src/orchestrator-v5/response-finaliser\.ts" \
-  | grep -v "src/orchestrator-v5/__tests__/response-finaliser" \
-  | grep -v "src/orchestrator/route-v2\.ts" \
+  | grep -v "^src/orchestrator-v5/response-finaliser\.ts:" \
+  | grep -v "^src/orchestrator-v5/__tests__/response-finaliser" \
+  | grep -v "^src/orchestrator/route-v2\.ts:" \
   | grep -v "// finaliser-exempt:" \
   || true)
 
