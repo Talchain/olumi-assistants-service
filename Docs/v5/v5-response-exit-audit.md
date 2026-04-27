@@ -1,58 +1,57 @@
 # V5 response exit audit
 
-**Phase 0 of the "V5 response finaliser: structurally guaranteed analysis_ready" brief.** Maps every HTTP exit path that returns an `OlumiResponse` (or a `BoundaryError`) from the V5 dispatch in `src/orchestrator/route-v2.ts`, so the response finaliser can be wired at a single (or minimal) convergence point rather than per-composer.
+This document is the **contract** for V5 response finalisation, not a snapshot of route-v2.ts line numbers. Line numbers in route-v2.ts will change as new dispatch families land; the contract below — four mechanisms guarding "every 200-OK V5 wire body was produced by `finaliseV5Response`" — is what stays stable.
 
-**Verified at:** branch `claude/v5-response-finaliser` HEAD `14e1966b` (off staging `33c2a872` plus the four CEE-1..3 commits from the previous brief). Confirmed with `git diff 33c2a872..HEAD -- src/orchestrator/route-v2.ts` — zero changes to route-v2.ts since the audit fixture, so the line numbers below are authoritative.
+## Defence-in-depth contract (current)
 
-> **External review correction (2026-04-27).** An external CC review caught two P1 gaps in the original implementation: (1) the grep gate enforced "do not write `analysis_ready` directly" but did NOT enforce "every 200-OK send must go through the finaliser" — a new `reply.code(200).send` could bypass without writing the field; (2) the egress-drift fallback was sent unfinalised, contradicting this doc's claim that fallbacks are stamped. Both are fixed in commit `<filled in by commit>` by introducing a `sendFinalised200` helper that is the SOLE 200-OK exit site in route-v2.ts. The helper finalises the candidate, validates egress, and on drift finalises the validator-built fallback before sending. The grep gate now also fails when `reply.code(200).send` appears anywhere in route-v2.ts outside the helper body. Sections below describe the post-fix architecture; the original per-site wiring is no longer accurate.
+Four mechanisms enforce the contract. Each catches what the others miss; no single bypass slips through all four.
 
-## Exit-point table
+| # | Mechanism | What it catches | Where it lives |
+|---|---|---|---|
+| **A** | Type brand + status-keyed Reply | Every Fastify send shape: `reply.code(200).send(raw)`, `reply.send(raw)`, `reply.status(200).send(raw)`, `reply.code(200).type(...).send(raw)`, implicit return of raw object, `reply.code(500).send(brand)`, `reply.code(200).send(boundaryError)` | `src/orchestrator-v5/response-finaliser.ts` (brand); `src/orchestrator/route-v2.ts` (`V5RouteReply`) |
+| **B** | Runtime WeakSet hook | Casts that evaded the type system. The `preSerialization` hook substitutes the egress-violation fallback and emits `v5.finaliser.bypass_detected` — production-observable. | `src/orchestrator/route-v2.ts` (preSerialization hook) |
+| **C** | Compile-time `@ts-expect-error` tests | Brand regression — if the brand silently becomes structurally compatible with `OlumiResponse` (e.g. a refactor accidentally widens the type), `tsc` fails on "Unused @ts-expect-error directive". | `src/orchestrator-v5/__tests__/response-finaliser-types.ts` (intentionally NOT a `.test.ts` file so it runs through `tsconfig.build.json` on every push) |
+| **D** | Narrow grep gate | (D1) Direct `analysis_ready` writes in composers/handlers; (D2) `FinalisedV5Response` references outside the sanctioned files (catches `as`, `as unknown as`, type aliasing, `satisfies`). | `scripts/check-no-direct-analysis-ready.sh` (pre-push check #15) |
 
-| # | Path | Dispatch / producer | Exit line in `route-v2.ts` | HTTP | Body shape | Goes through finaliser? |
-|---|---|---|---|---|---|---|
-| 1 | Pre-flight failure | `runPreFlight` | 185 | `pre.status` (often 422) | `BoundaryError` | No (legitimate skip — request never reached dispatch) |
-| 2 | System event commit fail | `dispatchSystemEvent` (commit threw) | 225 | 500 | `BoundaryError` | No (500 skip — see below) |
-| 3 | System event egress drift | `dispatchSystemEvent` → `validateEgress.fallback` | 233 | 200 | `OlumiResponse` (egress fallback) | **Yes** (200-OK convergence) |
-| 4 | System event success | `dispatchSystemEvent` → `validateEgress.value` | 235 | 200 | `OlumiResponse` | **Yes** |
-| 5 | Chip-click handler fail | `dispatchChipClickRunAnalysis` outcome `handler_failure` | 276 | 500 | `BoundaryError` | No (500 skip) |
-| 6 | Chip-click result invalid | outcome `handler_result_invalid` | 286 | 500 | `BoundaryError` | No (500 skip) |
-| 7 | Chip-click commit fail | outcome `commit_failed` | 296 | 500 | `BoundaryError` | No (500 skip) |
-| 8 | Chip-click egress drift | outcome `ok` → `validateEgress.fallback` | 305 | 200 | `OlumiResponse` (egress fallback) | **Yes** |
-| 9 | Chip-click success | outcome `ok` → `validateEgress.value` | 307 | 200 | `OlumiResponse` | **Yes** |
-| 10 | Chip-click uncaught throw | catch block at 323 | 323 | 500 | `BoundaryError` | No (500 skip) |
-| 11 | Draft graph commit fail | `dispatchDraftGraph` (commitPerformed=false) | 368 | 500 | `BoundaryError` | No (500 skip) |
-| 12 | Draft graph egress drift | `dispatchDraftGraph` → `validateEgress.fallback` | 376 | 200 | `OlumiResponse` (egress fallback) | **Yes** |
-| 13 | Draft graph success | `dispatchDraftGraph` → `validateEgress.value` | 378 | 200 | `OlumiResponse` | **Yes** |
-| 14 | Draft graph uncaught throw | catch block at 399 | 399 | 500 | `BoundaryError` | No (500 skip) |
-| 15 | Edit graph commit fail | `dispatchEditGraph` (commitPerformed=false) | 448 | 500 | `BoundaryError` | No (500 skip) |
-| 16 | Edit graph egress drift | `dispatchEditGraph` → `validateEgress.fallback` | 456 | 200 | `OlumiResponse` (egress fallback) | **Yes** |
-| 17 | Edit graph success | `dispatchEditGraph` → `validateEgress.value` | 458 | 200 | `OlumiResponse` | **Yes** |
-| 18 | Edit graph uncaught throw | catch block at 474 | 474 | 500 | `BoundaryError` | No (500 skip) |
-| 19 | TurnExecutor commit fail | `runTurnExecutor` (commit_performed=false) | 539 | 500 | `BoundaryError` | No (500 skip) |
-| 20 | TurnExecutor egress drift | `runTurnExecutor` → `validateEgress.fallback` | 548 | 200 | `OlumiResponse` (egress fallback) | **Yes** |
-| 21 | TurnExecutor success | `runTurnExecutor` → `validateEgress.value` | 551 | 200 | `OlumiResponse` | **Yes** |
+**No single bypass slips through all four.** A determined caster who casts `{} as FinalisedV5Response` evades A, but the grep gate D2 catches the identifier reference, the WeakSet hook B substitutes the fallback at runtime, and (if they refactor the brand to make C's directives "unused") C fails the build. The next-reviewer question shifts from "have you considered Fastify shape X?" to "explain how a single change simultaneously evades the type system, runtime hook, compile-time tests, and grep gate".
 
-**5 dispatch families × {success, egress-drift fallback} = 10 200-OK sites that the finaliser must wire.**
-**11 500 / `BoundaryError` sites legitimately skip** — see decision below.
+## Why this is the structural fix
 
-## Convergence
+Three rounds of external review on this brief and the prior one each found the same failure mode: **regex gates leak**. Each iteration was Claude declaring "the gate catches X" → reviewer enumerating bypass shape Y. The final lesson: stop trying to enforce a structural property (every 200-OK body went through the helper) with a syntactic primitive (grep). Type-brand the body; let the type system enforce it; layer runtime + tests + a narrow grep as defence in depth.
 
-Every 200-OK V5 HTTP exit passes through `validateEgress()` ([src/validators/b1.ts:137](../../src/validators/b1.ts#L137)) before `reply.code(200).send(...)`. No exit bypasses it. No V5 routes exist outside `src/orchestrator/route-v2.ts` (confirmed by `grep -rn "reply.send\|reply.code" src/` — every V5-relevant site is in route-v2.ts).
+## How a future contributor adds a new dispatch path
 
-**Post-fix design — `sendFinalised200` helper.** The finaliser is wired at a SINGLE site rather than five: `sendFinalised200(reply, requestId, exitPath, response, ctx)` in route-v2.ts is the sole sanctioned `reply.code(200).send` call. Each of the five dispatch families (system-event, chip-click, draft-graph, edit-graph, TurnExecutor) calls the helper instead of touching `reply` directly. The helper:
+1. Compute or surface an `AnalysisReadyPayload | undefined` on the dispatch-result type.
+2. In `route-v2.ts`, after the new dispatch returns, call `sendFinalised200(reply, requestId, exitPath, response, { analysisReady })`. Status-keyed Reply makes this the only ergonomic compile-fitting option.
+3. Add the new exit-path label to the `V5ExitPath` union.
+4. Update this audit doc's "current dispatch families" list (below).
 
-1. Finalises the candidate response (`finaliseV5Response(candidate, ctx)`) — stamps `analysis_ready` when `ctx.analysisReady` is provided.
-2. Validates the post-finalise shape (`validateEgress(finalised, requestId)`) — schema check sees the post-stamped shape, so a future schema tightening (e.g. requiring `computed_at` to be ISO-formatted) catches drift in the finaliser itself.
-3. **On egress drift, also finalises the validator-built fallback** before sending, so the wire response carries `analysis_ready` even when the upstream produced a malformed envelope. The fallback is a hard-coded schema-valid `OlumiResponse`; the finaliser only adds the passthrough `analysis_ready` field, so the post-finalise fallback remains schema-valid (we don't re-validate to avoid recursive-failure complexity for negligible safety gain).
-4. Emits `v5.response.finalised` telemetry with the actual wire shape (the soak metric for confirming emission rate).
-5. Sends.
+If the new path produces a non-2xx response, use `reply.code(N).send(boundaryError)` directly — `V5RouteReply` types `N: BoundaryError` for non-200 keys.
 
-**Enforcement.** The grep gate at `scripts/check-no-direct-analysis-ready.sh` now has TWO rules:
+## Current dispatch families (as of HEAD)
 
-- No composer / handler / TurnExecutor may write `analysis_ready` directly (catches direct property assignment, dot-assignment, dynamic-key assignment, object-literal property).
-- No `reply.code(200).send(...)` may appear in `src/orchestrator/route-v2.ts` outside the body of `sendFinalised200`. Adversarially verified: injecting `return reply.code(200).send({ ... })` anywhere else in route-v2.ts fires the gate with exit code 1.
+Five 200-OK families converge on `sendFinalised200`. Eleven non-2xx exits use `reply.code(N).send(boundaryError)` directly. The exact line numbers are not maintained here — look at `route-v2.ts` for the current state.
 
-This closes the route-exit bypass that the previous wiring (one `validateEgress` + `reply.send` per dispatch family) left unenforced.
+| Family | Exit type | Body type |
+|---|---|---|
+| Pre-flight | 4xx (typically 422) | `BoundaryError` |
+| System event | 200 OR 500 | `FinalisedV5Response` OR `BoundaryError` |
+| Chip-click | 200 OR 500 | `FinalisedV5Response` OR `BoundaryError` |
+| Draft-graph | 200 OR 500 | `FinalisedV5Response` OR `BoundaryError` |
+| Edit-graph | 200 OR 500 | `FinalisedV5Response` OR `BoundaryError` |
+| TurnExecutor | 200 OR 500 | `FinalisedV5Response` OR `BoundaryError` |
+
+Each 500 site carries an inline comment `// 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)` to prevent a future "fix" that would silently invalidate the prior-store-value invariant.
+
+## How `sendFinalised200` works
+
+The route's only sanctioned `reply.code(200).send(...)` site. Every dispatch family calls it.
+
+1. **Finalise the candidate** — `finaliseV5Response(candidate, ctx)` stamps `analysis_ready` (when `ctx.analysisReady` is provided), brands the response, registers WeakSet membership.
+2. **Validate the post-finalise shape** — `validateEgress(finalised, requestId)` runs Zod schema validation. Sees the post-stamped shape, so a future schema tightening catches drift in the finaliser itself.
+3. **Re-finalise the validated value (or fallback on drift)** — Zod's `safeParse` returns a fresh object, losing WeakSet membership. So the wire body is a fresh `finaliseV5Response(egress.value | egress.fallback, ctx)` call, ensuring the body the wire sees is always brand-tracked. Idempotent: the second `computed_at` is sub-ms-different from the first; observable behaviour is identical.
+4. **Telemetry** — `v5.response.finalised` event with `{exit_path, analysis_ready_emitted, analysis_ready_status, computed_at, egress_ok}`.
+5. **Send** — `reply.code(200).send(wireBody)`. The Reply type forces `wireBody: FinalisedV5Response`; raw or `BoundaryError` is a tsc error.
 
 ## Decision: 500 / BoundaryError paths skip the finaliser
 
@@ -81,50 +80,24 @@ This is correct because:
 
 The stamped value is the dispatch's `analysisReady` (computed from the same graph state the original response would have used). This means even when the upstream produced a malformed envelope, the UI still gets a coherent readiness view.
 
-## Dispatch result types — extension plan
+## Adversarial bypass enumeration (verified)
 
-To pass the precomputed payload from each dispatch path to the finaliser without composer involvement, each dispatch result type gets an optional `analysisReady?: AnalysisReadyPayload` field:
+Each shape was tested by injection + observation. No shape evades all four mechanisms.
 
-| Dispatch result type | File:line | Source of `analysisReady` |
+| # | Bypass shape | Caught by |
 |---|---|---|
-| `DispatchSystemEventResult` | [system-events/dispatch.ts:39](../../src/orchestrator-v5/system-events/dispatch.ts#L39) | Always undefined — system events (undo/redo/etc.) carry no graph state |
-| `DispatchChipClickRunAnalysisResult` | [handlers/chip-click-dispatch.ts:78](../../src/orchestrator-v5/handlers/chip-click-dispatch.ts#L78) | Computed from post-run graph on `outcome: 'ok'` only; `undefined` on the three failure outcomes (matches the failure-skip rule) |
-| `DispatchDraftGraphResult` | [handlers/draft-graph-dispatch.ts:65](../../src/orchestrator-v5/handlers/draft-graph-dispatch.ts#L65) | The pipeline's rich `result.analysisReady` (already exposed on `DraftGraphResult`) |
-| `DispatchEditGraphResult` | [handlers/edit-graph-dispatch.ts:69](../../src/orchestrator-v5/handlers/edit-graph-dispatch.ts#L69) | `computeStructuralReadiness(editResult.appliedGraph)` (moved from inside `editResultToOlumiResponse` per CEE-1.5; now produced as a sibling field on the dispatch result) |
-| `TurnExecutorRunResult` | [turn-executor.ts:137](../../src/orchestrator-v5/turn-executor.ts#L137) | `analysisReadyForTurn` (already computed at lines 368-378; surface as a top-level field, not inside telemetry) |
+| 1 | `reply.code(200).send(rawOlumiResponse)` | A (tsc error: `Argument not assignable to FinalisedV5Response`) |
+| 2 | `reply.send(rawObject)` (Fastify defaults to 200) | A (tsc error: `Object literal may only specify known properties, and 'response_version' does not exist in type 'V5RouteReply'`) |
+| 3 | `reply.status(200).send(raw)` | A (status alias enforces same brand) |
+| 4 | `reply.code(200).send(boundaryError)` | A (status↔body pairing rejects) |
+| 5 | `reply.code(500).send(finalised)` | A (5xx wants BoundaryError, not the brand) |
+| 6 | `return rawObject` (implicit handler return) | A (status-keyed Reply rejects raw at the route level) |
+| 7 | `reply.code(200).type('json').send(raw)` (chained interleave) | A (covered by Reply map at `send` resolution) |
+| 8 | `{} as FinalisedV5Response` (cast bypass) | D2 (grep catches identifier outside sanctioned files); B (WeakSet membership absent at runtime) |
+| 9 | `as unknown as FinalisedV5Response` | D2 |
+| 10 | `type Brand = FinalisedV5Response; ... as Brand` | D2 (grep catches the `FinalisedV5Response` reference in the alias declaration) |
+| 11 | `satisfies FinalisedV5Response` | D2 (mentions identifier) |
+| 12 | Brand silently regresses (e.g. refactor widens the type) | C (`@ts-expect-error` annotations turn into `Unused directive` errors when the negative cases stop type-erroring) |
+| 13 | New dispatch family added without calling helper | A (status-keyed Reply forces the helper) + telemetry absent (visible in soak metrics) |
 
-After this surfacing, route-v2.ts wires each `validateEgress` site as `validateEgress(finaliseV5Response(dispatchResult.response, { analysisReady: dispatchResult.analysisReady }), requestId)`. Five sites, one pattern.
-
-## Composer reverts — to remove after wiring
-
-The previous brief (`claude/v5-analysis-ready-contract` commits `0462a1c6` / `8f82285f` / `15231c37` / `14e1966b`) added per-composer `analysisReady` parameters and conditional emission. The finaliser replaces all of it. Six files revert:
-
-| File | Lines to revert |
-|---|---|
-| [src/orchestrator-v5/compose.ts](../../src/orchestrator-v5/compose.ts) | `analysisReady?` param on three composers + conditional spreads |
-| [src/orchestrator-v5/compose/recoverable-validation-response.ts](../../src/orchestrator-v5/compose/recoverable-validation-response.ts) | `analysisReady` arg + conditional spread |
-| [src/orchestrator-v5/compose/validation-failure-responses.ts](../../src/orchestrator-v5/compose/validation-failure-responses.ts) | `analysisReady` on `composeValidationFailure` + `wrapResponse` + conditional spread |
-| [src/orchestrator-v5/compose/unsupported-action-response.ts](../../src/orchestrator-v5/compose/unsupported-action-response.ts) | `analysisReady` on `ComposeUnsupportedActionInput` + conditional spread |
-| [src/orchestrator-v5/handlers/draft-graph-dispatch.ts](../../src/orchestrator-v5/handlers/draft-graph-dispatch.ts) | `attachComputedAt` call + conditional spread inside `draftResultToOlumiResponse`; surface `result.analysisReady` raw on `DispatchDraftGraphResult` instead |
-| [src/orchestrator-v5/handlers/edit-graph-dispatch.ts](../../src/orchestrator-v5/handlers/edit-graph-dispatch.ts) | `computeStructuralReadiness` call + `attachComputedAt` + conditional spread inside `editResultToOlumiResponse`; move the `computeStructuralReadiness` call into `dispatchEditGraph` and surface on `DispatchEditGraphResult` |
-
-`turn-executor.ts` also reverts the seven `analysisReady: analysisReadyForTurn` arg-passes (one per compose call site) and the `v5.analysis_ready.emit` log inside `finalizeRun` — the latter moves to route-v2.ts as `v5.response.finalised`.
-
-## Verification of finaliser contract (post-implementation)
-
-```bash
-grep -rn "analysis_ready" src/orchestrator-v5/ \
-  | grep -v "__tests__" \
-  | grep -v "response-finaliser" \
-  | grep -v "analysis-ready-emit" \
-  | grep -v "computeStructuralReadiness" \
-  | grep -v "AnalysisReadyPayload"
-```
-
-After the finaliser lands, the only remaining hits should be:
-- TurnExecutor's `analysisReadyForTurn` computation site
-- Dispatch-result type field declarations (`analysisReady?: AnalysisReadyPayload`)
-- The route-v2.ts finaliser invocations themselves
-- Documentation comments
-
-Anything else is a contract violation.
+The remaining residual: a contributor casts `as FinalisedV5Response` in a sanctioned file (e.g. inside a test that's exempt). Reviewable; no automated guard. Documented as the single intentional escape hatch.

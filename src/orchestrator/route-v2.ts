@@ -92,7 +92,7 @@ import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
-import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
@@ -155,15 +155,28 @@ type V5ExitPath =
  * rather than letting bad timestamps through.
  */
 function sendFinalised200(
-  reply: import('fastify').FastifyReply,
+  reply: import('fastify').FastifyReply<{ Reply: V5RouteReply }>,
   requestId: string,
   exitPath: V5ExitPath,
   candidate: import('@talchain/schemas/boundary').OlumiResponse,
   ctx: { readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload },
-): import('fastify').FastifyReply {
-  const finalised = finaliseV5Response(candidate, ctx);
-  const egress = validateEgress(finalised, requestId);
-  const wireBody = egress.ok ? egress.value : finaliseV5Response(egress.fallback, ctx);
+): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
+  // Mechanism A in action — the route's `Reply: V5RouteReply` makes
+  // `reply.code(200).send(<non-branded>)` a tsc error. To satisfy that,
+  // `wireBody` MUST be the finaliser's output. There's a subtle wrinkle:
+  // `validateEgress` runs the response through Zod's safeParse, which
+  // returns a fresh object — losing the WeakSet membership and (for the
+  // type-checker) the brand. So we run the validator on a finalised
+  // candidate to surface schema drift, but the wire body is always a
+  // FRESH finalise call against the validated value (or fallback). This
+  // double-finalisation is cheap (WeakSet add + shallow spread + ISO
+  // stamp) and idempotent in observable behaviour; the second computed_at
+  // is sub-ms-different from the first.
+  const candidateFinalised = finaliseV5Response(candidate, ctx);
+  const egress = validateEgress(candidateFinalised, requestId);
+  const wireBody = egress.ok
+    ? finaliseV5Response(egress.value, ctx)
+    : finaliseV5Response(egress.fallback, ctx);
   if (!egress.ok) {
     log.error(
       { request_id: requestId, exit_path: exitPath },
@@ -263,8 +276,74 @@ const EDIT_GRAPH_POSITIVE_REGEX =
 const EDIT_GRAPH_NEGATIVE_REGEX =
   /\b(explain|compare|what would|flip|why|how does|tell me|show me|describe)\b/i;
 
+/**
+ * V5 status-keyed Reply contract — the type-system half of the response
+ * finaliser's defence in depth (mechanism A in
+ * src/orchestrator-v5/response-finaliser.ts).
+ *
+ * Fastify 5 supports status-code-keyed Reply types via
+ * `ReplyKeysToCodes<keyof RouteGeneric['Reply']>` and
+ * `ResolveReplyTypeWithRouteGeneric`. Declaring the route with this shape
+ * makes the type-checker enforce status↔body pairing at every send site:
+ *
+ *   - `reply.code(200).send(raw)`           — type error: raw is not branded
+ *   - `reply.code(200).send(boundaryError)` — type error: 200 wants brand
+ *   - `reply.code(500).send(brand)`         — type error: 500 wants BoundaryError
+ *   - `reply.code(500).send(boundaryError)` — OK
+ *   - `reply.send(raw)` (default 200)       — type error: 200 wants brand
+ *
+ * The pre-flight 422 path uses `pre.status` which is typed as the
+ * pre-flight failure status. The `400 | 422 | 500: BoundaryError` mapping
+ * covers every possible pre-status output (per buildBoundaryError /
+ * runPreFlight definitions).
+ */
+type V5RouteReply = {
+  200: FinalisedV5Response;
+  400: BoundaryError;
+  422: BoundaryError;
+  500: BoundaryError;
+};
+
 export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void> {
-  app.post('/orchestrate/v2/turn', async (req, reply) => {
+  // Mechanism B (runtime defence in depth): preSerialization hook asserts
+  // every 200-OK response body has been processed by `finaliseV5Response`
+  // (membership in the WeakSet). Catches any cast that evaded the type
+  // system. On detection, logs a violation event and substitutes the
+  // egress-violation fallback so the wire response stays product-safe;
+  // production observability fires.
+  //
+  // Scoped to `/orchestrate/v2/turn` only via path check — global hook is
+  // simpler than route-scoped registration and the cost (one path
+  // comparison per send) is negligible.
+  app.addHook('preSerialization', async (request, reply, payload) => {
+    if (request.routeOptions.url !== '/orchestrate/v2/turn') return payload;
+    if (reply.statusCode !== 200) return payload;
+    if (isFinalisedV5Response(payload)) return payload;
+    log.error(
+      {
+        event: 'v5.finaliser.bypass_detected',
+        request_id: (request.headers['x-request-id'] as string | undefined) ?? null,
+        route: request.routeOptions.url,
+        status: reply.statusCode,
+      },
+      'V5 200-OK response bypassed finaliser — substituting egress-violation fallback',
+    );
+    // Fail safe: substitute a typed fallback rather than ship the bypassing
+    // body. The fallback envelope is hard-coded schema-valid; no readiness
+    // is set (the bypass means we don't know what readiness should be).
+    return {
+      response_version: 2,
+      assistant_text: 'The server produced a response that failed validation.',
+      blocks: [
+        { type: 'error', error_code: 'EGRESS_CONTRACT_VIOLATION', severity: 'error' },
+      ],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'frame',
+    };
+  });
+
+  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', async (req, reply) => {
     // Shared pre-flight: extension parse → B1 ingress → scenario upsert.
     // Every dispatch branch in this handler runs AFTER this call. The
     // helper is the only site that may invoke those three primitives in
