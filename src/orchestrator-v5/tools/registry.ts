@@ -83,9 +83,18 @@ import { createPLoTClient, type PLoTClient } from '../../orchestrator/plot-clien
 
 import {
   createRunAnalysisHandler,
+  type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from './handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
+
+// Re-exported for the chip-click dispatch path. The handler-ownership
+// invariant ([scripts/validate-handler-ownership.sh]) restricts direct
+// imports of `tools/handlers/run-analysis` to this file. Chip-click
+// dispatch needs `ScenarioReader` + `RunAnalysisScenarioSnapshot` to
+// inject a one-shot reader (single-source-of-truth snapshot wiring);
+// re-exporting from the sanctioned surface satisfies the invariant.
+export type { ScenarioReader, RunAnalysisScenarioSnapshot };
 
 /**
  * Input to a handler invocation. Populated by dispatch.ts from the same

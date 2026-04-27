@@ -80,6 +80,8 @@
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
+import { config } from '../config/index.js';
+
 import {
   attachComputedAt,
   type AnalysisReadyPayload,
@@ -174,9 +176,26 @@ export function finaliseV5Response(
   response: OlumiResponse,
   ctx: FinaliserContext,
 ): FinalisedV5Response {
+  // Defensive ceeTrace scrub: V5 source code on this branch does not write
+  // `ceeTrace` (verified by exhaustive grep), but the V5 golden-path replay
+  // observed `ceeTrace.reason: "CEE"` on a Step 4 wire response from an
+  // earlier deploy. Strip-on-egress is a permanent guard against any
+  // upstream (legacy CEE pipeline, Fastify hook, future regression) that
+  // could attach the field. When CEE_TURN_DEBUG_ENABLED is true the field
+  // is preserved for operator inspection; otherwise it is removed before
+  // analysis_ready stamping so internal trace shapes never reach the wire.
+  const debugEnabled = config.cee?.turnDebugEnabled === true;
+  const scrubbed = debugEnabled ? response : stripCeeTrace(response);
   const stamped: OlumiResponse = ctx.analysisReady
-    ? { ...response, analysis_ready: attachComputedAt(ctx.analysisReady) }
-    : { ...response };
+    ? { ...scrubbed, analysis_ready: attachComputedAt(ctx.analysisReady) }
+    : { ...scrubbed };
   FINALISED_RESPONSES.add(stamped);
   return stamped as FinalisedV5Response;
+}
+
+function stripCeeTrace(response: OlumiResponse): OlumiResponse {
+  if (!('ceeTrace' in (response as Record<string, unknown>))) return response;
+  const clone: Record<string, unknown> = { ...(response as Record<string, unknown>) };
+  delete clone.ceeTrace;
+  return clone as OlumiResponse;
 }

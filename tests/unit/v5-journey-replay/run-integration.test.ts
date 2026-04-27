@@ -23,7 +23,7 @@ class ProcessExitError extends Error {
   }
 }
 
-import { stubFetchRouter } from './_test-helpers.js';
+import { stubFetchRouter, REPLAY_FIXTURE_ANALYSIS_READY } from './_test-helpers.js';
 
 let originalArgv: string[] = [];
 let originalExit: typeof process.exit;
@@ -103,6 +103,9 @@ describe('full replay run (mocked staging service)', () => {
               { id: 'c1', label: 'Run analysis', message: 'run', action_type: 'chip_click' },
             ],
             stage_indicator: 'frame',
+            // Harness Step 4 hard-fails when analysis_ready is absent
+            // (catches the chip-click → finaliser wire regression).
+            analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
           },
         };
       }
@@ -230,6 +233,7 @@ describe('full replay run (mocked staging service)', () => {
             response_version: 2,
             assistant_text: 'ok',
             suggested_actions: [{ id: 'c1', label: 'Chip', message: 'msg' }],
+            analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
           },
         };
       }

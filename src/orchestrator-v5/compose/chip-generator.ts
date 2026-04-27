@@ -45,6 +45,7 @@
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 import type { StageType } from '@talchain/schemas/boundary';
 
+import { log } from '../../utils/telemetry.js';
 import type { SuggestedAction } from './types.js';
 import type { HandlerValidationRegistry } from '../routing/validator.js';
 import { curatedHandlerChips } from './helpers.js';
@@ -92,10 +93,78 @@ export interface ChipGeneratorInput {
 const MAX_CHIPS = 3;
 
 /**
+ * Defensive chip-egress validator. Drops chips that cannot map cleanly to a
+ * registered action: literal `null` action_types (defence against upstream
+ * regressions that fill optional fields with null), and action_types that
+ * point at handlers absent from the validation registry. Prompt chips
+ * (action_type omitted entirely) pass through unchanged — they are
+ * conversational text, not handler invocations.
+ *
+ * Policy: dead or misleading chips are worse than missing chips. No
+ * fallback action_type is invented; the offending chip is suppressed.
+ */
+export function validateAndFilterChips(
+  chips: readonly SuggestedAction[],
+  registry: HandlerValidationRegistry,
+): readonly SuggestedAction[] {
+  return chips.filter((chip) => {
+    if (!('action_type' in chip)) return true;
+    const at = (chip as { action_type?: unknown }).action_type;
+    if (at === undefined) return true;
+    if (at === null) {
+      // Silent drops hide broken chip generation upstream — emit a
+      // structured warning so any regression that re-introduces a
+      // null action_type surfaces in logs.
+      log.warn(
+        {
+          event: 'v5.chip.suppressed',
+          action_type: null,
+          reason: 'null_action_type',
+          chip_label: (chip as { label?: unknown }).label ?? null,
+        },
+        'V5 chip suppression — chip dropped because action_type was literally null',
+      );
+      return false;
+    }
+    if (typeof at !== 'string') {
+      log.warn(
+        {
+          event: 'v5.chip.suppressed',
+          action_type: typeof at,
+          reason: 'null_action_type',
+          chip_label: (chip as { label?: unknown }).label ?? null,
+        },
+        'V5 chip suppression — chip dropped because action_type was not a string',
+      );
+      return false;
+    }
+    if (registry[at] == null) {
+      log.warn(
+        {
+          event: 'v5.chip.suppressed',
+          action_type: at,
+          reason: 'unregistered_handler',
+          chip_label: (chip as { label?: unknown }).label ?? null,
+        },
+        'V5 chip suppression — chip dropped because action_type points at an unregistered handler',
+      );
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
  * Build chips for the compose layer. Returns at most MAX_CHIPS. Returns
- * empty array when no rule applies for the current stage/signals.
+ * empty array when no rule applies for the current stage/signals. All
+ * emitted chips are passed through `validateAndFilterChips` so a chip
+ * with an unmapped or literally-null `action_type` cannot reach the wire.
  */
 export function generateChips(input: ChipGeneratorInput): readonly SuggestedAction[] {
+  return validateAndFilterChips(generateChipsRaw(input), input.validationRegistry);
+}
+
+function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[] {
   const handlerJustRan = findHandlerJustRan(input.handlerFacts);
   const hasAnalysis = input.analysis != null;
   const robustnessIsFragile =
@@ -234,6 +303,7 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
   // converse turns, no chip is meaningful.
   return [];
 }
+
 
 function findHandlerJustRan(
   facts: readonly HandlerFact[] | undefined,

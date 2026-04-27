@@ -197,3 +197,79 @@ If further investigation in Render logs reveals Step 5 fails for an independent 
 - **V5 routing prompt hash on staging is unverified.** The expected hash `2e25001a025e288c` for `Prompts/v38.2.txt` was sourced from the harness header; staging does not surface the loaded V5 prompt hash via any admin endpoint (only V1 store-backed prompts appear in `/admin/prompts/verify`).
 - **Step 5's State-vs-Prompt root-cause split needs server logs.** Without `session.read_degraded` telemetry events and the actual prompt context Sonnet received on Step 5, attribution between (a) handler-fact read failure, (b) prompt not surfacing facts, and (c) commit/read race remains a triage choice. The Composition-layer fix at Step 4 (the binding constraint) plausibly resolves the user-visible symptom regardless of which sub-cause dominates.
 - **Independent curl session and harness session used different scenario ids.** The harness session (`5ba22a71-…`) and the curl session (`5b6a7d2b-…`) are two separate scenarios that were run within ~3 minutes of each other against the same staging build. Findings replicate across both runs (both produced 6/6 structural pass with the same content findings on Step 4 and Step 5), so the conclusions are robust to single-run noise.
+
+---
+
+## Delta — `claude/v5-chip-click-analysis-ready` (pending staging deploy)
+
+Date: 2026-04-27
+Branch: `claude/v5-chip-click-analysis-ready` (off `claude/v5-response-finaliser` HEAD)
+Status: **awaiting staging deploy** — pass/fail counts and binding-constraint claims will be updated after a staging replay runs with `--expected-build` matching the deployed SHA.
+
+### What changed
+
+Targeted at the binding constraint (Hiring Step 4 / Finding 4.1) plus Paul's defensive-scrub scope expansion on Tasks 5 and 6 of the brief.
+
+| # | Change | File(s) |
+|---|---|---|
+| 1 | **Wire `analysisReady` from chip-click dispatch — single-source-of-truth snapshot wiring.** The dispatcher pre-loads the scenario snapshot ONCE via `loadScenarioSnapshotForRunAnalysis(scenario_id)` and injects a one-shot `ScenarioReader` returning that exact cached snapshot into the per-call registry (`createRegistry({ scenarioReader })`). After commit, `computeStructuralReadiness(snapshot.graph)` derives readiness from the same `GraphV3T` reference the handler operated on. **No second persistence read, no TOCTOU window** — a concurrent edit-graph dispatch from another session cannot drift readiness from what the handler saw. Snapshot-load failure paths log `analysis_ready_missing_reason` ("snapshot_load_failed" or "no_goal_node") so the original baseline regression cannot recur as an unobservable false negative. `route-v2.ts:481-483` already forwards `cc.analysisReady` to `sendFinalised200`; the chain is now intact. | [src/orchestrator-v5/handlers/chip-click-dispatch.ts](../../src/orchestrator-v5/handlers/chip-click-dispatch.ts), [src/orchestrator-v5/tools/registry.ts](../../src/orchestrator-v5/tools/registry.ts) (re-exports `ScenarioReader` + `RunAnalysisScenarioSnapshot` to satisfy the handler-ownership invariant) |
+| 2 | **Defensive `ceeTrace` scrub on egress.** When `CEE_TURN_DEBUG_ENABLED=false` the finaliser strips any `ceeTrace` field from the response before stamping `analysis_ready`. No V5 source on this branch writes `ceeTrace` (verified by exhaustive grep), but the baseline observed it from an upstream layer; this is a permanent guard. | [src/orchestrator-v5/response-finaliser.ts](../../src/orchestrator-v5/response-finaliser.ts) |
+| 3 | **Defensive chip-suppression validation.** `validateAndFilterChips` drops any chip whose `action_type` is literally `null` or points at an unregistered handler. Prompt chips (no `action_type` field) pass through unchanged. No fallback action_type is invented. | [src/orchestrator-v5/compose/chip-generator.ts](../../src/orchestrator-v5/compose/chip-generator.ts) |
+
+### Tests added (all green locally)
+
+| Test | Coverage |
+|---|---|
+| [chip-click-dispatch-analysis-ready.test.ts](../../src/orchestrator-v5/handlers/__tests__/chip-click-dispatch-analysis-ready.test.ts) | 4 cases — uses a REAL schema-valid GraphV3T fixture and the REAL `computeStructuralReadiness` (no GraphV3 / helper mocks): (a) `analysisReady` surfaces on dispatch result; (b) snapshot loaded EXACTLY ONCE and the same object identity is shared with handler reader and readiness derivation (`expect(readerOutput).toBe(snapshot)` — TOCTOU regression guard); (c) **race/regression**: a divergent post-edit graph queued during handler execution is NEVER consumed because there is no second read; (d) graceful failure when persisted graph is missing. |
+| Schema sweep + negative-then-positive contract in [response-finaliser.test.ts](../../src/orchestrator-v5/__tests__/response-finaliser.test.ts) | `composeToolCallResponse` omits `analysis_ready` (negative); `finaliseV5Response` stamps it on the same envelope (positive); ceeTrace scrub: stripped when debug disabled (3 cases) AND **preserved when `CEE_TURN_DEBUG_ENABLED=true`** (proves opt-out behaviour, not always-on). |
+| New cases in [route-v2-chip-click.test.ts](../../tests/integration/orchestrator/route-v2-chip-click.test.ts) | Full-path: chip-click → dispatch → finaliser → wire. Asserts `analysis_ready` present with ISO-8601 `computed_at` when supplied; absent when not. |
+| [chip-suppression.test.ts](../../src/orchestrator-v5/compose/__tests__/chip-suppression.test.ts) | 7 cases — null suppressed, unregistered suppressed, prompt chip kept, registered chip kept, no fallback fabrication. |
+| [step5-denial-phrases.test.ts](../../tests/unit/v5-journey-replay/step5-denial-phrases.test.ts) | Replay-harness `assertExplainLeader` hard-fails on 15 specific denial shapes (`results aren't back yet`, `haven't run the analysis`, `analysis is not ready`, `simulation hasn't completed`, etc.), with **8 whitelisted false-positive shapes** ("no further analysis required", "I haven't run a sensitivity analysis on that specific factor, but the leading option is X", etc.) ensuring legitimate analysis-state discussion does not trip the guard. |
+| `assertAnalysisRun` in [tools/v5-journey-replay/assertions.ts](../../tools/v5-journey-replay/assertions.ts) (extended) | **Step 4 wire `analysis_ready` is now a hard assertion**: replay row fails with `step_4_analysis_ready_missing` / `_unexpected_status` / `_options_too_few` / `_goal_node_id_missing` / `_computed_at_missing` if the field is absent or malformed. Closes the gap where Step 4 quietly passed at the structural level while shipping no readiness signal. |
+
+### Local replay attempted
+
+```
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url http://localhost:3101 \
+  --out /tmp/v5-replay-local.md \
+  --scenario-prefix local-post-fix
+```
+
+Result: **environmentally blocked.** Step 1 (`1_draft_graph`) returned HTTP 500 with `reason: draft_graph_commit_failed` because local `.env` has LLM keys but no `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` (Supabase credentials are staging-only per the project's session note). Steps 2–6 skipped on chain dependency. The local server itself is healthy (`/healthz` 200, V5 enabled, route registered, auth working) — the failure is at the persistence layer, not in the wire fix.
+
+The wire fix is verified via the route-level integration test (Task 3c above) which directly proves chip-click → dispatch → finaliser → wire emits `analysis_ready` on the response body.
+
+### Verification gauntlet (local, all green)
+
+- `pnpm exec tsc -p tsconfig.build.json --noEmit` — clean
+- `bash scripts/check-no-direct-analysis-ready.sh` — clean (D1 + D2 mechanisms both pass)
+- `pnpm vitest run` — **719 test files, 12,608 tests passed; 32 skipped (network/integration gated); 0 regressions**
+- `bash scripts/validate-prepush.sh` — all 15 stages pass
+
+### Pending — staging replay
+
+After staging deploy, run:
+
+```
+OLUMI_REPLAY_API_KEY=<staging-key> \
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --expected-build <staging-build-hash-after-deploy> \
+  --out Docs/v5/v5-golden-path-evidence-cee.md \
+  --scenario-prefix staging-post-fix
+```
+
+Acceptance criteria:
+- 6/6 pass
+- Step 4 wire response carries `analysis_ready` (Finding 4.1 closed)
+- Step 5 `assistant_text` length > 200 chars, contains at least one option label drafted in Step 1, AND no denial phrase per the new harness assertion (Finding 5.1 closed)
+- No `ceeTrace` on wire (Finding 4.2 confirmed clean by defensive scrub)
+- No chips with literal `action_type: null` (Finding 5.2 confirmed clean by suppression pass)
+- `--expected-build` matches the deployed SHA
+
+If staging replay goes green, this evidence file will be updated with revised pass/fail counts, the binding constraint marked **closed**, and the failure-summary table re-derived from the new replay.
+
+### Out of scope — Discoveries (deferred to separate brief)
+
+- **Frame-stage edit intents fall to coaching.** Steps 3 ("Add another option") and 6 ("Increase the budget factor") arrive at `stage='frame'`; the `dispatchEditGraph` gate at [route-v2.ts:594-598](../../src/orchestrator/route-v2.ts#L594-L598) requires `stage ∈ {analyse, decide}` so these messages fall through to TurnExecutor. Sonnet's `olumi_action.handler_id` enum at [routing/tool-schema.ts:62-77](../../src/orchestrator-v5/routing/tool-schema.ts#L62-L77) only exposes `run_analysis`; the registry at [tools/registry.ts:165-173](../../src/orchestrator-v5/tools/registry.ts#L165-L173) only registers `run_analysis`. Result: structural edit intents at frame stage produce coaching responses (~131–193 chars) with stage echoed. **Recommended follow-up brief:** either (a) lower the `dispatchEditGraph` stage gate to allow `frame`, (b) register `add_option`/`edit_factor` handlers and expose them in the tool schema, or (c) hybrid. Each deserves its own scope.

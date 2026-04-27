@@ -21,7 +21,7 @@
  *      new compose function would silently bypass the contract.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 
 import {
@@ -278,6 +278,118 @@ describe('finaliser contract — schema sweep across compose surface', () => {
 // schema sweep does — composer outputs are inspected for unexpected
 // analysis_ready presence regardless of how it was set. See
 // adversarial-bypass note in scripts/check-no-direct-analysis-ready.sh.
+
+// ─── Group 4.5: chip-click compose → finaliser end-to-end contract ────────
+//
+// The V5 golden-path Step 4 is a chip-click → composeToolCallResponse →
+// finaliseV5Response chain. This test pins both halves of the ownership
+// contract in one assertion: composer never writes analysis_ready
+// (negative), finaliser stamps it (positive). Designed to be hard to
+// silently break — any drift in either direction fails the test.
+
+describe('finaliser contract — chip-click compose negative-then-positive', () => {
+  it('composeToolCallResponse omits analysis_ready; finaliseV5Response stamps it on the same envelope', () => {
+    const env = composeToolCallResponse({
+      orientation: '',
+      confirmation: 'Ran analysis on your current scenario.',
+      coaching: null,
+      stage: 'analyse',
+    });
+
+    // Negative: composer surface clean.
+    expect('analysis_ready' in env).toBe(false);
+
+    // Positive: feed THAT exact envelope into the finaliser with a payload.
+    const finalised = finaliseV5Response(env, { analysisReady: fixturePayload() });
+    expect('analysis_ready' in finalised).toBe(true);
+    expect(finalised.analysis_ready).toBeDefined();
+    expect((finalised.analysis_ready as { status: string }).status).toBe('ready');
+    expect(
+      (finalised.analysis_ready as { computed_at?: string }).computed_at,
+    ).toBeTypeOf('string');
+
+    // Schema round-trip — proves the post-finalise body is wire-valid.
+    OlumiResponseSchema.parse(finalised);
+
+    // Composer envelope NOT mutated (caller refs stay clean).
+    expect('analysis_ready' in env).toBe(false);
+  });
+});
+
+// ─── Group 4.7: defensive ceeTrace scrub on egress ────────────────────────
+//
+// V5 source code does not write `ceeTrace`, but the V5 golden-path baseline
+// observed `ceeTrace.reason: "CEE"` on a Step 4 wire response from an
+// earlier deploy. The finaliser strips any `ceeTrace` field from the
+// response when CEE_TURN_DEBUG_ENABLED is false — a permanent guard
+// against upstream regressions.
+
+describe('finaliser contract — ceeTrace defensive scrub', () => {
+  it('strips ceeTrace when present on the response and debug is disabled', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const polluted = { ...env, ceeTrace: { reason: 'CEE' } } as typeof env & {
+      ceeTrace: { reason: string };
+    };
+    const finalised = finaliseV5Response(polluted, {});
+    expect('ceeTrace' in (finalised as object)).toBe(false);
+  });
+
+  it('strips ceeTrace alongside analysis_ready stamping when payload also provided', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const polluted = { ...env, ceeTrace: { reason: 'CEE', pipeline: 'foo' } } as typeof env & {
+      ceeTrace: { reason: string; pipeline: string };
+    };
+    const finalised = finaliseV5Response(polluted, { analysisReady: fixturePayload() });
+    expect('ceeTrace' in (finalised as object)).toBe(false);
+    expect('analysis_ready' in finalised).toBe(true);
+  });
+
+  it('no-op when ceeTrace is absent (no spurious key insertion)', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    expect('ceeTrace' in (env as object)).toBe(false);
+    const finalised = finaliseV5Response(env, {});
+    expect('ceeTrace' in (finalised as object)).toBe(false);
+  });
+
+  // Improvement 4: prove the ceeTrace strip is opt-out, not always-on.
+  // When CEE_TURN_DEBUG_ENABLED is true, operators inspecting wire
+  // responses MUST be able to see the trace field. The default-disabled
+  // behaviour is a defensive guard for production traffic; it must not
+  // block the documented debugging path.
+  it('preserves ceeTrace when CEE_TURN_DEBUG_ENABLED is explicitly true (operator inspection path)', async () => {
+    // Re-import the finaliser with the debug flag flipped so the
+    // module-level `config` proxy reads the overridden value at call
+    // time. We do this by stashing the original env, mutating it, and
+    // re-importing the module.
+    const ORIGINAL = process.env.CEE_TURN_DEBUG_ENABLED;
+    try {
+      process.env.CEE_TURN_DEBUG_ENABLED = 'true';
+      // Force config re-evaluation by clearing the module cache and
+      // re-importing the finaliser. The `config` value in
+      // response-finaliser.ts is a lazy Proxy that reads from process.env
+      // each access, so the new value is observed without cache busting.
+      vi.resetModules();
+      const { finaliseV5Response: finaliseDebug } = await import('../response-finaliser.js');
+      const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+      const polluted = { ...env, ceeTrace: { reason: 'CEE', pipeline: 'foo' } } as typeof env & {
+        ceeTrace: { reason: string; pipeline: string };
+      };
+      const finalised = finaliseDebug(polluted, {});
+      expect('ceeTrace' in (finalised as object)).toBe(true);
+      expect((finalised as unknown as { ceeTrace: unknown }).ceeTrace).toEqual({
+        reason: 'CEE',
+        pipeline: 'foo',
+      });
+    } finally {
+      if (ORIGINAL === undefined) {
+        delete process.env.CEE_TURN_DEBUG_ENABLED;
+      } else {
+        process.env.CEE_TURN_DEBUG_ENABLED = ORIGINAL;
+      }
+      vi.resetModules();
+    }
+  });
+});
 
 describe('finaliser contract — adversarial documentation', () => {
   it('schema sweep above catches any composer-set analysis_ready (object literal, dot, dynamic key)', () => {
