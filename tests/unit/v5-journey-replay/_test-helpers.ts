@@ -94,6 +94,20 @@ export const REPLAY_FIXTURE_ANALYSIS_READY = {
 };
 
 /**
+ * Shared `assistant_text` fixture for replay-harness fixtures. Set above
+ * the Step 5 substance gate (text_len > 200) so the same response shape
+ * can serve all six canonical steps without per-step branching. Includes
+ * `Option A` so it also clears the option-label gate when journey
+ * context is threaded — Step 1 of the replay parses option labels from
+ * `draft_graph.nodes`, so any fixture lacking a draft_graph leaves the
+ * label gate disabled (and this filler is benign in that case).
+ */
+export const REPLAY_FIXTURE_ASSISTANT_TEXT =
+  'Looking at the analysis, Option A leads with about 62% probability against the goal. ' +
+  'The strongest driver is the cost factor, and the result is sensitive to a roughly 10% ' +
+  'shift in the cost→outcome edge. The most fragile assumption is contingency budget.';
+
+/**
  * Stub `fetch` with a router that picks a response per URL. Useful
  * for the full-replay integration test where /healthz and
  * /orchestrate/v2/turn need distinct behaviours.

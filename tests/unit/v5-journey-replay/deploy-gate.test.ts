@@ -8,7 +8,11 @@ import {
   readExpectedBuildEnv,
 } from '../../../tools/v5-journey-replay/index.js';
 import type { HealthzResult } from '../../../tools/v5-journey-replay/types.js';
-import { stubFetchRouter, REPLAY_FIXTURE_ANALYSIS_READY } from './_test-helpers.js';
+import {
+  stubFetchRouter,
+  REPLAY_FIXTURE_ANALYSIS_READY,
+  REPLAY_FIXTURE_ASSISTANT_TEXT,
+} from './_test-helpers.js';
 
 const SENTINEL = 'SENTINEL-LEAK-CANARY-DO-NOT-MATCH-PROD-xyz123';
 
@@ -421,7 +425,7 @@ describe('run() honours the deploy gate', () => {
         status: 200,
         jsonValue: {
           response_version: 2,
-          assistant_text: 'ok',
+          assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
           // Step 4 hard-fails when analysis_ready is absent. Including
           // it on every step is harmless (schema-optional) and lets the
@@ -462,7 +466,7 @@ describe('run() honours the deploy gate', () => {
         status: 200,
         jsonValue: {
           response_version: 2,
-          assistant_text: 'ok',
+          assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
           // Step 4 hard-fails when analysis_ready is absent. Including
           // it on every step is harmless (schema-optional) and lets the
@@ -536,7 +540,7 @@ describe('run() honours the deploy gate', () => {
         status: 200,
         jsonValue: {
           response_version: 2,
-          assistant_text: 'ok',
+          assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
           // Step 4 hard-fails when analysis_ready is absent. Including
           // it on every step is harmless (schema-optional) and lets the

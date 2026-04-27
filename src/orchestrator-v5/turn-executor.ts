@@ -536,6 +536,43 @@ export async function runTurnExecutor(
         },
         'V5 TurnExecutor context pack assembled',
       );
+
+      // V5 Step 5 grounding probe: collapse the State→Composition→Prompt
+      // triage into a single info-level Render log line per turn. The
+      // derived `analysis_projection_status` enum makes the failure point
+      // grep-friendly; the constituent flags (`has_run_analysis_fact`,
+      // `leading_option_populated`, `analysis_section_chars`) remain on
+      // the same line for forensic detail.
+      const hasRunAnalysisFact = context.prior_facts.some(
+        (f) => f.fact_type === 'run_analysis',
+      );
+      const leadingOptionPopulated = !!contextPack.analysis?.leading_option;
+      const projectionStatus: 'facts_absent' | 'projection_empty' | 'projection_populated' =
+        !hasRunAnalysisFact
+          ? 'facts_absent'
+          : !leadingOptionPopulated
+            ? 'projection_empty'
+            : 'projection_populated';
+      log.info(
+        {
+          event: 'v5_turn_context_analysis_projection',
+          request_id: requestId,
+          scenario_id: context.session_id,
+          analysis_projection_status: projectionStatus,
+          has_run_analysis_fact: hasRunAnalysisFact,
+          analysis_summary_present: analysisSummary !== null,
+          analysis_state_source: analysisStateSource,
+          analysis_staleness_reason: analysisStalenessReason,
+          leading_option_populated: leadingOptionPopulated,
+          runner_up_populated: !!contextPack.analysis?.runner_up,
+          top_drivers_count: contextPack.analysis?.top_drivers?.length ?? 0,
+          analysis_section_keys: contextPack.analysis
+            ? Object.keys(contextPack.analysis)
+            : [],
+          analysis_section_chars: JSON.stringify(contextPack.analysis ?? {}).length,
+        },
+        'V5 turnExecutor: context-pack analysis projection',
+      );
       storeTurnDebug({
         turn_id: requestId,
         session_id: context.session_id,

@@ -194,7 +194,21 @@ async function fetchPriorFacts(
     .map((t) => t.id);
   if (handlerRowIds.length === 0) return [];
   try {
-    return await store.readFactsFor(handlerRowIds);
+    const facts = await store.readFactsFor(handlerRowIds);
+    log.info(
+      {
+        event: 'v5_turn_context_facts',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        prior_turn_count: priorTurns.length,
+        handler_row_id_count: handlerRowIds.length,
+        fact_count: facts.length,
+        fact_types: facts.map((f) => f.fact_type),
+        has_run_analysis_fact: facts.some((f) => f.fact_type === 'run_analysis'),
+      },
+      'V5 buildTurnContext: prior_facts loaded',
+    );
+    return facts;
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);

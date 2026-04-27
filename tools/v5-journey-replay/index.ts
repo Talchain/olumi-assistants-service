@@ -35,12 +35,13 @@ import { randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-import { getHealthz, postTurn, preflightAuth } from './client.js';
+import { getHealthz, postTurn, preflightAuth, type FetchResult } from './client.js';
 import {
   assertAnalysisRun,
   assertDraftGraph,
   assertExplainLeader,
   assertProductShape,
+  type AssertionResult,
 } from './assertions.js';
 import { CANONICAL_STEPS } from './steps.js';
 import { writeEvidencePack, type EvidenceHeader } from './evidence-writer.js';
@@ -373,6 +374,12 @@ async function run(): Promise<void> {
   // direct prerequisite is in this set — this also handles transitive
   // dependencies because a skipped step adds itself to the set.
   const notPassed = new Set<string>();
+  // Labels of `kind: 'option'` nodes parsed out of Step 1's draft_graph
+  // response. Step 5's `assertExplainLeader` uses these to verify the
+  // explain-leader prose references at least one option from the journey.
+  // Empty until Step 1 succeeds; the substance check degrades gracefully
+  // when empty so a parse miss doesn't fail Step 5 spuriously.
+  let step1OptionLabels: string[] = [];
 
   for (const step of CANONICAL_STEPS) {
     if (step.depends_on && notPassed.has(step.depends_on)) {
@@ -393,6 +400,15 @@ async function run(): Promise<void> {
     try {
       const result = await postTurn(cfg.baseUrl, payload, 90_000, cfg.apiKey);
 
+      // Capture the per-step assistant_text once, redacted, so every
+      // rows.push below can attach it without recomputing. The pre-fix
+      // baseline showed Step 5 passed structurally (text_len=1497) while
+      // a curl on the same staging build returned a denial phrase —
+      // text persistence in the evidence pack closes that blind spot.
+      const assistantTextRedacted = result.body?.assistant_text
+        ? redactString(result.body.assistant_text, cfg.apiKey)
+        : undefined;
+
       // A 200 with an error envelope (schema: "error.v1" or BoundaryError
       // shape) is a V5 runtime failure, NOT a success. Fail the row.
       if (result.status === 200 && hasErrorEnvelope(result.body)) {
@@ -407,13 +423,38 @@ async function run(): Promise<void> {
           failing_contract: 'v5-runtime 200 with error envelope',
           outcome_class: 'v5-runtime',
           http_status: result.status,
+          assistant_text: assistantTextRedacted,
         });
         console.log(`[FAIL] ${step.name}: 200 with error envelope (${String(errShape)})`);
         notPassed.add(step.name);
         continue;
       }
 
-      const assertion = pickAssertion(step.name)(result);
+      // Capture Step 1's drafted-graph option labels into the journey
+      // context so Step 5's assertion can verify the explain-leader prose
+      // references at least one of them. Defensive parsing — a missing
+      // graph or wrong shape degrades gracefully (labels stays empty,
+      // Step 5 falls back to substance-only checks).
+      if (step.name === '1_draft_graph') {
+        const draftGraph = (result.body as { draft_graph?: unknown })?.draft_graph;
+        const nodes =
+          draftGraph && typeof draftGraph === 'object' && 'nodes' in draftGraph
+            ? (draftGraph as { nodes?: unknown }).nodes
+            : null;
+        if (Array.isArray(nodes)) {
+          step1OptionLabels = nodes
+            .filter(
+              (n): n is { kind: 'option'; label: string } =>
+                typeof n === 'object' &&
+                n !== null &&
+                (n as { kind?: unknown }).kind === 'option' &&
+                typeof (n as { label?: unknown }).label === 'string',
+            )
+            .map((n) => n.label);
+        }
+      }
+
+      const assertion = pickAssertion(step.name, { step1OptionLabels })(result);
       const outcomeClass = classifyResponse({ status: result.status, body: result.body });
 
       if (assertion.ok) {
@@ -423,6 +464,7 @@ async function run(): Promise<void> {
           evidence: redactString(assertion.evidence, cfg.apiKey),
           outcome_class: outcomeClass,
           http_status: result.status,
+          assistant_text: assistantTextRedacted,
         });
         console.log(`[PASS] ${step.name}: ${redact(assertion.evidence)}`);
       } else {
@@ -433,6 +475,7 @@ async function run(): Promise<void> {
           failing_contract: redactString(assertion.failing_contract, cfg.apiKey),
           outcome_class: outcomeClass,
           http_status: result.status,
+          assistant_text: assistantTextRedacted,
         });
         console.log(
           `[FAIL] ${step.name}: ${redact(assertion.failing_contract)} | ${redact(assertion.evidence)}`,
@@ -498,14 +541,23 @@ function buildEvidenceHeader(
   };
 }
 
-function pickAssertion(stepName: string) {
+/**
+ * Bind per-journey context (currently Step 1 option labels) into the
+ * Step 5 assertion at factory time, so the call site stays uniform
+ * (`pickAssertion(name, ctx)(result)`). Other assertions ignore ctx —
+ * they're returned as-is rather than wrapped in identity thunks.
+ */
+function pickAssertion(
+  stepName: string,
+  ctx: { step1OptionLabels: readonly string[] },
+): (result: FetchResult) => AssertionResult {
   switch (stepName) {
     case '1_draft_graph':
       return assertDraftGraph;
     case '4_run_analysis':
       return assertAnalysisRun;
     case '5_explain_leader':
-      return assertExplainLeader;
+      return (result) => assertExplainLeader(result, ctx);
     default:
       return assertProductShape;
   }

@@ -275,6 +275,28 @@ export function renderEvidencePack(
   }
   lines.push('');
 
+  // Per-step assistant_text dump. Folded under the table rather than
+  // into a column so the table stays scannable. Pre-fix baseline showed
+  // Step 5 passed structurally with text_len=1497 while curl on the
+  // same staging build returned a denial phrase — content persistence
+  // closes that blind spot. Each block is rendered inside a fenced
+  // code section with the redacted text verbatim.
+  const rowsWithText = rows.filter(
+    (r) => typeof r.assistant_text === 'string' && r.assistant_text.length > 0,
+  );
+  if (rowsWithText.length > 0) {
+    lines.push('### assistant_text per step (redacted)');
+    lines.push('');
+    for (const row of rowsWithText) {
+      lines.push(`#### \`${row.step}\``);
+      lines.push('');
+      lines.push('```');
+      lines.push(redact(row.assistant_text ?? ''));
+      lines.push('```');
+      lines.push('');
+    }
+  }
+
   // ---- Canonical steps brief ----
   lines.push('## Canonical steps (from brief)');
   lines.push('');

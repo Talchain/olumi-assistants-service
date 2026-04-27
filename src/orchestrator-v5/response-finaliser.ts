@@ -194,8 +194,39 @@ export function finaliseV5Response(
 }
 
 function stripCeeTrace(response: OlumiResponse): OlumiResponse {
-  if (!('ceeTrace' in (response as Record<string, unknown>))) return response;
-  const clone: Record<string, unknown> = { ...(response as Record<string, unknown>) };
-  delete clone.ceeTrace;
+  // The defensive scrub walks two known leak surfaces:
+  //   1. top-level `response.ceeTrace` (legacy CEE pipeline emitter)
+  //   2. nested `response.blocks[i].enrichment.ceeTrace` (decision-review
+  //      enricher passthrough — observed on staging f588320 inside
+  //      `blocks[0].enrichment.ceeTrace.reason: "Legacy CEE calls
+  //      skipped (M2 decision-review enabled)"`). Stripped only when
+  //      `CEE_TURN_DEBUG_ENABLED=false`; the caller's `debugEnabled`
+  //      gate at line 187 short-circuits this whole function when debug
+  //      is on, so no per-surface flag is needed here.
+  const asRecord = response as Record<string, unknown>;
+  const hasTopLevel = 'ceeTrace' in asRecord;
+  const blocks = Array.isArray(asRecord.blocks) ? (asRecord.blocks as unknown[]) : null;
+  const blockHasTrace = blocks
+    ? blocks.some((b) => {
+        const enrichment = (b as { enrichment?: Record<string, unknown> })?.enrichment;
+        return enrichment != null && 'ceeTrace' in enrichment;
+      })
+    : false;
+
+  if (!hasTopLevel && !blockHasTrace) return response;
+
+  const clone: Record<string, unknown> = { ...asRecord };
+  if (hasTopLevel) delete clone.ceeTrace;
+  if (blockHasTrace && blocks) {
+    clone.blocks = blocks.map((b) => {
+      const blockRec = b as Record<string, unknown>;
+      const enrichment = blockRec.enrichment as Record<string, unknown> | undefined;
+      if (enrichment && 'ceeTrace' in enrichment) {
+        const { ceeTrace: _drop, ...rest } = enrichment;
+        return { ...blockRec, enrichment: rest };
+      }
+      return b;
+    });
+  }
   return clone as OlumiResponse;
 }

@@ -389,6 +389,103 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
       vi.resetModules();
     }
   });
+
+  // Nested scrub — staging f588320 observed `blocks[0].enrichment.ceeTrace`
+  // from the decision-review enricher passthrough. The original top-level
+  // strip missed it entirely. These four cases lock the deeper walk in.
+
+  it('strips nested blocks[*].enrichment.ceeTrace when debug is disabled', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const polluted = {
+      ...env,
+      blocks: [
+        {
+          type: 'analysis_result',
+          enrichment: {
+            ceeTrace: {
+              reason: 'Legacy CEE calls skipped (M2 decision-review enabled)',
+            },
+            factor_sensitivity: [{ factor_id: 'fac_a', strength: 0.5 }],
+          },
+        },
+      ],
+    } as unknown as typeof env;
+    const finalised = finaliseV5Response(polluted, {});
+    const blocks = (finalised as unknown as {
+      blocks: Array<{ enrichment?: Record<string, unknown> }>;
+    }).blocks;
+    expect(blocks[0].enrichment).toBeDefined();
+    expect('ceeTrace' in (blocks[0].enrichment as object)).toBe(false);
+    // Sibling fields under enrichment must survive — the scrub strips
+    // only `ceeTrace`, never the rest of the enrichment payload.
+    expect((blocks[0].enrichment as { factor_sensitivity?: unknown }).factor_sensitivity)
+      .toBeDefined();
+  });
+
+  it('strips both top-level and nested ceeTrace in the same response', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const polluted = {
+      ...env,
+      ceeTrace: { reason: 'top' },
+      blocks: [
+        { type: 'analysis_result', enrichment: { ceeTrace: { reason: 'nested' } } },
+      ],
+    } as unknown as typeof env;
+    const finalised = finaliseV5Response(polluted, {});
+    expect('ceeTrace' in (finalised as object)).toBe(false);
+    const blocks = (finalised as unknown as {
+      blocks: Array<{ enrichment?: Record<string, unknown> }>;
+    }).blocks;
+    expect('ceeTrace' in (blocks[0].enrichment as object)).toBe(false);
+  });
+
+  it('preserves nested blocks[*].enrichment.ceeTrace when CEE_TURN_DEBUG_ENABLED is true', async () => {
+    const ORIGINAL = process.env.CEE_TURN_DEBUG_ENABLED;
+    try {
+      process.env.CEE_TURN_DEBUG_ENABLED = 'true';
+      vi.resetModules();
+      const { finaliseV5Response: finaliseDebug } = await import('../response-finaliser.js');
+      const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+      const polluted = {
+        ...env,
+        blocks: [
+          { type: 'analysis_result', enrichment: { ceeTrace: { reason: 'nested' } } },
+        ],
+      } as unknown as typeof env;
+      const finalised = finaliseDebug(polluted, {});
+      const blocks = (finalised as unknown as {
+        blocks: Array<{ enrichment?: Record<string, unknown> }>;
+      }).blocks;
+      expect('ceeTrace' in (blocks[0].enrichment as object)).toBe(true);
+    } finally {
+      if (ORIGINAL === undefined) {
+        delete process.env.CEE_TURN_DEBUG_ENABLED;
+      } else {
+        process.env.CEE_TURN_DEBUG_ENABLED = ORIGINAL;
+      }
+      vi.resetModules();
+    }
+  });
+
+  it('is a no-op when blocks have enrichment without ceeTrace', () => {
+    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const clean = {
+      ...env,
+      blocks: [
+        {
+          type: 'analysis_result',
+          enrichment: { factor_sensitivity: [{ factor_id: 'a', strength: 0.1 }] },
+        },
+      ],
+    } as unknown as typeof env;
+    const finalised = finaliseV5Response(clean, {});
+    const blocks = (finalised as unknown as {
+      blocks: Array<{ enrichment?: Record<string, unknown> }>;
+    }).blocks;
+    expect((blocks[0].enrichment as { factor_sensitivity?: unknown }).factor_sensitivity)
+      .toBeDefined();
+    expect('ceeTrace' in (blocks[0].enrichment as object)).toBe(false);
+  });
 });
 
 describe('finaliser contract — adversarial documentation', () => {

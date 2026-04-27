@@ -18,6 +18,15 @@ export interface EvidenceRow {
   /** Prompt metadata captured per-turn, if the response envelope exposes it. */
   readonly prompt_version?: string;
   readonly system_chars?: number;
+  /**
+   * Full redacted `assistant_text` from the response body, captured per-step
+   * so reviewers can audit denial-phrase regressions and content drift
+   * directly from the evidence pack. The pre-fix baseline showed the harness
+   * passed structurally on Step 5 (text_len=1497) while curl on the same
+   * staging build returned a denial phrase — text persistence closes that
+   * blind spot. Always redacted via `redactString` before write.
+   */
+  readonly assistant_text?: string;
 }
 
 export interface TurnResponse {
