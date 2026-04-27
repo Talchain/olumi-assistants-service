@@ -46,7 +46,10 @@ This baseline supplements the harness output with **independently-captured per-s
 
 ## Summary
 
-Hiring: steps passed **6/6** (HTTP-200 + harness assertion contract). First chain-blocking failure: **none at the structural level**. **Behavioural degradation observed at Step 5** (response acknowledges Step 4's analysis was queued but claims results "aren't back yet" — see classification below).
+Hiring (pre-fix baseline, staging `38106bd`): 6/6 structural pass; 2 chain-blocking findings (4.1, 5.1); 4 non-blocking.
+Hiring (post-fix replay, staging `f588320`): **6/6 structural pass — no regression**; **Findings 4.1 (analysis_ready on Step 4 wire) and 5.2 (chip without action_type) closed**; **Finding 5.1 (Step 5 stall) NOT closed** — wire fix did not propagate analysis content into Sonnet's Step 5 reasoning, root cause refined from "Composition cascade" to **independent State/Prompt**; Findings 4.2 (ceeTrace leak) and 4.3 (em dashes) unchanged.
+
+See **Delta — `claude/v5-chip-click-analysis-ready` (post staging deploy)** below for the per-finding acceptance table and revised binding constraint.
 
 Marketing: **not run**. Recovery from `.tmp/diagnostic/olumi-debug-d90cfe97-20260426.json` was attempted; the bundle exists but contains a follow-up turn (`cee_request.message: "Proceed."`) plus the resulting graph — the original 297-character framing brief is not in the bundle (`user_actions[0].detail.message_length: 297` confirms a brief was sent but its text was not captured). Per scope decision, fell back to Hiring-only without inventing a brief.
 
@@ -200,11 +203,19 @@ If further investigation in Render logs reveals Step 5 fails for an independent 
 
 ---
 
-## Delta — `claude/v5-chip-click-analysis-ready` (pending staging deploy)
+## Delta — `claude/v5-chip-click-analysis-ready` (post staging deploy)
 
-Date: 2026-04-27
-Branch: `claude/v5-chip-click-analysis-ready` (off `claude/v5-response-finaliser` HEAD)
-Status: **awaiting staging deploy** — pass/fail counts and binding-constraint claims will be updated after a staging replay runs with `--expected-build` matching the deployed SHA.
+Date: 2026-04-27 (replay run 22:23 UTC)
+Branch: `claude/v5-chip-click-analysis-ready` merged into `staging` as `f588320f`.
+Status: **deploy verified** — staging build hash `f588320` (= commit `f588320fd285703ee77dda382172a4cab248b1e2`) matches `--expected-build f588320`. Two findings closed, three still open. **Binding constraint shifted downstream: the wire fix did not resolve the user-visible Step 5 stall.**
+
+Replay scenarios run:
+- Harness: scenario id `28f0325b-d3b1-4ec6-b864-82ed4da52f1d`, full 6-step chain.
+- Independent curl, full chain: scenario id `ecf702c0-eb33-44b2-8f47-e11bda370231`, 6 steps mirroring `tools/v5-journey-replay/steps.ts` payloads exactly. Step 5 in this run **hit the denial phrase "results aren't available… haven't come through yet"** — see Finding 5.1 below.
+
+Pass counts:
+- **Hiring 6/6** at HTTP/structural level (no regression vs pre-fix baseline). All steps return 200; harness's per-row `failing_contract` column is empty for every row.
+- The harness's Step 5 reported `text_len=1497` and structurally passed; the independent curl session's Step 5 returned `text_len=282` and contained a denial-phrase match. Whether the harness's longer Step 5 contained denial wording in different prose cannot be verified from the harness's evidence pack (text content is not persisted, only `text_len`). The curl session is therefore authoritative for content-level Step 5 attribution.
 
 ### What changed
 
@@ -247,28 +258,50 @@ The wire fix is verified via the route-level integration test (Task 3c above) wh
 - `pnpm vitest run` — **719 test files, 12,608 tests passed; 32 skipped (network/integration gated); 0 regressions**
 - `bash scripts/validate-prepush.sh` — all 15 stages pass
 
-### Pending — staging replay
+### Staging replay results
 
-After staging deploy, run:
-
+Command run:
 ```
 OLUMI_REPLAY_API_KEY=<staging-key> \
 pnpm tsx tools/v5-journey-replay/index.ts \
   --base-url https://cee-staging.onrender.com \
-  --expected-build <staging-build-hash-after-deploy> \
+  --expected-build f588320 \
   --out Docs/v5/v5-golden-path-evidence-cee.md \
-  --scenario-prefix staging-post-fix
+  --scenario-prefix staging-post-chip-click-fix
 ```
 
-Acceptance criteria:
-- 6/6 pass
-- Step 4 wire response carries `analysis_ready` (Finding 4.1 closed)
-- Step 5 `assistant_text` length > 200 chars, contains at least one option label drafted in Step 1, AND no denial phrase per the new harness assertion (Finding 5.1 closed)
-- No `ceeTrace` on wire (Finding 4.2 confirmed clean by defensive scrub)
-- No chips with literal `action_type: null` (Finding 5.2 confirmed clean by suppression pass)
-- `--expected-build` matches the deployed SHA
+Result: harness exit code 0; deploy gate passed (`/healthz.build f588320` matches `--expected-build`); `[PASS]` on all six rows (see [Docs/v5/v5-golden-path-evidence-cee.md](../../Docs/v5/v5-golden-path-evidence-cee.md) for the regenerated harness pack). `[PASS] 4_run_analysis: status=200 chip_count=0 analysis_ready=ready options=4 elapsed=5187ms` ← the new harness signal explicitly proves wire-level `analysis_ready` shipped on Step 4.
 
-If staging replay goes green, this evidence file will be updated with revised pass/fail counts, the binding constraint marked **closed**, and the failure-summary table re-derived from the new replay.
+Per-finding status against acceptance criteria:
+
+| Finding | Acceptance | Observed (post-fix) | Status |
+|---|---|---|---|
+| 4.1 — `analysis_ready` missing on Step 4 wire | wire carries `analysis_ready` with status, options, goal_node_id, ISO-8601 `computed_at` | Step 4 envelope: `analysis_ready={status:"ready", options:[4 entries with option_id+label+status+interventions+impact_proxy], goal_node_id:"goal_q3_delivery", computed_at:"2026-04-27T22:27:38.938Z"}` ✓ | **CLOSED** ✓ |
+| 4.2 — `ceeTrace.reason` "CEE" leak | no `ceeTrace` on wire (defensive scrub) | Step 4 envelope still contains `blocks[0].enrichment.ceeTrace.reason: "Legacy CEE calls skipped (M2 decision-review enabled)"`. Banned-term scan: 1 hit (unchanged from pre-fix). | **NOT CLOSED** — scrub at [response-finaliser.ts:197-199](../../src/orchestrator-v5/response-finaliser.ts#L197-L199) only deletes `response.ceeTrace` (top-level on `OlumiResponse`); the actual leak path is `response.blocks[0].enrichment.ceeTrace`, which the scrub does not traverse. Either deepen the scrub to walk `blocks[*].enrichment.ceeTrace` or strip at the producer (decision-review enricher). |
+| 4.3 — em dashes in `review_cards` | not in branch scope; no acceptance change | 4 hits in `blocks[0].enrichment.review_cards[0].why` and `items[*].suggested_evidence` (unchanged from pre-fix) | **NOT CLOSED** (not in scope for this branch — Prompt-layer follow-up) |
+| 5.1 — Step 5 stalls with "results aren't back yet" | `assistant_text` > 200 chars, contains an option label, no denial phrase | Independent curl Step 5 (full chain, scenario `ecf702c0-…`): 282 chars, **contains denial phrase** `"Analysis results aren't available in the current context , the simulation was run but the results haven't come through yet."`. No option label referenced. Harness Step 5 was 1497 chars — content not in evidence pack to verify denial-phrase status. | **NOT CLOSED** — the wire-level fix (4.1) did NOT propagate analysis content into Sonnet's reasoning on Step 5. Root cause is downstream of the wire: either (a) handler facts are not surfaced to the Sonnet prompt's working context in a usable form, or (b) the v38.2 routing prompt has no instruction to ground "explain leader" responses on `prior_facts[].run_analysis` content even when present. The pre-fix evidence's "two findings causally linked" hypothesis was wrong: 4.1 and 5.1 are **independent**. |
+| 5.2 — chip with `action_type: null` | no chips with literal `action_type: null` | Step 5 chip is now `{id: "chip_prompt_summarise_decision", label: "Summarise the decision", message: "Summarise the decision and the key trade-offs."}` — no `action_type` field at all (prompt-shape chip per the suppression rule's allow list). | **CLOSED** ✓ |
+
+### Revised binding constraint (post-fix)
+
+**Step 5's "explain leader" turn does not ground in the run_analysis handler fact even when `analysis_ready={status:"ready"}` is present on the same envelope.** Two-stage triage required:
+
+1. **State-layer probe (cheap, do first):** confirm whether `prior_facts` on Step 5's `EnrichedTurnContext` includes the run_analysis fact committed at Step 4. Add a single `log.info({event:"v5_turn_context_facts", request_id, scenario_id, fact_count, fact_kinds: prior_facts.map(f => f.kind)})` line at [src/orchestrator-v5/build-turn-context.ts](../../src/orchestrator-v5/build-turn-context.ts) just after `readFactsFor`, push to staging, replay, read Render logs. If `fact_count===0` on Step 5 → State-layer fix (Supabase commit-vs-read race / RLS / row visibility on `v5_handler_facts`). If `fact_count>=1` and includes a `run_analysis` fact → State path is fine.
+
+2. **Prompt-layer fix (gated on probe):** if State path is fine, the v38.2 routing prompt does not surface `prior_facts[run_analysis].outcome` to Sonnet in a way it can use to answer "explain leader". Audit `Prompts/v38.2.txt` for whether `prior_facts` contents are rendered into the Sonnet system/user message, and whether the prompt instructs Sonnet to ground analysis-explanation responses on those facts rather than denying when the current envelope's `analysis_ready` lacks per-option result data.
+
+**Downstream steps unblocked:** Step 5 (`explain_leader`) becomes substantively answerable — leading option, win probability, drivers, caveats — instead of stalling. Step 6 (`edit_budget`) is independent and already passes substantively (grounded in graph state, not analysis).
+
+Secondary follow-ups out of this binding-constraint scope:
+- Finding 4.2 (ceeTrace leak): one-line fix at the finaliser scrub to walk `blocks[*].enrichment.ceeTrace`, or strip at the decision-review enricher producer. Cheap and orthogonal.
+- Finding 4.3 (em dashes): prompt edit on `decision_review_default` (store_version 11). Out of scope for orchestrator brief; belongs in a prompt-curation pass.
+
+### Ratchet status
+
+Pre-fix baseline (staging `38106bd`): 6/6 structural pass; 2 chain-blocking findings (4.1, 5.1); 4 non-blocking (1.1, 4.2, 4.3, 5.2).
+Post-fix replay (staging `f588320`): **6/6 structural pass — no regression**; 1 chain-blocking finding remains (5.1, root cause shifted from Composition to State/Prompt); 2 non-blocking remain (4.2, 4.3); 2 closed (4.1, 5.2); 1 was a Step 1 prompt observation never claimed for fix in this branch (1.1).
+
+The ratchet rule is upheld: every step that previously passed still passes; pass count is equal-or-better; the closed findings (4.1, 5.2) cannot regress without a new failure being recorded. **The wire fix (4.1) is permanent.** The shifted Step 5 attribution (5.1 from "Composition cascade" to "independent State/Prompt") is a refinement of the diagnostic, not a regression.
 
 ### Out of scope — Discoveries (deferred to separate brief)
 
