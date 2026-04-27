@@ -43,6 +43,7 @@ import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-re
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import {
   createRegistry,
+  getDefaultPlotClient,
   resolveHandler,
   type HandlerRegistry,
   type RunAnalysisScenarioSnapshot,
@@ -88,11 +89,16 @@ export interface DispatchChipClickRunAnalysisParams {
  * mutate the canvas — the user clicked "Run analysis" on the existing
  * graph — but Step 5 of the V5 golden path needs the wire response from
  * Step 4 (the run_analysis chip-click) to carry `analysis_ready` so the
- * model's gating logic sees a runnability signal. The `ok` outcome
- * therefore computes structural readiness from the same persisted-graph
- * source the run_analysis handler reads (loadPersistedGraph(scenario_id))
- * — NOT from any ingress payload field — so a stale client-side graph
- * cannot drift the readiness emission. Failure outcomes leave it
+ * model's gating logic sees a runnability signal.
+ *
+ * Single-source-of-truth: the `ok` outcome derives structural readiness
+ * from the SAME `GraphV3T` reference the run_analysis handler operated
+ * on. The dispatcher pre-loads the scenario snapshot once via
+ * `loadScenarioSnapshotForRunAnalysis` and injects a one-shot
+ * `ScenarioReader` returning that exact snapshot — handler invocation
+ * and post-handler readiness derivation share the same in-memory graph
+ * reference, so a concurrent edit-graph dispatch from another session
+ * cannot drift the emission. Failure outcomes leave `analysisReady`
  * undefined; in route-v2.ts those map to BoundaryError 500 anyway.
  */
 export type DispatchChipClickRunAnalysisResult =
@@ -183,8 +189,16 @@ export async function dispatchChipClickRunAnalysis(
     return cachedSnapshot;
   };
 
+  // Reuse the memoised default PLoT client so per-call registry
+  // construction does not also construct a fresh PLoTClientImpl (which
+  // holds undici dispatchers). The handler swap we need here is the
+  // ScenarioReader, not the PLoT transport.
   const registry =
-    handlerRegistry ?? createRegistry({ scenarioReader: oneShotReader });
+    handlerRegistry ??
+    createRegistry({
+      scenarioReader: oneShotReader,
+      plotClient: getDefaultPlotClient(),
+    });
   const handlerFn = resolveHandler(registry, 'run_analysis');
   if (!handlerFn) {
     // Safety net — the default registry registers run_analysis. If that

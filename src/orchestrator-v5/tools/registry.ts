@@ -204,6 +204,24 @@ function resolvePlotClient(): PLoTClient {
   return client;
 }
 
+let defaultPlotClientCache: PLoTClient | undefined;
+
+/**
+ * Lazy singleton accessor for the production PLoTClient. Used by callers
+ * that need a fresh per-call HandlerRegistry (e.g. chip-click-dispatch's
+ * one-shot ScenarioReader injection) but should NOT construct a fresh
+ * PLoTClientImpl on every call. PLoT clients hold undici dispatchers;
+ * per-call construction would accumulate network resources under load.
+ *
+ * Lazy for the same env-capture reason as `getDefaultRegistry`.
+ */
+export function getDefaultPlotClient(): PLoTClient {
+  if (!defaultPlotClientCache) {
+    defaultPlotClientCache = resolvePlotClient();
+  }
+  return defaultPlotClientCache;
+}
+
 let defaultRegistryCache: HandlerRegistry | undefined;
 
 /**
