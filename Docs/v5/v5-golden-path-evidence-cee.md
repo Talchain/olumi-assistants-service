@@ -10,30 +10,30 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 | v38.2 confirmed (startup / healthz build) | yes |
 | v38.2 confirmed (per-turn) | not capturable |
 | run_analysis passed end-to-end (handler + commit + response) | yes |
-| Analysis persisted into follow-up context | yes |
+| Analysis persisted into follow-up context | not externally verified |
 | No internal terms in user-facing text | yes |
 
 ## Run metadata
 
 - **Branch:** `staging`
-- **Pack generated from commit SHA:** `f588320fd285703ee77dda382172a4cab248b1e2` (if this does not match HEAD, regenerate with the harness)
+- **Pack generated from commit SHA:** `050cc9a7e952293c251938380afb0120bdebd4c8` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-04-27T22:23:15.582Z
+- **Started at:** 2026-04-28T00:03:10.272Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
-- **Expected build:** `f588320`
+- **Expected build:** `050cc9a`
 
 ## Deploy confirmation (Phase 2)
 
 - **GET /healthz status:** 200
-- **build (commit short):** `f588320`
+- **build (commit short):** `050cc9a`
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 327ms
+- **elapsed:** 357ms
 
-Deploy confirmed: `/healthz` build `f588320` matches `--expected-build f588320`.
+Deploy confirmed: `/healthz` build `050cc9a` matches `--expected-build 050cc9a`.
 
 **Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
@@ -47,12 +47,60 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=33877ms | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=980 chip_count=1 elapsed=8446ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=274 chip_count=0 elapsed=6513ms stage=frame | — |
-| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=5187ms | — |
-| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1497 chip_count=0 | — |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=134 chip_count=0 elapsed=5696ms stage=frame | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=32435ms | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1042 chip_count=1 elapsed=9209ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=321 chip_count=0 elapsed=5895ms stage=frame | — |
+| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=4713ms | — |
+| `5_explain_leader` | [FAIL] failed | v5-runtime | 200 | status=200 text_len=58 (expected > 200) chip_count=1 | step_5_text_too_short |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=83 chip_count=0 elapsed=5885ms stage=frame | — |
+
+### assistant_text per step (redacted)
+
+#### `1_draft_graph`
+
+```
+Drafted a decision graph with 16 nodes and 28 edges.
+```
+
+#### `2_weakest_option`
+
+```
+Looking at the model structure, **Maintain Current Team (Status Quo)** is the weakest option.
+
+Here is why the model points that way: it receives no positive effect on Engineering Team Capacity beyond the baseline, meaning it does nothing to address the throughput gap that drives your Q3 goal. Engineering Team Capacity is your strongest causal lever, with a moderate-to-strong effect on delivery throughput (strength 0.65, confidence 0.92), and Status Quo simply leaves it unchanged. Every other option at least attempts to move that factor.
+
+The one thing Status Quo avoids is Budget Overrun Risk, since Incremental Hiring Cost stays at zero. But that benefit is structurally weak: Budget Overrun Risk only has a slight negative effect on the goal (strength -0.20), so the cost saving does not compensate for the capacity gap.
+
+Worth noting: this is a structural reading from the model, not a simulation result. Running the analysis would give you probability-weighted comparisons across all four options. Would that be a useful next step?
+```
+
+#### `3_add_option`
+
+```
+What option would you like to add? A few directions that aren't yet in the model:
+
+- **Contract/freelance engineers** , temporary capacity without permanent headcount cost
+- **Redistribute scope** , cut or defer Q3 roadmap items to match current team capacity
+- **Something else entirely** , tell me what you have in mind
+```
+
+#### `4_run_analysis`
+
+```
+Ran analysis on your current scenario.
+```
+
+#### `5_explain_leader`
+
+```
+Engineering Team Scaling Strategy is a node, not a option.
+```
+
+#### `6_edit_budget`
+
+```
+Which budget-related factor did you have in mind? The model has two that could fit:
+```
 
 ## Canonical steps (from brief)
 

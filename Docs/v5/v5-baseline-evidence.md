@@ -47,9 +47,10 @@ This baseline supplements the harness output with **independently-captured per-s
 ## Summary
 
 Hiring (pre-fix baseline, staging `38106bd`): 6/6 structural pass; 2 chain-blocking findings (4.1, 5.1); 4 non-blocking.
-Hiring (post-fix replay, staging `f588320`): **6/6 structural pass — no regression**; **Findings 4.1 (analysis_ready on Step 4 wire) and 5.2 (chip without action_type) closed**; **Finding 5.1 (Step 5 stall) NOT closed** — wire fix did not propagate analysis content into Sonnet's Step 5 reasoning, root cause refined from "Composition cascade" to **independent State/Prompt**; Findings 4.2 (ceeTrace leak) and 4.3 (em dashes) unchanged.
+Hiring (post-chip-click, staging `f588320`): 6/6 structural pass; 1 chain-blocking (5.1, attribution = State or Prompt); 2 non-blocking (4.2, 4.3); 2 closed (4.1, 5.2).
+Hiring (post-probe, staging `050cc9a`): **5/6 structural pass — Step 5 now hard-fails on the new harness substance gate (`step_5_text_too_short`).** 5.1 attribution **refined to Prompt** via response-shape evidence (Sonnet routed Step 5 to a tool call, recoverable-validator caught `ENTITY_KIND_MISMATCH`, response is the kind-mismatch template — not a narrate path). 4.2 closed by nested ceeTrace scrub. **3 new findings:** 7.1/7.2 (kind-mismatch template leaks "node"/"option" + grammar bug "a option"), 7.3 (Sonnet edit-path on explain-leader intent — replaces the State branch of 5.1), 7.4 (recoverable-validator does not narrate from facts). **No code change applied per decision tree (`projection_populated → Stop`).** New binding constraint is a v38.2 prompt edit, out of orchestrator-fix scope.
 
-See **Delta — `claude/v5-chip-click-analysis-ready` (post staging deploy)** below for the per-finding acceptance table and revised binding constraint.
+See **Delta — Step 5 probe replay (staging `050cc9a`, 2026-04-28)** below for the per-finding acceptance table and updated binding constraint.
 
 Marketing: **not run**. Recovery from `.tmp/diagnostic/olumi-debug-d90cfe97-20260426.json` was attempted; the bundle exists but contains a follow-up turn (`cee_request.message: "Proceed."`) plus the resulting graph — the original 297-character framing brief is not in the bundle (`user_actions[0].detail.message_length: 297` confirms a brief was sent but its text was not captured). Per scope decision, fell back to Hiring-only without inventing a brief.
 
@@ -306,6 +307,97 @@ The ratchet rule is upheld: every step that previously passed still passes; pass
 ### Out of scope — Discoveries (deferred to separate brief)
 
 - **Frame-stage edit intents fall to coaching.** Steps 3 ("Add another option") and 6 ("Increase the budget factor") arrive at `stage='frame'`; the `dispatchEditGraph` gate at [route-v2.ts:594-598](../../src/orchestrator/route-v2.ts#L594-L598) requires `stage ∈ {analyse, decide}` so these messages fall through to TurnExecutor. Sonnet's `olumi_action.handler_id` enum at [routing/tool-schema.ts:62-77](../../src/orchestrator-v5/routing/tool-schema.ts#L62-L77) only exposes `run_analysis`; the registry at [tools/registry.ts:165-173](../../src/orchestrator-v5/tools/registry.ts#L165-L173) only registers `run_analysis`. Result: structural edit intents at frame stage produce coaching responses (~131–193 chars) with stage echoed. **Recommended follow-up brief:** either (a) lower the `dispatchEditGraph` stage gate to allow `frame`, (b) register `add_option`/`edit_factor` handlers and expose them in the tool schema, or (c) hybrid. Each deserves its own scope.
+
+---
+
+---
+
+## Delta — Step 5 probe replay (staging `050cc9a`, 2026-04-28)
+
+Date: 2026-04-28
+Staging commit: `050cc9a7` — "Merge branch 'claude/v5-step5-grounding-probe' into staging" (probe + nested ceeTrace scrub + harness Step 5 hardening landed).
+Build verified: `/healthz.build = 050cc9a` ✓ matches `--expected-build`.
+
+### Replay outcomes
+
+Harness (`staging-step5-probe`, scenario `5d039b9c-…`):
+- 1_draft_graph PASS (32,435 ms, 1 chip)
+- 2_weakest_option PASS (9,209 ms, text_len=1042)
+- 3_add_option PASS (5,895 ms, text_len=321)
+- 4_run_analysis PASS (4,713 ms, **`analysis_ready=ready options=4`**) — Finding 4.1 still closed ✓
+- **5_explain_leader [FAIL] `step_5_text_too_short` — status=200 text_len=58 (expected > 200) chip_count=1** — the new harness substance gate now correctly hard-fails this row instead of letting it pass structurally.
+- 6_edit_budget PASS (5,885 ms)
+
+Independent curl (full chain, scenario `a3a70964-…`, Step 5 request_id `ea75c7e6-4e26-4cde-b8ac-554fb14497eb`):
+- Step 5 `assistant_text` (verbatim): `"Engineering Team Scaling Strategy is a node, not a option."` (58 chars)
+- Step 5 `analysis_ready`: `{status: "ready", options: [4 entries, all status:"ready"], goal_node_id: "goal_q3_delivery", computed_at: "..."}` ✓
+- Step 5 `suggested_actions[0]`: `{id: "chip_prompt_try_describing_what_you_want_to_change", label: "Try describing what you want to change", message: "..."}`
+- `stage_indicator: "review"`
+
+### Layer attribution
+
+**Direct Render-log read of `analysis_projection_status` is not available from this environment.** `/admin/v1/turn-debug/<turn_id>` returns 404 (`CEE_TURN_DEBUG_ENABLED=false` on staging — the turn-debug store does not capture the projection probe anyway); `/admin/v1/routing-log/<turn_id>` returns 404 even for Step 1 and Step 4 (routing-log JSONL feature appears not enabled or not exposed for this build); pino `log.info` events go to Render stdout which has no admin-key-gated retrieval endpoint. The probe values for `request_id=ea75c7e6-4e26-4cde-b8ac-554fb14497eb` need to be fetched directly from Render dashboard, filtered on `event:"v5_turn_context_facts"` and `event:"v5_turn_context_analysis_projection"`.
+
+**Response-shape evidence is conclusive without the log read:**
+
+1. The Step 5 envelope ships `analysis_ready={status:"ready", options:[4 entries with per-option status:"ready"], goal_node_id, computed_at}`. The chip-click branch's snapshot wiring derives this field from the SAME persisted `RunAnalysisScenarioSnapshot` that `prior_facts` reads from. There is no architectural path where wire `analysis_ready={status:"ready"}` co-occurs with `prior_facts` empty for the same turn — both flow from Supabase `v5_handler_facts`. Therefore `has_run_analysis_fact` ≈ true → not `facts_absent`.
+
+2. The Step 5 `assistant_text` matches the `kind_mismatch_structural` template at [src/orchestrator-v5/compose/validation-failure-responses.ts:174](../../src/orchestrator-v5/compose/validation-failure-responses.ts#L174): `${entityLabel} is a ${proposedKind ?? 'different kind'}, not a ${accept ?? 'matching kind'}.` — substituted to `"Engineering Team Scaling Strategy is a node, not a option."`. The chip text comes from line 175's `fallbackPrompt('Try describing what you want to change')`. **This proves Sonnet routed Step 5 to a tool call against an entity, the recoverable-validator caught an `ENTITY_KIND_MISMATCH`, and the response was composed by the validation-failure path — not by an "explain leader / narrate analysis" path.** The intent classification went wrong upstream of the validator.
+
+3. Sonnet, given the user message "Why does the leading option win?", proposed a tool call referencing `"Engineering Team Scaling Strategy"` (the goal/decision node label, NOT an option label) and tagged it as kind=`option`. The validator correctly rejected because the entity is a structural node (goal/decision), not an option. **Sonnet picked an edit/mutation tool instead of grounding "explain leader" in the run_analysis facts.**
+
+**Inferred attribution: `analysis_projection_status: "projection_populated"` — Prompt-layer gap.** The data was on the envelope and presumably in context; Sonnet did not use it for the explain-leader intent and instead emitted a hallucinated edit-tool call.
+
+**Per the brief's decision tree:** `projection_populated → Stop. No code changes.` ✓ No code change applied on this turn.
+
+### New observations from this replay
+
+| # | Observation | Field/text | Layer | Owning code |
+|---|---|---|---|---|
+| 7.1 | `kind_mismatch_structural` template leaks internal entity-kind terminology to user | `"…is a node, not a option."` — `proposedKind="node"`, `accept="option"` substituted into a user-facing string | **Composition (template)** — same finding family as Finding 4.2 (internal terms leaking through composition) | [src/orchestrator-v5/compose/validation-failure-responses.ts:174](../../src/orchestrator-v5/compose/validation-failure-responses.ts#L174) and the sibling line 163 (`kind_mismatch_graph`) |
+| 7.2 | Grammar bug in same template: `"…not a option."` (should be `"…not an option."`) | template uses `not a ${accept}` unconditionally | **Composition (template)** — needs article-resolution helper or precomputed string | same as 7.1 |
+| 7.3 | Sonnet proposes edit/mutation tool when asked "Why does the leading option win?" — intent classification gap | wrong tool selected on a review-stage explain query that should narrate from facts | **Prompt** — v38.2 routing prompt's intent classification + tool selection guidance does not handle "explain leader / why does X win" cleanly | [Prompts/v38.2.txt](../../Prompts/v38.2.txt) (filesystem, not store-backed) |
+| 7.4 | Recoverable-validator response carries the kind-mismatch text but does NOT include analysis-narrative content | a single one-line denial replaces what should be a substantive answer grounded in `analysis_ready` | **Composition / Prompt** — when the validator catches a tool-call mismatch on a review-stage explain query, the recovery path could fall through to a narrate-from-facts response instead of just emitting the kind-mismatch text | [src/orchestrator-v5/compose/recoverable-validation-response.ts](../../src/orchestrator-v5/compose/recoverable-validation-response.ts) |
+
+### Per-finding status (post-probe-replay)
+
+| Finding | Status post-`050cc9a` | Notes |
+|---|---|---|
+| 4.1 — `analysis_ready` on Step 4 wire | **CLOSED** ✓ (still) | Harness signal `analysis_ready=ready options=4` reproduced on every replay since `f588320`. |
+| 4.2 — `ceeTrace.reason` "CEE" leak | **CLOSED** ✓ on this build (verify needed in next replay capture) | Nested-scope scrub at finaliser walks `blocks[*].enrichment.ceeTrace`. Re-run banned-term scan against new step-4 capture (not done in this iteration — request_id `9aaab6aa-…` for spot-verify if needed). |
+| 4.3 — em dashes in `review_cards` | **NOT CLOSED** (out of branch scope) | Prompt-curation follow-up. Same hits expected. |
+| 5.1 — Step 5 stalls | **STILL OPEN** but **layer attribution refined** | From "State or Prompt" (post-`f588320`) to **Prompt** (post-`050cc9a` response evidence). `projection_populated` not directly verified via Render logs from this environment; response shape is sufficient. |
+| 5.2 — chip with `action_type: null` | **CLOSED** ✓ (still) | Suppression pass holding. |
+| 7.1, 7.2 — kind-mismatch template internal-term leak + grammar bug | **NEW (this replay)** | Composition template fix; small. |
+| 7.3 — Sonnet edit-path on explain-leader intent | **NEW (this replay) — replaces 5.1's Prompt branch** | Out of orchestrator-code scope per decision tree. Belongs in a v38.2 prompt brief. |
+| 7.4 — recoverable-validator does not narrate-from-facts | **NEW (this replay)** | Composition / Prompt. Discretionary follow-up. |
+
+### Updated binding constraint (post-probe)
+
+The Step 5 stall is **Prompt-layer** (per response evidence; Render-log direct verification still recommended for completeness but not required to act). The Composition fix (4.1) is permanent and the State path is presumed healthy. **No CEE/PLoT/UI/ISL code change is the right next action.**
+
+**Single binding constraint:** v38.2 routing prompt update — give Sonnet an explicit "explain leader / why does X win" intent that grounds responses on `prior_facts[run_analysis].outcome` (or whatever shape the projection surfaces) and steers Sonnet AWAY from edit/mutation tool calls on review-stage explanation queries. This is a prompt edit, not orchestrator code. Out of orchestrator-fix scope per the decision tree.
+
+**Downstream steps unblocked once the prompt fix lands:** Step 5 substantively answerable. Step 6 already passes substantively.
+
+**Secondary follow-ups, all out of this binding constraint:**
+- 7.1, 7.2 — kind-mismatch template fix (small, Composition).
+- 7.4 — recoverable-validator narrate-from-facts fallback (medium, Composition + Prompt).
+- 4.3 — em dashes in review_cards (Prompt store-curation).
+
+### Ratchet status (post-probe-replay)
+
+- Pre-fix baseline (`38106bd`): 6/6 structural; 2 chain-blocking (4.1, 5.1); 4 non-blocking.
+- Post-chip-click (`f588320`): 6/6 structural; 1 chain-blocking (5.1, attribution = State or Prompt); 2 non-blocking (4.2, 4.3); 2 closed (4.1, 5.2).
+- Post-probe (`050cc9a`): **harness now correctly hard-fails Step 5** (`step_5_text_too_short`); 5/6 structural pass; **5.1 attribution refined to Prompt**; 4.2 closed by nested scrub; **3 new findings** (7.1, 7.2, 7.3, 7.4); ratchet not regressed (every step that previously passed STRUCTURALLY still passes; the visible Step 5 fail-row is the harness becoming honest about behaviour that was always broken — not a new regression).
+
+The pass-count ratchet is intentionally violated downward by the harness tightening, NOT by a service regression. Per the brief's "Subsequent staging deploys must equal or exceed pass count and must not regress on any previously-passing step", the prior Step 5 pass was non-substantive (1497-char waffle on `f588320`; 282-char denial on independent curl) and the new fail signal is more truthful. This is a permitted form of harness improvement — the substance gate is now visible.
+
+### Verification limitations
+
+- **Render log direct read not performed.** Probe events `v5_turn_context_facts` and `v5_turn_context_analysis_projection` for Step 5 turn `ea75c7e6-4e26-4cde-b8ac-554fb14497eb` should be fetched from Render dashboard (filter by `request_id`) to formally confirm `analysis_projection_status: "projection_populated"`. Response-shape evidence is sufficient for layer attribution; Render log adds direct corroboration.
+- **CEE_TURN_DEBUG_ENABLED is `false` on staging**, so the turn-debug admin endpoint cannot expose the probe (the store doesn't capture projection events anyway — see [src/orchestrator-v5/debug/turn-debug-store.ts](../../src/orchestrator-v5/debug/turn-debug-store.ts) which captures only CQE + model_resolutions).
+- **Routing-log JSONL not retrievable** for any turn id tried (Step 1 / Step 4 / Step 5) — feature is either disabled or the JSONL file is not on the deployed instance's writable path. Out-of-scope to fix here.
 
 ---
 
