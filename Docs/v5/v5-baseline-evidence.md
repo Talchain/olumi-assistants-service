@@ -49,9 +49,10 @@ This baseline supplements the harness output with **independently-captured per-s
 Hiring (pre-fix baseline, staging `38106bd`): 6/6 structural pass; 2 chain-blocking findings (4.1, 5.1); 4 non-blocking.
 Hiring (post-chip-click, staging `f588320`): 6/6 structural pass; 1 chain-blocking (5.1, attribution = State or Prompt); 2 non-blocking (4.2, 4.3); 2 closed (4.1, 5.2).
 Hiring (post-probe, staging `050cc9a`): 5/6 structural pass — Step 5 now hard-fails on the new harness substance gate; 5.1 attribution refined to Prompt via response-shape evidence. 4.2 closed by nested ceeTrace scrub.
-Hiring (post-fact-trace, staging `db7825b`, 2026-04-28): **5/6 structural pass; Step 5 still fails substance gate**, denial-phrase shape (no kind-mismatch leak this run). **State chain formally ruled out via direct Supabase read on scenario `40927e27-…`:** Step 4 persisted with `turn_class='handler'`, `handler_id='run_analysis'`, 1 row in `v5_handler_facts` with `action_type='run_analysis'` and a fully-populated 97 KB payload (`result.leading_option_id="opt_hire_local"`, win_probabilities, enrichment). `priorTurns` filter would correctly select that row's id; `readFactsFor` returns 1 fact with `fact_type='run_analysis'`. **5.1 narrows to {Composition projection, Prompt}.** Cheapest next probe: fixture-level unit test on `assembleContextPackWithSummary`.
+Hiring (post-fact-trace, staging `db7825b`, 2026-04-28): 5/6 structural; State chain ruled out via Supabase; 5.1 narrowed to {Composition projection, Prompt}. ChatGPT triaged the Render logs to a schema-validation silent-drop: `readFactsFor` parsed `payload` raw without merging the DB `noop` column, schema rejected on missing `noop`, `fetchPriorFacts` caught into `session.read_degraded`, returned `[]`.
+Hiring (post-hydration-fix, staging `f0dcbeb`, 2026-04-28): **6/6 substantive pass.** Hydration merges `noop` from the DB column into the payload before `HandlerFactSchema.safeParse`. **5.1 closed.** Step 5 now grounds in the analysis: names leading option ("Hire Two Senior Engineers Locally"), cites real factor labels and edge strengths (0.6, 0.65, 0.55), and acknowledges what is missing from this run rather than denying. `analysis_projection_status: projection_populated` corroborated via Supabase direct read (Step 4 row carries `noop_col=false, payload_has_noop_key=false` — verbatim split shape that exercises the hydration on every fact load).
 
-See **Delta — Step 5 fact-chain trace replay (staging `db7825b`, 2026-04-28)** below for the probe-event values and updated binding constraint.
+See **Delta — Step 5 hydration fix replay (staging `f0dcbeb`, 2026-04-28)** below for verbatim Step 5 output, per-finding closure status, and the updated ratchet.
 
 Marketing: **not run**. Recovery from `.tmp/diagnostic/olumi-debug-d90cfe97-20260426.json` was attempted; the bundle exists but contains a follow-up turn (`cee_request.message: "Proceed."`) plus the resulting graph — the original 297-character framing brief is not in the bundle (`user_actions[0].detail.message_length: 297` confirms a brief was sent but its text was not captured). Per scope decision, fell back to Hiring-only without inventing a brief.
 
@@ -310,6 +311,91 @@ The ratchet rule is upheld: every step that previously passed still passes; pass
 - **Frame-stage edit intents fall to coaching.** Steps 3 ("Add another option") and 6 ("Increase the budget factor") arrive at `stage='frame'`; the `dispatchEditGraph` gate at [route-v2.ts:594-598](../../src/orchestrator/route-v2.ts#L594-L598) requires `stage ∈ {analyse, decide}` so these messages fall through to TurnExecutor. Sonnet's `olumi_action.handler_id` enum at [routing/tool-schema.ts:62-77](../../src/orchestrator-v5/routing/tool-schema.ts#L62-L77) only exposes `run_analysis`; the registry at [tools/registry.ts:165-173](../../src/orchestrator-v5/tools/registry.ts#L165-L173) only registers `run_analysis`. Result: structural edit intents at frame stage produce coaching responses (~131–193 chars) with stage echoed. **Recommended follow-up brief:** either (a) lower the `dispatchEditGraph` stage gate to allow `frame`, (b) register `add_option`/`edit_factor` handlers and expose them in the tool schema, or (c) hybrid. Each deserves its own scope.
 
 ---
+
+---
+
+## Delta — Step 5 hydration fix replay (staging `f0dcbeb`, 2026-04-28)
+
+Date: 2026-04-28
+Staging commit: `f0dcbebb` — "fix(v5): hydrate noop column into payload before HandlerFactSchema validation".
+Build verified: `/healthz.build = f0dcbeb` ✓.
+
+### Replay outcomes
+
+Harness (`staging-step5-hydration-fix`, scenario `10ec9a63-…`):
+- 1_draft_graph PASS (35,403 ms)
+- 2_weakest_option PASS (7,457 ms, text_len=817)
+- 3_add_option PASS (5,933 ms, text_len=298)
+- 4_run_analysis PASS (5,449 ms, **`analysis_ready=ready options=4`** ✓)
+- **5_explain_leader PASS (text_len=1638, `labels_checked=4`, chip_count=1)** ✓
+- 6_edit_budget PASS (6,175 ms)
+
+**6/6 PASS.** Step 5 substance gate, denial-phrase regex, and option-label gate all clear.
+
+(First harness invocation immediately post-deploy hit Step 1 timeout from cold-start; warmup probe + retry succeeded — recorded for forensic completeness, not a regression.)
+
+Independent curl (full chain, scenario `a3d40ed6-fc6e-4678-80a0-b6bbb9f77854`) — Step 4 request_id `30808653-96c0-4f96-9fba-fbb77f336a3c`, Step 5 request_id `a4902793-67f7-461a-9e9f-be1f97141a5b`. Step 5 `assistant_text` (1605 chars, verbatim):
+
+> The analysis shows **Hire Two Senior Engineers Locally** as the leading option, but the robustness band is unknown and top drivers are not available from this run, so I can reason from the model structure rather than computed sensitivity figures.
+>
+> Here is what the causal model suggests:
+>
+> **Engineering Delivery Capacity is the central mechanism.** It carries the strongest connection to Q3 Roadmap Delivery Confidence (strength 0.6, high confidence), and that outcome is the primary driver of your goal at strength 0.65. Hiring locally feeds directly into Delivery Capacity, without the coordination drag that the offshore path introduces.
+>
+> **The offshore path trades capacity for overhead.** Engaging an offshore partner also increases Delivery Capacity, but it simultaneously activates Coordination and Management Overhead, which weakly increases Q3 Delivery Delay Risk and weakly decreases Team Capability and Knowledge Retention. Those two penalties likely pull its score below local hiring.
+>
+> **Cost is the main counterweight.** Engineering Headcount Cost moderately increases Budget Overrun Risk (strength 0.55), and local hiring carries the highest cost. That is the primary reason local hiring does not dominate more decisively, the budget risk partially offsets the delivery advantage.
+>
+> **What I cannot tell you from this run** is the exact probability margin between local hiring and offshore, or which factor is most sensitive. Running a fresh analysis would surface those figures and tell you how stable the lead actually is, worth doing before committing, given the cost trade-off is real.
+
+This is substantively grounded: names the leading option, cites real factor labels (Engineering Delivery Capacity, Q3 Roadmap Delivery Confidence, Coordination and Management Overhead, Team Capability and Knowledge Retention, Engineering Headcount Cost, Budget Overrun Risk), real edge strengths (0.6, 0.65, 0.55), and acknowledges what is missing from this run (robustness band, top drivers) instead of denying. **Finding 5.1 closed.**
+
+### `analysis_projection_status` attribution
+
+**Render log direct read remains unavailable from this environment.** The probe value is corroborated through two independent paths:
+
+1. **Supabase direct read** for scenario `a3d40ed6-…` confirms the verbatim split-shape row that exercises the hydration:
+   ```
+   v5_conversation_turns row (Step 4):
+     turn_class=handler, handler_id=run_analysis, fact_count=1
+   v5_handler_facts row:
+     action_type=run_analysis, noop_col_value=false, payload.fact_type=run_analysis,
+     payload_has_noop_key=false   ← payload does NOT contain noop, hydration MUST fire on read
+   ```
+   Pre-fix this exact row threw `SessionReadError` and `prior_facts` came back empty; post-fix the hydration path produces a valid `RunAnalysisHandlerFact` with `noop=false` and the full result payload.
+
+2. **Functional / response-shape proof** — Sonnet's Step 5 response references the leading option by name ("Hire Two Senior Engineers Locally") with concrete factor labels and edge strengths from the analysis. Per [turn-executor.ts:550-555](../../src/orchestrator-v5/turn-executor.ts#L550-L555), `projection_status = !has_run_analysis_fact ? 'facts_absent' : !leading_option_populated ? 'projection_empty' : 'projection_populated'`. Both predicates are demonstrably true given the response content, so `analysis_projection_status: "projection_populated"`.
+
+### Per-finding closure status (post-`f0dcbeb`)
+
+| Finding | Status |
+|---|---|
+| 4.1 — `analysis_ready` on Step 4 wire | **CLOSED** ✓ (still) |
+| 4.2 — `ceeTrace.reason` "CEE" leak | (re-verify next replay) |
+| 4.3 — em dashes in `review_cards` | NOT CLOSED (out of scope) |
+| **5.1 — Step 5 stalls** | **CLOSED** ✓ — root cause was the noop-hydration silent fact-drop in `readFactsFor`; fix in `f0dcbeb` flips `fact_count: 0 → 1`, projection populates, Sonnet grounds. |
+| 5.2 — chip with `action_type: null` | CLOSED ✓ (still) |
+| 7.1, 7.2 — kind-mismatch template internal-term leak + grammar | (only fired pre-hydration-fix; Sonnet no longer routes Step 5 to an edit path) |
+| 7.3 — Sonnet edit-path on explain-leader | **NO LONGER OBSERVED** — root cause was empty `prior_facts`, not a v38.2 prompt gap |
+| 7.4 — recoverable-validator does not narrate-from-facts | NOT TRIGGERED post-fix |
+
+### Updated binding constraint
+
+**No active binding constraint.** All chain-blocking findings closed.
+
+The two remaining open observations (4.2 ceeTrace nested scrub re-verify; 4.3 em dashes in review_cards) are non-chain-blocking and orthogonal to V5 routing/state correctness.
+
+The Step 5 minor caveat — "robustness band is unknown and top drivers are not available from this run" — corresponds to optional projection fields (`runner_up`, `top_drivers`, robustness summary) being absent from the projected analysis. This is a Composition refinement (richer projection from `run_analysis` fact's enrichment subtree) and worth a follow-up brief, but is not a regression: the leading option, factor narrative, and key edge strengths all surface; the response remains substantive and product-acceptable.
+
+### Ratchet status (post-hydration-fix)
+
+- Pre-fix baseline (`38106bd`): 6/6 structural; 2 chain-blocking; 4 non-blocking.
+- Post-chip-click (`f588320`): 6/6 structural; 1 chain-blocking; 2 non-blocking; 2 closed.
+- Post-probe (`050cc9a`): 5/6 (harness substance gate honestly fails Step 5).
+- Post-fact-trace (`db7825b`): 5/6 (same); State formally ruled out via Supabase.
+- **Post-hydration-fix (`f0dcbeb`): 6/6 substantive pass — Step 5 grounds correctly with leading option name, factor labels, edge strengths.**
+
+The ratchet is upheld and advanced: every previously-passing step still passes; Step 5 transitions from harness-fail to substantive-pass without any service-level regression on Steps 1–4 or Step 6.
 
 ---
 

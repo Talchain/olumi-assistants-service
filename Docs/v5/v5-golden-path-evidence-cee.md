@@ -10,30 +10,30 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 | v38.2 confirmed (startup / healthz build) | yes |
 | v38.2 confirmed (per-turn) | not capturable |
 | run_analysis passed end-to-end (handler + commit + response) | yes |
-| Analysis persisted into follow-up context | not externally verified |
+| Analysis persisted into follow-up context | yes |
 | No internal terms in user-facing text | yes |
 
 ## Run metadata
 
 - **Branch:** `staging`
-- **Pack generated from commit SHA:** `db7825b9b2e2e45cf86f3f515e35e4185cde03ac` (if this does not match HEAD, regenerate with the harness)
+- **Pack generated from commit SHA:** `f0dcbebb8a67f36916bb567d4b1d663c96fb0162` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-04-28T09:55:05.027Z
+- **Started at:** 2026-04-28T10:28:48.449Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
-- **Expected build:** `db7825b`
+- **Expected build:** `f0dcbeb`
 
 ## Deploy confirmation (Phase 2)
 
 - **GET /healthz status:** 200
-- **build (commit short):** `db7825b`
+- **build (commit short):** `f0dcbeb`
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 346ms
+- **elapsed:** 294ms
 
-Deploy confirmed: `/healthz` build `db7825b` matches `--expected-build db7825b`.
+Deploy confirmed: `/healthz` build `f0dcbeb` matches `--expected-build f0dcbeb`.
 
 **Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
@@ -47,41 +47,39 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=31294ms | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1163 chip_count=1 elapsed=10081ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=134 chip_count=0 elapsed=5073ms stage=frame | — |
-| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=4092ms | — |
-| `5_explain_leader` | [FAIL] failed | v5-runtime | 200 | status=200 text_len=141 (expected > 200) chip_count=1 | step_5_text_too_short |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=181 chip_count=0 elapsed=13731ms stage=frame | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=35403ms | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=817 chip_count=1 elapsed=7457ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=298 chip_count=0 elapsed=5933ms stage=frame | — |
+| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=5449ms | — |
+| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1638 labels_checked=4 chip_count=1 | — |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=185 chip_count=0 elapsed=6175ms stage=frame | — |
 
 ### assistant_text per step (redacted)
 
 #### `1_draft_graph`
 
 ```
-Drafted a decision graph with 14 nodes and 28 edges.
+Drafted a decision graph with 16 nodes and 31 edges.
 ```
 
 #### `2_weakest_option`
 
 ```
-No analysis has been run yet, so there are no probability results to draw from. What the model does show is the causal structure, and that points to a clear answer.
+Looking at the model structure, **Maintain Current Team (Status Quo)** is the weakest path.
 
-**Maintain Current Team (Status Quo)** looks weakest against your goal of delivering Q3 roadmap commitments on time.
+Here is why the model points there: Status Quo connects to Engineering Delivery Capacity, but without adding headcount or revenue, it leaves that factor at its current level (0.3 on a 0-1 scale). It also carries Coordination and Management Overhead without the offsetting benefit of new capacity, and it is the only option with no mechanism to reduce Budget Overrun Risk over time. Every path to your goal runs through Q3 Roadmap Delivery Confidence, and Status Quo does the least to move that needle.
 
-Here is why the structure points that way: Engineering Team Capacity is the strongest driver in the model, with a 0.65 effect on Q3 Roadmap Delivery and a -0.5 drag on Roadmap Slip risk, both at high confidence. Status Quo does nothing to move that factor. Every other option at least attempts to shift capacity or velocity in a positive direction.
-
-Status Quo also leaves Customer Demand Growth as an unmitigated pressure. If demand is rising and your team size is not, the Roadmap Slip risk accumulates with no counterweight.
-
-The one thing Status Quo has going for it is zero Headcount Investment, which keeps Budget Overrun Risk low. But under your current model, that saving does not offset the delivery exposure.
-
-Running the analysis would give you actual probabilities across all four options rather than structural inference. Worth doing before drawing firm conclusions?
+The one factor worth probing: how stretched is the current team actually running? If your team is underutilised, Status Quo looks less weak than the model suggests. If they are already at capacity, the model's read holds.
 ```
 
 #### `3_add_option`
 
 ```
-Which option would you like to add? A brief description is enough, for example "Contract a freelance team" or "Delay hiring until Q4".
+What option would you like to add? A couple of directions that aren't yet in the model:
+
+- **Contract/freelance engineers** for short-term capacity without permanent headcount
+- **Redistribute scope** by cutting or deferring Q3 roadmap items to match current team capacity
+- Something else entirely
 ```
 
 #### `4_run_analysis`
@@ -93,16 +91,25 @@ Ran analysis on your current scenario.
 #### `5_explain_leader`
 
 ```
-I wasn't sure what you meant by Engineering Team Scaling Strategy. Try asking about a specific option, or describe what you'd like to change.
+The analysis flags Hire Two Senior Engineers Locally as the leading option, but I need to be transparent: the analysis was loaded from a prior run with unknown freshness, and the top drivers and robustness band are not available in the current context. I can reason from the model structure, but I want to be clear this is structural inference, not computed sensitivity data.
+
+Here is what the model suggests is driving the result:
+
+**Engineering Delivery Capacity is the central mechanism.** It carries the strongest edge to Q3 Roadmap Delivery Confidence (strength 0.65, confidence 0.92) and the strongest negative edge to Q3 Delivery Slip (strength -0.5, confidence 0.90). Hiring locally drives delivery capacity directly, without the coordination drag that the offshore path introduces.
+
+**No coordination overhead penalty.** The offshore option activates Coordination and Management Overhead, which pulls down roadmap delivery confidence and increases delivery slip risk. Local hiring avoids that drag entirely.
+
+**Cost is contained within the budget constraint.** Hiring and Staffing Cost drives Budget Overrun Risk strongly (0.7), but the £200k cap is already modelled, so local hiring stays within the constraint rather than breaching it.
+
+The runner-up, Introduce Tiered Pricing to Fund Gradual Hiring, adds Revenue Uplift as a partial offset to cost risk, but the delivery capacity effect arrives more slowly, which likely costs it ground on the Q3 goal specifically.
+
+To get computed sensitivity rankings rather than structural inference, running a fresh analysis would give you the actual driver weights. Would that be useful?
 ```
 
 #### `6_edit_budget`
 
 ```
-Which factor did you have in mind? The model has two that relate to budget:
-
-- **Headcount Investment** (the cost of hiring)
-- **Budget Overrun Risk** (the risk of exceeding budget)
+What value would you like to set for Hiring and Staffing Cost? The factor currently has a cap of £200,000 , are you thinking of something like £250,000, £300,000, or a different figure?
 ```
 
 ## Canonical steps (from brief)
