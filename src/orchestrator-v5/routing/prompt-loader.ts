@@ -1,7 +1,7 @@
 /**
  * V5 — routing prompt loader.
  *
- * Loads `Prompts/v39.txt` once at module import. Exposes the prompt text
+ * Loads `Prompts/v40.txt` once at module import. Exposes the prompt text
  * plus observability primitives (version, hash, systemChars) for the
  * routing call and lifecycle logs (Phase 2.5).
  *
@@ -11,7 +11,7 @@
  *
  * Path resolution uses `process.cwd()` — the established pattern in this
  * repo for external data files (see dsk-loader.ts, routing-log.ts,
- * draft-coaching-log.ts). The prompt lives under `Prompts/v39.txt`
+ * draft-coaching-log.ts). The prompt lives under `Prompts/v40.txt`
  * (capital P). Casing matters on Linux/Render — hard-coded lowercase
  * would compile on macOS and 500 at module init on deploy.
  *
@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 
-export const ROUTING_PROMPT_VERSION = 'v39';
+export const ROUTING_PROMPT_VERSION = 'v40';
 
 /**
  * Sanity range for the prompt size. Range, not equality — lets a small
@@ -51,7 +51,7 @@ export interface LoadedPrompt {
  * `loadRoutingPrompt` seam without touching `fs` or env vars.
  */
 export function defaultPromptPath(): string {
-  return resolve(process.cwd(), 'Prompts', 'v39.txt');
+  return resolve(process.cwd(), 'Prompts', 'v40.txt');
 }
 
 /**

@@ -24,9 +24,9 @@ import {
 } from '../prompt-loader.js';
 
 describe('prompt-loader (v5 alpha hardening 2.1)', () => {
-  it('exports the eager-loaded prompt with version v39', () => {
-    expect(LOADED_PROMPT.version).toBe('v39');
-    expect(ROUTING_PROMPT_VERSION).toBe('v39');
+  it('exports the eager-loaded prompt with version v40', () => {
+    expect(LOADED_PROMPT.version).toBe('v40');
+    expect(ROUTING_PROMPT_VERSION).toBe('v40');
   });
 
   it('prompt size falls within the sanity range', () => {
@@ -65,11 +65,11 @@ describe('prompt-loader (v5 alpha hardening 2.1)', () => {
     expect(() => loadRoutingPrompt(wrong)).toThrow(/outside expected range/);
   });
 
-  it('defaultPromptPath resolves under process.cwd()/Prompts/v39.txt with exact casing', () => {
+  it('defaultPromptPath resolves under process.cwd()/Prompts/v40.txt with exact casing', () => {
     // Exact casing matters on Linux/Render (correction 2). We assert the
     // segments rather than a full path to stay portable across runners.
     const p = defaultPromptPath();
-    expect(p.endsWith('/Prompts/v39.txt')).toBe(true);
+    expect(p.endsWith('/Prompts/v40.txt')).toBe(true);
   });
 
   // Correction 6: confirm the loader works in the compiled dist layout, not
