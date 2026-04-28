@@ -27,7 +27,8 @@ export type StructuralViolationCode =
   | 'EDGE_LIMIT_EXCEEDED'
   | 'NO_GOAL'
   | 'NO_DECISION'
-  | 'FEWER_THAN_TWO_OPTIONS';
+  | 'FEWER_THAN_TWO_OPTIONS'
+  | 'OPTION_NO_FACTOR_EDGES';
 
 export interface StructuralViolation {
   code: StructuralViolationCode;
@@ -72,6 +73,7 @@ export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
   NO_GOAL: 'The model would have no goal node.',
   NO_DECISION: 'The model would have no decision node.',
   FEWER_THAN_TWO_OPTIONS: 'The model would have fewer than two options.',
+  OPTION_NO_FACTOR_EDGES: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
 };
 
 // ============================================================================
@@ -90,6 +92,7 @@ export function validateGraphStructure(graph: GraphV3T): StructuralValidationRes
   checkRequiredNodeKinds(graph, violations);
   checkLimits(graph, violations);
   checkOrphanNodes(graph, violations);
+  checkOptionFactorEdges(graph, violations);
   checkPathToGoal(graph, violations);
   checkCycles(graph, violations);
 
@@ -158,6 +161,37 @@ function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): v
 function isDirected(edge: GraphV3T['edges'][number]): boolean {
   // Treat absent edge_type as 'directed' (backward compat, matches schemas/graph.ts)
   return (edge as Record<string, unknown>).edge_type !== 'bidirected';
+}
+
+/**
+ * Every option node must have at least one outbound directed edge to a
+ * factor node. An option without a factor connection cannot be analysed —
+ * the prompt (edit-graph-v6) already states this rule, but the validator
+ * was not enforcing it. An LLM that emits only `add_node opt_*` plus the
+ * decision→option structural edge would otherwise produce a non-functional
+ * option that passes structural validation.
+ *
+ * Inbound `decision → option` edges and outbound `option → outcome|risk`
+ * edges do not satisfy the rule — the connection must be option → factor.
+ */
+function checkOptionFactorEdges(graph: GraphV3T, violations: StructuralViolation[]): void {
+  const factorIds = new Set<string>();
+  for (const node of graph.nodes) {
+    if (node.kind === 'factor') factorIds.add(node.id);
+  }
+
+  for (const node of graph.nodes) {
+    if (node.kind !== 'option') continue;
+    const hasFactorEdge = graph.edges.some(
+      (edge) => isDirected(edge) && edge.from === node.id && factorIds.has(edge.to),
+    );
+    if (!hasFactorEdge) {
+      violations.push({
+        code: 'OPTION_NO_FACTOR_EDGES',
+        detail: `Option "${node.id}" (${node.label}) has no outbound edge to a factor — it cannot be analysed. Add at least one option → factor edge.`,
+      });
+    }
+  }
 }
 
 function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): void {

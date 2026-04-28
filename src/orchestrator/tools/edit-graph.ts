@@ -1902,7 +1902,18 @@ export async function handleEditGraph(
         validationOutcome = 'graph_structure_invalid';
         setViolationCodes(structResult.violations.map((violation) => violation.code));
         recoveryPathChosen = 'repair_retry';
-        if (intentCategory !== 'structural') {
+        // Repair-eligible structural codes for the structural-intent path.
+        // Default behaviour for structural intents is immediate reject — for
+        // most structural failures (NO_GOAL, CYCLE_DETECTED, NODE_LIMIT_EXCEEDED,
+        // etc.) repair is unlikely to recover. OPTION_NO_FACTOR_EDGES is the
+        // exception: an LLM that emits add_node + decision-edge but forgets the
+        // option → factor edge has made a known-fixable mistake. Per the brief,
+        // this code must enter the repair loop before final rejection.
+        const STRUCTURAL_REPAIRABLE_CODES = new Set<string>(['OPTION_NO_FACTOR_EDGES']);
+        const allRepairable = structResult.violations.length > 0
+          && structResult.violations.every((v) => STRUCTURAL_REPAIRABLE_CODES.has(v.code));
+        const isLastAttempt = attempt === totalAttempts;
+        if (intentCategory !== 'structural' || (allRepairable && !isLastAttempt)) {
           consecutiveNarrowStructuralFailures++;
           lastValidationResult = {
             valid: false,
@@ -1914,7 +1925,11 @@ export async function handleEditGraph(
               message: violation.detail,
             })),
           };
-          if (consecutiveNarrowStructuralFailures >= 2) {
+          // Narrow-intent recovery-question guard only applies to non-structural
+          // intents — for structural intents repairing OPTION_NO_FACTOR_EDGES,
+          // skip the consecutive-failure recovery question (the structural intent
+          // path doesn't have the "narrow recovery" semantics).
+          if (intentCategory !== 'structural' && consecutiveNarrowStructuralFailures >= 2) {
             recoveryPathChosen = 'narrow_intent_recovery_question';
             branchTaken = 'recovery_question';
             branchReason = 'repeated_graph_structure_invalid';

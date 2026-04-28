@@ -27,7 +27,10 @@ import { getAdapter } from '../../adapters/llm/router.js';
 import type {
   ConversationContext,
   DecisionStage,
+  GraphPatchBlockData,
   GraphV3T,
+  PendingClarificationState,
+  SuggestedAction,
   V2RunResponseEnvelope,
 } from '../../orchestrator/types.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
@@ -79,6 +82,213 @@ export interface DispatchEditGraphResult {
   readonly analysisReady?: AnalysisReadyPayload;
 }
 
+/**
+ * Map the V4 internal `SuggestedAction` shape (`{ label, prompt, role,
+ * action_type? }`) to the boundary `Action` shape (`{ id, label, message,
+ * action_type? }`). The boundary `action_type` enum is closed to v0.7.0
+ * V5ActionType values, so internal action_types that don't fit are dropped
+ * (the resulting chip still works as a prompt-replay button via `message`).
+ */
+const BOUNDARY_ACTION_TYPES: ReadonlySet<string> = new Set([
+  'run_analysis',
+  'set_factor_value',
+  'add_constraint',
+  'adjust_edge_strength',
+  'explain_result',
+  'compare_options',
+  'what_would_flip',
+]);
+
+type BoundaryAction = OlumiResponse['suggested_actions'][number];
+
+function mapSuggestedActionToBoundary(
+  action: SuggestedAction,
+  index: number,
+): BoundaryAction {
+  const base: BoundaryAction = {
+    id: `edit_graph_action_${index}`,
+    label: action.label,
+    message: action.prompt,
+  };
+  if (action.action_type && BOUNDARY_ACTION_TYPES.has(action.action_type)) {
+    base.action_type = action.action_type as BoundaryAction['action_type'];
+  }
+  return base;
+}
+
+function chipsFromPendingClarification(
+  pending: PendingClarificationState,
+): SuggestedAction[] {
+  return pending.candidate_labels.map((label) => ({
+    label,
+    prompt: `Update ${label}.`,
+    role: 'facilitator' as const,
+  }));
+}
+
+// NOTE — pendingProposal accept/cancel chips intentionally NOT rendered.
+//
+// The V4 `handleEditGraph` reads `invocationInput.pending_proposal`
+// (edit-graph.ts around line 1274) to deterministically apply a stored
+// proposal on the next turn. The V5 pre-Sonnet dispatcher, however, does
+// NOT currently:
+//   (a) persist `pendingProposal` to session storage,
+//   (b) read it back on the next turn,
+//   (c) thread it via `handleEditGraph(..., { invocationInput: { ... } })`.
+//
+// Without (a)+(b)+(c), an "Apply this change" chip would replay as a plain
+// user prompt that the LLM has to re-resolve — not a byte-for-byte replay
+// of the original proposal. Presenting non-deterministic accept/cancel
+// chips is worse UX than no chips at all (the user expects clicking
+// "Apply" to apply exactly the shown proposal).
+//
+// Until the deterministic-replay plumbing is wired (separate brief), the
+// composer simply does not surface pending-proposal chips. The V4
+// `assistant_text` still describes the proposal and the user can confirm
+// in natural language.
+
+/**
+ * Build wire-shaped `suggested_actions` from `EditGraphResult`.
+ *
+ * Sources merged (not exclusive precedence) and deduped by `message`:
+ *   1. `result.suggestedActions` — explicit chips from edit-graph.ts
+ *      (clarification chips from `buildClarificationActions`, "Try a
+ *      simpler change" / "Start fresh" recovery chips, "Re-run analysis"
+ *      rerun_recommended chip).
+ *   2. `result.pendingClarification` candidate-label chips — defensively
+ *      included so a result that carries pendingClarification without
+ *      explicit actions still surfaces chips.
+ *
+ * `pendingProposal` accept/cancel chips are intentionally NOT rendered —
+ * see comment on `chipsFromPendingProposal` removal.
+ *
+ * First occurrence wins on dedupe, so explicit `suggestedActions` take
+ * priority over pending-state-derived chips when prompts collide.
+ */
+function buildBoundarySuggestedActions(
+  result: EditGraphResult,
+): BoundaryAction[] {
+  const collected: SuggestedAction[] = [];
+
+  if (result.suggestedActions && result.suggestedActions.length > 0) {
+    collected.push(...result.suggestedActions);
+  }
+  if (result.pendingClarification) {
+    collected.push(...chipsFromPendingClarification(result.pendingClarification));
+  }
+
+  // Dedupe by message.
+  const seen = new Set<string>();
+  const unique: SuggestedAction[] = [];
+  for (const action of collected) {
+    if (seen.has(action.prompt)) continue;
+    seen.add(action.prompt);
+    unique.push(action);
+  }
+
+  return unique.map((a, i) => mapSuggestedActionToBoundary(a, i));
+}
+
+/**
+ * Surface rejection metadata on the wire as a boundary `error` block.
+ *
+ * The internal V4 `GraphPatchBlock` uses `data.status: 'rejected'` with
+ * rejection.code/reason/attempts. The boundary `graph_patch` block schema
+ * has no rejected status (only `'applied' | 'noop'`) and a narrow
+ * `operation` enum, so V4 rejection blocks cannot pass through unmodified.
+ *
+ * Mapping rejection → `error` block (with `details` carrying the rejection
+ * code AND the specific structural violation codes) preserves the
+ * rejection signal without widening the boundary schema. The UI can read
+ * `details.rejection_code` and `details.violation_codes` to render a
+ * specific recovery affordance.
+ *
+ * Two rejection-emit paths exist in the V4 handler:
+ *   1. `buildRejectionResult` (final-attempt repair exhaustion / max-ops /
+ *      budget) → returns `result.blocks: [GraphPatchBlock with rejection]`.
+ *   2. Structural-violation immediate reject for structural intents
+ *      (edit-graph.ts:1950) → returns `result.blocks: []`. Violation codes
+ *      live on `result.diagnostics.validation_violation_codes` and the
+ *      umbrella code on `result.diagnostics.failure_code`.
+ *
+ * Both paths are handled here so a structural-validation rejection (e.g.
+ * the new OPTION_NO_FACTOR_EDGES code) reaches the wire even when the V4
+ * block is absent.
+ *
+ * Successful (non-rejected) edits return `[]` — the V4 GraphPatchBlock
+ * with `operations: PatchOperation[]` does not fit the narrow boundary
+ * `graph_patch` operation enum, and the applied graph reaches the UI via
+ * `analysis_ready` + the persisted scenarios.graph row.
+ */
+function buildBoundaryBlocks(result: EditGraphResult): OlumiResponse['blocks'] {
+  if (!result.wasRejected) return [];
+
+  // Path 1: V4 GraphPatchBlock with rejection metadata (from buildRejectionResult).
+  const rejectionBlock = result.blocks.find(
+    (b) => b.block_type === 'graph_patch'
+      && (b.data as GraphPatchBlockData).status === 'rejected',
+  );
+
+  if (rejectionBlock) {
+    const data = rejectionBlock.data as GraphPatchBlockData;
+    const rej = data.rejection;
+    if (rej) {
+      // Stable codes only on the wire. Raw validator detail (rej.reason
+      // text, failure messages, free-form descriptions) stays in server
+      // logs and never crosses the boundary. The UI renders specific
+      // recovery affordances from the codes, not the text.
+      const details: Record<string, unknown> = { source: 'edit_graph' };
+      if (rej.code) details.rejection_code = rej.code;
+      if (rej.plot_code) details.plot_code = rej.plot_code;
+      if (rej.attempts != null) details.attempts = rej.attempts;
+      // Promote diagnostics violation_codes when present so OPTION_NO_FACTOR_EDGES
+      // and similar specific codes reach the wire alongside the umbrella rejection_code.
+      const violationCodes = result.diagnostics?.validation_violation_codes;
+      if (violationCodes && violationCodes.length > 0) {
+        details.violation_codes = violationCodes;
+      }
+      return [
+        {
+          type: 'error',
+          error_code: 'INTERNAL_ERROR',
+          severity: 'warn',
+          details,
+        },
+      ];
+    }
+  }
+
+  // Path 2: structural-violation immediate reject — V4 returns blocks: [] but
+  // surfaces the failure on diagnostics. Synthesize an error block so the
+  // wire still carries rejection_code + violation_codes (e.g. for the
+  // OPTION_NO_FACTOR_EDGES rule).
+  //
+  // Stable codes only — `failure_message` may contain raw validator output
+  // ("Option opt_x has no outbound edge to a factor — cannot be analysed")
+  // which we do NOT want on the wire. Logs retain it via diagnostics; the
+  // wire surface is just `rejection_code` + `failure_branch` + optional
+  // `violation_codes`.
+  const diag = result.diagnostics;
+  if (diag?.failure_code || (diag?.validation_violation_codes && diag.validation_violation_codes.length > 0)) {
+    const details: Record<string, unknown> = { source: 'edit_graph' };
+    if (diag.failure_code) details.rejection_code = diag.failure_code;
+    if (diag.failure_branch) details.failure_branch = diag.failure_branch;
+    if (diag.validation_violation_codes && diag.validation_violation_codes.length > 0) {
+      details.violation_codes = diag.validation_violation_codes;
+    }
+    return [
+      {
+        type: 'error',
+        error_code: 'INTERNAL_ERROR',
+        severity: 'warn',
+        details,
+      },
+    ];
+  }
+
+  return [];
+}
+
 function editResultToOlumiResponse(
   result: EditGraphResult,
   payload: MessageTurnPayload,
@@ -96,8 +306,8 @@ function editResultToOlumiResponse(
   return {
     response_version: 2,
     assistant_text: result.assistantText ?? fallback,
-    blocks: [],
-    suggested_actions: [],
+    blocks: buildBoundaryBlocks(result),
+    suggested_actions: buildBoundarySuggestedActions(result),
     insights: [],
     stage_indicator: payload.stage,
   };
