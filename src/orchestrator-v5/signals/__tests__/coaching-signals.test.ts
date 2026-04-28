@@ -10,6 +10,7 @@ function makeContextPack(overrides: {
   topDrivers?: readonly string[];
   analysisPresent?: boolean;
 } = {}): ContextPack {
+  const driverLabels = overrides.topDrivers ?? ['Customer Churn'];
   return {
     version: '2.0',
     stage: 'analyse',
@@ -26,10 +27,14 @@ function makeContextPack(overrides: {
         ? null
         : {
             status: 'complete',
-            leading_option: 'Option A',
-            runner_up: 'Option B',
+            leading_option: { label: 'Option A', probability: 0.6 },
+            runner_up: { label: 'Option B', probability: 0.4 },
+            margin_pp: 20,
             robustness_band: 'moderate',
-            top_drivers: overrides.topDrivers ?? ['Customer Churn'],
+            top_drivers: driverLabels.map((label, i) => ({
+              factor_label: label,
+              sensitivity_value: 0.5 - i * 0.1,
+            })),
             fragile_edges: [],
             staleness_reason: null,
           },

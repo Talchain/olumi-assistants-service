@@ -132,10 +132,10 @@ function findMostRecentSuccessfulAnalysisFact(
 /**
  * For an edit-handler turn, read the edited target_id off the handler fact
  * and, if it is present in contextPack.analysis.top_drivers (matched by
- * label exactly as the ContextPack carries it), return that label so the
- * coaching text can name it. Null when no analysis exists, or when the
- * target is not among top drivers, or when the fact shape does not carry
- * target_id.
+ * factor_label exactly as the ContextPack carries it), return that label
+ * so the coaching text can name it. Null when no analysis exists, or when
+ * the target is not among top drivers, or when the fact shape does not
+ * carry target_id.
  */
 function findEditTargetTopDriverLabel(
   outcome: SuccessfulHandlerOutcome,
@@ -152,10 +152,12 @@ function findEditTargetTopDriverLabel(
       fact.fact_type === 'add_constraint'
     ) {
       const targetId = fact.result.target_id;
-      // top_drivers is a list of factor_label strings; an edit fact carries
-      // target_id (factor id). Match on both id and label as a best-effort.
-      const match = drivers.find((label) => label === targetId);
-      if (match !== undefined) return match;
+      // top_drivers carries { factor_label, sensitivity_value }; an edit
+      // fact carries target_id (factor id). Best-effort label match —
+      // ContextPack does not currently expose factor_id, so we compare
+      // factor_label against target_id (legacy behaviour preserved).
+      const match = drivers.find((d) => d.factor_label === targetId);
+      if (match !== undefined) return match.factor_label;
     }
   }
   return null;

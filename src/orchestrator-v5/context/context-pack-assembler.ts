@@ -28,8 +28,12 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { SessionTurn } from '@talchain/schemas/orchestrator';
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
-import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
+import type {
+  AnalysisResponseSummary,
+  OptionSummary,
+} from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
+import { log } from '../../utils/telemetry.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import { detectCompound } from '../routing/compound-detector.js';
 import {
@@ -65,12 +69,23 @@ export interface ContextPackGraph {
   };
 }
 
+export interface ContextPackAnalysisOption {
+  readonly label: string;
+  readonly probability: number;
+}
+
+export interface ContextPackAnalysisDriver {
+  readonly factor_label: string;
+  readonly sensitivity_value: number;
+}
+
 export interface ContextPackAnalysis {
   readonly status: string;
-  readonly leading_option: string | null;
-  readonly runner_up: string | null;
-  readonly robustness_band: string;
-  readonly top_drivers: readonly string[];
+  readonly leading_option: ContextPackAnalysisOption | null;
+  readonly runner_up: ContextPackAnalysisOption | null;
+  readonly margin_pp: number | null;
+  readonly robustness_band: string | null;
+  readonly top_drivers: readonly ContextPackAnalysisDriver[];
   readonly fragile_edges: readonly string[];
   readonly staleness_reason: string | null;
 }
@@ -292,25 +307,105 @@ function projectGraph(graph: GraphWithOptions | null): ContextPackGraph {
   };
 }
 
+/**
+ * Probability scale guard. Returns true when `value` is a finite number in
+ * [0, 1]. On violation, emits a telemetry event the caller can correlate
+ * with the offending option/scenario; the caller is expected to *exclude*
+ * the offending option from the projection (do not throw — Sonnet should
+ * still see the rest of the analysis).
+ */
+function isProbabilityValid(
+  value: unknown,
+  context: { call_site: string; option_label?: string | null; option_id?: string | null },
+): value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+    log.warn(
+      {
+        event: 'analysis_projection_invalid_probability',
+        call_site: context.call_site,
+        option_label: context.option_label ?? null,
+        option_id: context.option_id ?? null,
+        value: typeof value === 'number' ? value : String(value),
+      },
+      'context-pack-assembler: dropping option with invalid win_probability',
+    );
+    return false;
+  }
+  return true;
+}
+
+const TOP_DRIVER_CAP = 3;
+
 function projectAnalysis(
   analysis: AnalysisResponseSummary | null,
   stalenessReason: string | null,
 ): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
-  const sortedOptions = [...analysis.options].sort((a, b) => b.win_probability - a.win_probability);
-  const leading = sortedOptions[0]?.option_label ?? null;
-  const runnerUp = sortedOptions[1]?.option_label ?? null;
+  // 1. Filter options by probability scale guard, then sort desc.
+  //    F.6 passthrough: we only filter+sort; we do not transform values.
+  const validOptions: OptionSummary[] = analysis.options
+    .filter((o) =>
+      isProbabilityValid(o.win_probability, {
+        call_site: 'projectAnalysis.options',
+        option_label: o.option_label,
+        option_id: o.option_id,
+      }),
+    )
+    .slice()
+    .sort((a, b) => b.win_probability - a.win_probability);
+
+  const leadingSrc = validOptions[0];
+  const runnerUpSrc = validOptions[1];
+
+  const leading: ContextPackAnalysisOption | null = leadingSrc
+    ? { label: leadingSrc.option_label, probability: leadingSrc.win_probability }
+    : null;
+  const runnerUp: ContextPackAnalysisOption | null = runnerUpSrc
+    ? { label: runnerUpSrc.option_label, probability: runnerUpSrc.win_probability }
+    : null;
+
+  // margin_pp is pre-computed upstream in compactAnalysis — passthrough.
+  // When the upstream margin_pp is missing (legacy callers) or scale-guard
+  // dropped one of the leading two options, fall through to null rather
+  // than recompute here (F.6).
+  const marginPp =
+    leading && runnerUp ? analysis.margin_pp ?? null : null;
+
+  // 2. Top drivers: filter non-finite, sort by |sensitivity| desc, cap at 3.
+  //    Upstream `DriverSummary.sensitivity` is already the absolute value
+  //    (Math.abs in deriveTopDrivers); sign is in `direction`. Re-attach
+  //    sign so consumers see a signed magnitude.
+  const topDrivers: ContextPackAnalysisDriver[] = analysis.top_drivers
+    .filter((d) => isFiniteSensitivity(d.sensitivity))
+    .map((d) => ({
+      factor_label: d.factor_label,
+      sensitivity_value: d.direction === 'negative' ? -d.sensitivity : d.sensitivity,
+    }))
+    .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
+    .slice(0, TOP_DRIVER_CAP);
+
+  // 3. Robustness band: null when source is unknown / empty; do not fabricate.
+  const rawBand = analysis.robustness_level;
+  const robustnessBand =
+    typeof rawBand === 'string' && rawBand.trim().length > 0 && rawBand !== 'unknown'
+      ? rawBand
+      : null;
 
   return {
     status: analysis.analysis_status,
     leading_option: leading,
     runner_up: runnerUp,
-    robustness_band: analysis.robustness_level,
-    top_drivers: analysis.top_drivers.map((d) => d.factor_label),
+    margin_pp: marginPp,
+    robustness_band: robustnessBand,
+    top_drivers: topDrivers,
     fragile_edges: (analysis.top_fragile_edges ?? []).map((e) => `${e.from_label} → ${e.to_label}`),
     staleness_reason: stalenessReason,
   };
+}
+
+function isFiniteSensitivity(value: unknown): value is number {
+  return typeof value === 'number' && !Number.isNaN(value) && value !== Infinity && value !== -Infinity;
 }
 
 function projectConversation(

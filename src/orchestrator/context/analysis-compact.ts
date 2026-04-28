@@ -70,6 +70,10 @@ export interface AnalysisResponseSummary {
   top_fragile_edges?: FragileEdge[];
   /** Winner win_probability minus runner-up win_probability. Null when fewer than 2 options. */
   margin: number | null;
+  /** `margin × 100` rounded to 1 decimal place. Null when `margin` is null.
+   *  Pre-computed here so the V5 ContextPack assembler can stay free of
+   *  semantic transforms (F.6 passthrough). */
+  margin_pp: number | null;
   analysis_status: string;
 }
 
@@ -537,6 +541,11 @@ export function compactAnalysis(
     const margin = options.length >= 2
       ? options[0].win_probability - options[1].win_probability
       : null;
+    // margin_pp: margin in percentage points, rounded to 1 dp. Pre-computed
+    // upstream so the V5 assembler stays passthrough-only (F.6).
+    const marginPp = margin === null
+      ? null
+      : Math.round(margin * 1000) / 10;
 
     const summary: AnalysisResponseSummary = {
       winner: winner ?? { option_id: '', option_label: '', win_probability: 0 },
@@ -545,6 +554,7 @@ export function compactAnalysis(
       robustness_level: robustnessLevel,
       fragile_edge_count: fragileEdgeCount,
       margin,
+      margin_pp: marginPp,
       analysis_status: status,
     };
 

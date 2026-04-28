@@ -38,8 +38,9 @@ function runAnalysisFact(): HandlerFact {
 function analysisAt(band: string): ContextPackAnalysis {
   return {
     status: 'complete',
-    leading_option: 'Option A',
-    runner_up: 'Option B',
+    leading_option: { label: 'Option A', probability: 0.6 },
+    runner_up: { label: 'Option B', probability: 0.4 },
+    margin_pp: 20,
     robustness_band: band,
     top_drivers: [],
     fragile_edges: [],

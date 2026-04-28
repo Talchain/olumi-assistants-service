@@ -190,12 +190,9 @@ async function fetchPriorFacts(
   const handlerRowIds = priorTurns
     .filter((t) => t.turn_class === 'handler')
     .map((t) => t.id);
-  // TODO(stage2-cleanup): once the fact-chain root cause is identified
-  // and verified on staging, downgrade this to debug or drop the
-  // `handler_row_ids` / `prior_turn_handler_ids` arrays to keep prod
-  // logs lean. Trace fires unconditionally so empty-history turns
-  // still produce a row (distinguishes session-load failure from
-  // filter mismatch).
+  // Lean info row: counts and presence flags only. Verbose arrays moved to
+  // debug — set LOG_LEVEL=debug to recover handler_row_ids / per-turn
+  // class+handler arrays when investigating fact-chain issues.
   log.info(
     {
       event: 'v5_fact_chain_trace',
@@ -203,12 +200,20 @@ async function fetchPriorFacts(
       scenario_id: scenarioId,
       session_store_present: store !== undefined,
       prior_turn_count: priorTurns.length,
-      prior_turn_classes: priorTurns.map((t) => t.turn_class),
-      prior_turn_handler_ids: priorTurns.map((t) => t.handler_id ?? null),
       handler_row_id_count: handlerRowIds.length,
-      handler_row_ids: handlerRowIds,
     },
     'V5 buildTurnContext: fact chain trace',
+  );
+  log.debug(
+    {
+      event: 'v5_fact_chain_trace_detail',
+      request_id: requestId,
+      scenario_id: scenarioId,
+      prior_turn_classes: priorTurns.map((t) => t.turn_class),
+      prior_turn_handler_ids: priorTurns.map((t) => t.handler_id ?? null),
+      handler_row_ids: handlerRowIds,
+    },
+    'V5 buildTurnContext: fact chain trace (verbose)',
   );
   if (!store) return [];
   if (priorTurns.length === 0) return [];
