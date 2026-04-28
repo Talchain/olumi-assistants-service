@@ -688,3 +688,115 @@ The wire fix (Finding 4.1) is permanent. Step 5's "explain leader" turn still do
 Pre-fix baseline (staging `38106bd`): 6/6 structural pass; 2 chain-blocking findings (4.1, 5.1); 4 non-blocking (1.1, 4.2, 4.3, 5.2).
 Post-fix replay (staging `f588320`): 6/6 structural pass; 1 chain-blocking (5.1); 2 non-blocking (4.2, 4.3); 2 closed (4.1, 5.2).
 This branch (probe wiring, pre-staging-replay): no behavioural delta on the wire (probe is observability only); harness assertions tightened so a future Step 5 denial-phrase regression cannot mascarade as a structural pass; nested ceeTrace scrub closes Finding 4.2. **Pending probe data, the chain-blocking count remains 1 (5.1) — but the next replay will determine whether it stays open as a code-fix item or migrates to a separate prompt-layer brief.**
+
+## Delta — V5 post-analysis projection enrichment replay (staging `4420a14`, 2026-04-28)
+
+Date: 2026-04-28
+Staging commit: `4420a141` — "feat(v5): post-analysis projection enrichment — Step 5 grounding"
+Build verified: `/healthz.build = 4420a14` ✓ matches `--expected-build`. Confirmed across 5 consecutive probes.
+
+### Replay outcomes
+
+Harness: `staging-projection-enrichment`, scenario `7d5ab535-4a55-4add-8111-3baced73a05a`. Evidence pack: [v5-projection-enrichment-replay-4420a14.md](v5-projection-enrichment-replay-4420a14.md).
+
+| Step | Result | Notes |
+|---|---|---|
+| 1_draft_graph | **PASS** | 200, chip_count=1, first_chip_label="Run analysis", elapsed=33422ms |
+| 2_weakest_option | **PASS** | 200, text_len=1004, chip_count=1, elapsed=8979ms, stage=analyse |
+| 3_add_option | **PASS** | 200, text_len=233, chip_count=0, elapsed=7442ms, stage=frame |
+| 4_run_analysis | **PASS** | 200, text_len=38, **`analysis_ready=ready options=4`**, elapsed=5122ms |
+| **5_explain_leader** | **PASS** | 200, **text_len=1280** (vs 58 chars on broken `050cc9a` baseline; vs 1042 on hydration-fix `f0dcbeb`), labels_checked=4, chip_count=2 |
+| 6_edit_budget | **PASS** | 200, text_len=96, chip_count=0, elapsed=7033ms, stage=frame |
+
+### Step 5 substance gate — verified
+
+Step 5 `assistant_text` (verbatim from evidence pack):
+
+> Hire Two Senior Engineers Locally leads at **68.5%** primarily because **Engineering Capacity is the dominant driver** in this model, with a **sensitivity value of 1.0**, meaning it accounts for the largest share of variance in the outcome. Local hiring directly and strongly increases Engineering Capacity, which in turn moderately drives Q3 Roadmap Delivery (strength 0.55) and reduces Q3 Delivery Slip risk (strength -0.40). Those two pathways feed directly into Meeting Q3 Roadmap Commitments.
+>
+> The offshore option competes on the same capacity mechanism but trails at **28.8%**, likely because the model reflects a cost or delivery speed trade-off that disadvantages it relative to local hiring under current assumptions.
+>
+> Two things worth noting before treating this as settled:
+>
+> - **The result is fragile.** Q3 Roadmap Complexity is the second-largest driver with a **negative sensitivity of -0.39**, meaning if your roadmap is more complex than currently assumed, the margin narrows. How confident are you in the current complexity estimate?
+> - **The analysis freshness is unknown** , this was loaded from a prior run. If any inputs have changed since then, the 68.5% figure may not reflect your current model state.
+>
+> Running a fresh analysis would give you a clean read before committing.
+
+Required-substring checks against the brief's success criteria:
+
+| Check | Outcome |
+|---|---|
+| Contains a percentage figure (`%`) | ✓ — `68.5%`, `28.8%` |
+| References runner-up or margin | ✓ — `"trails at 28.8%"`, `"the margin narrows"` |
+| References ≥ 1 driver / factor label | ✓ — `Engineering Capacity`, `Q3 Roadmap Complexity` |
+| References sensitivity values | ✓ — `1.0`, `-0.39` |
+| Does NOT contain "not available from this run" | ✓ absent |
+| Does NOT contain "top drivers are not available" | ✓ absent |
+| Surfaces the staleness flag (`loaded_from_prior_run_freshness_unknown`) | ✓ — `"The analysis freshness is unknown , this was loaded from a prior run"` |
+
+The Step 5 text now references both top-level `enrichment.factor_sensitivity[]` (the dominant driver and its sign) and the structural causal chain. This is the projection-enrichment outcome the brief targeted: prior-fact loading produces a populated `top_drivers[]` projection, and the LLM uses it.
+
+### Probe-log evidence — `v5_turn_context_analysis_projection`
+
+Direct verification of the probe-log fields (`top_drivers_count`, `analysis_section_chars`, `analysis_projection_status`) requires Render log access; **logs were not capturable from this local replay run** (no Render API token in scope). Indirect evidence:
+
+| Field | Inferred value | Evidence |
+|---|---|---|
+| `analysis_projection_status` | `projection_populated` | Step 5 substantive text references concrete probability + driver figures sourced from the projection (not invented from graph topology). `facts_absent` and `projection_empty` are inconsistent with the observed text. |
+| `top_drivers_count` | ≥ 2 | Step 5 names two distinct drivers with sensitivity values (`Engineering Capacity 1.0`, `Q3 Roadmap Complexity -0.39`). |
+| `analysis_section_chars` | < 800 (target) | Local unit test `analysis section stays under 800 chars for a realistic 4-option, 3-driver run` enforces the budget on a fixture matching this run's shape. The deployed code path is identical. |
+| `has_run_analysis_fact` | `true` | Step 5 reads from prior fact (the 30-min-old run_analysis fact persisted by Step 4); the staleness flag confirms the fallback path fired. |
+
+Direct probe-log capture is deferred to a future replay with Render log access. The substance-level success criterion (Step 5 text contains percentage + runner-up + driver) is met.
+
+### Step 4 ceeTrace status
+
+**ceeTrace IS present in `blocks[0].enrichment.ceeTrace` on the Step 4 wire response.** Captured via independent `/orchestrate/v2/turn` probe against staging build `4420a14`:
+
+```json
+{
+  "requestId": "ee5bd064-d314-4bcd-a13a-08949307e60a",
+  "degraded": false,
+  "timestamp": "2026-04-28T12:28:16.642Z",
+  "source": "orchestrator",
+  "reason": "Legacy CEE calls skipped (M2 decision-review enabled)"
+}
+```
+
+**Attribution: environment, not code.** The response-finaliser scrub at [response-finaliser.ts:187-188](../../src/orchestrator-v5/response-finaliser.ts#L187-L188) only fires when `CEE_TURN_DEBUG_ENABLED=false`. Top-level `ceeTrace` correctly absent (`'ceeTrace' in body === false`); only the nested `blocks[*].enrichment.ceeTrace` survives because the `debugEnabled` short-circuit at line 187 skips the entire scrub function. This implies `CEE_TURN_DEBUG_ENABLED=true` in the staging Render env. **Code path is correct; the env flag is the lever.**
+
+Action required (out of scope for this branch): clear `CEE_TURN_DEBUG_ENABLED` on staging or restrict it to scoped debug sessions. Tracked as a follow-up under the existing Finding 4.2 family (banned-term-free user-facing text — `ceeTrace.reason: "Legacy CEE calls skipped"` would still leak even if surfaced to the user).
+
+### Per-finding status (post-`4420a14`)
+
+| Finding | Status | Notes |
+|---|---|---|
+| 4.1 — `analysis_ready` on Step 4 wire | **CLOSED** ✓ | Maintained; still ready+4 options. |
+| 4.2 — em-dashes / banned terms in step 4 enrichment | **STILL OPEN** | `ceeTrace.reason` env-driven; see ceeTrace section above. |
+| 5.1 — Step 5 stalls on prior-run grounding | **CLOSED** ✓ | Step 5 surfaces 68.5% / 28.8% / dominant driver / sensitivity values. The projection enrichment delivers the data the prompt was already written to consume. |
+| 5.2 — Step 5 denial phrasing | **CLOSED** (maintained) | "not available from this run" absent; staleness flag surfaces honestly without denial. |
+
+### Ratchet status
+
+| Stage | Pass count | Chain-blocking findings |
+|---|---|---|
+| Pre-fix baseline (`38106bd`) | 6/6 structural | 2 (4.1, 5.1) |
+| Post-finaliser fix (`f588320`) | 6/6 structural | 1 (5.1) |
+| Post-hydration-fix (`f0dcbeb`) | 6/6 substantive (Step 5 = 1042 chars but generic causal text) | 1 (5.1, refined to "projection-empty") |
+| **Post-projection-enrichment (`4420a14`)** | **6/6 substantive (Step 5 = 1280 chars with concrete probability + driver figures)** | **0 chain-blocking** |
+
+### Verification limitations
+
+- Direct Render log capture (probe-log values, telemetry events) was not performed; substance-level Step 5 text serves as the user-facing success criterion.
+- The independent ceeTrace probe used a fresh scenario; per-`request_id` log correlation against the harness scenario was not performed.
+- `Prompts/v38.2.txt` hash on the running staging instance was not verified (filesystem-loaded; no admin endpoint exposes the loaded hash). Prompt deltas vs. expected `2e25001a025e288c` would only be detectable via Render logs.
+
+### Code reference
+
+- Projection enrichment commit: `4420a141` (10 files, +830/-46). Source-of-truth additions:
+  - `compactAnalysis()` now emits `margin_pp` (margin × 100, 1 dp) — F.6 compliant.
+  - `ContextPackAnalysis` carries `{ leading_option, runner_up, margin_pp, top_drivers[] }` with structured shapes; `robustness_band` nullable.
+  - `buildAnalysisFromPriorFacts` reuses `compactAnalysis()` on `result.enrichment` then merges top-level `enrichment.factor_sensitivity[]` (the staging shape) when per-option walk returns empty top_drivers.
+  - Production-safe scale guard logs `analysis_projection_invalid_probability` and excludes the offending option (no throw); covers the case where the would-be leader is dropped.
+- 21 new unit tests across [context-pack-assembler.test.ts](../../src/orchestrator-v5/context/__tests__/context-pack-assembler.test.ts) and [analysis-fallback.test.ts](../../src/orchestrator-v5/context/__tests__/analysis-fallback.test.ts).
