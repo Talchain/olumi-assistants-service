@@ -215,9 +215,30 @@ export class SupabaseSessionStore implements SessionStore {
 
     // DB stores the wire-shape HandlerFact inside the `payload` JSONB column
     // (see schemas audit §observations); unwrap and parse.
+    //
+    // Hydration: the write path (`mapFactsForRpc`) intentionally splits the
+    // wire shape — `payload` JSONB carries `{fact_type, fact_version, result}`
+    // while `noop` lives on its own column for SQL-level filtering. The read
+    // path must rejoin them before validation, otherwise `HandlerFactSchema`
+    // (which is `.strict()` and requires `noop`) rejects every row and
+    // `prior_facts` is silently empty for callers (analysis fallback,
+    // coaching-cache reader, …). Prefer `row.noop`; fall through to a
+    // payload-side `noop` if a future writer puts it there; default to
+    // `false` so a missing column on legacy rows still parses.
     const facts: HandlerFact[] = [];
-    for (const row of (data ?? []) as Array<{ payload: unknown }>) {
-      const parsed = HandlerFactSchema.safeParse(row.payload);
+    for (const row of (data ?? []) as Array<{ payload: unknown; noop?: unknown }>) {
+      const payloadObj =
+        row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+          ? (row.payload as Record<string, unknown>)
+          : {};
+      const noop =
+        typeof row.noop === 'boolean'
+          ? row.noop
+          : typeof payloadObj.noop === 'boolean'
+            ? (payloadObj.noop as boolean)
+            : false;
+      const hydrated = { ...payloadObj, noop };
+      const parsed = HandlerFactSchema.safeParse(hydrated);
       if (parsed.success) {
         facts.push(parsed.data);
       } else {

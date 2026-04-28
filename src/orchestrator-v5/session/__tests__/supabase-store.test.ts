@@ -472,6 +472,166 @@ describe('SupabaseSessionStore.readFactsFor', () => {
     // Must NOT filter on the client-side turn_id column.
     expect(filters['in:turn_id']).toBeUndefined();
   });
+
+  // Regression guard for the 2026-04-28 staging Step 5 silent fact-drop.
+  // The write path (`mapFactsForRpc`) projects the wire shape into a split
+  // DB shape — `payload` JSONB carries `{fact_type, fact_version, result}`
+  // while `noop` is its own column. The read path must rejoin them before
+  // HandlerFactSchema validation, otherwise `.strict()` rejects every row
+  // and `prior_facts` is silently empty. The exact staging row shape:
+  //   { noop: false, payload: { fact_type, fact_version: 1, result: {...} } }
+  it('hydrates noop column into payload before HandlerFactSchema validation', async () => {
+    // This is the verbatim shape captured from staging scenario
+    // 40927e27-bf1f-4788-b86f-40eeadaa4fca v5_handler_facts row
+    // e16c7656-8171-49e3-90d6-7bf916b45ac0 on 2026-04-28: noop is a DB
+    // column (false), payload contains {fact_type, fact_version, result}
+    // — and importantly NOT noop. Pre-fix this row threw SessionReadError.
+    const stagingRow = {
+      noop: false,
+      handler_id: 'run_analysis',
+      action_type: 'run_analysis',
+      payload: {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        result: {
+          scenario_id: '40927e27-bf1f-4788-b86f-40eeadaa4fca',
+          leading_option_id: 'opt_hire_local',
+          summary: 'Analysis complete',
+        },
+      },
+    };
+    const { client } = makeClient({
+      selectResult: { data: [stagingRow], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+
+    const facts = await store.readFactsFor(['96404c69-ad9c-41f2-b4f5-f624ffa0ded2']);
+    expect(facts).toHaveLength(1);
+    const fact = facts[0];
+    expect(fact.fact_type).toBe('run_analysis');
+    expect(fact.fact_version).toBe(1);
+    expect(fact.noop).toBe(false);
+    if (fact.fact_type === 'run_analysis') {
+      expect(fact.result.leading_option_id).toBe('opt_hire_local');
+    }
+  });
+
+  it('honours payload-side noop when DB column is absent (legacy / future writers)', async () => {
+    // Defence in depth: if a future writer ever puts noop inside the
+    // payload, do not double-write or clobber it.
+    const legacyRow = {
+      // noop column intentionally absent
+      payload: {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: true,
+        result: {
+          scenario_id: '11111111-1111-4111-8111-111111111111',
+          leading_option_id: null,
+          summary: 'noop suppression',
+        },
+      },
+    };
+    const { client } = makeClient({
+      selectResult: { data: [legacyRow], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    const facts = await store.readFactsFor(['row-1']);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].noop).toBe(true);
+  });
+
+  it('defaults noop to false when both DB column and payload field are absent', async () => {
+    // Backstop for legacy rows that pre-date the column. Without this
+    // path the schema would still reject and `prior_facts` would empty.
+    const ancientRow = {
+      payload: {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        result: {
+          scenario_id: '22222222-2222-4222-8222-222222222222',
+          leading_option_id: 'opt_a',
+          summary: 'pre-noop schema',
+        },
+      },
+    };
+    const { client } = makeClient({
+      selectResult: { data: [ancientRow], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    const facts = await store.readFactsFor(['row-1']);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].noop).toBe(false);
+  });
+
+  // Round-trip: write a run_analysis fact via the same `append` path
+  // that chip-click-dispatch.ts uses, capture what `mapFactsForRpc`
+  // sends to Supabase, simulate that as the row shape on read, and
+  // confirm `readFactsFor` hydrates it back into a valid HandlerFact.
+  // Pre-fix this round-trip failed because `mapFactsForRpc` writes
+  // payload without noop and `readFactsFor` parsed payload raw.
+  it('round-trips a run_analysis fact through append → readFactsFor hydration', async () => {
+    const { client, rpcCalls } = makeClient();
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+
+    const runAnalysisFact = {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1 as const,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO,
+        leading_option_id: 'opt_hire_local',
+        summary: 'Analysis ran successfully',
+      },
+    };
+
+    await store.append({
+      scenario_id: SCENARIO,
+      turn_id: 'turn-roundtrip',
+      turn_class: 'handler',
+      handler_id: 'run_analysis',
+      request_hash: 'sha256:roundtrip',
+      response_emitted: true,
+      llm_calls_used: 0,
+      duration_ms: 50,
+      handler_facts: [runAnalysisFact],
+    });
+
+    expect(rpcCalls).toHaveLength(1);
+    const rpcArgs = rpcCalls[0].args as Record<string, unknown>;
+    const dbFacts = rpcArgs.p_handler_facts as Array<{
+      handler_id: string;
+      action_type: string;
+      noop: boolean;
+      payload: Record<string, unknown>;
+    }>;
+    expect(dbFacts).toHaveLength(1);
+    // Sanity: the write splits noop out of payload.
+    expect(dbFacts[0].noop).toBe(false);
+    expect(dbFacts[0].payload).not.toHaveProperty('noop');
+    expect(dbFacts[0].payload.fact_type).toBe('run_analysis');
+
+    // Now read the same shape back. SELECT-shape mirrors what Supabase
+    // returns: `{ payload, handler_id, action_type, noop }`.
+    const dbRow = {
+      payload: dbFacts[0].payload,
+      handler_id: dbFacts[0].handler_id,
+      action_type: dbFacts[0].action_type,
+      noop: dbFacts[0].noop,
+    };
+    const { client: readClient } = makeClient({
+      selectResult: { data: [dbRow], error: null },
+    });
+    const readStore = new SupabaseSessionStore(readClient, cache, { defaultReadLimit: 20 });
+
+    const facts = await readStore.readFactsFor(['row-roundtrip']);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toEqual(runAnalysisFact);
+  });
 });
 
 describe('SupabaseSessionStore.loadGraph', () => {
