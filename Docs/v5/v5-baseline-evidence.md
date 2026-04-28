@@ -893,3 +893,97 @@ Extended `EDIT_GRAPH_NEGATIVE_REGEX` to cover phrasal verbs, figurative usage, a
 
 - Negative regex patch: [route-v2.ts:271-296](../../src/orchestrator/route-v2.ts#L271-L296)
 - Test additions: [route-v2-edit-graph.test.ts:319-380](../../tests/integration/orchestrator/route-v2-edit-graph.test.ts#L319-L380)
+
+---
+
+## Delta — 6-step replay against staging `ca25e31` (negative-regex fix, 2026-04-28)
+
+**Build:** `ca25e31` deployed and confirmed via `/healthz`:
+```
+{"ok":true,"build":"ca25e31","degraded":false,"service":"assistants","version":"1.12.0"}
+```
+
+**Replay command:**
+```bash
+OLUMI_REPLAY_API_KEY=<staging-key> \
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --expected-build ca25e31 \
+  --out Docs/v5/v5-edit-graph-recovery-evidence.md \
+  --scenario-prefix staging-edit-recovery
+```
+
+**Started:** 2026-04-28T13:50:47.002Z. First attempt failed at Step 1 with a transport-layer abort (cold-dyno timeout); retry succeeded with all 6 steps.
+
+### Per-step results
+
+| step | message | http | text_len | chip_count | stage | result |
+|---|---|---|---|---|---|---|
+| 1_draft_graph | (decision brief) | 200 | — | 1 | frame→analyse | **PASS** — 16 nodes / 29 edges drafted, "Run analysis" chip emitted, elapsed 32.4s |
+| 2_weakest_option | "Which option looks weakest?" | 200 | 1097 | 1 | analyse | **PASS** — references Status Quo + Engineering Team Capacity + structural reading, no internal terms |
+| 3_add_option | "Add another option to this decision." | 200 | 347 | 0 | frame | **PASS** — coaching response with 3 tailored options (Contract-to-hire / Internal redeployment / Hybrid), open-ended question; no graph mutation |
+| 4_run_analysis | (Run analysis chip click) | 200 | 38 | 0 | analyse | **PASS** — analysis_ready=ready, 4 options computed |
+| 5_explain_leader | "Why does the leading option win?" | 200 | 1496 | 1 | analyse | **PASS** — names Hiring Two Senior Engineers Locally at 78.2%, identifies Engineering Team Capacity as dominant driver (sensitivity 1.0), three reinforcing pathways with strengths quoted, Local Talent Market Tightness flagged as caveat (sensitivity -0.35) |
+| 6_edit_budget | "Increase the budget factor." | 200 | 79 | 0 | frame | **PASS** — clarification ask: "The request is clear but 'budget factor' could map to two things in your model." |
+
+**Result: 6/6 PASS at harness assertion level.** No BoundaryError, no internal-term leakage, no schema violations. Evidence pack written to [Docs/v5/v5-edit-graph-recovery-evidence.md](v5-edit-graph-recovery-evidence.md).
+
+### Steps 3 & 6 — routing analysis
+
+**Regex-level prediction** (against shipped negative regex in `route-v2.ts`):
+
+| message | pos match | neg match | dispatches? |
+|---|---|---|---|
+| "Add another option to this decision." | `Add` | — | **YES → edit_graph** |
+| "Increase the budget factor." | `Increase` | — | **YES → edit_graph** |
+| "Why does the leading option win?" | — | `Why` | NO → Sonnet TurnExecutor |
+| "Run analysis." | — | — | NO → chip-click handler |
+
+Both Step 3 and Step 6 satisfy the dispatch predicate (`isEditGraphShape === true`) and route to `dispatchEditGraph` rather than falling through to Sonnet.
+
+**Step 3 outcome — edit_graph dispatch produced coaching, not a graph mutation:**
+- The response text ("What option would you like to add? A few directions that would complement the existing four: Contract-to-hire, Internal redeployment, Hybrid. What did you have in mind?") is consistent with `handleEditGraph`'s empty-operations coaching path: the LLM, faced with a vague structural-add request and no explicit factor target, returned `operations: []` with `coaching.summary` describing alternatives. The composer surfaced the coaching text as `assistant_text`.
+- No `draft_graph` block re-emitted; no graph mutation visible in the response.
+- chip_count=0 — no clarification chips because the LLM did not produce `pendingClarification` state (no resolution ambiguity to clarify; this is an open-ended creation request).
+- Verdict: **edit_graph reached, no mutation produced, conversational fallback returned by handler itself.** This is the expected behaviour per the v6 prompt: vague structural-add requests with no factor target prompt the user for direction rather than inventing wiring.
+
+**Step 6 outcome — edit_graph dispatch produced a clarification ask:**
+- The response text ("The request is clear but 'budget factor' could map to two things in your model.") is the `resolveEditTarget` ambiguous path: multiple budget-related factors exist, `match_type === 'ambiguous'`, resolution mode `clarify`, response `assistantText = buildClarificationQuestion(...)`.
+- chip_count=0 in the harness count is the legacy `chips` field; the boundary `suggested_actions` may carry candidate-label chips per the composer change — harness does not separately report `suggested_actions` length. (Verification of the chip surface against the wire shape is not in the current harness assertions.)
+- No graph mutation; `analysis_ready` unchanged.
+- Verdict: **edit_graph reached, ambiguity correctly detected, clarification path activated.**
+
+### Telemetry not captured
+
+The replay harness reports HTTP status, response shape, and assistant text, but does NOT capture per-turn telemetry from Render logs:
+- `turn_class` (e.g., `direct_answer` / `tool_call_proposed` / `tool_call_executed`)
+- `handler_proposed` (which V5 action Sonnet selected, if any)
+- `validator_outcome` (Sonnet validator pass/fail)
+- `exit_path` (`turn_executor` / `edit_graph` / `draft_graph` / `chip_click`)
+
+These fields are emitted on `turn_executor.completed` and `v5.response.finalised` events but require Render log correlation by `request_id` to retrieve. Per-`request_id` log capture was not performed in this replay; the harness records the request IDs internally but does not surface them per step.
+
+The strongest available evidence that Steps 3 and 6 dispatched to `edit_graph`:
+1. The shipped regex (verified locally against the production source) returns `isEditGraphShape === true` for both messages.
+2. `route-v2.ts:594-599` dispatches deterministically when the predicate is true — there is no other code path that could produce these responses given the same gate.
+3. The response text shapes match `handleEditGraph`'s empty-ops coaching (Step 3) and clarify branch (Step 6) more closely than Sonnet TurnExecutor's text-only output.
+
+### Verification
+
+- Replay 6/6 PASS — no transport, schema, or content failures
+- Build SHA matches deployed staging
+- `tsc -p tsconfig.build.json --noEmit` clean
+- 26/26 route-v2 edit-graph tests pass (incl. 8 new false-positive guards from the regex patch)
+- 68/68 targeted edit-graph tests pass
+
+### Limitations / follow-ups
+
+- Render log correlation by `request_id` for `turn_class` / `handler_proposed` / `validator_outcome` / `exit_path` was not performed. Hard confirmation that Step 3 and Step 6 dispatched via `edit_graph` (rather than Sonnet TurnExecutor) requires log inspection.
+- The replay harness does not yet assert `suggested_actions` shape on rejection / clarify responses. The composer changes (boundary `error` block, candidate-label chips) are pinned by unit tests but not by the canonical replay.
+- Step 3's outcome — coaching response without a graph mutation — is the expected behaviour for vague structural-add requests per the v6 prompt; demoing "Add an option" with explicit factor wiring (e.g. "Add a contract hiring option that affects payroll cost and hiring lead time") would exercise the mutation path more directly.
+
+### Code reference
+
+- Negative regex (post-patch): [route-v2.ts:271-296](../../src/orchestrator/route-v2.ts#L271-L296)
+- Composer rejection / clarify path: [edit-graph-dispatch.ts:223-310](../../src/orchestrator-v5/handlers/edit-graph-dispatch.ts#L223-L310)
+- Replay evidence pack: [v5-edit-graph-recovery-evidence.md](v5-edit-graph-recovery-evidence.md)
