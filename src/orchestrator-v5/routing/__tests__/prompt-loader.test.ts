@@ -24,12 +24,12 @@ import {
 } from '../prompt-loader.js';
 
 describe('prompt-loader (v5 alpha hardening 2.1)', () => {
-  it('exports the eager-loaded prompt with version v38.2', () => {
-    expect(LOADED_PROMPT.version).toBe('v38.2');
-    expect(ROUTING_PROMPT_VERSION).toBe('v38.2');
+  it('exports the eager-loaded prompt with version v39', () => {
+    expect(LOADED_PROMPT.version).toBe('v39');
+    expect(ROUTING_PROMPT_VERSION).toBe('v39');
   });
 
-  it('prompt size falls within the sanity range [18500, 20500]', () => {
+  it('prompt size falls within the sanity range', () => {
     expect(LOADED_PROMPT.systemChars).toBeGreaterThanOrEqual(
       EXPECTED_SYSTEM_CHARS_MIN,
     );
@@ -65,11 +65,11 @@ describe('prompt-loader (v5 alpha hardening 2.1)', () => {
     expect(() => loadRoutingPrompt(wrong)).toThrow(/outside expected range/);
   });
 
-  it('defaultPromptPath resolves under process.cwd()/Prompts/v38.2.txt with exact casing', () => {
+  it('defaultPromptPath resolves under process.cwd()/Prompts/v39.txt with exact casing', () => {
     // Exact casing matters on Linux/Render (correction 2). We assert the
     // segments rather than a full path to stay portable across runners.
     const p = defaultPromptPath();
-    expect(p.endsWith('/Prompts/v38.2.txt')).toBe(true);
+    expect(p.endsWith('/Prompts/v39.txt')).toBe(true);
   });
 
   // Correction 6: confirm the loader works in the compiled dist layout, not
