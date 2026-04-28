@@ -35,7 +35,7 @@
 **Verification:**
 - `npx tsc -p tsconfig.build.json --noEmit` — clean.
 - `npx vitest run src/orchestrator-v5/routing/__tests__/prompt-loader.test.ts` — 7 passed, 1 skipped (the dist-bootstrap test, which only runs after `pnpm build`).
-- Prompt size: v40.txt = 21,443 bytes (within `EXPECTED_SYSTEM_CHARS_MIN..MAX` = 18,500..22,000). v39 was 21,059.
+- Prompt size: v40.txt = 21,443 bytes on disk; the loader's `text.length` (UTF-16 code units, the value compared against `EXPECTED_SYSTEM_CHARS_MIN..MAX` = 18,500..22,000) is 21,439 — the 4-unit difference is the two em-dashes in `<STYLE>` "OLUMI VOCABULARY" bullets, each 3 UTF-8 bytes but 1 UTF-16 code unit. v39 was 21,059 bytes / 21,055 chars.
 
 ---
 

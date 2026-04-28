@@ -147,11 +147,12 @@ export class RoutingError extends Error {
  * coaching arc. Each response must work as a freestanding answer.
  *
  * V5 alpha hardening Phase 2.1: the system prompt is now the content of
- * `Prompts/v38.2.txt`, loaded at module init via `./prompt-loader.ts`.
- * The previous 662-char hardcoded constant was the routing-only scaffolding
- * from earlier slices; v38.2 is the full orchestrator persona + reasoning
- * prompt. Observability primitives (version, hash, systemChars) are
- * exported alongside for lifecycle logs.
+ * the active prompt file (currently `Prompts/v40.txt`), loaded at module
+ * init via `./prompt-loader.ts`. The previous 662-char hardcoded constant
+ * was the routing-only scaffolding from earlier slices; the file-loaded
+ * prompt is the full orchestrator persona + reasoning prompt.
+ * Observability primitives (version, hash, systemChars) are exported
+ * alongside for lifecycle logs.
  */
 export const ROUTING_SYSTEM_PROMPT: string = LOADED_PROMPT.text;
 export const ROUTING_PROMPT_VERSION: string = LOADED_PROMPT.version;
