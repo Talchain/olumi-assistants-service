@@ -180,8 +180,6 @@ async function fetchPriorFacts(
   scenarioId: string,
   store: SessionStore | undefined,
 ): Promise<readonly HandlerFact[]> {
-  if (!store) return [];
-  if (priorTurns.length === 0) return [];
   // Critical correctness fix: `readFactsFor` filters against
   // `v5_handler_facts.v5_conversation_turn_id`, which is the FK to the
   // `v5_conversation_turns.id` row UUID — NOT the client-supplied
@@ -192,6 +190,28 @@ async function fetchPriorFacts(
   const handlerRowIds = priorTurns
     .filter((t) => t.turn_class === 'handler')
     .map((t) => t.id);
+  // TODO(stage2-cleanup): once the fact-chain root cause is identified
+  // and verified on staging, downgrade this to debug or drop the
+  // `handler_row_ids` / `prior_turn_handler_ids` arrays to keep prod
+  // logs lean. Trace fires unconditionally so empty-history turns
+  // still produce a row (distinguishes session-load failure from
+  // filter mismatch).
+  log.info(
+    {
+      event: 'v5_fact_chain_trace',
+      request_id: requestId,
+      scenario_id: scenarioId,
+      session_store_present: store !== undefined,
+      prior_turn_count: priorTurns.length,
+      prior_turn_classes: priorTurns.map((t) => t.turn_class),
+      prior_turn_handler_ids: priorTurns.map((t) => t.handler_id ?? null),
+      handler_row_id_count: handlerRowIds.length,
+      handler_row_ids: handlerRowIds,
+    },
+    'V5 buildTurnContext: fact chain trace',
+  );
+  if (!store) return [];
+  if (priorTurns.length === 0) return [];
   if (handlerRowIds.length === 0) return [];
   try {
     const facts = await store.readFactsFor(handlerRowIds);

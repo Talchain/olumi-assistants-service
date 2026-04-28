@@ -308,6 +308,28 @@ export async function dispatchChipClickRunAnalysis(
       handlerFacts: enrichedFacts,
     });
 
+    log.info(
+      {
+        event: 'v5_fact_chain_commit',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        raw_handler_fact_count: outcome.handler_facts.length,
+        enriched_handler_fact_count: enrichedFacts.length,
+        raw_fact_types: outcome.handler_facts.map((f) => f.fact_type),
+        enriched_fact_types: enrichedFacts.map((f) => f.fact_type),
+        has_raw_run_analysis_fact: outcome.handler_facts.some(
+          (f) => f.fact_type === 'run_analysis',
+        ),
+        has_enriched_run_analysis_fact: enrichedFacts.some(
+          (f) => f.fact_type === 'run_analysis',
+        ),
+      },
+      'V5 chip-click: run_analysis fact persistence pre-commit',
+    );
+
     try {
       await commitDirectAnswer(response, {
         scenario_id: payload.scenario_id,

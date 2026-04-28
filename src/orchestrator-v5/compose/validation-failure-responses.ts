@@ -149,32 +149,17 @@ function composeEntityResolutionAmbiguous(error: ValidationError): BranchResult 
 
 function composeEntityKindMismatch(error: ValidationError): BranchResult {
   const details = error.details ?? {};
-  const proposedKind = pickKind(details.proposed_kind);
-  const resolvedKind = pickKind(details.resolved_kind);
-  const accepted = readAcceptedKinds(details.accepted_kinds);
   const entityLabel = safeLabel({
     label: readString(details.proposed_label),
-    kind: proposedKind ?? undefined,
+    kind: undefined,
   });
-  if (resolvedKind) {
-    return {
-      body: {
-        assistant_text:
-          `${entityLabel} is a ${resolvedKind} in your model, not a ${proposedKind ?? 'that kind'}.`,
-        suggested_actions: [fallbackPrompt('Try describing what you want to change')],
-      },
-      template_id: 'kind_mismatch_graph',
-      chip_type: 'text_prompt',
-    };
-  }
-  const accept = accepted[0];
   return {
     body: {
       assistant_text:
-        `${entityLabel} is a ${proposedKind ?? 'different kind'}, not a ${accept ?? 'matching kind'}.`,
+        `I wasn't sure what you meant by ${entityLabel}. Try asking about a specific option, or describe what you'd like to change.`,
       suggested_actions: [fallbackPrompt('Try describing what you want to change')],
     },
-    template_id: 'kind_mismatch_structural',
+    template_id: 'kind_mismatch',
     chip_type: 'text_prompt',
   };
 }
@@ -459,16 +444,6 @@ function readCandidates(value: unknown): EntityLike[] {
         label: typeof record.label === 'string' ? record.label : null,
       } satisfies EntityLike;
     });
-}
-
-function readAcceptedKinds(value: unknown): readonly EntityKind[] {
-  if (!Array.isArray(value)) return [];
-  const out: EntityKind[] = [];
-  for (const v of value) {
-    const k = pickKind(v);
-    if (k) out.push(k);
-  }
-  return out;
 }
 
 function readLabelBearer(value: unknown, kind: EntityKind | null): EntityLike | null {

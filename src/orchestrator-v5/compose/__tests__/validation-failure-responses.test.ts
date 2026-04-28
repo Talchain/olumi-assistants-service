@@ -109,7 +109,11 @@ describe('composeValidationFailure — ENTITY_RESOLUTION_AMBIGUOUS', () => {
 });
 
 describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
-  it('structural mismatch uses proposed_label when present', () => {
+  const KIND_MISMATCH_PATTERN =
+    /^I wasn't sure what you meant by .+\. Try asking about a specific option, or describe what you'd like to change\.$/;
+  const INTERNAL_KIND_LABELS = ['node', 'edge', 'goal', 'constraint'] as const;
+
+  it('uses proposed_label when present and uses the fixed template', () => {
     const { response, template_id } = composeFor({
       code: 'ENTITY_KIND_MISMATCH',
       message: 'kind mismatch',
@@ -120,15 +124,14 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
         proposed_label: 'Churn Risk',
       },
     });
-    expect(template_id).toBe('kind_mismatch_structural');
+    expect(template_id).toBe('kind_mismatch');
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
     expect(response.assistant_text).toContain('Churn Risk');
-    expect(response.assistant_text).toContain('node');
-    expect(response.assistant_text).toContain('option');
     expect(response.suggested_actions.length).toBe(1);
     assertStyle(response.assistant_text);
   });
 
-  it('graph-resolved mismatch shows resolved_kind', () => {
+  it('does not leak internal kind labels — graph-resolved mismatch', () => {
     const { response, template_id } = composeFor({
       code: 'ENTITY_KIND_MISMATCH',
       message: 'mismatch',
@@ -139,10 +142,52 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
         proposed_label: 'Churn Risk',
       },
     });
-    expect(template_id).toBe('kind_mismatch_graph');
-    expect(response.assistant_text).toContain('node');
-    expect(response.assistant_text).toContain('option');
+    expect(template_id).toBe('kind_mismatch');
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(response.assistant_text).toContain('Churn Risk');
     expect(response.assistant_text).not.toContain('fac_churn');
+    for (const label of INTERNAL_KIND_LABELS) {
+      expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
+    }
+    assertStyle(response.assistant_text);
+  });
+
+  it('renders cleanly across every EntityKind enum value with no jargon leak', () => {
+    const KINDS = ['node', 'edge', 'option', 'goal', 'constraint'] as const;
+    for (const proposed of KINDS) {
+      for (const resolved of [...KINDS, undefined]) {
+        const { response, template_id } = composeFor({
+          code: 'ENTITY_KIND_MISMATCH',
+          message: 'mismatch',
+          details: {
+            proposed_kind: proposed,
+            ...(resolved ? { resolved_kind: resolved } : { accepted_kinds: ['option'] }),
+            proposed_label: 'Some Entity',
+          },
+        });
+        expect(template_id).toBe('kind_mismatch');
+        expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+        for (const label of INTERNAL_KIND_LABELS) {
+          expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
+        }
+        expect(response.assistant_text).not.toMatch(/\bkind\b/i);
+        assertStyle(response.assistant_text);
+      }
+    }
+  });
+
+  it('handles a missing proposed_label via safeLabel fallback', () => {
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_KIND_MISMATCH',
+      message: 'mismatch',
+      details: {
+        proposed_kind: 'node',
+        accepted_kinds: ['option'],
+      },
+    });
+    expect(template_id).toBe('kind_mismatch');
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(response.suggested_actions.length).toBe(1);
     assertStyle(response.assistant_text);
   });
 });
