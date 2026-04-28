@@ -321,6 +321,63 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         message: 'Regulatory factor should be weighted less heavily overall',
         expectDispatch: false,
       },
+      // ──────────────────────────────────────────────────────────────
+      // Frame-stage false-positive guard cases — added when the stage
+      // gate was removed from isEditGraphShape. Without these, frame-
+      // stage conversational/figurative use of edit verbs would falsely
+      // dispatch and mutate the graph.
+      // ──────────────────────────────────────────────────────────────
+      {
+        label: 'suppressed: figurative "add" — "add some context"',
+        message: 'Let me add some context about our constraints',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: phrasal "set up"',
+        message: "I'd like to set up the decision properly first",
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: figurative "remove doubt"',
+        message: 'Let me remove any doubt about the timeline',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: phrasal "set aside"',
+        message: 'Set aside the cost factor for now',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: meta "reduce complexity"',
+        message: 'Reduce complexity by focusing on the main issue',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: idiomatic "change my mind"',
+        message: "Change my mind — let's think about this differently",
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: meta "update our approach"',
+        message: 'Update our approach to include risk',
+        expectDispatch: false,
+      },
+      {
+        label: 'suppressed: UI command "delete this thread"',
+        message: 'Delete this thread and start fresh',
+        expectDispatch: false,
+      },
+      // Sanity: legitimate edits still dispatch despite expanded negative regex.
+      {
+        label: 'positive: "Add an option for contract hiring"',
+        message: 'Add an option for contract hiring',
+        expectDispatch: true,
+      },
+      {
+        label: 'positive: "Increase the budget to 300k"',
+        message: 'Increase the budget to 300k',
+        expectDispatch: true,
+      },
     ];
 
     let turnIdSuffix = 0;

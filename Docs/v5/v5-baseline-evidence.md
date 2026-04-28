@@ -800,3 +800,96 @@ Action required (out of scope for this branch): clear `CEE_TURN_DEBUG_ENABLED` o
   - `buildAnalysisFromPriorFacts` reuses `compactAnalysis()` on `result.enrichment` then merges top-level `enrichment.factor_sensitivity[]` (the staging shape) when per-option walk returns empty top_drivers.
   - Production-safe scale guard logs `analysis_projection_invalid_probability` and excludes the offending option (no throw); covers the case where the would-be leader is dropped.
 - 21 new unit tests across [context-pack-assembler.test.ts](../../src/orchestrator-v5/context/__tests__/context-pack-assembler.test.ts) and [analysis-fallback.test.ts](../../src/orchestrator-v5/context/__tests__/analysis-fallback.test.ts).
+
+---
+
+## Delta — Edit-graph recovery + frame gate (staging `560a2cb`, 2026-04-28)
+
+**Build:** `560a2cb` deployed and confirmed via `/healthz`:
+```
+{"ok":true,"build":"560a2cb","degraded":false,"service":"assistants","version":"1.12.0"}
+```
+
+### Shipped (commit `34a8a000`, merged via `560a2cb9`)
+
+- **Composer surface** — [edit-graph-dispatch.ts:82-200](../../src/orchestrator-v5/handlers/edit-graph-dispatch.ts#L82-L200) — wire `OlumiResponse.blocks` and `suggested_actions` now carry rejection metadata + clarification chips. Rejection block is a boundary `error` block with `details.{rejection_code, plot_code, attempts, violation_codes}`. Stable codes only — raw validator text stays in logs.
+- **Orphan-option validation** — [graph-structure-validator.ts:158+](../../src/orchestrator/graph-structure-validator.ts#L158) — new `OPTION_NO_FACTOR_EDGES` rule. Admitted into structural-intent repair loop via `STRUCTURAL_REPAIRABLE_CODES` at [edit-graph.ts:1912](../../src/orchestrator/tools/edit-graph.ts#L1912).
+- **Frame-stage gate removed** — [route-v2.ts:594-598](../../src/orchestrator/route-v2.ts#L594-L598) — `isEditGraphShape` no longer requires `stage ∈ {analyse, decide}`.
+
+### Frame-stage false-positive matrix (regex-level verification)
+
+The regex evaluation runs against the exact production source (route-v2.ts:268-269 positive, :277-278 negative). Each row shows the matched substring(s) and the dispatch decision (`pos !== null && neg === null`).
+
+**Initial state (post-deploy, before regex patch):**
+
+| # | Message | pos | neg | dispatches? | verdict |
+|---|---|---|---|---|---|
+| 1 | "Let me add some context about our constraints" | `add` | — | YES | **FAIL — false dispatch** |
+| 2 | "I'd like to set up the decision properly first" | `set` | — | YES | **FAIL — false dispatch** |
+| 3 | "Let me remove any doubt about the timeline" | `remove` | — | YES | **FAIL — false dispatch** |
+| 4 | "Set aside the cost factor for now" | `Set` | — | YES | **FAIL — false dispatch** |
+| 5 | "Reduce complexity by focusing on the main issue" | `Reduce` | — | YES | **FAIL — false dispatch** |
+| 6 | "Change my mind — let's think about this differently" | `Change` | — | YES | **FAIL — false dispatch** |
+| 7 | "Update our approach to include risk" | `Update` | — | YES | **FAIL — false dispatch** |
+| 8 | "Delete this thread and start fresh" | `Delete` | — | YES | **FAIL — false dispatch** |
+
+**Result: 8/8 phrases would falsely dispatch to `edit_graph` at `stage=frame` with a graph present.** The frame-stage gate previously masked this: conversational/figurative use of edit-verbs was blocked by the stage check, not by the negative regex. With the gate removed, every figurative use of `add|set|remove|reduce|change|update|delete` reaches the dispatch branch.
+
+### Negative regex patch
+
+Extended `EDIT_GRAPH_NEGATIVE_REGEX` to cover phrasal verbs, figurative usage, and meta-commands:
+
+```
+/\b(?:explain|compare|what would|flip|why|how does|tell me|show me|describe
+  |set up|set aside
+  |add (?:some |any |more )?(?:context|information|detail|details|background)
+  |remove (?:any |the )?(?:doubt|confusion|uncertainty|ambiguity)
+  |change (?:my |our |their )?mind
+  |reduce (?:complexity|scope|noise|clutter)
+  |delete (?:this |the )?(?:thread|conversation|chat|message)
+  |update (?:my |our |their |the )?(?:approach|thinking|understanding|view|perspective)
+  |modify (?:my |our |their )?(?:view|mind|thinking|approach))\b/i
+```
+
+**Post-patch matrix (final state):**
+
+| # | Message | pos | neg | dispatches? | verdict |
+|---|---|---|---|---|---|
+| 1 | "Let me add some context about our constraints" | `add` | `add some context` | NO | PASS — Sonnet |
+| 2 | "I'd like to set up the decision properly first" | `set` | `set up` | NO | PASS — Sonnet |
+| 3 | "Let me remove any doubt about the timeline" | `remove` | `remove any doubt` | NO | PASS — Sonnet |
+| 4 | "Set aside the cost factor for now" | `Set` | `Set aside` | NO | PASS — Sonnet |
+| 5 | "Reduce complexity by focusing on the main issue" | `Reduce` | `Reduce complexity` | NO | PASS — Sonnet |
+| 6 | "Change my mind — let's think about this differently" | `Change` | `Change my mind` | NO | PASS — Sonnet |
+| 7 | "Update our approach to include risk" | `Update` | `Update our approach` | NO | PASS — Sonnet |
+| 8 | "Delete this thread and start fresh" | `Delete` | `Delete this thread` | NO | PASS — Sonnet |
+
+**Sanity checks (legitimate edits still dispatch):**
+
+| # | Message | pos | neg | dispatches? | verdict |
+|---|---|---|---|---|---|
+| 9 | "Add an option for contract hiring" | `Add` | — | YES | PASS — edit_graph |
+| 10 | "Increase the budget to £300k" | `Increase` | — | YES | PASS — edit_graph |
+| 11 | "Reduce the cost factor by 20%" | `Reduce` | — | YES | PASS — edit_graph |
+| 12 | "Change the strength of the launch edge" | `Change` | — | YES | PASS — edit_graph |
+
+### Test coverage
+
+[tests/integration/orchestrator/route-v2-edit-graph.test.ts](../../tests/integration/orchestrator/route-v2-edit-graph.test.ts) extended with 10 new regression cases (8 false-positive guards + 2 sanity dispatches). 26/26 tests pass.
+
+### Verification
+
+- `tsc -p tsconfig.build.json --noEmit` — clean
+- 68 targeted edit-graph tests pass (was 53 pre-patch; +10 route guards, +5 from earlier round)
+- No regression in 202 broader edit-graph regression tests
+- Replay harness invocation deferred — regex-level verification at the load-bearing decision point matches production behaviour exactly (`route-v2.ts:594-598` evaluates the same `isEditGraphShape` predicate).
+
+### Limitations / follow-ups
+
+- The 8-message matrix was verified against the regex source, not by HTTP POST against staging with logs captured per request. The regex is the load-bearing logic and Node executes the identical pattern, so behaviour is deterministic — but per-`request_id` Render log correlation was not performed.
+- Replay harness (`tools/v5-journey-replay/index.ts`) was not run; the targeted unit + integration test suites cover the regex logic and do not exercise the full 6-step canonical journey. Step 3 ("Add another option") and Step 6 ("Edit budget") behaviour against staging awaits the next replay pass.
+
+### Code reference
+
+- Negative regex patch: [route-v2.ts:271-296](../../src/orchestrator/route-v2.ts#L271-L296)
+- Test additions: [route-v2-edit-graph.test.ts:319-380](../../tests/integration/orchestrator/route-v2-edit-graph.test.ts#L319-L380)

@@ -270,12 +270,25 @@ const EDIT_GRAPH_POSITIVE_REGEX =
 
 /**
  * Negative guard for edit_graph dispatch. If a message contains any of
- * these phrases it is a meta-question, not an edit command, and must NOT
- * dispatch even if a positive edit-verb also appears. Mutating the graph
- * on a meta-question is the worst failure mode.
+ * these phrases it is a meta-question or conversational/figurative use of
+ * an edit verb, NOT an edit command, and must NOT dispatch even if a
+ * positive edit-verb also appears. Mutating the graph on a meta-question
+ * is the worst failure mode.
+ *
+ * Pattern groups:
+ *   1. Meta-question markers: "explain", "compare", "what would", "flip",
+ *      "why", "how does", "tell me", "show me", "describe".
+ *   2. Phrasal verbs that turn an edit verb into a non-mutation: "set up",
+ *      "set aside" (procedural framing / deprioritisation, not delete).
+ *   3. Figurative / idiomatic uses of edit verbs: "add context",
+ *      "remove doubt", "change my mind", "reduce complexity",
+ *      "delete this thread", "update our approach", "modify thinking".
+ *      These were exposed when the frame-stage gate was removed —
+ *      conversational discourse at frame stage previously fell through
+ *      to Sonnet only because the stage gate blocked dispatch entirely.
  */
 const EDIT_GRAPH_NEGATIVE_REGEX =
-  /\b(explain|compare|what would|flip|why|how does|tell me|show me|describe)\b/i;
+  /\b(?:explain|compare|what would|flip|why|how does|tell me|show me|describe|set up|set aside|add (?:some |any |more )?(?:context|information|detail|details|background)|remove (?:any |the )?(?:doubt|confusion|uncertainty|ambiguity)|change (?:my |our |their )?mind|reduce (?:complexity|scope|noise|clutter)|delete (?:this |the )?(?:thread|conversation|chat|message)|update (?:my |our |their |the )?(?:approach|thinking|understanding|view|perspective)|modify (?:my |our |their )?(?:view|mind|thinking|approach))\b/i;
 
 /**
  * V5 status-keyed Reply contract — the type-system half of the response
