@@ -987,3 +987,36 @@ The strongest available evidence that Steps 3 and 6 dispatched to `edit_graph`:
 - Negative regex (post-patch): [route-v2.ts:271-296](../../src/orchestrator/route-v2.ts#L271-L296)
 - Composer rejection / clarify path: [edit-graph-dispatch.ts:223-310](../../src/orchestrator-v5/handlers/edit-graph-dispatch.ts#L223-L310)
 - Replay evidence pack: [v5-edit-graph-recovery-evidence.md](v5-edit-graph-recovery-evidence.md)
+
+### Step 6 wire-body inspection (2026-04-28, scenario `e7fddfe1`)
+
+Direct curl probes against staging captured the full response bodies:
+
+**"Increase the budget factor."** (Step 6 message, fresh scenario):
+- `assistant_text`: "How much would you like to increase the Incremental Hiring or Engagement Cost? The factor is currently set to £0, with a cap of £300,000. For example: £50,000, £150,000, or a specific amount you have in mind."
+- `blocks: []`, `suggested_actions: []`, fresh `analysis_ready` with 4 options.
+- No `pendingClarification` in body (boundary schema has no such field; composer would have forwarded `candidate_labels` → chips if handler had populated it).
+
+**Diagnostic probe — "Update the cost factor."** (same scenario, deliberately ambiguous):
+- `assistant_text`: "\"Cost factor\" could point to a couple of things in your model. Which did you have in mind?"
+- `blocks: []`, `suggested_actions: []`, fresh `analysis_ready` with 4 options.
+- Same shape: clarification ask in text, but no chips.
+
+**Diagnosis — two classes of ambiguity, only one produces wire chips:**
+
+| Class | Source | `pendingClarification` populated? | Wire `suggested_actions`? |
+|---|---|---|---|
+| Resolver-detected | `resolveEditTarget` → `match_type: 'ambiguous'` with N>1 alternatives | YES (edit-graph.ts:1410-1414) | YES — composer maps `candidate_labels` to chips |
+| LLM-detected | LLM returns `operations: []` with a coaching summary asking the user | NO (edit-graph.ts:1614-1651 empty-ops success path) | NO — nothing to forward |
+
+Both probed messages fell into the LLM-detected class:
+- "Increase the budget factor." — resolver found a single high-confidence match (the staging drafted graph has only one budget-mapping factor); LLM identified the target unambiguously but asked for a value.
+- "Update the cost factor." — LLM detected multiple cost factors and asked conversationally; resolver did not classify as `ambiguous` (likely returned `match_type: 'none'` or a single token-overlap match), so the clarify branch at edit-graph.ts:1407-1425 did not fire.
+
+**Composer behaviour:**
+- Composer merge logic is correct and pinned by [edit-graph-dispatch.test.ts](../../src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch.test.ts) — the test "pendingClarification → maps candidate_labels to suggested_actions when no explicit chips" asserts forwarding when the handler populates the field.
+- For LLM-detected ambiguity, `pendingClarification` is absent and the composer correctly emits no chips.
+
+**No fix required at the composer layer.** Surfacing chips for LLM-detected ambiguity would require either (a) prompt schema change to add a structured `clarification_options[]` output, (b) handler post-processing of empty-ops responses to synthesise `pendingClarification` from graph context, or (c) parsing LLM coaching text for candidate labels (fragile). All three are out of scope for the recovery-surface brief.
+
+**Wire stamping observation:** Both probes returned a fresh `analysis_ready` with `computed_at: <this turn>`. Per `dispatchEditGraph`'s contract, `analysisReady` is computed only when `editResult.appliedGraph` is non-null (i.e., a successful applied edit). The empty-ops success path returns `appliedGraph: null` → `analysisReady: undefined` → response-finaliser would not stamp. The presence of fresh `analysis_ready` in both probes therefore implies one of: (a) `edit_graph` dispatched and PLoT applied a small edit (low likelihood given the LLM-asks-for-value text), or (b) the turn was handled by Sonnet TurnExecutor (which has its own `analysisReady` emit path stamping from prior fact-chain / structural state). Render log correlation by `request_id` would resolve this; deferred.
