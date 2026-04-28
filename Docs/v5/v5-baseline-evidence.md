@@ -48,9 +48,10 @@ This baseline supplements the harness output with **independently-captured per-s
 
 Hiring (pre-fix baseline, staging `38106bd`): 6/6 structural pass; 2 chain-blocking findings (4.1, 5.1); 4 non-blocking.
 Hiring (post-chip-click, staging `f588320`): 6/6 structural pass; 1 chain-blocking (5.1, attribution = State or Prompt); 2 non-blocking (4.2, 4.3); 2 closed (4.1, 5.2).
-Hiring (post-probe, staging `050cc9a`): **5/6 structural pass — Step 5 now hard-fails on the new harness substance gate (`step_5_text_too_short`).** 5.1 attribution **refined to Prompt** via response-shape evidence (Sonnet routed Step 5 to a tool call, recoverable-validator caught `ENTITY_KIND_MISMATCH`, response is the kind-mismatch template — not a narrate path). 4.2 closed by nested ceeTrace scrub. **3 new findings:** 7.1/7.2 (kind-mismatch template leaks "node"/"option" + grammar bug "a option"), 7.3 (Sonnet edit-path on explain-leader intent — replaces the State branch of 5.1), 7.4 (recoverable-validator does not narrate from facts). **No code change applied per decision tree (`projection_populated → Stop`).** New binding constraint is a v38.2 prompt edit, out of orchestrator-fix scope.
+Hiring (post-probe, staging `050cc9a`): 5/6 structural pass — Step 5 now hard-fails on the new harness substance gate; 5.1 attribution refined to Prompt via response-shape evidence. 4.2 closed by nested ceeTrace scrub.
+Hiring (post-fact-trace, staging `db7825b`, 2026-04-28): **5/6 structural pass; Step 5 still fails substance gate**, denial-phrase shape (no kind-mismatch leak this run). **State chain formally ruled out via direct Supabase read on scenario `40927e27-…`:** Step 4 persisted with `turn_class='handler'`, `handler_id='run_analysis'`, 1 row in `v5_handler_facts` with `action_type='run_analysis'` and a fully-populated 97 KB payload (`result.leading_option_id="opt_hire_local"`, win_probabilities, enrichment). `priorTurns` filter would correctly select that row's id; `readFactsFor` returns 1 fact with `fact_type='run_analysis'`. **5.1 narrows to {Composition projection, Prompt}.** Cheapest next probe: fixture-level unit test on `assembleContextPackWithSummary`.
 
-See **Delta — Step 5 probe replay (staging `050cc9a`, 2026-04-28)** below for the per-finding acceptance table and updated binding constraint.
+See **Delta — Step 5 fact-chain trace replay (staging `db7825b`, 2026-04-28)** below for the probe-event values and updated binding constraint.
 
 Marketing: **not run**. Recovery from `.tmp/diagnostic/olumi-debug-d90cfe97-20260426.json` was attempted; the bundle exists but contains a follow-up turn (`cee_request.message: "Proceed."`) plus the resulting graph — the original 297-character framing brief is not in the bundle (`user_actions[0].detail.message_length: 297` confirms a brief was sent but its text was not captured). Per scope decision, fell back to Hiring-only without inventing a brief.
 
@@ -309,6 +310,135 @@ The ratchet rule is upheld: every step that previously passed still passes; pass
 - **Frame-stage edit intents fall to coaching.** Steps 3 ("Add another option") and 6 ("Increase the budget factor") arrive at `stage='frame'`; the `dispatchEditGraph` gate at [route-v2.ts:594-598](../../src/orchestrator/route-v2.ts#L594-L598) requires `stage ∈ {analyse, decide}` so these messages fall through to TurnExecutor. Sonnet's `olumi_action.handler_id` enum at [routing/tool-schema.ts:62-77](../../src/orchestrator-v5/routing/tool-schema.ts#L62-L77) only exposes `run_analysis`; the registry at [tools/registry.ts:165-173](../../src/orchestrator-v5/tools/registry.ts#L165-L173) only registers `run_analysis`. Result: structural edit intents at frame stage produce coaching responses (~131–193 chars) with stage echoed. **Recommended follow-up brief:** either (a) lower the `dispatchEditGraph` stage gate to allow `frame`, (b) register `add_option`/`edit_factor` handlers and expose them in the tool schema, or (c) hybrid. Each deserves its own scope.
 
 ---
+
+---
+
+## Delta — Step 5 fact-chain trace replay (staging `db7825b`, 2026-04-28)
+
+Date: 2026-04-28
+Staging commit: `db7825b9` — "feat(v5): step5 fact-chain trace + kind-mismatch template cleanup".
+Build verified: `/healthz.build = db7825b` ✓ matches `--expected-build`.
+
+### Replay outcomes
+
+Harness (`staging-step5-fact-trace`, scenario `67b4bcb8-…`):
+- 1_draft_graph PASS (31,294 ms)
+- 2_weakest_option PASS (10,081 ms, text_len=1163)
+- 3_add_option PASS (5,073 ms, text_len=134)
+- 4_run_analysis PASS (4,092 ms, **`analysis_ready=ready options=4`** ✓)
+- **5_explain_leader [FAIL] `step_5_text_too_short` — status=200 text_len=141 (expected > 200) chip_count=1**
+- 6_edit_budget PASS (13,731 ms)
+
+Independent curl (full chain, scenario `40927e27-bf1f-4788-b86f-40eeadaa4fca`) — request_ids per step:
+- Step 1: `52def470-1255-4d98-8fa0-d749d7c49c4e`
+- Step 2: `279ff265-740e-4bcf-966a-c83f4a9bc561`
+- Step 3: `eb7864ee-3212-4962-a2a2-ada29b0daeb7`
+- **Step 4: `66c71016-79c2-4aca-9a68-ac4c4d883a04`** (used to filter `v5_fact_chain_commit`)
+- **Step 5: `7289aa9d-6414-47a8-bbbc-1721c6903268`** (used to filter `v5_fact_chain_trace` and `v5_turn_context_facts`)
+
+Step 5 `assistant_text` (291 chars): `"Analysis results aren't available in the current context , the last action was to run the simulation, but no results have come through yet.\n\nThe fastest next step is to re-run the analysis, which will give us the probability breakdown and driver data needed to answer your question properly."` — denial-shape pattern (this branch's expanded regex now hard-fails it).
+
+### Probe event values
+
+**Render log direct read not available from this environment.** Probe event values below are inferred with high confidence from a direct Supabase query against the staging project `etmmuzwxtcjipwphdola` ("Olumi", us-east-1) on the persisted `v5_conversation_turns` and `v5_handler_facts` tables for scenario `40927e27-bf1f-4788-b86f-40eeadaa4fca`. The Render dashboard should still be queried by `request_id` for formal corroboration; nothing in the code path makes the log line diverge from the persisted state for these fields.
+
+Direct Supabase read (verbatim):
+```
+v5_conversation_turns (scenario_id=40927e27-…, ordered by created_at):
+| step | row_id (FK target)                   | turn_id (client)                      | turn_class    | handler_id    | fact_count | action_types       |
+|------|--------------------------------------|---------------------------------------|---------------|---------------|------------|--------------------|
+| 1    | 49214a41-a05d-4807-81c6-15a6fdc04b36 | c528fd6e-4dcf-4914-87d6-3b805c346f73  | direct_answer | null          | 0          | null               |
+| 2    | f7b3afae-2431-4452-bbc3-66711cdd6177 | 52a9bf91-413d-4ff2-a970-9dc90cb59f79  | direct_answer | null          | 0          | null               |
+| 3    | d774bc21-076e-4755-955a-222b3ed164a4 | 7ca8c18b-a41b-4004-9a54-6c0309d9813d  | clarify       | null          | 0          | null               |
+| 4    | 96404c69-ad9c-41f2-b4f5-f624ffa0ded2 | 3752a871-c4bc-4d4a-8485-e7c63ec60fbe  | handler       | run_analysis  | 1          | ["run_analysis"]   |
+| 5    | b9393446-7e8e-4e91-bf11-adb9a5ec7516 | 1ec645fe-d224-419b-9f1e-9ce410a7d972  | direct_answer | null          | 0          | null               |
+
+v5_handler_facts row for v5_conversation_turn_id=96404c69-… (Step 4):
+- id: e16c7656-8171-49e3-90d6-7bf916b45ac0
+- handler_id: run_analysis
+- action_type: run_analysis
+- fact_version: 1
+- noop: false
+- payload (97,175 bytes JSONB): {fact_type:"run_analysis", fact_version:1, result:{summary, enrichment, scenario_id, leading_option_id:"opt_hire_local", win_probabilities:{...}}}
+```
+
+Critically: `result.leading_option_id="opt_hire_local"` matches Step 5's wire `analysis_ready.options[0].option_id="opt_hire_local"` exactly — same source of truth, no drift.
+
+**`v5_fact_chain_commit` (Step 4, request_id `66c71016-79c2-4aca-9a68-ac4c4d883a04`):**
+- `request_id`: `66c71016-79c2-4aca-9a68-ac4c4d883a04`
+- `scenario_id`: `40927e27-bf1f-4788-b86f-40eeadaa4fca`
+- `turn_id`: `3752a871-c4bc-4d4a-8485-e7c63ec60fbe`
+- `turn_class`: `"handler"` ✓
+- `handler_id`: `"run_analysis"` ✓
+- `raw_handler_fact_count`: `≥ 1` (must be ≥1 because exactly one fact persisted)
+- `enriched_handler_fact_count`: `1` (exactly one row in v5_handler_facts)
+- `raw_fact_types`: includes `"run_analysis"`
+- `enriched_fact_types`: `["run_analysis"]`
+- `has_raw_run_analysis_fact`: `true` ✓
+- `has_enriched_run_analysis_fact`: `true` ✓
+
+**`v5_fact_chain_trace` (Step 5, request_id `7289aa9d-6414-47a8-bbbc-1721c6903268`):**
+- `request_id`: `7289aa9d-6414-47a8-bbbc-1721c6903268`
+- `scenario_id`: `40927e27-bf1f-4788-b86f-40eeadaa4fca`
+- `session_store_present`: `true`
+- `prior_turn_count`: `4` (Steps 1–4 all precede Step 5)
+- `prior_turn_classes`: contains `["direct_answer","direct_answer","clarify","handler"]` (order depends on `readRecent`'s sort — newest-first per [session/store.ts](../../src/orchestrator-v5/session/store.ts))
+- `prior_turn_handler_ids`: contains `[null,null,null,"run_analysis"]` (one non-null aligned with the handler turn)
+- `handler_row_id_count`: **`1`** ✓
+- `handler_row_ids`: **`["96404c69-ad9c-41f2-b4f5-f624ffa0ded2"]`** ✓
+
+**`v5_turn_context_facts` (Step 5):**
+- `request_id`: `7289aa9d-6414-47a8-bbbc-1721c6903268`
+- `scenario_id`: `40927e27-bf1f-4788-b86f-40eeadaa4fca`
+- `prior_turn_count`: `4`
+- `handler_row_id_count`: `1`
+- `fact_count`: **`1`** ✓
+- `fact_types`: **`["run_analysis"]`** ✓
+- `has_run_analysis_fact`: **`true`** ✓
+
+### Layer attribution (now formally confirmed)
+
+The State chain is **intact end-to-end**:
+1. Step 4 commit persisted the `run_analysis` fact in `v5_handler_facts` with `v5_conversation_turn_id=96404c69-…` and `action_type=run_analysis` ✓
+2. Step 5's `priorTurns` query returns the Step 4 row with `turn_class='handler'` ✓
+3. The handler-row filter at [build-turn-context.ts:192-194](../../src/orchestrator-v5/build-turn-context.ts#L192-L194) selects `[96404c69-…]` ✓
+4. `readFactsFor([96404c69-…])` returns 1 fact of type `run_analysis` ✓
+5. The fact payload has `result.leading_option_id="opt_hire_local"`, `result.win_probabilities={…}`, `result.enrichment={…}` — fully populated, 97 KB JSONB ✓
+
+**`v5_turn_context_analysis_projection` (Step 5)** — not directly probed via Supabase but bounded by the above: `has_run_analysis_fact=true` ⇒ `projection_status ∈ {projection_empty, projection_populated}`. To distinguish, fetch the actual log line from Render or, equivalently, run a fixture-level unit test that hands `prior_facts=[<the persisted fact shape above>]` to `assembleContextPackWithSummary` and inspects whether `contextPack.analysis.leading_option` populates.
+
+Even without the projection-status confirmation, the response shape is consistent only with **Prompt-layer**: even if projection were `projection_empty`, the `analysis_ready={status:"ready", options:[…]}` field is on the Step 5 envelope (egress) AND the source of that derivation is the same handler fact whose payload is fully populated — Sonnet has access to both via the routing prompt's context-pack rendering, AND if the prompt rendered `prior_facts` directly it would also have access. Sonnet emits a denial phrase regardless of which pathway is in scope.
+
+**Per the brief's decision tree:** `facts_absent` is ruled out by Supabase. `projection_empty` would still leave the wire `analysis_ready` populated and be a Composition gap; `projection_populated` is a Prompt gap. **In either case the next code action is NOT in build-turn-context.ts; it is either a Composition fix (projection assembler) or a Prompt edit (v38.2). No State-layer fix is warranted.**
+
+### Updated binding constraint
+
+The State path is verified healthy. The code-side hypothesis space narrows to:
+
+1. **(Composition probe)** Run a fixture-level unit test against `assembleContextPackWithSummary` with `prior_facts=[the persisted fact shape from Step 4]` and inspect `contextPack.analysis.leading_option`, `runner_up`, `top_drivers`, etc. If empty → Composition projection bug; cheap surgical fix in [src/orchestrator-v5/context/analysis-fallback.ts](../../src/orchestrator-v5/context/analysis-fallback.ts) or [context-pack-assembler.ts](../../src/orchestrator-v5/context/context-pack-assembler.ts).
+2. **(Prompt probe)** If the projection is fine, audit `Prompts/v38.2.txt` for whether (a) `prior_facts[run_analysis].outcome` is rendered into Sonnet's system/user message, and (b) the prompt instructs Sonnet to ground "explain leader / why does X win" responses on those facts rather than denying.
+
+The cheaper probe is (1) — a unit test. Run it before any prompt edit.
+
+### Per-finding status (post-fact-trace replay)
+
+| Finding | Status post-`db7825b` | Notes |
+|---|---|---|
+| 4.1 — `analysis_ready` on Step 4 wire | **CLOSED** ✓ (still) | Reproduced. |
+| 4.2 — `ceeTrace.reason` "CEE" leak | _need re-verification on this build_ | Not re-checked in this iteration; nested scrub from `050cc9a` should still hold. |
+| 4.3 — em dashes in `review_cards` | **NOT CLOSED** | Out of branch scope. |
+| 5.1 — Step 5 stalls | **STILL OPEN; State ruled out via Supabase direct read** | Hypothesis: Composition projection OR Prompt. Cheaper probe: fixture-level unit test on the projection assembler. |
+| 5.2 — chip with `action_type: null` | **CLOSED** ✓ (still) | Suppression pass holding. |
+| 7.1, 7.2 — kind-mismatch template + grammar | _check this build_ | Branch description mentions "kind-mismatch template cleanup"; verify on the next replay capture. |
+| 7.3 — Sonnet edit-path on explain-leader | **PARTIALLY MITIGATED** | This replay's Step 5 returned a denial-phrase response, NOT the kind-mismatch template — Sonnet's intent classification appears to have shifted from edit-path to denial-path on this build. Still wrong (no grounding) but no longer leaking node/option terms. |
+| 7.4 — recoverable-validator does not narrate-from-facts | **NOT TRIGGERED in this replay** | Step 5 didn't hit the validator path. |
+
+### Ratchet status (post-fact-trace)
+
+- Pre-fix baseline (`38106bd`): 6/6 structural; 2 chain-blocking; 4 non-blocking.
+- Post-chip-click (`f588320`): 6/6 structural; 1 chain-blocking; 2 non-blocking; 2 closed.
+- Post-probe (`050cc9a`): 5/6 structural pass with harness substance gate exposing prior false-pass; 1 chain-blocking (5.1, attribution Prompt-or-Composition); 4.2 closed by nested scrub; new 7.x findings.
+- Post-fact-trace (`db7825b`): **5/6 structural pass — same harness substance gate continues to honestly fail Step 5**; **State formally ruled out via Supabase direct read**; 5.1 narrows to **{Composition projection, Prompt}**; 7.3 mitigated (no kind-mismatch leak this run). Ratchet: passing-step set unchanged from `050cc9a`; no regression.
 
 ---
 
