@@ -50,6 +50,14 @@ import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import type { GraphStateIngress, AnalysisStateIngress } from '../../boundary/request-extensions.js';
+import type {
+  PendingClarificationState,
+  PendingProposalState,
+  SuggestedAction,
+  TypedConversationBlock,
+  GraphPatchBlockData,
+} from '../../../orchestrator/types.js';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -224,6 +232,478 @@ describe('dispatchEditGraph', () => {
       // Response is still returned for server-side logging — the route-v2
       // path maps commitPerformed=false to a wire-level retryable error.
       expect(result.response.assistant_text).toBeDefined();
+    });
+  });
+
+  // ── recovery surface — composer forwards rejection blocks + chips ─────────
+  // Pre-this-fix, `editResultToOlumiResponse` hardcoded blocks=[] and
+  // suggested_actions=[], silently dropping clarification chips,
+  // propose-and-confirm chips, and rejection codes. These tests pin the
+  // forwarding contract.
+
+  describe('composer recovery — rejection blocks', () => {
+    function makeRejectedBlock(code: string, attempts: number): TypedConversationBlock {
+      const data: GraphPatchBlockData = {
+        patch_type: 'edit',
+        operations: [],
+        status: 'rejected',
+        base_graph_hash: 'sha256:base',
+        rejection: {
+          reason: 'Structural validation failed: NO_PATH_TO_GOAL',
+          code,
+          attempts,
+        },
+      };
+      return {
+        block_id: 'block_rej_1',
+        block_type: 'graph_patch',
+        data,
+        provenance: { trigger: 'tool:edit_graph', turn_id: TURN_ID, timestamp: '2026-04-28T00:00:00.000Z' },
+      };
+    }
+
+    it('structural rejection → emits boundary error block carrying rejection_code, no graph commit', async () => {
+      const result: EditGraphResult = {
+        blocks: [makeRejectedBlock('STRUCTURAL_VALIDATION_FAILED', 3)],
+        assistantText: "I wasn't able to make that change safely.",
+        latencyMs: 4500,
+        appliedGraph: null,
+        wasRejected: true,
+        suggestedActions: [
+          { role: 'facilitator', label: 'Try a simpler change', prompt: 'Try a simpler version of this change.' },
+          { role: 'facilitator', label: 'Start fresh', prompt: 'Let\'s rebuild the model from the updated brief.' },
+        ],
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-rej-struct',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      // Boundary error block carries rejection metadata (not a V4 graph_patch).
+      expect(dispatched.response.blocks).toHaveLength(1);
+      const block = dispatched.response.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        expect(block.error_code).toBe('INTERNAL_ERROR');
+        expect(block.severity).toBe('warn');
+        expect(block.details).toBeDefined();
+        expect(block.details!.source).toBe('edit_graph');
+        expect(block.details!.rejection_code).toBe('STRUCTURAL_VALIDATION_FAILED');
+        expect(block.details!.attempts).toBe(3);
+        // Stable codes only — no raw `reason` text on the wire.
+        expect(block.details!.reason).toBeUndefined();
+      }
+
+      // Recovery chips forwarded from result.suggestedActions.
+      expect(dispatched.response.suggested_actions).toHaveLength(2);
+      expect(dispatched.response.suggested_actions[0]!.label).toBe('Try a simpler change');
+      expect(dispatched.response.suggested_actions[0]!.message).toBe('Try a simpler version of this change.');
+
+      // No graph commit on rejection — appliedGraph: null → metadata.graph: undefined.
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0]!;
+      expect(metadata.graph).toBeUndefined();
+
+      // analysis_ready undefined on rejection — UI keeps prior store value.
+      expect(dispatched.analysisReady).toBeUndefined();
+
+      // Boundary validity pinned where blocks + chips are synthesised.
+      expect(() => OlumiResponseSchema.parse(dispatched.response)).not.toThrow();
+    });
+
+    it('PLoT semantic rejection → boundary error block carries plot_code and rejection_code', async () => {
+      const data: GraphPatchBlockData = {
+        patch_type: 'edit',
+        operations: [],
+        status: 'rejected',
+        base_graph_hash: 'sha256:base',
+        rejection: {
+          reason: 'PLoT rejected: cycle detected',
+          code: 'PLOT_SEMANTIC_REJECTED',
+          plot_code: 'CYCLE_DETECTED',
+          attempts: 2,
+        },
+      };
+      const block: TypedConversationBlock = {
+        block_id: 'block_plot_rej',
+        block_type: 'graph_patch',
+        data,
+        provenance: { trigger: 'tool:edit_graph', turn_id: TURN_ID, timestamp: '2026-04-28T00:00:00.000Z' },
+      };
+      const result: EditGraphResult = {
+        blocks: [block],
+        assistantText: "I wasn't able to make that change safely.",
+        latencyMs: 5000,
+        appliedGraph: null,
+        wasRejected: true,
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-plot-rej',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      const wireBlock = dispatched.response.blocks[0]!;
+      expect(wireBlock.type).toBe('error');
+      if (wireBlock.type === 'error') {
+        expect(wireBlock.details!.rejection_code).toBe('PLOT_SEMANTIC_REJECTED');
+        expect(wireBlock.details!.plot_code).toBe('CYCLE_DETECTED');
+        // Raw rejection text not on the wire.
+        expect(wireBlock.details!.reason).toBeUndefined();
+      }
+      expect(() => OlumiResponseSchema.parse(dispatched.response)).not.toThrow();
+    });
+  });
+
+  describe('composer recovery — clarification chips', () => {
+    it('pendingClarification → maps candidate_labels to suggested_actions when no explicit chips', async () => {
+      const pending: PendingClarificationState = {
+        tool: 'edit_graph',
+        original_edit_request: 'increase the budget',
+        candidate_labels: ['Annual Budget', 'Marketing Budget', 'Project Budget'],
+      };
+      const result: EditGraphResult = {
+        blocks: [],
+        assistantText: 'Which budget did you mean — Annual Budget or Marketing Budget or Project Budget?',
+        latencyMs: 1200,
+        appliedGraph: null,
+        wasRejected: true,
+        pendingClarification: pending,
+        // No suggestedActions — composer must derive chips from pending state.
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-clarify-pending',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(dispatched.response.suggested_actions).toHaveLength(3);
+      expect(dispatched.response.suggested_actions.map((a) => a.label))
+        .toEqual(['Annual Budget', 'Marketing Budget', 'Project Budget']);
+      expect(dispatched.response.suggested_actions[0]!.message).toBe('Update Annual Budget.');
+    });
+
+    it('overlapping explicit + pendingClarification → merged with dedupe (one entry per message)', async () => {
+      // Both sources produce identical prompts. Merge collects all four;
+      // dedupe-by-message keeps two. Explicit chips come first, so they
+      // win on the dedupe collision.
+      const pending: PendingClarificationState = {
+        tool: 'edit_graph',
+        original_edit_request: 'update budget',
+        candidate_labels: ['Foo', 'Bar'],
+      };
+      const explicit: SuggestedAction[] = [
+        { role: 'facilitator', label: 'Foo', prompt: 'Update Foo.' },
+        { role: 'facilitator', label: 'Bar', prompt: 'Update Bar.' },
+      ];
+      const result: EditGraphResult = {
+        blocks: [],
+        assistantText: 'Which one?',
+        latencyMs: 100,
+        appliedGraph: null,
+        wasRejected: true,
+        suggestedActions: explicit,
+        pendingClarification: pending,
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-clarify-dedupe',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(dispatched.response.suggested_actions).toHaveLength(2);
+      const messages = dispatched.response.suggested_actions.map((a) => a.message);
+      expect(new Set(messages).size).toBe(messages.length);
+    });
+
+    it('non-overlapping explicit chip + pendingClarification → merged (both surfaced)', async () => {
+      // Mixed recovery state: an explicit "Re-run analysis" rerun chip
+      // alongside pendingClarification candidate labels. Earlier
+      // exclusive-precedence logic would drop the clarification chips;
+      // merge semantics surface all of them.
+      const pending: PendingClarificationState = {
+        tool: 'edit_graph',
+        original_edit_request: 'update factor',
+        candidate_labels: ['Cost', 'Revenue'],
+      };
+      const explicit: SuggestedAction[] = [
+        { role: 'facilitator', label: 'Re-run analysis', prompt: 'run the analysis again' },
+      ];
+      const result: EditGraphResult = {
+        blocks: [],
+        assistantText: 'Mixed state',
+        latencyMs: 100,
+        appliedGraph: null,
+        wasRejected: false,
+        suggestedActions: explicit,
+        pendingClarification: pending,
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-merge-mixed',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(dispatched.response.suggested_actions).toHaveLength(3);
+      expect(dispatched.response.suggested_actions.map((a) => a.label))
+        .toEqual(['Re-run analysis', 'Cost', 'Revenue']);
+      // Boundary validity is pinned where chips are synthesised.
+      expect(() => OlumiResponseSchema.parse(dispatched.response)).not.toThrow();
+    });
+  });
+
+  // ── violation_codes synthesis from diagnostics — covers the
+  // structural-violation path (edit-graph.ts:1950) which returns
+  // blocks: [] but populates result.diagnostics.validation_violation_codes.
+  // Ensures OPTION_NO_FACTOR_EDGES (and any future structural codes) reach
+  // the wire even when the V4 GraphPatchBlock with rejection metadata is
+  // absent.
+  describe('composer recovery — violation_codes synthesis from diagnostics', () => {
+    it('structural-violation immediate reject → synthesises wire error block from diagnostics', async () => {
+      // V4 returns blocks: [] for structural-intent immediate rejects
+      // (the bypass-repair path). The composer must synthesise the wire
+      // error block from result.diagnostics so the rejection_code and
+      // violation_codes still reach the UI.
+      const result: EditGraphResult = {
+        blocks: [],
+        assistantText: 'I could not apply that change. Consider simplifying.',
+        latencyMs: 600,
+        appliedGraph: null,
+        wasRejected: true,
+        diagnostics: {
+          classified_intent: 'structural',
+          instruction_mode_applied: 'structural_default',
+          edit_instruction_preview: 'add an option for contract hiring',
+          graph_context_node_count: 5,
+          graph_context_edge_count: 5,
+          operations_proposed_count: 2,
+          operations_proposed_types: ['add_node', 'add_edge'],
+          validation_outcome: 'graph_structure_invalid',
+          validation_violation_codes: ['OPTION_NO_FACTOR_EDGES'],
+          recovery_path_chosen: 'rejection_block',
+          conversational_state_summary: null,
+          target_resolution: null,
+          resolution_mode: 'auto_apply',
+          proposal_returned: false,
+          branch_taken: 'rejection',
+          branch_reason: 'graph_structure_invalid',
+          failure_branch: 'graph_structure_invalid',
+          failure_code: 'OPTION_NO_FACTOR_EDGES',
+          failure_message: 'Option opt_x has no outbound edge to a factor',
+        },
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-structural-synth',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(dispatched.response.blocks).toHaveLength(1);
+      const block = dispatched.response.blocks[0]!;
+      expect(block.type).toBe('error');
+      if (block.type === 'error') {
+        expect(block.details!.source).toBe('edit_graph');
+        expect(block.details!.rejection_code).toBe('OPTION_NO_FACTOR_EDGES');
+        expect(block.details!.violation_codes).toEqual(['OPTION_NO_FACTOR_EDGES']);
+        expect(block.details!.failure_branch).toBe('graph_structure_invalid');
+        // Raw failure_message not promoted to the wire — stable codes only.
+        expect(block.details!.reason).toBeUndefined();
+      }
+      // No graph commit + no analysis_ready on rejection.
+      expect(dispatched.analysisReady).toBeUndefined();
+      // Boundary validity pinned for diagnostics-synthesised blocks.
+      expect(() => OlumiResponseSchema.parse(dispatched.response)).not.toThrow();
+    });
+
+    it('V4 GraphPatchBlock rejection + diagnostics → wire block carries both rejection_code and violation_codes', async () => {
+      const data: GraphPatchBlockData = {
+        patch_type: 'edit',
+        operations: [],
+        status: 'rejected',
+        base_graph_hash: 'sha256:base',
+        rejection: {
+          reason: 'Structural violation',
+          code: 'STRUCTURAL_VALIDATION_FAILED',
+          attempts: 3,
+        },
+      };
+      const block: TypedConversationBlock = {
+        block_id: 'block_rej',
+        block_type: 'graph_patch',
+        data,
+        provenance: { trigger: 'tool:edit_graph', turn_id: TURN_ID, timestamp: '2026-04-28T00:00:00.000Z' },
+      };
+      const result: EditGraphResult = {
+        blocks: [block],
+        assistantText: "I wasn't able to make that change safely.",
+        latencyMs: 5000,
+        appliedGraph: null,
+        wasRejected: true,
+        diagnostics: {
+          classified_intent: 'structural',
+          instruction_mode_applied: 'structural_default',
+          edit_instruction_preview: 'add an option',
+          graph_context_node_count: 5,
+          graph_context_edge_count: 5,
+          operations_proposed_count: 2,
+          operations_proposed_types: ['add_node', 'add_edge'],
+          validation_outcome: 'graph_structure_invalid',
+          validation_violation_codes: ['OPTION_NO_FACTOR_EDGES'],
+          recovery_path_chosen: 'rejection_block',
+          conversational_state_summary: null,
+          target_resolution: null,
+          resolution_mode: 'auto_apply',
+          proposal_returned: false,
+          branch_taken: 'rejection',
+          branch_reason: 'final_attempt',
+          failure_branch: 'structural_validation_failed',
+          failure_code: 'STRUCTURAL_VALIDATION_FAILED',
+          failure_message: 'Repair exhausted',
+        },
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-rej-with-violations',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      const wireBlock = dispatched.response.blocks[0]!;
+      expect(wireBlock.type).toBe('error');
+      if (wireBlock.type === 'error') {
+        // Umbrella rejection_code from V4 block.
+        expect(wireBlock.details!.rejection_code).toBe('STRUCTURAL_VALIDATION_FAILED');
+        // Specific violation codes promoted from diagnostics.
+        expect(wireBlock.details!.violation_codes).toEqual(['OPTION_NO_FACTOR_EDGES']);
+        expect(wireBlock.details!.attempts).toBe(3);
+        // Raw rejection.reason text not promoted to the wire.
+        expect(wireBlock.details!.reason).toBeUndefined();
+      }
+      expect(() => OlumiResponseSchema.parse(dispatched.response)).not.toThrow();
+    });
+  });
+
+  describe('composer recovery — propose-and-confirm chips intentionally suppressed', () => {
+    it('pendingProposal alone → no chips emitted (deterministic-replay not wired)', async () => {
+      // V5 dispatch does not currently persist pendingProposal across
+      // turns nor thread it via invocationInput, so accept/cancel chips
+      // would replay as plain user prompts (the LLM has to re-resolve
+      // the proposal). Showing non-deterministic accept/cancel chips is
+      // worse UX than showing none — the user can confirm in natural
+      // language until the deterministic-replay path is wired.
+      const proposal: PendingProposalState = {
+        tool: 'edit_graph',
+        original_edit_request: 'increase fac_budget by 50%',
+        proposed_changes: { changes: [], summary: 'increase budget' } as unknown as PendingProposalState['proposed_changes'],
+        candidate_labels: ['fac_budget'],
+        base_graph_hash: 'sha256:proposal',
+      };
+      const result: EditGraphResult = {
+        blocks: [],
+        assistantText: 'Apply the proposed change?',
+        latencyMs: 600,
+        appliedGraph: null,
+        wasRejected: false,
+        pendingProposal: proposal,
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-propose',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(dispatched.response.suggested_actions).toHaveLength(0);
+      // Boundary validity pinned for the no-chip path too.
+      expect(() => OlumiResponseSchema.parse(dispatched.response)).not.toThrow();
+    });
+  });
+
+  describe('composer recovery — successful edit', () => {
+    it('blocks remain empty for successful edits (no V4→boundary graph_patch mapping)', async () => {
+      // Successful applied edit returns a V4 graph_patch with status=accepted/applied.
+      // The boundary graph_patch enum doesn't fit V5 multi-op edits, so blocks=[].
+      // The applied graph reaches the UI via analysis_ready + scenarios.graph row.
+      const data: GraphPatchBlockData = {
+        patch_type: 'edit',
+        operations: [],
+        status: 'accepted',
+        base_graph_hash: 'sha256:applied',
+      };
+      const successBlock: TypedConversationBlock = {
+        block_id: 'block_applied',
+        block_type: 'graph_patch',
+        data,
+        provenance: { trigger: 'tool:edit_graph', turn_id: TURN_ID, timestamp: '2026-04-28T00:00:00.000Z' },
+      };
+      const result: EditGraphResult = {
+        blocks: [successBlock],
+        assistantText: 'Edge strength increased.',
+        latencyMs: 1100,
+        appliedGraph: POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
+        wasRejected: false,
+      };
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const dispatched = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-applied-blocks-empty',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(dispatched.response.blocks).toEqual([]);
+      // analysis_ready stamped from applied graph.
+      expect(dispatched.analysisReady).toBeDefined();
     });
   });
 

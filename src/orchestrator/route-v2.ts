@@ -585,15 +585,19 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // toward NOT dispatching. False negatives fall through to Sonnet's
     // text_only branch (WORKING per the matrix).
     //   - kind: 'message' (branched above for system events).
-    //   - graph_state present (something to edit).
-    //   - stage in {analyse, decide} (edit happens after drafting).
+    //   - graph_state present (something to edit). The presence of a
+    //     graph is the load-bearing precondition, not the stage.
     //   - EDIT_INTENT_REGEX: positive match on edit verbs.
     //   - EDIT_GRAPH_NEGATIVE_REGEX: NO match. Explicit guards against
     //     "explain this", "compare options", "what would" — those are
     //     meta-questions that might contain an edit verb incidentally.
+    //
+    // The stage check was removed — stages continue to influence
+    // Sonnet's coaching tone via `stage_indicator` and the context
+    // pack, but they no longer block deterministic edit dispatch when
+    // a graph is already present.
     const isEditGraphShape =
       extensions.graphState != null &&
-      (ingress.stage === 'analyse' || ingress.stage === 'decide') &&
       EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message) &&
       !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
     if (isEditGraphShape) {

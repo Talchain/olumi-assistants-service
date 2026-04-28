@@ -132,6 +132,93 @@ describe('validateGraphStructure', () => {
     expect(hasViolation(result, 'NO_PATH_TO_GOAL')).toBe(true);
   });
 
+  // ──────────────────────────────────────────────────────────────────────
+  // OPTION_NO_FACTOR_EDGES — pins the prompt's invariant that an option
+  // with no outbound edge to a factor cannot be analysed. Before this rule
+  // was added, an LLM that emitted only `add_node opt_*` plus the
+  // decision→option structural edge would produce a non-functional option
+  // that passed structural validation.
+  // ──────────────────────────────────────────────────────────────────────
+
+  describe('OPTION_NO_FACTOR_EDGES', () => {
+    it('option with zero outbound edges → fails', () => {
+      const graph = makeValidGraph();
+      // Remove all outbound edges from opt_a (decision→opt_a stays, but no opt_a→fac_*).
+      graph.edges = graph.edges.filter((e) => e.from !== 'opt_a');
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      expect(hasViolation(result, 'OPTION_NO_FACTOR_EDGES')).toBe(true);
+      const violation = result.violations.find((v) => v.code === 'OPTION_NO_FACTOR_EDGES')!;
+      expect(violation.detail).toContain('opt_a');
+    });
+
+    it('option with only inbound decision edge → fails (inbound ≠ outbound to factor)', () => {
+      const graph = makeValidGraph();
+      // Strip both outbound edges from opt_a — leaves only dec_1→opt_a (inbound).
+      graph.edges = graph.edges.filter((e) => !(e.from === 'opt_a' && e.to === 'fac_x'));
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      expect(hasViolation(result, 'OPTION_NO_FACTOR_EDGES')).toBe(true);
+    });
+
+    it('option with outbound edge to outcome only → fails (must be option → factor)', () => {
+      const graph: GraphV3T = {
+        nodes: [
+          { id: 'dec_1', kind: 'decision', label: 'Decide' },
+          { id: 'opt_a', kind: 'option', label: 'Option A' },
+          { id: 'opt_b', kind: 'option', label: 'Option B' },
+          { id: 'fac_x', kind: 'factor', label: 'Cost' },
+          { id: 'out_revenue', kind: 'outcome', label: 'Revenue' },
+          { id: 'goal_1', kind: 'goal', label: 'Profit' },
+        ],
+        edges: [
+          { from: 'dec_1', to: 'opt_a', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+          { from: 'dec_1', to: 'opt_b', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+          // opt_a → outcome (NOT a factor) — should NOT satisfy the rule.
+          { from: 'opt_a', to: 'out_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+          { from: 'opt_b', to: 'fac_x', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+          { from: 'fac_x', to: 'out_revenue', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+          { from: 'out_revenue', to: 'goal_1', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+        ],
+      } as unknown as GraphV3T;
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      expect(hasViolation(result, 'OPTION_NO_FACTOR_EDGES')).toBe(true);
+      // Specifically: opt_a is the violator (its only outbound is to out_revenue).
+      const violation = result.violations.find((v) => v.code === 'OPTION_NO_FACTOR_EDGES')!;
+      expect(violation.detail).toContain('opt_a');
+    });
+
+    it('option with at least one option → factor edge → passes (alongside other valid edges)', () => {
+      // The base valid graph already has opt_a → fac_x and opt_b → fac_x.
+      const result = validateGraphStructure(makeValidGraph());
+      expect(result.valid).toBe(true);
+      expect(hasViolation(result, 'OPTION_NO_FACTOR_EDGES')).toBe(false);
+    });
+
+    it('repair-loop visibility: orphan-option violation appears in violations array (not just final)', () => {
+      // A repair attempt sees the full violations[] from validateGraphStructure
+      // — assert OPTION_NO_FACTOR_EDGES is among them so the repair prompt
+      // can include it in its error context (caller-visible).
+      const graph = makeValidGraph();
+      graph.nodes.push({ id: 'opt_orphan', kind: 'option', label: 'Orphan Option' } as GraphV3T['nodes'][number]);
+      graph.edges.push({
+        from: 'dec_1', to: 'opt_orphan',
+        strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
+      } as GraphV3T['edges'][number]);
+      // No opt_orphan → fac_* edge.
+
+      const result = validateGraphStructure(graph);
+      expect(result.valid).toBe(false);
+      const orphanViolations = result.violations.filter((v) => v.code === 'OPTION_NO_FACTOR_EDGES');
+      expect(orphanViolations.length).toBe(1);
+      expect(orphanViolations[0]!.detail).toContain('opt_orphan');
+    });
+  });
+
   it('CYCLE_DETECTED: detects directed cycle', () => {
     const graph = makeValidGraph();
     // Create cycle: goal_1 → fac_x (fac_x→goal_1 already exists)

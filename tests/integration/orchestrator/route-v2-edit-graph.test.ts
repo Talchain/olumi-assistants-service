@@ -216,7 +216,11 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
     expect([200, 500]).toContain(res.statusCode);
   });
 
-  it('stage=frame → NOT dispatched (edit is post-draft)', async () => {
+  it('stage=frame with graph_state + edit verb → DISPATCHES (stage gate removed)', async () => {
+    // The stage check was removed: presence of a graph is the load-bearing
+    // precondition. Frame-stage edits are now dispatched if all other gates
+    // pass (graph_state present, edit verb, no negative phrasing).
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -226,7 +230,7 @@ describe('POST /orchestrate/v2/turn — edit_graph dispatch', () => {
         message: 'Change the factor weight',
       }),
     });
-    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
     expect([200, 500]).toContain(res.statusCode);
   });
 
