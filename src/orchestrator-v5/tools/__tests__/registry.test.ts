@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import type { V5ActionType } from '@talchain/schemas/orchestrator';
 
 import {
+  createRegistry,
   EMPTY_HANDLER_REGISTRY,
   resolveHandler,
   type HandlerFn,
@@ -19,6 +20,8 @@ import {
   type HandlerOutcome,
   type HandlerRegistry,
 } from '../registry.js';
+import type { ScenarioReader } from '../handlers/run-analysis.js';
+import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 
 const noopHandler: HandlerFn = async (_: HandlerInvocation): Promise<HandlerOutcome> => ({
   assistant_text: 'test',
@@ -38,6 +41,8 @@ describe('EMPTY_HANDLER_REGISTRY', () => {
       'add_constraint',
       'adjust_edge_strength',
       'explain_result',
+      'explain_results',
+      'explain_from_structure',
       'compare_options',
       'what_would_flip',
     ];
@@ -70,11 +75,55 @@ describe('resolveHandler', () => {
       'add_constraint',
       'adjust_edge_strength',
       'explain_result',
+      'explain_results',
+      'explain_from_structure',
       'compare_options',
       'what_would_flip',
     ];
     for (const id of allHandlerIds) {
       expect(resolveHandler(EMPTY_HANDLER_REGISTRY, id)).toBeNull();
     }
+  });
+});
+
+describe('createRegistry — V5 0.9.0 handler set', () => {
+  // Stubs for createRegistry's required deps. These never run because the
+  // tests only assert presence in the registry map, not handler invocation.
+  const stubScenarioReader: ScenarioReader = () =>
+    Promise.reject(new Error('scenario reader not exercised in this test'));
+  const stubPlotClient: PLoTClient = {
+    run: () => Promise.reject(new Error('plot client not exercised')),
+    validatePatch: () => Promise.reject(new Error('plot client not exercised')),
+  } as unknown as PLoTClient;
+
+  it('registers run_analysis plus the three V5 no-op handlers', () => {
+    const registry = createRegistry({
+      scenarioReader: stubScenarioReader,
+      plotClient: stubPlotClient,
+    });
+    expect(registry.size).toBe(4);
+    expect(resolveHandler(registry, 'run_analysis')).not.toBeNull();
+    expect(resolveHandler(registry, 'explain_from_structure')).not.toBeNull();
+    expect(resolveHandler(registry, 'explain_results')).not.toBeNull();
+    expect(resolveHandler(registry, 'what_would_flip')).not.toBeNull();
+  });
+
+  it('does not register the deprecated explain_result literal', () => {
+    const registry = createRegistry({
+      scenarioReader: stubScenarioReader,
+      plotClient: stubPlotClient,
+    });
+    expect(resolveHandler(registry, 'explain_result')).toBeNull();
+  });
+
+  it('does not register handler ids without a backing handler', () => {
+    const registry = createRegistry({
+      scenarioReader: stubScenarioReader,
+      plotClient: stubPlotClient,
+    });
+    expect(resolveHandler(registry, 'set_factor_value')).toBeNull();
+    expect(resolveHandler(registry, 'add_constraint')).toBeNull();
+    expect(resolveHandler(registry, 'compare_options')).toBeNull();
+    expect(resolveHandler(registry, 'adjust_edge_strength')).toBeNull();
   });
 });

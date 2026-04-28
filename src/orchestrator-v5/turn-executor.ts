@@ -889,6 +889,9 @@ export async function runTurnExecutor(
           payload,
           requestId,
           signal: turnAbort.signal,
+          orientationText: routingResult.orientationText,
+          proposal: action,
+          analysisReady: analysisReadyForTurn,
         });
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');
@@ -999,17 +1002,31 @@ export async function runTurnExecutor(
           turn_class: 'handler',
         });
       }
+      // V5 0.9.0: handlers may set `suppress_orientation: true` on their
+      // outcome to instruct the composer to skip Sonnet's pre-tool-call
+      // text. Used by the precondition-fail path of the no-op explanation
+      // handlers (explain_results, what_would_flip) where the brief is
+      // explicit that the deterministic template "does not fall through to
+      // Sonnet text". Default behaviour (flag absent) is unchanged for
+      // run_analysis and any future handler that does not opt in.
+      const orientationForCompose = handlerOutcome.suppress_orientation
+        ? ''
+        : sanitisedOrientation.output;
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
+      // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
+      // emit a misleading "Run analysis" chip when a prior non-noop
+      // run_analysis fact already exists in the conversation.
       const executeChips = generateChips({
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
+        priorFacts: context.prior_facts,
         analysis: contextPackForLog?.analysis ?? null,
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
       });
       composedOk = composeToolCallResponse({
-        orientation: sanitisedOrientation.output,
+        orientation: orientationForCompose,
         confirmation: confirmationText,
         coaching: coachingText,
         stage: context.stage,

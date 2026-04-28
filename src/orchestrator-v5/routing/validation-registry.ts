@@ -42,6 +42,27 @@ const runAnalysisPrecondition: PreconditionCheck = ({ graph }) => {
   return { ok: true };
 };
 
+// 0.9.0 — confirmation template for the V5 no-op handlers
+// (explain_from_structure, explain_results, what_would_flip). On the happy
+// path the handler returns `assistant_text: ''` and Sonnet's orientation
+// alone surfaces. On the empty-orientation guard path the handler returns
+// a safe fallback string. On the precondition-fail path of the analysis-
+// dependent handlers the handler returns the deterministic template AND
+// sets `suppress_orientation: true`. In all three cases the handler-
+// authored `assistant_text` is the right thing to show as confirmation —
+// the function form forwards it directly, no rewriting.
+const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
+  if (
+    outcome !== null &&
+    typeof outcome === 'object' &&
+    'assistant_text' in outcome &&
+    typeof (outcome as { assistant_text: unknown }).assistant_text === 'string'
+  ) {
+    return (outcome as { assistant_text: string }).assistant_text;
+  }
+  return '';
+};
+
 export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   run_analysis: {
     handler_id: 'run_analysis',
@@ -53,5 +74,38 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
     accepted_entity_kinds: ['option', 'goal'],
     preconditions: runAnalysisPrecondition,
     confirmation_template: 'Ran analysis on your current scenario.',
+  },
+  // 0.9.0 — V5 no-op routing handlers. None has a graph-level precondition;
+  // explain_results and what_would_flip do their own analysis-fact-presence
+  // check inside the handler body so the user-facing failure path can return
+  // a templated response with a "Run analysis" chip instead of a typed
+  // PRECONDITION_UNMET rejection.
+  //
+  // accepted_entity_kinds is restricted to ['goal', 'option'] for all
+  // three handlers. The wire entity-kind enum includes 'node' as a
+  // catch-all that covers decision, factor, outcome, and risk nodes
+  // collapsed into one literal. Accepting 'node' on explain_from_structure
+  // would let Sonnet target outcome/risk/edge-adjacent nodes that the
+  // no-op handler can't sensibly explain. The decision-node misroute
+  // pattern (Sonnet picking the decision node for "what factor influences
+  // my decision?") is caught instead by the validator's ENTITY_KIND_MISMATCH
+  // path, which routes through composeRecoverableValidationResponse to
+  // produce a 200 + coaching response asking the user to retarget — the
+  // correct degradation for a structurally-ambiguous request that the
+  // wire schema cannot disambiguate.
+  explain_from_structure: {
+    handler_id: 'explain_from_structure',
+    accepted_entity_kinds: ['goal', 'option'],
+    confirmation_template: noopHandlerConfirmationTemplate,
+  },
+  explain_results: {
+    handler_id: 'explain_results',
+    accepted_entity_kinds: ['goal', 'option'],
+    confirmation_template: noopHandlerConfirmationTemplate,
+  },
+  what_would_flip: {
+    handler_id: 'what_would_flip',
+    accepted_entity_kinds: ['goal', 'option'],
+    confirmation_template: noopHandlerConfirmationTemplate,
   },
 };

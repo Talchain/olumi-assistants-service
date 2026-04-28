@@ -92,6 +92,7 @@ function makeInvocation(overrides?: Partial<HandlerInvocation>): HandlerInvocati
     },
     requestId: TEST_REQUEST_ID,
     signal: new AbortController().signal,
+    orientationText: '',
     ...overrides,
   };
 }

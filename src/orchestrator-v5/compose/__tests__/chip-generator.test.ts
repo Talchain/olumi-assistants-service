@@ -320,3 +320,232 @@ describe('generateChips', () => {
     }
   });
 });
+
+// V5 0.9.0 — facts_absent rule fires when one of the new no-op explanation
+// handlers ran but no real run_analysis fact exists in handlerFacts. The
+// chip is the same "Run analysis" executable as the analyse-stage rule
+// when readiness is ready; otherwise a conversational setup prompt.
+describe('generateChips — V5 0.9.0 facts_absent rule', () => {
+  function noopExplainResultsFact(): HandlerFact {
+    return {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: true, option_count: 2 },
+    };
+  }
+
+  function noopWhatWouldFlipFact(): HandlerFact {
+    return {
+      fact_type: 'what_would_flip',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: true, option_count: 2 },
+    };
+  }
+
+  function noopExplainFromStructureFact(): HandlerFact {
+    return {
+      fact_type: 'explain_from_structure',
+      fact_version: 1,
+      noop: true,
+      result: { option_count: 2 },
+    };
+  }
+
+  it('explain_results noop fact + facts_absent + ready → executable run_analysis chip', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [noopExplainResultsFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+    expect(chips[0].label).toBe('Run analysis');
+  });
+
+  it('what_would_flip noop fact + facts_absent + ready → executable run_analysis chip', () => {
+    const chips = generateChips({
+      stage: 'decide',
+      handlerFacts: [noopWhatWouldFlipFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+  });
+
+  it('explain_from_structure noop fact + facts_absent + ready → executable run_analysis chip', () => {
+    // Fires across stages — frame here.
+    const chips = generateChips({
+      stage: 'frame',
+      handlerFacts: [noopExplainFromStructureFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+  });
+
+  it('noop fact + facts_absent + readiness undefined → conversational setup prompt', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [noopExplainResultsFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      // analysisReady intentionally absent.
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBeUndefined();
+    expect(chips[0].label).toBe('Set values for options');
+  });
+
+  it('noop run_analysis fact does NOT satisfy facts_absent — still emits Run analysis', () => {
+    // The non-noop filter: a noop run_analysis fact must NOT count as
+    // "real analysis present". Mirrors the handler-side precondition.
+    const noopRunAnalysisFact: HandlerFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: true,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: null,
+        summary: '',
+      },
+    };
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [noopRunAnalysisFact, noopExplainResultsFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+  });
+
+  it('explain_results post-analysis (priorFacts has run_analysis) → NO Run analysis chip', () => {
+    // V5 0.9.0 fix: the original facts_absent rule consulted only the
+    // current turn's handlerFacts, so a successful post-analysis
+    // explain_results turn (current fact = noop explain_results, prior =
+    // non-noop run_analysis) would falsely emit a "Run analysis" chip.
+    // The fix routes deriveProjectionStatus through priorFacts AND the
+    // populated analysis projection.
+    const priorRunAnalysis: HandlerFact = runAnalysisFact();
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [noopExplainResultsFact()],
+      priorFacts: [priorRunAnalysis],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    // Run analysis chip MUST NOT appear — analysis already exists.
+    for (const c of chips) {
+      expect(c.action_type).not.toBe('run_analysis');
+    }
+  });
+
+  it('analysis projection populated but NO prior run_analysis fact → STILL emits Run analysis (single source of truth = priorFacts)', () => {
+    // V5 0.9.0 alignment: the chip rule and the handler precondition both
+    // key off the persisted run_analysis HandlerFact. A turn that arrives
+    // with `analysis` populated upstream but no persisted fact (e.g. a
+    // bypass path that synthesises analysis without writing a fact) is
+    // facts_absent. The user gets the "Run analysis" chip and the handler
+    // returns its precondition-fail template — both signals agreeing.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [noopExplainResultsFact()],
+      // priorFacts deliberately empty.
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+  });
+});
+
+// V5 0.9.0 — deriveProjectionStatus is the single helper that flattens
+// "no real run_analysis fact" / "fact present, projection empty" / "fact
+// present, projection populated" into one enum. Used by the facts_absent
+// chip rule above.
+describe('deriveProjectionStatus', () => {
+  it('returns "facts_absent" when handlerFacts is empty', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    expect(deriveProjectionStatus([], null)).toBe('facts_absent');
+    expect(deriveProjectionStatus(undefined, null)).toBe('facts_absent');
+  });
+
+  it('returns "facts_absent" when only a noop run_analysis fact is present and analysis is empty', async () => {
+    // V5 0.9.0: deriveProjectionStatus now treats a populated analysis
+    // projection (leading_option non-null) as standalone evidence of real
+    // analysis. Test the noop-fact filter in isolation by passing null
+    // analysis — otherwise the populated projection signal would override.
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    const noop: HandlerFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: true,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: null,
+        summary: '',
+      },
+    };
+    expect(deriveProjectionStatus([noop], null)).toBe('facts_absent');
+  });
+
+  it('returns "facts_absent" when only a noop explain_results fact is present', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    const noop: HandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: true, option_count: 0 },
+    };
+    expect(deriveProjectionStatus([noop], null)).toBe('facts_absent');
+  });
+
+  it('returns "projection_empty" when run_analysis fact present but analysis has no leading_option', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    expect(deriveProjectionStatus([runAnalysisFact()], null)).toBe('projection_empty');
+  });
+
+  it('returns "projection_populated" when run_analysis fact + populated analysis present', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    expect(deriveProjectionStatus([runAnalysisFact()], analysisAt('stable'))).toBe(
+      'projection_populated',
+    );
+  });
+
+  it('treats prior_facts as evidence of real analysis (cross-turn, V5 0.9.0)', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    // Current turn: only a noop explain_results fact. Prior turns: non-noop
+    // run_analysis fact. Status must reflect "analysis exists somewhere",
+    // not "facts absent on this turn".
+    const noopExplain: HandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: false, option_count: 2 },
+    };
+    expect(
+      deriveProjectionStatus([noopExplain], analysisAt('stable'), [runAnalysisFact()]),
+    ).toBe('projection_populated');
+  });
+
+  it('returns "facts_absent" when analysis projection is populated but priorFacts is empty (single source of truth)', async () => {
+    // Critical alignment with the handler precondition: a populated
+    // upstream analysis projection alone does NOT count. The persisted
+    // run_analysis HandlerFact is the canonical signal both the chip
+    // generator and the explain_results / what_would_flip handlers consult.
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    expect(deriveProjectionStatus([], analysisAt('stable'))).toBe('facts_absent');
+    expect(deriveProjectionStatus([], analysisAt('stable'), [])).toBe('facts_absent');
+  });
+});

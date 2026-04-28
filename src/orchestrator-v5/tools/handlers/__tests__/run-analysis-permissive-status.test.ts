@@ -60,6 +60,7 @@ function makeInvocation(): HandlerInvocation {
     } as unknown as HandlerInvocation['payload'],
     requestId: REQUEST_ID,
     signal: new AbortController().signal,
+    orientationText: '',
   };
 }
 

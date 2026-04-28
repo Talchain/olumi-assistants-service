@@ -75,9 +75,17 @@
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type {
   HandlerFact,
-  TurnContext,
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
+
+import type { ProposalAction } from '../routing/types.js';
+import type { EnrichedTurnContext } from '../build-turn-context.js';
+import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+
+// Mirrors the alias in compose/chip-generator.ts. Defined here so the
+// HandlerInvocation contract has a stable name without forcing handlers
+// to import the chip-generator module.
+type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 import { createPLoTClient, type PLoTClient } from '../../orchestrator/plot-client.js';
 
@@ -86,6 +94,9 @@ import {
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from './handlers/run-analysis.js';
+import { createExplainFromStructureHandler } from './handlers/explain-from-structure.js';
+import { createExplainResultsHandler } from './handlers/explain-results.js';
+import { createWhatWouldFlipHandler } from './handlers/what-would-flip.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 
 // Re-exported for the chip-click dispatch path. The handler-ownership
@@ -100,25 +111,76 @@ export type { ScenarioReader, RunAnalysisScenarioSnapshot };
  * Input to a handler invocation. Populated by dispatch.ts from the same
  * sources it hands to invokeNarrate for direct_answer / clarify, plus the
  * AbortSignal that bounds the turn.
+ *
+ * `orientationText` carries Sonnet's pre-tool-call narrative, surfaced from
+ * the routing layer (`routingResult.orientationText`). Existing handlers
+ * (run_analysis) ignore it — orientation is composed AFTER the handler
+ * runs in compose.ts. The V5 no-op handlers (explain_from_structure,
+ * explain_results, what_would_flip) read it to choose a safe fallback
+ * string when the orientation text is empty (Sonnet sometimes emits only
+ * the tool_use block with no preceding text). Default `''` so the
+ * existing run_analysis test fixtures don't have to populate it.
  */
 export interface HandlerInvocation {
-  readonly context: TurnContext;
+  // EnrichedTurnContext extends the wire-level TurnContext with CEE-internal
+  // fields (`prior_turns`, `prior_facts`) that handlers may read. The wire
+  // schema is `.strict()` and cannot carry these fields, so the runtime
+  // context is always the enriched form. Typing it here lets handlers like
+  // `explain_results` consume `prior_facts` without an unchecked cast.
+  readonly context: EnrichedTurnContext;
   // v0.7.0: handlers only fire on message-kind turns (system events
   // bypass the handler registry entirely via route-v2's deterministic branch).
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
   readonly signal: AbortSignal;
+  readonly orientationText: string;
+  /**
+   * The validated tool-call proposal that landed this handler. Always present
+   * on the LLM-routed handler path (turn-executor STEP 3) and absent only on
+   * the chip-click dispatch path (`dispatchChipClickRunAnalysis`) where there
+   * is no LLM proposal — chip-click pre-validates the action server-side and
+   * synthesises a proposal stand-in only when handlers need it. Marked
+   * optional so the chip-click path can omit it without lying about the
+   * source. Existing run_analysis handler ignores it.
+   *
+   * Added in 0.9.0 so the V5 no-op handlers (explain_from_structure,
+   * explain_results, what_would_flip) can read the resolved target entity.
+   */
+  readonly proposal?: ProposalAction;
+  /**
+   * Structural readiness payload for the current scenario. Carries the
+   * authoritative `options[]` and `goal_node_id` per
+   * `computeStructuralReadiness`. Used by the V5 no-op explanation handlers
+   * to populate the precondition-fail template's option count from real
+   * graph state — `context.entity_registry.option_ids` is a wire stub
+   * (initialised empty in `build-turn-context.ts`) and would always render
+   * "0 options" otherwise.
+   *
+   * Optional: undefined when the turn has no graph (frame stage with no
+   * draft) or when the chip-click path bypasses the routing layer. Handlers
+   * that read it must fall back gracefully on undefined.
+   */
+  readonly analysisReady?: AnalysisReadyPayload;
 }
 
 /**
  * What a handler returns on success. Throws on failure — turn-executor
  * catches and maps to HANDLER_INVOCATION_FAILED (for generic errors) or
  * HANDLER_RESULT_INVALID (for Zod-parse-failure on the returned shape).
+ *
+ * `suppress_orientation` (default false) instructs the compose layer to
+ * skip Sonnet's pre-tool-call orientation text when joining the assistant
+ * response. Used by the precondition-fail path of the V5 no-op handlers
+ * (explain_results, what_would_flip): the brief is explicit that the
+ * "no analysis run yet" template must NOT be preceded by Sonnet's
+ * orientation. Existing handlers (run_analysis) leave it unset; behaviour
+ * unchanged for them.
  */
 export interface HandlerOutcome {
   readonly assistant_text: string;
   readonly handler_facts: readonly HandlerFact[];
   readonly llm_calls_used: number;
+  readonly suppress_orientation?: boolean;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;
@@ -177,8 +239,16 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
   const scenarioReader = overrides?.scenarioReader ?? DEFAULT_SCENARIO_READER;
 
   const runAnalysis = createRunAnalysisHandler({ plotClient, scenarioReader });
+  const explainFromStructure = createExplainFromStructureHandler();
+  const explainResults = createExplainResultsHandler();
+  const whatWouldFlip = createWhatWouldFlipHandler();
 
-  return new Map<V5ActionType, HandlerFn>([['run_analysis', runAnalysis]]);
+  return new Map<V5ActionType, HandlerFn>([
+    ['run_analysis', runAnalysis],
+    ['explain_from_structure', explainFromStructure],
+    ['explain_results', explainResults],
+    ['what_would_flip', whatWouldFlip],
+  ]);
 }
 
 function resolvePlotClient(): PLoTClient {

@@ -214,7 +214,32 @@ describe('OLUMI_ACTION_TOOL definition', () => {
       properties: { handler_id: { type: string; enum?: readonly string[] } };
     };
     expect(action.properties.handler_id.type).toBe('string');
-    expect(action.properties.handler_id.enum).toEqual(['run_analysis']);
+    // V5 0.9.0: enum widened from ['run_analysis'] to four handlers so
+    // Sonnet has correct routing options for analytical / explanatory
+    // intents that previously misrouted as run_analysis proposals.
+    expect(action.properties.handler_id.enum).toEqual([
+      'run_analysis',
+      'explain_from_structure',
+      'explain_results',
+      'what_would_flip',
+    ]);
+  });
+
+  it('handler_id description guides Sonnet through each handler choice', () => {
+    const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
+      properties: { handler_id: { description: string } };
+    };
+    const desc = action.properties.handler_id.description;
+    // Per-handler routing guidance — each must appear so Sonnet can
+    // distinguish between them when picking a handler.
+    expect(desc).toContain('run_analysis');
+    expect(desc).toContain('explain_from_structure');
+    expect(desc).toContain('explain_results');
+    expect(desc).toContain('what_would_flip');
+    // Key disambiguation cues that drive routing accuracy.
+    expect(desc).toContain('pre-analysis');
+    expect(desc).toContain('post-analysis');
+    expect(desc).toContain('Requires a prior analysis run');
   });
 
   it('parser remains permissive on unknown handler_ids (validator handles it)', () => {

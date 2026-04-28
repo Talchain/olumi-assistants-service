@@ -241,6 +241,14 @@ export async function dispatchChipClickRunAnalysis(
         payload,
         requestId,
         signal: turnAbort.signal,
+        // Chip-click bypasses the routing layer, so there is no Sonnet
+        // orientation text to forward. Pass empty string; the run_analysis
+        // handler does not read this field, and the field is required by
+        // the HandlerInvocation contract added in 0.9.0 to support the
+        // V5 no-op handlers (which are never invoked via chip-click).
+        orientationText: '',
+        // proposal is also absent on the chip-click path — see HandlerInvocation
+        // JSDoc; the field is optional precisely for this dispatch.
       });
     } catch (err) {
       // Mirror TurnExecutor's catch ladder so chip-click errors surface

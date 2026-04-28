@@ -59,22 +59,53 @@ export const OLUMI_ACTION_TOOL = {
         additionalProperties: false,
         description: 'Concrete action payload. Required when intent_class === "execute".',
         properties: {
-          // V5 Task 1.3: constrained to the registered-handler set. Only
-          // `run_analysis` is implemented in the TurnExecutor registry; other
-          // V5ActionType values (set_factor_value, add_constraint, etc.) have
-          // no handler and would be rejected by the validator. `draft_graph`
-          // and `edit_graph` are NOT in V5ActionType — they are dispatched
-          // by the system layer before routing and never reach this tool call.
-          // Parse-layer validation against this enum prevents Sonnet from
-          // wasting turns proposing unavailable actions.
+          // V5 Task 1.3: constrained to the registered-handler set. 0.9.0
+          // adds three no-op routing handlers — explain_from_structure,
+          // explain_results, what_would_flip — so Sonnet has correct tool
+          // surfaces for analytical / explanatory user intents that
+          // previously misrouted as run_analysis proposals targeting wrong
+          // entity kinds (debug bundles bef4470b, 69d99ced from 28 April).
+          // Other V5ActionType values (set_factor_value, add_constraint,
+          // etc.) have no handler in V5 and would be rejected by the
+          // validator. `draft_graph` and `edit_graph` are NOT in
+          // V5ActionType — they are dispatched by the system layer before
+          // routing and never reach this tool call. Parse-layer validation
+          // against this enum prevents Sonnet from wasting turns proposing
+          // unavailable actions.
           handler_id: {
             type: 'string',
-            enum: ['run_analysis'],
+            enum: [
+              'run_analysis',
+              'explain_from_structure',
+              'explain_results',
+              'what_would_flip',
+            ],
             description:
-              'The action to execute. Only run_analysis is available through ' +
-              'this tool. Graph structural changes (draft_graph, edit_graph) ' +
-              'are dispatched by the system before routing and never reach ' +
-              'this tool call. Value modifications happen on the canvas UI.',
+              'The action to execute. Pick the handler that matches the user intent:\n' +
+              '\n' +
+              '• run_analysis — run the Monte Carlo analysis on the current scenario. ' +
+              'Pick when the user asks to run, simulate, or evaluate the model. ' +
+              'Mutates: produces analysis projection state.\n' +
+              '\n' +
+              '• explain_from_structure — answer pre-analysis structural questions ' +
+              'about factor influence, causal relationships, or model structure. ' +
+              'Pick when the user asks "what factor most influences X?" or ' +
+              '"why might option Y be the leading option?" and no analysis ' +
+              'has been run yet. Answers from graph structure only. No mutation.\n' +
+              '\n' +
+              '• explain_results — answer post-analysis explanation questions ' +
+              '("why did X win?", "explain the analysis results"). Requires ' +
+              'a prior analysis run; if none exists the handler will respond ' +
+              'with a prompt to run analysis first. No mutation.\n' +
+              '\n' +
+              '• what_would_flip — answer sensitivity / robustness questions ' +
+              '("what would change this outcome?", "how robust is this result?"). ' +
+              'Requires a prior analysis run; if none exists the handler will ' +
+              'respond with a prompt to run analysis first. No mutation.\n' +
+              '\n' +
+              'Graph structural changes (draft_graph, edit_graph) are ' +
+              'dispatched by the system before routing and never reach this ' +
+              'tool call. Value modifications happen on the canvas UI.',
           },
           entity: {
             type: 'object',

@@ -88,6 +88,18 @@ export interface ChipGeneratorInput {
    * readiness signal on its own — see `analysisReady` above.
    */
   readonly graphOptionCount?: number;
+  /**
+   * V5 0.9.0: prior-turn handler facts loaded from the session store.
+   * `handlerFacts` above only carries the CURRENT turn's facts — fine for
+   * "did run_analysis just succeed?" but wrong for "is there an analysis
+   * record anywhere in the conversation?" The new `facts_absent` rule
+   * needs the cross-turn view: if a prior `run_analysis` fact exists but
+   * the current turn is a noop explanation, we should NOT emit a "Run
+   * analysis" chip (the user already has analysis). Optional for
+   * compatibility with chip-suppression / regression tests that pass only
+   * the current turn's facts.
+   */
+  readonly priorFacts?: readonly HandlerFact[];
 }
 
 const MAX_CHIPS = 3;
@@ -166,6 +178,9 @@ export function generateChips(input: ChipGeneratorInput): readonly SuggestedActi
 
 function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[] {
   const handlerJustRan = findHandlerJustRan(input.handlerFacts);
+  const noopExplanationHandlerJustRan = findNoopExplanationHandlerJustRan(
+    input.handlerFacts,
+  );
   const hasAnalysis = input.analysis != null;
   const robustnessIsFragile =
     input.analysis != null && input.analysis.robustness_band === 'fragile';
@@ -184,6 +199,46 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         'what_could_flip',
         'What could change the outcome?',
         'What could change the outcome of this analysis?',
+      ),
+    ]);
+  }
+
+  // V5 0.9.0 — Rule: when one of the no-op explanation handlers ran but
+  // projection is facts_absent (no real run_analysis fact exists yet), the
+  // user has asked an analysis-grounded question with no analysis to ground
+  // it in. Surface a "Run analysis" executable chip so the user can recover
+  // in one click. Gated on analysisReady.status === 'ready' per the same
+  // contract used by the analyse-stage rule below — without readiness we
+  // fall back to a conversational prompt.
+  //
+  // This rule fires at ANY stage. The existing analyse-stage rule below
+  // covers the case where no handler ran at all; this rule covers the case
+  // where Sonnet correctly routed an explanation handler but the analysis
+  // is missing. Both target the same recovery action.
+  if (
+    noopExplanationHandlerJustRan != null &&
+    deriveProjectionStatus(
+      input.handlerFacts,
+      input.analysis ?? null,
+      input.priorFacts,
+    ) === 'facts_absent'
+  ) {
+    const readyStatus = input.analysisReady?.status;
+    const isReady = readyStatus === 'ready';
+    const curated = curatedHandlerChips(input.validationRegistry);
+    const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
+    if (runAnalysis && isReady) {
+      return cap([
+        executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label),
+      ]);
+    }
+    // Readiness unknown / not ready — surface a conversational prompt so
+    // the user has a visible next step. Mirrors the analyse-stage fallback.
+    return cap([
+      promptChip(
+        'set_option_values',
+        'Set values for options',
+        'Help me set up the options for this decision so the analysis can run.',
       ),
     ]);
   }
@@ -313,6 +368,79 @@ function findHandlerJustRan(
     if (f.fact_type === 'run_analysis' && !f.noop) return 'run_analysis';
   }
   return null;
+}
+
+// V5 0.9.0 — return the no-op fact_type when one of the new no-op handlers
+// produced a fact on this turn. Used to drive the "Run analysis" chip
+// when explain_results / what_would_flip / explain_from_structure ran but
+// no real analysis fact exists in prior_facts.
+function findNoopExplanationHandlerJustRan(
+  facts: readonly HandlerFact[] | undefined,
+): 'explain_from_structure' | 'explain_results' | 'what_would_flip' | null {
+  if (!facts || facts.length === 0) return null;
+  for (const f of facts) {
+    if (
+      f.fact_type === 'explain_from_structure' ||
+      f.fact_type === 'explain_results' ||
+      f.fact_type === 'what_would_flip'
+    ) {
+      return f.fact_type;
+    }
+  }
+  return null;
+}
+
+/**
+ * Three-state derivation of the analysis projection status used by the
+ * "facts_absent" chip rule below.
+ *
+ * - `facts_absent`     — no non-noop run_analysis fact across this turn's
+ *                       handlerFacts OR prior_facts.
+ * - `projection_empty` — fact present (current or prior) but the analysis
+ *                       projection has no leading_option (PLoT degraded /
+ *                       blocked / unknown).
+ * - `projection_populated` — fact present and projection has data.
+ *
+ * **Critical:** the run_analysis check is `!f.noop`. A noop run_analysis
+ * fact and any noop explanation fact (`explain_results`, `what_would_flip`,
+ * `explain_from_structure`) must NOT count as "facts present" — they carry
+ * no projection data for Sonnet to reference.
+ *
+ * **Single source of truth (V5 0.9.0):** the persisted `run_analysis`
+ * HandlerFact is the canonical signal. The chip rule and the handler-side
+ * precondition (`explain_results`/`what_would_flip` checking
+ * `prior_facts`) MUST agree on this. Earlier iterations also treated a
+ * populated context-pack analysis projection (`leading_option != null`)
+ * as evidence of real analysis, but that diverged from the handler
+ * precondition: a turn arriving with `analysis` populated upstream but no
+ * persisted fact (UI bypass paths flagged in P1) would produce a
+ * precondition-fail template AND chip suppression, leaving the user
+ * stranded with "no analysis" text and no recovery action. Using
+ * priorFacts exclusively keeps the two signals aligned.
+ *
+ * The `analysis` argument is retained for the projection_empty vs
+ * projection_populated distinction within the "facts present" branch —
+ * once we know analysis exists, the projection's leading_option tells us
+ * whether PLoT actually produced usable data.
+ *
+ * Inputs are deliberately permissive (handles undefined/null).
+ */
+export function deriveProjectionStatus(
+  handlerFacts: readonly HandlerFact[] | undefined,
+  analysis: ContextPackAnalysis | null | undefined,
+  priorFacts?: readonly HandlerFact[] | undefined,
+): 'facts_absent' | 'projection_empty' | 'projection_populated' {
+  const hasCurrentRunAnalysisFact = (handlerFacts ?? []).some(
+    (f) => f.fact_type === 'run_analysis' && !f.noop,
+  );
+  const hasPriorRunAnalysisFact = (priorFacts ?? []).some(
+    (f) => f.fact_type === 'run_analysis' && !f.noop,
+  );
+  const hasAnalysisRecord = hasCurrentRunAnalysisFact || hasPriorRunAnalysisFact;
+
+  if (!hasAnalysisRecord) return 'facts_absent';
+  if (!analysis || analysis.leading_option == null) return 'projection_empty';
+  return 'projection_populated';
 }
 
 function cap(chips: readonly SuggestedAction[]): readonly SuggestedAction[] {
