@@ -79,8 +79,13 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { ProposalAction } from '../routing/types.js';
+import type { ExplanationAnswerErrorReason } from '../routing/validator-explanation.js';
 import type { EnrichedTurnContext } from '../build-turn-context.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+import type {
+  AnalysisProjectionSummary,
+  StructureProjectionSummary,
+} from '../context/projection-summaries.js';
 
 // Mirrors the alias in compose/chip-generator.ts. Defined here so the
 // HandlerInvocation contract has a stable name without forcing handlers
@@ -113,13 +118,17 @@ export type { ScenarioReader, RunAnalysisScenarioSnapshot };
  * AbortSignal that bounds the turn.
  *
  * `orientationText` carries Sonnet's pre-tool-call narrative, surfaced from
- * the routing layer (`routingResult.orientationText`). Existing handlers
- * (run_analysis) ignore it — orientation is composed AFTER the handler
- * runs in compose.ts. The V5 no-op handlers (explain_from_structure,
- * explain_results, what_would_flip) read it to choose a safe fallback
- * string when the orientation text is empty (Sonnet sometimes emits only
- * the tool_use block with no preceding text). Default `''` so the
- * existing run_analysis test fixtures don't have to populate it.
+ * the routing layer (`routingResult.orientationText`). The non-explanation
+ * handlers (run_analysis) ignore it — orientation is composed AFTER the
+ * handler runs in compose.ts. The V5 explanation handlers
+ * (explain_from_structure, explain_results, what_would_flip) ALSO ignore
+ * `orientationText` post-v40: they consume Sonnet's answer via
+ * `explanation.answer_text` (which is part of the structured tool-call
+ * payload, not the pre-tool-call text), and fall back to a deterministic
+ * composer when invalid or missing. The turn-executor forces
+ * suppress_orientation for explanation handlers, so any pre-tool-call text
+ * Sonnet did emit is dropped at compose time. Default `''` so existing
+ * run_analysis test fixtures don't have to populate it.
  */
 export interface HandlerInvocation {
   // EnrichedTurnContext extends the wire-level TurnContext with CEE-internal
@@ -161,6 +170,41 @@ export interface HandlerInvocation {
    * that read it must fall back gracefully on undefined.
    */
   readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * Side-band answer-text verdict for the explanation handlers. Threaded
+   * from the turn-executor after `validateExplanationAnswer` succeeds.
+   *
+   *  - present + `answer_text_valid: true` → handler uses `answer_text` as
+   *    its assistant_text.
+   *  - present + `answer_text_valid: false` → handler composes a
+   *    deterministic fallback from `analysisProjection` /
+   *    `structureProjection`.
+   *  - absent → either a non-explanation handler (mutation handlers ignore
+   *    it) OR the precondition-bypass path (no analysis fact yet) where the
+   *    handler renders its existing template directly.
+   *
+   * `evidence_used` and `cited_fields` are observability only; the
+   * turn-executor emits them as telemetry and they MUST NOT appear in the
+   * user-visible response.
+   */
+  readonly explanation?: {
+    readonly answer_text: string;
+    readonly answer_text_valid: boolean;
+    readonly answer_validation_error?: ExplanationAnswerErrorReason;
+    readonly evidence_used?: readonly string[];
+    readonly cited_fields?: readonly string[];
+  };
+  /**
+   * Slim view of the ContextPack analysis. Consumed only on the
+   * deterministic fallback path of `explain_results` and `what_would_flip`.
+   * Optional: null when no analysis projection exists in the context pack.
+   */
+  readonly analysisProjection?: AnalysisProjectionSummary;
+  /**
+   * Slim view of the compact graph for `explain_from_structure` fallback —
+   * top causal links, named-factor pathway entries, goal label.
+   */
+  readonly structureProjection?: StructureProjectionSummary;
 }
 
 /**

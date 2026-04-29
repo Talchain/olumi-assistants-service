@@ -102,9 +102,13 @@ describe('integration: explain_results post-analysis chip surfacing', () => {
     const outcome = await handler(
       makePostAnalysisInvocation([priorRunAnalysisFact()]),
     );
-    // Precondition pass — orientation will surface via compose, no template.
-    expect(outcome.suppress_orientation).toBeUndefined();
-    expect(outcome.assistant_text).toBe('');
+    // Answer-carrying contract (post-Commit-4): the handler now always
+    // owns the user-visible string and always sets suppress_orientation:
+    // true. Without an explanation payload + analysisProjection, the
+    // handler composes the generic "could not be summarised" line —
+    // covered in dedicated explain-results tests; here we only check the
+    // no-op fact and the suppression flag.
+    expect(outcome.suppress_orientation).toBe(true);
     const fact = outcome.handler_facts[0];
     expect(fact.fact_type).toBe('explain_results');
     expect(fact.noop).toBe(true);

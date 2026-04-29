@@ -69,6 +69,7 @@ import {
 import {
   getDefaultRegistry,
   resolveHandler,
+  type HandlerInvocation,
   type HandlerOutcome,
   type HandlerRegistry,
 } from './tools/registry.js';
@@ -112,6 +113,13 @@ import {
   type GraphLookupStats,
 } from './routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
+import { validateExplanationAnswer } from './routing/validator-explanation.js';
+import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
+import {
+  buildAnalysisProjectionSummary,
+  buildStructureProjectionSummary,
+} from './context/projection-summaries.js';
+import { containsMutationLanguage } from './routing/mutation-language.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -878,6 +886,69 @@ export async function runTurnExecutor(
 
       // STEP 3 — EXECUTE. Reuse the existing handler registry; contract is
       // unchanged (HandlerInvocation → HandlerOutcome).
+      //
+      // Answer-carrying explanation handlers: run the side-band answer-text
+      // check AFTER validateToolCall succeeds. Verdict drives the handler's
+      // happy-path-vs-fallback branch. Validation never blocks execution —
+      // invalid answers route to the deterministic fallback so the user
+      // always gets a useful response. Mutation/computation handlers
+      // tolerate stray `explanation` fields silently with telemetry.
+      const isExplanationHandler = EXPLANATION_HANDLER_IDS.has(proposedHandlerId);
+      let explanationInvocationPayload: HandlerInvocation['explanation'];
+      if (isExplanationHandler) {
+        const verdict = validateExplanationAnswer(
+          proposedHandlerId,
+          action.explanation,
+          context.prior_facts,
+        );
+        if (!verdict.skip && verdict.payload) {
+          explanationInvocationPayload = verdict.payload;
+          emit(TelemetryEvents.V5ExplanationAnswerVerdict, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: proposedHandlerId,
+            answer_text_valid: verdict.payload.answer_text_valid,
+            answer_validation_error: verdict.payload.answer_validation_error ?? null,
+            answer_text_length: verdict.payload.answer_text.length,
+            evidence_used_count: verdict.payload.evidence_used?.length ?? 0,
+            cited_fields_count: verdict.payload.cited_fields?.length ?? 0,
+          });
+          if (
+            (verdict.payload.evidence_used && verdict.payload.evidence_used.length > 0) ||
+            (verdict.payload.cited_fields && verdict.payload.cited_fields.length > 0)
+          ) {
+            emit(TelemetryEvents.V5ExplanationEvidence, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              handler_id: proposedHandlerId,
+              evidence_used: verdict.payload.evidence_used ?? [],
+              cited_fields: verdict.payload.cited_fields ?? [],
+            });
+          }
+        }
+      } else if (action.explanation) {
+        // Mutation/computation handler carrying a stray `explanation` field.
+        // Drop silently with telemetry; never coach the user about it.
+        emit(TelemetryEvents.V5UnexpectedExplanationPayload, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: proposedHandlerId,
+        });
+      }
+
+      // Build narrow projections used only on the deterministic fallback
+      // path. Cheap to construct; handlers consult them only when the
+      // happy-path answer_text is unusable.
+      const analysisProjection = isExplanationHandler
+        ? buildAnalysisProjectionSummary(contextPackForLog?.analysis ?? null) ?? undefined
+        : undefined;
+      const structureProjection =
+        proposedHandlerId === 'explain_from_structure' && contextPackForLog
+          ? buildStructureProjectionSummary(contextPackForLog.graph, {
+              messageText: payload.message,
+            })
+          : undefined;
+
       try {
         const registry = options.handlerRegistry ?? getDefaultRegistry();
         const handlerFn = resolveHandler(registry, proposedHandlerId);
@@ -892,6 +963,9 @@ export async function runTurnExecutor(
           orientationText: routingResult.orientationText,
           proposal: action,
           analysisReady: analysisReadyForTurn,
+          explanation: explanationInvocationPayload,
+          analysisProjection,
+          structureProjection,
         });
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');
@@ -1009,9 +1083,15 @@ export async function runTurnExecutor(
       // explicit that the deterministic template "does not fall through to
       // Sonnet text". Default behaviour (flag absent) is unchanged for
       // run_analysis and any future handler that does not opt in.
-      const orientationForCompose = handlerOutcome.suppress_orientation
-        ? ''
-        : sanitisedOrientation.output;
+      //
+      // Answer-carrying explanation handlers (post-Commit-3): the handler
+      // ALWAYS owns the entire user-visible string — either Sonnet's
+      // answer_text (happy path) or the deterministic fallback. Drive
+      // suppression off the handler set rather than per-handler opt-in so
+      // explanations never get a stale orientation prefix.
+      const suppressOrientation =
+        handlerOutcome.suppress_orientation === true || isExplanationHandler;
+      const orientationForCompose = suppressOrientation ? '' : sanitisedOrientation.output;
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop
@@ -1150,6 +1230,31 @@ export async function runTurnExecutor(
       },
       'V5 TurnExecutor composed response chips',
     );
+
+    // STEP 6.5 — log-only mutation-language guard (defence-in-depth).
+    //
+    // Primary mutation-language detection lives in
+    // `validateExplanationAnswer` (Commit 2): a match there marks the
+    // answer invalid, and the handler renders the deterministic fallback.
+    // This STEP 6.5 check is detection-only on the FINAL composed
+    // assistant_text; if mutation language survived to compose despite
+    // the side-band check, emit telemetry so ops can see drift. We
+    // explicitly DO NOT swap the text here — the user-visible response is
+    // already what the handler chose; mutating it post-compose would risk
+    // user-visible inconsistency between assistant_text and chips.
+    if (
+      handlerIdForCommit &&
+      !['draft_graph', 'edit_graph'].includes(handlerIdForCommit) &&
+      composedOk.assistant_text &&
+      containsMutationLanguage(composedOk.assistant_text)
+    ) {
+      emit(TelemetryEvents.V5MutationLanguageGuard, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        handler_id: handlerIdForCommit,
+        text_length: composedOk.assistant_text.length,
+      });
+    }
 
     // ==================================================================
     // STEP 7 — COMMIT (unchanged contract)

@@ -31,10 +31,17 @@
 import { describe, it, expect } from 'vitest';
 
 import { createExplainFromStructureHandler } from '../explain-from-structure.js';
+import { createExplainResultsHandler } from '../explain-results.js';
 import type { HandlerInvocation } from '../../registry.js';
+import type {
+  AnalysisProjectionSummary,
+  StructureProjectionSummary,
+} from '../../../context/projection-summaries.js';
 import { validateToolCall } from '../../../routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import type { ProposalAction } from '../../../routing/types.js';
+import { containsMutationLanguage } from '../../../routing/mutation-language.js';
+import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 const SCENARIO_ID = 'bef4470b-bef4-4470-bbef-4470bbef4470';
 const REQUEST_ID = 'req-bef4470b-replay';
@@ -217,10 +224,13 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler(bef4470bInvocation(proposal, orientation));
 
-    // No-op contract: zero LLM calls, single noop fact, assistant_text=''
-    // (orientation surfaces via the compose pipeline).
+    // Answer-carrying contract (post-Commit-4): handler always owns the
+    // user-visible string, suppress_orientation is always true. Without an
+    // explanation payload OR a structureProjection, the handler composes
+    // the generic "could not be summarised" fallback. Compose with a
+    // structureProjection in dedicated tests; this integration test only
+    // checks the no-op fact persistence and the suppress_orientation flag.
     expect(outcome.llm_calls_used).toBe(0);
-    expect(outcome.assistant_text).toBe('');
     expect(outcome.handler_facts).toHaveLength(1);
     const fact = outcome.handler_facts[0];
     expect(fact.fact_type).toBe('explain_from_structure');
@@ -228,6 +238,167 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
     if (fact.fact_type === 'explain_from_structure') {
       expect(fact.result.option_count).toBe(2);
     }
-    expect(outcome.suppress_orientation).toBeUndefined();
+    expect(outcome.suppress_orientation).toBe(true);
+  });
+});
+
+// --- Answer-carrying integration tests (Commit 6) -----------------------
+//
+// These exercise the post-v40 contract end-to-end on the bef4470b graph
+// shape: the handler now consumes invocation.explanation and falls back to
+// composing from the projection summaries. They cover the four key cases
+// the brief calls out:
+//   1. valid answer_text → used verbatim
+//   2. bare tool_use (missing explanation) → deterministic fallback
+//   3. post-analysis explain_results with empty answer_text → fallback cites
+//      leading option AND a top driver
+//   4. mutation language in answer_text → fallback used (covered indirectly
+//      via the invalid path)
+
+const HIRING_STRUCTURE_PROJECTION: StructureProjectionSummary = {
+  goal_label: 'Hire the best candidate',
+  top_causal_links: [
+    { label_from: 'Salary cost', label_to: 'Hire the best candidate', strength: -0.55 },
+    { label_from: 'Code quality', label_to: 'Hire the best candidate', strength: 0.62 },
+    { label_from: 'Ramp-up time', label_to: 'Hire the best candidate', strength: -0.41 },
+  ],
+  named_factor_label: undefined,
+  named_factor_pathways: [],
+  factor_count: 10,
+  option_count: 2,
+};
+
+const HIRING_ANALYSIS_PROJECTION: AnalysisProjectionSummary = {
+  status: 'complete',
+  leading_option: { label: 'Senior developer', probability: 0.71 },
+  runner_up: { label: 'Junior developer', probability: 0.21 },
+  margin_pp: 50,
+  robustness_band: 'stable',
+  top_drivers: [
+    { factor_label: 'Code quality', sensitivity_value: 0.62 },
+    { factor_label: 'Salary cost', sensitivity_value: -0.55 },
+  ],
+  staleness_reason: null,
+};
+
+const RUN_ANALYSIS_FACT: RunAnalysisHandlerFact = {
+  fact_type: 'run_analysis',
+  fact_version: 1,
+  noop: false,
+  result: {
+    scenario_id: SCENARIO_ID,
+    leading_option_id: 'opt_sr_dev',
+    summary: 'Senior developer leads the analysis.',
+  },
+};
+
+describe('integration: bef4470b answer-carrying explanation contract', () => {
+  it('explain_from_structure: valid answer_text is used verbatim', async () => {
+    const handler = createExplainFromStructureHandler();
+    const validAnswer =
+      'Code quality has the strongest direct link to the goal at 0.62 strength, ahead of salary cost which works in the opposite direction. These two are the largest structural drivers in your hiring model.';
+    const proposal: ProposalAction = {
+      handler_id: 'explain_from_structure',
+      entity: {
+        id: GOAL_NODE_ID,
+        kind: 'goal',
+        resolution_status: 'resolved',
+        resolution_method: 'context_inference',
+      },
+      parameters: [],
+      cited_context_fields: [],
+      explanation: { answer_text: validAnswer },
+    };
+    const invocation = {
+      ...bef4470bInvocation(proposal, ''),
+      explanation: { answer_text: validAnswer, answer_text_valid: true },
+      structureProjection: HIRING_STRUCTURE_PROJECTION,
+    };
+    const outcome = await handler(invocation);
+    expect(outcome.assistant_text).toBe(validAnswer);
+    expect(outcome.suppress_orientation).toBe(true);
+  });
+
+  it('explain_from_structure: bare tool_use (missing explanation) → fallback contains causal links AND factor labels', async () => {
+    // Brief Task 5 integration test: simulate Sonnet response with tool_use
+    // block, no text blocks, no explanation field → handler produces
+    // deterministic fallback, NOT the 39-char SAFE_FALLBACK stub.
+    const handler = createExplainFromStructureHandler();
+    const proposal: ProposalAction = {
+      handler_id: 'explain_from_structure',
+      entity: {
+        id: GOAL_NODE_ID,
+        kind: 'goal',
+        resolution_status: 'resolved',
+        resolution_method: 'context_inference',
+      },
+      parameters: [],
+      cited_context_fields: [],
+    };
+    const invocation = {
+      ...bef4470bInvocation(proposal, ''),
+      explanation: undefined,
+      structureProjection: HIRING_STRUCTURE_PROJECTION,
+    };
+    const outcome = await handler(invocation);
+    // Strongest causal links present (factor labels and goal label)
+    expect(outcome.assistant_text).toContain('Code quality');
+    expect(outcome.assistant_text).toContain('Hire the best candidate');
+    // Strength formatting present
+    expect(outcome.assistant_text).toMatch(/strength\s+-?0\.\d{2}/);
+    // Length well above the 39-char SAFE_FALLBACK stub
+    expect(outcome.assistant_text.length).toBeGreaterThan(80);
+    expect(outcome.assistant_text).not.toBe('Here is what the model structure shows.');
+  });
+
+  it('explain_results post-analysis: empty answer_text → fallback contains leading option AND driver', async () => {
+    // Brief Task 5 integration test: post-analysis explain_results with
+    // empty answer_text → deterministic fallback contains leading option
+    // and driver.
+    const handler = createExplainResultsHandler();
+    const proposal: ProposalAction = {
+      handler_id: 'explain_results',
+      entity: {
+        id: 'opt_sr_dev',
+        kind: 'option',
+        resolution_status: 'resolved',
+        resolution_method: 'label_match',
+      },
+      parameters: [],
+      cited_context_fields: [],
+    };
+    const baseInvocation = bef4470bInvocation(proposal, '');
+    const invocation: HandlerInvocation = {
+      ...baseInvocation,
+      context: {
+        ...baseInvocation.context,
+        prior_facts: [RUN_ANALYSIS_FACT],
+      } as HandlerInvocation['context'],
+      explanation: {
+        answer_text: '',
+        answer_text_valid: false,
+        answer_validation_error: 'missing',
+      },
+      analysisProjection: HIRING_ANALYSIS_PROJECTION,
+    };
+    const outcome = await handler(invocation);
+    // Leading option label is present
+    expect(outcome.assistant_text).toContain('Senior developer');
+    // Raw probability value preserved (not converted to per-cent).
+    expect(outcome.assistant_text).toContain('0.71');
+    // A top driver factor label is present, with sensitivity value.
+    expect(outcome.assistant_text).toContain('Code quality');
+    expect(outcome.assistant_text).toContain('0.62');
+    // Length well above the 32-char SAFE_FALLBACK stub
+    expect(outcome.assistant_text.length).toBeGreaterThan(80);
+    expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');
+  });
+
+  it('explain_from_structure: happy-path answer_text on hiring graph never triggers mutation-language guard', () => {
+    // Defensive: confirm a healthy explain_from_structure answer about
+    // bef4470b's hiring graph reads as exposition, not as a mutation.
+    const healthyAnswer =
+      'Code quality drives the goal most strongly at 0.62 strength, with salary cost working in the opposite direction at -0.55. The senior-developer option performs best because of how those two factors combine.';
+    expect(containsMutationLanguage(healthyAnswer)).toBe(false);
   });
 });
