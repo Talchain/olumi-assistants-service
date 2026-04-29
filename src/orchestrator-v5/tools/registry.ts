@@ -79,8 +79,13 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { ProposalAction } from '../routing/types.js';
+import type { ExplanationAnswerErrorReason } from '../routing/validator-explanation.js';
 import type { EnrichedTurnContext } from '../build-turn-context.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+import type {
+  AnalysisProjectionSummary,
+  StructureProjectionSummary,
+} from '../context/projection-summaries.js';
 
 // Mirrors the alias in compose/chip-generator.ts. Defined here so the
 // HandlerInvocation contract has a stable name without forcing handlers
@@ -161,6 +166,41 @@ export interface HandlerInvocation {
    * that read it must fall back gracefully on undefined.
    */
   readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * Side-band answer-text verdict for the explanation handlers. Threaded
+   * from the turn-executor after `validateExplanationAnswer` succeeds.
+   *
+   *  - present + `answer_text_valid: true` → handler uses `answer_text` as
+   *    its assistant_text.
+   *  - present + `answer_text_valid: false` → handler composes a
+   *    deterministic fallback from `analysisProjection` /
+   *    `structureProjection`.
+   *  - absent → either a non-explanation handler (mutation handlers ignore
+   *    it) OR the precondition-bypass path (no analysis fact yet) where the
+   *    handler renders its existing template directly.
+   *
+   * `evidence_used` and `cited_fields` are observability only; the
+   * turn-executor emits them as telemetry and they MUST NOT appear in the
+   * user-visible response.
+   */
+  readonly explanation?: {
+    readonly answer_text: string;
+    readonly answer_text_valid: boolean;
+    readonly answer_validation_error?: ExplanationAnswerErrorReason;
+    readonly evidence_used?: readonly string[];
+    readonly cited_fields?: readonly string[];
+  };
+  /**
+   * Slim view of the ContextPack analysis. Consumed only on the
+   * deterministic fallback path of `explain_results` and `what_would_flip`.
+   * Optional: null when no analysis projection exists in the context pack.
+   */
+  readonly analysisProjection?: AnalysisProjectionSummary;
+  /**
+   * Slim view of the compact graph for `explain_from_structure` fallback —
+   * top causal links, named-factor pathway entries, goal label.
+   */
+  readonly structureProjection?: StructureProjectionSummary;
 }
 
 /**

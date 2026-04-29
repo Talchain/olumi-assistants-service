@@ -510,6 +510,31 @@ export const TelemetryEvents = {
   // compromise_match_count > 30%). Per-turn context lives in the routing
   // log; this event is the observability stream.
   CqeExtraction: "cqe.extraction",
+
+  // V5 answer-carrying explanation handlers. Emitted from the turn-executor
+  // around handler dispatch.
+  //
+  // V5ExplanationAnswerVerdict — once per explanation-handler turn after
+  // the side-band check. Payload: { handler_id, answer_text_valid,
+  // answer_validation_error?, answer_text_length, evidence_used_count,
+  // cited_fields_count }.
+  V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
+  // V5ExplanationEvidence — observability-only mirror of Sonnet's
+  // evidence_used / cited_fields. Emitted when at least one entry is
+  // present. Never persisted on the handler fact and never surfaced to the
+  // user. Payload: { handler_id, evidence_used, cited_fields }.
+  V5ExplanationEvidence: "v5.explanation.evidence",
+  // V5UnexpectedExplanationPayload — emitted when a mutation/computation
+  // handler (run_analysis, draft_graph, edit_graph) carries a stray
+  // `explanation` field. The field is silently dropped; the user is not
+  // shown an error. Payload: { handler_id, request_id }.
+  V5UnexpectedExplanationPayload: "v5.unexpected_explanation_payload",
+  // V5MutationLanguageGuard — STEP 6 log-only check. Emitted when the
+  // final composed assistant_text on a non-edit handler turn matches the
+  // mutation-language regex despite the side-band check. Detection only;
+  // the final text is NOT mutated at this stage. Payload:
+  // { handler_id, text_length }.
+  V5MutationLanguageGuard: "v5.mutation_language_guard",
 } as const;
 
 /**
