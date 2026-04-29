@@ -201,6 +201,51 @@ export interface TurnPlan {
 }
 
 
+// ============================================================================
+// Draft Coaching — UI-facing display shapes for envelope.draft_coaching
+// ============================================================================
+
+/** One entry in the LLM's coaching widening_log: a node the model widened
+ *  the consideration set around, with a short reason. Strict shape; raw
+ *  cache copy retains anything the LLM added under .passthrough(). */
+export interface DraftCoachingWideningEntry {
+  node_id: string;
+  label: string;
+  reason: string;
+}
+
+/** One bias signal raised by the coaching model on the user's brief. */
+export interface DraftCoachingBiasSignal {
+  type: string;
+  detail: string;
+  target?: string;
+}
+
+/** Strengthen-an-area item produced by the LLM coaching pass. Canonical
+ *  definition lives here; tools/draft-graph.ts re-exports as StrengthenItem. */
+export interface DraftCoachingStrengthenItem {
+  id: string;
+  label: string;
+  detail: string;
+  action_type: string;
+  bias_category?: string;
+}
+
+/** Draft-time coaching payload stamped onto the response envelope after a
+ *  successful draft_graph turn. summary / widening_log / bias_signals are
+ *  null when the LLM did not produce that field; strengthen_items defaults
+ *  to []. */
+export interface DraftCoaching {
+  summary: string | null;
+  strengthen_items: DraftCoachingStrengthenItem[];
+  widening_log: DraftCoachingWideningEntry[] | null;
+  bias_signals: DraftCoachingBiasSignal[] | null;
+}
+
+/** @deprecated Re-exported from `tools/draft-graph.ts` as `StrengthenItem` for
+ *  back-compat. Prefer `DraftCoachingStrengthenItem` in new code. */
+export type StrengthenItem = DraftCoachingStrengthenItem;
+
 export interface ResponseLineage {
   context_hash: string;
   plan_hash?: string;
@@ -236,6 +281,10 @@ export interface OrchestratorResponseEnvelope {
   debug?: OrchestratorDebugPayload;
   /** DSK deterministic coaching items. Omitted when DSK_COACHING_ENABLED=false or both arrays empty. */
   dsk_coaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
+  /** Draft-time coaching from the unified pipeline. Set after a successful
+   *  draft_graph turn; omitted on subsequent turns. Mirrors dsk_coaching in
+   *  placement. */
+  draft_coaching?: DraftCoaching;
   /** Server-constructed model receipt after draft_graph. */
   model_receipt?: ModelReceipt;
   /**

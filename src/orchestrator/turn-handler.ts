@@ -49,6 +49,8 @@ import { createCommentaryBlock, createReviewCardBlock, createArtefactBlock } fro
 import { handleRunAnalysis } from "./tools/run-analysis.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
 import { appendDraftCoaching } from "../orchestrator-v5/coaching/draft-coaching-log.js";
+import { buildDraftCoaching } from "./draft-coaching.js";
+import type { DraftCoaching } from "./types.js";
 import { handleGenerateBrief } from "./tools/generate-brief.js";
 import { handleEditGraph, computeGraphHash } from "./tools/edit-graph.js";
 import { handleExplainResults } from "./tools/explain-results.js";
@@ -913,6 +915,7 @@ async function dispatchTool(
     let toolLatencyMs: number | undefined;
     let editGraphSuggestedActions: Array<{ label: string; prompt: string; role: 'facilitator' | 'challenger' | 'scientist' }> | undefined;
     let toolLLMTelemetry: import("./tools/draft-graph.js").DraftGraphResult['toolLLMTelemetry'];
+    let draftCoaching: DraftCoaching | undefined;
 
     switch (toolName) {
       case 'run_analysis': {
@@ -967,6 +970,7 @@ async function dispatchTool(
         assistantText = result.assistantText;
         toolLatencyMs = result.latencyMs;
         toolLLMTelemetry = result.toolLLMTelemetry;
+        draftCoaching = buildDraftCoaching(result);
         break;
       }
 
@@ -1031,6 +1035,7 @@ async function dispatchTool(
       contextHash,
       suggestedActions: editGraphSuggestedActions,
       dskCoaching,
+      draftCoaching,
       computedStage,
     });
 

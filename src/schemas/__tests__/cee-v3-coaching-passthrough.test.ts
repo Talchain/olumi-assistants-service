@@ -87,4 +87,22 @@ describe('CEE V3 coaching schema (V5 Group 1, Task A.1)', () => {
     expect(parsed.coaching?.widening_log).toHaveLength(1);
     expect(parsed.coaching?.bias_signals).toHaveLength(1);
   });
+
+  it('passthrough: lets unknown future keys on the coaching wrapper survive parsing', () => {
+    const input = {
+      ...MINIMAL_BASE,
+      coaching: {
+        summary: 'short',
+        strengthen_items: [],
+        // future field the prompt or pipeline might add (e.g. bias_findings, recommendations)
+        future_field: 'must-survive',
+        another_future: { k: 1 },
+      },
+    };
+
+    const parsed = CEEGraphResponseV3.parse(input);
+    const coaching = parsed.coaching as Record<string, unknown> | undefined;
+    expect(coaching?.future_field).toBe('must-survive');
+    expect(coaching?.another_future).toEqual({ k: 1 });
+  });
 });

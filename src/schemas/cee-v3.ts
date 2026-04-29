@@ -448,9 +448,13 @@ export const CEEGraphResponseV3 = z.object({
    */
   goal_constraints: z.array(GoalConstraintSchema).optional(),
   /** LLM coaching output, optional decision-quality insights. widening_log
-   *  and bias_signals added for V5 coaching pipeline; shapes preserved as
-   *  unknown because the prompt (Paul-owned) defines them. Tasks consume via
-   *  draft_coaching namespace; see src/orchestrator-v5/coaching/types.ts. */
+   *  and bias_signals are kept as `unknown[]` here so the LLM's byte-for-byte
+   *  output reaches V5 ContextPack via the draft_coaching cache; the
+   *  envelope-facing `draft_coaching` field narrows them to typed display
+   *  shapes at the wire boundary (see src/orchestrator/draft-coaching.ts).
+   *  The wrapper is `.passthrough()` so additive future coaching fields
+   *  (e.g. a new bias_findings) reach downstream consumers instead of being
+   *  stripped silently. */
   coaching: z.object({
     summary: z.string(),
     strengthen_items: z.array(z.object({
@@ -459,10 +463,10 @@ export const CEEGraphResponseV3 = z.object({
       detail: z.string(),
       action_type: z.string(),
       bias_category: z.string().optional(),
-    })), // CIL Phase 1: strip unknown fields on strengthen_items
+    })), // strict — matches DraftGraphResult.strengthenItems contract
     widening_log: z.array(z.unknown()).optional(),
     bias_signals: z.array(z.unknown()).optional(),
-  }).optional(), // CIL Phase 1: strip unknown fields on coaching wrapper
+  }).passthrough().optional(),
   /** LLM causal claims — stated reasoning about direct effects, mediations, confounders (Phase 2B) */
   causal_claims: CausalClaimsArraySchema,
   /** Draft warnings from the pipeline — CEEStructuralWarningV1 shape from structure detection.

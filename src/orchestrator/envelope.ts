@@ -59,6 +59,9 @@ export interface EnvelopeInput {
   graphHash?: string;
   /** DSK coaching items — omitted when disabled or both arrays empty. */
   dskCoaching?: import("../schemas/dsk-coaching.js").DskCoachingItems;
+  /** Draft-time coaching from the unified pipeline. Set only on draft_graph
+   *  turns where the LLM produced coaching output. Omitted otherwise. */
+  draftCoaching?: import("./types.js").DraftCoaching;
   /** Authoritative computed stage (from inferStage). Overrides framing.stage if provided. */
   computedStage?: DecisionStage;
   /** Read-only debug summary inputs from the current turn flow. */
@@ -115,6 +118,12 @@ export function assembleEnvelope(input: EnvelopeInput): OrchestratorResponseEnve
   // DSK coaching — omit entirely when undefined (flags-off parity / omit-empty)
   if (input.dskCoaching) {
     envelope.dsk_coaching = input.dskCoaching;
+  }
+
+  // Draft coaching — omit entirely when undefined (only set on successful
+  // draft_graph turns where the LLM produced coaching output)
+  if (input.draftCoaching) {
+    envelope.draft_coaching = input.draftCoaching;
   }
 
   // Validate (do NOT recompute) analysis_ready on graph_patch blocks.

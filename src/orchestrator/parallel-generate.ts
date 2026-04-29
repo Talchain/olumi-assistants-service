@@ -20,6 +20,7 @@ import { ORCHESTRATOR_TIMEOUT_MS } from "../config/timeouts.js";
 import { handleDraftGraph } from "./tools/draft-graph.js";
 import { appendDraftCoaching } from "../orchestrator-v5/coaching/draft-coaching-log.js";
 import type { DraftGraphResult } from "./tools/draft-graph.js";
+import { buildDraftCoaching } from "./draft-coaching.js";
 import { assembleEnvelope, buildTurnPlan } from "./envelope.js";
 import {
   getIdempotentResponse,
@@ -411,6 +412,7 @@ function assembleBothSucceeded(
       context: turnRequest.context,
       turnPlan: buildTurnPlan('draft_graph', 'deterministic', true, draftResult.latencyMs),
       dskCoaching,
+      draftCoaching: buildDraftCoaching(draftResult),
     }),
   };
 }
@@ -455,6 +457,7 @@ function assembleCoachingFailed(
     { request_id: requestId, error: coachingError instanceof Error ? coachingError.message : String(coachingError) },
     "parallel_generate: coaching LLM failed, using fallback text",
   );
+  const draftCoaching = buildDraftCoaching(draftResult);
 
   // Build fallback text from draft pipeline outputs
   const fallbackParts: string[] = [];
@@ -483,6 +486,7 @@ function assembleCoachingFailed(
       context: turnRequest.context,
       turnPlan: buildTurnPlan('draft_graph', 'deterministic', true, draftResult.latencyMs),
       dskCoaching,
+      draftCoaching,
     }),
   };
 }

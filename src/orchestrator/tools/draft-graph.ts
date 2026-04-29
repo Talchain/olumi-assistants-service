@@ -12,7 +12,7 @@ import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts, PipelineOutcome } from "../../cee/unified-pipeline/types.js";
-import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry } from "../types.js";
+import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry, DraftCoachingStrengthenItem } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
@@ -58,14 +58,10 @@ export interface CEEDraftWarning {
   edge_ids?: string[];
 }
 
-/** Structured strengthen item from LLM coaching output. */
-export interface StrengthenItem {
-  id: string;
-  label: string;
-  detail: string;
-  action_type: string;
-  bias_category?: string;
-}
+/** Structured strengthen item from LLM coaching output. Canonical type
+ *  lives in `../types.ts` as `DraftCoachingStrengthenItem`; this is a
+ *  re-export for back-compat with existing call sites. */
+export type StrengthenItem = DraftCoachingStrengthenItem;
 
 export interface DraftGraphResult {
   blocks: TypedConversationBlock[];
