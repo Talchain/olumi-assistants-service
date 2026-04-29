@@ -1,20 +1,23 @@
 /**
- * V5 `explain_results` handler — pure no-op routing surface for post-analysis
- * explanation questions ("why did X win?", "explain the analysis results").
+ * V5 `explain_results` answer-carrying handler for post-analysis explanation
+ * questions ("why did X win?", "explain the analysis results").
  *
- * Registered in 0.9.0. Like `explain_from_structure`, this handler does not
- * call PLoT or ISL and does not compute anything; Sonnet's pre-tool-call
- * orientation text becomes the assistant response on the happy path. The
- * persisted handler fact (`noop: true`) records routing success.
+ * Answer-carrying contract (post-v40 fix): the handler always owns the
+ * entire user-visible string. Sonnet's `answer_text` (carried inside the
+ * tool-call payload via `invocation.explanation`) is used verbatim when the
+ * side-band validator marked it valid; otherwise the deterministic
+ * fallback in `explanation-fallback.ts` composes a response from the
+ * pre-built `analysisProjection` summary. The turn-executor forces
+ * `suppress_orientation: true` for explanation handlers, so Sonnet's
+ * pre-tool-call orientation never reaches the user; the handler also sets
+ * the flag on its outcome as defence-in-depth.
  *
  * Precondition (D2): `explain_results` requires a non-noop `run_analysis`
  * fact in the conversation's `prior_facts`. When absent (the user has not
  * yet run analysis), the handler returns a deterministic template explaining
  * that no analysis has been run, with the option count interpolated. The
- * outcome is marked `suppress_orientation: true` so Sonnet's pre-tool-call
- * text does not precede the template — the brief is explicit that this
- * path "does not fall through to Sonnet text". The composer surfaces a
- * "Run analysis" chip via the chip-generator's `facts_absent` rule.
+ * composer surfaces a "Run analysis" chip via the chip-generator's
+ * `facts_absent` rule.
  *
  * Why the precondition lives in the handler, not the validator (D2):
  *   The validator's PRECONDITION_UNMET path produces a typed rejection
@@ -29,16 +32,12 @@
  *   The check is `f.fact_type === 'run_analysis' && !f.noop`. A future noop
  *   `run_analysis` fact (none exist today, but the discriminated union
  *   permits one) must NOT satisfy the precondition — only a real PLoT-
- *   backed analysis run produces the projection data Sonnet's orientation
- *   text references. See `chip-generator.ts:findHandlerJustRan` for the
- *   parallel filter.
- *
- * Empty-orientation guard (D8):
- *   When the precondition passes but Sonnet emits no pre-tool-call text,
- *   the handler returns the safe fallback string instead of empty
- *   assistant_text. Generic on purpose — narrative detail is Sonnet's job.
+ *   backed analysis run produces the projection data the answer references.
+ *   See `chip-generator.ts:findHandlerJustRan` for the parallel filter.
  *
  * F.6 invariant: no PLoT, no ISL, no LLM call, no math, no graph mutation.
+ * The fallback formats raw values from the projection; it does not derive
+ * new metrics.
  */
 
 import {

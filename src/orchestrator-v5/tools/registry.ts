@@ -118,13 +118,17 @@ export type { ScenarioReader, RunAnalysisScenarioSnapshot };
  * AbortSignal that bounds the turn.
  *
  * `orientationText` carries Sonnet's pre-tool-call narrative, surfaced from
- * the routing layer (`routingResult.orientationText`). Existing handlers
- * (run_analysis) ignore it — orientation is composed AFTER the handler
- * runs in compose.ts. The V5 no-op handlers (explain_from_structure,
- * explain_results, what_would_flip) read it to choose a safe fallback
- * string when the orientation text is empty (Sonnet sometimes emits only
- * the tool_use block with no preceding text). Default `''` so the
- * existing run_analysis test fixtures don't have to populate it.
+ * the routing layer (`routingResult.orientationText`). The non-explanation
+ * handlers (run_analysis) ignore it — orientation is composed AFTER the
+ * handler runs in compose.ts. The V5 explanation handlers
+ * (explain_from_structure, explain_results, what_would_flip) ALSO ignore
+ * `orientationText` post-v40: they consume Sonnet's answer via
+ * `explanation.answer_text` (which is part of the structured tool-call
+ * payload, not the pre-tool-call text), and fall back to a deterministic
+ * composer when invalid or missing. The turn-executor forces
+ * suppress_orientation for explanation handlers, so any pre-tool-call text
+ * Sonnet did emit is dropped at compose time. Default `''` so existing
+ * run_analysis test fixtures don't have to populate it.
  */
 export interface HandlerInvocation {
   // EnrichedTurnContext extends the wire-level TurnContext with CEE-internal
