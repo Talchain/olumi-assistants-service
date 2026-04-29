@@ -7,9 +7,10 @@
  * Olumi explaining — never a bullet list, never a template dump.
  *
  * F.6 invariant: format only. Sort and slice; do NOT calculate new metrics,
- * derive new margins, or synthesise causality. Probabilities are formatted
- * as percentages (existing convention used in user-visible copy throughout
- * V5); no derivation.
+ * derive new margins, or synthesise causality. Numeric values (probability,
+ * margin_pp, sensitivity, edge strength) are surfaced verbatim as supplied
+ * by the context pack — no ×100 conversion, no fixed-precision rounding,
+ * no unit substitution. The fallback is a formatter, not a derivation step.
  *
  * Copy rules:
  *  - Sentence case, British English.
@@ -27,12 +28,11 @@ import type {
 
 function formatRawNumber(value: number): string {
   // Brief: "Use raw values as provided in context. Do not convert formats."
-  // We surface the raw number with up to four-digit precision so trailing
-  // zeros are not added, but the underlying value is preserved unchanged.
-  // No multiplication, no rounding to integers, no unit conversion.
+  // String(value) preserves the underlying number verbatim — JS already
+  // emits 0.62 as "0.62" and 35 as "35". The integer guard is purely
+  // cosmetic (avoids "35.0" if a future caller hands us a float-typed
+  // integer); it does not change the numeric value.
   if (Number.isInteger(value)) return String(value);
-  // Strip trailing zeros from a fixed representation so 0.62 stays "0.62"
-  // and 0.6234567 stays "0.6234567".
   return String(value);
 }
 
@@ -179,6 +179,21 @@ export function composeExplainFromStructureFallback(
   ) {
     const factor = projection.named_factor_label;
     const pathways = projection.named_factor_pathways.slice(0, 2);
+
+    // Over-claim guard: only assert the named factor "feeds into" the goal
+    // when at least one cited pathway actually terminates at the goal node
+    // (1-hop, structurally verified from the projection). If the named
+    // factor is only adjacent to sibling factors or other non-goal nodes,
+    // describe the structural connection without claiming it reaches the
+    // goal — multi-hop derivation crosses the F.6 line.
+    const reachesGoal =
+      projection.goal_label !== null &&
+      pathways.some(
+        (p) =>
+          (p.label_from === factor && p.label_to === projection.goal_label) ||
+          (p.label_to === factor && p.label_from === projection.goal_label),
+      );
+
     const path = pathways
       .map((p) =>
         p.label_from === factor
@@ -186,7 +201,8 @@ export function composeExplainFromStructureFallback(
           : `${p.label_from} (strength ${formatRawNumber(p.strength)})`,
       )
       .join(' and ');
-    if (projection.goal_label) {
+
+    if (reachesGoal) {
       sentences.push(
         `${factor} connects to ${path}, which feeds into ${projection.goal_label}.`,
       );

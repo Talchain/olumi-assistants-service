@@ -151,7 +151,7 @@ describe('composeExplainFromStructureFallback', () => {
     expect(text).toContain('strength');
   });
 
-  it('uses named-factor pathways when the user mentioned a factor', () => {
+  it('uses named-factor pathways when the user mentioned a factor (path reaches goal)', () => {
     const text = composeExplainFromStructureFallback({
       ...STRUCTURE,
       named_factor_label: 'Engineering Capacity',
@@ -166,6 +166,49 @@ describe('composeExplainFromStructureFallback', () => {
     expectNaturalProse(text);
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('Q3 Throughput');
+    // Goal-reaching path → "feeds into" claim is allowed.
+    expect(text).toMatch(/feeds into Q3 Throughput/);
+  });
+
+  it('does NOT claim a named factor "feeds into" the goal when the cited pathway reaches a sibling, not the goal', () => {
+    // Over-claim guard: factor F is adjacent only to sibling F2 (no edge
+    // to the goal). The fallback must describe the structural connection
+    // without falsely asserting the factor reaches the goal — multi-hop
+    // derivation would cross the F.6 line.
+    const text = composeExplainFromStructureFallback({
+      ...STRUCTURE,
+      named_factor_label: 'Hiring Cost',
+      named_factor_pathways: [
+        {
+          label_from: 'Hiring Cost',
+          label_to: 'Engineering Capacity', // sibling factor, NOT the goal
+          strength: 0.3,
+        },
+      ],
+    });
+    expect(text).toContain('Hiring Cost');
+    expect(text).toContain('Engineering Capacity');
+    expect(text).not.toMatch(/feeds into/);
+    // Still mentions the goal elsewhere is fine, but must not assert the
+    // named factor reaches it via the cited pathway.
+    expect(text).toContain('connects to');
+  });
+
+  it('drops the "feeds into goal" claim when goal_label is null even if pathways exist', () => {
+    const text = composeExplainFromStructureFallback({
+      ...STRUCTURE,
+      goal_label: null,
+      named_factor_label: 'Engineering Capacity',
+      named_factor_pathways: [
+        {
+          label_from: 'Engineering Capacity',
+          label_to: 'Some other node',
+          strength: 0.65,
+        },
+      ],
+    });
+    expect(text).not.toMatch(/feeds into/);
+    expect(text).toContain('Engineering Capacity');
   });
 
   it('handles an empty graph gracefully without crashing or leaking internal terms', () => {
