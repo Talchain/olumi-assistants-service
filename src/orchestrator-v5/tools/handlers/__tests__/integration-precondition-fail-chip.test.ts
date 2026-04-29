@@ -16,10 +16,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { createExplainResultsHandler } from '../explain-results.js';
 import { createWhatWouldFlipHandler } from '../what-would-flip.js';
 import type { HandlerInvocation } from '../../registry.js';
+import type { EnrichedTurnContext } from '../../../build-turn-context.js';
 import { generateChips } from '../../../compose/chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 
@@ -27,26 +29,42 @@ const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const REQUEST_ID = 'req-precondition-fail-chip';
 const GOAL_ID = 'goal_node_1';
 
+// Typed builders for HandlerInvocation fixture parts. Each return type
+// matches the canonical schema-derived shape, so no `as unknown` cast is
+// needed at the call site. EnrichedTurnContext and MessageTurnPayload are
+// the wide structural types HandlerInvocation expects; building them with
+// proper literal-narrowing here keeps the test free of the broader
+// codebase's "fixture cast" pattern.
+function buildEnrichedTurnContext(message: string): EnrichedTurnContext {
+  return {
+    stage: 'analyse',
+    entity_registry: { option_ids: [], goal_id: GOAL_ID },
+    capabilities: {},
+    messages: [{ role: 'user' as const, content: message }],
+    session_id: SCENARIO_ID,
+    request_id: REQUEST_ID,
+    budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
+    prior_turns: [],
+    prior_facts: [],
+  };
+}
+
+function buildMessageTurnPayload(message: string): MessageTurnPayload {
+  return {
+    kind: 'message' as const,
+    turn_id: 't_precondition_fail',
+    scenario_id: SCENARIO_ID,
+    message,
+    turn_class: 'decide' as const,
+    stage: 'analyse' as const,
+    source: 'composer' as const,
+  };
+}
+
 function makePreAnalysisInvocation(message: string): HandlerInvocation {
   return {
-    context: {
-      stage: 'analyse',
-      entity_registry: { option_ids: [], goal_id: GOAL_ID },
-      capabilities: {},
-      messages: [{ role: 'user', content: message }],
-      session_id: SCENARIO_ID,
-      request_id: REQUEST_ID,
-      budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
-      prior_turns: [],
-      prior_facts: [],
-    } as unknown as HandlerInvocation['context'],
-    payload: {
-      turn_id: 't_precondition_fail',
-      scenario_id: SCENARIO_ID,
-      message,
-      turn_class: 'analyse',
-      stage: 'analyse',
-    } as unknown as HandlerInvocation['payload'],
+    context: buildEnrichedTurnContext(message),
+    payload: buildMessageTurnPayload(message),
     requestId: REQUEST_ID,
     signal: new AbortController().signal,
     orientationText: 'Looking at the analysis you have configured.',

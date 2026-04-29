@@ -229,11 +229,13 @@ const NUMERIC_PATTERNS: readonly RegExp[] = [
   /\b\d+\.\d+\b/,
   // Percentages (`5%`, `88.3 %`).
   /\b\d+(\.\d+)?\s*%/,
-  // Percentage-point spans (`88.3 percentage points`, `88pp`). The bare
-  // decimal pattern above will already catch the leading number, but this
-  // makes the percentage-point semantics explicit and survives a future
-  // edit that drops the decimal portion.
-  /\b\d+(\.\d+)?\s*(?:percentage points|pp)\b/i,
+  // Percentage-point spans (`88.3 percentage points`, `88pp`) and British-
+  // English `per cent` (`62 per cent`, `5.5 per cent`). The bare decimal
+  // pattern above catches decimals like `0.62` but integers like `62 per
+  // cent` would otherwise slip past it; this branch also makes the
+  // percentage-point semantics explicit so a future edit dropping the
+  // decimal portion does not weaken the rule.
+  /\b\d+(\.\d+)?\s*(?:percentage points|pp|per cent)\b/i,
   // Sensitivity values cited inline (`sensitivity value of 1.0`,
   // `sensitivity 0.177`). Captures the numeric immediately after the
   // sensitivity reference even when it is an integer.

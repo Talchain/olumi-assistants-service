@@ -118,37 +118,39 @@ const READY_GRAPH = {
   ],
 };
 
-const EXPLAIN_RESULTS_TOOL_INPUT = {
-  intent_class: 'execute',
-  action: {
-    handler_id: 'explain_results',
-    entity: {
-      id: 'goal_q3',
-      kind: 'goal',
-      label: 'Goal',
-      resolution_status: 'resolved',
-      resolution_method: 'context_inference',
+function buildToolInput(handlerId: 'explain_results' | 'what_would_flip') {
+  return {
+    intent_class: 'execute',
+    action: {
+      handler_id: handlerId,
+      entity: {
+        id: 'goal_q3',
+        kind: 'goal',
+        label: 'Goal',
+        resolution_status: 'resolved',
+        resolution_method: 'context_inference',
+      },
+      parameters: [],
+      cited_context_fields: ['analysis.leading_option'],
+      explanation: {
+        // Long enough to clear the validator's 80-char floor and free of
+        // forbidden / mutation terms — the answer-text is irrelevant on the
+        // precondition path (handler renders the template), but a clean
+        // payload removes any side-band-rejection confound from the test.
+        answer_text:
+          'Looking at the leading option, the strongest direct driver in the model is Engineering Capacity which connects to the goal. Walking the structure first will explain the result.',
+      },
     },
-    parameters: [],
-    cited_context_fields: ['analysis.leading_option'],
-    explanation: {
-      // Long enough to clear the validator's 80-char floor and free of
-      // forbidden / mutation terms — the answer-text is irrelevant on the
-      // precondition path (handler renders the template), but a clean
-      // payload removes any side-band-rejection confound from the test.
-      answer_text:
-        'Looking at the leading option, the strongest direct driver in the model is Engineering Capacity which connects to the goal. Walking the structure first will explain the result.',
-    },
-  },
-};
+  };
+}
 
-function mkExplainResultsToolUse(): ChatWithToolsResult {
+function mkToolUse(handlerId: 'explain_results' | 'what_would_flip'): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [
     {
       type: 'tool_use',
-      id: 'tu-explain',
+      id: `tu-${handlerId}`,
       name: OLUMI_ACTION_TOOL_NAME,
-      input: EXPLAIN_RESULTS_TOOL_INPUT as Record<string, unknown>,
+      input: buildToolInput(handlerId) as Record<string, unknown>,
     },
   ];
   return {
@@ -197,9 +199,9 @@ afterEach(() => {
   setTestSink(null);
 });
 
-describe('turn-executor × explain_results precondition-fail — wire-level chip surfacing (Test B)', () => {
-  it('drives runTurnExecutor end-to-end → final OlumiResponse.suggested_actions contains executable run_analysis chip', async () => {
-    const routingAdapter = mockRoutingAdapter(async () => mkExplainResultsToolUse());
+describe('turn-executor × explanation precondition-fail — wire-level chip surfacing (Test B)', () => {
+  it('explain_results: drives runTurnExecutor end-to-end → final OlumiResponse.suggested_actions contains executable run_analysis chip', async () => {
+    const routingAdapter = mockRoutingAdapter(async () => mkToolUse('explain_results'));
     const registry = createRegistry({
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => makeReadyScenarioSnapshot(),
@@ -220,6 +222,41 @@ describe('turn-executor × explain_results precondition-fail — wire-level chip
     expect(telemetry.failure_type).toBeNull();
 
     // The headline assertion: the chip survives all the way to the wire.
+    const runAnalysisChip = response.suggested_actions.find(
+      (a: { action_type?: string }) => a.action_type === 'run_analysis',
+    );
+    expect(runAnalysisChip).toBeDefined();
+    expect(runAnalysisChip).toMatchObject({
+      id: 'chip_action_run_analysis',
+      action_type: 'run_analysis',
+      label: 'Run analysis',
+    });
+  });
+
+  it('what_would_flip: drives runTurnExecutor end-to-end → final OlumiResponse.suggested_actions contains executable run_analysis chip', async () => {
+    // Brief task 2 explicitly names both handlers for envelope-level
+    // coverage. The chip rule reads from the typed handler-fact union,
+    // and what_would_flip emits its own ExplainResultsHandlerFact-shaped
+    // signal on the precondition-fail path. Wire-level symmetry test.
+    const routingAdapter = mockRoutingAdapter(async () => mkToolUse('what_would_flip'));
+    const registry = createRegistry({
+      plotClient: makeMockPlotClient(),
+      scenarioReader: async () => makeReadyScenarioSnapshot(),
+    });
+
+    const { response, telemetry } = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'What would change the outcome?' },
+      'req-flip-precondition',
+      {
+        routingAdapter,
+        handlerRegistry: registry,
+        graphState: READY_GRAPH,
+      },
+    );
+
+    OlumiResponseSchema.parse(response);
+    expect(telemetry.failure_type).toBeNull();
+
     const runAnalysisChip = response.suggested_actions.find(
       (a: { action_type?: string }) => a.action_type === 'run_analysis',
     );

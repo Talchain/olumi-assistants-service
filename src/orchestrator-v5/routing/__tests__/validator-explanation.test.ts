@@ -348,4 +348,24 @@ describe('Test H ordering rule: staleness caveat must precede figures', () => {
     expect(verdict.skip).toBe(false);
     expect(verdict.payload?.answer_text_valid).toBe(true);
   });
+
+  it('British-English "per cent" before caveat with staleness_reason → invalid (numeric detection covers integer-cent phrasing)', () => {
+    // Sonnet may absorb the codebase's British-English style and emit
+    // "62 per cent" instead of "0.62" or "62%". The bare-decimal pattern
+    // would miss the integer-cent phrasing; the percentage-point branch
+    // now also matches "per cent".
+    const verdict = validateExplanationAnswer(
+      'explain_results',
+      {
+        answer_text:
+          'Hire Two Senior Engineers Locally leads at 62 per cent with a meaningful margin over the runner-up. Note that this result is from a prior run with unknown freshness.',
+      },
+      [{ fact_type: 'run_analysis', noop: false }],
+      'loaded_from_prior_run_freshness_unknown',
+    );
+    expect(verdict.payload?.answer_text_valid).toBe(false);
+    expect(verdict.payload?.answer_validation_error).toBe(
+      'staleness_caveat_must_precede_figures',
+    );
+  });
 });
