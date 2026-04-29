@@ -21,6 +21,16 @@ import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifie
 
 export type CompactNodeSource = 'user' | 'assumption' | 'system';
 
+/**
+ * Display-safe provenance vocabulary for the UI/coaching layer. Mapped from
+ * upstream extractionType (nodes) or provenance.source (edges); the raw
+ * upstream value is preserved on `_raw_provenance` for diagnostics.
+ *
+ * Unknown / absent upstream values map to `'ai_inferred'` (safe default —
+ * anything not explicitly user-set or brief-extracted is treated as inferred).
+ */
+export type CompactProvenance = 'from_brief' | 'ai_inferred' | 'user_set';
+
 export interface CompactNode {
   id: string;
   kind: string;
@@ -31,8 +41,15 @@ export interface CompactNode {
   raw_value?: number;  // from observed_state.raw_value
   unit?: string;       // from observed_state.unit
   cap?: number;        // from observed_state.cap
-  /** Provenance: how this node's value was determined. */
+  /** Provenance enum (legacy CompactNodeSource vocabulary).
+   *  Kept alongside `provenance` for back-compat with context-pack-assembler /
+   *  telemetry consumers that read this field today. */
   source?: CompactNodeSource;
+  /** Display-safe provenance projection (UI/coaching vocabulary). Added
+   *  alongside `source`. Unknown upstream values map to `'ai_inferred'`. */
+  provenance?: CompactProvenance;
+  /** Raw upstream provenance string (debug/diagnostics only). */
+  _raw_provenance?: string;
   /** Human-readable summary of option interventions (option nodes only). */
   intervention_summary?: string;
 }
@@ -44,6 +61,11 @@ export interface CompactEdge {
   exists: number;     // exists_probability (defaulted to DEFAULT_EXISTS_PROBABILITY if absent)
   /** Human-readable causal interpretation (causal edges only, omitted for structural/bidirected). */
   plain_interpretation?: string;
+  /** Display-safe provenance projection. Mapped from edge.provenance.source.
+   *  Unknown / absent values map to `'ai_inferred'`. */
+  provenance?: CompactProvenance;
+  /** Raw upstream provenance source (debug/diagnostics only). */
+  _raw_provenance?: string;
 }
 
 export interface GraphV3Compact {
@@ -188,15 +210,20 @@ function buildPlainInterpretation(
  * Compact a V3 graph for LLM context.
  *
  * Kept per node: id, kind, label, type (if present), category (if present),
- * observed_state.value, raw_value, unit, cap (if present), source (derived from extractionType),
+ * observed_state.value, raw_value, unit, cap (if present),
+ * source (legacy CompactNodeSource — derived from extractionType),
+ * provenance (display-safe CompactProvenance — also derived from extractionType),
+ * _raw_provenance (raw extractionType string for diagnostics),
  * intervention_summary (option nodes with data.interventions).
  *
  * Dropped per node: body, state_space, goal_threshold, observed_state.std,
- * observed_state.baseline, observed_state.extractionType (projected to source).
+ * observed_state.baseline, observed_state.extractionType (projected to source + provenance).
  *
  * Kept per edge: from, to, strength.mean, exists_probability (defaulted to DEFAULT_EXISTS_PROBABILITY),
- * plain_interpretation (causal edges only).
- * Dropped per edge: strength.std, effect_direction, label.
+ * plain_interpretation (causal edges only),
+ * provenance (display-safe CompactProvenance — derived from edge.provenance.source),
+ * _raw_provenance (raw provenance.source string for diagnostics).
+ * Dropped per edge: strength.std, effect_direction, label, edge.provenance.reasoning.
  *
  * Output is sorted: nodes by id, edges by from then to.
  */
@@ -244,21 +271,50 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
           n.cap = obsState.cap;
         }
 
-        // Provenance: derive from extractionType
-        // explicit  → user      (value was stated directly by the user)
-        // inferred  → assumption (value was derived/estimated by the LLM)
-        // range/observed/absent → system (everything else is treated as system-provided)
+        // Provenance: derive both legacy `source` (for context-pack-assembler
+        // / telemetry consumers) and the new `provenance` projection (for the
+        // UI/coaching layer). Raw upstream value is retained on
+        // `_raw_provenance` for diagnostics.
+        //
+        // source mapping (unchanged):
+        //   explicit  → user
+        //   inferred  → assumption
+        //   range/observed/anything-else → system
+        //
+        // provenance mapping (new):
+        //   explicit, observed → from_brief   (value came from the brief / observation)
+        //   inferred, range    → ai_inferred  (LLM-derived / range estimate)
+        //   anything-else      → ai_inferred  (safe default per brief)
+        //   user_specified path: not currently emitted by upstream nodes;
+        //     reserved for future user-edit pipelines.
         const et = obsState.extractionType;
         if (et === 'explicit') {
           n.source = 'user';
+          n.provenance = 'from_brief';
+          n._raw_provenance = 'explicit';
         } else if (et === 'inferred') {
           n.source = 'assumption';
+          n.provenance = 'ai_inferred';
+          n._raw_provenance = 'inferred';
+        } else if (et === 'observed') {
+          n.source = 'system';
+          n.provenance = 'from_brief';
+          n._raw_provenance = 'observed';
+        } else if (et === 'range') {
+          n.source = 'system';
+          n.provenance = 'ai_inferred';
+          n._raw_provenance = 'range';
         } else {
           n.source = 'system';
+          n.provenance = 'ai_inferred';
+          if (typeof et === 'string' && et.length > 0) {
+            n._raw_provenance = et;
+          }
         }
       } else {
-        // No observed_state — treat as system-derived
+        // No observed_state — treat as system-derived / ai_inferred.
         n.source = 'system';
+        n.provenance = 'ai_inferred';
       }
 
       // Intervention summary for option nodes with data.interventions
@@ -291,6 +347,36 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
       const interpretation = buildPlainInterpretation(edge, labelMap, kindMap);
       if (interpretation) {
         e.plain_interpretation = interpretation;
+      }
+
+      // Edge provenance projection. EdgeProvenanceV3.source ∈
+      // {brief_extraction, cee_hypothesis, domain_knowledge, user_specified}.
+      // Read as `unknown` so the fallback branch can defensively log future
+      // (post-schema-bump) values that wouldn't satisfy the typed union.
+      // Mapping:
+      //   brief_extraction  → from_brief
+      //   user_specified    → user_set
+      //   cee_hypothesis    → ai_inferred
+      //   domain_knowledge  → ai_inferred
+      //   unknown / absent  → ai_inferred (safe default per brief)
+      const rawSource: unknown = edge.provenance?.source;
+      if (rawSource === 'brief_extraction') {
+        e.provenance = 'from_brief';
+        e._raw_provenance = 'brief_extraction';
+      } else if (rawSource === 'user_specified') {
+        e.provenance = 'user_set';
+        e._raw_provenance = 'user_specified';
+      } else if (rawSource === 'cee_hypothesis') {
+        e.provenance = 'ai_inferred';
+        e._raw_provenance = 'cee_hypothesis';
+      } else if (rawSource === 'domain_knowledge') {
+        e.provenance = 'ai_inferred';
+        e._raw_provenance = 'domain_knowledge';
+      } else {
+        e.provenance = 'ai_inferred';
+        if (typeof rawSource === 'string' && rawSource.length > 0) {
+          e._raw_provenance = rawSource;
+        }
       }
 
       return e;

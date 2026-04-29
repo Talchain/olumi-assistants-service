@@ -470,6 +470,134 @@ describe("compactGraph", () => {
     expect(interp).not.toContain("uncertain");
   });
 
+  // ==========================================================================
+  // Provenance projection (Tier 2 — display-safe vocabulary alongside `source`)
+  // ==========================================================================
+
+  it("node extractionType=explicit → provenance=from_brief (and source=user)", () => {
+    const node = makeNode("n_explicit", { observed_state: { value: 10, extractionType: "explicit" } });
+    const result = compactGraph(makeGraph([node], []));
+    const n = result.nodes[0];
+    expect(n.source).toBe("user");
+    expect(n.provenance).toBe("from_brief");
+    expect(n._raw_provenance).toBe("explicit");
+  });
+
+  it("node extractionType=observed → provenance=from_brief (and source=system)", () => {
+    const node = makeNode("n_observed", { observed_state: { value: 10, extractionType: "observed" } });
+    const result = compactGraph(makeGraph([node], []));
+    const n = result.nodes[0];
+    expect(n.source).toBe("system");
+    expect(n.provenance).toBe("from_brief");
+    expect(n._raw_provenance).toBe("observed");
+  });
+
+  it("node extractionType=inferred → provenance=ai_inferred (and source=assumption)", () => {
+    const node = makeNode("n_inferred", { observed_state: { value: 10, extractionType: "inferred" } });
+    const result = compactGraph(makeGraph([node], []));
+    const n = result.nodes[0];
+    expect(n.source).toBe("assumption");
+    expect(n.provenance).toBe("ai_inferred");
+    expect(n._raw_provenance).toBe("inferred");
+  });
+
+  it("node extractionType=range → provenance=ai_inferred (and source=system)", () => {
+    const node = makeNode("n_range", { observed_state: { value: 10, extractionType: "range" } });
+    const result = compactGraph(makeGraph([node], []));
+    const n = result.nodes[0];
+    expect(n.source).toBe("system");
+    expect(n.provenance).toBe("ai_inferred");
+    expect(n._raw_provenance).toBe("range");
+  });
+
+  it("node unknown extractionType → provenance=ai_inferred, _raw_provenance preserves the raw string", () => {
+    const node = makeNode("n_unknown", { observed_state: { value: 10, extractionType: "future_unknown_value" } });
+    const result = compactGraph(makeGraph([node], []));
+    const n = result.nodes[0];
+    expect(n.provenance).toBe("ai_inferred");
+    expect(n._raw_provenance).toBe("future_unknown_value");
+  });
+
+  it("node with no observed_state → provenance=ai_inferred, no _raw_provenance", () => {
+    const node = makeNode("n_no_obs");
+    const result = compactGraph(makeGraph([node], []));
+    const n = result.nodes[0];
+    expect(n.source).toBe("system");
+    expect(n.provenance).toBe("ai_inferred");
+    expect(n).not.toHaveProperty("_raw_provenance");
+  });
+
+  it("edge provenance.source=brief_extraction → provenance=from_brief", () => {
+    const edge = makeEdge("a", "b", { provenance: { source: "brief_extraction" } });
+    const result = compactGraph(makeGraph([], [edge]));
+    const e = result.edges[0];
+    expect(e.provenance).toBe("from_brief");
+    expect(e._raw_provenance).toBe("brief_extraction");
+  });
+
+  it("edge provenance.source=user_specified → provenance=user_set", () => {
+    const edge = makeEdge("a", "b", { provenance: { source: "user_specified" } });
+    const result = compactGraph(makeGraph([], [edge]));
+    const e = result.edges[0];
+    expect(e.provenance).toBe("user_set");
+    expect(e._raw_provenance).toBe("user_specified");
+  });
+
+  it("edge provenance.source=cee_hypothesis → provenance=ai_inferred", () => {
+    const edge = makeEdge("a", "b", { provenance: { source: "cee_hypothesis" } });
+    const result = compactGraph(makeGraph([], [edge]));
+    const e = result.edges[0];
+    expect(e.provenance).toBe("ai_inferred");
+    expect(e._raw_provenance).toBe("cee_hypothesis");
+  });
+
+  it("edge provenance.source=domain_knowledge → provenance=ai_inferred", () => {
+    const edge = makeEdge("a", "b", { provenance: { source: "domain_knowledge" } });
+    const result = compactGraph(makeGraph([], [edge]));
+    const e = result.edges[0];
+    expect(e.provenance).toBe("ai_inferred");
+    expect(e._raw_provenance).toBe("domain_knowledge");
+  });
+
+  it("edge with no provenance field → provenance=ai_inferred, no _raw_provenance", () => {
+    const edge = makeEdge("a", "b");
+    const result = compactGraph(makeGraph([], [edge]));
+    const e = result.edges[0];
+    expect(e.provenance).toBe("ai_inferred");
+    expect(e).not.toHaveProperty("_raw_provenance");
+  });
+
+  it("edge unknown provenance.source → provenance=ai_inferred, _raw_provenance preserves the raw string", () => {
+    const edge = makeEdge("a", "b", { provenance: { source: "future_source_value" } });
+    const result = compactGraph(makeGraph([], [edge]));
+    const e = result.edges[0];
+    expect(e.provenance).toBe("ai_inferred");
+    expect(e._raw_provenance).toBe("future_source_value");
+  });
+
+  it("aggregate _node_count / _edge_count are unchanged by the provenance projection", () => {
+    const nodes = [
+      makeNode("a", { observed_state: { value: 1, extractionType: "explicit" } }),
+      makeNode("b", { observed_state: { value: 2, extractionType: "inferred" } }),
+    ];
+    const edges = [makeEdge("a", "b", { provenance: { source: "brief_extraction" } })];
+    const result = compactGraph(makeGraph(nodes, edges));
+    expect(result._node_count).toBe(2);
+    expect(result._edge_count).toBe(1);
+  });
+
+  it("legacy `source` field still emits today's vocabulary unchanged (regression)", () => {
+    // Three nodes covering all three legacy source values.
+    const nodes = [
+      makeNode("u", { observed_state: { value: 1, extractionType: "explicit" } }),  // → user
+      makeNode("a", { observed_state: { value: 2, extractionType: "inferred" } }),  // → assumption
+      makeNode("s", { observed_state: { value: 3, extractionType: "range" } }),     // → system
+    ];
+    const result = compactGraph(makeGraph(nodes, []));
+    const sourceById = Object.fromEntries(result.nodes.map((n) => [n.id, n.source]));
+    expect(sourceById).toEqual({ u: "user", a: "assumption", s: "system" });
+  });
+
   it("token size: realistic 10-node graph serialises to < 1500 tokens", () => {
     const nodes = Array.from({ length: 10 }, (_, i) =>
       makeNode(`node_${i.toString().padStart(2, "0")}`, {
