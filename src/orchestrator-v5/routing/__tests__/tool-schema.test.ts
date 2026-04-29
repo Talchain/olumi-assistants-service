@@ -411,3 +411,62 @@ describe('parseToolCallResponse', () => {
     }
   });
 });
+
+// Answer-carrying explanation field — schema-level coverage. Side-band
+// validator behaviour (answer_text quality, mutation-language detection,
+// fallback) is tested in routing/__tests__/validator-explanation.test.ts.
+describe('OLUMI_ACTION_TOOL.action.explanation field', () => {
+  it('declares an optional explanation object on action with answer_text required', () => {
+    const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
+      properties: { explanation?: { type: string; required?: readonly string[]; properties?: Record<string, unknown> } };
+      required: readonly string[];
+    };
+    expect(action.properties.explanation).toBeDefined();
+    expect(action.properties.explanation?.type).toBe('object');
+    expect(action.properties.explanation?.required).toEqual(['answer_text']);
+    expect(action.properties.explanation?.properties).toHaveProperty('answer_text');
+    expect(action.properties.explanation?.properties).toHaveProperty('evidence_used');
+    expect(action.properties.explanation?.properties).toHaveProperty('cited_fields');
+    // explanation is intentionally NOT in action.required: it is optional on
+    // the wire so Sonnet can omit it (bare tool_use). The side-band validator
+    // enforces presence per-handler; absent → deterministic fallback.
+    expect(action.required).not.toContain('explanation');
+  });
+
+  it('parser accepts an execute proposal carrying an explanation payload', () => {
+    const input = {
+      ...VALID_EXECUTE_INPUT,
+      action: {
+        ...VALID_EXECUTE_INPUT.action,
+        handler_id: 'explain_results',
+        explanation: {
+          answer_text: 'Engineering Capacity is the leading driver because it has the strongest causal footprint across your goal.',
+          evidence_used: ['analysis.leading_option', 'analysis.top_drivers'],
+          cited_fields: ['Engineering Capacity', 'Q3 Delivery Throughput'],
+        },
+      },
+    };
+    const result = parseToolCallResponse(input);
+    expect(result.intent_class).toBe('execute');
+    if (result.intent_class === 'execute') {
+      expect(result.action.explanation?.answer_text).toContain('Engineering Capacity');
+      expect(result.action.explanation?.evidence_used).toHaveLength(2);
+      expect(result.action.explanation?.cited_fields).toHaveLength(2);
+    }
+  });
+
+  it('parser accepts an execute proposal with NO explanation field (bare tool_use)', () => {
+    // Reproduces the v40 staging failure shape: handler_id explanation
+    // handler with no explanation payload. Parsing must succeed; the
+    // side-band validator handles the missing-field case.
+    const input = {
+      ...VALID_EXECUTE_INPUT,
+      action: { ...VALID_EXECUTE_INPUT.action, handler_id: 'explain_results' },
+    };
+    const result = parseToolCallResponse(input);
+    expect(result.intent_class).toBe('execute');
+    if (result.intent_class === 'execute') {
+      expect(result.action.explanation).toBeUndefined();
+    }
+  });
+});

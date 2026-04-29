@@ -144,16 +144,54 @@ export const ProposalParameterSchema = z.object({
 export type ProposalParameter = z.infer<typeof ProposalParameterSchema>;
 
 /**
+ * Proposal explanation — answer-carrying payload for explanation handlers
+ * (`explain_from_structure`, `explain_results`, `what_would_flip`). Sonnet
+ * fills `answer_text` with the complete user-facing explanation; the
+ * side-band validator (`validateExplanationAnswer`) decides whether to use
+ * it or fall through to deterministic fallback. Optional everywhere on the
+ * wire — when Sonnet omits it (bare tool_use), the side-band check stamps
+ * `answer_text_valid: false` and the handler composes a fallback.
+ *
+ * `evidence_used` and `cited_fields` are observability-only: emitted as
+ * telemetry on the routing turn, never persisted on the handler fact and
+ * never surfaced to the user.
+ */
+export const ProposalExplanationSchema = z.object({
+  answer_text: z.string(),
+  evidence_used: z.array(z.string()).optional(),
+  cited_fields: z.array(z.string()).optional(),
+});
+export type ProposalExplanation = z.infer<typeof ProposalExplanationSchema>;
+
+/**
+ * The set of handler ids that own answer-carrying explanation responses.
+ * Drives: side-band answer-text validation, suppress-orientation default at
+ * compose time, mutation-language guard's "is this an explanation turn?"
+ * check. Mutation/computation handlers are NOT in this set; they tolerate a
+ * stray `explanation` field by silently dropping it (telemetry only).
+ */
+export const EXPLANATION_HANDLER_IDS = new Set<string>([
+  'explain_from_structure',
+  'explain_results',
+  'what_would_flip',
+]);
+
+/**
  * Action — the concrete payload of an execute proposal. Handler id is a free
  * string here; the validator cross-checks it against the registry. Keeping
  * it a free string avoids a circular import onto V5ActionType, which would
  * couple the canonical enum file to handler registry types.
+ *
+ * `explanation` is optional in the wire schema. The side-band validator
+ * enforces presence + quality for explanation handlers; mutation/computation
+ * handlers tolerate it as a stray field (silently ignored).
  */
 export const ProposalActionSchema = z.object({
   handler_id: z.string().min(1),
   entity: ProposalEntitySchema,
   parameters: z.array(ProposalParameterSchema).default([]),
   cited_context_fields: z.array(ContextPackFieldSchema).default([]),
+  explanation: ProposalExplanationSchema.optional(),
 });
 export type ProposalAction = z.infer<typeof ProposalActionSchema>;
 

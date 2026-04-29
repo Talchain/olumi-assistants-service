@@ -85,23 +85,36 @@ export const OLUMI_ACTION_TOOL = {
               '\n' +
               '• run_analysis — run the Monte Carlo analysis on the current scenario. ' +
               'Pick when the user asks to run, simulate, or evaluate the model. ' +
-              'Mutates: produces analysis projection state.\n' +
+              'Mutates: produces analysis projection state. Do NOT include ' +
+              'an `explanation` payload on this handler.\n' +
               '\n' +
               '• explain_from_structure — answer pre-analysis structural questions ' +
               'about factor influence, causal relationships, or model structure. ' +
               'Pick when the user asks "what factor most influences X?" or ' +
               '"why might option Y be the leading option?" and no analysis ' +
-              'has been run yet. Answers from graph structure only. No mutation.\n' +
+              'has been run yet. Answers from graph structure only. No mutation. ' +
+              'You MUST populate `explanation.answer_text` with your complete ' +
+              'structural explanation. Reference specific factors, causal link ' +
+              'strengths, and pathways from the graph. Do not use mutation ' +
+              'language (proposing, adding, updating).\n' +
               '\n' +
               '• explain_results — answer post-analysis explanation questions ' +
               '("why did X win?", "explain the analysis results"). Requires ' +
               'a prior analysis run; if none exists the handler will respond ' +
-              'with a prompt to run analysis first. No mutation.\n' +
+              'with a prompt to run analysis first. No mutation. You MUST ' +
+              'populate `explanation.answer_text` with your complete analysis ' +
+              'explanation: cite the leading option, probability, runner-up, ' +
+              'margin, top drivers, and robustness from context. Do not use ' +
+              'mutation language.\n' +
               '\n' +
               '• what_would_flip — answer sensitivity / robustness questions ' +
               '("what would change this outcome?", "how robust is this result?"). ' +
               'Requires a prior analysis run; if none exists the handler will ' +
-              'respond with a prompt to run analysis first. No mutation.\n' +
+              'respond with a prompt to run analysis first. No mutation. You ' +
+              'MUST populate `explanation.answer_text` with your complete ' +
+              'sensitivity explanation: cite margins, top drivers, robustness ' +
+              'band, and what changes would alter the outcome. Do not use ' +
+              'mutation language.\n' +
               '\n' +
               'Graph structural changes (draft_graph, edit_graph) are ' +
               'dispatched by the system before routing and never reach this ' +
@@ -198,6 +211,49 @@ export const OLUMI_ACTION_TOOL = {
             },
           },
           cited_context_fields: { type: 'array', items: { type: 'string' } },
+          // Answer-carrying explanation payload. Required by the side-band
+          // validator for explanation handlers (explain_from_structure,
+          // explain_results, what_would_flip); silently ignored on
+          // mutation/computation handlers (run_analysis). When omitted on an
+          // explanation handler, the side-band check stamps
+          // `answer_text_valid: false` and the handler composes a
+          // deterministic fallback from the context pack — the user always
+          // gets a useful response. evidence_used and cited_fields are
+          // observability only (telemetry); never persisted.
+          explanation: {
+            type: 'object',
+            additionalProperties: false,
+            description:
+              'For explanation handlers (explain_from_structure, explain_results, ' +
+              'what_would_flip): your complete user-facing answer. Populate ' +
+              'answer_text with the full answer; this is what the user reads. ' +
+              'Do not use mutation language (proposing, adding, updating). For ' +
+              'mutation handlers (run_analysis): omit this field.',
+            properties: {
+              answer_text: {
+                type: 'string',
+                description:
+                  'The complete user-facing explanation. Sentence case, ' +
+                  'British English, no bullet lists. Reference specific values, ' +
+                  'factor labels, and causal links from the context.',
+              },
+              evidence_used: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'Observability only: ContextPack field paths the answer ' +
+                  'cites (e.g. "analysis.leading_option"). Never user-visible.',
+              },
+              cited_fields: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'Observability only: specific labels or values referenced ' +
+                  'in answer_text. Never user-visible.',
+              },
+            },
+            required: ['answer_text'],
+          },
         },
         required: ['handler_id', 'entity'],
       },
