@@ -93,6 +93,9 @@ import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.j
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
+import type { GraphV3T } from './types.js';
+import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
@@ -160,7 +163,10 @@ function sendFinalised200(
   requestId: string,
   exitPath: V5ExitPath,
   candidate: import('@talchain/schemas/boundary').OlumiResponse,
-  ctx: { readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload },
+  ctx: {
+    readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
+    readonly graph: GraphV3T | null;
+  },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
   // `reply.code(200).send(<non-branded>)` a tsc error. To satisfy that,
@@ -173,11 +179,28 @@ function sendFinalised200(
   // double-finalisation is cheap (WeakSet add + shallow spread + ISO
   // stamp) and idempotent in observable behaviour; the second computed_at
   // is sub-ms-different from the first.
+  // Output safety — central egress entity-ID leak guard. Runs BEFORE
+  // validateEgress so the validator sees the cleaned envelope. Also runs on
+  // the post-validate value (and the fallback) so re-finalisation cannot
+  // re-introduce a leak via a future validator transform. The fallback is
+  // currently hard-coded clean; scrubbing it is defence-in-depth against
+  // future fallback drift. See output-safety.ts for the design rationale.
   const candidateFinalised = finaliseV5Response(candidate, ctx);
-  const egress = validateEgress(candidateFinalised, requestId);
+  const candidateSanitised = sanitiseOlumiResponseForEgress(candidateFinalised, {
+    graph: ctx.graph,
+    requestId,
+    exitPath,
+  });
+  const egress = validateEgress(candidateSanitised, requestId);
   const wireBody = egress.ok
-    ? finaliseV5Response(egress.value, ctx)
-    : finaliseV5Response(egress.fallback, ctx);
+    ? finaliseV5Response(
+        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath }),
+        ctx,
+      )
+    : finaliseV5Response(
+        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath }),
+        ctx,
+      );
   if (!egress.ok) {
     log.error(
       { request_id: requestId, exit_path: exitPath },
@@ -424,6 +447,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
       return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
         analysisReady: sysResult.analysisReady,
+        graph: sysResult.graph,
       });
     }
 
@@ -493,6 +517,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // outcome === 'ok'
         return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
           analysisReady: cc.analysisReady,
+          graph: cc.graph,
         });
       } catch (err) {
         log.error(
@@ -560,6 +585,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         }
         return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
           analysisReady: dg.analysisReady,
+          graph: dg.graph,
         });
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
@@ -640,6 +666,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         }
         return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
           analysisReady: eg.analysisReady,
+          graph: eg.graph,
         });
       } catch (err) {
         log.error(
@@ -726,8 +753,19 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return reply.code(500).send(boundaryError);
     }
 
+    // Safe-parse the ingress graphState into a strict GraphV3T for the
+    // egress sanitiser's label resolution. Parse failure (or absent
+    // graphState) → null; the sanitiser falls back to prefix-aware
+    // generic wording without throwing.
+    const turnGraph: GraphV3T | null = extensions.graphState
+      ? (() => {
+          const parsed = GraphV3.safeParse(extensions.graphState);
+          return parsed.success ? parsed.data : null;
+        })()
+      : null;
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
+      graph: turnGraph,
     });
   });
 }

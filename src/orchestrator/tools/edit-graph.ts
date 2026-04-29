@@ -64,6 +64,7 @@ import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patc
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
+import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
 import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
 import { STRUCTURAL_EDGE_DEFAULTS } from "../context/constants.js";
 import { enforceProposalLanguage } from "../deterministic/proposal-language-guard.js";
@@ -2285,21 +2286,58 @@ export async function handleEditGraph(
       "edit_graph completed",
     );
 
-    // Build assistant text: coaching.summary preferred, warnings appended
+    // Build assistant text: coaching.summary preferred, warnings appended.
+    //
+    // Layer 1 entity-ID leak guard: every string composed into `textParts`
+    // here is LLM- or PLoT-generated and may reference entity IDs by their
+    // raw slug (e.g. `fac_delivery_cost`). We scrub each fragment via the
+    // V5 egress sanitiser, preferring the post-mutation `appliedGraph` for
+    // label resolution and falling back to `context.graph` (pre-mutation,
+    // same source `buildPatchSummary` uses) and finally to prefix-aware
+    // generic wording. Output safety is about the output, not the
+    // provenance — PLoT-generated repair `reason` strings are scrubbed too.
+    //
+    // Telemetry asymmetry (intentional): Layer 1 logs the raw leaked ID
+    // here for triage. Layer 2 (output-safety.ts central scan) logs only
+    // the prefix type, never the raw ID. This is deliberate — Layer 1 is
+    // internal observability for known-bug diagnosis; Layer 2 is the egress
+    // boundary and must not surface raw user-visible IDs to log infra.
+    const scrubGraph = appliedGraph ?? context.graph ?? null;
+    const scrubFragment = (raw: string): string => {
+      const r = sanitiseUserFacingText(raw, scrubGraph);
+      if (r.matches.length > 0) {
+        for (const m of r.matches) {
+          log.info(
+            {
+              event: 'v5.internal_id_leak_caught',
+              request_id: requestId,
+              handler_id: 'edit_graph',
+              prefix: m.prefix,
+              resolution: m.resolved,
+              // Layer 1 includes the raw text snippet for triage.
+              snippet: raw.length > 240 ? raw.slice(0, 240) + '…' : raw,
+            },
+            'V5 edit_graph: entity-id leak caught at handler boundary',
+          );
+        }
+      }
+      return r.text;
+    };
+
     let assistantText: string | null = null;
     const textParts: string[] = [];
 
     if (llmResult.coaching?.summary) {
-      textParts.push(llmResult.coaching.summary);
+      textParts.push(scrubFragment(llmResult.coaching.summary));
     }
     if (repairsApplied && repairsApplied.length > 0) {
       const repairSummary = repairsApplied
-        .map((r) => `- ${'code' in r && r.code ? `[${r.code}] ` : ''}${r.reason}`)
+        .map((r) => `- ${'code' in r && r.code ? `[${r.code}] ` : ''}${scrubFragment(r.reason)}`)
         .join('\n');
       textParts.push(`PLoT applied ${repairsApplied.length} repair(s) to ensure semantic consistency:\n${repairSummary}`);
     }
     if (llmResult.warnings.length > 0) {
-      textParts.push(`Note: ${llmResult.warnings.join(' ')}`);
+      textParts.push(`Note: ${scrubFragment(llmResult.warnings.join(' '))}`);
     }
 
     if (textParts.length > 0) {

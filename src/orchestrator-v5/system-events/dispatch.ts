@@ -64,6 +64,14 @@ export interface DispatchSystemEventResult {
    * so future implementations can populate it without a type-shape change.
    */
   readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * Graph for the central egress sanitiser. Always `null` here as a
+   * deliberate documented choice: system-event acknowledgement responses
+   * have empty `assistant_text` and no blocks, so the sanitiser is a no-op
+   * regardless. If a future change exposes a post-mutation graph at this
+   * layer (see `analysisReady` jsdoc above), populate it here too.
+   */
+  readonly graph: null;
 }
 
 export interface DispatchSystemEventParams {
@@ -117,6 +125,7 @@ export async function dispatchSystemEvent(
       response,
       commitPerformed: false,
       commitSkippedReason: 'client_only_event',
+      graph: null,
     };
   }
 
@@ -139,7 +148,7 @@ export async function dispatchSystemEvent(
       },
       'V5 system event committed',
     );
-    return { response, commitPerformed: true };
+    return { response, commitPerformed: true, graph: null };
   } catch (err) {
     log.error(
       {
@@ -150,6 +159,6 @@ export async function dispatchSystemEvent(
       },
       'V5 system event commit failed',
     );
-    return { response, commitPerformed: false };
+    return { response, commitPerformed: false, graph: null };
   }
 }

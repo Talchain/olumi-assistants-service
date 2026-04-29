@@ -52,6 +52,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 
 import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
+import type { GraphV3T } from '../../orchestrator/types.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -75,6 +76,12 @@ export interface DispatchDraftGraphResult {
    * "no fresh readiness this turn" rather than as a blocker.
    */
   readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * Post-repair graph used for label resolution by the central egress
+   * sanitiser (sanitiseOlumiResponseForEgress). Null when the draft did
+   * not produce a graph — sanitiser falls back to prefix-aware generic.
+   */
+  readonly graph: GraphV3T | null;
 }
 
 /**
@@ -266,7 +273,7 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch committed',
     );
-    return { response, commitPerformed: true, analysisReady };
+    return { response, commitPerformed: true, analysisReady, graph: draftResult.graphOutput };
   } catch (err) {
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
     // Client sees the generic retry prompt; the response built below is server-side only.
@@ -281,6 +288,6 @@ export async function dispatchDraftGraph(
       'V5 draft_graph dispatch — commit failed; route returns 500 INTERNAL_ERROR',
     );
     const response = draftResultToOlumiResponse(draftResult, payload, false);
-    return { response, commitPerformed: false };
+    return { response, commitPerformed: false, graph: draftResult.graphOutput };
   }
 }

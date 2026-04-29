@@ -80,6 +80,12 @@ export interface DispatchEditGraphResult {
    * the UI's prior `ceeAnalysisReady` remains correct.
    */
   readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * Post-edit graph used for label resolution by the central egress
+   * sanitiser (sanitiseOlumiResponseForEgress). Null when the edit was
+   * rejected — sanitiser falls back to prefix-aware generic wording.
+   */
+  readonly graph: GraphV3T | null;
 }
 
 /**
@@ -483,7 +489,7 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch committed',
     );
-    return { response, commitPerformed: true, analysisReady };
+    return { response, commitPerformed: true, analysisReady, graph: editResult.appliedGraph ?? null };
   } catch (err) {
     log.error(
       {
@@ -493,6 +499,6 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch — commit failed',
     );
-    return { response, commitPerformed: false, analysisReady };
+    return { response, commitPerformed: false, analysisReady, graph: editResult.appliedGraph ?? null };
   }
 }

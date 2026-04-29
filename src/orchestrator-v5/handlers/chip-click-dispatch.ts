@@ -107,8 +107,10 @@ export type DispatchChipClickRunAnalysisResult =
       readonly response: OlumiResponse;
       readonly commitPerformed: true;
       readonly analysisReady?: AnalysisReadyPayload;
+      /** Snapshot graph for label resolution by central egress sanitiser. */
+      readonly graph: GraphV3T | null;
     }
-  | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined }
+  | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined; readonly graph: GraphV3T | null }
   | {
       readonly outcome: 'handler_failure';
       readonly response: OlumiResponse;
@@ -116,12 +118,14 @@ export type DispatchChipClickRunAnalysisResult =
       readonly causeKind: string;
       readonly retryable: boolean;
       readonly analysisReady?: undefined;
+      readonly graph: GraphV3T | null;
     }
   | {
       readonly outcome: 'handler_result_invalid';
       readonly response: OlumiResponse;
       readonly commitPerformed: false;
       readonly analysisReady?: undefined;
+      readonly graph: GraphV3T | null;
     };
 
 export async function dispatchChipClickRunAnalysis(
@@ -189,6 +193,13 @@ export async function dispatchChipClickRunAnalysis(
     return cachedSnapshot;
   };
 
+  // Graph for the central egress sanitiser. Same single-source-of-truth
+  // contract as `cachedSnapshot.graph` used for readiness derivation
+  // (loadScenarioSnapshotForRunAnalysis already runs GraphV3.safeParse).
+  // Null on the test path or when snapshot load failed — sanitiser then
+  // falls back to prefix-aware generic wording.
+  const snapshotGraph: GraphV3T | null = (cachedSnapshot?.graph as GraphV3T | undefined) ?? null;
+
   // Reuse the memoised default PLoT client so per-call registry
   // construction does not also construct a fresh PLoTClientImpl (which
   // holds undici dispatchers). The handler swap we need here is the
@@ -217,6 +228,7 @@ export async function dispatchChipClickRunAnalysis(
         handlerFacts: [],
       }),
       commitPerformed: false,
+      graph: snapshotGraph,
     };
   }
 
@@ -270,6 +282,7 @@ export async function dispatchChipClickRunAnalysis(
           commitPerformed: false,
           causeKind: err.cause_kind,
           retryable: err.retryable,
+          graph: snapshotGraph,
         };
       }
       if (err instanceof HandlerResultInvalidError) {
@@ -285,6 +298,7 @@ export async function dispatchChipClickRunAnalysis(
           outcome: 'handler_result_invalid',
           response: failureResponse,
           commitPerformed: false,
+          graph: snapshotGraph,
         };
       }
       throw err;
@@ -367,7 +381,7 @@ export async function dispatchChipClickRunAnalysis(
       const analysisReady = cachedSnapshot
         ? deriveAnalysisReadyFromSnapshot(cachedSnapshot, requestId, payload.scenario_id)
         : undefined;
-      return { outcome: 'ok', response, commitPerformed: true, analysisReady };
+      return { outcome: 'ok', response, commitPerformed: true, analysisReady, graph: snapshotGraph };
     } catch (err) {
       log.error(
         {
@@ -377,7 +391,7 @@ export async function dispatchChipClickRunAnalysis(
         },
         'V5 chip_click run_analysis dispatch — commit failed',
       );
-      return { outcome: 'commit_failed', response, commitPerformed: false };
+      return { outcome: 'commit_failed', response, commitPerformed: false, graph: snapshotGraph };
     }
   } finally {
     clearTimeout(turnTimer);

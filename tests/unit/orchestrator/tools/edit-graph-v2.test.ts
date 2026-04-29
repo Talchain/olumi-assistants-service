@@ -615,7 +615,12 @@ describe("envelope and coaching wiring", () => {
     // reads a coherent proposal frame instead of completion language.
     expect(result.assistantText).toContain("Proposing to add a competitor response factor");
     expect(result.assistantText).toContain("Note:");
-    expect(result.assistantText).toContain("fac_competitor added as external");
+    // Layer 1 entity-ID leak guard scrubs `fac_competitor` from warnings:
+    // the test fixture's graph does not contain that node, so the unambiguous
+    // `fac` prefix falls back to the prefix-aware generic "the relevant factor".
+    // (Was previously asserting the raw ID — that was a bug pre-output-safety.)
+    expect(result.assistantText).toContain("the relevant factor added as external");
+    expect(result.assistantText).not.toContain("fac_competitor");
   });
 
   // Test 10: Empty operations → assistant_text is warnings + coaching
