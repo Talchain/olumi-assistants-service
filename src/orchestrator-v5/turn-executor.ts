@@ -1231,6 +1231,31 @@ export async function runTurnExecutor(
       'V5 TurnExecutor composed response chips',
     );
 
+    // STEP 6.5 — log-only mutation-language guard (defence-in-depth).
+    //
+    // Primary mutation-language detection lives in
+    // `validateExplanationAnswer` (Commit 2): a match there marks the
+    // answer invalid, and the handler renders the deterministic fallback.
+    // This STEP 6.5 check is detection-only on the FINAL composed
+    // assistant_text; if mutation language survived to compose despite
+    // the side-band check, emit telemetry so ops can see drift. We
+    // explicitly DO NOT swap the text here — the user-visible response is
+    // already what the handler chose; mutating it post-compose would risk
+    // user-visible inconsistency between assistant_text and chips.
+    if (
+      handlerIdForCommit &&
+      !['draft_graph', 'edit_graph'].includes(handlerIdForCommit) &&
+      composedOk.assistant_text &&
+      containsMutationLanguage(composedOk.assistant_text)
+    ) {
+      emit(TelemetryEvents.V5MutationLanguageGuard, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        handler_id: handlerIdForCommit,
+        text_length: composedOk.assistant_text.length,
+      });
+    }
+
     // ==================================================================
     // STEP 7 — COMMIT (unchanged contract)
     // ==================================================================
