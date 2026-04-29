@@ -435,10 +435,20 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
     // non-noop run_analysis) would falsely emit a "Run analysis" chip.
     // The fix routes deriveProjectionStatus through priorFacts AND the
     // populated analysis projection.
+    //
+    // The handler emits `precondition_unmet: false` on the post-analysis
+    // path (explain-results.ts:96) — match that here so the precondition-
+    // unmet rule above this one does not fire spuriously.
     const priorRunAnalysis: HandlerFact = runAnalysisFact();
+    const postAnalysisExplainResultsFact: HandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: false, option_count: 2 },
+    };
     const chips = generateChips({
       stage: 'analyse',
-      handlerFacts: [noopExplainResultsFact()],
+      handlerFacts: [postAnalysisExplainResultsFact],
       priorFacts: [priorRunAnalysis],
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
@@ -547,5 +557,112 @@ describe('deriveProjectionStatus', () => {
     const { deriveProjectionStatus } = await import('../chip-generator.js');
     expect(deriveProjectionStatus([], analysisAt('stable'))).toBe('facts_absent');
     expect(deriveProjectionStatus([], analysisAt('stable'), [])).toBe('facts_absent');
+  });
+});
+
+// V5 spec §7 every-failure-path-includes-a-chip — explicit precondition rule.
+// When the handler returned a precondition-fail outcome (Test B path), the
+// chip MUST fire on `result.precondition_unmet === true` regardless of how
+// `priorFacts` is threaded. Independent of `deriveProjectionStatus`.
+describe('generateChips — V5 spec §7 explicit precondition_unmet rule', () => {
+  function preconditionUnmetExplainResultsFact(): HandlerFact {
+    return {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: true, option_count: 4 },
+    };
+  }
+
+  function preconditionUnmetWhatWouldFlipFact(): HandlerFact {
+    return {
+      fact_type: 'what_would_flip',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: true, option_count: 4 },
+    };
+  }
+
+  it('explain_results precondition_unmet:true + analysisReady.status: ready → executable run_analysis chip', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [preconditionUnmetExplainResultsFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+    expect(chips[0].id).toBe('chip_action_run_analysis');
+    expect(chips[0].label).toBe('Run analysis');
+  });
+
+  it('what_would_flip precondition_unmet:true + analysisReady.status: ready → executable run_analysis chip', () => {
+    const chips = generateChips({
+      stage: 'decide',
+      handlerFacts: [preconditionUnmetWhatWouldFlipFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].action_type).toBe('run_analysis');
+    expect(chips[0].id).toBe('chip_action_run_analysis');
+  });
+
+  it('explain_results precondition_unmet:true + analysisReady.status: needs_encoding → no executable chip from precondition rule', () => {
+    // The precondition rule does NOT fire when readiness is not 'ready'.
+    // Downstream rules may emit a conversational fallback; assert the
+    // executable run_analysis chip is suppressed specifically.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [preconditionUnmetExplainResultsFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+      analysisReady: {
+        status: 'needs_encoding',
+        options: [],
+        goal_node_id: 'g',
+      } as never,
+    });
+    for (const c of chips) {
+      expect(c.action_type).not.toBe('run_analysis');
+    }
+  });
+
+  it('explain_results precondition_unmet:true + analysisReady undefined → no executable chip', () => {
+    // Readiness unknown — the precondition rule does not fire. Downstream
+    // facts_absent rule emits the conversational setup prompt.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [preconditionUnmetExplainResultsFact()],
+      analysis: null,
+      validationRegistry: REGISTRY,
+    });
+    for (const c of chips) {
+      expect(c.action_type).not.toBe('run_analysis');
+    }
+  });
+
+  it('explain_results happy path (precondition_unmet:false, prior run_analysis present) → NO run_analysis chip from precondition rule', () => {
+    // Regression guard: the precondition rule must read the typed
+    // result.precondition_unmet field, not just fact_type === 'explain_results'.
+    const happyPathFact: HandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: { precondition_unmet: false, option_count: 4 },
+    };
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [happyPathFact],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+    });
+    for (const c of chips) {
+      expect(c.action_type).not.toBe('run_analysis');
+    }
   });
 });

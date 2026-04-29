@@ -18,6 +18,11 @@
  *  4. Must NOT contain mutation language (uses `containsMutationLanguage`)
  *  5. For explain_results / what_would_flip without a non-noop run_analysis
  *     fact: must NOT contain analysis language (probability, driver, etc.)
+ *  6. When `analysisStalenessReason` is present and the handler is NOT
+ *     `explain_from_structure`, the staleness caveat phrase MUST appear
+ *     before any numeric figure (probability, percentage points,
+ *     sensitivity). Trust contract: the user reads "treat figures as
+ *     directional" before the figures themselves.
  *
  * Precondition bypass: when `explain_results` / `what_would_flip` has no
  * non-noop `run_analysis` fact, ALL answer-text validation is skipped — the
@@ -75,7 +80,8 @@ export type ExplanationAnswerErrorReason =
   | 'too_short'
   | 'forbidden_internal_term'
   | 'mutation_language_detected'
-  | 'analysis_language_without_analysis_fact';
+  | 'analysis_language_without_analysis_fact'
+  | 'staleness_caveat_must_precede_figures';
 
 export interface ExplanationAnswerVerdict {
   /**
@@ -107,11 +113,17 @@ export interface ExplanationAnswerVerdict {
  * @param explanation The Sonnet-supplied explanation payload, if present.
  * @param priorFacts The conversation's prior handler facts. Used to detect
  *   the precondition bypass for `explain_results` / `what_would_flip`.
+ * @param analysisStalenessReason When non-null, the analysis projection is
+ *   loaded from a prior run with unknown freshness. Activates the staleness
+ *   ordering rule (rule 6): the caveat phrase must precede any numeric in
+ *   the answer text. Skipped for `explain_from_structure` since structural
+ *   answers cite graph link strengths, not analysis figures.
  */
 export function validateExplanationAnswer(
   handlerId: string,
   explanation: ProposalExplanation | undefined,
   priorFacts: readonly SideBandPriorFact[],
+  analysisStalenessReason?: string | null,
 ): ExplanationAnswerVerdict {
   // Non-explanation handler: nothing to do here. Caller will not attach
   // explanation to the invocation; mutation handlers' stray fields are
@@ -178,6 +190,24 @@ export function validateExplanationAnswer(
     }
   }
 
+  // Rule 6: staleness caveat must precede figures. Trust contract — the
+  // user reads "treat figures as directional" before the figures
+  // themselves. Skipped for `explain_from_structure`: structural answers
+  // cite graph link strengths, not analysis figures, and the structure
+  // projection has no `staleness_reason` field.
+  if (
+    analysisStalenessReason != null &&
+    handlerId !== 'explain_from_structure'
+  ) {
+    const numericIdx = firstNumericIndex(answerText);
+    if (numericIdx !== null) {
+      const caveatIdx = firstStalenessCaveatIndex(answerText);
+      if (caveatIdx === null || numericIdx < caveatIdx) {
+        return invalid(answerText, explanation, 'staleness_caveat_must_precede_figures');
+      }
+    }
+  }
+
   return {
     skip: false,
     payload: {
@@ -187,6 +217,87 @@ export function validateExplanationAnswer(
       cited_fields: explanation.cited_fields,
     },
   };
+}
+
+// Numeric phrasings observed in v5 staging answer-text (Test D/F/H excerpts):
+// `0.926`, `0.043`, `1.0`, `88.3 percentage points`, `at 0.926 probability`,
+// `sensitivity value of 1.0`, `sensitivity 0.177`. Each pattern is anchored
+// so it does not over-match plain dates, version numbers, or list ordinals.
+const NUMERIC_PATTERNS: readonly RegExp[] = [
+  // Bare decimals (catches `0.926`, `0.043`, `1.0`, `88.3`, `0.177`,
+  // `0.361`). Anchored on word boundary so "v1.2" doesn't match.
+  /\b\d+\.\d+\b/,
+  // Percentages (`5%`, `88.3 %`).
+  /\b\d+(\.\d+)?\s*%/,
+  // Percentage-point spans (`88.3 percentage points`, `88pp`) and British-
+  // English `per cent` (`62 per cent`, `5.5 per cent`). The bare decimal
+  // pattern above catches decimals like `0.62` but integers like `62 per
+  // cent` would otherwise slip past it; this branch also makes the
+  // percentage-point semantics explicit so a future edit dropping the
+  // decimal portion does not weaken the rule.
+  /\b\d+(\.\d+)?\s*(?:percentage points|pp|per cent)\b/i,
+  // Sensitivity values cited inline (`sensitivity value of 1.0`,
+  // `sensitivity 0.177`). Captures the numeric immediately after the
+  // sensitivity reference even when it is an integer.
+  /\bsensitivity\s*(?:value\s*of\s*)?\d/i,
+  // Inline "at <decimal>" probability/sensitivity citations (`at 0.926
+  // probability`, `at 1.0`).
+  /\bat\s+\d+\.\d+\b/i,
+];
+
+/**
+ * Index of the first numeric figure in the text (probability, percentage,
+ * percentage points, sensitivity value, or "at 0.X" inline citation).
+ * Returns null when no numeric pattern matches. Used by rule 6 to compare
+ * against the staleness-caveat position.
+ */
+export function firstNumericIndex(text: string): number | null {
+  let earliest: number | null = null;
+  for (const pat of NUMERIC_PATTERNS) {
+    const match = pat.exec(text);
+    if (match && match.index >= 0) {
+      if (earliest === null || match.index < earliest) {
+        earliest = match.index;
+      }
+    }
+  }
+  return earliest;
+}
+
+// Staleness-caveat phrasings. The first six are the canonical caveats from
+// the brief; "loaded from a prior run" and "with unknown freshness" appear
+// in the deterministic fallback's reordered staleness sentence — including
+// them ensures the fallback's own output validates after reorder.
+const STALENESS_CAVEAT_PATTERNS: readonly RegExp[] = [
+  /\bstale\b/i,
+  /\bprior run\b/i,
+  /\blatest available run\b/i,
+  /\bmay be outdated\b/i,
+  /\bfreshness unknown\b/i,
+  /\bmodel has changed\b/i,
+  /\brerun before relying\b/i,
+  /\bdirectional rather than definitive\b/i,
+  /\bloaded from a prior run\b/i,
+  /\bwith unknown freshness\b/i,
+];
+
+/**
+ * Index of the first staleness-caveat phrase in the text, or null when
+ * none of the recognised phrases appear. The phrase set covers brief-
+ * specified canonical caveats and the deterministic-fallback's own
+ * staleness sentence so structurally-correct fallback output validates.
+ */
+export function firstStalenessCaveatIndex(text: string): number | null {
+  let earliest: number | null = null;
+  for (const pat of STALENESS_CAVEAT_PATTERNS) {
+    const match = pat.exec(text);
+    if (match && match.index >= 0) {
+      if (earliest === null || match.index < earliest) {
+        earliest = match.index;
+      }
+    }
+  }
+  return earliest;
 }
 
 function invalid(
