@@ -48,9 +48,7 @@ import type {
 } from '../registry.js';
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { resolveOptionCount } from './no-op-helpers.js';
-
-const SAFE_FALLBACK_ASSISTANT_TEXT =
-  'Here is what the model structure shows.' as const;
+import { composeExplainFromStructureFallback } from './explanation-fallback.js';
 
 export function createExplainFromStructureHandler(): HandlerFn {
   return async function explainFromStructureHandler(
@@ -73,14 +71,22 @@ export function createExplainFromStructureHandler(): HandlerFn {
       );
     }
 
-    const orientation = invocation.orientationText.trim();
+    // Answer-carrying contract (post-Commit-3): use Sonnet's answer_text
+    // when valid; otherwise compose a deterministic fallback from the
+    // structure projection (top causal links, named-factor pathways, goal
+    // label). The turn-executor forces suppress_orientation for explanation
+    // handlers, so Sonnet's pre-tool-call orientation never reaches the user.
+    const explanation = invocation.explanation;
     const assistantText =
-      orientation === '' ? SAFE_FALLBACK_ASSISTANT_TEXT : '';
+      explanation && explanation.answer_text_valid
+        ? explanation.answer_text
+        : composeExplainFromStructureFallback(invocation.structureProjection);
 
     return {
       assistant_text: assistantText,
       handler_facts: [parsed.data],
       llm_calls_used: 0,
+      suppress_orientation: true,
     };
   };
 }

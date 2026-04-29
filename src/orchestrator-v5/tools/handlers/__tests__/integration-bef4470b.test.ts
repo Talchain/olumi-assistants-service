@@ -217,10 +217,13 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
     const handler = createExplainFromStructureHandler();
     const outcome = await handler(bef4470bInvocation(proposal, orientation));
 
-    // No-op contract: zero LLM calls, single noop fact, assistant_text=''
-    // (orientation surfaces via the compose pipeline).
+    // Answer-carrying contract (post-Commit-4): handler always owns the
+    // user-visible string, suppress_orientation is always true. Without an
+    // explanation payload OR a structureProjection, the handler composes
+    // the generic "could not be summarised" fallback. Compose with a
+    // structureProjection in dedicated tests; this integration test only
+    // checks the no-op fact persistence and the suppress_orientation flag.
     expect(outcome.llm_calls_used).toBe(0);
-    expect(outcome.assistant_text).toBe('');
     expect(outcome.handler_facts).toHaveLength(1);
     const fact = outcome.handler_facts[0];
     expect(fact.fact_type).toBe('explain_from_structure');
@@ -228,6 +231,6 @@ describe('integration: bef4470b ENTITY_KIND_MISMATCH replay', () => {
     if (fact.fact_type === 'explain_from_structure') {
       expect(fact.result.option_count).toBe(2);
     }
-    expect(outcome.suppress_orientation).toBeUndefined();
+    expect(outcome.suppress_orientation).toBe(true);
   });
 });

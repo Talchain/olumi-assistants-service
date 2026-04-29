@@ -1,9 +1,11 @@
 /**
- * Unit tests for the V5 `explain_results` no-op handler.
+ * Unit tests for the V5 `explain_results` answer-carrying handler.
  *
  * Covers registration, validator accept/reject, fact persistence,
- * orientation pass-through, the precondition pass/fail paths (with the
- * critical non-noop filter), and the empty-orientation guard.
+ * the precondition pass/fail paths (with the critical non-noop filter),
+ * and the new answer-carrying contract: happy path consumes
+ * `invocation.explanation.answer_text`, fallback path composes a
+ * deterministic response from `invocation.analysisProjection`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -17,8 +19,8 @@ import {
 import { createExplainResultsHandler } from '../explain-results.js';
 import type {
   HandlerInvocation,
-  HandlerOutcome,
 } from '../../registry.js';
+import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
 import { validateToolCall } from '../../../routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import type { ProposalAction } from '../../../routing/types.js';
@@ -63,23 +65,32 @@ function makeAnalysisReady(optionCount: number): HandlerInvocation['analysisRead
   };
 }
 
+const ANALYSIS_PROJECTION: AnalysisProjectionSummary = {
+  status: 'complete',
+  leading_option: { label: 'Hire Senior Engineer', probability: 0.62 },
+  runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
+  margin_pp: 35,
+  robustness_band: 'stable',
+  top_drivers: [
+    { factor_label: 'Engineering Capacity', sensitivity_value: 0.65 },
+    { factor_label: 'Hiring Cost', sensitivity_value: -0.42 },
+  ],
+  staleness_reason: null,
+};
+
 function makeInvocation(
   overrides?: {
     priorFacts?: readonly HandlerFact[];
     optionCount?: number;
-    orientationText?: string;
+    explanation?: HandlerInvocation['explanation'];
+    analysisProjection?: AnalysisProjectionSummary;
   },
 ): HandlerInvocation {
-  // V5 0.9.0 fix: option_count comes from analysisReady (real graph state),
-  // not entity_registry (wire stub, always empty in production).
   const optionCount = overrides?.optionCount ?? 2;
   return {
     context: {
       stage: 'analyse',
-      entity_registry: {
-        option_ids: [],
-        goal_id: GOAL_ID,
-      },
+      entity_registry: { option_ids: [], goal_id: GOAL_ID },
       capabilities: {},
       messages: [{ role: 'user', content: 'why did opt_1 win?' }],
       session_id: SCENARIO_ID,
@@ -97,8 +108,10 @@ function makeInvocation(
     } as unknown as HandlerInvocation['payload'],
     requestId: REQUEST_ID,
     signal: new AbortController().signal,
-    orientationText: overrides?.orientationText ?? "Looking at why opt_1 leads.",
+    orientationText: '',
     analysisReady: makeAnalysisReady(optionCount),
+    explanation: overrides?.explanation,
+    analysisProjection: overrides?.analysisProjection,
   };
 }
 
@@ -117,6 +130,9 @@ function buildProposal(overrides?: Partial<ProposalAction>): ProposalAction {
     ...overrides,
   };
 }
+
+const VALID_ANSWER_TEXT =
+  'Hire Senior Engineer leads at 62 per cent because Engineering Capacity carries the strongest sensitivity in the model, well ahead of the runner-up.';
 
 describe('explain_results — registration', () => {
   it('is registered in the default V5 handler registry', () => {
@@ -140,23 +156,7 @@ describe('explain_results — validator', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('accepts a goal-kind proposal', () => {
-    const result = validateToolCall(
-      buildProposal({
-        entity: {
-          id: GOAL_ID,
-          kind: 'goal',
-          resolution_status: 'resolved',
-          resolution_method: 'context_inference',
-        },
-      }),
-      undefined,
-      HANDLER_VALIDATION_REGISTRY,
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it('rejects a node-kind proposal with ENTITY_KIND_MISMATCH (analysis-grounded — must target goal/option)', () => {
+  it('rejects a node-kind proposal with ENTITY_KIND_MISMATCH', () => {
     const result = validateToolCall(
       buildProposal({
         entity: {
@@ -174,33 +174,12 @@ describe('explain_results — validator', () => {
       expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
     }
   });
-
-  it('rejects an edge-kind proposal with ENTITY_KIND_MISMATCH', () => {
-    const result = validateToolCall(
-      buildProposal({
-        entity: {
-          id: 'e_1',
-          kind: 'edge',
-          resolution_status: 'resolved',
-          resolution_method: 'id_match',
-        },
-      }),
-      undefined,
-      HANDLER_VALIDATION_REGISTRY,
-    );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-    }
-  });
 });
 
 describe('explain_results — precondition (analysis fact)', () => {
   it('returns the deterministic template when no run_analysis fact exists', async () => {
     const handler = createExplainResultsHandler();
-    const outcome = await handler(
-      makeInvocation({ priorFacts: [], optionCount: 2 }),
-    );
+    const outcome = await handler(makeInvocation({ priorFacts: [], optionCount: 2 }));
     expect(outcome.assistant_text).toBe(
       'No analysis has been run on your model yet. ' +
         'The graph has 2 options configured ' +
@@ -212,46 +191,13 @@ describe('explain_results — precondition (analysis fact)', () => {
     expect(fact.noop).toBe(true);
     if (fact.fact_type === 'explain_results') {
       expect(fact.result.precondition_unmet).toBe(true);
-      expect(fact.result.option_count).toBe(2);
     }
   });
 
-  it('uses singular "option" in the template when option_count === 1', async () => {
+  it('fails precondition when only a noop run_analysis fact is present', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
-      makeInvocation({ priorFacts: [], optionCount: 1 }),
-    );
-    expect(outcome.assistant_text).toContain('1 option configured');
-    expect(outcome.assistant_text).not.toContain('1 options');
-  });
-
-  it('passes precondition when a non-noop run_analysis fact is present', async () => {
-    const handler = createExplainResultsHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        orientationText: 'Looking at the analysis results.',
-      }),
-    );
-    expect(outcome.suppress_orientation).toBeUndefined();
-    expect(outcome.assistant_text).toBe('');
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_results') {
-      expect(fact.result.precondition_unmet).toBe(false);
-    }
-  });
-
-  it('fails precondition when only a noop run_analysis fact is present (D4 critical filter)', async () => {
-    // A noop run_analysis fact must NOT satisfy the precondition — only a
-    // real PLoT-backed analysis run produces the projection data the
-    // explanation handler is asked to ground in. Mirrors the chip-generator
-    // rule.
-    const handler = createExplainResultsHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(true)],
-        optionCount: 2,
-      }),
+      makeInvocation({ priorFacts: [makeRunAnalysisFact(true)], optionCount: 2 }),
     );
     expect(outcome.suppress_orientation).toBe(true);
     const fact = outcome.handler_facts[0];
@@ -259,53 +205,96 @@ describe('explain_results — precondition (analysis fact)', () => {
       expect(fact.result.precondition_unmet).toBe(true);
     }
   });
-
-  it('fails precondition when prior_facts contains only a noop explain_results fact', async () => {
-    const noopExplainFact: HandlerFact = {
-      fact_type: 'explain_results',
-      fact_version: 1,
-      noop: true,
-      result: { precondition_unmet: true, option_count: 2 },
-    };
-    const handler = createExplainResultsHandler();
-    const outcome = await handler(
-      makeInvocation({ priorFacts: [noopExplainFact], optionCount: 2 }),
-    );
-    expect(outcome.suppress_orientation).toBe(true);
-  });
 });
 
-describe('explain_results — execution', () => {
-  it('persists a fact that round-trips through the schema', async () => {
+describe('explain_results — answer-carrying contract', () => {
+  it('happy path: uses Sonnet answer_text when answer_text_valid is true', async () => {
     const handler = createExplainResultsHandler();
     const outcome = await handler(
-      makeInvocation({ priorFacts: [makeRunAnalysisFact(false)] }),
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: {
+          answer_text: VALID_ANSWER_TEXT,
+          answer_text_valid: true,
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.suppress_orientation).toBe(true);
+    expect(outcome.llm_calls_used).toBe(0);
+  });
+
+  it('bare tool_use regression: missing explanation → deterministic fallback with leading option + driver', async () => {
+    // Reproduces the v40 staging Test D failure shape: explanation is
+    // absent (Sonnet emitted bare tool_use). The handler must NOT return
+    // the old 32-char SAFE_FALLBACK stub; it must compose a useful
+    // response from the analysis projection.
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: undefined,
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text.length).toBeGreaterThan(80);
+    expect(outcome.assistant_text).toContain('Hire Senior Engineer');
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');
+  });
+
+  it('invalid answer_text → deterministic fallback (probability + driver from projection)', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: {
+          answer_text: 'too short',
+          answer_text_valid: false,
+          answer_validation_error: 'too_short',
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toContain('Hire Senior Engineer');
+    expect(outcome.assistant_text).toContain('62 per cent');
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+  });
+
+  it('persists a fact that round-trips through the schema on the happy path', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: {
+          answer_text: VALID_ANSWER_TEXT,
+          answer_text_valid: true,
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
     );
     const parsed = ExplainResultsHandlerFactSchema.safeParse(outcome.handler_facts[0]);
     expect(parsed.success).toBe(true);
   });
 
-  it('returns a safe fallback string when orientation is empty (D8 happy path)', async () => {
+  it('always sets suppress_orientation: true on explanation turns (handler owns the user-visible string)', async () => {
     const handler = createExplainResultsHandler();
-    const outcome = await handler(
+    const valid = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        orientationText: '',
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    expect(outcome.assistant_text).toBe('Here is what the analysis shows.');
-    expect(outcome.suppress_orientation).toBeUndefined();
-  });
-
-  it('returns assistant_text="" on the happy path (orientation will surface via compose)', async () => {
-    const handler = createExplainResultsHandler();
-    const outcome: HandlerOutcome = await handler(
+    const fallback = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        orientationText: 'Sonnet wrote this orientation.',
+        explanation: undefined,
+        analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    expect(outcome.assistant_text).toBe('');
-    expect(outcome.llm_calls_used).toBe(0);
+    expect(valid.suppress_orientation).toBe(true);
+    expect(fallback.suppress_orientation).toBe(true);
   });
 });

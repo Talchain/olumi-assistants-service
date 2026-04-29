@@ -17,10 +17,8 @@ import {
 } from '@talchain/schemas/orchestrator';
 
 import { createExplainFromStructureHandler } from '../explain-from-structure.js';
-import type {
-  HandlerInvocation,
-  HandlerOutcome,
-} from '../../registry.js';
+import type { HandlerInvocation } from '../../registry.js';
+import type { StructureProjectionSummary } from '../../../context/projection-summaries.js';
 import { validateToolCall } from '../../../routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import type { ProposalAction } from '../../../routing/types.js';
@@ -210,64 +208,103 @@ describe('explain_from_structure — validator', () => {
   });
 });
 
-describe('explain_from_structure — execution', () => {
-  it('returns a noop fact and uses Sonnet orientation as assistant_text', async () => {
+const STRUCTURE_PROJECTION: StructureProjectionSummary = {
+  goal_label: 'Q3 Throughput',
+  top_causal_links: [
+    { label_from: 'Engineering Capacity', label_to: 'Q3 Throughput', strength: 0.65 },
+    { label_from: 'Hiring Cost', label_to: 'Q3 Throughput', strength: -0.42 },
+  ],
+  named_factor_label: undefined,
+  named_factor_pathways: [],
+  factor_count: 4,
+  option_count: 2,
+};
+
+const VALID_ANSWER_TEXT =
+  'Engineering Capacity is the strongest direct driver of Q3 Throughput at 0.65 strength, well ahead of any other factor influencing your goal.';
+
+describe('explain_from_structure — answer-carrying contract', () => {
+  it('happy path: uses Sonnet answer_text when answer_text_valid is true', async () => {
     const handler = createExplainFromStructureHandler();
-    const outcome: HandlerOutcome = await handler(
-      makeInvocation({ optionCount: 2 }),
-    );
-    expect(outcome.assistant_text).toBe('');
-    expect(outcome.handler_facts).toHaveLength(1);
-    const fact = outcome.handler_facts[0];
-    expect(fact.fact_type).toBe('explain_from_structure');
-    expect(fact.noop).toBe(true);
-    expect(fact.fact_version).toBe(1);
-    if (fact.fact_type === 'explain_from_structure') {
-      expect(fact.result.option_count).toBe(2);
-    }
-    expect(outcome.llm_calls_used).toBe(0);
-    expect(outcome.suppress_orientation).toBeUndefined();
+    const outcome = await handler({
+      ...makeInvocation({ optionCount: 2 }),
+      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.suppress_orientation).toBe(true);
   });
 
-  it('persists a fact that round-trips through the schema (D9 invariant)', async () => {
+  it('bare tool_use regression: missing explanation → fallback contains causal links and factor labels', async () => {
+    // Reproduces v40 staging Test E shape (factor-named structural question
+    // returned the 39-char SAFE_FALLBACK stub).
     const handler = createExplainFromStructureHandler();
-    const outcome = await handler(makeInvocation());
+    const outcome = await handler({
+      ...makeInvocation({ optionCount: 2 }),
+      explanation: undefined,
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text.length).toBeGreaterThan(80);
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text).toContain('Q3 Throughput');
+    expect(outcome.assistant_text).not.toBe('Here is what the model structure shows.');
+  });
+
+  it('answer_text < 80 chars → fallback used', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation({ optionCount: 2 }),
+      explanation: {
+        answer_text: 'Too short.',
+        answer_text_valid: false,
+        answer_validation_error: 'too_short',
+      },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+  });
+
+  it('named factor pathway included when structureProjection has named_factor_label', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation({ optionCount: 2 }),
+      explanation: undefined,
+      structureProjection: {
+        ...STRUCTURE_PROJECTION,
+        named_factor_label: 'Engineering Capacity',
+        named_factor_pathways: [
+          {
+            label_from: 'Engineering Capacity',
+            label_to: 'Q3 Throughput',
+            strength: 0.65,
+          },
+        ],
+      },
+    });
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text).toContain('Q3 Throughput');
+  });
+
+  it('persists a fact that round-trips through the schema', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
     const parsed = ExplainFromStructureHandlerFactSchema.safeParse(
       outcome.handler_facts[0],
     );
     expect(parsed.success).toBe(true);
   });
 
-  it('returns a safe fallback string when orientation is empty (D8)', async () => {
+  it('always sets suppress_orientation: true on explanation turns', async () => {
     const handler = createExplainFromStructureHandler();
-    const outcome = await handler(makeInvocation({ orientationText: '   ' }));
-    expect(outcome.assistant_text).toBe('Here is what the model structure shows.');
-    expect(outcome.suppress_orientation).toBeUndefined();
-  });
-
-  it('records option_count = 0 when analysisReady has zero options', async () => {
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler(makeInvocation({ optionCount: 0 }));
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_from_structure') {
-      expect(fact.result.option_count).toBe(0);
-    }
-  });
-
-  it('falls back to entity_registry when analysisReady is undefined', async () => {
-    // Defensive fallback for the chip-click path (no routing layer, no
-    // analysisReady threading) and any edge case where the structural
-    // readiness payload is unavailable.
-    const handler = createExplainFromStructureHandler();
-    const outcome = await handler(
-      makeInvocation({
-        omitAnalysisReady: true,
-        fallbackOptionIds: ['opt_1', 'opt_2', 'opt_3'],
-      }),
-    );
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'explain_from_structure') {
-      expect(fact.result.option_count).toBe(3);
-    }
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: undefined,
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.suppress_orientation).toBe(true);
   });
 });

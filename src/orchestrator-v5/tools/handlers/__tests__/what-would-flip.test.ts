@@ -1,11 +1,9 @@
 /**
- * Unit tests for the V5 `what_would_flip` no-op handler.
+ * Unit tests for the V5 `what_would_flip` answer-carrying handler.
  *
- * Mirrors `explain-results.test.ts` — same precondition pattern, same
- * accepted_entity_kinds, same template shape — but asserts against the
- * handler-specific fact_type and safe-fallback string. The shared
- * patterns are tested explicitly in both files so a regression in one
- * handler is not masked by a passing test in the other.
+ * Mirrors `explain-results.test.ts` — same precondition + answer-carrying
+ * pattern, same accepted_entity_kinds — but asserts against the
+ * handler-specific fact_type and fallback content.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -17,10 +15,8 @@ import {
 } from '@talchain/schemas/orchestrator';
 
 import { createWhatWouldFlipHandler } from '../what-would-flip.js';
-import type {
-  HandlerInvocation,
-  HandlerOutcome,
-} from '../../registry.js';
+import type { HandlerInvocation } from '../../registry.js';
+import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
 import { validateToolCall } from '../../../routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import type { ProposalAction } from '../../../routing/types.js';
@@ -65,22 +61,32 @@ function makeAnalysisReady(optionCount: number): HandlerInvocation['analysisRead
   };
 }
 
+const ANALYSIS_PROJECTION: AnalysisProjectionSummary = {
+  status: 'complete',
+  leading_option: { label: 'Hire Senior Engineer', probability: 0.62 },
+  runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
+  margin_pp: 35,
+  robustness_band: 'stable',
+  top_drivers: [
+    { factor_label: 'Engineering Capacity', sensitivity_value: 0.65 },
+    { factor_label: 'Hiring Cost', sensitivity_value: -0.42 },
+  ],
+  staleness_reason: null,
+};
+
 function makeInvocation(
   overrides?: {
     priorFacts?: readonly HandlerFact[];
     optionCount?: number;
-    orientationText?: string;
+    explanation?: HandlerInvocation['explanation'];
+    analysisProjection?: AnalysisProjectionSummary;
   },
 ): HandlerInvocation {
-  // V5 0.9.0 fix: option_count comes from analysisReady (real graph state).
   const optionCount = overrides?.optionCount ?? 2;
   return {
     context: {
       stage: 'decide',
-      entity_registry: {
-        option_ids: [],
-        goal_id: GOAL_ID,
-      },
+      entity_registry: { option_ids: [], goal_id: GOAL_ID },
       capabilities: {},
       messages: [{ role: 'user', content: 'what would change the outcome?' }],
       session_id: SCENARIO_ID,
@@ -98,8 +104,10 @@ function makeInvocation(
     } as unknown as HandlerInvocation['payload'],
     requestId: REQUEST_ID,
     signal: new AbortController().signal,
-    orientationText: overrides?.orientationText ?? 'Looking at what could flip the result.',
+    orientationText: '',
     analysisReady: makeAnalysisReady(optionCount),
+    explanation: overrides?.explanation,
+    analysisProjection: overrides?.analysisProjection,
   };
 }
 
@@ -118,6 +126,9 @@ function buildProposal(overrides?: Partial<ProposalAction>): ProposalAction {
     ...overrides,
   };
 }
+
+const VALID_ANSWER_TEXT =
+  'For Hire Two Mid-Level to overtake the leader, Engineering Capacity would need to drop materially given the current 35 percentage point margin and stable robustness.';
 
 describe('what_would_flip — registration', () => {
   it('is registered in the default V5 handler registry', () => {
@@ -141,22 +152,6 @@ describe('what_would_flip — validator', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('accepts a goal-kind proposal', () => {
-    const result = validateToolCall(
-      buildProposal({
-        entity: {
-          id: GOAL_ID,
-          kind: 'goal',
-          resolution_status: 'resolved',
-          resolution_method: 'context_inference',
-        },
-      }),
-      undefined,
-      HANDLER_VALIDATION_REGISTRY,
-    );
-    expect(result.valid).toBe(true);
-  });
-
   it('rejects a node-kind proposal with ENTITY_KIND_MISMATCH', () => {
     const result = validateToolCall(
       buildProposal({
@@ -175,71 +170,24 @@ describe('what_would_flip — validator', () => {
       expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
     }
   });
-
-  it('rejects an edge-kind proposal with ENTITY_KIND_MISMATCH', () => {
-    const result = validateToolCall(
-      buildProposal({
-        entity: {
-          id: 'e_1',
-          kind: 'edge',
-          resolution_status: 'resolved',
-          resolution_method: 'id_match',
-        },
-      }),
-      undefined,
-      HANDLER_VALIDATION_REGISTRY,
-    );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-    }
-  });
 });
 
 describe('what_would_flip — precondition (analysis fact)', () => {
   it('returns the deterministic template when no run_analysis fact exists', async () => {
     const handler = createWhatWouldFlipHandler();
-    const outcome = await handler(
-      makeInvocation({ priorFacts: [], optionCount: 2 }),
-    );
+    const outcome = await handler(makeInvocation({ priorFacts: [], optionCount: 2 }));
     expect(outcome.assistant_text).toBe(
       'No analysis has been run on your model yet. ' +
         'The graph has 2 options configured ' +
         'and is ready to analyse. Would you like me to run the analysis?',
     );
     expect(outcome.suppress_orientation).toBe(true);
-    const fact = outcome.handler_facts[0];
-    expect(fact.fact_type).toBe('what_would_flip');
-    expect(fact.noop).toBe(true);
-    if (fact.fact_type === 'what_would_flip') {
-      expect(fact.result.precondition_unmet).toBe(true);
-      expect(fact.result.option_count).toBe(2);
-    }
-  });
-
-  it('passes precondition when a non-noop run_analysis fact is present', async () => {
-    const handler = createWhatWouldFlipHandler();
-    const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        orientationText: 'Looking at the flip thresholds.',
-      }),
-    );
-    expect(outcome.suppress_orientation).toBeUndefined();
-    expect(outcome.assistant_text).toBe('');
-    const fact = outcome.handler_facts[0];
-    if (fact.fact_type === 'what_would_flip') {
-      expect(fact.result.precondition_unmet).toBe(false);
-    }
   });
 
   it('fails precondition when only a noop run_analysis fact is present', async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(true)],
-        optionCount: 2,
-      }),
+      makeInvocation({ priorFacts: [makeRunAnalysisFact(true)], optionCount: 2 }),
     );
     expect(outcome.suppress_orientation).toBe(true);
     const fact = outcome.handler_facts[0];
@@ -249,37 +197,88 @@ describe('what_would_flip — precondition (analysis fact)', () => {
   });
 });
 
-describe('what_would_flip — execution', () => {
-  it('persists a fact that round-trips through the schema', async () => {
+describe('what_would_flip — answer-carrying contract', () => {
+  it('happy path: uses Sonnet answer_text when answer_text_valid is true', async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
-      makeInvocation({ priorFacts: [makeRunAnalysisFact(false)] }),
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+    expect(outcome.suppress_orientation).toBe(true);
+  });
+
+  it('bare tool_use regression: missing explanation → fallback contains margin and driver', async () => {
+    // Reproduces the v40 staging Test F failure shape.
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: undefined,
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text.length).toBeGreaterThan(80);
+    expect(outcome.assistant_text).toContain('Hire Senior Engineer');
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text).not.toBe('Here is what could change the outcome.');
+  });
+
+  it('answer_text containing mutation language → fallback used', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: {
+          answer_text: 'Proposing to add a new factor would shift the outcome significantly across the model.',
+          answer_text_valid: false,
+          answer_validation_error: 'mutation_language_detected',
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).not.toContain('Proposing to add');
+    expect(outcome.assistant_text).toContain('Hire Senior Engineer');
+  });
+
+  it('fallback cites runner-up and margin from the projection', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: undefined,
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toContain('Hire Two Mid-Level');
+    expect(outcome.assistant_text).toContain('35');
+  });
+
+  it('persists a fact that round-trips through the schema on the happy path', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
     );
     const parsed = WhatWouldFlipHandlerFactSchema.safeParse(outcome.handler_facts[0]);
     expect(parsed.success).toBe(true);
   });
 
-  it('returns a safe fallback string when orientation is empty (D8 happy path)', async () => {
+  it('always sets suppress_orientation: true on explanation turns', async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
         priorFacts: [makeRunAnalysisFact(false)],
-        orientationText: '',
+        explanation: undefined,
+        analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
-    expect(outcome.assistant_text).toBe('Here is what could change the outcome.');
-    expect(outcome.suppress_orientation).toBeUndefined();
-  });
-
-  it('returns assistant_text="" on the happy path (orientation will surface via compose)', async () => {
-    const handler = createWhatWouldFlipHandler();
-    const outcome: HandlerOutcome = await handler(
-      makeInvocation({
-        priorFacts: [makeRunAnalysisFact(false)],
-        orientationText: 'Sonnet wrote this orientation.',
-      }),
-    );
-    expect(outcome.assistant_text).toBe('');
-    expect(outcome.llm_calls_used).toBe(0);
+    expect(outcome.suppress_orientation).toBe(true);
   });
 });

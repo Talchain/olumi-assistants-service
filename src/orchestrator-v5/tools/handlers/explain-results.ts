@@ -53,9 +53,7 @@ import type {
 } from '../registry.js';
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { buildAnalysisAbsentTemplate, resolveOptionCount } from './no-op-helpers.js';
-
-const SAFE_FALLBACK_ASSISTANT_TEXT =
-  'Here is what the analysis shows.' as const;
+import { composeExplainResultsFallback } from './explanation-fallback.js';
 
 export function createExplainResultsHandler(): HandlerFn {
   return async function explainResultsHandler(
@@ -106,14 +104,25 @@ export function createExplainResultsHandler(): HandlerFn {
       );
     }
 
-    const orientation = invocation.orientationText.trim();
+    // Answer-carrying contract (post-Commit-3): the side-band validator's
+    // verdict drives whether to use Sonnet's answer_text or compose a
+    // deterministic fallback. The handler ALWAYS owns the entire
+    // user-visible string; the turn-executor forces suppress_orientation
+    // for explanation handlers, so any orientation Sonnet produced is
+    // ignored on the user side.
+    const explanation = invocation.explanation;
     const assistantText =
-      orientation === '' ? SAFE_FALLBACK_ASSISTANT_TEXT : '';
+      explanation && explanation.answer_text_valid
+        ? explanation.answer_text
+        : composeExplainResultsFallback(invocation.analysisProjection);
 
     return {
       assistant_text: assistantText,
       handler_facts: [parsed.data],
       llm_calls_used: 0,
+      // Drive home that the handler owns the response; defence-in-depth in
+      // case future compose-layer changes inspect this flag directly.
+      suppress_orientation: true,
     };
   };
 }
