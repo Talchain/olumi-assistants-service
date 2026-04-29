@@ -40,8 +40,16 @@ export const EXPECTED_SYSTEM_CHARS_MAX = 22_000;
 
 export interface LoadedPrompt {
   readonly text: string;
-  /** 16-char lowercase hex prefix of SHA-256(text). Stable per content. */
+  /**
+   * 16-char lowercase hex prefix of SHA-256(text-as-sent).
+   * Aliased to `sentHash`; retained as `hash` so existing log fields
+   * (`v5.routing.calling_anthropic.prompt_hash`) keep their meaning.
+   */
   readonly hash: string;
+  /** SHA-256 prefix of the raw on-disk bytes (pre-normalization). */
+  readonly sourceHash: string;
+  /** SHA-256 prefix of the normalized bytes actually sent to Anthropic. */
+  readonly sentHash: string;
   readonly systemChars: number;
   readonly version: typeof ROUTING_PROMPT_VERSION;
 }
@@ -63,8 +71,17 @@ export function loadRoutingPrompt(
   resolvePath: () => string = defaultPromptPath,
 ): LoadedPrompt {
   const path = resolvePath();
-  const text = readFileSync(path, 'utf-8');
-  const hash = createHash('sha256').update(text).digest('hex').slice(0, 16);
+  const raw = readFileSync(path, 'utf-8');
+  const sourceHash = createHash('sha256').update(raw).digest('hex').slice(0, 16);
+  // Byte-stability normalization: CRLF/CR → LF, strip trailing whitespace
+  // per line. Whitespace-only — no non-whitespace content is changed.
+  // (Asserted by prompt-loader.normalization-content-preserving.test.ts.)
+  const text = raw
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n');
+  const sentHash = createHash('sha256').update(text).digest('hex').slice(0, 16);
   const systemChars = text.length;
   if (
     systemChars < EXPECTED_SYSTEM_CHARS_MIN ||
@@ -76,7 +93,14 @@ export function loadRoutingPrompt(
         `Likely wrong file at "${path}" or truncation. Refusing to start.`,
     );
   }
-  return { text, hash, systemChars, version: ROUTING_PROMPT_VERSION };
+  return {
+    text,
+    hash: sentHash,
+    sourceHash,
+    sentHash,
+    systemChars,
+    version: ROUTING_PROMPT_VERSION,
+  };
 }
 
 /**

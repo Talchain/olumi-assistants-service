@@ -427,9 +427,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5DecisionReviewFailed: "v5.decision_review.failed",
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
+        V5DeterministicValueUpdate: "v5.deterministic_value_update",
         V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
         V5ExplanationEvidence: "v5.explanation.evidence",
         V5MutationLanguageGuard: "v5.mutation_language_guard",
+        V5PromptCache: "v5.prompt_cache",
         V5RecoveryChipServed: "v5.recovery_chip_served",
         V5UnexpectedExplanationPayload: "v5.unexpected_explanation_payload",
         ValidatorOutcome: "v5.validator_outcome",
@@ -460,7 +462,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|context_pack|handler_invocation|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -598,6 +600,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "draft.validation_cache.miss": [TelemetryEvents.ValidationCacheMiss],
         "draft.validation_cache.bypass": [TelemetryEvents.ValidationCacheBypass],
         "llm.anthropic_prompt_cache.hint": [TelemetryEvents.AnthropicPromptCacheHint],
+
+        // V5 routing prompt-cache observability — hit/miss only for
+        // cache_mode='enabled'; disabled modes split out so they don't
+        // skew hit-rate dashboards.
+        "v5.prompt_cache.hit": [TelemetryEvents.V5PromptCache],
+        "v5.prompt_cache.miss": [TelemetryEvents.V5PromptCache],
+        "v5.prompt_cache.unknown": [TelemetryEvents.V5PromptCache],
+        "v5.prompt_cache.disabled": [TelemetryEvents.V5PromptCache],
 
         // SSE Resume events (v1.8)
         "sse.resume.issued": [TelemetryEvents.SseResumeIssued],
@@ -942,6 +952,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5ExplanationEvidence,
         TelemetryEvents.V5UnexpectedExplanationPayload,
         TelemetryEvents.V5MutationLanguageGuard,
+        TelemetryEvents.V5DeterministicValueUpdate,
       ];
 
       for (const event of allEvents) {
@@ -1337,12 +1348,16 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",
+        "v5.decision_review_degraded",
+        "v5.deterministic_value_update",
         // V5 alpha hardening Phase 2.5: primary lifecycle events.
         "v5.context_pack.assembled",
         "v5.explanation.answer_verdict",
         "v5.explanation.evidence",
         "v5.handler_invocation",
         "v5.mutation_language_guard",
+        "v5.prompt_cache",
+        "v5.recovery_chip_served",
         "v5.recovery_response",
         "v5.unexpected_explanation_payload",
         "v5.validator_outcome",

@@ -288,6 +288,11 @@ export const TelemetryEvents = {
   ValidationCacheBypass: "assist.draft.validation_cache_bypass",
 
   AnthropicPromptCacheHint: "assist.llm.anthropic_prompt_cache_hint",
+
+  // V5 routing prompt-cache observability (one event per chatWithTools call
+  // out of route-with-tool-use.ts; covers cached, disabled-by-config, and
+  // cache_control-rejection fallback paths).
+  V5PromptCache: "v5.prompt_cache",
   CostCalculationUnknownModel: "assist.cost_calculation.unknown_model",
   // SSE Resume events (v1.8.0)
   SseResumeIssued: "assist.sse.resume_issued",
@@ -1269,6 +1274,42 @@ export function emit(event: string, data: Event) {
             provider: String((eventData.provider as string) || "unknown"),
             operation: String((eventData.operation as string) || "unknown"),
           });
+          break;
+        }
+
+        case TelemetryEvents.V5PromptCache: {
+          const cacheMode = String((eventData.cache_mode as string) || "unknown");
+          const cacheHit = eventData.cache_hit;
+          const llmCall = String((eventData.llm_call as number | string) ?? "unknown");
+          // Only emit hit/miss counters for cache_mode === 'enabled' so that
+          // dashboards computing hit / (hit + miss) reflect the true cache
+          // performance. When caching is disabled (config flag off, or
+          // cache_control rejected by the API) the call had no opportunity
+          // to hit; conflating those with misses understates the hit rate.
+          // Disabled paths increment a separate counter tagged by mode.
+          if (cacheMode === "enabled") {
+            if (cacheHit === true) {
+              datadogClient.increment("v5.prompt_cache.hit", 1, {
+                cache_mode: cacheMode,
+                llm_call: llmCall,
+              });
+            } else if (cacheHit === false) {
+              datadogClient.increment("v5.prompt_cache.miss", 1, {
+                cache_mode: cacheMode,
+                llm_call: llmCall,
+              });
+            } else {
+              datadogClient.increment("v5.prompt_cache.unknown", 1, {
+                cache_mode: cacheMode,
+                llm_call: llmCall,
+              });
+            }
+          } else {
+            datadogClient.increment("v5.prompt_cache.disabled", 1, {
+              cache_mode: cacheMode,
+              llm_call: llmCall,
+            });
+          }
           break;
         }
 

@@ -39,9 +39,12 @@ import { ORCHESTRATOR_TIMEOUT_MS } from '../../config/timeouts.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
+  SystemCacheBlock,
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
+import { config } from '../../config/index.js';
+import { TelemetryEvents, emit } from '../../utils/telemetry.js';
 
 import type { ContextPack } from '../context/context-pack-assembler.js';
 
@@ -157,7 +160,119 @@ export class RoutingError extends Error {
 export const ROUTING_SYSTEM_PROMPT: string = LOADED_PROMPT.text;
 export const ROUTING_PROMPT_VERSION: string = LOADED_PROMPT.version;
 export const ROUTING_PROMPT_HASH: string = LOADED_PROMPT.hash;
+export const ROUTING_PROMPT_SOURCE_HASH: string = LOADED_PROMPT.sourceHash;
+export const ROUTING_PROMPT_SENT_HASH: string = LOADED_PROMPT.sentHash;
 export const ROUTING_PROMPT_SYSTEM_CHARS: number = LOADED_PROMPT.systemChars;
+
+// -----------------------------------------------------------------------
+// Prompt-cache call shape
+// -----------------------------------------------------------------------
+
+export type V5PromptCacheMode =
+  | 'enabled'
+  | 'disabled_config'
+  | 'disabled_api_unsupported';
+
+/**
+ * Build the system field(s) for a routing chatWithTools call. When
+ * Anthropic prompt caching is enabled (`config.promptCache.anthropicEnabled`,
+ * default true) the prompt is sent as a single ephemeral cache block; the
+ * adapter forwards `system_cache_blocks` to the SDK with `cache_control`
+ * intact (see [src/adapters/llm/anthropic.ts:2643-2651]). When caching is
+ * disabled we fall back to the plain string `system` parameter — same bytes,
+ * no cache instruction. This helper is exported so tests can drive the
+ * shape directly without mutating global config.
+ */
+export function buildSystemForRouting(
+  prompt: string,
+  opts?: { cachingEnabled?: boolean },
+): {
+  fields: { system: string; system_cache_blocks?: SystemCacheBlock[] };
+  cacheMode: 'enabled' | 'disabled_config';
+} {
+  const cachingEnabled =
+    opts?.cachingEnabled ?? config.promptCache.anthropicEnabled;
+  if (cachingEnabled) {
+    // The adapter prefers `system_cache_blocks` over `system` when both are
+    // present (anthropic.ts:2645). `system` is retained as a fallback for
+    // non-Anthropic adapters that ignore `system_cache_blocks` per types.ts.
+    const blocks: SystemCacheBlock[] = [
+      { type: 'text', text: prompt, cache_control: { type: 'ephemeral' } },
+    ];
+    return {
+      fields: { system: prompt, system_cache_blocks: blocks },
+      cacheMode: 'enabled',
+    };
+  }
+  return { fields: { system: prompt }, cacheMode: 'disabled_config' };
+}
+
+/**
+ * Narrow detector for the only error class that should trigger the
+ * disabled_api_unsupported fallback: Anthropic 400 BadRequest whose body
+ * mentions cache_control. Timeouts, 429s, 5xx, AbortError and 400s for
+ * unrelated reasons must propagate unchanged.
+ */
+function isCacheControlSchemaRejection(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  // UpstreamHTTPError carries .status; the SDK's BadRequestError shape also
+  // exposes status. Either way we require status === 400 + a cache_control
+  // mention in the rendered message.
+  const anyErr = err as { status?: unknown; message?: unknown };
+  const status =
+    typeof anyErr.status === 'number'
+      ? anyErr.status
+      : Number(anyErr.status ?? NaN);
+  if (status !== 400) return false;
+  const message =
+    typeof anyErr.message === 'string' ? anyErr.message : String(anyErr.message ?? '');
+  return /cache_control/i.test(message);
+}
+
+interface V5PromptCacheEmitArgs {
+  requestId: string;
+  sessionId: string | null;
+  llmCall: 1 | 2;
+  cacheMode: V5PromptCacheMode;
+  usage: ChatWithToolsResult['usage'] | undefined;
+  stablePrefixBytes: number;
+}
+
+function emitV5PromptCache(args: V5PromptCacheEmitArgs): void {
+  const cacheRead = args.usage?.cache_read_input_tokens;
+  const cacheCreate = args.usage?.cache_creation_input_tokens;
+  const totalInput = args.usage?.input_tokens;
+  // cache_hit is true when read>0, false when read===0, null when usage
+  // didn't expose cache fields at all.
+  let cacheHit: boolean | null;
+  if (typeof cacheRead === 'number') {
+    cacheHit = cacheRead > 0;
+  } else {
+    cacheHit = null;
+  }
+  emit(TelemetryEvents.V5PromptCache, {
+    // Brief-named identifiers (scenario_id, turn_id) emitted alongside the
+    // codebase's existing routing-log aliases (request_id ≡ turn_id,
+    // v5_journey_id ≡ scenario_id) so downstream consumers can join on
+    // either convention.
+    request_id: args.requestId,
+    turn_id: args.requestId,
+    v5_journey_id: args.sessionId,
+    scenario_id: args.sessionId,
+    llm_call: args.llmCall,
+    cache_mode: args.cacheMode,
+    cache_creation_input_tokens:
+      typeof cacheCreate === 'number' ? cacheCreate : null,
+    cache_read_input_tokens: typeof cacheRead === 'number' ? cacheRead : null,
+    total_input_tokens: typeof totalInput === 'number' ? totalInput : null,
+    cache_hit: cacheHit,
+    stable_prefix_bytes: args.stablePrefixBytes,
+    prompt_version: ROUTING_PROMPT_VERSION,
+    prompt_hash: ROUTING_PROMPT_HASH,
+    source_hash: ROUTING_PROMPT_SOURCE_HASH,
+    sent_hash: ROUTING_PROMPT_SENT_HASH,
+  });
+}
 
 // One-time module-init log so every deploy records the installed prompt.
 // Keep payload minimal — no user text, no secrets. Fires once per process.
@@ -323,8 +438,12 @@ export async function routeWithToolUse(
 
   const userMessage = buildUserMessage(contextPack, message);
 
-  const firstCallArgs: ChatWithToolsArgs = {
-    system: options.systemPromptOverride ?? ROUTING_SYSTEM_PROMPT,
+  const promptText = options.systemPromptOverride ?? ROUTING_SYSTEM_PROMPT;
+  const initialSystem = buildSystemForRouting(promptText);
+  let cacheMode: V5PromptCacheMode = initialSystem.cacheMode;
+
+  let firstCallArgs: ChatWithToolsArgs = {
+    ...initialSystem.fields,
     messages: [{ role: 'user', content: userMessage }],
     tools: [OLUMI_ACTION_TOOL],
     tool_choice: { type: 'auto' },
@@ -339,7 +458,11 @@ export async function routeWithToolUse(
   // context_pack_chars is a synthetic char-count proxy for quick sanity —
   // JSON-stringify cost is a few ms on typical packs.
   const contextPackChars = JSON.stringify(contextPack).length;
-  const systemPromptChars = (firstCallArgs.system as string).length;
+  const systemPromptChars = promptText.length;
+  // stable_prefix_bytes must be UTF-8 byte length, not UTF-16 code-unit
+  // count — Anthropic's prompt cache is byte-keyed, so any future
+  // non-ASCII edit to v40 would otherwise misreport the cached size.
+  const stablePrefixBytes = Buffer.byteLength(promptText, 'utf8');
   // V5 alpha hardening follow-up: emit the full primary-event obs
   // schema with nulls for fields unknown at routing-call time
   // (handler_proposed / validator_outcome / response_type are populated
@@ -372,8 +495,69 @@ export async function routeWithToolUse(
       signal: options.signal,
     });
   } catch (err) {
-    throw translateAdapterError(err, 1);
+    // Narrow fallback: only retry-without-cache for the precise schema
+    // rejection shape (HTTP 400 with /cache_control/i). All other error
+    // classes — timeouts, 429s, 5xx, AbortError, generic 400s — propagate
+    // unchanged through translateAdapterError exactly as before.
+    if (cacheMode === 'enabled' && isCacheControlSchemaRejection(err)) {
+      log.warn(
+        {
+          event: 'v5.prompt_cache.fallback',
+          request_id: options.requestId,
+          turn_id: options.requestId,
+          v5_journey_id: options.sessionId ?? null,
+          scenario_id: options.sessionId ?? null,
+          reason: 'cache_control_schema_rejection',
+        },
+        'V5 routing prompt-cache rejected by API, retrying without cache_control',
+      );
+      const fallbackSystem = buildSystemForRouting(promptText, {
+        cachingEnabled: false,
+      });
+      cacheMode = 'disabled_api_unsupported';
+      firstCallArgs = {
+        ...firstCallArgs,
+        ...fallbackSystem.fields,
+        system_cache_blocks: undefined,
+      };
+      try {
+        firstResult = await adapter.chatWithTools(firstCallArgs, {
+          requestId: options.requestId,
+          timeoutMs,
+          signal: options.signal,
+        });
+      } catch (retryErr) {
+        emitV5PromptCache({
+          requestId: options.requestId,
+          sessionId: options.sessionId ?? null,
+          llmCall: 1,
+          cacheMode,
+          usage: undefined,
+          stablePrefixBytes,
+        });
+        throw translateAdapterError(retryErr, 1);
+      }
+    } else {
+      emitV5PromptCache({
+        requestId: options.requestId,
+        sessionId: options.sessionId ?? null,
+        llmCall: 1,
+        cacheMode,
+        usage: undefined,
+        stablePrefixBytes,
+      });
+      throw translateAdapterError(err, 1);
+    }
   }
+
+  emitV5PromptCache({
+    requestId: options.requestId,
+    sessionId: options.sessionId ?? null,
+    llmCall: 1,
+    cacheMode,
+    usage: firstResult.usage,
+    stablePrefixBytes,
+  });
 
   const parsedOrError = tryInterpret(firstResult, 1);
   if (parsedOrError.kind === 'ok') return parsedOrError.result;
@@ -419,8 +603,25 @@ export async function routeWithToolUse(
       signal: options.signal,
     });
   } catch (err) {
+    emitV5PromptCache({
+      requestId: options.requestId,
+      sessionId: options.sessionId ?? null,
+      llmCall: 2,
+      cacheMode,
+      usage: undefined,
+      stablePrefixBytes,
+    });
     throw translateAdapterError(err, 2);
   }
+
+  emitV5PromptCache({
+    requestId: options.requestId,
+    sessionId: options.sessionId ?? null,
+    llmCall: 2,
+    cacheMode,
+    usage: repairResult.usage,
+    stablePrefixBytes,
+  });
 
   const secondAttempt = tryInterpret(repairResult, 2);
   if (secondAttempt.kind === 'ok') return secondAttempt.result;
