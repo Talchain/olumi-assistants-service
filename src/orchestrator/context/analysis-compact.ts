@@ -266,16 +266,50 @@ function deriveConstraintTensions(response: V2RunResponseEnvelope): string[] | u
 }
 
 /**
- * Derive top 3 flip thresholds from sensitivity analysis.
- * Looks for flip_threshold field on factor_sensitivity entries.
- * Returns up to 3 entries sorted by closest distance (flip_value - current_value ascending).
+ * Full per-factor flip entry with `factor_id`, `direction`, and `elasticity` —
+ * the shape the decision_review enricher needs. {@link deriveFlipThresholds}
+ * projects this down to the narrower {@link FlipThreshold} shape.
+ *
+ * `direction` describes the input change required to flip the result:
+ *   `flip_value > current_value` → `'increase'`
+ *   `flip_value < current_value` → `'decrease'`
+ * Elasticity sign is *not* used for direction — it describes model response
+ * direction, not the input change needed (a negatively-elastic factor at
+ * current=40 with flip=30 still requires `'decrease'` to flip the outcome).
  */
-function deriveFlipThresholds(
+export interface FactorFlipEntry {
+  factor_id: string;
+  factor_label: string;
+  current_value: number;
+  flip_value: number;
+  direction: 'increase' | 'decrease';
+  unit: string | null;
+  elasticity: number | null;
+}
+
+/**
+ * Walk every option's factor_sensitivity[] entries, filter to factors with a
+ * non-null flip_value AND a non-null current_value, and project each into a
+ * {@link FactorFlipEntry}. Deduplicates by factor_id, keeping the first
+ * occurrence (matches the historical {@link deriveFlipThresholds} behaviour).
+ *
+ * Optional lookups:
+ *   `graphNodeLabels`: factor_id → display label. Used when the
+ *     factor_sensitivity entry lacks `label` / `factor_label`.
+ *   `graphNodeUnits`: factor_id → unit string. Used when the
+ *     factor_sensitivity entry lacks `unit`.
+ *
+ * Sort order is undefined here — callers decide whether to dedupe / sort /
+ * cap. The historical {@link deriveFlipThresholds} sorts by absolute distance
+ * and slices to 3.
+ */
+export function collectFactorFlipEntries(
   response: V2RunResponseEnvelope,
   graphNodeLabels?: Map<string, string>,
-): FlipThreshold[] | undefined {
+  graphNodeUnits?: Map<string, string>,
+): FactorFlipEntry[] {
   const results = getResultsArray(response);
-  const seen = new Map<string, FlipThreshold>();
+  const seen = new Map<string, FactorFlipEntry>();
 
   for (const result of results) {
     if (!isOptionResult(result)) continue;
@@ -286,6 +320,8 @@ function deriveFlipThresholds(
       const factorId = (typeof factor.node_id === 'string' ? factor.node_id : null)
         ?? (typeof factor.factor_id === 'string' ? factor.factor_id : null);
       if (!factorId) continue;
+      // Skip duplicates here so we never need to re-resolve labels/units.
+      if (seen.has(factorId)) continue;
 
       const flipValue = typeof factor.flip_threshold === 'number' ? factor.flip_threshold
         : typeof factor.flip_value === 'number' ? factor.flip_value
@@ -295,33 +331,64 @@ function deriveFlipThresholds(
         : null;
       if (flipValue === null || currentValue === null) continue;
 
-      const label = graphNodeLabels?.get(factorId)
-        ?? (typeof factor.label === 'string' ? factor.label : null)
-        ?? (typeof factor.factor_label === 'string' ? factor.factor_label : null)
-        ?? factorId;
+      const label = (typeof factor.factor_label === 'string' && factor.factor_label)
+        ? factor.factor_label
+        : (typeof factor.label === 'string' && factor.label)
+          ? factor.label
+          : graphNodeLabels?.get(factorId) ?? factorId;
 
-      const unit = typeof factor.unit === 'string' ? factor.unit : null;
+      const unit = typeof factor.unit === 'string' ? factor.unit
+        : graphNodeUnits?.get(factorId) ?? null;
 
-      // Deduplicate by factorId — keep first occurrence
-      if (!seen.has(factorId)) {
-        seen.set(factorId, {
-          factor_label: label as string,
-          current_value: currentValue,
-          flip_value: flipValue,
-          unit,
-        });
-      }
+      const elasticity = typeof factor.elasticity === 'number' && Number.isFinite(factor.elasticity)
+        ? factor.elasticity
+        : null;
+
+      // Direction = input change required to flip; not elasticity sign.
+      // flip_value === current_value is degenerate (no actionable flip);
+      // upstream filters should drop these, but if one slips through
+      // default to 'increase' so the prompt has a consistent value.
+      const direction: 'increase' | 'decrease' = flipValue >= currentValue ? 'increase' : 'decrease';
+
+      seen.set(factorId, {
+        factor_id: factorId,
+        factor_label: label,
+        current_value: currentValue,
+        flip_value: flipValue,
+        direction,
+        unit,
+        elasticity,
+      });
     }
   }
 
-  if (seen.size === 0) return undefined;
+  return Array.from(seen.values());
+}
 
-  // Sort by absolute distance (closest to flip first — most actionable)
-  const sorted = Array.from(seen.values())
+/**
+ * Derive top 3 flip thresholds from sensitivity analysis.
+ * Returns up to 3 entries sorted by closest distance (|flip_value - current_value| ascending).
+ *
+ * Implementation: thin adapter over {@link collectFactorFlipEntries} that
+ * trims to the legacy {@link FlipThreshold} shape (no factor_id / direction /
+ * elasticity). The {@link AnalysisResponseSummary} contract is unchanged.
+ */
+function deriveFlipThresholds(
+  response: V2RunResponseEnvelope,
+  graphNodeLabels?: Map<string, string>,
+): FlipThreshold[] | undefined {
+  const entries = collectFactorFlipEntries(response, graphNodeLabels);
+  if (entries.length === 0) return undefined;
+
+  return entries
     .sort((a, b) => Math.abs(a.flip_value - a.current_value) - Math.abs(b.flip_value - b.current_value))
-    .slice(0, 3);
-
-  return sorted;
+    .slice(0, 3)
+    .map((entry) => ({
+      factor_label: entry.factor_label,
+      current_value: entry.current_value,
+      flip_value: entry.flip_value,
+      unit: entry.unit,
+    }));
 }
 
 /**

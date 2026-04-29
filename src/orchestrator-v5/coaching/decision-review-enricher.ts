@@ -24,9 +24,12 @@ import { createHash } from 'node:crypto';
 import {
   invokeDecisionReview,
   type DecisionReviewInvokeInput,
+  type DecisionReviewMeta,
 } from '../../cee/decision-review/invoke.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
+import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 
 import type { DecisionReviewOutput } from './types.js';
 
@@ -172,6 +175,19 @@ export async function enrichRunAnalysisWithDecisionReview(
 }
 
 
+/**
+ * Exported for contract testing — exercises the full enrichment-to-invoke-input
+ * projection without round-tripping through the LLM call. The runtime invocation
+ * path (`enrichRunAnalysisWithDecisionReview` above) is the only production caller.
+ */
+export function buildInvokeInputForTests(
+  brief: string,
+  enrichment: Record<string, unknown>,
+  leadingOptionId: string | null,
+): DecisionReviewInvokeInput | null {
+  return buildInvokeInput(brief, enrichment, leadingOptionId);
+}
+
 function buildInvokeInput(
   brief: string,
   enrichment: Record<string, unknown>,
@@ -182,15 +198,44 @@ function buildInvokeInput(
   if (!winner) return null;
   const runnerUp = selectRunnerUp(results, winner);
 
+  // Build label/unit lookups from enrichment.graph.nodes[]. The graph is
+  // opaque (Record<string, unknown>) on this path, so reads are defensive.
+  // Same maps are reused by readFlipThresholdData and readIslResults so
+  // labels stay consistent across the prompt.
+  const graph = readGraph(enrichment);
+  const labelMap = buildNodeLabelMap(graph);
+  const unitMap = buildNodeUnitMap(graph);
+
+  const flipThresholdData = readFlipThresholdData(enrichment, labelMap, unitMap);
+  const islResults = readIslResults(enrichment, labelMap);
+  const deterministicCoaching = readDeterministicCoaching(enrichment);
+
+  const margin = runnerUp !== null
+    ? winner.win_probability - runnerUp.win_probability
+    : null;
+  const robustnessLevel = readRobustnessLevel(enrichment);
+
+  const meta: DecisionReviewMeta = {
+    input_shape_version: 'v5-normalised',
+    flip_threshold_count: flipThresholdData?.length ?? 0,
+    factor_sensitivity_count: countArray(islResults.factor_sensitivity),
+    fragile_edge_count: countArray(islResults.fragile_edges),
+    model_critique_count: 0, // 0 until the M1 deterministic-coaching pipeline ships
+    has_deterministic_coaching: false,
+    margin,
+    robustness_level: robustnessLevel,
+  };
+
   return {
     brief,
     brief_hash: sha256(brief),
-    graph: readGraph(enrichment),
-    isl_results: readIslResults(enrichment),
-    deterministic_coaching: readDeterministicCoaching(enrichment),
+    graph,
+    isl_results: islResults,
+    deterministic_coaching: deterministicCoaching,
     winner,
     runner_up: runnerUp,
-    flip_threshold_data: readFlipThresholdData(enrichment),
+    ...(flipThresholdData ? { flip_threshold_data: flipThresholdData } : {}),
+    _meta: meta,
   };
 }
 
@@ -252,7 +297,11 @@ function projectOptionAsWinner(r: Record<string, unknown>): DecisionReviewInvoke
         ? r.label
         : id;
   const winProb = readNumber(r.win_probability) ?? 0;
-  const outcomeMean = readNumber(r.outcome_mean);
+  // outcome_mean: read from flat field first, then nested outcome.mean.
+  // PLoT's option_comparison shape carries the value nested; older fixtures
+  // and some test paths use the flat field.
+  const outcomeMean = readNumber(r.outcome_mean)
+    ?? readNumber(readRecord(r.outcome)?.mean);
   return {
     id,
     label,
@@ -268,34 +317,140 @@ function readGraph(enrichment: Record<string, unknown>): Record<string, unknown>
     : {};
 }
 
-function readIslResults(enrichment: Record<string, unknown>): Record<string, unknown> {
-  // PLoT V2RunResponseEnvelope carries factor_sensitivity and robustness at
-  // the top level; the decision_review prompt expects them nested inside
-  // isl_results. Build a minimal projection.
-  const obj: Record<string, unknown> = {};
+function readIslResults(
+  enrichment: Record<string, unknown>,
+  labelMap: Map<string, string>,
+): Record<string, unknown> {
+  // PLoT V2RunResponseEnvelope carries factor_sensitivity, robustness, and
+  // results at the top level. The decision_review prompt (defaults.ts:1245-
+  // 1252) expects normalised entries nested inside isl_results with a
+  // specific field shape — factor_id/factor_label, from_label/to_label,
+  // outcome.{mean,p10,p90}. We rename and reshape rather than passing the
+  // raw envelope through.
+
+  // factor_sensitivity: rename id → factor_id and label → factor_label;
+  // pin elasticity / confidence to numbers (or null — never invent).
+  const factorSensitivity: Record<string, unknown>[] = [];
   if (Array.isArray(enrichment.factor_sensitivity)) {
-    obj.factor_sensitivity = enrichment.factor_sensitivity;
-  } else {
-    obj.factor_sensitivity = [];
-  }
-  if (enrichment.robustness !== null && typeof enrichment.robustness === 'object') {
-    const rob = enrichment.robustness as Record<string, unknown>;
-    obj.robustness = rob;
-    if (Array.isArray(rob.fragile_edges)) {
-      obj.fragile_edges = rob.fragile_edges;
+    for (const raw of enrichment.factor_sensitivity) {
+      const e = readRecord(raw);
+      if (!e) continue;
+      const factorId = (typeof e.factor_id === 'string' ? e.factor_id : null)
+        ?? (typeof e.id === 'string' ? e.id : null);
+      if (!factorId) continue;
+      const factorLabel = (typeof e.factor_label === 'string' && e.factor_label)
+        ? e.factor_label
+        : (typeof e.label === 'string' && e.label)
+          ? e.label
+          : labelMap.get(factorId) ?? factorId;
+      factorSensitivity.push({
+        factor_id: factorId,
+        factor_label: factorLabel,
+        elasticity: typeof e.elasticity === 'number' && Number.isFinite(e.elasticity) ? e.elasticity : null,
+        confidence: typeof e.confidence === 'number' && Number.isFinite(e.confidence) ? e.confidence : null,
+      });
     }
   }
-  // option_comparison: the prompt's shape expects an array; PLoT's per-result
-  // shape already covers this via `results`, so forward results[] as the
-  // comparison slice.
-  obj.option_comparison = Array.isArray(enrichment.results) ? enrichment.results : [];
-  return obj;
+
+  // fragile_edges: pull from enrichment.robustness.fragile_edges[];
+  // resolve from_label / to_label via the graph node label map when the
+  // edge entry uses *_node_id keys without inline labels.
+  const fragileEdges: Record<string, unknown>[] = [];
+  const rob = readRecord(enrichment.robustness);
+  if (rob && Array.isArray(rob.fragile_edges)) {
+    for (const raw of rob.fragile_edges) {
+      const e = readRecord(raw);
+      if (!e) continue;
+      const fromNodeId = typeof e.from_node_id === 'string' ? e.from_node_id : null;
+      const toNodeId = typeof e.to_node_id === 'string' ? e.to_node_id : null;
+      const fromLabel = (typeof e.from_label === 'string' && e.from_label)
+        ? e.from_label
+        : (fromNodeId ? labelMap.get(fromNodeId) ?? fromNodeId : null);
+      const toLabel = (typeof e.to_label === 'string' && e.to_label)
+        ? e.to_label
+        : (toNodeId ? labelMap.get(toNodeId) ?? toNodeId : null);
+      const out: Record<string, unknown> = {
+        edge_id: (typeof e.edge_id === 'string' ? e.edge_id : null)
+          ?? (typeof e.id === 'string' ? e.id : null),
+        from_label: fromLabel,
+        to_label: toLabel,
+        switch_probability: typeof e.switch_probability === 'number' ? e.switch_probability : null,
+      };
+      if (typeof e.marginal_switch_probability === 'number') {
+        out.marginal_switch_probability = e.marginal_switch_probability;
+      }
+      if (typeof e.alternative_winner_id === 'string') {
+        out.alternative_winner_id = e.alternative_winner_id;
+      }
+      if (typeof e.alternative_winner_label === 'string') {
+        out.alternative_winner_label = e.alternative_winner_label;
+      }
+      fragileEdges.push(out);
+    }
+  }
+
+  // option_comparison: normalise outcome shape so the prompt always sees
+  // nested outcome.{mean,p10,p90}. Both flat (outcome_mean / outcome_p10 /
+  // outcome_p90) and nested input shapes are accepted.
+  const optionComparison: Record<string, unknown>[] = [];
+  if (Array.isArray(enrichment.results)) {
+    for (const raw of enrichment.results) {
+      const r = readRecord(raw);
+      if (!r) continue;
+      const outcomeNested = readRecord(r.outcome);
+      const mean = readNumber(r.outcome_mean) ?? readNumber(outcomeNested?.mean);
+      const p10 = readNumber(r.outcome_p10) ?? readNumber(outcomeNested?.p10);
+      const p90 = readNumber(r.outcome_p90) ?? readNumber(outcomeNested?.p90);
+      optionComparison.push({
+        option_id: typeof r.option_id === 'string' ? r.option_id : null,
+        option_label: (typeof r.option_label === 'string' && r.option_label)
+          ? r.option_label
+          : (typeof r.label === 'string' ? r.label : null),
+        win_probability: typeof r.win_probability === 'number' ? r.win_probability : null,
+        outcome: {
+          mean,
+          p10,
+          p90,
+        },
+      });
+    }
+  }
+
+  // robustness: copy the recommendation_stability / overall_confidence
+  // signals the prompt reads at defaults.ts:1252. Drop fragile_edges from
+  // here (now a sibling field).
+  const robustnessOut: Record<string, unknown> = {};
+  if (rob) {
+    if (typeof rob.recommendation_stability === 'number') {
+      robustnessOut.recommendation_stability = rob.recommendation_stability;
+    }
+    if (typeof rob.overall_confidence === 'number') {
+      robustnessOut.overall_confidence = rob.overall_confidence;
+    }
+    if (typeof rob.level === 'string') {
+      robustnessOut.level = rob.level;
+    }
+  }
+
+  return {
+    factor_sensitivity: factorSensitivity,
+    fragile_edges: fragileEdges,
+    option_comparison: optionComparison,
+    robustness: robustnessOut,
+  };
 }
 
-function readDeterministicCoaching(enrichment: Record<string, unknown>): Record<string, unknown> {
+function readDeterministicCoaching(_enrichment: Record<string, unknown>): Record<string, unknown> {
   // PLoT envelope does not ship an M1-shaped deterministic_coaching payload.
-  // Provide the minimum required shape so the shape check passes and the
-  // prompt can read readiness / empty arrays.
+  // We return the minimum required shape so the prompt v11 shape check
+  // passes — `readiness: 'unknown'` and `headline_type: 'neutral'` are
+  // **intentional safe defaults** kept for v11 compatibility (its tone
+  // alignment table at defaults.ts:1320 keys on these enums and would
+  // produce miscalibrated tone if we shipped null today).
+  //
+  // Prompt v12 (drafted separately) will fall back to `_meta.margin` /
+  // `_meta.robustness_level` and ignore these defaults. After v12 ships,
+  // a follow-up branch will flip these to null. See plan §"Tier 3 timing".
   return {
     readiness: 'unknown',
     headline_type: 'neutral',
@@ -304,16 +459,110 @@ function readDeterministicCoaching(enrichment: Record<string, unknown>): Record<
   };
 }
 
+/**
+ * Derive flip_threshold_data from per-result factor_sensitivity entries.
+ * PLoT does not ship a top-level `flip_threshold_data` field; the data
+ * exists nested in `results[].factor_sensitivity[].flip_threshold`. This
+ * delegates to {@link collectFactorFlipEntries} (shared with
+ * analysis-compact.ts) for the read + filter + dedupe step, then projects
+ * to the prompt's input shape.
+ *
+ * Direction is value-delta-driven (`flip_value > current_value` →
+ * `'increase'`) — never elasticity-sign-driven. See FactorFlipEntry doc.
+ */
 function readFlipThresholdData(
   enrichment: Record<string, unknown>,
+  graphNodeLabels: Map<string, string>,
+  graphNodeUnits: Map<string, string>,
 ): ReadonlyArray<Record<string, unknown>> | undefined {
-  const raw = enrichment.flip_threshold_data;
-  if (!Array.isArray(raw)) return undefined;
-  return raw.filter((r): r is Record<string, unknown> => r !== null && typeof r === 'object');
+  const entries = collectFactorFlipEntries(
+    enrichment as V2RunResponseEnvelope,
+    graphNodeLabels,
+    graphNodeUnits,
+  );
+  if (entries.length === 0) return undefined;
+
+  return entries.map((entry) => {
+    const out: Record<string, unknown> = {
+      factor_id: entry.factor_id,
+      factor_label: entry.factor_label,
+      current_value: entry.current_value,
+      flip_value: entry.flip_value,
+      direction: entry.direction,
+    };
+    if (entry.unit !== null) {
+      out.unit = entry.unit;
+    }
+    return out;
+  });
 }
+
+// ============================================================================
+// Helpers — defensive narrowing for opaque enrichment reads
+// ============================================================================
 
 function readNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function countArray(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+/**
+ * Build factor_id → display label map from `enrichment.graph.nodes[]`.
+ * Defensive: returns an empty Map when the graph shape isn't recognisable.
+ */
+function buildNodeLabelMap(graph: Record<string, unknown>): Map<string, string> {
+  const map = new Map<string, string>();
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return map;
+  for (const raw of nodes) {
+    const n = readRecord(raw);
+    if (!n) continue;
+    const id = typeof n.id === 'string' ? n.id : null;
+    const label = typeof n.label === 'string' ? n.label : null;
+    if (id && label) map.set(id, label);
+  }
+  return map;
+}
+
+/**
+ * Build factor_id → unit map from `enrichment.graph.nodes[]` reading
+ * `node.data.unit` (the prompt-side convention from the brief).
+ * Falls back to `node.observed_state.unit` for older fixtures.
+ */
+function buildNodeUnitMap(graph: Record<string, unknown>): Map<string, string> {
+  const map = new Map<string, string>();
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return map;
+  for (const raw of nodes) {
+    const n = readRecord(raw);
+    if (!n) continue;
+    const id = typeof n.id === 'string' ? n.id : null;
+    if (!id) continue;
+    const data = readRecord(n.data);
+    const obs = readRecord(n.observed_state);
+    const unit = (typeof data?.unit === 'string' ? data.unit : null)
+      ?? (typeof obs?.unit === 'string' ? obs.unit : null);
+    if (unit) map.set(id, unit);
+  }
+  return map;
+}
+
+/**
+ * Read robustness.level defensively from the V2 envelope.
+ */
+function readRobustnessLevel(enrichment: Record<string, unknown>): string | null {
+  const rob = readRecord(enrichment.robustness);
+  if (!rob) return null;
+  return typeof rob.level === 'string' ? rob.level : null;
 }
 
 function sha256(s: string): string {

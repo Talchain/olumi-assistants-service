@@ -35,6 +35,38 @@ import {
 // Shared input shape (subset the V5 enricher needs; route schema is richer)
 // ============================================================================
 
+/**
+ * Adapter-side diagnostics for the decision_review LLM call. Lives on the
+ * input object, never injected into the user message — see
+ * `buildDecisionReviewUserMessage` for the strict separation. v12 (the next
+ * decision_review prompt revision) will read these signals through a future
+ * adapter-side hook that overrides deterministic_coaching defaults; today
+ * v11 is unaware of `_meta` and that is intentional.
+ */
+export interface DecisionReviewMeta {
+  readonly input_shape_version: 'v5-normalised';
+  /** Number of populated entries on flip_threshold_data after derivation. */
+  readonly flip_threshold_count: number;
+  /** Number of populated entries on isl_results.factor_sensitivity. */
+  readonly factor_sensitivity_count: number;
+  /** Number of populated entries on isl_results.fragile_edges. */
+  readonly fragile_edge_count: number;
+  /** Number of model_critiques carried by deterministic_coaching. 0 until the
+   *  M1 deterministic-coaching pipeline ships. */
+  readonly model_critique_count: number;
+  /** Whether the deterministic_coaching block is the M1 fully-derived shape.
+   *  False until M1 ships — v12 uses this to decide whether to fall back to
+   *  raw signals (margin, robustness_level) instead of trusting headline_type
+   *  / readiness. */
+  readonly has_deterministic_coaching: boolean;
+  /** winner.win_probability minus runner_up.win_probability. Null when no
+   *  runner-up exists. */
+  readonly margin: number | null;
+  /** robustness.level pulled defensively from the V2 envelope. Null when
+   *  absent. */
+  readonly robustness_level: string | null;
+}
+
 export interface DecisionReviewInvokeInput {
   readonly brief: string;
   readonly brief_hash: string;
@@ -56,6 +88,8 @@ export interface DecisionReviewInvokeInput {
     readonly [k: string]: unknown;
   } | null;
   readonly flip_threshold_data?: ReadonlyArray<Record<string, unknown>>;
+  /** Adapter-side diagnostics — never injected into the user message. */
+  readonly _meta?: DecisionReviewMeta;
 }
 
 export interface InvokeDecisionReviewOptions {

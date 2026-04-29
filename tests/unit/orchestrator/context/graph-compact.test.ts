@@ -474,40 +474,45 @@ describe("compactGraph", () => {
   // Provenance projection (Tier 2 — display-safe vocabulary alongside `source`)
   // ==========================================================================
 
-  it("node extractionType=explicit → provenance=from_brief (and source=user)", () => {
+  // _raw_provenance is emitted ONLY for unrecognised upstream values — the
+  // four canonical extractionType values are recoverable from `provenance` +
+  // the mapping table, so emitting them here would just burn LLM context
+  // tokens (see CompactNode._raw_provenance docstring).
+
+  it("node extractionType=explicit → provenance=from_brief, source=user, no _raw_provenance", () => {
     const node = makeNode("n_explicit", { observed_state: { value: 10, extractionType: "explicit" } });
     const result = compactGraph(makeGraph([node], []));
     const n = result.nodes[0];
     expect(n.source).toBe("user");
     expect(n.provenance).toBe("from_brief");
-    expect(n._raw_provenance).toBe("explicit");
+    expect(n).not.toHaveProperty("_raw_provenance");
   });
 
-  it("node extractionType=observed → provenance=from_brief (and source=system)", () => {
+  it("node extractionType=observed → provenance=from_brief, source=system, no _raw_provenance", () => {
     const node = makeNode("n_observed", { observed_state: { value: 10, extractionType: "observed" } });
     const result = compactGraph(makeGraph([node], []));
     const n = result.nodes[0];
     expect(n.source).toBe("system");
     expect(n.provenance).toBe("from_brief");
-    expect(n._raw_provenance).toBe("observed");
+    expect(n).not.toHaveProperty("_raw_provenance");
   });
 
-  it("node extractionType=inferred → provenance=ai_inferred (and source=assumption)", () => {
+  it("node extractionType=inferred → provenance=ai_inferred, source=assumption, no _raw_provenance", () => {
     const node = makeNode("n_inferred", { observed_state: { value: 10, extractionType: "inferred" } });
     const result = compactGraph(makeGraph([node], []));
     const n = result.nodes[0];
     expect(n.source).toBe("assumption");
     expect(n.provenance).toBe("ai_inferred");
-    expect(n._raw_provenance).toBe("inferred");
+    expect(n).not.toHaveProperty("_raw_provenance");
   });
 
-  it("node extractionType=range → provenance=ai_inferred (and source=system)", () => {
+  it("node extractionType=range → provenance=ai_inferred, source=system, no _raw_provenance", () => {
     const node = makeNode("n_range", { observed_state: { value: 10, extractionType: "range" } });
     const result = compactGraph(makeGraph([node], []));
     const n = result.nodes[0];
     expect(n.source).toBe("system");
     expect(n.provenance).toBe("ai_inferred");
-    expect(n._raw_provenance).toBe("range");
+    expect(n).not.toHaveProperty("_raw_provenance");
   });
 
   it("node unknown extractionType → provenance=ai_inferred, _raw_provenance preserves the raw string", () => {
@@ -527,36 +532,36 @@ describe("compactGraph", () => {
     expect(n).not.toHaveProperty("_raw_provenance");
   });
 
-  it("edge provenance.source=brief_extraction → provenance=from_brief", () => {
+  it("edge provenance.source=brief_extraction → provenance=from_brief, no _raw_provenance", () => {
     const edge = makeEdge("a", "b", { provenance: { source: "brief_extraction" } });
     const result = compactGraph(makeGraph([], [edge]));
     const e = result.edges[0];
     expect(e.provenance).toBe("from_brief");
-    expect(e._raw_provenance).toBe("brief_extraction");
+    expect(e).not.toHaveProperty("_raw_provenance");
   });
 
-  it("edge provenance.source=user_specified → provenance=user_set", () => {
+  it("edge provenance.source=user_specified → provenance=user_set, no _raw_provenance", () => {
     const edge = makeEdge("a", "b", { provenance: { source: "user_specified" } });
     const result = compactGraph(makeGraph([], [edge]));
     const e = result.edges[0];
     expect(e.provenance).toBe("user_set");
-    expect(e._raw_provenance).toBe("user_specified");
+    expect(e).not.toHaveProperty("_raw_provenance");
   });
 
-  it("edge provenance.source=cee_hypothesis → provenance=ai_inferred", () => {
+  it("edge provenance.source=cee_hypothesis → provenance=ai_inferred, no _raw_provenance", () => {
     const edge = makeEdge("a", "b", { provenance: { source: "cee_hypothesis" } });
     const result = compactGraph(makeGraph([], [edge]));
     const e = result.edges[0];
     expect(e.provenance).toBe("ai_inferred");
-    expect(e._raw_provenance).toBe("cee_hypothesis");
+    expect(e).not.toHaveProperty("_raw_provenance");
   });
 
-  it("edge provenance.source=domain_knowledge → provenance=ai_inferred", () => {
+  it("edge provenance.source=domain_knowledge → provenance=ai_inferred, no _raw_provenance", () => {
     const edge = makeEdge("a", "b", { provenance: { source: "domain_knowledge" } });
     const result = compactGraph(makeGraph([], [edge]));
     const e = result.edges[0];
     expect(e.provenance).toBe("ai_inferred");
-    expect(e._raw_provenance).toBe("domain_knowledge");
+    expect(e).not.toHaveProperty("_raw_provenance");
   });
 
   it("edge with no provenance field → provenance=ai_inferred, no _raw_provenance", () => {

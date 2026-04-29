@@ -48,7 +48,10 @@ export interface CompactNode {
   /** Display-safe provenance projection (UI/coaching vocabulary). Added
    *  alongside `source`. Unknown upstream values map to `'ai_inferred'`. */
   provenance?: CompactProvenance;
-  /** Raw upstream provenance string (debug/diagnostics only). */
+  /** Raw upstream provenance string. Emitted ONLY for unrecognised upstream
+   *  values — the four canonical extractionType values are recoverable from
+   *  `provenance` + the mapping table, so emitting them here would just burn
+   *  LLM context tokens. Treat as diagnostic-only. */
   _raw_provenance?: string;
   /** Human-readable summary of option interventions (option nodes only). */
   intervention_summary?: string;
@@ -64,7 +67,8 @@ export interface CompactEdge {
   /** Display-safe provenance projection. Mapped from edge.provenance.source.
    *  Unknown / absent values map to `'ai_inferred'`. */
   provenance?: CompactProvenance;
-  /** Raw upstream provenance source (debug/diagnostics only). */
+  /** Raw upstream provenance.source. Emitted ONLY for unrecognised values
+   *  (see CompactNode._raw_provenance for the rationale). */
   _raw_provenance?: string;
 }
 
@@ -287,28 +291,29 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         //   anything-else      → ai_inferred  (safe default per brief)
         //   user_specified path: not currently emitted by upstream nodes;
         //     reserved for future user-edit pipelines.
+        // `_raw_provenance` is debug-only and only emitted when the upstream
+        // value falls OUTSIDE the four canonical extractionType values — i.e.
+        // when something would be lost by the projection. For the canonical
+        // values the raw is fully recoverable from `provenance` + the mapping
+        // table, so emitting it would just burn LLM context tokens.
         const et = obsState.extractionType;
         if (et === 'explicit') {
           n.source = 'user';
           n.provenance = 'from_brief';
-          n._raw_provenance = 'explicit';
         } else if (et === 'inferred') {
           n.source = 'assumption';
           n.provenance = 'ai_inferred';
-          n._raw_provenance = 'inferred';
         } else if (et === 'observed') {
           n.source = 'system';
           n.provenance = 'from_brief';
-          n._raw_provenance = 'observed';
         } else if (et === 'range') {
           n.source = 'system';
           n.provenance = 'ai_inferred';
-          n._raw_provenance = 'range';
         } else {
           n.source = 'system';
           n.provenance = 'ai_inferred';
           if (typeof et === 'string' && et.length > 0) {
-            n._raw_provenance = et;
+            n._raw_provenance = et; // unrecognised value — preserved for debug
           }
         }
       } else {
@@ -359,23 +364,22 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
       //   cee_hypothesis    → ai_inferred
       //   domain_knowledge  → ai_inferred
       //   unknown / absent  → ai_inferred (safe default per brief)
+      // `_raw_provenance` is debug-only and only emitted for unrecognised
+      // upstream values (see node-side comment above). Canonical mappings are
+      // recoverable from `provenance` + the mapping table.
       const rawSource: unknown = edge.provenance?.source;
       if (rawSource === 'brief_extraction') {
         e.provenance = 'from_brief';
-        e._raw_provenance = 'brief_extraction';
       } else if (rawSource === 'user_specified') {
         e.provenance = 'user_set';
-        e._raw_provenance = 'user_specified';
       } else if (rawSource === 'cee_hypothesis') {
         e.provenance = 'ai_inferred';
-        e._raw_provenance = 'cee_hypothesis';
       } else if (rawSource === 'domain_knowledge') {
         e.provenance = 'ai_inferred';
-        e._raw_provenance = 'domain_knowledge';
       } else {
         e.provenance = 'ai_inferred';
         if (typeof rawSource === 'string' && rawSource.length > 0) {
-          e._raw_provenance = rawSource;
+          e._raw_provenance = rawSource; // unrecognised value — preserved for debug
         }
       }
 
