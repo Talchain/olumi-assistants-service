@@ -152,10 +152,18 @@ export function buildRecoveryChip(input: RecoveryChipInput): RecoveryChipResult 
  * variant of `LLM_SCHEMA_VIOLATION` from generic schema parse failures).
  *
  * `PLOT_*`, `LLM_DENIAL`, and `DECISION_REVIEW_FAILED` are never produced
- * by this translator — they are values callers pass directly when they have
- * richer context (PLoT errors are caught by handler-failure-responses.ts;
- * LLM_DENIAL has no current detection path; DECISION_REVIEW_FAILED is
- * scoped to the run_analysis post-processing path).
+ * by this translator — they are values callers pass directly when they
+ * have richer context. Today:
+ *   - PLoT failures still flow through `composeHandlerFailure`, so the
+ *     recovery layer never sees them; the follow-up brief at
+ *     `Docs/v5/follow-up-recovery-coverage.md` Task A relocates that
+ *     wiring to the turn-executor catch site so `PLOT_TIMEOUT` /
+ *     `PLOT_HTTP_ERROR` get routed through `buildRecoveryChip` like
+ *     every other failure.
+ *   - `LLM_DENIAL` has no current detection path; the case exists in
+ *     the builder for forward compatibility.
+ *   - `DECISION_REVIEW_FAILED` is scoped to the run_analysis
+ *     post-processing path and is emitted out-of-band.
  */
 export function recoveryFailureTypeFromInternal(
   internal: InternalFailure,
