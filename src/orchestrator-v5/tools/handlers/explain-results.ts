@@ -53,6 +53,8 @@ import type {
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { buildAnalysisAbsentTemplate, resolveOptionCount } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
+import { mapFallbackReason } from './diagnostics.js';
+import { applyStalenessPrefix } from './staleness-prefix.js';
 
 export function createExplainResultsHandler(): HandlerFn {
   return async function explainResultsHandler(
@@ -65,11 +67,21 @@ export function createExplainResultsHandler(): HandlerFn {
     );
 
     if (!hasAnalysisFact) {
+      const assistantText = buildAnalysisAbsentTemplate(
+        optionCount,
+        invocation.analysisReady?.status,
+      );
       const fact: ExplainResultsHandlerFact = {
         fact_type: 'explain_results',
         fact_version: 1,
         noop: true,
-        result: { precondition_unmet: true, option_count: optionCount },
+        result: {
+          precondition_unmet: true,
+          option_count: optionCount,
+          answer_source: 'precondition_template',
+          fallback_reason: null,
+          answer_text_length: assistantText.length,
+        },
       };
       const parsed = ExplainResultsHandlerFactSchema.safeParse(fact);
       if (!parsed.success) {
@@ -79,28 +91,11 @@ export function createExplainResultsHandler(): HandlerFn {
         );
       }
       return {
-        assistant_text: buildAnalysisAbsentTemplate(
-          optionCount,
-          invocation.analysisReady?.status,
-        ),
+        assistant_text: assistantText,
         handler_facts: [parsed.data],
         llm_calls_used: 0,
         suppress_orientation: true,
       };
-    }
-
-    const fact: ExplainResultsHandlerFact = {
-      fact_type: 'explain_results',
-      fact_version: 1,
-      noop: true,
-      result: { precondition_unmet: false, option_count: optionCount },
-    };
-    const parsed = ExplainResultsHandlerFactSchema.safeParse(fact);
-    if (!parsed.success) {
-      throw new HandlerResultInvalidError(
-        'ExplainResultsHandlerFact failed schema validation',
-        { issues: parsed.error.issues },
-      );
     }
 
     // Answer-carrying contract (post-Commit-3): the side-band validator's
@@ -110,10 +105,42 @@ export function createExplainResultsHandler(): HandlerFn {
     // for explanation handlers, so any orientation Sonnet produced is
     // ignored on the user side.
     const explanation = invocation.explanation;
-    const assistantText =
-      explanation && explanation.answer_text_valid
-        ? explanation.answer_text
-        : composeExplainResultsFallback(invocation.analysisProjection);
+    const sonnetValid = !!(explanation && explanation.answer_text_valid);
+    const rawText = sonnetValid
+      ? explanation!.answer_text
+      : composeExplainResultsFallback(invocation.analysisProjection);
+
+    // Trust contract: when the analysis is loaded from a prior run, prepend
+    // the staleness caveat in code. The chip-generator separately surfaces a
+    // "Rerun analysis" chip from the projection's staleness_reason.
+    const stalenessReason = invocation.analysisProjection?.staleness_reason ?? null;
+    const { text: assistantText, prefixed } = applyStalenessPrefix(
+      rawText,
+      stalenessReason,
+    );
+
+    const fact: ExplainResultsHandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: {
+        precondition_unmet: false,
+        option_count: optionCount,
+        answer_source: sonnetValid ? 'sonnet' : 'deterministic_fallback',
+        fallback_reason: sonnetValid
+          ? null
+          : mapFallbackReason(explanation?.answer_validation_error),
+        answer_text_length: assistantText.length,
+        staleness_prefixed: prefixed,
+      },
+    };
+    const parsed = ExplainResultsHandlerFactSchema.safeParse(fact);
+    if (!parsed.success) {
+      throw new HandlerResultInvalidError(
+        'ExplainResultsHandlerFact failed schema validation',
+        { issues: parsed.error.issues },
+      );
+    }
 
     return {
       assistant_text: assistantText,

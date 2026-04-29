@@ -61,7 +61,12 @@ import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready
 import { GraphV3 } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
-import type { ComposeContext } from './compose/types.js';
+import type { ComposeContext, SuggestedAction } from './compose/types.js';
+import {
+  tryDeterministicValueUpdate,
+  buildClarifyAssistantText,
+  buildClarifyChipMessage,
+} from './routing/deterministic-value-update.js';
 import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
@@ -595,6 +600,103 @@ export async function runTurnExecutor(
           word_range_missed: cqeSummary.word_range_missed,
         },
       });
+
+      // V5 explain-stabilisation Task 4 — deterministic value-update
+      // pre-route. Catches explicit "Set X to N" / "Increase Y to N"
+      // phrasings before they reach the LLM and dispatches them as a
+      // clarify direct_answer with candidate factor chips. Negative gate
+      // suppresses on hypothetical phrasings ("what if budget increased").
+      // Pure function; falls through to the LLM when no candidate match.
+      const deterministicValueUpdate = tryDeterministicValueUpdate(
+        payload.message,
+        contextPack.parsed_quantities,
+        graphLookupForValidate,
+      );
+      emit(TelemetryEvents.V5DeterministicValueUpdate, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        matched: deterministicValueUpdate.matched,
+        dispatch: deterministicValueUpdate.matched
+          ? deterministicValueUpdate.dispatch
+          : null,
+        candidate_count: deterministicValueUpdate.matched
+          ? deterministicValueUpdate.candidates.length
+          : 0,
+        top_score: deterministicValueUpdate.matched
+          ? deterministicValueUpdate.candidates[0]?.score ?? null
+          : null,
+        // Per-candidate source tags ('substring' | 'dice') so routing
+        // diagnostics can distinguish exact-label hits from fuzzy hits
+        // without inferring from `score`.
+        candidate_sources: deterministicValueUpdate.matched
+          ? deterministicValueUpdate.candidates.map((c) => c.source)
+          : [],
+        skip_reason: deterministicValueUpdate.matched
+          ? null
+          : deterministicValueUpdate.skip_reason,
+        cqe_quantity_count: contextPack.parsed_quantities.length,
+      });
+      if (deterministicValueUpdate.matched) {
+        // Dispatch a clarify-shape direct_answer. No LLM call, no handler
+        // fact persisted — the user's chip click on the next turn is what
+        // produces a real factor reference for the LLM to act on.
+        const clarifyChips: SuggestedAction[] = deterministicValueUpdate.candidates.map(
+          (cand, idx) => ({
+            id: `chip_clarify_factor_${idx}`,
+            label: cand.label,
+            message: buildClarifyChipMessage(
+              payload.message,
+              cand,
+              deterministicValueUpdate.quantity,
+            ),
+          }),
+        );
+        const clarifyResponse = composeDirectAnswerResponse({
+          assistant_text: buildClarifyAssistantText(deterministicValueUpdate.candidates),
+          stage: context.stage,
+          suggested_actions: clarifyChips,
+        });
+        sonnetTextForLog = clarifyResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+
+        try {
+          const committed = await commitDirectAnswer(clarifyResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'deterministic_value_update',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on deterministic value-update pre-route',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, {
+            phase: 'commit',
+          });
+        }
+        return finalizeRun();
+      }
+
       routingResult = await routeWithToolUse(contextPack, payload.message, {
         requestId,
         sessionId: context.session_id,
@@ -900,7 +1002,6 @@ export async function runTurnExecutor(
           proposedHandlerId,
           action.explanation,
           context.prior_facts,
-          analysisStalenessReason,
         );
         if (!verdict.skip && verdict.payload) {
           explanationInvocationPayload = verdict.payload;

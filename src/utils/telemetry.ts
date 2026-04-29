@@ -535,6 +535,13 @@ export const TelemetryEvents = {
   // the final text is NOT mutated at this stage. Payload:
   // { handler_id, text_length }.
   V5MutationLanguageGuard: "v5.mutation_language_guard",
+  // V5DeterministicValueUpdate — emitted when the pre-LLM value-update
+  // pre-route runs. `matched: true` means the turn was dispatched as a
+  // clarify direct_answer without an LLM call; `matched: false` means the
+  // pre-route declined and the turn proceeded to the LLM. Payload:
+  // { matched, dispatch?, candidate_count?, top_score?, skip_reason?,
+  //   cqe_quantity_count }.
+  V5DeterministicValueUpdate: "v5.deterministic_value_update",
 } as const;
 
 /**

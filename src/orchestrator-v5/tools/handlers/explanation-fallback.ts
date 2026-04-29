@@ -58,15 +58,12 @@ export function composeExplainResultsFallback(
   const leading = projection.leading_option;
   const sentences: string[] = [];
 
-  // Trust contract: when the analysis is loaded from a prior run, the
-  // staleness caveat MUST appear before any figure. The validator's
-  // rule 6 enforces the same ordering on Sonnet's text; this composer
-  // achieves it structurally by placing the caveat as sentence #1.
-  if (projection.staleness_reason) {
-    sentences.push(
-      'Treat the figures below as directional rather than definitive, since the analysis is loaded from a prior run with unknown freshness.',
-    );
-  }
+  // Staleness caveat is no longer composed here. The handler's
+  // `applyStalenessPrefix` helper prepends it to the final assistant_text
+  // (whether this fallback or Sonnet's answer_text) when the analysis
+  // projection carries a `staleness_reason`. Keeping the composer free of
+  // the caveat sentence avoids duplication when prefix + composer both
+  // ran, and keeps prose ordering decisions in one place.
 
   sentences.push(
     `${leading.label} performs best, with a probability of ${formatRawNumber(leading.probability)}.`,
@@ -123,15 +120,10 @@ export function composeWhatWouldFlipFallback(
   const leading = projection.leading_option;
   const sentences: string[] = [];
 
-  // Trust contract: staleness caveat precedes any figure (parallel to
-  // composeExplainResultsFallback). When the analysis is loaded from a
-  // prior run, the user reads "treat figures as directional" before the
-  // figures themselves.
-  if (projection.staleness_reason) {
-    sentences.push(
-      'Treat the figures below as directional rather than definitive, since the analysis is loaded from a prior run with unknown freshness.',
-    );
-  }
+  // Staleness caveat is no longer composed here — see the parallel note in
+  // composeExplainResultsFallback. The handler's applyStalenessPrefix
+  // helper prepends it to the final assistant_text when staleness_reason
+  // is set on the projection.
 
   sentences.push(
     `${leading.label} is currently performing best, with a probability of ${formatRawNumber(leading.probability)}.`,
@@ -174,15 +166,47 @@ export function composeWhatWouldFlipFallback(
 }
 
 /**
- * `explain_from_structure` fallback — no analysis required. Format the
- * structure projection into prose: goal, top causal links, named-factor
- * pathways if the user mentioned a factor by name.
+ * `explain_from_structure` fallback — no analysis required. Sonnet rarely
+ * populates `answer_text` for generic structural prompts ("what factor
+ * most influences my decision?"); this composer therefore acts as the
+ * primary user-facing prose for those turns. Reads as Olumi explaining
+ * causal structure, not a system reporting.
+ *
+ * Two prose branches:
+ *  - **Named-factor branch** when the user mentioned a factor by label:
+ *    open with the factor and its strongest pathway, preserving the F.6
+ *    over-claim guard so we only assert reach-to-goal when a cited
+ *    pathway actually terminates at the goal node.
+ *  - **Generic branch** when no factor was named: open with the goal and
+ *    walk through the strongest 1-2 direct causal links shaping it.
+ *
+ * The next-step nudge ("Running the analysis would show…") is only
+ * appended when `options.canRunAnalysis === true`. The handler should
+ * pass `invocation.analysisReady?.status === 'ready'` so Sonnet's
+ * suggestion stays grounded in the structural-readiness signal — we do
+ * not nudge the user toward an analysis the precondition will not let
+ * run.
+ *
+ * Length target: 300–600 chars on a typical 5-factor / 4-option graph;
+ * sparse graphs (1 factor / 1 option) may produce shorter prose, which is
+ * fine — do not pad.
  */
+export interface ExplainFromStructureFallbackOptions {
+  readonly canRunAnalysis?: boolean;
+}
+
 export function composeExplainFromStructureFallback(
   projection: StructureProjectionSummary | undefined,
+  options?: ExplainFromStructureFallbackOptions,
 ): string {
+  const canRunAnalysis = options?.canRunAnalysis === true;
   if (!projection) {
-    return 'The model structure could not be summarised from the available data. Would you like to run the analysis?';
+    // No projection at all — extremely thin context. Give a neutral one-
+    // sentence response and only nudge toward analysis when readiness says
+    // it's actually runnable.
+    return canRunAnalysis
+      ? 'The model structure could not be summarised from the available data. Would you like to run the analysis?'
+      : 'The model structure could not be summarised from the available data.';
   }
 
   const sentences: string[] = [];
@@ -208,35 +232,44 @@ export function composeExplainFromStructureFallback(
           (p.label_to === factor && p.label_from === projection.goal_label),
       );
 
-    const path = pathways
-      .map((p) =>
-        p.label_from === factor
-          ? `${p.label_to} (strength ${formatRawNumber(p.strength)})`
-          : `${p.label_from} (strength ${formatRawNumber(p.strength)})`,
-      )
-      .join(' and ');
-
-    if (reachesGoal) {
+    const top = pathways[0];
+    const otherEnd =
+      top.label_from === factor ? top.label_to : top.label_from;
+    sentences.push(
+      `${factor} shapes this decision through its causal links in the model.`,
+    );
+    if (reachesGoal && projection.goal_label) {
       sentences.push(
-        `${factor} connects to ${path}, which feeds into ${projection.goal_label}.`,
+        `Its strongest direct influence runs to ${projection.goal_label} at strength ${formatRawNumber(top.strength)}, meaning movement here would have the most structural effect on your goal.`,
       );
     } else {
-      sentences.push(`${factor} connects to ${path} in the model.`);
+      sentences.push(
+        `Its strongest direct connection is to ${otherEnd} at strength ${formatRawNumber(top.strength)}, so changes there would propagate first.`,
+      );
+    }
+    if (pathways.length > 1) {
+      const second = pathways[1];
+      const secondOther =
+        second.label_from === factor ? second.label_to : second.label_from;
+      sentences.push(
+        `A second pathway runs to ${secondOther} at strength ${formatRawNumber(second.strength)}, giving you a secondary lever if the first proves hard to move.`,
+      );
     }
   } else if (projection.top_causal_links.length > 0) {
     const top = projection.top_causal_links.slice(0, 2);
-    const linkText = top
-      .map(
-        (l) =>
-          `${l.label_from} drives ${l.label_to} at strength ${formatRawNumber(l.strength)}`,
-      )
-      .join(', and ');
-    if (projection.goal_label) {
+    const goalIntro = projection.goal_label
+      ? `Your decision around ${projection.goal_label} is shaped by several causal mechanisms.`
+      : 'This decision is shaped by several causal mechanisms.';
+    sentences.push(goalIntro);
+    const first = top[0];
+    sentences.push(
+      `${first.label_from} has the strongest visible direct influence on ${first.label_to} at strength ${formatRawNumber(first.strength)}, meaning changes here would have the most structural effect.`,
+    );
+    if (top.length > 1) {
+      const second = top[1];
       sentences.push(
-        `Looking at the model, the strongest direct links shaping ${projection.goal_label} are ${linkText}.`,
+        `${second.label_from} also contributes meaningfully through its direct link to ${second.label_to} at strength ${formatRawNumber(second.strength)}, so it is worth keeping in view as a secondary lever.`,
       );
-    } else {
-      sentences.push(`The strongest direct links in the model are ${linkText}.`);
     }
   } else if (projection.goal_label) {
     sentences.push(
@@ -254,7 +287,11 @@ export function composeExplainFromStructureFallback(
     );
   }
 
-  sentences.push('Would you like to run the analysis to see how the options compare?');
+  if (canRunAnalysis) {
+    sentences.push(
+      'Running the analysis would show how these structural relationships translate into option-level probabilities.',
+    );
+  }
 
   return sentences.join(' ');
 }

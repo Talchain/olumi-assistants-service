@@ -206,6 +206,40 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     ]);
   }
 
+  // V5 explain-stabilisation Task 2 — stale-analysis recovery chip.
+  //
+  // When the analysis projection carries a staleness_reason (the analysis
+  // was loaded from a prior run and the handler just answered using it)
+  // AND the graph is currently analysable (analysisReady.status === 'ready'),
+  // surface an executable "Rerun analysis" chip so the user can refresh in
+  // one click. Trigger keys on the projection's staleness_reason — NOT on
+  // any per-turn `staleness_prefixed` flag — because applyStalenessPrefix
+  // is idempotent and may set prefixed=false when Sonnet's prose already
+  // contains a caveat. The staleness STATE is the source of truth.
+  //
+  // Placed BEFORE the precondition-unmet and facts_absent rules so the
+  // staleness recovery wins for turns that have a stale analysis (those
+  // other rules require facts_absent or precondition_unmet — by definition
+  // a staleness_reason means analysis IS present, just outdated).
+  if (
+    noopExplanationHandlerJustRan != null &&
+    input.analysis?.staleness_reason != null &&
+    input.analysisReady?.status === 'ready'
+  ) {
+    const curated = curatedHandlerChips(input.validationRegistry);
+    const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
+    if (runAnalysis) {
+      return cap([
+        {
+          id: 'chip_action_rerun_analysis',
+          label: 'Rerun analysis',
+          message: 'Rerun the analysis.',
+          action_type: 'run_analysis',
+        },
+      ]);
+    }
+  }
+
   // V5 spec §7 every-failure-path-includes-a-chip — explicit precondition rule.
   // When `explain_results` or `what_would_flip` returned a precondition-fail
   // outcome (`noop: true` + `result.precondition_unmet === true`), the

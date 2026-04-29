@@ -301,3 +301,89 @@ describe('explain_results — answer-carrying contract', () => {
     expect(fallback.suppress_orientation).toBe(true);
   });
 });
+
+describe('explain_results — diagnostic fields', () => {
+  it('Sonnet valid → answer_source=sonnet, fallback_reason=null, length matches text', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.answer_source).toBe('sonnet');
+      expect(fact.result.fallback_reason).toBeNull();
+      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_TEXT.length);
+    }
+  });
+
+  it('Sonnet invalid (too_short) → answer_source=deterministic_fallback, fallback_reason=too_short', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: {
+          answer_text: 'too short',
+          answer_text_valid: false,
+          answer_validation_error: 'too_short',
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.answer_source).toBe('deterministic_fallback');
+      expect(fact.result.fallback_reason).toBe('too_short');
+      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
+    }
+  });
+
+  it('Sonnet absent → answer_source=deterministic_fallback, fallback_reason=missing', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: undefined,
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.answer_source).toBe('deterministic_fallback');
+      expect(fact.result.fallback_reason).toBe('missing');
+    }
+  });
+
+  it('mutation_language_detected validator code maps to fallback_reason=mutation_language', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: {
+          answer_text: 'irrelevant',
+          answer_text_valid: false,
+          answer_validation_error: 'mutation_language_detected',
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.fallback_reason).toBe('mutation_language');
+    }
+  });
+
+  it('precondition fail → answer_source=precondition_template, fallback_reason explicitly null', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(makeInvocation({ priorFacts: [], optionCount: 2 }));
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.answer_source).toBe('precondition_template');
+      expect(fact.result.fallback_reason).toBeNull();
+      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
+    }
+  });
+});

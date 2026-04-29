@@ -309,6 +309,56 @@ describe('explain_from_structure — answer-carrying contract', () => {
   });
 });
 
+describe('explain_from_structure — diagnostic fields', () => {
+  it('Sonnet valid → answer_source=sonnet', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_from_structure') {
+      expect(fact.result.answer_source).toBe('sonnet');
+      expect(fact.result.fallback_reason).toBeNull();
+      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_TEXT.length);
+    }
+  });
+
+  it('fallback (too_short) → answer_source=deterministic_fallback, fallback_reason=too_short', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: {
+        answer_text: 'too short',
+        answer_text_valid: false,
+        answer_validation_error: 'too_short',
+      },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_from_structure') {
+      expect(fact.result.answer_source).toBe('deterministic_fallback');
+      expect(fact.result.fallback_reason).toBe('too_short');
+      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
+    }
+  });
+
+  it('explanation absent → answer_source=deterministic_fallback, fallback_reason=missing', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: undefined,
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_from_structure') {
+      expect(fact.result.answer_source).toBe('deterministic_fallback');
+      expect(fact.result.fallback_reason).toBe('missing');
+    }
+  });
+});
+
 describe('explain_from_structure — Test A calibration (validator-rejection failure modes)', () => {
   // Brief task 1: pin the deterministic-fallback behaviour for each of the
   // validator-rejection paths Sonnet can land on for a Test-A-shaped pre-
@@ -360,7 +410,9 @@ describe('explain_from_structure — Test A calibration (validator-rejection fai
     expect(outcome.assistant_text).toContain('Engineering Capacity');
     expect(outcome.assistant_text.toLowerCase()).not.toMatch(/\bedge\b/);
     expect(outcome.assistant_text.toLowerCase()).not.toMatch(/\bnode\b/);
-    expect(outcome.assistant_text).toContain('direct links');
+    // New composer phrasing: "direct influence" / "direct link to" rather
+    // than the old "direct links" plural.
+    expect(outcome.assistant_text).toMatch(/direct (influence|link)/);
   });
 
   it('mutation_language_detected ("Proposing to add") → falls back with no proposal verbs', async () => {

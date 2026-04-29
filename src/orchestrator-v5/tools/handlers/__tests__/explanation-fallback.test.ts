@@ -101,27 +101,18 @@ describe('composeExplainResultsFallback', () => {
     expect(text).toContain('Would you like to');
   });
 
-  it('mentions staleness when staleness_reason is present', () => {
-    const text = composeExplainResultsFallback({
-      ...ANALYSIS,
-      staleness_reason: 'analysis_projection_loaded_with_unknown_freshness',
-    });
-    expect(text.toLowerCase()).toContain('directional');
-  });
-
-  it('staleness caveat appears BEFORE any figure when staleness_reason is present (Test H ordering)', () => {
-    // Trust contract: the user reads "treat figures as directional" before
-    // the figures themselves. Composer enforces this structurally by
-    // placing the caveat as sentence #1.
+  it('does NOT include the staleness caveat (handler prepends it via applyStalenessPrefix)', () => {
+    // The composer is no longer responsible for the staleness caveat — the
+    // handler's applyStalenessPrefix helper prepends it to the final
+    // assistant_text. Asserting absence here keeps prose ordering decisions
+    // in one place (the helper), so a future composer change cannot
+    // double-prepend.
     const text = composeExplainResultsFallback({
       ...ANALYSIS,
       staleness_reason: 'loaded_from_prior_run_freshness_unknown',
     });
-    const caveatIdx = text.toLowerCase().indexOf('directional');
-    const probabilityIdx = text.indexOf(String(ANALYSIS.leading_option!.probability));
-    expect(caveatIdx).toBeGreaterThanOrEqual(0);
-    expect(probabilityIdx).toBeGreaterThanOrEqual(0);
-    expect(caveatIdx).toBeLessThan(probabilityIdx);
+    expect(text.toLowerCase()).not.toContain('directional');
+    expect(text.toLowerCase()).not.toContain('prior run');
   });
 });
 
@@ -155,76 +146,105 @@ describe('composeWhatWouldFlipFallback', () => {
     expect(text).toContain('Would you like to run the analysis');
   });
 
-  it('staleness caveat appears BEFORE any figure when staleness_reason is present (Test H ordering, what_would_flip path)', () => {
-    // Brief task 3 layer 2: composeWhatWouldFlipFallback previously did
-    // not handle staleness at all. Now it parallels
-    // composeExplainResultsFallback — caveat as sentence #1 when present.
+  it('does NOT include the staleness caveat (handler prepends it via applyStalenessPrefix)', () => {
+    // Same contract as composeExplainResultsFallback — the handler's
+    // applyStalenessPrefix helper owns the caveat. Asserting absence here
+    // prevents accidental double-prefix when a future change lands.
     const text = composeWhatWouldFlipFallback({
       ...ANALYSIS,
       staleness_reason: 'loaded_from_prior_run_freshness_unknown',
     });
-    const caveatIdx = text.toLowerCase().indexOf('directional');
-    const probabilityIdx = text.indexOf(String(ANALYSIS.leading_option!.probability));
-    expect(caveatIdx).toBeGreaterThanOrEqual(0);
-    expect(probabilityIdx).toBeGreaterThanOrEqual(0);
-    expect(caveatIdx).toBeLessThan(probabilityIdx);
+    expect(text.toLowerCase()).not.toContain('directional');
+    expect(text.toLowerCase()).not.toContain('prior run');
   });
 });
 
 describe('composeExplainFromStructureFallback', () => {
   it('cites the strongest causal links and the goal label when no factor named', () => {
-    const text = composeExplainFromStructureFallback(STRUCTURE);
+    const text = composeExplainFromStructureFallback(STRUCTURE, { canRunAnalysis: true });
     expectNaturalProse(text);
     expect(text).toContain('Q3 Throughput');
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('Hiring Cost');
     expect(text).toContain('strength');
+    // Olumi-style explanatory tone, not a system report.
+    expect(text).toContain('shaped by several causal mechanisms');
+  });
+
+  it('length lands in [300, 600] for a typical 5-factor / 4-option graph', () => {
+    const text = composeExplainFromStructureFallback(
+      { ...STRUCTURE, factor_count: 5, option_count: 4 },
+      { canRunAnalysis: true },
+    );
+    expect(text.length).toBeGreaterThanOrEqual(300);
+    expect(text.length).toBeLessThanOrEqual(600);
+  });
+
+  it('canRunAnalysis=true → next-step nudge mentions "Running the analysis"', () => {
+    const text = composeExplainFromStructureFallback(STRUCTURE, { canRunAnalysis: true });
+    expect(text).toContain('Running the analysis');
+  });
+
+  it('canRunAnalysis=false → no "Running the analysis" nudge', () => {
+    const text = composeExplainFromStructureFallback(STRUCTURE, { canRunAnalysis: false });
+    expect(text).not.toContain('Running the analysis');
+  });
+
+  it('omitted options default to no nudge (safer than nudging on a non-runnable graph)', () => {
+    const text = composeExplainFromStructureFallback(STRUCTURE);
+    expect(text).not.toContain('Running the analysis');
   });
 
   it('uses named-factor pathways when the user mentioned a factor (path reaches goal)', () => {
-    const text = composeExplainFromStructureFallback({
-      ...STRUCTURE,
-      named_factor_label: 'Engineering Capacity',
-      named_factor_pathways: [
-        {
-          label_from: 'Engineering Capacity',
-          label_to: 'Q3 Throughput',
-          strength: 0.65,
-        },
-      ],
-    });
+    const text = composeExplainFromStructureFallback(
+      {
+        ...STRUCTURE,
+        named_factor_label: 'Engineering Capacity',
+        named_factor_pathways: [
+          {
+            label_from: 'Engineering Capacity',
+            label_to: 'Q3 Throughput',
+            strength: 0.65,
+          },
+        ],
+      },
+      { canRunAnalysis: true },
+    );
     expectNaturalProse(text);
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('Q3 Throughput');
-    // Goal-reaching path → "feeds into" claim is allowed.
-    expect(text).toMatch(/feeds into Q3 Throughput/);
+    // Goal-reaching pathway → reach-to-goal claim is allowed and surfaced.
+    expect(text).toMatch(/runs to Q3 Throughput/);
   });
 
-  it('does NOT claim a named factor "feeds into" the goal when the cited pathway reaches a sibling, not the goal', () => {
-    // Over-claim guard: factor F is adjacent only to sibling F2 (no edge
+  it('does NOT claim a named factor reaches the goal when the cited pathway reaches a sibling', () => {
+    // Over-claim guard: factor F is adjacent only to sibling F2 (no link
     // to the goal). The fallback must describe the structural connection
-    // without falsely asserting the factor reaches the goal — multi-hop
+    // without asserting the factor reaches the goal — multi-hop
     // derivation would cross the F.6 line.
-    const text = composeExplainFromStructureFallback({
-      ...STRUCTURE,
-      named_factor_label: 'Hiring Cost',
-      named_factor_pathways: [
-        {
-          label_from: 'Hiring Cost',
-          label_to: 'Engineering Capacity', // sibling factor, NOT the goal
-          strength: 0.3,
-        },
-      ],
-    });
+    const text = composeExplainFromStructureFallback(
+      {
+        ...STRUCTURE,
+        named_factor_label: 'Hiring Cost',
+        named_factor_pathways: [
+          {
+            label_from: 'Hiring Cost',
+            label_to: 'Engineering Capacity', // sibling factor, NOT the goal
+            strength: 0.3,
+          },
+        ],
+      },
+      { canRunAnalysis: false },
+    );
     expect(text).toContain('Hiring Cost');
     expect(text).toContain('Engineering Capacity');
-    expect(text).not.toMatch(/feeds into/);
-    // Still mentions the goal elsewhere is fine, but must not assert the
-    // named factor reaches it via the cited pathway.
-    expect(text).toContain('connects to');
+    // No reach-to-goal phrasing — the new prose uses "runs to <goal>" only
+    // when reachesGoal is true.
+    expect(text).not.toMatch(/runs to Q3 Throughput/);
+    expect(text).not.toMatch(/effect on your goal/);
   });
 
-  it('drops the "feeds into goal" claim when goal_label is null even if pathways exist', () => {
+  it('drops the reach-to-goal claim when goal_label is null even if pathways exist', () => {
     const text = composeExplainFromStructureFallback({
       ...STRUCTURE,
       goal_label: null,
@@ -237,7 +257,7 @@ describe('composeExplainFromStructureFallback', () => {
         },
       ],
     });
-    expect(text).not.toMatch(/feeds into/);
+    expect(text).not.toMatch(/effect on your goal/);
     expect(text).toContain('Engineering Capacity');
   });
 
@@ -250,6 +270,6 @@ describe('composeExplainFromStructureFallback', () => {
       option_count: 0,
     });
     for (const pattern of FORBIDDEN_INTERNAL) expect(text).not.toMatch(pattern);
-    expect(text).toContain('Would you like');
+    expect(text).toContain('empty');
   });
 });

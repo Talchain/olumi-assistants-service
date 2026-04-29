@@ -282,3 +282,55 @@ describe('what_would_flip — answer-carrying contract', () => {
     expect(outcome.suppress_orientation).toBe(true);
   });
 });
+
+describe('what_would_flip — diagnostic fields', () => {
+  it('Sonnet valid → answer_source=sonnet', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'what_would_flip') {
+      expect(fact.result.answer_source).toBe('sonnet');
+      expect(fact.result.fallback_reason).toBeNull();
+      expect(fact.result.answer_text_length).toBe(VALID_ANSWER_TEXT.length);
+    }
+  });
+
+  it('Sonnet invalid (forbidden_internal_term) → fallback_reason=forbidden_internal_term', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFact(false)],
+        explanation: {
+          answer_text: 'leaks internal term',
+          answer_text_valid: false,
+          answer_validation_error: 'forbidden_internal_term',
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'what_would_flip') {
+      expect(fact.result.answer_source).toBe('deterministic_fallback');
+      expect(fact.result.fallback_reason).toBe('forbidden_internal_term');
+    }
+  });
+
+  it('precondition fail → answer_source=precondition_template, fallback_reason explicitly null', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({ priorFacts: [], optionCount: 2 }),
+    );
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'what_would_flip') {
+      expect(fact.result.answer_source).toBe('precondition_template');
+      expect(fact.result.fallback_reason).toBeNull();
+      expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
+    }
+  });
+});

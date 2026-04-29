@@ -44,6 +44,7 @@ import type {
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import { resolveOptionCount } from './no-op-helpers.js';
 import { composeExplainFromStructureFallback } from './explanation-fallback.js';
+import { mapFallbackReason } from './diagnostics.js';
 
 export function createExplainFromStructureHandler(): HandlerFn {
   return async function explainFromStructureHandler(
@@ -51,11 +52,38 @@ export function createExplainFromStructureHandler(): HandlerFn {
   ): Promise<HandlerOutcome> {
     const optionCount = resolveOptionCount(invocation);
 
+    // Answer-carrying contract (post-Commit-3): use Sonnet's answer_text
+    // when valid; otherwise compose a deterministic fallback from the
+    // structure projection (top causal links, named-factor pathways, goal
+    // label). The turn-executor forces suppress_orientation for explanation
+    // handlers, so Sonnet's pre-tool-call orientation never reaches the user.
+    //
+    // V5 explain-stabilisation Task 3: the deterministic fallback is now
+    // the primary path for generic structural prompts (Sonnet rarely
+    // populates answer_text for them). Pass `canRunAnalysis` so the
+    // composer's next-step nudge stays grounded in the structural-
+    // readiness signal — no nudge when the graph cannot yet support a run.
+    const explanation = invocation.explanation;
+    const sonnetValid = !!(explanation && explanation.answer_text_valid);
+    const canRunAnalysis = invocation.analysisReady?.status === 'ready';
+    const assistantText = sonnetValid
+      ? explanation!.answer_text
+      : composeExplainFromStructureFallback(invocation.structureProjection, {
+          canRunAnalysis,
+        });
+
     const fact: ExplainFromStructureHandlerFact = {
       fact_type: 'explain_from_structure',
       fact_version: 1,
       noop: true,
-      result: { option_count: optionCount },
+      result: {
+        option_count: optionCount,
+        answer_source: sonnetValid ? 'sonnet' : 'deterministic_fallback',
+        fallback_reason: sonnetValid
+          ? null
+          : mapFallbackReason(explanation?.answer_validation_error),
+        answer_text_length: assistantText.length,
+      },
     };
 
     const parsed = ExplainFromStructureHandlerFactSchema.safeParse(fact);
@@ -65,17 +93,6 @@ export function createExplainFromStructureHandler(): HandlerFn {
         { issues: parsed.error.issues },
       );
     }
-
-    // Answer-carrying contract (post-Commit-3): use Sonnet's answer_text
-    // when valid; otherwise compose a deterministic fallback from the
-    // structure projection (top causal links, named-factor pathways, goal
-    // label). The turn-executor forces suppress_orientation for explanation
-    // handlers, so Sonnet's pre-tool-call orientation never reaches the user.
-    const explanation = invocation.explanation;
-    const assistantText =
-      explanation && explanation.answer_text_valid
-        ? explanation.answer_text
-        : composeExplainFromStructureFallback(invocation.structureProjection);
 
     return {
       assistant_text: assistantText,
