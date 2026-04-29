@@ -181,6 +181,9 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   const noopExplanationHandlerJustRan = findNoopExplanationHandlerJustRan(
     input.handlerFacts,
   );
+  const preconditionUnmetExplanationFact = findPreconditionUnmetExplanationFact(
+    input.handlerFacts,
+  );
   const hasAnalysis = input.analysis != null;
   const robustnessIsFragile =
     input.analysis != null && input.analysis.robustness_band === 'fragile';
@@ -201,6 +204,27 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         'What could change the outcome of this analysis?',
       ),
     ]);
+  }
+
+  // V5 spec §7 every-failure-path-includes-a-chip — explicit precondition rule.
+  // When `explain_results` or `what_would_flip` returned a precondition-fail
+  // outcome (`noop: true` + `result.precondition_unmet === true`), the
+  // handler itself signalled that analysis is missing. The chip MUST fire
+  // independent of priorFacts threading: the precondition-fail signal IS the
+  // single source of truth for this turn. Placed BEFORE the facts_absent
+  // rule below so the precondition-fail path is decided by the typed handler
+  // signal, not by re-deriving from priorFacts.
+  if (
+    preconditionUnmetExplanationFact != null &&
+    input.analysisReady?.status === 'ready'
+  ) {
+    const curated = curatedHandlerChips(input.validationRegistry);
+    const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
+    if (runAnalysis) {
+      return cap([
+        executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label),
+      ]);
+    }
   }
 
   // V5 0.9.0 — Rule: when one of the no-op explanation handlers ran but
@@ -383,6 +407,33 @@ function findNoopExplanationHandlerJustRan(
       f.fact_type === 'explain_from_structure' ||
       f.fact_type === 'explain_results' ||
       f.fact_type === 'what_would_flip'
+    ) {
+      return f.fact_type;
+    }
+  }
+  return null;
+}
+
+// V5 spec §7 every-failure-path-includes-a-chip — return the fact_type when
+// `explain_results` or `what_would_flip` produced a precondition-fail
+// outcome (the typed handler-fact signal that analysis is missing on a turn
+// asking for analysis-grounded explanation). `explain_from_structure` is
+// excluded: it has no analysis precondition. The runtime check on
+// `result.precondition_unmet === true` narrows the discriminated union
+// without an `as` cast.
+function findPreconditionUnmetExplanationFact(
+  facts: readonly HandlerFact[] | undefined,
+): 'explain_results' | 'what_would_flip' | null {
+  if (!facts || facts.length === 0) return null;
+  for (const f of facts) {
+    if (
+      (f.fact_type === 'explain_results' || f.fact_type === 'what_would_flip') &&
+      f.noop === true &&
+      'result' in f &&
+      f.result != null &&
+      typeof f.result === 'object' &&
+      'precondition_unmet' in f.result &&
+      f.result.precondition_unmet === true
     ) {
       return f.fact_type;
     }

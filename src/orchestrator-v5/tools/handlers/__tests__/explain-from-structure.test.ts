@@ -308,3 +308,88 @@ describe('explain_from_structure — answer-carrying contract', () => {
     expect(outcome.suppress_orientation).toBe(true);
   });
 });
+
+describe('explain_from_structure — Test A calibration (validator-rejection failure modes)', () => {
+  // Brief task 1: pin the deterministic-fallback behaviour for each of the
+  // validator-rejection paths Sonnet can land on for a Test-A-shaped pre-
+  // analysis question. The schema-description fix raises Sonnet's compliance
+  // floor; these tests guarantee the user sees a non-stub response on the
+  // residual failure cases.
+
+  it('200-char clean structural answer → uses Sonnet text verbatim (positive control)', async () => {
+    const handler = createExplainFromStructureHandler();
+    const longClean =
+      'Looking at the model structure, Engineering Capacity is the strongest direct driver of Q3 Throughput, with a causal link strength of 0.65. Hiring Cost contributes a secondary pathway at -0.42 strength.';
+    expect(longClean.length).toBeGreaterThanOrEqual(200);
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: { answer_text: longClean, answer_text_valid: true },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text).toBe(longClean);
+  });
+
+  it('60-char too_short answer → falls back to projection prose with strength values', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: {
+        answer_text: 'Engineering Capacity is the most influential factor here.',
+        answer_text_valid: false,
+        answer_validation_error: 'too_short',
+      },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text).toContain('0.65');
+    expect(outcome.assistant_text.length).toBeGreaterThan(80);
+  });
+
+  it('forbidden_internal_term ("edge"/"node") → falls back without leaking internal vocabulary', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: {
+        answer_text:
+          'The edge from Engineering Capacity to the goal node has strength 1.0, making it the most influential factor.',
+        answer_text_valid: false,
+        answer_validation_error: 'forbidden_internal_term',
+      },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text.toLowerCase()).not.toMatch(/\bedge\b/);
+    expect(outcome.assistant_text.toLowerCase()).not.toMatch(/\bnode\b/);
+    expect(outcome.assistant_text).toContain('direct links');
+  });
+
+  it('mutation_language_detected ("Proposing to add") → falls back with no proposal verbs', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: {
+        answer_text:
+          "I'd propose adding a Capacity factor to make this clearer; for now Engineering Capacity is the strongest causal driver in the model.",
+        answer_text_valid: false,
+        answer_validation_error: 'mutation_language_detected',
+      },
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text.toLowerCase()).not.toContain('proposing');
+    expect(outcome.assistant_text.toLowerCase()).not.toContain('would add');
+  });
+
+  it('missing explanation payload → falls back to projection prose (matches Test A staging shape)', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      explanation: undefined,
+      structureProjection: STRUCTURE_PROJECTION,
+    });
+    expect(outcome.assistant_text).toContain('Engineering Capacity');
+    expect(outcome.assistant_text).toContain('Q3 Throughput');
+    expect(outcome.assistant_text).toContain('0.65');
+    expect(outcome.assistant_text.length).toBeGreaterThan(80);
+  });
+});

@@ -58,6 +58,16 @@ export function composeExplainResultsFallback(
   const leading = projection.leading_option;
   const sentences: string[] = [];
 
+  // Trust contract: when the analysis is loaded from a prior run, the
+  // staleness caveat MUST appear before any figure. The validator's
+  // rule 6 enforces the same ordering on Sonnet's text; this composer
+  // achieves it structurally by placing the caveat as sentence #1.
+  if (projection.staleness_reason) {
+    sentences.push(
+      'Treat the figures below as directional rather than definitive, since the analysis is loaded from a prior run with unknown freshness.',
+    );
+  }
+
   sentences.push(
     `${leading.label} performs best, with a probability of ${formatRawNumber(leading.probability)}.`,
   );
@@ -93,12 +103,6 @@ export function composeExplainResultsFallback(
     );
   }
 
-  if (projection.staleness_reason) {
-    sentences.push(
-      'Treat the figures as directional rather than definitive, since the analysis is loaded from a prior run with unknown freshness.',
-    );
-  }
-
   sentences.push('Would you like to explore what would change this result?');
 
   return sentences.join(' ');
@@ -118,6 +122,16 @@ export function composeWhatWouldFlipFallback(
 
   const leading = projection.leading_option;
   const sentences: string[] = [];
+
+  // Trust contract: staleness caveat precedes any figure (parallel to
+  // composeExplainResultsFallback). When the analysis is loaded from a
+  // prior run, the user reads "treat figures as directional" before the
+  // figures themselves.
+  if (projection.staleness_reason) {
+    sentences.push(
+      'Treat the figures below as directional rather than definitive, since the analysis is loaded from a prior run with unknown freshness.',
+    );
+  }
 
   sentences.push(
     `${leading.label} is currently performing best, with a probability of ${formatRawNumber(leading.probability)}.`,

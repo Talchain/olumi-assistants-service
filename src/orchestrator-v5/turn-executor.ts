@@ -900,6 +900,7 @@ export async function runTurnExecutor(
           proposedHandlerId,
           action.explanation,
           context.prior_facts,
+          analysisStalenessReason,
         );
         if (!verdict.skip && verdict.payload) {
           explanationInvocationPayload = verdict.payload;

@@ -94,8 +94,12 @@ export const OLUMI_ACTION_TOOL = {
               '"why might option Y be the leading option?" and no analysis ' +
               'has been run yet. Answers from graph structure only. No mutation. ' +
               'You MUST populate `explanation.answer_text` with your complete ' +
-              'structural explanation. Reference specific factors, causal link ' +
-              'strengths, and pathways from the graph. Do not use mutation ' +
+              'structural explanation: cite at least two specific factors by ' +
+              'their graph labels, at least two causal link strengths with ' +
+              'numeric values, and the pathway from those factors to the goal ' +
+              'label. Write a complete multi-sentence explanation that walks ' +
+              'the user through the structural reasoning. Use "causal link" ' +
+              'or "direct link" — never "edge" or "node". Do not use mutation ' +
               'language (proposing, adding, updating).\n' +
               '\n' +
               '• explain_results — answer post-analysis explanation questions ' +

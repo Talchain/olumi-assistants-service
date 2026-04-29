@@ -108,6 +108,21 @@ describe('composeExplainResultsFallback', () => {
     });
     expect(text.toLowerCase()).toContain('directional');
   });
+
+  it('staleness caveat appears BEFORE any figure when staleness_reason is present (Test H ordering)', () => {
+    // Trust contract: the user reads "treat figures as directional" before
+    // the figures themselves. Composer enforces this structurally by
+    // placing the caveat as sentence #1.
+    const text = composeExplainResultsFallback({
+      ...ANALYSIS,
+      staleness_reason: 'loaded_from_prior_run_freshness_unknown',
+    });
+    const caveatIdx = text.toLowerCase().indexOf('directional');
+    const probabilityIdx = text.indexOf(String(ANALYSIS.leading_option!.probability));
+    expect(caveatIdx).toBeGreaterThanOrEqual(0);
+    expect(probabilityIdx).toBeGreaterThanOrEqual(0);
+    expect(caveatIdx).toBeLessThan(probabilityIdx);
+  });
 });
 
 describe('composeWhatWouldFlipFallback', () => {
@@ -138,6 +153,21 @@ describe('composeWhatWouldFlipFallback', () => {
       leading_option: null,
     });
     expect(text).toContain('Would you like to run the analysis');
+  });
+
+  it('staleness caveat appears BEFORE any figure when staleness_reason is present (Test H ordering, what_would_flip path)', () => {
+    // Brief task 3 layer 2: composeWhatWouldFlipFallback previously did
+    // not handle staleness at all. Now it parallels
+    // composeExplainResultsFallback — caveat as sentence #1 when present.
+    const text = composeWhatWouldFlipFallback({
+      ...ANALYSIS,
+      staleness_reason: 'loaded_from_prior_run_freshness_unknown',
+    });
+    const caveatIdx = text.toLowerCase().indexOf('directional');
+    const probabilityIdx = text.indexOf(String(ANALYSIS.leading_option!.probability));
+    expect(caveatIdx).toBeGreaterThanOrEqual(0);
+    expect(probabilityIdx).toBeGreaterThanOrEqual(0);
+    expect(caveatIdx).toBeLessThan(probabilityIdx);
   });
 });
 
