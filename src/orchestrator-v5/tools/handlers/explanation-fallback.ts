@@ -21,24 +21,23 @@
 
 import type {
   AnalysisProjectionSummary,
+  AnalysisProjectionDriver,
   StructureProjectionSummary,
 } from '../../context/projection-summaries.js';
 
-const PROBABILITY_FRACTION_DIGITS = 0;
-
-function formatProbability(prob: number): string {
-  // Probability stored as a 0–1 fraction. Format as a per-cent integer for
-  // user-visible copy without introducing new derivation: this matches the
-  // convention already used in the rest of V5 user-facing strings.
-  const pct = prob * 100;
-  return `${pct.toFixed(PROBABILITY_FRACTION_DIGITS)} per cent`;
+function formatRawNumber(value: number): string {
+  // Brief: "Use raw values as provided in context. Do not convert formats."
+  // We surface the raw number with up to four-digit precision so trailing
+  // zeros are not added, but the underlying value is preserved unchanged.
+  // No multiplication, no rounding to integers, no unit conversion.
+  if (Number.isInteger(value)) return String(value);
+  // Strip trailing zeros from a fixed representation so 0.62 stays "0.62"
+  // and 0.6234567 stays "0.6234567".
+  return String(value);
 }
 
-function formatStrength(strength: number): string {
-  // Match the strength-display convention used in graph-compact: two
-  // significant decimals, signed.
-  const sign = strength < 0 ? '-' : '';
-  return `${sign}${Math.abs(strength).toFixed(2)}`;
+function formatDriver(d: AnalysisProjectionDriver): string {
+  return `${d.factor_label} (sensitivity ${formatRawNumber(d.sensitivity_value)})`;
 }
 
 /**
@@ -60,32 +59,30 @@ export function composeExplainResultsFallback(
   const sentences: string[] = [];
 
   sentences.push(
-    `${leading.label} performs best, with a probability of ${formatProbability(leading.probability)}.`,
+    `${leading.label} performs best, with a probability of ${formatRawNumber(leading.probability)}.`,
   );
 
   if (projection.runner_up && projection.margin_pp !== null) {
     sentences.push(
-      `That is ahead of ${projection.runner_up.label} by about ${Math.abs(
+      `That is ahead of ${projection.runner_up.label} by ${formatRawNumber(
         projection.margin_pp,
-      ).toFixed(0)} percentage points, so the lead is meaningful rather than marginal.`,
+      )} percentage points, so the lead is meaningful rather than marginal.`,
     );
   } else if (projection.runner_up) {
     sentences.push(
-      `${projection.runner_up.label} sits in second place, with a probability of ${formatProbability(projection.runner_up.probability)}.`,
+      `${projection.runner_up.label} sits in second place, with a probability of ${formatRawNumber(projection.runner_up.probability)}.`,
     );
   }
 
   if (projection.top_drivers.length > 0) {
-    const driverLabels = projection.top_drivers
-      .slice(0, 2)
-      .map((d) => d.factor_label);
-    if (driverLabels.length === 1) {
+    const drivers = projection.top_drivers.slice(0, 2);
+    if (drivers.length === 1) {
       sentences.push(
-        `The result is driven mainly by ${driverLabels[0]}, which has the largest sensitivity in the model.`,
+        `The result is driven mainly by ${formatDriver(drivers[0])}, which carries the largest sensitivity in the model.`,
       );
     } else {
       sentences.push(
-        `The result is driven mainly by ${driverLabels[0]} and ${driverLabels[1]}, which together carry the largest sensitivity in the model.`,
+        `The result is driven mainly by ${formatDriver(drivers[0])} and ${formatDriver(drivers[1])}, which together carry the largest sensitivity in the model.`,
       );
     }
   }
@@ -123,14 +120,14 @@ export function composeWhatWouldFlipFallback(
   const sentences: string[] = [];
 
   sentences.push(
-    `${leading.label} is currently performing best, with a probability of ${formatProbability(leading.probability)}.`,
+    `${leading.label} is currently performing best, with a probability of ${formatRawNumber(leading.probability)}.`,
   );
 
   if (projection.runner_up && projection.margin_pp !== null) {
     sentences.push(
-      `For ${projection.runner_up.label} to overtake it, the lead of about ${Math.abs(
+      `For ${projection.runner_up.label} to overtake it, the lead of ${formatRawNumber(
         projection.margin_pp,
-      ).toFixed(0)} percentage points would need to close.`,
+      )} percentage points would need to close.`,
     );
   } else if (projection.runner_up) {
     sentences.push(
@@ -139,14 +136,14 @@ export function composeWhatWouldFlipFallback(
   }
 
   if (projection.top_drivers.length > 0) {
-    const driverLabels = projection.top_drivers.slice(0, 2).map((d) => d.factor_label);
-    if (driverLabels.length === 1) {
+    const drivers = projection.top_drivers.slice(0, 2);
+    if (drivers.length === 1) {
       sentences.push(
-        `Movement on ${driverLabels[0]} would shift this result the most, since it carries the largest sensitivity.`,
+        `Movement on ${formatDriver(drivers[0])} would shift this result the most, since it carries the largest sensitivity.`,
       );
     } else {
       sentences.push(
-        `Movement on ${driverLabels[0]} or ${driverLabels[1]} would shift this result the most, since they carry the largest sensitivity.`,
+        `Movement on ${formatDriver(drivers[0])} or ${formatDriver(drivers[1])} would shift this result the most, since they carry the largest sensitivity.`,
       );
     }
   }
@@ -185,8 +182,8 @@ export function composeExplainFromStructureFallback(
     const path = pathways
       .map((p) =>
         p.label_from === factor
-          ? `${p.label_to} (strength ${formatStrength(p.strength)})`
-          : `${p.label_from} (strength ${formatStrength(p.strength)})`,
+          ? `${p.label_to} (strength ${formatRawNumber(p.strength)})`
+          : `${p.label_from} (strength ${formatRawNumber(p.strength)})`,
       )
       .join(' and ');
     if (projection.goal_label) {
@@ -201,7 +198,7 @@ export function composeExplainFromStructureFallback(
     const linkText = top
       .map(
         (l) =>
-          `${l.label_from} drives ${l.label_to} at strength ${formatStrength(l.strength)}`,
+          `${l.label_from} drives ${l.label_to} at strength ${formatRawNumber(l.strength)}`,
       )
       .join(', and ');
     if (projection.goal_label) {

@@ -258,8 +258,11 @@ describe('explain_results — answer-carrying contract', () => {
       }),
     );
     expect(outcome.assistant_text).toContain('Hire Senior Engineer');
-    expect(outcome.assistant_text).toContain('62 per cent');
+    // Raw probability value (0-1 fraction), not per-cent conversion.
+    expect(outcome.assistant_text).toContain('0.62');
     expect(outcome.assistant_text).toContain('Engineering Capacity');
+    // Driver sensitivity value surfaced.
+    expect(outcome.assistant_text).toContain('0.65');
   });
 
   it('persists a fact that round-trips through the schema on the happy path', async () => {

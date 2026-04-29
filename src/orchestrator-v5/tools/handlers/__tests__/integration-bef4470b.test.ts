@@ -384,10 +384,11 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     const outcome = await handler(invocation);
     // Leading option label is present
     expect(outcome.assistant_text).toContain('Senior developer');
-    // Probability is present
-    expect(outcome.assistant_text).toContain('71 per cent');
-    // A top driver factor label is present
+    // Raw probability value preserved (not converted to per-cent).
+    expect(outcome.assistant_text).toContain('0.71');
+    // A top driver factor label is present, with sensitivity value.
     expect(outcome.assistant_text).toContain('Code quality');
+    expect(outcome.assistant_text).toContain('0.62');
     // Length well above the 32-char SAFE_FALLBACK stub
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
     expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');

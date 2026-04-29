@@ -67,14 +67,21 @@ function expectNaturalProse(text: string) {
 }
 
 describe('composeExplainResultsFallback', () => {
-  it('cites leading option label, probability, runner-up margin, and top drivers', () => {
+  it('cites leading option label, raw probability, runner-up margin, and top drivers with sensitivity values', () => {
     const text = composeExplainResultsFallback(ANALYSIS);
     expectNaturalProse(text);
     expect(text).toContain('Hire Senior Engineer');
-    expect(text).toContain('62 per cent');
+    // Raw probability value (0-1 fraction) — no per-cent conversion
+    expect(text).toContain('0.62');
+    expect(text).not.toContain('per cent');
+    // Runner-up label and raw margin
     expect(text).toContain('Hire Two Mid-Level');
     expect(text).toContain('35');
+    // Driver labels AND sensitivity values both surfaced
     expect(text).toContain('Engineering Capacity');
+    expect(text).toContain('0.65');
+    expect(text).toContain('Hiring Cost');
+    expect(text).toContain('-0.42');
     expect(text).toContain('robustness');
   });
 
@@ -104,12 +111,18 @@ describe('composeExplainResultsFallback', () => {
 });
 
 describe('composeWhatWouldFlipFallback', () => {
-  it('cites leading option, margin, and top drivers — no mutation language', () => {
+  it('cites leading option, raw margin, and top drivers WITH sensitivity values — no mutation language', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expectNaturalProse(text);
     expect(text).toContain('Hire Senior Engineer');
+    // Raw probability value
+    expect(text).toContain('0.62');
+    expect(text).not.toContain('per cent');
     expect(text).toContain('Hire Two Mid-Level');
+    // Driver labels AND sensitivity values
     expect(text).toContain('Engineering Capacity');
+    expect(text).toContain('0.65');
+    expect(text).toContain('-0.42');
     expect(text).not.toMatch(/\bproposing to\b/i);
     expect(text).not.toMatch(/\bI'll\s+\b/i);
   });
