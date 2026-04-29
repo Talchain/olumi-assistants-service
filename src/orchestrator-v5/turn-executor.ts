@@ -53,7 +53,10 @@ import {
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import { buildTurnContext, loadPersistedGraph } from './build-turn-context.js';
-import { buildFailureResponse } from './failure-response.js';
+import {
+  buildFailureResponse,
+  type FailureResponseRecoveryContext,
+} from './failure-response.js';
 import { composeValidationFailure } from './compose/validation-failure-responses.js';
 import { composeUnsupportedActionResponse } from './compose/unsupported-action-response.js';
 import { composeRecoverableValidationResponse } from './compose/recoverable-validation-response.js';
@@ -282,6 +285,29 @@ export async function runTurnExecutor(
 
   emit(TelemetryEvents.TurnExecutorStarted, obsPayload());
 
+  // Recovery-chip context for the egress safety layer (failure-response.ts).
+  // Closured over `proposedHandlerIdForLog` and `analysisReadyForTurn` so
+  // the values reflect whatever the turn knows at the point of failure.
+  // `cause` lets a caller refine LLM_SCHEMA_VIOLATION → ZOD_REPAIR_FAILED
+  // when the routing error cause is `schema_repair_failed`.
+  //
+  // TODO(retry-attribution): `isRetry` is hardcoded false because the
+  // current MessageTurnPayload schema does not carry a `retry_of` /
+  // chip-source / explicit retry marker. When that signal lands (e.g.
+  // chip-click metadata or a payload-level retry hint), thread it through
+  // here so `v5.recovery_chip_served.is_retry` is accurate. Until then,
+  // false is the safe default — failure dashboards interpret missing
+  // signal as "not a retry".
+  const recoveryCtx = (cause?: string): FailureResponseRecoveryContext => ({
+    previousUserMessage: payload.message,
+    analysisReady: analysisReadyForTurn?.status === 'ready',
+    scenarioId: context.session_id,
+    turnId: requestId,
+    isRetry: false,
+    handlerId: proposedHandlerIdForLog,
+    cause,
+  });
+
   const turnAbort = new AbortController();
   const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
 
@@ -421,12 +447,17 @@ export async function runTurnExecutor(
         'V5 TurnExecutor graph payload drift — all nodes dropped by adapter, failing turn',
       );
       failureType = INTERNAL_TO_WIRE.UNHANDLED;
-      response = buildFailureResponse('UNHANDLED', context.stage, {
-        reason: 'graph_payload_drift',
-        total_nodes: graphLookupStatsForLog.total_nodes,
-        dropped_by_unknown_kind: graphLookupStatsForLog.dropped_by_unknown_kind,
-        dropped_by_missing_id: graphLookupStatsForLog.dropped_by_missing_id,
-      });
+      response = buildFailureResponse(
+        'UNHANDLED',
+        context.stage,
+        {
+          reason: 'graph_payload_drift',
+          total_nodes: graphLookupStatsForLog.total_nodes,
+          dropped_by_unknown_kind: graphLookupStatsForLog.dropped_by_unknown_kind,
+          dropped_by_missing_id: graphLookupStatsForLog.dropped_by_missing_id,
+        },
+        recoveryCtx(),
+      );
       return finalizeRun();
     }
 
@@ -690,9 +721,12 @@ export async function runTurnExecutor(
             'V5 TurnExecutor commit failure on deterministic value-update pre-route',
           );
           failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
-          response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, {
-            phase: 'commit',
-          });
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
         }
         return finalizeRun();
       }
@@ -712,9 +746,12 @@ export async function runTurnExecutor(
     } catch (error) {
       if (turnAbort.signal.aborted) {
         failureType = INTERNAL_TO_WIRE.BUDGET_EXCEEDED;
-        response = buildFailureResponse('BUDGET_EXCEEDED', context.stage, {
-          budget_ms: context.budgets.turn_ms,
-        });
+        response = buildFailureResponse(
+          'BUDGET_EXCEEDED',
+          context.stage,
+          { budget_ms: context.budgets.turn_ms },
+          recoveryCtx(),
+        );
         return finalizeRun();
       }
       if (error instanceof RoutingError) {
@@ -730,9 +767,12 @@ export async function runTurnExecutor(
         'V5 TurnExecutor orient step failed with unexpected error',
       );
       failureType = INTERNAL_TO_WIRE.UNHANDLED;
-      response = buildFailureResponse('UNHANDLED', context.stage, {
-        reason: 'unexpected_routing_error',
-      });
+      response = buildFailureResponse(
+        'UNHANDLED',
+        context.stage,
+        { reason: 'unexpected_routing_error' },
+        recoveryCtx(),
+      );
       return finalizeRun();
     }
 
@@ -979,9 +1019,12 @@ export async function runTurnExecutor(
             'V5 TurnExecutor commit failure on recoverable validator path',
           );
           failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
-          response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, {
-            phase: 'commit',
-          });
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
         }
         return finalizeRun();
       }
@@ -1106,14 +1149,43 @@ export async function runTurnExecutor(
       // Non-blocking: enricher never throws, degrades to thin content on
       // timeout/failure. Hard 15s timeout inside the enricher; outer
       // turn-budget signal still wins when it fires first.
+      //
+      // Defense-in-depth: the enricher's own try/catch already covers all
+      // known failure paths (timeout, abort, shape extraction, downstream
+      // LLM error). The wrap here only fires if a future regression lets
+      // an exception escape. On escape, we patch the run_analysis fact's
+      // enrichment.decision_review to `null` so consumers can distinguish
+      // "review attempted, degraded" from "review absent" (the latter is
+      // the soft-fail path inside the enricher, where the field is simply
+      // not set).
       if (proposedHandlerId === 'run_analysis') {
-        handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
-          handlerFacts: handlerOutcome.handler_facts,
-          requestId,
-          scenarioId: context.session_id,
-          signal: turnAbort.signal,
-          brief: options.scenarioBrief ?? null,
-        });
+        try {
+          handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
+            handlerFacts: handlerOutcome.handler_facts,
+            requestId,
+            scenarioId: context.session_id,
+            signal: turnAbort.signal,
+            brief: options.scenarioBrief ?? null,
+          });
+        } catch (err) {
+          log.error(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              err: err instanceof Error ? err.message : String(err),
+              stack: err instanceof Error ? err.stack : undefined,
+            },
+            'V5 decision_review enrichment escaped enricher safety net',
+          );
+          emit(TelemetryEvents.V5DecisionReviewDegraded, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            reason: err instanceof Error ? err.message : 'unknown',
+          });
+          handlerFactsForCommit = patchRunAnalysisDecisionReviewNull(
+            handlerOutcome.handler_facts,
+          );
+        }
       }
 
       // STEP 4 — CONFIRM. Typed-per-handler per brief correction 5.
@@ -1383,9 +1455,12 @@ export async function runTurnExecutor(
         'V5 TurnExecutor commit failure',
       );
       failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
-      response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, {
-        phase: 'commit',
-      });
+      response = buildFailureResponse(
+        'STATE_COMMIT_FAILED',
+        context.stage,
+        { phase: 'commit' },
+        recoveryCtx(),
+      );
       return finalizeRun();
     }
   } finally {
@@ -1518,23 +1593,35 @@ export async function runTurnExecutor(
     switch (err.cause) {
       case 'timeout':
         failureType = INTERNAL_TO_WIRE.LLM_TIMEOUT;
-        response = buildFailureResponse('LLM_TIMEOUT', context.stage, { phase: 'orient' });
+        response = buildFailureResponse(
+          'LLM_TIMEOUT',
+          context.stage,
+          { phase: 'orient' },
+          recoveryCtx(),
+        );
         return finalizeRun();
       case 'aborted':
         // aborted while outer signal hadn't fired yet — treat as orient-side
         // timeout rather than budget; the budget-win branch above already
         // handled the true outer-budget case.
         failureType = INTERNAL_TO_WIRE.LLM_TIMEOUT;
-        response = buildFailureResponse('LLM_TIMEOUT', context.stage, { phase: 'orient' });
+        response = buildFailureResponse(
+          'LLM_TIMEOUT',
+          context.stage,
+          { phase: 'orient' },
+          recoveryCtx(),
+        );
         return finalizeRun();
       case 'schema_repair_failed':
       case 'empty_response':
       case 'unexpected_stop_reason':
         failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
-        response = buildFailureResponse('LLM_SCHEMA_VIOLATION', context.stage, {
-          phase: 'orient',
-          routing_error_cause: err.cause,
-        });
+        response = buildFailureResponse(
+          'LLM_SCHEMA_VIOLATION',
+          context.stage,
+          { phase: 'orient', routing_error_cause: err.cause },
+          recoveryCtx(err.cause),
+        );
         return finalizeRun();
       case 'api_error': {
         // R-004: do NOT log err.provider_message verbatim. Provider error
@@ -1578,20 +1665,40 @@ export async function runTurnExecutor(
               // button that fires immediately.
               errorContext.retryable = true;
               errorContext.retry_after_seconds = 60;
-              response = buildFailureResponse('LLM_RATE_LIMITED', context.stage, errorContext);
+              response = buildFailureResponse(
+                'LLM_RATE_LIMITED',
+                context.stage,
+                errorContext,
+                recoveryCtx(err.cause),
+              );
             } else {
               failureType = INTERNAL_TO_WIRE.LLM_REQUEST_INVALID;
               errorContext.retryable = false;
-              response = buildFailureResponse('LLM_REQUEST_INVALID', context.stage, errorContext);
+              response = buildFailureResponse(
+                'LLM_REQUEST_INVALID',
+                context.stage,
+                errorContext,
+                recoveryCtx(err.cause),
+              );
             }
           } else {
             failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
             errorContext.retryable = true;
-            response = buildFailureResponse('LLM_SCHEMA_VIOLATION', context.stage, errorContext);
+            response = buildFailureResponse(
+              'LLM_SCHEMA_VIOLATION',
+              context.stage,
+              errorContext,
+              recoveryCtx(err.cause),
+            );
           }
         } else {
           failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
-          response = buildFailureResponse('LLM_SCHEMA_VIOLATION', context.stage, errorContext);
+          response = buildFailureResponse(
+            'LLM_SCHEMA_VIOLATION',
+            context.stage,
+            errorContext,
+            recoveryCtx(err.cause),
+          );
         }
         return finalizeRun();
       }
@@ -1601,9 +1708,12 @@ export async function runTurnExecutor(
   function translateExecuteError(error: unknown): TurnExecutorRunResult {
     if (turnAbort.signal.aborted) {
       failureType = INTERNAL_TO_WIRE.BUDGET_EXCEEDED;
-      response = buildFailureResponse('BUDGET_EXCEEDED', context.stage, {
-        budget_ms: context.budgets.turn_ms,
-      });
+      response = buildFailureResponse(
+        'BUDGET_EXCEEDED',
+        context.stage,
+        { budget_ms: context.budgets.turn_ms },
+        recoveryCtx(),
+      );
       return finalizeRun();
     }
     if (error instanceof UnhandledTurnClassError) {
@@ -1630,16 +1740,20 @@ export async function runTurnExecutor(
       );
       if (isUnsupported) {
         failureType = INTERNAL_TO_WIRE.UNSUPPORTED_ACTION;
-        response = buildFailureResponse('UNSUPPORTED_ACTION', context.stage, {
-          reason: 'handler_not_registered',
-          handler_id: error.attempted,
-        });
+        response = buildFailureResponse(
+          'UNSUPPORTED_ACTION',
+          context.stage,
+          { reason: 'handler_not_registered', handler_id: error.attempted },
+          recoveryCtx(),
+        );
       } else {
         failureType = INTERNAL_TO_WIRE.UNHANDLED;
-        response = buildFailureResponse('UNHANDLED', context.stage, {
-          reason: error.reason,
-          attempted: error.attempted,
-        });
+        response = buildFailureResponse(
+          'UNHANDLED',
+          context.stage,
+          { reason: error.reason, attempted: error.attempted },
+          recoveryCtx(),
+        );
       }
       return finalizeRun();
     }
@@ -1681,9 +1795,12 @@ export async function runTurnExecutor(
         'V5 TurnExecutor handler result invalid',
       );
       failureType = INTERNAL_TO_WIRE.HANDLER_RESULT_INVALID;
-      response = buildFailureResponse('HANDLER_RESULT_INVALID', context.stage, {
-        reason: 'fact_schema_violation',
-      });
+      response = buildFailureResponse(
+        'HANDLER_RESULT_INVALID',
+        context.stage,
+        { reason: 'fact_schema_violation' },
+        recoveryCtx(),
+      );
       return finalizeRun();
     }
     log.error(
@@ -1691,9 +1808,12 @@ export async function runTurnExecutor(
       'V5 TurnExecutor execute step failed with unexpected error',
     );
     failureType = INTERNAL_TO_WIRE.UNHANDLED;
-    response = buildFailureResponse('UNHANDLED', context.stage, {
-      reason: 'unexpected_execute_error',
-    });
+    response = buildFailureResponse(
+      'UNHANDLED',
+      context.stage,
+      { reason: 'unexpected_execute_error' },
+      recoveryCtx(),
+    );
     return finalizeRun();
   }
 }
@@ -1701,6 +1821,33 @@ export async function runTurnExecutor(
 // -----------------------------------------------------------------------
 // Small pure helpers
 // -----------------------------------------------------------------------
+
+/**
+ * Set enrichment.decision_review to `null` on the first run_analysis fact
+ * so consumers can distinguish "review attempted, degraded at the call
+ * site" from "review absent" (the latter being the enricher's own
+ * soft-fail path, where the field is simply not set). Returns a new
+ * facts array; the original is unchanged.
+ */
+function patchRunAnalysisDecisionReviewNull(
+  facts: readonly HandlerFact[],
+): readonly HandlerFact[] {
+  const idx = facts.findIndex((f) => f.fact_type === 'run_analysis');
+  if (idx < 0) return facts;
+  const fact = facts[idx];
+  if (!fact || fact.fact_type !== 'run_analysis') return facts;
+  const enrichment = fact.result.enrichment ?? {};
+  const patched: HandlerFact = {
+    ...fact,
+    result: {
+      ...fact.result,
+      enrichment: { ...enrichment, decision_review: null },
+    },
+  };
+  const next = facts.slice();
+  next[idx] = patched;
+  return next;
+}
 
 /**
  * Narrow an ingress analysis payload into the V2RunResponseEnvelope shape

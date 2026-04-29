@@ -499,6 +499,20 @@ export const TelemetryEvents = {
   V5DecisionReviewSkipped: "v5.decision_review.skipped",
   V5DecisionReviewFailed: "v5.decision_review.failed",
 
+  // V5 recovery chips — fired when the egress safety layer
+  // (failure-response.ts) attaches one or more recovery chips to a failure
+  // response. Distinct from V5DecisionReviewFailed: this event is about the
+  // chips served, not the original failure cause. Payload: failure_type,
+  // chip_labels, scenario_id, turn_id, is_retry, handler_id.
+  V5RecoveryChipServed: "v5.recovery_chip_served",
+
+  // V5 decision_review call-site safety net. The enricher itself catches
+  // its own failures (see V5DecisionReviewFailed). This event fires only
+  // when an exception escaped the enricher and was caught by the
+  // turn-executor's defensive wrap — i.e. a future regression where the
+  // enricher's never-throws invariant was breached.
+  V5DecisionReviewDegraded: "v5.decision_review_degraded",
+
   // V5 Group 1 Task C: coaching signal fired during Step 5. Payload carries
   // the signal_id + turn_id so evaluators can correlate with coaching text.
   V5CoachingSignalFired: "v5.coaching.signal_fired",

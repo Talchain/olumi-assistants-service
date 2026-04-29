@@ -423,12 +423,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TurnExecutorGraphLookup: "turn_executor.graph_lookup",
         TurnExecutorStarted: "turn_executor.started",
         V5CoachingSignalFired: "v5.coaching.signal_fired",
+        V5DecisionReviewDegraded: "v5.decision_review_degraded",
         V5DecisionReviewFailed: "v5.decision_review.failed",
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
         V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
         V5ExplanationEvidence: "v5.explanation.evidence",
         V5MutationLanguageGuard: "v5.mutation_language_guard",
+        V5RecoveryChipServed: "v5.recovery_chip_served",
         V5UnexpectedExplanationPayload: "v5.unexpected_explanation_payload",
         ValidatorOutcome: "v5.validator_outcome",
       };
@@ -458,7 +460,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|context_pack|handler_invocation|recovery_response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|context_pack|handler_invocation|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -926,6 +928,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5DecisionReviewInvoked,
         TelemetryEvents.V5DecisionReviewSkipped,
         TelemetryEvents.V5DecisionReviewFailed,
+        TelemetryEvents.V5DecisionReviewDegraded,
+        TelemetryEvents.V5RecoveryChipServed,
         // V5 alpha hardening Phase 2.5: primary lifecycle events.
         // Debug-only until Datadog alignment is explicit.
         TelemetryEvents.ContextPackAssembled,
