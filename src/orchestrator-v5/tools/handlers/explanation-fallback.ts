@@ -14,8 +14,8 @@
  * Copy rules:
  *  - Sentence case, British English.
  *  - No em dashes (use commas or full stops).
- *  - No "winner" / "recommended" — say "leading option" / "performs best".
- *  - No "edge" / "node" / "fact" / "projection" / "handler" / etc.
+ *  - No tone words like winner or recommended; say leading option, performs best.
+ *  - No internal vocabulary; never reference graph internals or pipeline stages.
  *  - One next-step nudge at the end so the response is actionable.
  */
 
