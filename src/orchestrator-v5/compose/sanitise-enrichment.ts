@@ -174,6 +174,27 @@ export function isAllowlistedPath(path: string): boolean {
 }
 
 // ============================================================================
+// Suppression marker for fail-shut prose leaves
+// ============================================================================
+//
+// When a prose leaf trips a hard-ban, the brief's stated policy is
+// "drop a prose leaf to a generic '_redacted_' or null". We REPLACE
+// rather than DELETE for two reasons (Codex review 2026-04-30, P2):
+//   1. UI consumers may type these fields as `string` (e.g.
+//      `review_cards[*].what`) and an absent field surfaces as
+//      `undefined`, risking a crash or empty render.
+//   2. Deletion changes the wire shape; replacement keeps the field
+//      present with neutral copy, preserving the structural contract.
+//
+// The marker is a single Unicode horizontal ellipsis ("…") — short,
+// neutral, semantically obvious as "content withheld", and survives
+// any downstream string-typing assertions. UI can treat the field as
+// an empty signal (the structural sibling fields like `card_id`,
+// `factor_label`, `node_id`, etc. carry the actionable data).
+
+export const SUPPRESSED_PROSE_FALLBACK = '…';
+
+// ============================================================================
 // Per-string scrubber
 // ============================================================================
 
@@ -428,11 +449,12 @@ export function sanitiseEnrichment(
 
   // ── flat string leaves ────────────────────────────────────────────────
   // Fail-shut policy: a hard-ban hit on a prose leaf means engine
-  // vocabulary survived ID resolution. The leaf is DELETED rather than
-  // shipped — the structural shape stays consistent (the field becomes
-  // optional/missing) and downstream consumers fall back to whatever
-  // they render when the field is absent. This is the same fail-shut
-  // contract `partitionCritiques` applies to critique-array entries.
+  // vocabulary survived ID resolution. The leaf is REPLACED with
+  // `SUPPRESSED_PROSE_FALLBACK` rather than deleted — UI consumers
+  // typing the field as `string` get a neutral empty signal instead of
+  // an absent field. Codex review 2026-04-30 P2 — was previously
+  // `delete cloned[key]`, which changed the wire shape and risked UI
+  // rendering regressions.
   const flatStringLeaves: ReadonlyArray<string> = [
     'summary',
     'narrative',
@@ -447,11 +469,7 @@ export function sanitiseEnrichment(
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
       for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-      if (scrubbed.suppress) {
-        delete cloned[key];
-      } else {
-        cloned[key] = scrubbed.text;
-      }
+      cloned[key] = scrubbed.suppress ? SUPPRESSED_PROSE_FALLBACK : scrubbed.text;
     }
   }
 
@@ -475,11 +493,12 @@ export function sanitiseEnrichment(
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
       for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-      // Fail-shut: drop the offending entry from the array. The array
-      // shape is preserved (string[]) but the contaminated entry is
-      // omitted.
-      if (scrubbed.suppress) continue;
-      out.push(scrubbed.text);
+      // Fail-shut: replace the offending entry with the suppression
+      // marker so consumers iterating the array don't see a length
+      // change. Codex review 2026-04-30 P2 — was previously `continue`
+      // (drop entry), which changed array length and risked index-
+      // alignment regressions.
+      out.push(scrubbed.suppress ? SUPPRESSED_PROSE_FALLBACK : scrubbed.text);
     }
     cloned[key] = out;
   }
@@ -507,13 +526,10 @@ export function sanitiseEnrichment(
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
       for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-      // Fail-shut: drop the prose field but leave the structural item
-      // intact (sensitivity_value, node_id, etc. still surface).
-      if (scrubbed.suppress) {
-        delete rec[field];
-      } else {
-        rec[field] = scrubbed.text;
-      }
+      // Fail-shut: replace the prose field with the suppression marker.
+      // Structural sibling fields (sensitivity_value, node_id, etc.)
+      // are untouched.
+      rec[field] = scrubbed.suppress ? SUPPRESSED_PROSE_FALLBACK : scrubbed.text;
     }
   }
 
@@ -531,11 +547,7 @@ export function sanitiseEnrichment(
         const scrubbed = sanitiseEnrichmentText(v, ctx);
         for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
         for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-        if (scrubbed.suppress) {
-          delete cardRec[f];
-        } else {
-          cardRec[f] = scrubbed.text;
-        }
+        cardRec[f] = scrubbed.suppress ? SUPPRESSED_PROSE_FALLBACK : scrubbed.text;
       }
       const items = cardRec['items'];
       if (Array.isArray(items)) {
@@ -549,11 +561,9 @@ export function sanitiseEnrichment(
           const scrubbed = sanitiseEnrichmentText(v, ctx);
           for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
           for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-          if (scrubbed.suppress) {
-            delete itRec['suggested_evidence'];
-          } else {
-            itRec['suggested_evidence'] = scrubbed.text;
-          }
+          itRec['suggested_evidence'] = scrubbed.suppress
+            ? SUPPRESSED_PROSE_FALLBACK
+            : scrubbed.text;
         }
       }
     }

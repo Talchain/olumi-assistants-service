@@ -208,6 +208,44 @@ describe('unsafe-label rejection (Codex review 2026-04-30, finding #3)', () => {
     expect(resolveLabel('opt_x', ctx)).toBe('Hire Two Senior Engineers');
   });
 
+  it.each([
+    'Risk-Adjusted Return',
+    'Out-of-Scope Initiatives',
+    'Goal-Setting Framework',
+    'Factor Analysis Methodology',
+    'Constraint-Based Decision',
+    'Decision Support System',
+    'Outcome Measurement',
+    'Option Value Theory',
+  ])('does NOT reject the legitimate English-compound label %s', (legitimateLabel) => {
+    // Codex review 2026-04-30 P3: ENTITY_ID_LEAK_RE over-matches these
+    // English compounds. The narrowed unsafe-label check uses
+    // isSlugShapedEntityId, which rejects single-segment suffixes and
+    // multi-segment-with-short-first-segment cases. These labels must
+    // pass through unchanged.
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_legit', label: legitimateLabel }] },
+    };
+    expect(resolveLabel('opt_legit', ctx)).toBe(legitimateLabel);
+    expect(resolveLabelOrFallback('opt_legit', ctx)).toBe(legitimateLabel);
+  });
+
+  it('rejects digit-bearing slug-shaped IDs even with no other separator', () => {
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'Refers to opt_42' }] },
+    };
+    // opt_42 contains a digit → slug-shape gate confirms as real ID.
+    expect(resolveLabel('opt_x', ctx)).toBeNull();
+  });
+
+  it('rejects fac_/opt_-prefixed labels even with single-segment suffix (UNAMBIGUOUS_SHORT_PREFIXES)', () => {
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'Compare to fac_churn' }] },
+    };
+    // fac_ has no English collisions → confirmed even single-segment.
+    expect(resolveLabel('opt_x', ctx)).toBeNull();
+  });
+
   it('returns null when EVERY priority has only unsafe labels', () => {
     const ctx: LabelResolverContext = {
       graph: {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CRITIQUE_BUCKETS,
   S_BUCKET_REPLACEMENTS,
+  SUPPRESSED_PROSE_FALLBACK,
   bucketFor,
   isAllowlistedPath,
   partitionCritiques,
@@ -321,16 +322,17 @@ describe('fail-shut behaviour — hard-ban hits suppress the field, not just rec
     expect(r.diagnostic).toHaveLength(1);
   });
 
-  it('flat string leaf is DELETED (not shipped verbatim) on a hard-ban hit', () => {
+  it('flat string leaf is REPLACED with the suppression marker (not shipped verbatim)', () => {
     const enrichment: Record<string, unknown> = {
       summary: "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
     };
     const r = sanitiseEnrichment(enrichment, GRAPH);
-    expect(r.enrichment.summary).toBeUndefined();
+    expect(r.enrichment.summary).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(typeof r.enrichment.summary).toBe('string');
     expect(r.hardBans.length).toBeGreaterThan(0);
   });
 
-  it('improvement_guidance entry is DROPPED on a hard-ban hit; structural array preserved', () => {
+  it('improvement_guidance entry is REPLACED with the marker; array length preserved', () => {
     const enrichment: Record<string, unknown> = {
       improvement_guidance: [
         'Clean entry one.',
@@ -341,10 +343,13 @@ describe('fail-shut behaviour — hard-ban hits suppress the field, not just rec
     const r = sanitiseEnrichment(enrichment, GRAPH);
     const out = r.enrichment.improvement_guidance as string[];
     expect(Array.isArray(out)).toBe(true);
-    expect(out).toEqual(['Clean entry one.', 'Clean entry two.']);
+    expect(out).toHaveLength(3);
+    expect(out[0]).toBe('Clean entry one.');
+    expect(out[1]).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(out[2]).toBe('Clean entry two.');
   });
 
-  it('factor_sensitivity[*].interpretation field is DELETED on hard-ban; structural fields preserved', () => {
+  it('factor_sensitivity[*].interpretation is REPLACED with the marker; structural fields preserved', () => {
     const enrichment: Record<string, unknown> = {
       factor_sensitivity: [
         {
@@ -356,13 +361,13 @@ describe('fail-shut behaviour — hard-ban hits suppress the field, not just rec
     };
     const r = sanitiseEnrichment(enrichment, GRAPH);
     const fs = (r.enrichment.factor_sensitivity as Array<Record<string, unknown>>);
-    expect(fs[0]?.interpretation).toBeUndefined();
+    expect(fs[0]?.interpretation).toBe(SUPPRESSED_PROSE_FALLBACK);
     // Structural fields preserved
     expect(fs[0]?.node_id).toBe('fac_hiring_cost');
     expect(fs[0]?.sensitivity_value).toBe(0.7);
   });
 
-  it('review_cards[*].what is DELETED on hard-ban; structural fields preserved', () => {
+  it('review_cards[*].what is REPLACED with the marker; structural fields preserved', () => {
     const enrichment: Record<string, unknown> = {
       review_cards: [
         {
@@ -375,13 +380,13 @@ describe('fail-shut behaviour — hard-ban hits suppress the field, not just rec
     };
     const r = sanitiseEnrichment(enrichment, GRAPH);
     const rc = (r.enrichment.review_cards as Array<Record<string, unknown>>);
-    expect(rc[0]?.what).toBeUndefined();
+    expect(rc[0]?.what).toBe(SUPPRESSED_PROSE_FALLBACK);
     expect(rc[0]?.why).toBe('Clean why text.');
     expect(rc[0]?.card_id).toBe('ep_x');
     expect(rc[0]?.card_type).toBe('evidence_priority');
   });
 
-  it('review_cards[*].items[*].suggested_evidence is DELETED on hard-ban', () => {
+  it('review_cards[*].items[*].suggested_evidence is REPLACED with the marker', () => {
     const enrichment: Record<string, unknown> = {
       review_cards: [
         {
@@ -399,9 +404,17 @@ describe('fail-shut behaviour — hard-ban hits suppress the field, not just rec
     const r = sanitiseEnrichment(enrichment, GRAPH);
     const items = ((r.enrichment.review_cards as Array<Record<string, unknown>>)[0]
       ?.items as Array<Record<string, unknown>>);
-    expect(items[0]?.suggested_evidence).toBeUndefined();
+    expect(items[0]?.suggested_evidence).toBe(SUPPRESSED_PROSE_FALLBACK);
     expect(items[0]?.node_id).toBe('fac_hiring_cost');
     expect(items[0]?.factor_label).toBe('Hiring');
+  });
+
+  it('SUPPRESSED_PROSE_FALLBACK is a non-empty string typed compatibly with prose fields', () => {
+    expect(typeof SUPPRESSED_PROSE_FALLBACK).toBe('string');
+    expect(SUPPRESSED_PROSE_FALLBACK.length).toBeGreaterThan(0);
+    // Marker contains no entity-id-shaped tokens and no hard-ban substrings.
+    expect(SUPPRESSED_PROSE_FALLBACK).not.toMatch(/\b(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[_:-]/);
+    expect(SUPPRESSED_PROSE_FALLBACK).not.toMatch(/Node '/);
   });
 });
 
@@ -611,7 +624,9 @@ describe('HARD_BAN_PATTERNS — flat-token coverage', () => {
     };
     const r = sanitiseEnrichment(enrichment, GRAPH);
     expect(r.hardBans.some((h) => h.path === '$.summary')).toBe(true);
-    expect(r.enrichment['summary']).toBeUndefined();
+    // Codex review 2026-04-30 P2: replaced with the suppression marker
+    // rather than deleted (was previously toBeUndefined).
+    expect(r.enrichment['summary']).toBe(SUPPRESSED_PROSE_FALLBACK);
   });
 
   it('catches lowercase "option nodes" and singular "option node"', () => {

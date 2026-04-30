@@ -17,7 +17,10 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { finaliseV5Response } from '../response-finaliser.js';
 import { config } from '../../config/index.js';
-import type { CritiqueLike } from '../compose/sanitise-enrichment.js';
+import {
+  SUPPRESSED_PROSE_FALLBACK,
+  type CritiqueLike,
+} from '../compose/sanitise-enrichment.js';
 
 const ANALYSIS_READY_STUB = {
   status: 'ready' as const,
@@ -140,12 +143,12 @@ describe('response-finaliser — enrichment-prose backstop', () => {
     const out = finaliseV5Response(response, { analysisReady: ANALYSIS_READY_STUB });
     const block = (out.blocks as Array<Record<string, unknown>>)[0]!;
     const enrichment = block.enrichment as Record<string, unknown>;
-    // Both contaminated prose leaves are deleted.
+    // Both contaminated prose leaves are replaced with the suppression marker.
     const rc = (enrichment.review_cards as Array<Record<string, unknown>>);
-    expect(rc[0]?.what).toBeUndefined();
+    expect(rc[0]?.what).toBe(SUPPRESSED_PROSE_FALLBACK);
     expect(rc[0]?.card_id).toBe('ep_x'); // structural preserved
     const fs = (enrichment.factor_sensitivity as Array<Record<string, unknown>>);
-    expect(fs[0]?.interpretation).toBeUndefined();
+    expect(fs[0]?.interpretation).toBe(SUPPRESSED_PROSE_FALLBACK);
     expect(fs[0]?.node_id).toBe('fac_x'); // structural preserved
   });
 
@@ -176,7 +179,8 @@ describe('response-finaliser — enrichment-prose backstop', () => {
     const block = (out.blocks as Array<Record<string, unknown>>)[0]!;
     const enrichment = block.enrichment as Record<string, unknown>;
     const ig = enrichment.improvement_guidance as string[];
-    expect(ig).toEqual(['Clean entry one.', 'Clean entry two.']);
+    // Array length preserved; offending entry replaced in place.
+    expect(ig).toEqual(['Clean entry one.', SUPPRESSED_PROSE_FALLBACK, 'Clean entry two.']);
   });
 
   it('no-op when no blocks have enrichment', () => {

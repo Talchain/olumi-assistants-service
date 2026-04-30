@@ -25,26 +25,51 @@ import {
   resolveLabel as resolveLabelFromGraph,
   ENTITY_ID_LEAK_RE,
 } from '../../orchestrator/shared/entity-id-pattern.js';
-import { genericFallbackForId } from '../../orchestrator/shared/output-safety.js';
+import {
+  genericFallbackForId,
+  isSlugShapedEntityId,
+} from '../../orchestrator/shared/output-safety.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 
 /**
  * Unsafe-label predicate. A label is unsafe if it equals the lookup id
- * (upstream stored the raw id in the label slot) OR contains an entity-
- * ID-shaped token (`fac_*`, `opt_*`, etc.). Used by both `resolveLabel`
- * and `resolveLabelOrFallback` so the contract "never returns the raw
- * ID" holds even when an upstream source emits a malformed label.
+ * (upstream stored the raw id in the label slot) OR contains a
+ * **slug-shaped** entity-ID-confirmed token within it. Slug-shape
+ * confirmation reuses the existing
+ * `src/orchestrator/shared/output-safety.ts:isSlugShapedEntityId`
+ * heuristic so we don't reject legitimate English compounds like
+ * `Risk-Adjusted Return`, `Out-of-Scope Initiatives`, `Goal-Setting
+ * Framework`, `Factor Analysis Methodology`, or `Constraint-Based
+ * Decision` (all of which match `ENTITY_ID_LEAK_RE` superficially but
+ * fail the slug-shape gate).
  *
- * The check is structural — we DON'T want to assume that every label
- * containing a hyphen is unsafe (legitimate labels can have hyphens).
- * `ENTITY_ID_LEAK_RE` already encodes the prefix-discriminated pattern.
+ * The check operates per ENTITY_ID_LEAK_RE substring match: the label
+ * is unsafe if ANY confirmed-slug substring is found. This way:
+ *   - `"opt_hire_local"` (label === id)                 → unsafe.
+ *   - `"See fac_churn_rate"` (slug-shaped substring)    → unsafe.
+ *   - `"Risk-Adjusted Return"` (no slug-shape match)    → SAFE.
+ *   - `"Goal-Setting Framework"` (no slug-shape match)  → SAFE.
+ *   - `"opt_42"` (digit forces slug-shape true)         → unsafe.
+ *
+ * Codex review 2026-04-30 finding #3 (P3): the previous check rejected
+ * any `ENTITY_ID_LEAK_RE` match, which over-rejected legitimate English
+ * compound labels.
  */
 function isUnsafeLabel(label: string, lookupId: string): boolean {
   if (label === lookupId) return true;
-  // Per-call global matcher; the source regex is non-global by contract
-  // (see entity-id-pattern.ts:9-14 — the 7 .test() callsites in
-  // patch-summary.ts depend on it staying non-global).
-  return new RegExp(ENTITY_ID_LEAK_RE.source, 'i').test(label);
+  // Walk every ENTITY_ID_LEAK_RE substring within the label; the broad
+  // regex over-matches English compounds, so each match must pass the
+  // graph-free slug-shape gate before we treat the label as unsafe.
+  // The source regex is non-global by contract — see
+  // entity-id-pattern.ts:9-14. Build a per-call global matcher.
+  const global = new RegExp(ENTITY_ID_LEAK_RE.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = global.exec(label)) !== null) {
+    if (isSlugShapedEntityId(m[0])) return true;
+    // Defensive: zero-width match guard.
+    if (m.index === global.lastIndex) global.lastIndex++;
+  }
+  return false;
 }
 
 /**

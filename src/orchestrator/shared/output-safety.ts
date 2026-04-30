@@ -154,6 +154,43 @@ function isLikelyEntityId(
   return firstSeg.length >= 4;
 }
 
+/**
+ * Public, graph-free slug-shape gate. Returns true when `text` looks
+ * like a real internal entity ID (`fac_delivery_cost`, `opt_42`,
+ * `goal_revenue_growth`); false for English compounds the broad regex
+ * over-matches (`risk-adjusted`, `out-of-scope`, `goal-setting`,
+ * `factor_analysis`, `option_value`, `constraint-based`).
+ *
+ * Used by callers that need the slug-shape rule WITHOUT graph access —
+ * e.g. the V5 multi-source resolver's unsafe-label check
+ * (`compose/resolve-label.ts:isUnsafeLabel`), where the question is
+ * "could this label be a confirmed leak?" rather than "does this graph
+ * carry a node by this id?".
+ *
+ * Rule (no graph; mirrors `isLikelyEntityId` rules 2-5):
+ *   1. Contains a digit anywhere → confirmed ID.
+ *   2. Prefix is `fac` or `opt` (no English collisions) → confirmed ID.
+ *   3. Single-segment suffix → English compound, NOT an ID.
+ *   4. Multi-segment, first suffix segment < 4 chars → English connector
+ *      word ("of", "to") → NOT an ID.
+ *   5. Multi-segment, first suffix segment ≥ 4 chars → confirmed ID.
+ *
+ * Inputs that do NOT match the broad `ENTITY_ID_LEAK_RE` shape (no
+ * `prefix[_:-]suffix` split) return false. Callers should pre-filter
+ * with `ENTITY_ID_LEAK_RE` if they want to walk a string for confirmed
+ * matches.
+ */
+export function isSlugShapedEntityId(text: string): boolean {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  const split = splitMatch(text);
+  if (split === null) return false;
+  if (/\d/.test(text)) return true;
+  if (UNAMBIGUOUS_SHORT_PREFIXES.has(split.prefix)) return true;
+  const firstSeg = split.suffix.split(/[_:-]/, 1)[0] ?? '';
+  if (firstSeg === split.suffix) return false;
+  return firstSeg.length >= 4;
+}
+
 // ----------------------------------------------------------------------------
 // String-level scrub
 // ----------------------------------------------------------------------------
