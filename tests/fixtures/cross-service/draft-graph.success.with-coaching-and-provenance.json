@@ -1,0 +1,2119 @@
+{
+  "schema_version": "3.0",
+  "nodes": [
+    {
+      "id": "dec_hiring",
+      "kind": "decision",
+      "label": "Engineering Team Hiring Strategy",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_compliance_complexity",
+      "kind": "factor",
+      "label": "Regulatory Compliance Complexity",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.4,
+        "range_max": 0.9
+      },
+      "display_value": "0.4 to 0.9",
+      "provenance": "user_set"
+    },
+    {
+      "id": "fac_domain_expertise",
+      "kind": "factor",
+      "label": "Domain Expertise Level",
+      "observed_state": {
+        "value": 0.5,
+        "unit": "scale",
+        "source": "cee_inference",
+        "raw_value": 0,
+        "cap": 0,
+        "extractionType": "inferred",
+        "factor_type": "quality",
+        "uncertainty_drivers": [
+          "Fintech compliance knowledge depth varies by candidate",
+          "Offshore team regulatory familiarity unverified"
+        ]
+      },
+      "category": "controllable",
+      "intercept": 0.5,
+      "display_value": "Moderate domain expertise",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_hiring_cost",
+      "kind": "factor",
+      "label": "Hiring and Staffing Cost",
+      "observed_state": {
+        "value": 0,
+        "unit": "\u00a3",
+        "source": "brief_extraction",
+        "raw_value": 0,
+        "cap": 400000,
+        "extractionType": "explicit",
+        "factor_type": "cost",
+        "uncertainty_drivers": [
+          "Salary negotiations may shift final cost",
+          "Benefits and overhead not fully scoped"
+        ]
+      },
+      "category": "controllable",
+      "intercept": 0,
+      "display_value": "No cost allocated",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "fac_onboarding_time",
+      "kind": "factor",
+      "label": "Onboarding Ramp Duration",
+      "observed_state": {
+        "value": 0,
+        "unit": "months",
+        "source": "brief_extraction",
+        "raw_value": 0,
+        "cap": 8,
+        "extractionType": "explicit",
+        "factor_type": "time",
+        "uncertainty_drivers": [
+          "Ramp speed depends on codebase complexity",
+          "New hire prior fintech experience varies"
+        ]
+      },
+      "category": "controllable",
+      "intercept": 0,
+      "display_value": "No onboarding time",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "fac_team_size",
+      "kind": "factor",
+      "label": "Effective Team Capacity",
+      "observed_state": {
+        "value": 0.4,
+        "unit": "engineers",
+        "source": "brief_extraction",
+        "raw_value": 8,
+        "cap": 20,
+        "extractionType": "explicit",
+        "factor_type": "demand",
+        "uncertainty_drivers": [
+          "Productivity per engineer varies by role fit",
+          "Coordination overhead grows with team size"
+        ]
+      },
+      "category": "controllable",
+      "intercept": 0.4,
+      "display_value": "8 engineers",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "fac_timezone_overlap",
+      "kind": "factor",
+      "label": "Timezone Collaboration Overlap",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.1,
+        "range_max": 0.5
+      },
+      "display_value": "0.1 to 0.5",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "goal_compliance",
+      "kind": "goal",
+      "label": "Ship Compliance Feature On Time Without Platform Incidents",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_hybrid",
+      "kind": "option",
+      "label": "Hybrid: 1 Senior London + 3 Bangalore Engineers",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0.5,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0.5,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.65,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.5,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_london",
+      "kind": "option",
+      "label": "Hire 3 Senior Engineers in London",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0.625,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0.75,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.85,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.55,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_offshore",
+      "kind": "option",
+      "label": "Offshore to Bangalore Team (6 Engineers)",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0.45,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0.375,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.45,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.7,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_status_quo",
+      "kind": "option",
+      "label": "Continue with Current Team (Status Quo)",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.5,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.4,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": true,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_compliance_delivery",
+      "kind": "outcome",
+      "label": "Compliance Feature Delivery Speed",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_platform_stability",
+      "kind": "outcome",
+      "label": "Platform Stability and Code Quality",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_budget_overrun",
+      "kind": "risk",
+      "label": "Budget Overrun",
+      "observed_state": {
+        "value": 0,
+        "unit": "\u00a3",
+        "source": "brief_extraction",
+        "raw_value": 0,
+        "cap": 400000,
+        "extractionType": "explicit",
+        "factor_type": "cost",
+        "uncertainty_drivers": []
+      },
+      "display_value": "\u00a3400,000 budget cap",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "risk_deadline_miss",
+      "kind": "risk",
+      "label": "Compliance Deadline Miss",
+      "observed_state": {
+        "value": 0.5,
+        "unit": "months",
+        "source": "cee_inference",
+        "raw_value": 4,
+        "cap": 8,
+        "extractionType": "inferred",
+        "factor_type": "time",
+        "uncertainty_drivers": []
+      },
+      "display_value": "4-month deadline",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_platform_incident",
+      "kind": "risk",
+      "label": "Platform Stability Incident",
+      "provenance": "ai_inferred"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dec_hiring",
+      "to": "opt_hybrid",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "from_brief",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_hiring",
+      "to": "opt_london",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "from_brief",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_hiring",
+      "to": "opt_offshore",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "from_brief",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_hiring",
+      "to": "opt_status_quo",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "user_set",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_compliance_complexity",
+      "to": "out_platform_stability",
+      "strength": {
+        "mean": -0.2,
+        "std": 0.15
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_compliance_complexity",
+      "to": "risk_deadline_miss",
+      "strength": {
+        "mean": 0.35,
+        "std": 0.2
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_domain_expertise",
+      "to": "out_compliance_delivery",
+      "strength": {
+        "mean": 0.55,
+        "std": 0.15
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_domain_expertise",
+      "to": "out_platform_stability",
+      "strength": {
+        "mean": 0.45,
+        "std": 0.14
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_domain_expertise",
+      "to": "risk_platform_incident",
+      "strength": {
+        "mean": -0.35,
+        "std": 0.15
+      },
+      "exists_probability": 0.82,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_hiring_cost",
+      "to": "risk_budget_overrun",
+      "strength": {
+        "mean": 0.7,
+        "std": 0.12
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_onboarding_time",
+      "to": "out_compliance_delivery",
+      "strength": {
+        "mean": -0.4,
+        "std": 0.15
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_onboarding_time",
+      "to": "risk_deadline_miss",
+      "strength": {
+        "mean": 0.6,
+        "std": 0.15
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_team_size",
+      "to": "out_compliance_delivery",
+      "strength": {
+        "mean": 0.25,
+        "std": 0.12
+      },
+      "exists_probability": 0.82,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_team_size",
+      "to": "out_platform_stability",
+      "strength": {
+        "mean": 0.2,
+        "std": 0.12
+      },
+      "exists_probability": 0.78,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_team_size",
+      "to": "risk_platform_incident",
+      "strength": {
+        "mean": -0.2,
+        "std": 0.14
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_timezone_overlap",
+      "to": "out_compliance_delivery",
+      "strength": {
+        "mean": 0.3,
+        "std": 0.18
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_timezone_overlap",
+      "to": "risk_deadline_miss",
+      "strength": {
+        "mean": 0.25,
+        "std": 0.18
+      },
+      "exists_probability": 0.7,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_hybrid",
+      "to": "fac_domain_expertise",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_hybrid",
+      "to": "fac_hiring_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_hybrid",
+      "to": "fac_onboarding_time",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_hybrid",
+      "to": "fac_team_size",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_london",
+      "to": "fac_domain_expertise",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_london",
+      "to": "fac_hiring_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_london",
+      "to": "fac_onboarding_time",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_london",
+      "to": "fac_team_size",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_offshore",
+      "to": "fac_domain_expertise",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_offshore",
+      "to": "fac_hiring_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_offshore",
+      "to": "fac_onboarding_time",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_offshore",
+      "to": "fac_team_size",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_domain_expertise",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_hiring_cost",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_team_size",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_compliance_delivery",
+      "to": "goal_compliance",
+      "strength": {
+        "mean": 0.55,
+        "std": 0.1
+      },
+      "exists_probability": 0.95,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "out_platform_stability",
+      "to": "goal_compliance",
+      "strength": {
+        "mean": 0.35,
+        "std": 0.1
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "risk_budget_overrun",
+      "to": "goal_compliance",
+      "strength": {
+        "mean": -0.2,
+        "std": 0.12
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "risk_deadline_miss",
+      "to": "goal_compliance",
+      "strength": {
+        "mean": -0.5,
+        "std": 0.12
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    },
+    {
+      "from": "risk_platform_incident",
+      "to": "goal_compliance",
+      "strength": {
+        "mean": -0.4,
+        "std": 0.14
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai",
+      "edge_type": "directed"
+    }
+  ],
+  "options": [
+    {
+      "id": "opt_hybrid",
+      "label": "Hybrid: 1 Senior London + 3 Bangalore Engineers",
+      "status": "ready",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0.5,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0.5,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.65,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.5,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_london",
+      "label": "Hire 3 Senior Engineers in London",
+      "status": "ready",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0.625,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0.75,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.85,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.55,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_offshore",
+      "label": "Offshore to Bangalore Team (6 Engineers)",
+      "status": "ready",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0.45,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0.375,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.45,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.7,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_status_quo",
+      "label": "Continue with Current Team (Status Quo)",
+      "status": "ready",
+      "interventions": {
+        "fac_hiring_cost": {
+          "value": 0,
+          "unit": "\u00a3",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_hiring_cost",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_onboarding_time": {
+          "value": 0,
+          "unit": "months",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_onboarding_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_domain_expertise": {
+          "value": 0.5,
+          "unit": "scale",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_domain_expertise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_team_size": {
+          "value": 0.4,
+          "unit": "engineers",
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_team_size",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": true
+    }
+  ],
+  "goal_node_id": "goal_compliance",
+  "validation_warnings": [
+    {
+      "code": "OPTION_SIMILARITY",
+      "message": "Options \"Hybrid: 1 Senior London + 3 Bangalore Engineers\" and \"Hire 3 Senior Engineers in London\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+      "severity": "info",
+      "details": {
+        "optionA": "opt_hybrid",
+        "optionB": "opt_london",
+        "jaccard": 1
+      },
+      "suggestion": "Options affect the same factors \u2014 consider whether they represent genuinely different approaches"
+    },
+    {
+      "code": "OPTION_SIMILARITY",
+      "message": "Options \"Hybrid: 1 Senior London + 3 Bangalore Engineers\" and \"Offshore to Bangalore Team (6 Engineers)\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+      "severity": "info",
+      "details": {
+        "optionA": "opt_hybrid",
+        "optionB": "opt_offshore",
+        "jaccard": 1
+      },
+      "suggestion": "Options affect the same factors \u2014 consider whether they represent genuinely different approaches"
+    }
+  ],
+  "goal_constraints": [
+    {
+      "constraint_id": "constraint_goal_compliance_max",
+      "node_id": "goal_compliance",
+      "operator": "<=",
+      "value": 4,
+      "label": "Delivery deadline",
+      "unit": "months",
+      "source_quote": "in 4 months",
+      "confidence": 0.95,
+      "provenance": "inferred",
+      "deadline_metadata": {
+        "deadline_date": "2026-08-30",
+        "reference_date": "2026-04-30",
+        "assumed_reference_date": true
+      }
+    }
+  ],
+  "draft_warnings": [
+    {
+      "id": "goal_no_baseline_value",
+      "severity": "low",
+      "node_ids": [
+        "goal_compliance"
+      ],
+      "edge_ids": [],
+      "affected_node_ids": [
+        "goal_compliance"
+      ],
+      "affected_edge_ids": [],
+      "explanation": "Goal node has no observed_state.value set.",
+      "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison"
+    }
+  ],
+  "analysis_ready": {
+    "options": [
+      {
+        "id": "opt_hybrid",
+        "label": "Hybrid: 1 Senior London + 3 Bangalore Engineers",
+        "status": "ready",
+        "status_reason": "4 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_hiring_cost": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "No cost allocated"
+          },
+          "fac_onboarding_time": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "No onboarding time"
+          },
+          "fac_domain_expertise": {
+            "value": 0.65,
+            "source": "brief_extraction",
+            "display_value": "Moderate domain expertise"
+          },
+          "fac_team_size": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "8 engineers"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_hiring_cost": {
+            "display_value": "No cost allocated",
+            "normalised_value": 0.5,
+            "raw_value": 0,
+            "unit": "\u00a3"
+          },
+          "fac_onboarding_time": {
+            "display_value": "No onboarding time",
+            "normalised_value": 0.5,
+            "raw_value": 0,
+            "unit": "months"
+          },
+          "fac_domain_expertise": {
+            "display_value": "Moderate domain expertise",
+            "normalised_value": 0.65,
+            "raw_value": 0,
+            "unit": "scale"
+          },
+          "fac_team_size": {
+            "display_value": "8 engineers",
+            "normalised_value": 0.5,
+            "raw_value": 8,
+            "unit": "engineers"
+          }
+        }
+      },
+      {
+        "id": "opt_london",
+        "label": "Hire 3 Senior Engineers in London",
+        "status": "ready",
+        "status_reason": "4 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_hiring_cost": {
+            "value": 0.625,
+            "source": "brief_extraction",
+            "display_value": "No cost allocated"
+          },
+          "fac_onboarding_time": {
+            "value": 0.75,
+            "source": "brief_extraction",
+            "display_value": "No onboarding time"
+          },
+          "fac_domain_expertise": {
+            "value": 0.85,
+            "source": "brief_extraction",
+            "display_value": "Moderate domain expertise"
+          },
+          "fac_team_size": {
+            "value": 0.55,
+            "source": "brief_extraction",
+            "display_value": "8 engineers"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_hiring_cost": {
+            "display_value": "No cost allocated",
+            "normalised_value": 0.625,
+            "raw_value": 0,
+            "unit": "\u00a3"
+          },
+          "fac_onboarding_time": {
+            "display_value": "No onboarding time",
+            "normalised_value": 0.75,
+            "raw_value": 0,
+            "unit": "months"
+          },
+          "fac_domain_expertise": {
+            "display_value": "Moderate domain expertise",
+            "normalised_value": 0.85,
+            "raw_value": 0,
+            "unit": "scale"
+          },
+          "fac_team_size": {
+            "display_value": "8 engineers",
+            "normalised_value": 0.55,
+            "raw_value": 8,
+            "unit": "engineers"
+          }
+        }
+      },
+      {
+        "id": "opt_offshore",
+        "label": "Offshore to Bangalore Team (6 Engineers)",
+        "status": "ready",
+        "status_reason": "4 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_hiring_cost": {
+            "value": 0.45,
+            "source": "brief_extraction",
+            "display_value": "No cost allocated"
+          },
+          "fac_onboarding_time": {
+            "value": 0.375,
+            "source": "brief_extraction",
+            "display_value": "No onboarding time"
+          },
+          "fac_domain_expertise": {
+            "value": 0.45,
+            "source": "brief_extraction",
+            "display_value": "Moderate domain expertise"
+          },
+          "fac_team_size": {
+            "value": 0.7,
+            "source": "brief_extraction",
+            "display_value": "8 engineers"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_hiring_cost": {
+            "display_value": "No cost allocated",
+            "normalised_value": 0.45,
+            "raw_value": 0,
+            "unit": "\u00a3"
+          },
+          "fac_onboarding_time": {
+            "display_value": "No onboarding time",
+            "normalised_value": 0.375,
+            "raw_value": 0,
+            "unit": "months"
+          },
+          "fac_domain_expertise": {
+            "display_value": "Moderate domain expertise",
+            "normalised_value": 0.45,
+            "raw_value": 0,
+            "unit": "scale"
+          },
+          "fac_team_size": {
+            "display_value": "8 engineers",
+            "normalised_value": 0.7,
+            "raw_value": 8,
+            "unit": "engineers"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "label": "Continue with Current Team (Status Quo)",
+        "status": "ready",
+        "status_reason": "4 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_hiring_cost": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "No cost allocated"
+          },
+          "fac_onboarding_time": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "No onboarding time"
+          },
+          "fac_domain_expertise": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "Moderate domain expertise"
+          },
+          "fac_team_size": {
+            "value": 0.4,
+            "source": "brief_extraction",
+            "display_value": "8 engineers"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "fac_hiring_cost": {
+            "display_value": "No cost allocated",
+            "normalised_value": 0,
+            "raw_value": 0,
+            "unit": "\u00a3"
+          },
+          "fac_onboarding_time": {
+            "display_value": "No onboarding time",
+            "normalised_value": 0,
+            "raw_value": 0,
+            "unit": "months"
+          },
+          "fac_domain_expertise": {
+            "display_value": "Moderate domain expertise",
+            "normalised_value": 0.5,
+            "raw_value": 0,
+            "unit": "scale"
+          },
+          "fac_team_size": {
+            "display_value": "8 engineers",
+            "normalised_value": 0.4,
+            "raw_value": 8,
+            "unit": "engineers"
+          }
+        }
+      }
+    ],
+    "goal_node_id": "goal_compliance",
+    "status": "ready",
+    "bias_findings": [],
+    "model_adjustments": [
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_compliance_complexity",
+        "field": "nodes[fac_compliance_complexity].category",
+        "reason": "Reclassified unreachable factor \"Regulatory Compliance Complexity\" to external",
+        "source": "deterministic_sweep"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_timezone_overlap",
+        "field": "nodes[fac_timezone_overlap].category",
+        "reason": "Reclassified unreachable factor \"Timezone Collaboration Overlap\" to external",
+        "source": "deterministic_sweep"
+      }
+    ]
+  },
+  "meta": {
+    "roots": [
+      "dec_hiring",
+      "fac_compliance_complexity",
+      "fac_timezone_overlap"
+    ],
+    "leaves": [
+      "goal_compliance"
+    ],
+    "source": "assistant"
+  },
+  "quality": {
+    "overall": 9,
+    "structure": 8,
+    "coverage": 10,
+    "structural_proxy": 8,
+    "safety": 8
+  },
+  "trace": {
+    "request_id": "565ee470-1cec-41cd-939a-b2ea29717f2c",
+    "correlation_id": "565ee470-1cec-41cd-939a-b2ea29717f2c",
+    "engine": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "version": "1.12.0"
+    },
+    "pipeline": {
+      "status": "success",
+      "total_duration_ms": 44469,
+      "llm_call_count": 1,
+      "llm_quality": {
+        "risk_coefficient_corrections": 0
+      },
+      "llm_metadata": {
+        "model": "claude-sonnet-4-6",
+        "prompt_version": "draft_graph_default@v189 (staging)",
+        "prompt_text_version": "v189",
+        "prompt_hash": "519eeef80fb4c3e6c9a940770be00310d9e5ec8f3f2f9858325b108228caed1f",
+        "duration_ms": 40486,
+        "finish_reason": "end_turn",
+        "response_chars": 14028,
+        "token_usage": {
+          "prompt_tokens": 281,
+          "completion_tokens": 4338,
+          "total_tokens": 4619
+        },
+        "temperature": 0,
+        "max_tokens": 16384,
+        "seed": 17,
+        "instance_id": "d9ac261c",
+        "cache_age_ms": 0,
+        "cache_status": "fresh",
+        "use_staging_mode": true,
+        "structured_outputs_used": true
+      },
+      "validation_summary": {
+        "status": "valid",
+        "required_kinds": [
+          "goal",
+          "decision",
+          "option"
+        ],
+        "present_kinds": [
+          "decision",
+          "factor",
+          "goal",
+          "option",
+          "outcome",
+          "risk"
+        ],
+        "missing_kinds": []
+      },
+      "enrich": {
+        "called_count": 1,
+        "extraction_mode": "v4_complete_skip",
+        "factors_added": 0,
+        "factors_enhanced": 0,
+        "factors_skipped": 0,
+        "source": "unified_pipeline"
+      },
+      "repair": {
+        "deterministic_sweep": {
+          "sweep_ran": true,
+          "sweep_version": "v3",
+          "bucket_summary": {
+            "a": 0,
+            "b": 0,
+            "c": 0
+          },
+          "repairs_count": 2,
+          "unreachable_factors": {
+            "reclassified": [
+              "fac_compliance_complexity",
+              "fac_timezone_overlap"
+            ],
+            "marked_droppable": []
+          },
+          "goal_threshold_stripped": 0,
+          "goal_threshold_possibly_inferred": 0,
+          "factor_goal_splits": 0,
+          "option_outcome_shortcuts_removed": 0,
+          "option_outcome_shortcuts_skipped": 0,
+          "option_risk_shortcuts_removed": 0,
+          "option_risk_shortcuts_rerouted": 0,
+          "option_risk_shortcuts_skipped": 0,
+          "option_goal_shortcuts_removed": 0,
+          "option_goal_shortcuts_rerouted": 0,
+          "option_goal_shortcuts_skipped": 0,
+          "remaining_forbidden_edges_removed": 0,
+          "disconnected_observables_pruned": [],
+          "complexity_cap_pruned": 0,
+          "status_quo": {
+            "fixed": false,
+            "marked_droppable": false
+          },
+          "disconnected_options_before": [],
+          "disconnected_options_after": [],
+          "violations_before": 0,
+          "violations_after": 0,
+          "llm_repair_needed": false,
+          "edge_format": "V1_FLAT",
+          "graph_delta": {
+            "nodes_before": 17,
+            "nodes_after": 17,
+            "edges_before": 37,
+            "edges_after": 37
+          },
+          "rescue_score": 6
+        },
+        "edge_restore": {
+          "restoredCount": 0
+        }
+      },
+      "repair_summary": {
+        "deterministic_sweep_ran": true,
+        "deterministic_sweep_version": "v3",
+        "bucket_summary": {
+          "a": 0,
+          "b": 0,
+          "c": 0
+        },
+        "status_quo_action": "none",
+        "llm_repair_needed": false,
+        "deterministic_repairs_count": 2,
+        "deterministic_repairs": [
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_compliance_complexity].category",
+            "action": "Reclassified unreachable factor \"Regulatory Compliance Complexity\" to external"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_timezone_overlap].category",
+            "action": "Reclassified unreachable factor \"Timezone Collaboration Overlap\" to external"
+          }
+        ],
+        "unreachable_factors": {
+          "reclassified": [
+            "fac_compliance_complexity",
+            "fac_timezone_overlap"
+          ],
+          "marked_droppable": []
+        },
+        "status_quo": {
+          "fixed": false,
+          "marked_droppable": false
+        },
+        "llm_repair_called": false,
+        "llm_repair_brief_included": false,
+        "llm_repair_skipped_reason": "deterministic_sweep_sufficient",
+        "remaining_violations_count": 0,
+        "remaining_violation_codes": [],
+        "edge_format_detected": "V1_FLAT",
+        "graph_delta": {
+          "nodes_before": 17,
+          "nodes_after": 17,
+          "edges_before": 37,
+          "edges_after": 37
+        },
+        "risk_coefficient_corrections": []
+      },
+      "threshold_sweep": {
+        "ran": true,
+        "duration_ms": 0,
+        "goals_checked": 1,
+        "strips_applied": 0,
+        "warnings_emitted": 0,
+        "codes": []
+      },
+      "stage_snapshots": {
+        "stage_1_parse": {
+          "goal_node_id": "goal_compliance",
+          "goal_threshold": "absent",
+          "goal_threshold_raw": "absent",
+          "goal_threshold_unit": "absent",
+          "goal_threshold_cap": "absent",
+          "goal_constraints_count": 0
+        },
+        "stage_3_enrich": {
+          "goal_node_id": "goal_compliance",
+          "goal_threshold": "absent",
+          "goal_threshold_raw": "absent",
+          "goal_threshold_unit": "absent",
+          "goal_threshold_cap": "absent",
+          "goal_constraints_count": 0
+        },
+        "stage_4_repair": {
+          "goal_node_id": "goal_compliance",
+          "goal_threshold": "absent",
+          "goal_threshold_raw": "absent",
+          "goal_threshold_unit": "absent",
+          "goal_threshold_cap": "absent",
+          "goal_constraints_count": 1
+        },
+        "stage_4b_threshold_sweep": {
+          "goal_node_id": "goal_compliance",
+          "goal_threshold": "absent",
+          "goal_threshold_raw": "absent",
+          "goal_threshold_unit": "absent",
+          "goal_threshold_cap": "absent",
+          "goal_constraints_count": 1
+        },
+        "stage_5_package": {
+          "goal_node_id": "goal_compliance",
+          "goal_threshold": "absent",
+          "goal_threshold_raw": "absent",
+          "goal_threshold_unit": "absent",
+          "goal_threshold_cap": "absent",
+          "goal_constraints_count": 1
+        }
+      },
+      "plan_annotation": {
+        "plan_id": "821d3cc0-5c42-4ef6-a9ea-6280e2f4beae",
+        "plan_hash": "737ca707b2c8",
+        "stage3_rationales": [],
+        "confidence": {
+          "overall": 0.85,
+          "structure": 1,
+          "parameters": 1
+        },
+        "open_questions": [],
+        "context_hash_v0": "ddae597adf46",
+        "model_id": "claude-sonnet-4-6",
+        "prompt_version": "draft_graph_default@v189 (staging)"
+      },
+      "final_graph": {
+        "node_count": 17,
+        "edge_count": 37,
+        "node_kinds": [
+          "decision",
+          "factor",
+          "goal",
+          "option",
+          "outcome",
+          "risk"
+        ]
+      },
+      "pipeline_checkpoints": [
+        {
+          "stage": "post_adapter_normalisation",
+          "node_count": 17,
+          "edge_count": 37,
+          "edge_field_presence": {
+            "strength_mean": 37,
+            "strength_std": 37,
+            "belief_exists": 37,
+            "effect_direction": 37,
+            "weight": 0
+          },
+          "node_field_presence": {
+            "option_nodes_total": 4,
+            "options_with_interventions": 4
+          },
+          "sample_edges": [
+            {
+              "from": "dec_hiring",
+              "to": "opt_hybrid",
+              "strength_mean": 1,
+              "strength_std": 0.01,
+              "belief_exists": 1,
+              "effect_direction": "positive"
+            },
+            {
+              "from": "fac_compliance_complexity",
+              "to": "out_platform_stability",
+              "strength_mean": -0.2,
+              "strength_std": 0.15,
+              "belief_exists": 0.72,
+              "effect_direction": "negative"
+            },
+            {
+              "from": "out_compliance_delivery",
+              "to": "goal_compliance",
+              "strength_mean": 0.55,
+              "strength_std": 0.1,
+              "belief_exists": 0.95,
+              "effect_direction": "positive"
+            }
+          ],
+          "nested_strength_detected": true
+        },
+        {
+          "stage": "post_stabilisation",
+          "node_count": 17,
+          "edge_count": 37,
+          "edge_field_presence": {
+            "strength_mean": 37,
+            "strength_std": 37,
+            "belief_exists": 37,
+            "effect_direction": 37,
+            "weight": 37
+          },
+          "node_field_presence": {
+            "option_nodes_total": 4,
+            "options_with_interventions": 4
+          },
+          "sample_edges": [
+            {
+              "from": "dec_hiring",
+              "to": "opt_hybrid",
+              "strength_mean": 1,
+              "strength_std": 0.01,
+              "belief_exists": 1,
+              "effect_direction": "positive"
+            },
+            {
+              "from": "fac_compliance_complexity",
+              "to": "out_platform_stability",
+              "strength_mean": -0.2,
+              "strength_std": 0.15,
+              "belief_exists": 0.72,
+              "effect_direction": "negative"
+            },
+            {
+              "from": "out_compliance_delivery",
+              "to": "goal_compliance",
+              "strength_mean": 0.55,
+              "strength_std": 0.1,
+              "belief_exists": 0.95,
+              "effect_direction": "positive"
+            }
+          ]
+        },
+        {
+          "stage": "pre_boundary",
+          "node_count": 17,
+          "edge_count": 37,
+          "edge_field_presence": {
+            "strength_mean": 37,
+            "strength_std": 37,
+            "belief_exists": 37,
+            "effect_direction": 37,
+            "weight": 37
+          },
+          "node_field_presence": {
+            "option_nodes_total": 4,
+            "options_with_interventions": 4
+          },
+          "sample_edges": [
+            {
+              "from": "dec_hiring",
+              "to": "opt_hybrid",
+              "strength_mean": 1,
+              "strength_std": 0.01,
+              "belief_exists": 1,
+              "effect_direction": "positive"
+            },
+            {
+              "from": "fac_compliance_complexity",
+              "to": "out_platform_stability",
+              "strength_mean": -0.2,
+              "strength_std": 0.15,
+              "belief_exists": 0.72,
+              "effect_direction": "negative"
+            },
+            {
+              "from": "out_compliance_delivery",
+              "to": "goal_compliance",
+              "strength_mean": 0.55,
+              "strength_std": 0.1,
+              "belief_exists": 0.95,
+              "effect_direction": "positive"
+            }
+          ]
+        }
+      ],
+      "pipeline_checkpoints_meta": {
+        "enabled": true,
+        "adapter_count": 1,
+        "pipeline_count": 2,
+        "total_count": 3
+      },
+      "cee_provenance": {
+        "commit": "a555cf7",
+        "version": "1.12.0",
+        "build_timestamp": "2026-04-30T11:39:48.781Z",
+        "prompt_version": "draft_graph_default@v189 (staging)",
+        "prompt_source": "supabase",
+        "prompt_override_active": false,
+        "model": "claude-sonnet-4-6",
+        "pipeline_path": "unified",
+        "engine_base_url_configured": false,
+        "model_override_active": false,
+        "prompt_store_version": 189,
+        "context_hash": "4d0ea4de61ef",
+        "prompt_hash": "519eeef80fb4c3e6c9a940770be00310d9e5ec8f3f2f9858325b108228caed1f",
+        "model_id": "claude-sonnet-4-6",
+        "capability": "draft_graph"
+      },
+      "llm_raw": {
+        "text": "{\"nodes\":[{\"id\":\"dec_hiring\",\"kind\":\"decision\",\"label\":\"Engineering Team Hiring Strategy\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_london\",\"kind\":\"option\",\"label\":\"Hire 3 Senior Engineers in London\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_hiring_cost\",\"value\":0.625},{\"factor_id\":\"fac_onboarding_time\",\"value\":0.75},{\"factor_id\":\"fac_domain_expertise\",\"value\":0.85},{\"factor_id\":\"fac_team_size\",\"value\":0.55}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_offshore\",\"kind\":\"option\",\"label\":\"Offshore to Bangalore Team (6 Engineers)\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_hiring_cost\",\"value\":0.45},{\"factor_id\":\"fac_onboarding_time\",\"value\":0.375},{\"factor_id\":\"fac_domain_expertise\",\"value\":0.45},{\"factor_id\":\"fac_team_size\",\"value\":0.7}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_hybrid\",\"kind\":\"option\",\"label\":\"Hybrid: 1 Senior London + 3 Bangalore Engineers\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_hiring_cost\",\"value\":0.5},{\"factor_id\":\"fac_onboarding_time\",\"value\":0.5},{\"factor_id\":\"fac_domain_expertise\",\"value\":0.65},{\"factor_id\":\"fac_team_size\",\"value\":0.5}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Continue with Current Team (Status Quo)\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_hiring_cost\",\"value\":0.0},{\"factor_id\":\"fac_onboarding_time\",\"value\":0.0},{\"factor_id\":\"fac_domain_expertise\",\"value\":0.5},{\"factor_id\":\"fac_team_size\",\"value\":0.4}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":true,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":true,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_hiring_cost\",\"kind\":\"factor\",\"label\":\"Hiring and Staffing Cost\",\"category\":\"controllable\",\"data\":{\"value\":0.0,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"uncertainty_drivers\":[\"Salary negotiations may shift final cost\",\"Benefits and overhead not fully scoped\"],\"interventions\":[],\"raw_value\":0,\"unit\":\"\u00a3\",\"cap\":400000,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"No cost allocated\"},\"prior\":null,\"is_baseline\":false,\"intercept\":0.0,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_onboarding_time\",\"kind\":\"factor\",\"label\":\"Onboarding Ramp Duration\",\"category\":\"controllable\",\"data\":{\"value\":0.0,\"extractionType\":\"explicit\",\"factor_type\":\"time\",\"uncertainty_drivers\":[\"Ramp speed depends on codebase complexity\",\"New hire prior fintech experience varies\"],\"interventions\":[],\"raw_value\":0,\"unit\":\"months\",\"cap\":8,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"No onboarding time\"},\"prior\":null,\"is_baseline\":false,\"intercept\":0.0,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_domain_expertise\",\"kind\":\"factor\",\"label\":\"Domain Expertise Level\",\"category\":\"controllable\",\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"quality\",\"uncertainty_drivers\":[\"Fintech compliance knowledge depth varies by candidate\",\"Offshore team regulatory familiarity unverified\"],\"interventions\":[],\"raw_value\":0,\"unit\":\"scale\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"Moderate domain expertise\"},\"prior\":null,\"is_baseline\":false,\"intercept\":0.5,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_team_size\",\"kind\":\"factor\",\"label\":\"Effective Team Capacity\",\"category\":\"controllable\",\"data\":{\"value\":0.4,\"extractionType\":\"explicit\",\"factor_type\":\"demand\",\"uncertainty_drivers\":[\"Productivity per engineer varies by role fit\",\"Coordination overhead grows with team size\"],\"interventions\":[],\"raw_value\":8,\"unit\":\"engineers\",\"cap\":20,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"8 engineers\"},\"prior\":null,\"is_baseline\":false,\"intercept\":0.4,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_timezone_overlap\",\"kind\":\"factor\",\"label\":\"Timezone Collaboration Overlap\",\"category\":\"external\",\"data\":null,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.1,\"range_max\":0.5},\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"fac_compliance_complexity\",\"kind\":\"factor\",\"label\":\"Regulatory Compliance Complexity\",\"category\":\"external\",\"data\":null,\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.4,\"range_max\":0.9},\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"out_compliance_delivery\",\"kind\":\"outcome\",\"label\":\"Compliance Feature Delivery Speed\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"out_platform_stability\",\"kind\":\"outcome\",\"label\":\"Platform Stability and Code Quality\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"risk_deadline_miss\",\"kind\":\"risk\",\"label\":\"Compliance Deadline Miss\",\"category\":null,\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"time\",\"uncertainty_drivers\":[],\"interventions\":[],\"raw_value\":4,\"unit\":\"months\",\"cap\":8,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"4-month deadline\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"risk_platform_incident\",\"kind\":\"risk\",\"label\":\"Platform Stability Incident\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"risk_budget_overrun\",\"kind\":\"risk\",\"label\":\"Budget Overrun\",\"category\":null,\"data\":{\"value\":0.0,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"uncertainty_drivers\":[],\"interventions\":[],\"raw_value\":0,\"unit\":\"\u00a3\",\"cap\":400000,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\u00a3400,000 budget cap\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"goal_compliance\",\"kind\":\"goal\",\"label\":\"Ship Compliance Feature On Time Without Platform Incidents\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0}],\"edges\":[{\"from\":\"dec_hiring\",\"to\":\"opt_london\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_hiring\",\"to\":\"opt_offshore\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_hiring\",\"to\":\"opt_hybrid\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_hiring\",\"to\":\"opt_status_quo\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_london\",\"to\":\"fac_hiring_cost\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_london\",\"to\":\"fac_onboarding_time\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_london\",\"to\":\"fac_domain_expertise\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_london\",\"to\":\"fac_team_size\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_offshore\",\"to\":\"fac_hiring_cost\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_offshore\",\"to\":\"fac_onboarding_time\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_offshore\",\"to\":\"fac_domain_expertise\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_offshore\",\"to\":\"fac_team_size\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_hybrid\",\"to\":\"fac_hiring_cost\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_hybrid\",\"to\":\"fac_onboarding_time\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_hybrid\",\"to\":\"fac_domain_expertise\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_hybrid\",\"to\":\"fac_team_size\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_hiring_cost\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_domain_expertise\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_team_size\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"fac_domain_expertise\",\"to\":\"out_compliance_delivery\",\"strength\":{\"mean\":0.55,\"std\":0.15},\"exists_probability\":0.88,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_domain_expertise\",\"to\":\"out_platform_stability\",\"strength\":{\"mean\":0.45,\"std\":0.14},\"exists_probability\":0.85,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_onboarding_time\",\"to\":\"risk_deadline_miss\",\"strength\":{\"mean\":0.60,\"std\":0.15},\"exists_probability\":0.90,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_onboarding_time\",\"to\":\"out_compliance_delivery\",\"strength\":{\"mean\":-0.40,\"std\":0.15},\"exists_probability\":0.88,\"effect_direction\":\"negative\",\"edge_type\":\"directed\"},{\"from\":\"fac_team_size\",\"to\":\"out_compliance_delivery\",\"strength\":{\"mean\":0.25,\"std\":0.12},\"exists_probability\":0.82,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_team_size\",\"to\":\"out_platform_stability\",\"strength\":{\"mean\":0.20,\"std\":0.12},\"exists_probability\":0.78,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_hiring_cost\",\"to\":\"risk_budget_overrun\",\"strength\":{\"mean\":0.70,\"std\":0.12},\"exists_probability\":0.92,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_timezone_overlap\",\"to\":\"out_compliance_delivery\",\"strength\":{\"mean\":0.30,\"std\":0.18},\"exists_probability\":0.75,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_timezone_overlap\",\"to\":\"risk_deadline_miss\",\"strength\":{\"mean\":0.25,\"std\":0.18},\"exists_probability\":0.70,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_compliance_complexity\",\"to\":\"risk_deadline_miss\",\"strength\":{\"mean\":0.35,\"std\":0.20},\"exists_probability\":0.80,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"fac_compliance_complexity\",\"to\":\"out_platform_stability\",\"strength\":{\"mean\":-0.20,\"std\":0.15},\"exists_probability\":0.72,\"effect_direction\":\"negative\",\"edge_type\":\"directed\"},{\"from\":\"out_compliance_delivery\",\"to\":\"goal_compliance\",\"strength\":{\"mean\":0.55,\"std\":0.10},\"exists_probability\":0.95,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"out_platform_stability\",\"to\":\"goal_compliance\",\"strength\":{\"mean\":0.35,\"std\":0.10},\"exists_probability\":0.92,\"effect_direction\":\"positive\",\"edge_type\":\"directed\"},{\"from\":\"risk_deadline_miss\",\"to\":\"goal_compliance\",\"strength\":{\"mean\":-0.50,\"std\":0.12},\"exists_probability\":0.92,\"effect_direction\":\"negative\",\"edge_type\":\"directed\"},{\"from\":\"risk_platform_incident\",\"to\":\"goal_compliance\",\"strength\":{\"mean\":-0.40,\"std\":0.14},\"exists_probability\":0.88,\"effect_direction\":\"negative\",\"edge_type\":\"directed\"},{\"from\":\"risk_budget_overrun\",\"to\":\"goal_compliance\",\"strength\":{\"mean\":-0.20,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"negative\",\"edge_type\":\"directed\"},{\"from\":\"fac_domain_expertise\",\"to\":\"risk_platform_incident\",\"strength\":{\"mean\":-0.35,\"std\":0.15},\"exists_probability\":0.82,\"effect_direction\":\"negative\",\"edge_type\":\"directed\"},{\"from\":\"fac_team_size\",\"to\":\"risk_platform_incident\",\"strength\":{\"mean\":-0.20,\"std\":0.14},\"exists_probability\":0.72,\"effect_direction\":\"negative\",\"edge_type\":\"directed\"}],\"goal_constraints\":[{\"constraint_id\":\"gc_budget\",\"node_id\":\"risk_budget_overrun\",\"operator\":\"<=\",\"value\":1.0,\"label\":\"Total spend must not exceed \u00a3400K budget\",\"unit\":\"\u00a3\",\"source_quote\":\"We have \u00a3400K budget\",\"confidence\":1.0,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_deadline\",\"node_id\":\"risk_deadline_miss\",\"operator\":\"<=\",\"value\":0.5,\"label\":\"Compliance feature must ship within 4 months\",\"unit\":\"months\",\"source_quote\":\"need to ship a major compliance feature in 4 months\",\"confidence\":1.0,\"provenance\":\"explicit\"}]}",
+        "output_preview": "{\"nodes\":[{\"id\":\"dec_hiring\",\"kind\":\"decision\",\"label\":\"Engineering Team Hiring Strategy\",\"category\":null,\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_london\",\"kind\":\"option\",\"label\":\"Hire 3 Senior Engineers in London\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_hiring_cost\",\"value\":0.625},{\"factor_id\":\"fac_onboarding_time\",\"value\":0.75},{\"factor_id\":\"fac_domain_expertise\",\"value\":0.85},{\"factor_id\":\"fac_team_size\",\"value\":0.55}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_offshore\",\"kind\":\"option\",\"label\":\"Offshore to Bangalore Team (6 Engineers)\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_hiring_cost\",\"value\":0.45},{\"factor_id\":\"fac_onboarding_time\",\"value\":0.375},{\"factor_id\":\"fac_domain_expertise\",\"value\":0.45},{\"factor_id\":\"fac_team_size\",\"value\":0.7}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_baseline\":false,\"display_value\":\"\"},\"prior\":null,\"is_baseline\":false,\"intercept\":null,\"goal_threshold\":null,\"goal_threshold_raw\":null,\"goal_threshold_unit\":null,\"goal_threshold_cap\":0},{\"id\":\"opt_hybrid\",\"kind\":\"option\",\"label\":\"Hybrid: 1 Senior London + 3 Bangalore Engineers\",\"category\":null,\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"uncertainty_drivers\":[],\"interventions\":[{\"factor_id\":\"fac_hiring_cost\",\"value\":0.5},{\"factor_id\":\"fac_onboarding_time\",\"value\":0.5},{\"factor_id\":\"fac_domain_expertise\",\"value\":0.65},{\"factor_id\":\"fac_team_size\",\"value\":0.5}],\"raw_value\":0,\"unit\":\"\",\"cap\":0,\"encoding_map\":\"\",\"is_b",
+        "char_count": 14028,
+        "output_hash": "7da03b254514a0812cb69f4efebe13e412954c94aed1276d8b837c14b0cb893e",
+        "output_node_count": 17,
+        "output_edge_count": 37,
+        "truncated": true,
+        "full_output_available": true
+      },
+      "diagnostic_checks": {
+        "llm_raw_available": true,
+        "cee_trace_present": true,
+        "confidence_differentiated": true,
+        "confidence_unique_values": [
+          0.7,
+          0.72,
+          0.75,
+          0.78,
+          0.8,
+          0.82,
+          0.85,
+          0.88,
+          0.9,
+          0.92,
+          0.95
+        ],
+        "intercept_populated": true,
+        "is_baseline_present": true
+      }
+    },
+    "repair_summary": {
+      "deterministic_sweep_ran": true,
+      "deterministic_sweep_version": "v3",
+      "bucket_summary": {
+        "a": 0,
+        "b": 0,
+        "c": 0
+      },
+      "status_quo_action": "none",
+      "llm_repair_needed": false,
+      "deterministic_repairs_count": 2,
+      "deterministic_repairs": [
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "path": "nodes[fac_compliance_complexity].category",
+          "action": "Reclassified unreachable factor \"Regulatory Compliance Complexity\" to external"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "path": "nodes[fac_timezone_overlap].category",
+          "action": "Reclassified unreachable factor \"Timezone Collaboration Overlap\" to external"
+        }
+      ],
+      "unreachable_factors": {
+        "reclassified": [
+          "fac_compliance_complexity",
+          "fac_timezone_overlap"
+        ],
+        "marked_droppable": []
+      },
+      "status_quo": {
+        "fixed": false,
+        "marked_droppable": false
+      },
+      "llm_repair_called": false,
+      "llm_repair_brief_included": false,
+      "llm_repair_skipped_reason": "deterministic_sweep_sufficient",
+      "remaining_violations_count": 0,
+      "remaining_violation_codes": [],
+      "edge_format_detected": "V1_FLAT",
+      "graph_delta": {
+        "nodes_before": 17,
+        "nodes_after": 17,
+        "edges_before": 37,
+        "edges_after": 37
+      },
+      "risk_coefficient_corrections": []
+    },
+    "transform_defaults": {
+      "defaulted_edge_count": 0,
+      "total_defaults": 0,
+      "defaults": []
+    }
+  },
+  "_pipeline_outcome": {
+    "graph_drafted": true,
+    "graph_structurally_valid": true,
+    "deterministic_sweep_violations": 0,
+    "verification_status": "skipped",
+    "validation_status": "skipped",
+    "enrichment_status": "complete",
+    "coaching_status": "complete",
+    "warnings": [],
+    "rescue_score": 6,
+    "factor_value_coverage": {
+      "total": 6,
+      "explicit": 3,
+      "inferred_with_evidence": 0,
+      "fallback_default": 3
+    },
+    "edge_strength_unique_count": 12,
+    "llm_repair": {
+      "triggered": false,
+      "outcome": "skipped",
+      "fallback_reason": null,
+      "attempts": 0
+    },
+    "repair_provenance": [
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_compliance_complexity].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_timezone_overlap].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      }
+    ]
+  },
+  "coaching": {
+    "summary": "The brief frames the acquisition as an obvious win, but several important factors are underweighted: integration risk, cultural fit, and the opportunity cost of the 50M outlay. The model treats the synergy estimate (20M+ year one) as a single point \u2014 it should be a range so downside scenarios surface. Consider also: would a smaller stake or earn-out reduce execution risk while preserving upside?",
+    "strengthen_items": [
+      {
+        "id": "strengthen_001",
+        "label": "Replace point estimate of synergies with a range",
+        "detail": "The current synergy estimate of 20M is a single number. Add a low/high range (e.g. 5M floor, 30M ceiling) so the analysis can quantify how much of the deal economics depend on the optimistic case.",
+        "action_type": "set_factor_value",
+        "bias_category": "anchoring"
+      },
+      {
+        "id": "strengthen_002",
+        "label": "Add a do-nothing comparator",
+        "detail": "Without a status-quo option, the analysis cannot show whether the deal beats simply continuing organic growth. Add a baseline option that captures revenue trajectory without the acquisition.",
+        "action_type": "add_option",
+        "bias_category": "action_bias"
+      }
+    ],
+    "widening_log": [
+      {
+        "node_id": "factor_integration_cost",
+        "label": "Integration cost",
+        "reason": "The brief mentions cultural fit concerns but no quantified integration cost. Adding this factor lets the analysis express the downside the team raised."
+      },
+      {
+        "node_id": "factor_opportunity_cost",
+        "label": "Opportunity cost of 50M",
+        "reason": "Capital deployed on the acquisition cannot be deployed on organic R&D or buybacks. Surfacing this factor lets the model compare returns across uses."
+      }
+    ],
+    "bias_signals": [
+      {
+        "type": "confirmation_bias",
+        "detail": "Brief frames the deal as obviously good (CEO excited, board approved, plenty of cash, huge synergies). Concerns from the team are acknowledged then dismissed.",
+        "target": "decision_acquire_techco"
+      }
+    ]
+  }
+}

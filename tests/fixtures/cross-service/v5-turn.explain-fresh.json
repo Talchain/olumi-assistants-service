@@ -1,0 +1,23 @@
+{
+  "response_version": 2,
+  "assistant_text": "The London hire option leads in roughly 64% of simulations. The two largest drivers are: (1) deeper domain expertise translates to ~\u00a312K/month higher revenue capture, and (2) the 6-month onboarding ramp is offset by the team's higher hit-rate on the compliance feature. The offshoring option is competitive when timezone overlap is wide; in narrow-overlap scenarios the lead margin shrinks to ~3 percentage points.",
+  "blocks": [
+    {
+      "type": "explanation",
+      "narrative": "The London hire option leads in roughly 64% of simulations. The two largest drivers are: (1) deeper domain expertise translates to ~\u00a312K/month higher revenue capture, and (2) the 6-month onboarding ramp is offset by the team's higher hit-rate on the compliance feature. The offshoring option is competitive when timezone overlap is wide; in narrow-overlap scenarios the lead margin shrinks to ~3 percentage points.",
+      "referenced_option_ids": [
+        "opt_london_hire",
+        "opt_offshore_bangalore"
+      ]
+    }
+  ],
+  "suggested_actions": [
+    {
+      "id": "chip_prompt_what_could_flip",
+      "label": "What could change the outcome?",
+      "message": "What could change the outcome of this analysis?"
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "review"
+}

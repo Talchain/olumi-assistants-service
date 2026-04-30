@@ -1,0 +1,59 @@
+{
+  "_doc": "Provenance metadata for cross-boundary contract test fixtures. See Docs/v5/cross-boundary-contract-test-report.md.",
+  "draft-graph.success.with-coaching-and-provenance.json": {
+    "source": "synthetic_with_coaching_overlay",
+    "endpoint": "/assist/v1/draft-graph",
+    "schema": "CEEGraphResponseV3",
+    "build_hash": "a555cf7",
+    "captured_at": "2026-04-30",
+    "reason": "Structural shape (nodes/edges/options/goal_node_id) captured live from cee-staging.onrender.com on build a555cf7 (>= a555cf7b per brief). LLM did not produce a coaching block on multiple staging calls — coaching is gated on LLM emission, not deterministic. Synthetic coaching overlay (summary, strengthen_items, widening_log, bias_signals) added per brief requirement (full coaching). Three node provenance values and three edge provenance_display values present (from_brief / ai_inferred / user_set) — staging produced from_brief and ai_inferred only; one node and one edge patched to user_set."
+  },
+  "draft-graph.success.no-coaching.json": {
+    "source": "staging",
+    "endpoint": "/assist/v1/draft-graph",
+    "schema": "CEEGraphResponseV3",
+    "build_hash": "a555cf7",
+    "captured_at": "2026-04-30",
+    "reason": "Verbatim staging response; demonstrates that coaching is omitted when the LLM does not produce one."
+  },
+  "draft-graph.success.partial-coaching.json": {
+    "source": "synthetic_partial_overlay",
+    "endpoint": "/assist/v1/draft-graph",
+    "schema": "CEEGraphResponseV3",
+    "build_hash": "a555cf7",
+    "captured_at": "2026-04-30",
+    "reason": "Staging-derived structural shape; coaching set to { summary: null, strengthen_items: [] } with widening_log and bias_signals omitted. Tests graceful degradation of partial coaching consumption in the UI."
+  },
+  "v5-turn.explain-stale.json": {
+    "source": "synthetic",
+    "endpoint": "/orchestrate/v2/turn",
+    "schema": "OlumiResponse (V5 boundary)",
+    "build_hash": "N/A",
+    "captured_at": "2026-04-30",
+    "reason": "V5 turn endpoint requires a session/scenario context to call. Synthetic fixture matches the wire shape: assistant_text starts with the canonical staleness prefix (verbatim from src/orchestrator-v5/tools/handlers/staleness-prefix.ts:24), suggested_actions contains the rerun chip with id='chip_action_rerun_analysis', label='Rerun analysis', action_type='run_analysis' (from src/orchestrator-v5/compose/chip-generator.ts:234)."
+  },
+  "v5-turn.failure-with-recovery-chip.json": {
+    "source": "synthetic",
+    "endpoint": "/orchestrate/v2/turn",
+    "schema": "OlumiResponse (V5 boundary, failure shape from buildFailureResponse)",
+    "build_hash": "N/A",
+    "captured_at": "2026-04-30",
+    "reason": "Synthetic LLM_TIMEOUT failure: assistant_text='That took longer than usual.' (from src/orchestrator-v5/compose/recovery-chips.ts:101), retryPromptChip id='chip_prompt_retry' label='Try again' (line 217), error_code='UPSTREAM_TIMEOUT' (mapped from internal LLM_TIMEOUT), details.retryable=true (RETRYABLE_INTERNAL_FAILURES at failure-response.ts:46)."
+  },
+  "v5-turn.explain-fresh.json": {
+    "source": "synthetic",
+    "endpoint": "/orchestrate/v2/turn",
+    "schema": "OlumiResponse (V5 boundary)",
+    "build_hash": "N/A",
+    "captured_at": "2026-04-30",
+    "reason": "Synthetic happy-path explanation with no staleness prefix and no rerun chip. Suggested action is the 'what could flip' prompt chip per chip-generator.ts:202."
+  },
+  "decision-review.normalised.json": {
+    "source": "synthetic",
+    "endpoint": "internal: V5 enricher → DecisionReviewInvokeInput",
+    "schema": "DecisionReviewInvokeInput (src/cee/decision-review/invoke.ts:70)",
+    "build_hash": "N/A",
+    "captured_at": "2026-04-30",
+    "reason": "Synthetic; covers normalised shape with flip_threshold_data (factor_id, factor_label, current_value, flip_value, direction, unit), isl_results.factor_sensitivity, isl_results.fragile_edges, _meta.input_shape_version='v5-normalised', counts, margin, robustness_level."
+  }
+}

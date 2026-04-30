@@ -1,0 +1,24 @@
+{
+  "response_version": 2,
+  "assistant_text": "That took longer than usual.",
+  "blocks": [
+    {
+      "type": "error",
+      "error_code": "UPSTREAM_TIMEOUT",
+      "severity": "error",
+      "details": {
+        "retryable": true,
+        "stage": "analyse"
+      }
+    }
+  ],
+  "suggested_actions": [
+    {
+      "id": "chip_prompt_retry",
+      "label": "Try again",
+      "message": "Compare the London hire option against offshoring to Bangalore."
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "analyse"
+}
