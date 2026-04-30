@@ -9,8 +9,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve as pathResolve } from 'node:path';
+import { resolve as pathResolve } from 'node:path';
 import { registerDefaultPrompt } from './loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
@@ -2305,16 +2304,13 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('validate_graph', VALIDATE_GRAPH_PROMPT);
   // V5 routing prompt (v40) — registered from on-disk Prompts/v40.txt as the
   // PMS default fallback. Manual seeding into PMS is performed out-of-band;
-  // this registration is the in-memory default fallback only. The path is
-  // resolved relative to this source file (not process.cwd()) so it works
-  // under Render's working directory and inside test runners.
-  const v40Path = pathResolve(
-    dirname(fileURLToPath(import.meta.url)),
-    '..',
-    '..',
-    'Prompts',
-    'v40.txt',
-  );
+  // this registration is the in-memory default fallback only. Path resolution
+  // uses `process.cwd()` to mirror the established repo pattern for external
+  // data files (see src/orchestrator-v5/routing/prompt-loader.ts:62, dsk-loader.ts,
+  // routing-log.ts) — Render's working directory is the repo root, and Prompts/
+  // is NOT copied into dist/ at build time, so relative-to-source paths break
+  // in production. Tests also run with cwd=repo-root.
+  const v40Path = pathResolve(process.cwd(), 'Prompts', 'v40.txt');
   const ROUTING_PROMPT_V40_TEXT = readFileSync(v40Path, 'utf-8');
   registerDefaultPrompt('routing', ROUTING_PROMPT_V40_TEXT);
   // V5 slice A1 — narrate-mode placeholder. Paul is sole author of the final
