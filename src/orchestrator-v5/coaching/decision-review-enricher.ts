@@ -29,6 +29,8 @@ import {
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
+import { config } from '../../config/index.js';
+import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 
 import type { DecisionReviewOutput } from './types.js';
@@ -142,11 +144,37 @@ export async function enrichRunAnalysisWithDecisionReview(
       ...result.output,
       produced_at: new Date().toISOString(),
     };
+    // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:
+    // Run the parent-level enrichment through the sanitiser BEFORE
+    // attaching decision_review. The sanitiser:
+    //   - Routes bucket-D ISL critiques (engine validation / preprocessing)
+    //     to a separate `_diagnostics.critiques` bucket — gated by
+    //     CEE_TURN_DEBUG_ENABLED, omitted from the wire by default.
+    //   - Replaces bucket-S critique messages with the approved generic
+    //     copy (Paul-reviewed 2026-04-30) using resolved labels.
+    //   - Resolves entity IDs to labels in the 15 user-facing prose paths.
+    //   - Preserves every structural subtree (payloads, _meta, fragile_edges,
+    //     edge_e_values, factor_evpi, etc.) byte-equal.
+    // The decision_review subtree itself is kept verbatim (no allowlist
+    // path matches inside it; deep-clone preserves it) per the F.6
+    // verbatim contract.
+    const merged: Record<string, unknown> = {
+      ...(enrichment as Record<string, unknown>),
+      decision_review: output,
+    };
+    const sanitised = sanitiseEnrichment(merged);
+    let finalEnrichment: Record<string, unknown> = sanitised.enrichment;
+    if (config.cee?.turnDebugEnabled === true && sanitised.diagnostic.critiques.length > 0) {
+      finalEnrichment = {
+        ...finalEnrichment,
+        _diagnostics: { critiques: sanitised.diagnostic.critiques },
+      };
+    }
     const patched: HandlerFact = {
       ...fact,
       result: {
         ...fact.result,
-        enrichment: { ...enrichment, decision_review: output },
+        enrichment: finalEnrichment,
       },
     };
     const next = input.handlerFacts.slice();
