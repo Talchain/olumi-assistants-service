@@ -146,6 +146,8 @@ Substitutes are direct unit tests of `applyStalenessPrefix`, `buildFailureRespon
 
 The UI coaching consumption code (`mapDraftCoachingFromResponse` at `src/adapters/cee/client.ts:99`, `setDraftCoaching` at `src/canvas/store.ts:3135`, `commitDraftCoachingToStore` at `src/canvas/utils/draftIngestion.ts:8`) was already merged on UI `staging` before UI commits started. The pre-flight gate (per correction #1) passed; UI work proceeded.
 
+**Note (2026-04-30 sequencing):** during this session the UI repo's `claude/cross-boundary-contract-tests` branch was advanced past my commit `260b0b8f test(contract): CEE response fixtures + consumption + lifecycle` — Paul's parallel coaching consumption work landed as `ad78e0b5 feat(cee): consume coaching + provenance from /assist/v1/draft-graph` immediately after my commit, and the merge `70833cd5` brought both into `origin/staging`. My UI commit is therefore already merged into UI `staging`; CEE work remains on its own feature branch awaiting review.
+
 ---
 
 ## 8. Defects discovered
