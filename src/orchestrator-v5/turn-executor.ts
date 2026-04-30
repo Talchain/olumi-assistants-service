@@ -101,7 +101,15 @@ import {
   FALLBACK_STALENESS_REASON,
 } from './context/analysis-fallback.js';
 import type { CqeExtractionSummary } from './context/cqe/extract-quantities.js';
-import { computeDeterministicGraphHash } from './context/graph-hash.js';
+import {
+  computeAnalysisAffectingGraphHash,
+  computeDeterministicGraphHash,
+} from './context/graph-hash.js';
+import {
+  deriveAnalysisFreshness,
+  type FreshnessDerivation,
+} from './context/freshness.js';
+import type { TurnOutcome } from './turn-outcome.js';
 import {
   ROUTING_PROMPT_VERSION,
   ROUTING_PROMPT_HASH,
@@ -163,6 +171,20 @@ export interface TurnExecutorRunResult {
    * the chip-generator already uses today.
    */
   analysisReady?: NonNullable<GraphPatchBlockData['analysis_ready']>;
+  /**
+   * V5 state-trust internal turn-outcome contract. Computed after handler
+   * dispatch from the freshness derivation + handler identity. Used by
+   * downstream composition (rerun chip gate, analysis_ready freshness
+   * field threading) and telemetry. NOT exposed on the wire — wire
+   * consumers read freshness via the additive analysis_ready.* fields.
+   */
+  turn_outcome?: TurnOutcome;
+  /**
+   * V5 state-trust freshness derivation, threaded through so
+   * response-finaliser / analysis-ready-emit can use the selected fact's
+   * computed_at instead of restamping with Date.now() on every emit.
+   */
+  freshness?: FreshnessDerivation;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -320,6 +342,14 @@ export async function runTurnExecutor(
   let coachingMode: CoachingMode | null = null;
   let coachingSignalId: CoachingSignalId | null = null;
   let validationErrorCode: ValidationError['code'] | null = null;
+  // V5 state-trust: freshness derivation. Declared at run-scope so
+  // finalizeRun() can surface it on TurnExecutorRunResult regardless of
+  // which exit path fires. Computed during the analysis-summary block
+  // below; null on early-return paths that exit before that block runs
+  // (only orient/routing-error paths today, which finalizeRun handles
+  // gracefully via the optional field on the result).
+  let freshness: FreshnessDerivation | null = null;
+  let proposedHandlerIdForOutcome: string | null = null;
 
   // Routing log fields — closured so the finally block can emit one record
   // per turn regardless of which terminal path fires (success / typed
@@ -477,12 +507,31 @@ export async function runTurnExecutor(
     // routing prompt can treat it as reference material rather than fresh
     // output. prior_facts is already loaded by buildTurnContext — no new
     // DB call.
+    // V5 state-trust: derive freshness deterministically by comparing the
+    // current graph hash against graph_hash_at_run on the most recent
+    // successful run_analysis fact. Replaces the unconditional
+    // "loaded_from_prior_run_freshness_unknown" fallback (which fired
+    // even on freshly-completed analysis turns).
+    const currentAnalysisGraphHash = computeAnalysisAffectingGraphHash(graphStateForTurn);
+    freshness = deriveAnalysisFreshness(
+      context.prior_facts,
+      currentAnalysisGraphHash,
+    );
+
     let analysisSummary: AnalysisResponseSummary | null = null;
     let analysisStalenessReason: string | null = null;
     let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
     if (options.analysisState) {
       analysisSummary = compactAnalysis(coerceIngressAnalysis(options.analysisState));
       analysisStateSource = 'request';
+      // Freshness verdict is independent of whether the request carries
+      // analysis_state — it is always derived from the prior-fact chain.
+      // We still set the legacy staleness reason field when freshness is
+      // not 'fresh' so the existing prefix path stays consistent until
+      // the call sites are removed in the next commit.
+      if (freshness.freshness === 'stale' || freshness.freshness === 'unknown') {
+        analysisStalenessReason = FALLBACK_STALENESS_REASON;
+      }
     } else {
       // Resolve option labels from the current graph so the fallback doesn't
       // leak raw option_ids into Sonnet's user-facing prose. Filter to
@@ -502,9 +551,48 @@ export async function runTurnExecutor(
       );
       if (fallback) {
         analysisSummary = fallback;
-        analysisStalenessReason = FALLBACK_STALENESS_REASON;
         analysisStateSource = 'fallback';
+        // Legacy staleness reason now driven by the freshness verdict —
+        // only set when stale or unknown, NEVER on fresh. Removes the
+        // P0 bug where every explain turn after run_analysis stamped
+        // the prefix.
+        if (freshness.freshness === 'stale' || freshness.freshness === 'unknown') {
+          analysisStalenessReason = FALLBACK_STALENESS_REASON;
+        }
       }
+    }
+
+    // Emit the derivation event regardless of which branch built the
+    // summary — freshness reflects the prior-fact state, not the
+    // request payload. Telemetry consumers query by this single event
+    // to reconstruct freshness state for any turn.
+    emit(TelemetryEvents.AnalysisFreshnessDerived, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      freshness: freshness.freshness,
+      reason: freshness.reason,
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      computed_at: freshness.computed_at,
+      prior_fact_count: context.prior_facts.length,
+      analysis_state_source: analysisStateSource,
+    });
+    if (freshness.reason === 'invariant_failed') {
+      emit(TelemetryEvents.AnalysisFreshnessInvariantFailed, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        graph_hash_at_run: freshness.graph_hash_at_run,
+        current_graph_hash: freshness.current_graph_hash,
+        selected_fact_index: freshness.selected_fact_index,
+      });
+    }
+    if (freshness.reason === 'current_graph_hash_unavailable') {
+      emit(TelemetryEvents.AnalysisFreshnessGraphHashMissing, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        selected_fact_index: freshness.selected_fact_index,
+      });
     }
     try {
       const coachingCache = await readCoachingCache(
@@ -558,6 +646,8 @@ export async function runTurnExecutor(
             compactOutcome.kind === 'compacted' ? compactOutcome.via : null,
           analysis_state_source: analysisStateSource,
           analysis_staleness_reason: analysisStalenessReason,
+          analysis_freshness: freshness.freshness,
+          analysis_freshness_reason: freshness.reason,
         }),
       );
 
@@ -577,6 +667,8 @@ export async function runTurnExecutor(
             compactOutcome.kind === 'compacted' ? compactOutcome.via : null,
           analysis_state_source: analysisStateSource,
           analysis_staleness_reason: analysisStalenessReason,
+          analysis_freshness: freshness.freshness,
+          analysis_freshness_reason: freshness.reason,
         },
         'V5 TurnExecutor context pack assembled',
       );
@@ -607,6 +699,9 @@ export async function runTurnExecutor(
           analysis_summary_present: analysisSummary !== null,
           analysis_state_source: analysisStateSource,
           analysis_staleness_reason: analysisStalenessReason,
+          analysis_freshness: freshness.freshness,
+          analysis_freshness_reason: freshness.reason,
+          analysis_freshness_selected_fact_index: freshness.selected_fact_index,
           leading_option_populated: leadingOptionPopulated,
           runner_up_populated: !!contextPack.analysis?.runner_up,
           top_drivers_count: contextPack.analysis?.top_drivers?.length ?? 0,
@@ -796,6 +891,7 @@ export async function runTurnExecutor(
       const proposedHandlerId = action.handler_id as V5ActionType;
       resolutionStatus = action.entity.resolution_status;
       proposedHandlerIdForLog = action.handler_id;
+      proposedHandlerIdForOutcome = action.handler_id;
 
       // STEP 2 — VALIDATE. Structural checks (handler existence, resolution
       // status, kind, parameter bounds) ALWAYS run. Graph-dependent checks
@@ -1570,9 +1666,29 @@ export async function runTurnExecutor(
     // route-v2.ts as `v5.response.finalised` — that's the only point where
     // the actual emitted vs. computed comparison is meaningful, since the
     // wire stamping happens after this function returns.
+    //
+    // V5 state-trust: build the per-turn TurnOutcome contract from the
+    // freshness derivation + the dispatched handler identity. Surfaced
+    // alongside the freshness derivation itself so the response-finaliser
+    // can thread freshness onto the analysis_ready wire fields without
+    // re-deriving.
+    const turnOutcome: TurnOutcome | undefined = freshness
+      ? {
+          graph_mutated:
+            proposedHandlerIdForOutcome === 'draft_graph' ||
+            proposedHandlerIdForOutcome === 'edit_graph',
+          analysis_run:
+            proposedHandlerIdForOutcome === 'run_analysis' && commitPerformed,
+          analysis_selected_fact_index: freshness.selected_fact_index,
+          analysis_freshness: freshness.freshness,
+          freshness_reason: freshness.reason,
+        }
+      : undefined;
     return {
       response,
       analysisReady: analysisReadyForTurn,
+      ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
+      ...(freshness ? { freshness } : {}),
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,
