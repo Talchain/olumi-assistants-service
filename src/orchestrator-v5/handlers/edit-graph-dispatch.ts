@@ -20,7 +20,7 @@ import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { log } from '../../utils/telemetry.js';
 import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getAdapter } from '../../adapters/llm/router.js';
@@ -39,7 +39,11 @@ import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-re
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { buildTurnContext } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { deriveAnalysisFreshness } from '../context/freshness.js';
+import {
+  deriveAnalysisFreshness,
+  emitFreshnessTelemetry,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
 // V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
@@ -474,10 +478,14 @@ export async function dispatchEditGraph(
   // the POST-edit graph hash. Expected behaviour: an accepted substantive
   // edit produces freshness === 'stale' because the graph hash recorded
   // on the prior run_analysis fact diverges from the new graph hash.
-  // Rejected edits produce 'fresh' (graph unchanged). Failures here are
-  // non-fatal — degrade to no freshness field rather than failing the
-  // dispatch.
-  let freshness: import('../context/freshness.js').FreshnessDerivation | undefined;
+  // Rejected edits produce 'fresh' (graph unchanged).
+  //
+  // On failure: fall back to a synthetic `unknown / derivation_failed`
+  // verdict rather than dropping the freshness fields. This honours the
+  // brief's "every CEE dispatch path emits freshness" contract and
+  // surfaces the failure as observable wire data rather than silent
+  // absence.
+  let freshness: FreshnessDerivation;
   try {
     const turnContext = await buildTurnContext(payload, requestId);
     const postEditGraph = editResult.appliedGraph ?? graphState;
@@ -485,20 +493,19 @@ export async function dispatchEditGraph(
       postEditGraph as GraphStateIngress | null | undefined,
     );
     freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
-    emit(TelemetryEvents.AnalysisFreshnessDerived, {
-      request_id: requestId,
-      scenario_id: payload.scenario_id,
-      dispatch_path: 'edit_graph',
-      freshness: freshness.freshness,
-      reason: freshness.reason,
-      selected_fact_index: freshness.selected_fact_index,
-      graph_hash_at_run: freshness.graph_hash_at_run,
-      current_graph_hash: freshness.current_graph_hash,
-      computed_at: freshness.computed_at,
-      prior_fact_count: turnContext.prior_facts.length,
-      current_turn_fact_count: 0,
-      edit_was_rejected: editResult.wasRejected,
-    });
+    emitFreshnessTelemetry(
+      freshness,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'edit_graph',
+      },
+      {
+        prior_fact_count: turnContext.prior_facts.length,
+        current_turn_fact_count: 0,
+        edit_was_rejected: editResult.wasRejected,
+      },
+    );
   } catch (err) {
     log.warn(
       {
@@ -506,7 +513,39 @@ export async function dispatchEditGraph(
         scenario_id: payload.scenario_id,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      'V5 edit_graph dispatch — freshness derivation failed; analysis_ready will omit freshness fields',
+      'V5 edit_graph dispatch — freshness derivation failed; emitting derivation_failed verdict',
+    );
+    const postEditGraph = editResult.appliedGraph ?? graphState;
+    let currentGraphHash: string | null = null;
+    try {
+      currentGraphHash = computeAnalysisAffectingGraphHash(
+        postEditGraph as GraphStateIngress | null | undefined,
+      );
+    } catch {
+      // Hash computation failure is rare (input validation upstream)
+      // but if it does happen we still synthesise the verdict.
+    }
+    freshness = {
+      freshness: 'unknown',
+      reason: 'derivation_failed',
+      selected_fact_index: null,
+      graph_hash_at_run: null,
+      current_graph_hash: currentGraphHash,
+      computed_at: null,
+    };
+    emitFreshnessTelemetry(
+      freshness,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'edit_graph',
+      },
+      {
+        prior_fact_count: 0,
+        current_turn_fact_count: 0,
+        edit_was_rejected: editResult.wasRejected,
+        derivation_error: err instanceof Error ? err.message : String(err),
+      },
     );
   }
 
@@ -546,7 +585,7 @@ export async function dispatchEditGraph(
       commitPerformed: true,
       analysisReady,
       graph: editResult.appliedGraph ?? null,
-      ...(freshness ? { freshness } : {}),
+      freshness,
     };
   } catch (err) {
     log.error(
@@ -562,7 +601,7 @@ export async function dispatchEditGraph(
       commitPerformed: false,
       analysisReady,
       graph: editResult.appliedGraph ?? null,
-      ...(freshness ? { freshness } : {}),
+      freshness,
     };
   }
 }

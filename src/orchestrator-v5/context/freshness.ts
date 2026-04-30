@@ -27,6 +27,8 @@
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
+import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+
 /**
  * Four-valued freshness state. Reachable from new code paths only as
  * 'fresh' / 'stale' / 'none'; 'unknown' is the legacy/recovery escape
@@ -45,7 +47,17 @@ export type FreshnessReason =
   | 'legacy_fact_missing_hash'
   | 'current_graph_hash_unavailable'
   | 'no_successful_run_analysis_fact'
-  | 'invariant_failed';
+  | 'invariant_failed'
+  /** Dispatcher attempted derivation and failed (session-store error,
+   *  bad graph parse, etc.). Honours the "always emit freshness"
+   *  contract instead of dropping the wire fields silently. */
+  | 'derivation_failed'
+  /** First-turn `draft_graph` assumes an empty prior fact chain by
+   *  construction. The dispatcher invariant pinned by
+   *  route-v2-draft-graph-persistence.test.ts forbids the read that
+   *  would prove it. We surface `unknown` rather than confidently
+   *  reporting `none` so operators see the assumption in telemetry. */
+  | 'draft_graph_first_turn_assumption';
 
 /**
  * Verdict + provenance. `computed_at` is the selected fact's run-time
@@ -72,24 +84,54 @@ export interface FreshnessDerivation {
 }
 
 /**
- * Statuses that EXCLUDE a fact from freshness selection. Anything else —
- * known-success ('computed' / 'completed' / 'ready' / 'complete'),
- * non-canonical strings, or status missing entirely (legacy fact) —
- * remains eligible.
+ * Canonical successful analysis statuses. After normalisation
+ * (`normaliseAnalysisStatus`), only these values count as eligible for
+ * freshness selection. Anything else — partial, blocked, failed,
+ * degraded, future PLoT statuses (e.g. 'inconclusive', 'incomplete'),
+ * or any other non-canonical string — is excluded.
  *
- * Denylist (rather than allowlist) matches the handler's actual
- * semantics at run-analysis.ts:OK_STATUSES + UNKNOWN_STATUS template:
- * the handler ALREADY excludes fatal statuses (blocked / failed) by
- * throwing HandlerInvocationFailedError. We add 'partial' and
- * 'degraded' for defence-in-depth — those non-fatal-but-incomplete
- * runs should not drive the freshness verdict per the brief.
+ * Status missing entirely (legacy pre-0.10.0 fact) is treated as
+ * eligible separately by the selector, since pre-0.10.0 facts predate
+ * the status field's existence on the persisted shape.
+ *
+ * Why allowlist + normalisation rather than denylist: the original
+ * round used a denylist to accommodate pre-existing fixtures using
+ * `'complete'` (singular) and `'ok'`. That left silent acceptance of
+ * any future non-canonical status. Normalisation handles the historical
+ * non-canonical values explicitly while keeping a closed allowlist for
+ * forward safety.
  */
-const EXCLUDED_ANALYSIS_STATUSES = new Set([
-  'partial',
-  'blocked',
-  'failed',
-  'degraded',
+const SUCCESSFUL_ANALYSIS_STATUSES = new Set([
+  'computed',
+  'completed',
+  'ready',
 ]);
+
+/**
+ * Map historical / non-canonical analysis_status values to the
+ * canonical success set. Returns null for unknown / non-canonical
+ * values so the selector can treat them as ineligible.
+ *
+ * Aliases handled:
+ *   - 'complete' (singular) → 'completed'
+ *   - 'ok' / 'success' → 'completed'
+ * Whitespace and case are normalised before lookup.
+ */
+function normaliseAnalysisStatus(raw: string | null): string | null {
+  if (raw === null) return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === '') return null;
+  if (SUCCESSFUL_ANALYSIS_STATUSES.has(trimmed)) return trimmed;
+  switch (trimmed) {
+    case 'complete':
+      return 'completed';
+    case 'ok':
+    case 'success':
+      return 'completed';
+    default:
+      return null;
+  }
+}
 
 /**
  * Public projection of a selected run_analysis fact. Carries the
@@ -166,9 +208,11 @@ export function selectRunAnalysisFact(
   for (let i = 0; i < priorFacts.length; i += 1) {
     const view = viewRunAnalysisFact(priorFacts[i]!, i);
     if (!view) continue;
-    // Eligibility filter: exclude known-bad statuses; accept everything
-    // else (success values, unknown values, and missing status alike).
-    if (view.status !== null && EXCLUDED_ANALYSIS_STATUSES.has(view.status)) {
+    // Eligibility filter: status missing entirely (legacy fact) is
+    // accepted; otherwise the value must normalise to a canonical
+    // success. Everything else (partial / blocked / failed / degraded /
+    // future PLoT statuses) is excluded.
+    if (view.status !== null && normaliseAnalysisStatus(view.status) === null) {
       continue;
     }
     candidates.push(view);
@@ -341,4 +385,72 @@ export function enforceInvariants(
     freshness: 'unknown',
     reason: 'invariant_failed',
   };
+}
+
+/**
+ * Emit the full freshness telemetry family for a single derivation site.
+ * Always emits `analysis_freshness.derived`. Conditionally emits:
+ *   - `fact_selected` when a fact was selected (selected_fact_index !== null)
+ *   - `invariant_failed` when reason === 'invariant_failed'
+ *   - `graph_hash_missing` when reason === 'current_graph_hash_unavailable'
+ *
+ * Use this from EVERY derivation site (turn-executor pre/post-handler,
+ * chip-click, draft-graph, edit-graph) so the post-dispatch verdict that
+ * actually ships on the wire has the same forensic depth as the pre-
+ * dispatch routing view.
+ *
+ * Extra fields (prior_fact_count / current_turn_fact_count / dispatch
+ * extras) are passed through `extras` so each call site can tag its
+ * own context without duplicating the four emit() calls.
+ */
+export function emitFreshnessTelemetry(
+  derivation: FreshnessDerivation,
+  context: {
+    readonly request_id: string;
+    readonly scenario_id: string;
+    readonly dispatch_path: string;
+  },
+  extras: Record<string, unknown> = {},
+): void {
+  emit(TelemetryEvents.AnalysisFreshnessDerived, {
+    request_id: context.request_id,
+    scenario_id: context.scenario_id,
+    dispatch_path: context.dispatch_path,
+    freshness: derivation.freshness,
+    reason: derivation.reason,
+    selected_fact_index: derivation.selected_fact_index,
+    graph_hash_at_run: derivation.graph_hash_at_run,
+    current_graph_hash: derivation.current_graph_hash,
+    computed_at: derivation.computed_at,
+    ...extras,
+  });
+  if (derivation.selected_fact_index !== null) {
+    emit(TelemetryEvents.AnalysisFreshnessFactSelected, {
+      request_id: context.request_id,
+      scenario_id: context.scenario_id,
+      dispatch_path: context.dispatch_path,
+      selected_fact_index: derivation.selected_fact_index,
+      reason: derivation.reason,
+      graph_hash_at_run: derivation.graph_hash_at_run,
+      computed_at: derivation.computed_at,
+    });
+  }
+  if (derivation.reason === 'invariant_failed') {
+    emit(TelemetryEvents.AnalysisFreshnessInvariantFailed, {
+      request_id: context.request_id,
+      scenario_id: context.scenario_id,
+      dispatch_path: context.dispatch_path,
+      graph_hash_at_run: derivation.graph_hash_at_run,
+      current_graph_hash: derivation.current_graph_hash,
+      selected_fact_index: derivation.selected_fact_index,
+    });
+  }
+  if (derivation.reason === 'current_graph_hash_unavailable') {
+    emit(TelemetryEvents.AnalysisFreshnessGraphHashMissing, {
+      request_id: context.request_id,
+      scenario_id: context.scenario_id,
+      dispatch_path: context.dispatch_path,
+      selected_fact_index: derivation.selected_fact_index,
+    });
+  }
 }

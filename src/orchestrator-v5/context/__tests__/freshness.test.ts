@@ -122,13 +122,14 @@ describe('deriveAnalysisFreshness — fresh', () => {
     expect(r.selected_fact_index).toBe(0);
   });
 
-  it('matches under any non-excluded status (success / unknown / legacy "complete")', () => {
-    // Eligibility uses a denylist (partial / blocked / failed / degraded);
-    // every other value is accepted including the canonical successes
-    // (computed / completed / ready), the singular "complete" carried by
-    // older fixtures, and unknown statuses the handler accepts via its
-    // UNKNOWN_STATUS template.
-    for (const status of ['computed', 'completed', 'ready', 'complete', 'ok', 'success']) {
+  it('matches under canonical success and known aliases (case-insensitive)', () => {
+    // Eligibility uses an allowlist (computed / completed / ready) plus
+    // explicit aliases for historical fixture compatibility:
+    //   'complete' (singular) → 'completed'
+    //   'ok' / 'success' → 'completed'
+    // Whitespace and case are normalised. Unknown future PLoT statuses
+    // are NOT silently accepted (covered in the next test).
+    for (const status of ['computed', 'completed', 'ready', 'complete', 'ok', 'success', 'COMPUTED', '  ready  ']) {
       const facts: readonly HandlerFact[] = [
         mkRunAnalysisFact({
           graph_hash_at_run: 'h1h1h1h1h1h1h1h1',
@@ -138,6 +139,23 @@ describe('deriveAnalysisFreshness — fresh', () => {
       ];
       const r = deriveAnalysisFreshness(facts, 'h1h1h1h1h1h1h1h1');
       expect(r.freshness).toBe('fresh');
+    }
+  });
+
+  it('rejects unknown / future PLoT statuses (closed allowlist)', () => {
+    // Forward safety: a future PLoT status like "inconclusive" should
+    // NOT be silently accepted as successful. The fact is excluded from
+    // selection; freshness === 'none'.
+    for (const status of ['inconclusive', 'incomplete', 'pending', 'queued', 'analyzing']) {
+      const facts: readonly HandlerFact[] = [
+        mkRunAnalysisFact({
+          graph_hash_at_run: 'h1h1h1h1h1h1h1h1',
+          computed_at: '2026-04-30T00:00:00.000Z',
+          status,
+        }),
+      ];
+      const r = deriveAnalysisFreshness(facts, 'h1h1h1h1h1h1h1h1');
+      expect(r.freshness).toBe('none');
     }
   });
 

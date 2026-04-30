@@ -107,6 +107,7 @@ import {
 } from './context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
+  emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from './context/freshness.js';
 import type { TurnOutcome } from './turn-outcome.js';
@@ -577,52 +578,21 @@ export async function runTurnExecutor(
     // to reconstruct freshness state for any turn.
     // Pre-dispatch telemetry — represents the freshness state Sonnet's
     // analysis projection was grounded in. The post-dispatch re-derivation
-    // (see line ~1373) emits a SECOND `AnalysisFreshnessDerived` event
-    // tagged `dispatch_path: 'turn_executor_post_handler'` when a
-    // current-turn fact changes the verdict.
-    emit(TelemetryEvents.AnalysisFreshnessDerived, {
-      request_id: requestId,
-      scenario_id: context.session_id,
-      dispatch_path: 'turn_executor_pre_handler',
-      freshness: routingFreshness.freshness,
-      reason: routingFreshness.reason,
-      selected_fact_index: routingFreshness.selected_fact_index,
-      graph_hash_at_run: routingFreshness.graph_hash_at_run,
-      current_graph_hash: routingFreshness.current_graph_hash,
-      computed_at: routingFreshness.computed_at,
-      prior_fact_count: context.prior_facts.length,
-      analysis_state_source: analysisStateSource,
-    });
-    // Brief #5: emit `analysis_freshness.fact_selected` separately so
-    // operators can grep for "which fact won and why" without parsing
-    // the larger derived event.
-    if (routingFreshness.selected_fact_index !== null) {
-      emit(TelemetryEvents.AnalysisFreshnessFactSelected, {
+    // (see line ~1373) emits the same family tagged
+    // `dispatch_path: 'turn_executor_post_handler'` when a current-turn
+    // fact changes the verdict.
+    emitFreshnessTelemetry(
+      routingFreshness,
+      {
         request_id: requestId,
         scenario_id: context.session_id,
         dispatch_path: 'turn_executor_pre_handler',
-        selected_fact_index: routingFreshness.selected_fact_index,
-        reason: routingFreshness.reason,
-        graph_hash_at_run: routingFreshness.graph_hash_at_run,
-        computed_at: routingFreshness.computed_at,
-      });
-    }
-    if (routingFreshness.reason === 'invariant_failed') {
-      emit(TelemetryEvents.AnalysisFreshnessInvariantFailed, {
-        request_id: requestId,
-        scenario_id: context.session_id,
-        graph_hash_at_run: routingFreshness.graph_hash_at_run,
-        current_graph_hash: routingFreshness.current_graph_hash,
-        selected_fact_index: routingFreshness.selected_fact_index,
-      });
-    }
-    if (routingFreshness.reason === 'current_graph_hash_unavailable') {
-      emit(TelemetryEvents.AnalysisFreshnessGraphHashMissing, {
-        request_id: requestId,
-        scenario_id: context.session_id,
-        selected_fact_index: routingFreshness.selected_fact_index,
-      });
-    }
+      },
+      {
+        prior_fact_count: context.prior_facts.length,
+        analysis_state_source: analysisStateSource,
+      },
+    );
     try {
       const coachingCache = await readCoachingCache(
         context.session_id,
@@ -1401,19 +1371,18 @@ export async function runTurnExecutor(
         [...handlerFactsForCommit, ...context.prior_facts],
         currentAnalysisGraphHashForTurn,
       );
-      emit(TelemetryEvents.AnalysisFreshnessDerived, {
-        request_id: requestId,
-        scenario_id: context.session_id,
-        dispatch_path: 'turn_executor_post_handler',
-        freshness: freshness.freshness,
-        reason: freshness.reason,
-        selected_fact_index: freshness.selected_fact_index,
-        graph_hash_at_run: freshness.graph_hash_at_run,
-        current_graph_hash: freshness.current_graph_hash,
-        computed_at: freshness.computed_at,
-        prior_fact_count: context.prior_facts.length,
-        current_turn_fact_count: handlerFactsForCommit.length,
-      });
+      emitFreshnessTelemetry(
+        freshness,
+        {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          dispatch_path: 'turn_executor_post_handler',
+        },
+        {
+          prior_fact_count: context.prior_facts.length,
+          current_turn_fact_count: handlerFactsForCommit.length,
+        },
+      );
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop

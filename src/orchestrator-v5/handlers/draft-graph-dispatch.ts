@@ -56,9 +56,12 @@ import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { deriveAnalysisFreshness } from '../context/freshness.js';
+import {
+  emitFreshnessTelemetry,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
-import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { log } from '../../utils/telemetry.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -273,31 +276,42 @@ export async function dispatchDraftGraph(
         ? (draftResult.analysisReady as AnalysisReadyPayload)
         : undefined;
 
-    // V5 state-trust: derive freshness directly without a session-store
-    // read. Draft is the first-turn brief shape — by construction the
-    // prior fact chain is empty, so the verdict is always `none`. Going
-    // through buildTurnContext here would issue a `readRecent` call that
-    // (a) is wasted work and (b) violates the dispatcher invariant
-    // pinned by tests/integration/orchestrator/route-v2-draft-graph-
-    // persistence.test.ts ("dispatchDraftGraph must NOT call
-    // readRecent — that's the caller's responsibility").
+    // V5 state-trust: derive freshness WITHOUT a session-store read.
+    // Draft is the first-turn brief shape — the dispatcher invariant
+    // pinned by route-v2-draft-graph-persistence.test.ts forbids
+    // readRecent here. We CANNOT prove the prior fact chain is empty
+    // (an old scenario could be replayed to /orchestrate/v2/turn with
+    // a frame-stage payload), so emitting a confident `none` could
+    // mask a stale prior analysis.
+    //
+    // Instead emit `unknown` with reason `draft_graph_first_turn_assumption`.
+    // The freshness state is honestly "we did not look". UI sees
+    // `unknown` and renders no rerun chip; operators see the
+    // assumption in telemetry and can investigate replay scenarios if
+    // needed.
     const currentGraphHash = computeAnalysisAffectingGraphHash(
       draftResult.graphOutput as GraphStateIngress | null | undefined,
     );
-    const freshness = deriveAnalysisFreshness([], currentGraphHash);
-    emit(TelemetryEvents.AnalysisFreshnessDerived, {
-      request_id: requestId,
-      scenario_id: payload.scenario_id,
-      dispatch_path: 'draft_graph',
-      freshness: freshness.freshness,
-      reason: freshness.reason,
-      selected_fact_index: freshness.selected_fact_index,
-      graph_hash_at_run: freshness.graph_hash_at_run,
-      current_graph_hash: freshness.current_graph_hash,
-      computed_at: freshness.computed_at,
-      prior_fact_count: 0,
-      current_turn_fact_count: 0,
-    });
+    const freshness: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'draft_graph_first_turn_assumption',
+      selected_fact_index: null,
+      graph_hash_at_run: null,
+      current_graph_hash: currentGraphHash,
+      computed_at: null,
+    };
+    emitFreshnessTelemetry(
+      freshness,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'draft_graph',
+      },
+      {
+        prior_fact_count: 0,
+        current_turn_fact_count: 0,
+      },
+    );
 
     log.info(
       {

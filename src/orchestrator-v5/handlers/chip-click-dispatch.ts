@@ -31,7 +31,7 @@
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { log } from '../../utils/telemetry.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { composeToolCallResponse } from '../compose.js';
 import {
@@ -41,7 +41,7 @@ import {
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { deriveAnalysisFreshness } from '../context/freshness.js';
+import { deriveAnalysisFreshness, emitFreshnessTelemetry } from '../context/freshness.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -402,19 +402,18 @@ export async function dispatchChipClickRunAnalysis(
         cachedSnapshot?.graph as GraphStateIngress | null | undefined,
       );
       const freshness = deriveAnalysisFreshness(postDispatchFacts, currentGraphHash);
-      emit(TelemetryEvents.AnalysisFreshnessDerived, {
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        dispatch_path: 'chip_click_run_analysis',
-        freshness: freshness.freshness,
-        reason: freshness.reason,
-        selected_fact_index: freshness.selected_fact_index,
-        graph_hash_at_run: freshness.graph_hash_at_run,
-        current_graph_hash: freshness.current_graph_hash,
-        computed_at: freshness.computed_at,
-        prior_fact_count: context.prior_facts.length,
-        current_turn_fact_count: enrichedFacts.length,
-      });
+      emitFreshnessTelemetry(
+        freshness,
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          dispatch_path: 'chip_click_run_analysis',
+        },
+        {
+          prior_fact_count: context.prior_facts.length,
+          current_turn_fact_count: enrichedFacts.length,
+        },
+      );
 
       return { outcome: 'ok', response, commitPerformed: true, analysisReady, graph: snapshotGraph, freshness };
     } catch (err) {
