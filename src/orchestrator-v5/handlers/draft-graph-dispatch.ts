@@ -55,7 +55,6 @@ import type { GraphV3T } from '../../orchestrator/types.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildTurnContext } from '../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { deriveAnalysisFreshness } from '../context/freshness.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
@@ -274,40 +273,31 @@ export async function dispatchDraftGraph(
         ? (draftResult.analysisReady as AnalysisReadyPayload)
         : undefined;
 
-    // V5 state-trust: derive freshness — first-turn drafts have no
-    // prior fact chain so freshness === 'none' is the expected outcome.
-    // Computed against the post-draft graph for completeness so the
-    // wire `current_graph_hash` field is populated.
-    let freshness: import('../context/freshness.js').FreshnessDerivation | undefined;
-    try {
-      const turnContext = await buildTurnContext(payload, requestId);
-      const currentGraphHash = computeAnalysisAffectingGraphHash(
-        draftResult.graphOutput as GraphStateIngress | null | undefined,
-      );
-      freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
-      emit(TelemetryEvents.AnalysisFreshnessDerived, {
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        dispatch_path: 'draft_graph',
-        freshness: freshness.freshness,
-        reason: freshness.reason,
-        selected_fact_index: freshness.selected_fact_index,
-        graph_hash_at_run: freshness.graph_hash_at_run,
-        current_graph_hash: freshness.current_graph_hash,
-        computed_at: freshness.computed_at,
-        prior_fact_count: turnContext.prior_facts.length,
-        current_turn_fact_count: 0,
-      });
-    } catch (err) {
-      log.warn(
-        {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-        },
-        'V5 draft_graph dispatch — freshness derivation failed; analysis_ready will omit freshness fields',
-      );
-    }
+    // V5 state-trust: derive freshness directly without a session-store
+    // read. Draft is the first-turn brief shape — by construction the
+    // prior fact chain is empty, so the verdict is always `none`. Going
+    // through buildTurnContext here would issue a `readRecent` call that
+    // (a) is wasted work and (b) violates the dispatcher invariant
+    // pinned by tests/integration/orchestrator/route-v2-draft-graph-
+    // persistence.test.ts ("dispatchDraftGraph must NOT call
+    // readRecent — that's the caller's responsibility").
+    const currentGraphHash = computeAnalysisAffectingGraphHash(
+      draftResult.graphOutput as GraphStateIngress | null | undefined,
+    );
+    const freshness = deriveAnalysisFreshness([], currentGraphHash);
+    emit(TelemetryEvents.AnalysisFreshnessDerived, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'draft_graph',
+      freshness: freshness.freshness,
+      reason: freshness.reason,
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      computed_at: freshness.computed_at,
+      prior_fact_count: 0,
+      current_turn_fact_count: 0,
+    });
 
     log.info(
       {
@@ -325,7 +315,7 @@ export async function dispatchDraftGraph(
       commitPerformed: true,
       analysisReady,
       graph: draftResult.graphOutput,
-      ...(freshness ? { freshness } : {}),
+      freshness,
     };
   } catch (err) {
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).

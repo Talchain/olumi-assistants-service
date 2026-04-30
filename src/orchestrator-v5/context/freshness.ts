@@ -315,7 +315,19 @@ export function deriveAnalysisFreshness(
   });
 }
 
-function enforceInvariants(
+/**
+ * Run the hard-invariant enforcer on a candidate derivation. Returns
+ * the derivation unchanged when invariants hold; otherwise returns a
+ * coerced derivation with `freshness: 'unknown'` and
+ * `reason: 'invariant_failed'`.
+ *
+ * Exported for test injection — production code paths reach this only
+ * via the regular `deriveAnalysisFreshness` decision tree (which is
+ * exhaustive enough that no real input triggers a violation today). The
+ * fallback stays in place as defence-in-depth against future code
+ * changes that break the exhaustive tree.
+ */
+export function enforceInvariants(
   derivation: FreshnessDerivation,
 ): FreshnessDerivation {
   const violation = checkHardInvariants(derivation);

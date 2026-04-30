@@ -6,7 +6,8 @@
 import { describe, it, expect } from 'vitest';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { deriveAnalysisFreshness } from '../freshness.js';
+import { deriveAnalysisFreshness, enforceInvariants } from '../freshness.js';
+import type { FreshnessDerivation } from '../freshness.js';
 
 // Valid UUID v4 for fact.result.scenario_id (z.string().uuid()).
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -306,5 +307,83 @@ describe('deriveAnalysisFreshness — wire-field fidelity', () => {
     // Newer fact at index 1 should be selected.
     const r = deriveAnalysisFreshness([a, b], 'hash_b__________');
     expect(r.selected_fact_index).toBe(1);
+  });
+});
+
+describe('enforceInvariants — hard invariant violations', () => {
+  // Production code paths cannot construct this state through the regular
+  // decision tree, but the enforcer is the defence-in-depth backstop. The
+  // test injects an artificial violation by hand-rolling the derivation,
+  // exercising the fallback so a future code change that breaks the
+  // exhaustive tree fails this test rather than shipping bad freshness.
+
+  it('both hashes present + freshness=unknown → coerced to unknown / invariant_failed', () => {
+    // This is the impossible state: if both hashes are present the
+    // derivation must produce fresh or stale, never unknown. Force it.
+    const violating: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'graph_hash_match', // pretend the decision tree produced this
+      selected_fact_index: 0,
+      graph_hash_at_run: 'aaaa1111bbbb2222',
+      current_graph_hash: 'aaaa1111bbbb2222',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    const enforced = enforceInvariants(violating);
+    expect(enforced.freshness).toBe('unknown');
+    expect(enforced.reason).toBe('invariant_failed');
+    // Other fields untouched
+    expect(enforced.selected_fact_index).toBe(0);
+    expect(enforced.graph_hash_at_run).toBe('aaaa1111bbbb2222');
+    expect(enforced.current_graph_hash).toBe('aaaa1111bbbb2222');
+    expect(enforced.computed_at).toBe('2026-04-30T00:00:00.000Z');
+  });
+
+  it('valid fresh derivation passes through unchanged', () => {
+    const valid: FreshnessDerivation = {
+      freshness: 'fresh',
+      reason: 'graph_hash_match',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'h1',
+      current_graph_hash: 'h1',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    expect(enforceInvariants(valid)).toEqual(valid);
+  });
+
+  it('valid stale derivation passes through unchanged', () => {
+    const valid: FreshnessDerivation = {
+      freshness: 'stale',
+      reason: 'graph_hash_diverged',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'h1',
+      current_graph_hash: 'h2',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    expect(enforceInvariants(valid)).toEqual(valid);
+  });
+
+  it('legitimate unknown (one hash missing) passes through', () => {
+    // Hash-data-missing is a real reason for unknown; not a violation.
+    const valid: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'legacy_fact_missing_hash',
+      selected_fact_index: 0,
+      graph_hash_at_run: null,
+      current_graph_hash: 'h1',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    expect(enforceInvariants(valid)).toEqual(valid);
+  });
+
+  it('legitimate none (no fact selected) passes through', () => {
+    const valid: FreshnessDerivation = {
+      freshness: 'none',
+      reason: 'no_successful_run_analysis_fact',
+      selected_fact_index: null,
+      graph_hash_at_run: null,
+      current_graph_hash: 'h1',
+      computed_at: null,
+    };
+    expect(enforceInvariants(valid)).toEqual(valid);
   });
 });

@@ -103,6 +103,14 @@ export function computeDeterministicGraphHash(
  *   intervention.{unit, source, reasoning, value_confidence, display_value},
  *   target_match.{match_type, confidence}, edge.validation, edge.defaulted,
  *   option.{description, unresolved_targets, user_questions, brief_quote}.
+ *
+ * Also intentionally EXCLUDED — Monte Carlo configuration parameters
+ * passed to PLoT alongside the graph (`seed`, `n_samples`, request_id):
+ * these tune the simulation reproducibility / sample count, not the
+ * model itself. Two analyses against the same graph with different
+ * seeds should be considered freshness-equivalent. Including them
+ * would over-trigger `stale` on every rerun-with-new-seed without
+ * any user-visible model change.
  */
 export function computeAnalysisAffectingGraphHash(
   graph: GraphStateIngress | null | undefined,

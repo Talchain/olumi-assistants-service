@@ -167,12 +167,12 @@ function sendFinalised200(
     readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
     readonly graph: GraphV3T | null;
     /** V5 state-trust freshness derivation. Threaded into the finaliser
-     *  so analysis_ready carries freshness fields and computed_at reflects
-     *  the selected fact's timestamp. Populated on every CEE dispatch
-     *  path that produces analysis_ready: turn_executor, chip_click,
-     *  draft_graph, edit_graph. system_event omits today (graph-mutating
-     *  system events are scoped narrowly and most do not ship
-     *  analysis_ready). */
+     *  so the analysisReady payload carries freshness fields and
+     *  computed_at reflects the selected fact's timestamp. Populated on
+     *  every CEE dispatch path that produces an analysisReady payload
+     *  (turn_executor, chip_click, draft_graph, edit_graph). system_event
+     *  omits today; graph-mutating system events are scoped narrowly and
+     *  most do not ship the readiness field. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {

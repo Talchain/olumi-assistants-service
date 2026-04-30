@@ -28,8 +28,16 @@ import type { AnalysisFreshness, FreshnessReason } from './context/freshness.js'
  *
  * `analysis_selected_fact_index` is the position-in-array of the fact
  * the freshness derivation selected (newest-first per loader). Null
- * when no successful fact was selected. Used as a stable identifier
- * inside a single turn's telemetry.
+ * when no successful fact was selected.
+ *
+ * Note: the brief specified `analysis_selected_fact_id` (a stable row
+ * id). Index is used today as a pragmatic substitute because
+ * `@talchain/schemas`' `HandlerFact` type does not surface a row id —
+ * the session store reads facts via `v5_handler_facts.id` (FK to
+ * `v5_conversation_turns.id`) but discards the id when materialising
+ * the JSON. Index is deterministic within a single turn (the only
+ * scope that consumes it). Plumbing a real id requires extending the
+ * session-store `readFactsFor` signature; tracked as a follow-up.
  */
 export interface TurnOutcome {
   readonly graph_mutated: boolean;
