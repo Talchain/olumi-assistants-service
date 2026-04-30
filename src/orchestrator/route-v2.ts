@@ -166,12 +166,13 @@ function sendFinalised200(
   ctx: {
     readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
     readonly graph: GraphV3T | null;
-    /** V5 state-trust freshness derivation (turn_executor path only).
-     *  When provided, threaded into the finaliser so analysis_ready
-     *  carries freshness fields and computed_at reflects the selected
-     *  fact's timestamp. Other dispatch paths (system_event, draft_graph,
-     *  edit_graph, chip_click) omit it; analysis_ready then ships
-     *  without freshness fields and computed_at is wire-emit time. */
+    /** V5 state-trust freshness derivation. Threaded into the finaliser
+     *  so analysis_ready carries freshness fields and computed_at reflects
+     *  the selected fact's timestamp. Populated on every CEE dispatch
+     *  path that produces analysis_ready: turn_executor, chip_click,
+     *  draft_graph, edit_graph. system_event omits today (graph-mutating
+     *  system events are scoped narrowly and most do not ship
+     *  analysis_ready). */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
@@ -525,6 +526,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
           analysisReady: cc.analysisReady,
           graph: cc.graph,
+          ...(cc.freshness ? { freshness: cc.freshness } : {}),
         });
       } catch (err) {
         log.error(
@@ -593,6 +595,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
+          ...(dg.freshness ? { freshness: dg.freshness } : {}),
         });
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
@@ -674,6 +677,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
           analysisReady: eg.analysisReady,
           graph: eg.graph,
+          ...(eg.freshness ? { freshness: eg.freshness } : {}),
         });
       } catch (err) {
         log.error(

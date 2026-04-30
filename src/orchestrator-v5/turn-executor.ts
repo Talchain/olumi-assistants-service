@@ -342,14 +342,18 @@ export async function runTurnExecutor(
   let coachingMode: CoachingMode | null = null;
   let coachingSignalId: CoachingSignalId | null = null;
   let validationErrorCode: ValidationError['code'] | null = null;
-  // V5 state-trust: freshness derivation. Declared at run-scope so
-  // finalizeRun() can surface it on TurnExecutorRunResult regardless of
-  // which exit path fires. Computed during the analysis-summary block
-  // below; null on early-return paths that exit before that block runs
-  // (only orient/routing-error paths today, which finalizeRun handles
-  // gracefully via the optional field on the result).
+  // V5 state-trust: freshness derivation. The PRE-dispatch derivation
+  // (`routingFreshness`) is built from `context.prior_facts` and is used
+  // to ground Sonnet's analysis projection. The POST-dispatch derivation
+  // (`freshness`) re-runs against `[...currentTurnFacts, ...prior_facts]`
+  // so a just-produced `run_analysis` fact is selected on the same turn
+  // — fixing the case where a routed `run_analysis` would otherwise
+  // ship the wire with prior-turn freshness. `freshness` is what
+  // finalizeRun() surfaces; `routingFreshness` is internal-only.
+  let routingFreshness: FreshnessDerivation | null = null;
   let freshness: FreshnessDerivation | null = null;
   let proposedHandlerIdForOutcome: string | null = null;
+  let currentAnalysisGraphHashForTurn: string | null = null;
 
   // Routing log fields — closured so the finally block can emit one record
   // per turn regardless of which terminal path fires (success / typed
@@ -507,16 +511,21 @@ export async function runTurnExecutor(
     // routing prompt can treat it as reference material rather than fresh
     // output. prior_facts is already loaded by buildTurnContext — no new
     // DB call.
-    // V5 state-trust: derive freshness deterministically by comparing the
-    // current graph hash against graph_hash_at_run on the most recent
-    // successful run_analysis fact. Replaces the unconditional
-    // "loaded_from_prior_run_freshness_unknown" fallback (which fired
-    // even on freshly-completed analysis turns).
-    const currentAnalysisGraphHash = computeAnalysisAffectingGraphHash(graphStateForTurn);
-    freshness = deriveAnalysisFreshness(
+    // V5 state-trust: derive routing freshness — the PRE-dispatch view
+    // used to ground Sonnet's analysis projection. The wire-bound
+    // freshness is re-derived POST-dispatch below (see
+    // `re-derive freshness post-dispatch` block) so a just-produced
+    // run_analysis fact is selected on the same turn.
+    currentAnalysisGraphHashForTurn = computeAnalysisAffectingGraphHash(graphStateForTurn);
+    routingFreshness = deriveAnalysisFreshness(
       context.prior_facts,
-      currentAnalysisGraphHash,
+      currentAnalysisGraphHashForTurn,
     );
+    // Until the post-dispatch re-derivation runs, the wire-bound
+    // `freshness` defaults to the routing view — this covers exit paths
+    // that return before handler dispatch (orient errors, routing
+    // errors, validation failures).
+    freshness = routingFreshness;
 
     let analysisSummary: AnalysisResponseSummary | null = null;
     let analysisStalenessReason: string | null = null;
@@ -566,32 +575,52 @@ export async function runTurnExecutor(
     // summary — freshness reflects the prior-fact state, not the
     // request payload. Telemetry consumers query by this single event
     // to reconstruct freshness state for any turn.
+    // Pre-dispatch telemetry — represents the freshness state Sonnet's
+    // analysis projection was grounded in. The post-dispatch re-derivation
+    // (see line ~1373) emits a SECOND `AnalysisFreshnessDerived` event
+    // tagged `dispatch_path: 'turn_executor_post_handler'` when a
+    // current-turn fact changes the verdict.
     emit(TelemetryEvents.AnalysisFreshnessDerived, {
       request_id: requestId,
       scenario_id: context.session_id,
-      freshness: freshness.freshness,
-      reason: freshness.reason,
-      selected_fact_index: freshness.selected_fact_index,
-      graph_hash_at_run: freshness.graph_hash_at_run,
-      current_graph_hash: freshness.current_graph_hash,
-      computed_at: freshness.computed_at,
+      dispatch_path: 'turn_executor_pre_handler',
+      freshness: routingFreshness.freshness,
+      reason: routingFreshness.reason,
+      selected_fact_index: routingFreshness.selected_fact_index,
+      graph_hash_at_run: routingFreshness.graph_hash_at_run,
+      current_graph_hash: routingFreshness.current_graph_hash,
+      computed_at: routingFreshness.computed_at,
       prior_fact_count: context.prior_facts.length,
       analysis_state_source: analysisStateSource,
     });
-    if (freshness.reason === 'invariant_failed') {
+    // Brief #5: emit `analysis_freshness.fact_selected` separately so
+    // operators can grep for "which fact won and why" without parsing
+    // the larger derived event.
+    if (routingFreshness.selected_fact_index !== null) {
+      emit(TelemetryEvents.AnalysisFreshnessFactSelected, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        dispatch_path: 'turn_executor_pre_handler',
+        selected_fact_index: routingFreshness.selected_fact_index,
+        reason: routingFreshness.reason,
+        graph_hash_at_run: routingFreshness.graph_hash_at_run,
+        computed_at: routingFreshness.computed_at,
+      });
+    }
+    if (routingFreshness.reason === 'invariant_failed') {
       emit(TelemetryEvents.AnalysisFreshnessInvariantFailed, {
         request_id: requestId,
         scenario_id: context.session_id,
-        graph_hash_at_run: freshness.graph_hash_at_run,
-        current_graph_hash: freshness.current_graph_hash,
-        selected_fact_index: freshness.selected_fact_index,
+        graph_hash_at_run: routingFreshness.graph_hash_at_run,
+        current_graph_hash: routingFreshness.current_graph_hash,
+        selected_fact_index: routingFreshness.selected_fact_index,
       });
     }
-    if (freshness.reason === 'current_graph_hash_unavailable') {
+    if (routingFreshness.reason === 'current_graph_hash_unavailable') {
       emit(TelemetryEvents.AnalysisFreshnessGraphHashMissing, {
         request_id: requestId,
         scenario_id: context.session_id,
-        selected_fact_index: freshness.selected_fact_index,
+        selected_fact_index: routingFreshness.selected_fact_index,
       });
     }
     try {
@@ -1362,6 +1391,29 @@ export async function runTurnExecutor(
       const suppressOrientation =
         handlerOutcome.suppress_orientation === true || isExplanationHandler;
       const orientationForCompose = suppressOrientation ? '' : sanitisedOrientation.output;
+      // V5 state-trust: re-derive freshness POST-dispatch so the wire
+      // verdict reflects the just-produced run_analysis fact when one
+      // was committed this turn. Without this, a routed run_analysis
+      // would ship `freshness === 'none'` (or the prior verdict) on
+      // the same turn that produced the fresh fact. Re-derivation is
+      // free — it's a pure function over the in-memory fact arrays.
+      freshness = deriveAnalysisFreshness(
+        [...handlerFactsForCommit, ...context.prior_facts],
+        currentAnalysisGraphHashForTurn,
+      );
+      emit(TelemetryEvents.AnalysisFreshnessDerived, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        dispatch_path: 'turn_executor_post_handler',
+        freshness: freshness.freshness,
+        reason: freshness.reason,
+        selected_fact_index: freshness.selected_fact_index,
+        graph_hash_at_run: freshness.graph_hash_at_run,
+        current_graph_hash: freshness.current_graph_hash,
+        computed_at: freshness.computed_at,
+        prior_fact_count: context.prior_facts.length,
+        current_turn_fact_count: handlerFactsForCommit.length,
+      });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
       // emit a misleading "Run analysis" chip when a prior non-noop

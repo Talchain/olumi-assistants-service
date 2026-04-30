@@ -72,27 +72,46 @@ export interface FreshnessDerivation {
 }
 
 /**
- * Status values that count as "successful" for freshness selection.
- * Excludes 'partial', 'blocked', 'degraded', 'failed' — partial / failed
- * runs must not drive the freshness verdict per the brief.
+ * Statuses that EXCLUDE a fact from freshness selection. Anything else —
+ * known-success ('computed' / 'completed' / 'ready' / 'complete'),
+ * non-canonical strings, or status missing entirely (legacy fact) —
+ * remains eligible.
  *
- * The handler throws HandlerInvocationFailedError on fatal statuses
- * (blocked, failed) so those should never reach a persisted fact, but
- * we filter them anyway for defence-in-depth against future fact rows.
+ * Denylist (rather than allowlist) matches the handler's actual
+ * semantics at run-analysis.ts:OK_STATUSES + UNKNOWN_STATUS template:
+ * the handler ALREADY excludes fatal statuses (blocked / failed) by
+ * throwing HandlerInvocationFailedError. We add 'partial' and
+ * 'degraded' for defence-in-depth — those non-fatal-but-incomplete
+ * runs should not drive the freshness verdict per the brief.
  */
-const SUCCESSFUL_ANALYSIS_STATUSES = new Set([
-  'computed',
-  'completed',
-  'ready',
+const EXCLUDED_ANALYSIS_STATUSES = new Set([
+  'partial',
+  'blocked',
+  'failed',
+  'degraded',
 ]);
 
-interface RunAnalysisFactView {
+/**
+ * Public projection of a selected run_analysis fact. Carries the
+ * underlying fact reference so the projection assembler can reach into
+ * `result.enrichment` etc., plus the freshness-relevant metadata so the
+ * derivation does not re-read.
+ *
+ * Index is the fact's position in the input array (newest-first per
+ * loader convention). Used as a stable identifier within a single turn
+ * — the @talchain/schemas HandlerFact type does not surface a row id
+ * (deferred follow-up).
+ */
+export interface SelectedRunAnalysisFact {
   readonly fact: HandlerFact;
   readonly index: number;
   readonly graph_hash_at_run: string | null;
   readonly computed_at: string | null;
   readonly status: string | null;
 }
+
+// Internal alias retained for back-compat within this module.
+type RunAnalysisFactView = SelectedRunAnalysisFact;
 
 function readAnalysisStatus(enrichment: unknown): string | null {
   if (!enrichment || typeof enrichment !== 'object') return null;
@@ -126,23 +145,30 @@ function viewRunAnalysisFact(
 
 /**
  * Select the most recent successful run_analysis fact. "Successful" =
- * known-success status OR status missing entirely (legacy fact). Sorted
- * by computed_at desc; ties + missing timestamps fall back to the
- * insertion order from prior_facts (which build-turn-context delivers
- * newest-first per its loader convention).
+ * known-success status (computed / completed / ready) OR status missing
+ * entirely (legacy fact). Sorted by computed_at desc; ties + missing
+ * timestamps fall back to the insertion order from prior_facts (which
+ * build-turn-context delivers newest-first per its loader convention).
  *
  * Returns null when no eligible fact exists — the caller treats this as
  * freshness === 'none'.
+ *
+ * Exported for the analysis-projection assembler so the projection and
+ * the freshness verdict are always built from the SAME selected fact —
+ * eliminating the pre-state-trust drift where buildAnalysisFromPriorFacts
+ * picked the first non-noop fact while the freshness verdict picked the
+ * latest successful one.
  */
-function selectFact(
+export function selectRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
-): RunAnalysisFactView | null {
+): SelectedRunAnalysisFact | null {
   const candidates: RunAnalysisFactView[] = [];
   for (let i = 0; i < priorFacts.length; i += 1) {
     const view = viewRunAnalysisFact(priorFacts[i]!, i);
     if (!view) continue;
-    // Successful filter: known-success OR status missing (legacy).
-    if (view.status !== null && !SUCCESSFUL_ANALYSIS_STATUSES.has(view.status)) {
+    // Eligibility filter: exclude known-bad statuses; accept everything
+    // else (success values, unknown values, and missing status alike).
+    if (view.status !== null && EXCLUDED_ANALYSIS_STATUSES.has(view.status)) {
       continue;
     }
     candidates.push(view);
@@ -232,7 +258,7 @@ export function deriveAnalysisFreshness(
   priorFacts: readonly HandlerFact[],
   currentGraphHash: string | null,
 ): FreshnessDerivation {
-  const selected = selectFact(priorFacts);
+  const selected = selectRunAnalysisFact(priorFacts);
 
   if (selected === null) {
     const noFact: FreshnessDerivation = {

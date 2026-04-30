@@ -159,10 +159,11 @@ export interface FinaliserContext {
    * V5 state-trust freshness derivation. When provided, the finaliser
    * threads it into `attachComputedAt` so analysis_ready.computed_at
    * uses the selected fact's timestamp (not wire-emit time) and the
-   * freshness wire fields are stamped on the response. Optional for
-   * backwards compatibility — dispatch paths that do not derive
-   * freshness today (system_event, draft_graph, edit_graph, chip_click)
-   * may omit it and the legacy behaviour holds.
+   * freshness wire fields are stamped on the response. Populated on
+   * every primary CEE dispatch path that produces analysis_ready:
+   * turn_executor, chip_click, draft_graph, edit_graph. system_event
+   * may omit (most variants don't ship analysis_ready); the field stays
+   * `optional` in the schema for forward-compat.
    */
   readonly freshness?: import('./context/freshness.js').FreshnessDerivation;
 }

@@ -240,8 +240,11 @@ export type AnalysisReadyStatusT = z.infer<typeof AnalysisReadyStatus>;
 /**
  * V5 state-trust freshness verdict (additive on analysis_ready). Tells
  * the UI whether the analysis it can see is up to date with the current
- * graph. Always populated on turn_executor turns; absent on other
- * dispatch paths that do not derive freshness today.
+ * graph. Populated on every primary CEE dispatch path that ships
+ * analysis_ready (turn_executor, chip_click, draft_graph, edit_graph);
+ * may be absent on system_event variants that bypass the freshness
+ * derivation. The field stays `optional` so forward-compat with future
+ * dispatch paths is automatic.
  *
  *   fresh   → analysis matches the current graph; render figures normally
  *   stale   → graph has changed since the analysis ran; UI may render a

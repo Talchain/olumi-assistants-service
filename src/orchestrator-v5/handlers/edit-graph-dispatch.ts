@@ -20,7 +20,7 @@ import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getAdapter } from '../../adapters/llm/router.js';
@@ -37,6 +37,9 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { buildTurnContext } from '../build-turn-context.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { deriveAnalysisFreshness } from '../context/freshness.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
 // V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
@@ -80,6 +83,15 @@ export interface DispatchEditGraphResult {
    * the UI's prior `ceeAnalysisReady` remains correct.
    */
   readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * V5 state-trust freshness derivation. Edit_graph mutates the graph
+   * but does not produce a run_analysis fact, so post-edit freshness is
+   * determined by comparing the prior fact chain's recorded
+   * graph_hash_at_run against the post-edit graph hash. Expected to be
+   * `stale` after an accepted substantive edit, `fresh`/`unknown`/`none`
+   * otherwise. Surfaced on `analysis_ready` via response-finaliser.
+   */
+  readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
   /**
    * Post-edit graph used for label resolution by the central egress
    * sanitiser (sanitiseOlumiResponseForEgress). Null when the edit was
@@ -458,6 +470,46 @@ export async function dispatchEditGraph(
     ? computeStructuralReadiness(editResult.appliedGraph)
     : undefined;
 
+  // V5 state-trust: load the prior fact chain and derive freshness against
+  // the POST-edit graph hash. Expected behaviour: an accepted substantive
+  // edit produces freshness === 'stale' because the graph hash recorded
+  // on the prior run_analysis fact diverges from the new graph hash.
+  // Rejected edits produce 'fresh' (graph unchanged). Failures here are
+  // non-fatal — degrade to no freshness field rather than failing the
+  // dispatch.
+  let freshness: import('../context/freshness.js').FreshnessDerivation | undefined;
+  try {
+    const turnContext = await buildTurnContext(payload, requestId);
+    const postEditGraph = editResult.appliedGraph ?? graphState;
+    const currentGraphHash = computeAnalysisAffectingGraphHash(
+      postEditGraph as GraphStateIngress | null | undefined,
+    );
+    freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
+    emit(TelemetryEvents.AnalysisFreshnessDerived, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'edit_graph',
+      freshness: freshness.freshness,
+      reason: freshness.reason,
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      computed_at: freshness.computed_at,
+      prior_fact_count: turnContext.prior_facts.length,
+      current_turn_fact_count: 0,
+      edit_was_rejected: editResult.wasRejected,
+    });
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 edit_graph dispatch — freshness derivation failed; analysis_ready will omit freshness fields',
+    );
+  }
+
   try {
     // llm_calls_used: handleEditGraph makes at least one LLM call for the
     // edit classification + repair loop. Using 1 as an honest minimum.
@@ -489,7 +541,13 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch committed',
     );
-    return { response, commitPerformed: true, analysisReady, graph: editResult.appliedGraph ?? null };
+    return {
+      response,
+      commitPerformed: true,
+      analysisReady,
+      graph: editResult.appliedGraph ?? null,
+      ...(freshness ? { freshness } : {}),
+    };
   } catch (err) {
     log.error(
       {
@@ -499,6 +557,12 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch — commit failed',
     );
-    return { response, commitPerformed: false, analysisReady, graph: editResult.appliedGraph ?? null };
+    return {
+      response,
+      commitPerformed: false,
+      analysisReady,
+      graph: editResult.appliedGraph ?? null,
+      ...(freshness ? { freshness } : {}),
+    };
   }
 }

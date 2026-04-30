@@ -483,6 +483,11 @@ export const TelemetryEvents = {
   /** Soft signal: current graph hash was null (graph absent on this
    *  turn) so the comparison was impossible. */
   AnalysisFreshnessGraphHashMissing: "v5.analysis_freshness.graph_hash_missing",
+  /** Selection signal: which fact won and why. Separate from .derived so
+   *  operators can grep "fact_selected" without parsing the bigger event.
+   *  Fires only when a fact was actually selected (selected_fact_index
+   *  non-null). */
+  AnalysisFreshnessFactSelected: "v5.analysis_freshness.fact_selected",
 
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:

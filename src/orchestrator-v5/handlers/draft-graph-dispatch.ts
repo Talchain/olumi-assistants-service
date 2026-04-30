@@ -50,12 +50,16 @@ import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { buildTurnContext } from '../build-turn-context.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { deriveAnalysisFreshness } from '../context/freshness.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -82,6 +86,13 @@ export interface DispatchDraftGraphResult {
    * not produce a graph — sanitiser falls back to prefix-aware generic.
    */
   readonly graph: GraphV3T | null;
+  /**
+   * V5 state-trust freshness derivation. Draft is the first-turn brief
+   * shape — there is no prior run_analysis fact yet. Expected to be
+   * `none` in normal use; surfaced for telemetry / contract consistency
+   * and to make the wire field present on every CEE dispatch path.
+   */
+  readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
 }
 
 /**
@@ -262,6 +273,42 @@ export async function dispatchDraftGraph(
       commitResult.graphPersisted && draftResult.analysisReady
         ? (draftResult.analysisReady as AnalysisReadyPayload)
         : undefined;
+
+    // V5 state-trust: derive freshness — first-turn drafts have no
+    // prior fact chain so freshness === 'none' is the expected outcome.
+    // Computed against the post-draft graph for completeness so the
+    // wire `current_graph_hash` field is populated.
+    let freshness: import('../context/freshness.js').FreshnessDerivation | undefined;
+    try {
+      const turnContext = await buildTurnContext(payload, requestId);
+      const currentGraphHash = computeAnalysisAffectingGraphHash(
+        draftResult.graphOutput as GraphStateIngress | null | undefined,
+      );
+      freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
+      emit(TelemetryEvents.AnalysisFreshnessDerived, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'draft_graph',
+        freshness: freshness.freshness,
+        reason: freshness.reason,
+        selected_fact_index: freshness.selected_fact_index,
+        graph_hash_at_run: freshness.graph_hash_at_run,
+        current_graph_hash: freshness.current_graph_hash,
+        computed_at: freshness.computed_at,
+        prior_fact_count: turnContext.prior_facts.length,
+        current_turn_fact_count: 0,
+      });
+    } catch (err) {
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'V5 draft_graph dispatch — freshness derivation failed; analysis_ready will omit freshness fields',
+      );
+    }
+
     log.info(
       {
         request_id: requestId,
@@ -273,7 +320,13 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch committed',
     );
-    return { response, commitPerformed: true, analysisReady, graph: draftResult.graphOutput };
+    return {
+      response,
+      commitPerformed: true,
+      analysisReady,
+      graph: draftResult.graphOutput,
+      ...(freshness ? { freshness } : {}),
+    };
   } catch (err) {
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
     // Client sees the generic retry prompt; the response built below is server-side only.

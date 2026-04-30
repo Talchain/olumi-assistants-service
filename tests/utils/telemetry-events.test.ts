@@ -412,6 +412,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // telemetry events, ALSO add them here so this canary keeps flagging
         // accidental renames.
         AnalysisFreshnessDerived: "v5.analysis_freshness.derived",
+        AnalysisFreshnessFactSelected: "v5.analysis_freshness.fact_selected",
         AnalysisFreshnessGraphHashMissing: "v5.analysis_freshness.graph_hash_missing",
         AnalysisFreshnessInvariantFailed: "v5.analysis_freshness.invariant_failed",
         BoundaryValidation: "boundary.validation",
@@ -953,6 +954,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // V5 state-trust freshness derivation (debug-only until Datadog
         // alignment lands; structured logs are the source of truth).
         TelemetryEvents.AnalysisFreshnessDerived,
+        TelemetryEvents.AnalysisFreshnessFactSelected,
         TelemetryEvents.AnalysisFreshnessGraphHashMissing,
         TelemetryEvents.AnalysisFreshnessInvariantFailed,
         // Answer-carrying explanation handlers (debug-only — no Datadog
@@ -1365,6 +1367,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.deterministic_value_update",
         // V5 alpha hardening Phase 2.5: primary lifecycle events.
         "v5.analysis_freshness.derived",
+        "v5.analysis_freshness.fact_selected",
         "v5.analysis_freshness.graph_hash_missing",
         "v5.analysis_freshness.invariant_failed",
         "v5.context_pack.assembled",
