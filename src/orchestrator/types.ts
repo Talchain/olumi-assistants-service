@@ -582,10 +582,11 @@ export interface GraphPatchBlockData {
     computed_at?: string;
     /**
      * V5 state-trust freshness verdict. Tells the UI whether the analysis
-     * matches the current graph state. Optional for backwards compatibility
-     * with pre-state-trust dispatch paths (system_event, draft_graph,
-     * edit_graph, chip_click) — those omit the field; absence is treated
-     * as "freshness unknown" by the UI.
+     * matches the current graph state. Populated on every primary CEE
+     * dispatch path (turn_executor, chip_click, draft_graph, edit_graph).
+     * The `?` means "additive contract for forward compat" — future
+     * dispatch paths can adopt the wire fields gradually without breaking
+     * existing UI consumers; current paths always emit it.
      */
     freshness?: 'fresh' | 'stale' | 'unknown' | 'none';
     /** Stable string code for the freshness reason — debug / telemetry. */

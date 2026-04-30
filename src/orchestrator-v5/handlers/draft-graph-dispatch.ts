@@ -61,7 +61,7 @@ import {
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -279,22 +279,26 @@ export async function dispatchDraftGraph(
     // V5 state-trust: derive freshness WITHOUT a session-store read.
     // Draft is the first-turn brief shape — the dispatcher invariant
     // pinned by route-v2-draft-graph-persistence.test.ts forbids
-    // readRecent here. We CANNOT prove the prior fact chain is empty
-    // (an old scenario could be replayed to /orchestrate/v2/turn with
-    // a frame-stage payload), so emitting a confident `none` could
-    // mask a stale prior analysis.
+    // readRecent here.
     //
-    // Instead emit `unknown` with reason `draft_graph_first_turn_assumption`.
-    // The freshness state is honestly "we did not look". UI sees
-    // `unknown` and renders no rerun chip; operators see the
-    // assumption in telemetry and can investigate replay scenarios if
-    // needed.
+    // Wire freshness is `none` — the canonical "no successful
+    // run_analysis fact" verdict. That's the honest user-facing state:
+    // a brand new session has no prior analysis. UI handles `none`
+    // exactly the same as it handles "no fact found via lookup", so
+    // the wire stays consistent with non-shortcut dispatch paths.
+    //
+    // A separate telemetry-only event (`first_turn_assumed`) records
+    // the operator-facing assumption that we did not read the chain
+    // to verify it was empty. Replay scenarios (where a "first-turn"
+    // shape lands on a session with prior facts) surface as a divergence
+    // between the wire `none` and any later turn's actual `freshness`
+    // verdict — operators have a grep target.
     const currentGraphHash = computeAnalysisAffectingGraphHash(
       draftResult.graphOutput as GraphStateIngress | null | undefined,
     );
     const freshness: FreshnessDerivation = {
-      freshness: 'unknown',
-      reason: 'draft_graph_first_turn_assumption',
+      freshness: 'none',
+      reason: 'no_successful_run_analysis_fact',
       selected_fact_index: null,
       graph_hash_at_run: null,
       current_graph_hash: currentGraphHash,
@@ -312,6 +316,12 @@ export async function dispatchDraftGraph(
         current_turn_fact_count: 0,
       },
     );
+    emit(TelemetryEvents.AnalysisFreshnessFirstTurnAssumed, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'draft_graph',
+      reason: 'dispatcher_invariant_forbids_readRecent',
+    });
 
     log.info(
       {

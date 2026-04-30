@@ -20,9 +20,19 @@
  *     not Date.now)
  *   - the TurnOutcome internal contract
  *
- * No side effects. No reads from disk or env. All decisions derive from
- * the inputs alone — replacing them with mocks in tests is a function
- * call, not a mock injection.
+ * Side-effect split:
+ *   - `deriveAnalysisFreshness`, `selectRunAnalysisFact`, and
+ *     `enforceInvariants` are PURE functions. No I/O, no telemetry, no
+ *     reads from disk or env. All decisions derive from the inputs
+ *     alone — replacing them in tests is a function call, not a mock
+ *     injection.
+ *   - `emitFreshnessTelemetry` is the SIDE-EFFECTING companion. It
+ *     emits the full event family (derived / fact_selected /
+ *     invariant_failed / graph_hash_missing / first_turn_assumed
+ *     when relevant) for a single derivation. Lives in this module so
+ *     the event-family logic stays adjacent to the verdict types;
+ *     production call sites decide when to emit (most call once per
+ *     derivation; tests may skip emitting entirely).
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -51,13 +61,7 @@ export type FreshnessReason =
   /** Dispatcher attempted derivation and failed (session-store error,
    *  bad graph parse, etc.). Honours the "always emit freshness"
    *  contract instead of dropping the wire fields silently. */
-  | 'derivation_failed'
-  /** First-turn `draft_graph` assumes an empty prior fact chain by
-   *  construction. The dispatcher invariant pinned by
-   *  route-v2-draft-graph-persistence.test.ts forbids the read that
-   *  would prove it. We surface `unknown` rather than confidently
-   *  reporting `none` so operators see the assumption in telemetry. */
-  | 'draft_graph_first_turn_assumption';
+  | 'derivation_failed';
 
 /**
  * Verdict + provenance. `computed_at` is the selected fact's run-time
@@ -445,12 +449,23 @@ export function emitFreshnessTelemetry(
       selected_fact_index: derivation.selected_fact_index,
     });
   }
-  if (derivation.reason === 'current_graph_hash_unavailable') {
+  // graph_hash_missing fires whenever a hash comparison was IMPOSSIBLE —
+  // either current graph hash unavailable on this turn OR the selected
+  // fact predates 0.10.0 and has no graph_hash_at_run. Both are
+  // legitimately "comparison not possible because hash data missing".
+  if (
+    derivation.reason === 'current_graph_hash_unavailable' ||
+    derivation.reason === 'legacy_fact_missing_hash'
+  ) {
     emit(TelemetryEvents.AnalysisFreshnessGraphHashMissing, {
       request_id: context.request_id,
       scenario_id: context.scenario_id,
       dispatch_path: context.dispatch_path,
       selected_fact_index: derivation.selected_fact_index,
+      missing_side:
+        derivation.reason === 'current_graph_hash_unavailable'
+          ? 'current_graph_hash'
+          : 'graph_hash_at_run',
     });
   }
 }

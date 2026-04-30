@@ -334,3 +334,121 @@ describe('chip-click-dispatch — analysisReady surfacing (V5 finaliser brief)',
     expect(out.analysisReady).toBeUndefined();
   });
 });
+
+// ─── V5 state-trust — REAL freshness derivation (not mocked) ──────────────
+
+describe('chip-click-dispatch — freshness derivation runs against produced fact', () => {
+  beforeEach(() => {
+    // vi.clearAllMocks() only clears call history — it does NOT drain
+    // queued mockResolvedValueOnce / mockRejectedValueOnce. The previous
+    // describe block's last test queues a rejection on
+    // loadScenarioSnapshotForRunAnalysisMock that would otherwise leak
+    // into the first test here. mockReset() drains both call history
+    // AND queued returns AND the implementation, giving each test a
+    // pristine mock.
+    loadScenarioSnapshotForRunAnalysisMock.mockReset();
+    handlerFnMock.mockReset();
+    vi.clearAllMocks();
+    enrichRunAnalysisMock.mockImplementation(async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts);
+    commitDirectAnswerMock.mockResolvedValue({
+      response: {},
+      performed: true,
+      persisted_row_id: 'row-1',
+      graphPersisted: true,
+    });
+    createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
+  });
+
+  it('produces freshness=fresh when handler emits a fact whose graph_hash_at_run matches the snapshot graph hash', async () => {
+    const snapshot = snapshotFor(READY_GRAPH);
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshot);
+
+    // Compute the actual analysis-affecting hash for the snapshot graph.
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../context/graph-hash.js'
+    );
+    const expectedHash = computeAnalysisAffectingGraphHash(
+      snapshot.graph as never,
+    )!;
+
+    // Handler returns a fact stamped with the matching hash. The
+    // dispatcher's freshness derivation block must read this fact and
+    // produce 'fresh' — NOT mocked.
+    handlerFnMock.mockResolvedValueOnce({
+      assistant_text: 'Ran analysis on your current scenario.',
+      handler_facts: [
+        {
+          fact_type: 'run_analysis' as const,
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: SCENARIO_ID,
+            leading_option_id: 'opt_launch',
+            win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+            summary: 'Ran analysis on your current scenario.',
+            enrichment: { analysis_status: 'computed' },
+            graph_hash_at_run: expectedHash,
+            computed_at: '2026-04-30T12:00:00.000Z',
+          },
+        },
+      ],
+      llm_calls_used: 0,
+    });
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-real-freshness',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    // Real-derivation assertions: the dispatcher computed these from
+    // (a) the fact the handler produced and (b) the snapshot graph.
+    // No mock pre-set freshness on the result.
+    expect(out.freshness).toBeDefined();
+    expect(out.freshness!.freshness).toBe('fresh');
+    expect(out.freshness!.reason).toBe('graph_hash_match');
+    expect(out.freshness!.graph_hash_at_run).toBe(expectedHash);
+    expect(out.freshness!.current_graph_hash).toBe(expectedHash);
+    expect(out.freshness!.computed_at).toBe('2026-04-30T12:00:00.000Z');
+  });
+
+  it('produces freshness=stale when the produced fact records a different graph hash than the snapshot', async () => {
+    // Edge case: handler produces a fact with a hash that does NOT match
+    // the snapshot graph (could happen if the handler used a different
+    // graph internally, or if the fact came from a previous turn). The
+    // derivation must compare honestly and report stale.
+    const snapshot = snapshotFor(READY_GRAPH);
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshot);
+
+    handlerFnMock.mockResolvedValueOnce({
+      assistant_text: 'Ran analysis on your current scenario.',
+      handler_facts: [
+        {
+          fact_type: 'run_analysis' as const,
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: SCENARIO_ID,
+            leading_option_id: 'opt_launch',
+            win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+            summary: 'Ran analysis on your current scenario.',
+            enrichment: { analysis_status: 'computed' },
+            graph_hash_at_run: 'forced_mismatch_',
+            computed_at: '2026-04-30T12:00:00.000Z',
+          },
+        },
+      ],
+      llm_calls_used: 0,
+    });
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-real-stale',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.freshness!.freshness).toBe('stale');
+    expect(out.freshness!.reason).toBe('graph_hash_diverged');
+    expect(out.freshness!.graph_hash_at_run).toBe('forced_mismatch_');
+  });
+});

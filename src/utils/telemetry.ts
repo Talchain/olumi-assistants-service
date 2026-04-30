@@ -488,6 +488,13 @@ export const TelemetryEvents = {
    *  Fires only when a fact was actually selected (selected_fact_index
    *  non-null). */
   AnalysisFreshnessFactSelected: "v5.analysis_freshness.fact_selected",
+  /** Telemetry-only marker for dispatcher paths (currently draft_graph)
+   *  that synthesise the freshness verdict without reading the prior
+   *  fact chain. The wire freshness still reflects the canonical state
+   *  (none / unknown); this event records the assumption so operators
+   *  can investigate replay scenarios where a "first-turn" trigger
+   *  shape lands on a session that already has a prior fact. */
+  AnalysisFreshnessFirstTurnAssumed: "v5.analysis_freshness.first_turn_assumed",
 
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:

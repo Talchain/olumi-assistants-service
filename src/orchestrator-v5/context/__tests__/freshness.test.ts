@@ -3,11 +3,16 @@
  * derivation. Exercises the full decision tree against curated
  * prior_facts arrays and current-graph-hash inputs.
  */
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { deriveAnalysisFreshness, enforceInvariants } from '../freshness.js';
+import {
+  deriveAnalysisFreshness,
+  emitFreshnessTelemetry,
+  enforceInvariants,
+} from '../freshness.js';
 import type { FreshnessDerivation } from '../freshness.js';
+import { setTestSink } from '../../../utils/telemetry.js';
 
 // Valid UUID v4 for fact.result.scenario_id (z.string().uuid()).
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -403,5 +408,183 @@ describe('enforceInvariants — hard invariant violations', () => {
       computed_at: null,
     };
     expect(enforceInvariants(valid)).toEqual(valid);
+  });
+});
+
+// ─── emitFreshnessTelemetry — direct event-family coverage ─────────────
+
+describe('emitFreshnessTelemetry — event family by derivation reason', () => {
+  let captured: Array<{ event: string; data: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    captured = [];
+    setTestSink((event, data) => {
+      // Capture only freshness-family events; ignore unrelated emissions
+      // from boundary / config / etc that may fire in this scope.
+      if (event.startsWith('v5.analysis_freshness.')) {
+        captured.push({ event, data });
+      }
+    });
+  });
+
+  afterEach(() => {
+    setTestSink(null);
+  });
+
+  const ctx = {
+    request_id: 'req-emit-test',
+    scenario_id: 'scn-emit-test',
+    dispatch_path: 'unit_test',
+  };
+
+  function eventNames(): string[] {
+    return captured.map((c) => c.event);
+  }
+
+  it('fresh verdict → derived + fact_selected (NO invariant_failed, NO graph_hash_missing)', () => {
+    const fresh: FreshnessDerivation = {
+      freshness: 'fresh',
+      reason: 'graph_hash_match',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'h1',
+      current_graph_hash: 'h1',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    emitFreshnessTelemetry(fresh, ctx);
+    expect(eventNames()).toEqual([
+      'v5.analysis_freshness.derived',
+      'v5.analysis_freshness.fact_selected',
+    ]);
+    const derived = captured[0]!.data;
+    expect(derived.freshness).toBe('fresh');
+    expect(derived.reason).toBe('graph_hash_match');
+    expect(derived.dispatch_path).toBe('unit_test');
+    expect(derived.selected_fact_index).toBe(0);
+    expect(derived.graph_hash_at_run).toBe('h1');
+    expect(derived.current_graph_hash).toBe('h1');
+    expect(derived.computed_at).toBe('2026-04-30T00:00:00.000Z');
+    const factSelected = captured[1]!.data;
+    expect(factSelected.selected_fact_index).toBe(0);
+    expect(factSelected.reason).toBe('graph_hash_match');
+    expect(factSelected.graph_hash_at_run).toBe('h1');
+  });
+
+  it('stale verdict → derived + fact_selected', () => {
+    const stale: FreshnessDerivation = {
+      freshness: 'stale',
+      reason: 'graph_hash_diverged',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'h_old',
+      current_graph_hash: 'h_new',
+      computed_at: '2026-04-29T00:00:00.000Z',
+    };
+    emitFreshnessTelemetry(stale, ctx);
+    expect(eventNames()).toEqual([
+      'v5.analysis_freshness.derived',
+      'v5.analysis_freshness.fact_selected',
+    ]);
+  });
+
+  it('none verdict → derived only (no fact selected)', () => {
+    const none: FreshnessDerivation = {
+      freshness: 'none',
+      reason: 'no_successful_run_analysis_fact',
+      selected_fact_index: null,
+      graph_hash_at_run: null,
+      current_graph_hash: 'h1',
+      computed_at: null,
+    };
+    emitFreshnessTelemetry(none, ctx);
+    expect(eventNames()).toEqual(['v5.analysis_freshness.derived']);
+  });
+
+  it('legacy_fact_missing_hash → derived + fact_selected + graph_hash_missing (broadened trigger)', () => {
+    const legacy: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'legacy_fact_missing_hash',
+      selected_fact_index: 0,
+      graph_hash_at_run: null,
+      current_graph_hash: 'h1',
+      computed_at: '2026-04-29T00:00:00.000Z',
+    };
+    emitFreshnessTelemetry(legacy, ctx);
+    expect(eventNames()).toEqual([
+      'v5.analysis_freshness.derived',
+      'v5.analysis_freshness.fact_selected',
+      'v5.analysis_freshness.graph_hash_missing',
+    ]);
+    const missing = captured[2]!.data;
+    expect(missing.missing_side).toBe('graph_hash_at_run');
+  });
+
+  it('current_graph_hash_unavailable → derived + fact_selected + graph_hash_missing', () => {
+    const noCurrent: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'current_graph_hash_unavailable',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'h1',
+      current_graph_hash: null,
+      computed_at: '2026-04-29T00:00:00.000Z',
+    };
+    emitFreshnessTelemetry(noCurrent, ctx);
+    expect(eventNames()).toEqual([
+      'v5.analysis_freshness.derived',
+      'v5.analysis_freshness.fact_selected',
+      'v5.analysis_freshness.graph_hash_missing',
+    ]);
+    const missing = captured[2]!.data;
+    expect(missing.missing_side).toBe('current_graph_hash');
+  });
+
+  it('invariant_failed reason → derived + invariant_failed (and fact_selected when index non-null)', () => {
+    const violated: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'invariant_failed',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'h1',
+      current_graph_hash: 'h1',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    emitFreshnessTelemetry(violated, ctx);
+    expect(eventNames()).toEqual([
+      'v5.analysis_freshness.derived',
+      'v5.analysis_freshness.fact_selected',
+      'v5.analysis_freshness.invariant_failed',
+    ]);
+    const inv = captured[2]!.data;
+    expect(inv.dispatch_path).toBe('unit_test');
+    expect(inv.graph_hash_at_run).toBe('h1');
+    expect(inv.current_graph_hash).toBe('h1');
+  });
+
+  it('derivation_failed reason → derived only (no fact selected, no missing-hash event)', () => {
+    const failed: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'derivation_failed',
+      selected_fact_index: null,
+      graph_hash_at_run: null,
+      current_graph_hash: 'h1',
+      computed_at: null,
+    };
+    emitFreshnessTelemetry(failed, ctx);
+    expect(eventNames()).toEqual(['v5.analysis_freshness.derived']);
+    expect(captured[0]!.data.reason).toBe('derivation_failed');
+  });
+
+  it('extras are passed through on the derived event only', () => {
+    const fresh: FreshnessDerivation = {
+      freshness: 'fresh',
+      reason: 'graph_hash_match',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'h1',
+      current_graph_hash: 'h1',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    emitFreshnessTelemetry(fresh, ctx, { prior_fact_count: 7, custom_tag: 'foo' });
+    expect(captured[0]!.data.prior_fact_count).toBe(7);
+    expect(captured[0]!.data.custom_tag).toBe('foo');
+    // fact_selected event does NOT receive the extras — keeps the
+    // selection event's shape minimal and grep-friendly.
+    expect(captured[1]!.data.prior_fact_count).toBeUndefined();
   });
 });
