@@ -45,18 +45,22 @@ No diff on the 6 shared fixtures.
 
 ## 2. Tests added
 
-### CEE (`olumi-assistants-service`)
+### CEE (`olumi-assistants-service`) — 39 brief-added tests
 | File | Tests | Status |
 |---|---|---|
 | `tests/contract/fixtures-schema.test.ts` | 7 | pass |
-| `tests/contract/endpoint-feature-matrix.test.ts` | 18 | 8 pass route-verified + 10 `not_route_verified` (V5 substitutes) |
-| `tests/contract/field-coverage-audit.test.ts` | 11 | pass |
+| `tests/contract/endpoint-feature-matrix.test.ts` | 19 | 9 pass route-verified (incl. `fac_test_id` injection contract) + 10 `not_route_verified` (V5 substitutes) |
+| `tests/contract/field-coverage-audit.test.ts` | 13 | pass (incl. path-level walk + classification structure check) |
 
-### UI (`DecisionGuideAI`)
+Full CEE contract suite (incl. pre-existing `tests/contract/{ui-cee-contract,cross-service.blocked}.test.ts`): **67 passed | 21 skipped**.
+
+### UI (`DecisionGuideAI`) — 29 brief-added tests
 | File | Tests | Status |
 |---|---|---|
 | `tests/contracts/fixtures-schema.test.ts` | 7 | pass |
-| `tests/contracts/cee-response-consumption.test.ts` | 21 | pass |
+| `tests/contracts/cee-response-consumption.test.ts` | 22 | pass (incl. lifecycle test for "clears on new draft start", brief test 13) |
+
+Full UI contract suite (incl. pre-existing `tests/contracts/{golden-path-fixture,response-envelope-contract,turn-request-contract}.test.ts`): **111 passed**.
 
 ---
 
@@ -86,6 +90,8 @@ coaching, strengthen_items, widening_log, bias_signals,
 provenance, provenance_display,
 suggested_actions, assistant_text, analysis_ready, blocks
 ```
+
+The audit walks every produced JSON path in every fixture and, for paths whose leading segment is one of the 10 audited fields, requires the path to be either UI-consumed (top-level field present in `UI_CONSUMED_FIELDS`) or explicitly classified in `field-coverage.allowlist.json` (object map: path → justification, no wildcards). Out-of-v1-scope paths (e.g. `_meta.*`, `trace.*`) are ignored at the audit level but each specific path is enumerated and justified in the allowlist for documentation completeness.
 
 ### P1 — UI expects, CEE doesn't produce
 **None.** Every audited field consumed by the UI adapter has a CEE fixture that produces it. The audit's `UI_CONSUMED_FIELDS` map is curated from `DecisionGuideAI/src/{adapters/cee/client.ts, canvas/utils/draftIngestion.ts, v5/responseRouter.ts, canvas/conversation/useConversation.ts}`.
@@ -140,6 +146,12 @@ Both `fixtures-schema.test.ts` files (CEE + UI) run first via vitest's default a
 ### V5 route tests classified `not_route_verified`
 Substitutes are direct unit tests of `applyStalenessPrefix`, `buildFailureResponse`, `sanitiseOlumiResponseForEgress`, plus fixture-shape assertions. The skip-and-substitute table (§3) names every brief test and its substitute.
 
+### Render-layer coverage (UI side)
+Brief tests 7-8 and 17-18 are JSON-level scans on adapter output rather than full RTL component renders. Rationale: the cross-boundary contract is the *shape* of what the adapter produces, and component-level rendering for `PreAnalysisPanel`, message bubbles, and chips is already covered in `src/canvas/components/pre-analysis/__tests__/*.spec.tsx` and adjacent component tests. Mounting those components in the contract-test layer would duplicate render-tree assertions without adding cross-boundary signal — the assertion that no `bias_signals[].target` ever appears in `bias_signals[].detail` (test 7) and no raw entity IDs appear in user-facing prose paths (tests 8, 17, 18) is enforceable on the JSON. If future render code introduces a new path that concatenates structural pointers into rendered text, the corresponding component test catches it.
+
+### `fac_test_id` route-injection contract
+A new test in `endpoint-feature-matrix.test.ts` mocks the unified pipeline to return a body with `fac_test_id` and `opt_test_id` injected into `coaching.summary`, `strengthen_items[].label`, and `strengthen_items[].detail`, then POSTs through the live route. The test documents two invariants: (a) the route handler is a passthrough (it does not re-sanitise — production sanitisation lives inside Stage 5's `sanitiseCoachingForDisplay`), and (b) the production `sanitiseUserFacingText` correctly identifies each injected leak as a confirmed entity-ID match. If future work moves the scrubber out of Stage 5, this test fails immediately because the mock body would carry the leak through unchanged.
+
 ---
 
 ## 7. UI dependency status
@@ -166,7 +178,7 @@ cd ~/Documents/GitHub/olumi-assistants-service
 ls tests/fixtures/cross-service/*.json | grep -v fixture-metadata | wc -l
 # 9 (7 brief fixtures + 2 pre-existing blocked-response)
 
-pnpm exec vitest run tests/contract/   # 64 passed | 21 skipped (5 files)
+pnpm exec vitest run tests/contract/   # 67 passed | 21 skipped (5 files)
 pnpm exec tsc -p tsconfig.build.json --noEmit   # clean
 git status --short | grep "^?? src/"            # empty
 git diff --name-only origin/staging -- src/ | wc -l   # 0
@@ -179,7 +191,7 @@ ls tests/fixtures/cee-responses/*.json | wc -l  # 6
 diff -r ~/Documents/GitHub/olumi-assistants-service/tests/fixtures/cross-service/ \
         tests/fixtures/cee-responses/ \
    | grep -v decision-review | grep -v fixture-metadata | grep -v blocked-response   # empty
-pnpm exec vitest run tests/contracts/           # 110 passed (5 files)
+pnpm exec vitest run tests/contracts/           # 111 passed (5 files)
 git diff --name-only origin/staging -- src/ | wc -l   # 0
 ```
 

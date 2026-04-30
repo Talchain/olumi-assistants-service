@@ -91,6 +91,39 @@ function fixtureContainsField(fixture: unknown, fieldName: string): boolean {
   return false;
 }
 
+/**
+ * Walk every leaf and intermediate object key in a JSON value, yielding
+ * dotted JSON paths with `[]` for arrays. Used by the path-level audit to
+ * compare exact produced paths against the allowlist + UI consumption.
+ */
+function* walkPaths(value: unknown, path: string): Generator<string> {
+  if (value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      yield* walkPaths(child, `${path}[]`);
+    }
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const childPath = path ? `${path}.${k}` : k;
+      yield childPath;
+      yield* walkPaths(v, childPath);
+    }
+  }
+}
+
+/**
+ * Normalise an array-aware path so leaf-level lookups against the allowlist
+ * match either of the two conventions used in the JSON file:
+ *   - `bias_signals[].target` (array container marker)
+ *   - `coaching.bias_signals.target` (no marker)
+ * The audit accepts both.
+ */
+function pathVariants(path: string): string[] {
+  return [path, path.replace(/\[\]/g, "")];
+}
+
 interface Allowlist {
   audited_fields: ReadonlyArray<string>;
   diagnostic_allowed: Readonly<Record<string, string>>;
@@ -137,6 +170,44 @@ describe("field-coverage audit (v1)", () => {
         ).toBe(true);
       }
     }
+  });
+
+  it("path-level audit: every produced path under an audited field is either consumed by UI or in the allowlist", () => {
+    // v1 scope (per brief): walk all paths but only fail on paths whose
+    // leading segment is one of the 10 audited fields. Anything else is
+    // out of v1 audit scope and treated as out-of-scope diagnostic noise.
+    const allowedPaths = new Set<string>();
+    for (const cat of CLASSIFIED_CATEGORIES) {
+      const map = typedAllowlist[cat] as Readonly<Record<string, string>>;
+      for (const k of Object.keys(map)) allowedPaths.add(k);
+    }
+    // UI consumed shorthand → a UI consumer reads at least the named
+    // top-level field; sub-paths under it are presumed consumed via the
+    // adapter's defensive walk (e.g. mapDraftCoachingFromResponse reads
+    // every sub-field of coaching). This matches the brief's v1 stance:
+    // P1 is missing top-level fields, not missing sub-fields.
+    const uiConsumed = new Set(Object.keys(UI_CONSUMED_FIELDS));
+
+    const violations: string[] = [];
+    for (const { name, fixture } of FIXTURES) {
+      for (const path of walkPaths(fixture, "")) {
+        const head = path.split(/[.[]/)[0];
+        if (!audited.includes(head)) continue;
+        // Path falls under an audited field. Pass if EITHER:
+        //   (a) head is in UI_CONSUMED_FIELDS — adapter consumes the subtree
+        //   (b) any path-variant is explicitly classified in the allowlist
+        if (uiConsumed.has(head)) continue;
+        const variants = pathVariants(path);
+        if (variants.some((v) => allowedPaths.has(v))) continue;
+        violations.push(`${name}: ${path}`);
+      }
+    }
+    expect(
+      violations.length,
+      "Produced paths under audited fields must be either UI-consumed (top-level field in UI_CONSUMED_FIELDS) " +
+        "or explicitly classified in field-coverage.allowlist.json. Unclassified paths:\n  " +
+        violations.join("\n  "),
+    ).toBe(0);
   });
 
   for (const field of audited) {
