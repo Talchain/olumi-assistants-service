@@ -26,7 +26,10 @@ class ProcessExitError extends Error {
 import {
   stubFetchRouter,
   REPLAY_FIXTURE_ANALYSIS_READY,
+  REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH,
   REPLAY_FIXTURE_ASSISTANT_TEXT,
+  REPLAY_FIXTURE_STALE_TURN,
+  isStep7Message,
 } from './_test-helpers.js';
 
 let originalArgv: string[] = [];
@@ -42,6 +45,13 @@ describe('full replay run (mocked staging service)', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     delete process.env.OLUMI_REPLAY_API_KEY;
+    // Existing tests pre-date the min-build gate added by the
+    // golden-journey replay extension. They mock /healthz with deliberate
+    // SHAs (66d1adb, etc.) that aren't necessarily ancestors of the new
+    // min-build floor. Bypass the gate so these tests keep validating
+    // their original contracts; new tests in min-build.test.ts cover the
+    // gate itself.
+    vi.stubEnv('OLUMI_REPLAY_ALLOW_STALE_DEPLOY', 'true');
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       consoleLogs.push(args.map((a) => String(a)).join(' '));
     });
@@ -84,7 +94,7 @@ describe('full replay run (mocked staging service)', () => {
       '--scenario-prefix',
       'staging-test',
     ];
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
@@ -97,7 +107,15 @@ describe('full replay run (mocked staging service)', () => {
           },
         };
       }
+      if (url.endsWith('/assist/v1/draft-graph')) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH };
+      }
       if (url.endsWith('/orchestrate/v2/turn')) {
+        // Step 7 needs a staleness-prefixed body with a rerun chip; all
+        // other turns get the generic substantive fixture.
+        if (isStep7Message(body)) {
+          return { status: 200, jsonValue: REPLAY_FIXTURE_STALE_TURN };
+        }
         return {
           status: 200,
           jsonValue: {
@@ -150,7 +168,7 @@ describe('full replay run (mocked staging service)', () => {
       '/tmp/v5-evidence-test-halt.md',
     ];
     let turnCallCount = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
@@ -223,14 +241,20 @@ describe('full replay run (mocked staging service)', () => {
       '--out',
       '/tmp/v5-local.md',
     ];
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
           jsonValue: { ok: true, build: 'localdev', version: '0', service: 'assistants' },
         };
       }
+      if (url.endsWith('/assist/v1/draft-graph')) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH };
+      }
       if (url.endsWith('/orchestrate/v2/turn')) {
+        if (isStep7Message(body)) {
+          return { status: 200, jsonValue: REPLAY_FIXTURE_STALE_TURN };
+        }
         return {
           status: 200,
           jsonValue: {
@@ -262,7 +286,7 @@ describe('full replay run (mocked staging service)', () => {
       '--out',
       '/tmp/v5-boundary.md',
     ];
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, body) => {
       if (url.endsWith('/healthz')) {
         return { status: 200, jsonValue: { ok: true, build: '66d1adb', version: '0.0.1' } };
       }

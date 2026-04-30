@@ -31,6 +31,8 @@ describe('dependency cascade — failed step blocks all dependents', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     delete process.env.OLUMI_REPLAY_API_KEY;
+    // Bypass the new min-build gate (mocked /healthz uses an older SHA).
+    vi.stubEnv('OLUMI_REPLAY_ALLOW_STALE_DEPLOY', 'true');
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     originalArgv = process.argv;
@@ -66,7 +68,7 @@ describe('dependency cascade — failed step blocks all dependents', () => {
     ];
 
     let postCount = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, _body) => {
       if (url.endsWith('/healthz')) {
         return { status: 200, jsonValue: { ok: true, build: '66d1adb', version: '1', service: 'assistants' } };
       }
@@ -123,7 +125,7 @@ describe('dependency cascade — failed step blocks all dependents', () => {
       '/tmp/v5-transitive.md',
     ];
 
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, _body) => {
       if (url.endsWith('/healthz')) {
         return { status: 200, jsonValue: { ok: true, build: '66d1adb' } };
       }
@@ -137,6 +139,6 @@ describe('dependency cascade — failed step blocks all dependents', () => {
     const pack = writes[0]!.content;
     // Match step 5 row and confirm it skipped, with the prereq message
     // naming step 4 (the direct depends_on) — proving transitive skip.
-    expect(pack).toMatch(/`5_explain_leader` \| \[SKIP\] skipped \| skipped \| — \| skipped: prerequisite 4_run_analysis did not pass/);
+    expect(pack).toMatch(/`5_explain_leader` \| \[SKIP\] skipped \| skipped \|.*\| skipped_dependency: prerequisite 4_run_analysis did not pass/);
   });
 });

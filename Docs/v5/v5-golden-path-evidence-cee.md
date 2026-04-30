@@ -9,31 +9,31 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 | Replay reached orchestrator | yes |
 | v38.2 confirmed (startup / healthz build) | yes |
 | v38.2 confirmed (per-turn) | not capturable |
-| run_analysis passed end-to-end (handler + commit + response) | yes |
-| Analysis persisted into follow-up context | yes |
+| run_analysis passed end-to-end (handler + commit + response) | not externally verified |
+| Analysis persisted into follow-up context | not externally verified |
 | No internal terms in user-facing text | yes |
 
 ## Run metadata
 
-- **Branch:** `staging`
-- **Pack generated from commit SHA:** `f0dcbebb8a67f36916bb567d4b1d663c96fb0162` (if this does not match HEAD, regenerate with the harness)
+- **Branch:** `claude/cross-boundary-contract-tests`
+- **Pack generated from commit SHA:** `c7cfb91d87dfd61f702513c6c7cd0a97a100385f` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-04-28T10:28:48.449Z
+- **Started at:** 2026-04-30T14:28:52.283Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
-- **Expected build:** `f0dcbeb`
+- **Expected build:** `a555cf7`
 
 ## Deploy confirmation (Phase 2)
 
 - **GET /healthz status:** 200
-- **build (commit short):** `f0dcbeb`
+- **build (commit short):** `a555cf7`
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 294ms
+- **elapsed:** 856ms
 
-Deploy confirmed: `/healthz` build `f0dcbeb` matches `--expected-build f0dcbeb`.
+Deploy confirmed: `/healthz` build `a555cf7` matches `--expected-build a555cf7`.
 
 **Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
@@ -47,39 +47,62 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=35403ms | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=817 chip_count=1 elapsed=7457ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=298 chip_count=0 elapsed=5933ms stage=frame | — |
-| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=5449ms | — |
-| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1638 labels_checked=4 chip_count=1 | — |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=185 chip_count=0 elapsed=6175ms stage=frame | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=31334ms | — |
+| `1a_assist_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 nodes=17 edges=29 node_provenance=17/17 edge_provenance_display=29/29 coaching=absent | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=789 chip_count=1 elapsed=7181ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=530 chip_count=0 elapsed=7776ms stage=frame | — |
+| `4_run_analysis` | [FAIL] failed | v5-runtime | 200 | leaks=[$.blocks[0].enrichment.critiques[0].message:opt_hire_local, $.blocks[0].enrichment.critiques[1].message:opt_offshore, $.blocks[0].enrichment.critiques[2].message:opt_status_quo, $.blocks[0].enrichment] | analysis_run entity_id_leak |
+| `5_explain_leader` | [SKIP] skipped | skipped | — | skipped_dependency: prerequisite 4_run_analysis did not pass | skipped_dependency: 4_run_analysis |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=123 chip_count=0 elapsed=6066ms stage=frame | — |
+| `7_stale_explanation` | [FAIL] failed | v5-runtime | 200 | text_starts="Hire Two Senior Engineers Locally is the leading option at 0.76 probability, wit" expected_prefix_first_30="These results are from a prior" | step_7_missing_staleness_prefix |
+| `8_rerun_via_chip` | [SKIP] skipped | skipped | — | skipped_dependency: prerequisite 7_stale_explanation did not pass | skipped_dependency: 7_stale_explanation |
+| `9_what_would_flip` | [SKIP] skipped | skipped | — | skipped_dependency: prerequisite 8_rerun_via_chip did not pass | skipped_dependency: 8_rerun_via_chip |
+
+### Per-step feature observation summary
+
+Layered on top of the pass/fail table above. Captures *what features the response actually exhibited* (coaching, provenance, staleness prefix, recovery chip, etc.) and any non-fatal warnings raised by the new Wave 1–3 assertions. A step with `passed` status here may still surface warnings — they document soft contract divergences without failing the run.
+
+| step | endpoint | status | features observed | warnings | failures | response saved |
+|---|---|---|---|---|---|---|
+| `1_draft_graph` | orchestrate/v2/turn | [PASS] passed | — | — | — | yes |
+| `1a_assist_draft_graph` | assist/v1/draft-graph | [PASS] passed | node_provenance, edge_provenance_display | coaching_absent (CEE may not produce coaching on every draft) | — | no |
+| `2_weakest_option` | orchestrate/v2/turn | [PASS] passed | — | — | — | yes |
+| `3_add_option` | orchestrate/v2/turn | [PASS] passed | — | — | — | yes |
+| `4_run_analysis` | orchestrate/v2/turn | [FAIL] failed | — | — | analysis_run entity_id_leak | yes |
+| `5_explain_leader` | orchestrate/v2/turn | [SKIP] skipped | — | — | skipped_dependency: 4_run_analysis | no |
+| `6_edit_budget` | orchestrate/v2/turn | [PASS] passed | — | — | — | yes |
+| `7_stale_explanation` | orchestrate/v2/turn | [FAIL] failed | — | — | step_7_missing_staleness_prefix | yes |
+| `8_rerun_via_chip` | orchestrate/v2/turn | [SKIP] skipped | — | — | skipped_dependency: 7_stale_explanation | no |
+| `9_what_would_flip` | orchestrate/v2/turn | [SKIP] skipped | — | — | skipped_dependency: 8_rerun_via_chip | no |
 
 ### assistant_text per step (redacted)
 
 #### `1_draft_graph`
 
 ```
-Drafted a decision graph with 16 nodes and 31 edges.
+Drafted a decision graph with 16 nodes and 28 edges.
 ```
 
 #### `2_weakest_option`
 
 ```
-Looking at the model structure, **Maintain Current Team (Status Quo)** is the weakest path.
+Looking at the model structure, Status Quo is the weakest-looking option. It has no mechanism to increase Engineering Capacity beyond the current 0.3 (15 engineers), and the causal pathway to your goal runs through Delivery Throughput and Q3 Roadmap Coverage, both of which depend heavily on capacity. Without adding capacity, those outcomes stay flat while the risks remain.
 
-Here is why the model points there: Status Quo connects to Engineering Delivery Capacity, but without adding headcount or revenue, it leaves that factor at its current level (0.3 on a 0-1 scale). It also carries Coordination and Management Overhead without the offsetting benefit of new capacity, and it is the only option with no mechanism to reduce Budget Overrun Risk over time. Every path to your goal runs through Q3 Roadmap Delivery Confidence, and Status Quo does the least to move that needle.
+The other three options all activate the Engineering Capacity link to Delivery Throughput (strength 0.65) and Roadmap Coverage (strength 0.55). Status Quo simply does not.
 
-The one factor worth probing: how stretched is the current team actually running? If your team is underutilised, Status Quo looks less weak than the model suggests. If they are already at capacity, the model's read holds.
+That said, no analysis has been run yet, so this is structural reasoning rather than a computed ranking. Running the simulation would show you the actual probability gap between Status Quo and the leading option. Would you like to do that?
 ```
 
 #### `3_add_option`
 
 ```
-What option would you like to add? A couple of directions that aren't yet in the model:
+I want to make sure I add something genuinely useful rather than a generic option. What option did you have in mind?
 
-- **Contract/freelance engineers** for short-term capacity without permanent headcount
-- **Redistribute scope** by cutting or deferring Q3 roadmap items to match current team capacity
-- Something else entirely
+For context, the model currently compares hiring locally, engaging an offshore partner, gradual hiring via tiered pricing, and maintaining the status quo. A few directions that might make sense here:
+
+- A **contractor or freelance** route (short-term capacity without permanent headcount)
+- A **hybrid** approach (one local hire plus a smaller offshore engagement)
+- Something else entirely that you have in mind
 ```
 
 #### `4_run_analysis`
@@ -88,28 +111,18 @@ What option would you like to add? A couple of directions that aren't yet in the
 Ran analysis on your current scenario.
 ```
 
-#### `5_explain_leader`
-
-```
-The analysis flags Hire Two Senior Engineers Locally as the leading option, but I need to be transparent: the analysis was loaded from a prior run with unknown freshness, and the top drivers and robustness band are not available in the current context. I can reason from the model structure, but I want to be clear this is structural inference, not computed sensitivity data.
-
-Here is what the model suggests is driving the result:
-
-**Engineering Delivery Capacity is the central mechanism.** It carries the strongest edge to Q3 Roadmap Delivery Confidence (strength 0.65, confidence 0.92) and the strongest negative edge to Q3 Delivery Slip (strength -0.5, confidence 0.90). Hiring locally drives delivery capacity directly, without the coordination drag that the offshore path introduces.
-
-**No coordination overhead penalty.** The offshore option activates Coordination and Management Overhead, which pulls down roadmap delivery confidence and increases delivery slip risk. Local hiring avoids that drag entirely.
-
-**Cost is contained within the budget constraint.** Hiring and Staffing Cost drives Budget Overrun Risk strongly (0.7), but the £200k cap is already modelled, so local hiring stays within the constraint rather than breaching it.
-
-The runner-up, Introduce Tiered Pricing to Fund Gradual Hiring, adds Revenue Uplift as a partial offset to cost risk, but the delivery capacity effect arrives more slowly, which likely costs it ground on the Q3 goal specifically.
-
-To get computed sensitivity rankings rather than structural inference, running a fresh analysis would give you the actual driver weights. Would that be useful?
-```
-
 #### `6_edit_budget`
 
 ```
-What value would you like to set for Hiring and Staffing Cost? The factor currently has a cap of £200,000 , are you thinking of something like £250,000, £300,000, or a different figure?
+The model has two cost-related factors: Hiring and Staffing Cost and Cost Overrun Risk. Which one did you mean to increase?
+```
+
+#### `7_stale_explanation`
+
+```
+Hire Two Senior Engineers Locally is the leading option at 0.76 probability, with a 55.3 percentage point margin over the runner-up, Maintain Current Team (Status Quo), at 0.21.
+
+Note that the analysis was loaded from a prior run, so it's worth rerunning to confirm these figures reflect the current model. Would you like to do that?
 ```
 
 ## Canonical steps (from brief)

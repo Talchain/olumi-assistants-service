@@ -11,7 +11,10 @@ import type { HealthzResult } from '../../../tools/v5-journey-replay/types.js';
 import {
   stubFetchRouter,
   REPLAY_FIXTURE_ANALYSIS_READY,
+  REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH,
   REPLAY_FIXTURE_ASSISTANT_TEXT,
+  REPLAY_FIXTURE_STALE_TURN,
+  isStep7Message,
 } from './_test-helpers.js';
 
 const SENTINEL = 'SENTINEL-LEAK-CANARY-DO-NOT-MATCH-PROD-xyz123';
@@ -311,6 +314,13 @@ describe('run() honours the deploy gate', () => {
     delete process.env.OLUMI_REPLAY_API_KEY;
     delete process.env.OLUMI_REPLAY_ALLOW_STALE_DEPLOY;
     delete process.env.OLUMI_REPLAY_EXPECTED_BUILD;
+    delete process.env.OLUMI_REPLAY_MIN_BUILD;
+    // Tests in this describe-block focus on the deploy gate, not the
+    // newer min-build gate. Pass --min-build matching the mock SHA so
+    // the min-build short-circuit fires per-test (some tests verify the
+    // stale-deploy override; setting OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true
+    // here would make those tests stop exercising the override). Instead
+    // each test sets `--min-build=<their_mock_build>`.
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     originalArgv = process.argv;
@@ -343,7 +353,7 @@ describe('run() honours the deploy gate', () => {
       '/tmp/v5-malformed.md',
     ];
     let orchestrateCalls = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, _body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
@@ -376,7 +386,7 @@ describe('run() honours the deploy gate', () => {
       '/tmp/v5-strict-mismatch.md',
     ];
     let orchestrateCalls = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, _body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
@@ -411,25 +421,38 @@ describe('run() honours the deploy gate', () => {
       STAGING,
       '--out',
       '/tmp/v5-default-pass.md',
+      // Pin the min-build to the mock SHA so the new min-build gate's
+      // exact-equality short-circuit fires (otherwise it would attempt
+      // a git ancestry check against an arbitrary local repo state).
+      '--min-build',
+      SAMPLE_BUILD,
     ];
     let orchestrateCalls = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
           jsonValue: { ok: true, build: SAMPLE_BUILD, version: '1', service: 'assistants' },
         };
       }
+      if (url.endsWith('/assist/v1/draft-graph')) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH };
+      }
+      if (!url.endsWith('/orchestrate/v2/turn')) {
+        return { status: 404, jsonValue: {} };
+      }
       orchestrateCalls += 1;
+      // Step 7 needs the staleness fixture; all other turns get the
+      // generic substantive fixture.
+      if (isStep7Message(body)) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_STALE_TURN };
+      }
       return {
         status: 200,
         jsonValue: {
           response_version: 2,
           assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
-          // Step 4 hard-fails when analysis_ready is absent. Including
-          // it on every step is harmless (schema-optional) and lets the
-          // shared fixture serve all 6 canonical steps.
           analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
         },
       };
@@ -437,8 +460,10 @@ describe('run() honours the deploy gate', () => {
 
     const mod = await importFreshRun();
     await mod.run();
-    // 1 preflight + 6 canonical steps = 7 POSTs.
-    expect(orchestrateCalls).toBe(7);
+    // 1 preflight + 9 turn-route canonical steps (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    // = 10 POSTs to /orchestrate/v2/turn. Step 1a hits /assist/v1/draft-graph
+    // and is excluded from this counter.
+    expect(orchestrateCalls).toBe(10);
     const pack = writes[0]!.content;
     expect(pack).toMatch(/well-formed/);
   });
@@ -452,15 +477,23 @@ describe('run() honours the deploy gate', () => {
       STAGING,
       '--expected-build',
       SAMPLE_BUILD,
+      '--min-build',
+      SAMPLE_BUILD,
       '--out',
       '/tmp/v5-strict-match.md',
     ];
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
           jsonValue: { ok: true, build: SAMPLE_BUILD, version: '1', service: 'assistants' },
         };
+      }
+      if (url.endsWith('/assist/v1/draft-graph')) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH };
+      }
+      if (isStep7Message(body)) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_STALE_TURN };
       }
       return {
         status: 200,
@@ -468,9 +501,6 @@ describe('run() honours the deploy gate', () => {
           response_version: 2,
           assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
-          // Step 4 hard-fails when analysis_ready is absent. Including
-          // it on every step is harmless (schema-optional) and lets the
-          // shared fixture serve all 6 canonical steps.
           analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
         },
       };
@@ -494,7 +524,7 @@ describe('run() honours the deploy gate', () => {
       '/tmp/v5-degraded.md',
     ];
     let orchestrateCalls = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, _body) => {
       if (url.endsWith('/healthz')) {
         return {
           status: 200,
@@ -531,20 +561,26 @@ describe('run() honours the deploy gate', () => {
       '/tmp/v5-override.md',
     ];
     let orchestrateCalls = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, body) => {
       if (url.endsWith('/healthz')) {
         return { status: 200, jsonValue: { ok: true, build: 'abc', version: '0', service: 'assistants' } };
       }
+      if (url.endsWith('/assist/v1/draft-graph')) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH };
+      }
+      if (!url.endsWith('/orchestrate/v2/turn')) {
+        return { status: 404, jsonValue: {} };
+      }
       orchestrateCalls += 1;
+      if (isStep7Message(body)) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_STALE_TURN };
+      }
       return {
         status: 200,
         jsonValue: {
           response_version: 2,
           assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
           suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
-          // Step 4 hard-fails when analysis_ready is absent. Including
-          // it on every step is harmless (schema-optional) and lets the
-          // shared fixture serve all 6 canonical steps.
           analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
         },
       };
@@ -552,7 +588,9 @@ describe('run() honours the deploy gate', () => {
 
     const mod = await importFreshRun();
     await mod.run();
-    // Override allowed the run to proceed: 1 preflight + 6 canonical steps = 7 POSTs.
-    expect(orchestrateCalls).toBe(7);
+    // Override allowed the run to proceed: 1 preflight + 9 turn steps = 10 POSTs
+    // to /orchestrate/v2/turn. Step 1a hits /assist/v1/draft-graph (excluded
+    // from this counter).
+    expect(orchestrateCalls).toBe(10);
   });
 });

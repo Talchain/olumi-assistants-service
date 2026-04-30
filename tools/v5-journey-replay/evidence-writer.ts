@@ -50,6 +50,7 @@ function escapePipes(s: string): string {
 function statusLabel(s: string): string {
   if (s === 'passed') return '[PASS]';
   if (s === 'failed') return '[FAIL]';
+  if (s === 'transient_failure') return '[TRANSIENT]';
   return '[SKIP]';
 }
 
@@ -274,6 +275,34 @@ export function renderEvidencePack(
     }
   }
   lines.push('');
+
+  // ---- Per-step feature observation summary (Wave 1–3 extension) ----
+  if (rows.length > 0) {
+    lines.push('### Per-step feature observation summary');
+    lines.push('');
+    lines.push(
+      'Layered on top of the pass/fail table above. Captures *what features the ' +
+        'response actually exhibited* (coaching, provenance, staleness prefix, ' +
+        'recovery chip, etc.) and any non-fatal warnings raised by the new ' +
+        'Wave 1–3 assertions. A step with `passed` status here may still surface ' +
+        'warnings — they document soft contract divergences without failing the run.',
+    );
+    lines.push('');
+    lines.push('| step | endpoint | status | features observed | warnings | failures | response saved |');
+    lines.push('|---|---|---|---|---|---|---|');
+    for (const row of rows) {
+      const features = (row.features_observed ?? []).join(', ') || '—';
+      const warns = (row.warnings ?? []).map((w) => escapePipes(redact(w))).join('; ') || '—';
+      const failure = row.failing_contract ? escapePipes(redact(row.failing_contract)) : '—';
+      const saved =
+        typeof row.assistant_text === 'string' && row.assistant_text.length > 0 ? 'yes' : 'no';
+      const endpoint = row.endpoint ?? 'orchestrate/v2/turn';
+      lines.push(
+        `| \`${row.step}\` | ${endpoint} | ${statusLabel(row.status)} ${row.status} | ${escapePipes(features)} | ${warns} | ${failure} | ${saved} |`,
+      );
+    }
+    lines.push('');
+  }
 
   // Per-step assistant_text dump. Folded under the table rather than
   // into a column so the table stays scannable. Pre-fix baseline showed

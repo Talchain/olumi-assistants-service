@@ -4,7 +4,7 @@
 
 import type { OutcomeClass } from './classify-outcome.js';
 
-export type StepStatus = 'passed' | 'failed' | 'skipped';
+export type StepStatus = 'passed' | 'failed' | 'skipped' | 'transient_failure';
 
 export interface EvidenceRow {
   readonly step: string;
@@ -27,6 +27,25 @@ export interface EvidenceRow {
    * blind spot. Always redacted via `redactString` before write.
    */
   readonly assistant_text?: string;
+  /**
+   * Non-fatal observations from the new (Wave 1–3) assertions: missing
+   * coaching on a draft, unobservable decision-review enrichment, lenient
+   * internal-term hits, etc. Surfaced in the per-step feature observation
+   * table without affecting pass/fail.
+   */
+  readonly warnings?: ReadonlyArray<string>;
+  /**
+   * Short tags describing what features this step's response actually
+   * exhibited (e.g. `coaching`, `node_provenance`, `staleness_prefix`,
+   * `rerun_chip`). Drives the per-step feature observation table.
+   */
+  readonly features_observed?: ReadonlyArray<string>;
+  /**
+   * Endpoint label for the per-step feature observation table.
+   * Defaults to `'orchestrate/v2/turn'` when the step uses postTurn,
+   * `'assist/v1/draft-graph'` for the assist-route step.
+   */
+  readonly endpoint?: string;
 }
 
 export interface TurnResponse {
@@ -41,6 +60,19 @@ export interface TurnResponse {
   }>;
   readonly insights?: ReadonlyArray<unknown>;
   readonly stage_indicator?: string;
+  /**
+   * V5 wire field stamped by `run_analysis` handler turns. Shape is
+   * `AnalysisReadyPayload` from src/schemas/analysis-ready.ts. Carried as
+   * `unknown` here because the harness narrows it with a cast at the
+   * use-site rather than maintaining a parallel type definition.
+   */
+  readonly analysis_ready?: unknown;
+  /**
+   * V5 wire field stamped on draft-graph turns. The harness consumes only
+   * `draft_graph.nodes[]` to extract option labels for downstream
+   * label-reference assertions.
+   */
+  readonly draft_graph?: unknown;
   // BoundaryError shape (4xx/5xx). All optional — present only on the
   // error envelope path.
   readonly error?: string;
@@ -110,4 +142,14 @@ export interface HarnessConfig {
    * well-formed.
    */
   readonly expectedBuild?: string;
+  /**
+   * Minimum-build SHA the deploy must be at-or-after for the new
+   * coaching / provenance / recovery / output-safety assertions to be
+   * meaningful. Resolved from `--min-build` flag (preferred) or
+   * `OLUMI_REPLAY_MIN_BUILD` env var, defaulting to the merge SHA of
+   * commit `a555cf7` (`feat(cee): expose coaching + per-node/edge
+   * provenance on /assist/v1/draft-graph`). Verified via local
+   * `git merge-base --is-ancestor`; see `min-build.ts`.
+   */
+  readonly minBuild?: string;
 }

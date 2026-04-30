@@ -1,5 +1,5 @@
 /**
- * V5 alpha hardening Phase 3 — six canonical journey steps from Paul's brief.
+ * V5 alpha hardening Phase 3 — canonical journey steps.
  *
  * Each step defines a request payload + per-step assertion (via
  * `./assertions.ts`). The CLI threads outputs through the evidence writer.
@@ -10,28 +10,58 @@
  * HTTP 200, no BoundaryError, no internal terms.
  *
  * Step 4b (correction 14) — PLoT unknown status with unusable fields →
- * typed fatal. This is covered by the handler-level unit test at
+ * typed fatal. Covered by the handler-level unit test at
  * src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts
  * and cannot be exercised through the HTTP boundary without injecting a
- * mock PLoT response. The evidence pack references that unit test as
- * authoritative coverage.
+ * mock PLoT response.
+ *
+ * Wave 1–3 extension: steps 1a (coaching + provenance via /assist/v1),
+ * 7 (stale explanation + rerun chip), 8 (rerun via captured chip), and
+ * 9 (what-would-flip) layer on top of the original six. The new
+ * `endpoint` discriminator on `JourneyStep` selects between
+ * /orchestrate/v2/turn (default) and /assist/v1/draft-graph.
  */
 
 import { randomUUID } from 'node:crypto';
 
 import type { TurnPayload } from './client.js';
+import type { AssistDraftGraphPayload } from './assist-client.js';
+
+/**
+ * Tagged request descriptor returned by `JourneyStep.buildPayload`. The
+ * runner inspects `kind` and dispatches to the right transport.
+ */
+export type StepRequest =
+  | { readonly kind: 'turn'; readonly payload: TurnPayload }
+  | { readonly kind: 'assist_draft_graph'; readonly payload: AssistDraftGraphPayload };
 
 export interface JourneyStep {
   readonly name: string;
   readonly description: string;
-  readonly buildPayload: (ctx: JourneyContext) => TurnPayload;
-  /** If true, step only makes sense after a prior step has completed. */
+  readonly buildPayload: (ctx: JourneyContext) => StepRequest;
+  /** If set, step only makes sense after the named step has passed. */
   readonly depends_on?: string;
 }
 
+/**
+ * Mutable journey context. The runner owns the only writable handle and
+ * patches in captured outputs after each step (e.g. step-7 captures the
+ * stale rerun chip into `staleRerunChip` for step 8 to replay). Steps and
+ * assertions never mutate the context directly — assertions communicate
+ * via their `captured` back-channel and the runner copies values across.
+ */
 export interface JourneyContext {
   readonly scenario_id: string;
   readonly turn_counter: { value: number };
+  /** Option labels parsed from step 1's draft-graph block. Populated by the runner. */
+  step1OptionLabels?: readonly string[];
+  /** Rerun chip captured from step 7. Read by step 8 to replay the click. */
+  staleRerunChip?: {
+    readonly id: string;
+    readonly label: string;
+    readonly message: string;
+    readonly action_type: string;
+  };
 }
 
 export function mkTurnId(): string {
@@ -44,19 +74,34 @@ const DECISION_BRIEF =
   'engage an offshore partner, or introduce tiered pricing to hire more ' +
   'gradually. Decision matters for Q3 roadmap commitments.';
 
+function turnRequest(payload: TurnPayload): StepRequest {
+  return { kind: 'turn', payload };
+}
+
 export const CANONICAL_STEPS: readonly JourneyStep[] = [
   {
     name: '1_draft_graph',
     description:
       'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
-    buildPayload: (ctx) => ({
-      kind: 'message',
-      turn_id: mkTurnId(),
-      scenario_id: ctx.scenario_id,
-      stage: 'frame',
-      message: DECISION_BRIEF,
-      turn_class: 'frame',
-      source: 'composer',
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'frame',
+        message: DECISION_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      }),
+  },
+  {
+    name: '1a_assist_draft_graph',
+    description:
+      'POST same brief to /assist/v1/draft-graph → assert coaching shape + per-node/edge provenance enums.',
+    depends_on: '1_draft_graph',
+    buildPayload: () => ({
+      kind: 'assist_draft_graph',
+      payload: { brief: DECISION_BRIEF },
     }),
   },
   {
@@ -64,77 +109,138 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
     description:
       '"Which option looks weakest?" → 200, response references actual option/factor labels from the draft.',
     depends_on: '1_draft_graph',
-    buildPayload: (ctx) => ({
-      kind: 'message',
-      turn_id: mkTurnId(),
-      scenario_id: ctx.scenario_id,
-      stage: 'analyse',
-      message: 'Which option looks weakest?',
-      turn_class: 'decide',
-      source: 'composer',
-    }),
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'analyse',
+        message: 'Which option looks weakest?',
+        turn_class: 'decide',
+        source: 'composer',
+      }),
   },
   {
     name: '3_add_option',
     description:
       '"Add another option" → product-shaped: 200, no BoundaryError, no internal terms. May route to converse/clarify/recoverable validation.',
     depends_on: '1_draft_graph',
-    buildPayload: (ctx) => ({
-      kind: 'message',
-      turn_id: mkTurnId(),
-      scenario_id: ctx.scenario_id,
-      stage: 'frame',
-      message: 'Add another option to this decision.',
-      turn_class: 'frame',
-      source: 'composer',
-    }),
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'frame',
+        message: 'Add another option to this decision.',
+        turn_class: 'frame',
+        source: 'composer',
+      }),
   },
   {
     name: '4_run_analysis',
     description:
       'Emit chip_click payload for Run analysis → 200, PLoT completes, handler fact persisted.',
     depends_on: '1_draft_graph',
-    // source: 'chip_click' + chip.action_type carries the UI chip-click
-    // dispatch signal per talchain v0.7.0 boundary schema.
-    buildPayload: (ctx) => ({
-      kind: 'message',
-      turn_id: mkTurnId(),
-      scenario_id: ctx.scenario_id,
-      stage: 'analyse',
-      message: 'Run analysis.',
-      turn_class: 'decide',
-      source: 'chip_click',
-      chip: { action_type: 'run_analysis' },
-    }),
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'analyse',
+        message: 'Run analysis.',
+        turn_class: 'decide',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      }),
   },
   {
     name: '5_explain_leader',
     description:
-      '"Why does the leading option win?" → 200, response names leading option, probability, a top driver, a caveat. Exercises analysis fallback on follow-up.',
+      '"Why does the leading option win?" → 200, response names leading option, probability, a top driver, a caveat. Exercises analysis fallback on follow-up. Recovery + retry on LLM_TIMEOUT/LLM_UNAVAILABLE.',
     depends_on: '4_run_analysis',
-    buildPayload: (ctx) => ({
-      kind: 'message',
-      turn_id: mkTurnId(),
-      scenario_id: ctx.scenario_id,
-      stage: 'decide',
-      message: 'Why does the leading option win?',
-      turn_class: 'decide',
-      source: 'composer',
-    }),
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'decide',
+        message: 'Why does the leading option win?',
+        turn_class: 'decide',
+        source: 'composer',
+      }),
   },
   {
     name: '6_edit_budget',
     description:
       '"Increase the budget factor" → 200, edit proposal or clarifying question. Recoverable validator path is acceptable.',
     depends_on: '1_draft_graph',
-    buildPayload: (ctx) => ({
-      kind: 'message',
-      turn_id: mkTurnId(),
-      scenario_id: ctx.scenario_id,
-      stage: 'frame',
-      message: 'Increase the budget factor.',
-      turn_class: 'frame',
-      source: 'composer',
-    }),
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'frame',
+        message: 'Increase the budget factor.',
+        turn_class: 'frame',
+        source: 'composer',
+      }),
+  },
+  {
+    name: '7_stale_explanation',
+    description:
+      'Post-edit explanation question → analysis is now stale. Assert canonical staleness prefix and exactly one rerun chip with action_type=run_analysis.',
+    depends_on: '6_edit_budget',
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'decide',
+        message: 'Which option is currently leading?',
+        turn_class: 'decide',
+        source: 'composer',
+      }),
+  },
+  {
+    name: '8_rerun_via_chip',
+    description:
+      "Click step 7's captured rerun chip — exact message + action_type=run_analysis. Assert fresh analysis (no staleness prefix) or recovery shape.",
+    depends_on: '7_stale_explanation',
+    // chip-click payload mirrors src/orchestrator/route-v2.ts:466–473 — keep
+    // in sync if the dispatch contract changes.
+    buildPayload: (ctx) => {
+      const chip = ctx.staleRerunChip;
+      if (!chip) {
+        throw new Error(
+          'step 8 buildPayload called without ctx.staleRerunChip — did step 7 fail to capture the rerun chip?',
+        );
+      }
+      return turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'analyse',
+        message: chip.message,
+        turn_class: 'decide',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      });
+    },
+  },
+  {
+    name: '9_what_would_flip',
+    description:
+      '"What would need to change for the runner-up to perform best?" → references factors / options by label, substantive narrative, no entity-id leaks.',
+    depends_on: '8_rerun_via_chip',
+    buildPayload: (ctx) =>
+      turnRequest({
+        kind: 'message',
+        turn_id: mkTurnId(),
+        scenario_id: ctx.scenario_id,
+        stage: 'decide',
+        message: 'What would need to change for the runner-up to perform best?',
+        turn_class: 'decide',
+        source: 'composer',
+      }),
   },
 ];

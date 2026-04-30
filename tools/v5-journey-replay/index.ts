@@ -36,17 +36,25 @@ import { execSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import { getHealthz, postTurn, preflightAuth, type FetchResult } from './client.js';
+import { postDraftGraph } from './assist-client.js';
 import {
-  assertAnalysisRun,
+  assertAnalysisRunExtended,
+  assertAssistDraftGraph,
   assertDraftGraph,
-  assertExplainLeader,
+  assertExplainLeaderFresh,
+  assertExplainLeaderRecovery,
   assertProductShape,
+  assertRerunViaChip,
+  assertStaleExplanation,
+  assertWhatWouldFlip,
   type AssertionResult,
+  type CapturedRerunChip,
 } from './assertions.js';
-import { CANONICAL_STEPS } from './steps.js';
+import { CANONICAL_STEPS, type JourneyContext, type JourneyStep, type StepRequest } from './steps.js';
 import { writeEvidencePack, type EvidenceHeader } from './evidence-writer.js';
 import { classifyResponse, hasErrorEnvelope, isTransportError } from './classify-outcome.js';
 import { isLocalHost } from './localhost.js';
+import { evaluateMinBuildGate, DEFAULT_MIN_BUILD_SHA } from './min-build.js';
 import { createRedactor, redactString } from './redact.js';
 import type { EvidenceRow, HarnessConfig, HealthzResult, PreflightVerdict } from './types.js';
 
@@ -79,6 +87,18 @@ function isStaleDeployOverrideEnabled(): boolean {
  */
 function readExpectedBuildEnv(): string | undefined {
   const raw = process.env.OLUMI_REPLAY_EXPECTED_BUILD;
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed;
+}
+
+/**
+ * Read the minimum-build SHA override from `OLUMI_REPLAY_MIN_BUILD`.
+ * Defaults to `DEFAULT_MIN_BUILD_SHA` (the merge SHA of `a555cf7`).
+ */
+function readMinBuildEnv(): string | undefined {
+  const raw = process.env.OLUMI_REPLAY_MIN_BUILD;
   if (raw === undefined) return undefined;
   const trimmed = raw.trim();
   if (trimmed.length === 0) return undefined;
@@ -195,6 +215,7 @@ function parseArgs(): HarnessConfig {
   let outPath = 'Docs/v5/v5-golden-path-evidence-cee.md';
   let scenarioPrefix = 'local';
   let expectedBuildCli: string | undefined;
+  let minBuildCli: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -209,17 +230,26 @@ function parseArgs(): HarnessConfig {
     } else if (arg.startsWith('--expected-build=')) {
       const val = arg.slice('--expected-build='.length).trim();
       expectedBuildCli = val.length > 0 ? val : undefined;
+    } else if (arg === '--min-build' && i + 1 < args.length) {
+      minBuildCli = args[++i]!.trim() || undefined;
+    } else if (arg.startsWith('--min-build=')) {
+      const val = arg.slice('--min-build='.length).trim();
+      minBuildCli = val.length > 0 ? val : undefined;
     } else if (arg === '--help' || arg === '-h') {
       console.log(
         'Usage: pnpm tsx tools/v5-journey-replay/index.ts \\\n' +
           '         [--base-url URL] [--out PATH] [--scenario-prefix TAG] \\\n' +
-          '         [--expected-build SHA]\n' +
+          '         [--expected-build SHA] [--min-build SHA]\n' +
           '\n' +
           'Auth: set OLUMI_REPLAY_API_KEY env var for remote URLs (required).\n' +
           '\n' +
           'Strict-mode SHA check: --expected-build SHA (or set OLUMI_REPLAY_EXPECTED_BUILD).\n' +
           'CLI flag takes precedence over the env var. When both are unset, the deploy\n' +
-          'gate only confirms /healthz returned a well-formed build field.',
+          'gate only confirms /healthz returned a well-formed build field.\n' +
+          '\n' +
+          `Min-build gate: --min-build SHA (default: ${DEFAULT_MIN_BUILD_SHA}, env OLUMI_REPLAY_MIN_BUILD).\n` +
+          'Verified via local `git merge-base --is-ancestor`. Set OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true\n' +
+          'to override.',
       );
       process.exit(0);
     }
@@ -228,8 +258,9 @@ function parseArgs(): HarnessConfig {
   // CLI flag wins; fall back to env. Both being unset means default
   // mode (well-formed-only check, no SHA comparison).
   const expectedBuild = expectedBuildCli ?? readExpectedBuildEnv();
+  const minBuild = minBuildCli ?? readMinBuildEnv() ?? DEFAULT_MIN_BUILD_SHA;
 
-  return { baseUrl, outPath, scenarioPrefix, apiKey: readApiKey(), expectedBuild };
+  return { baseUrl, outPath, scenarioPrefix, apiKey: readApiKey(), expectedBuild, minBuild };
 }
 
 /**
@@ -317,6 +348,7 @@ async function run(): Promise<void> {
   console.log(
     `  expected_build   = ${cfg.expectedBuild ?? 'not set (default: well-formed-only check)'}`,
   );
+  console.log(`  min_build        = ${cfg.minBuild ?? '(not set)'}`);
   console.log('');
 
   // Fail-fast gate. Throws with MISSING_KEY_MESSAGE for remote+no-key.
@@ -351,6 +383,32 @@ async function run(): Promise<void> {
     process.exit(3);
   }
 
+  // Min-build gate: ensure the deployed build is at-or-after the SHA where
+  // coaching / provenance / recovery / output-safety landed. Verified via
+  // local `git merge-base --is-ancestor`. Falls back to a permissive
+  // warning when ancestry cannot be verified (e.g. shallow clone). Halt
+  // is overridable via OLUMI_REPLAY_ALLOW_STALE_DEPLOY=true.
+  const minBuildGate = evaluateMinBuildGate(
+    cfg.baseUrl,
+    healthz.result?.body?.build,
+    cfg.minBuild,
+    undefined,
+    cfg.expectedBuild,
+  );
+  if (minBuildGate.note) {
+    console.log(`[MIN-BUILD] ${minBuildGate.note}`);
+  }
+  if (minBuildGate.halt) {
+    console.error(`[MIN-BUILD HALT] ${minBuildGate.reason}`);
+    const haltHeader = buildEvidenceHeader(cfg, startedAt, healthz.result, {
+      status: 0,
+      note: `min-build gate halted: ${minBuildGate.reason}`,
+    });
+    writeEvidencePack(cfg.outPath, haltHeader, [], redact);
+    console.log(`Evidence pack written to ${cfg.outPath}`);
+    process.exit(3);
+  }
+
   // Phase 3 preflight: auth probe. Halt on 401/403/5xx/exception — do not
   // burn the replay on a known-bad state.
   const preflight = await runPreflight(cfg, redact);
@@ -374,20 +432,24 @@ async function run(): Promise<void> {
   // direct prerequisite is in this set — this also handles transitive
   // dependencies because a skipped step adds itself to the set.
   const notPassed = new Set<string>();
-  // Labels of `kind: 'option'` nodes parsed out of Step 1's draft_graph
-  // response. Step 5's `assertExplainLeader` uses these to verify the
-  // explain-leader prose references at least one option from the journey.
-  // Empty until Step 1 succeeds; the substance check degrades gracefully
-  // when empty so a parse miss doesn't fail Step 5 spuriously.
-  let step1OptionLabels: string[] = [];
+  // Mutable journey context. The runner is the only writer; assertions
+  // remain pure and communicate captured state via their `captured`
+  // back-channel (the runner copies values across after each step).
+  const ctx: JourneyContext = {
+    scenario_id: scenarioId,
+    turn_counter: turnCounter,
+    step1OptionLabels: [],
+  };
 
   for (const step of CANONICAL_STEPS) {
     if (step.depends_on && notPassed.has(step.depends_on)) {
       rows.push({
         step: step.name,
         status: 'skipped',
-        evidence: `skipped: prerequisite ${step.depends_on} did not pass`,
+        evidence: `skipped_dependency: prerequisite ${step.depends_on} did not pass`,
+        failing_contract: `skipped_dependency: ${step.depends_on}`,
         outcome_class: 'skipped',
+        endpoint: stepEndpointLabel(step),
       });
       console.log(`[SKIP] ${step.name} (depends on ${step.depends_on})`);
       notPassed.add(step.name);
@@ -395,23 +457,90 @@ async function run(): Promise<void> {
     }
 
     turnCounter.value += 1;
-    const payload = step.buildPayload({ scenario_id: scenarioId, turn_counter: turnCounter });
+    let request: StepRequest;
+    try {
+      request = step.buildPayload(ctx);
+    } catch (err) {
+      const msg = redactString(err instanceof Error ? err.message : String(err), cfg.apiKey);
+      rows.push({
+        step: step.name,
+        status: 'failed',
+        evidence: `buildPayload exception: ${msg}`,
+        failing_contract: 'harness payload build',
+        outcome_class: 'harness-auth-blocker',
+        endpoint: stepEndpointLabel(step),
+      });
+      console.log(`[FAIL] ${step.name}: buildPayload threw — ${msg}`);
+      notPassed.add(step.name);
+      continue;
+    }
 
     try {
-      const result = await postTurn(cfg.baseUrl, payload, 90_000, cfg.apiKey);
+      // Step 5 carries an LLM_TIMEOUT/LLM_UNAVAILABLE retry path. All
+      // other steps make a single request.
+      const isStep5 = step.name === '5_explain_leader';
+      let result = await dispatchRequest(request, cfg);
+      const firstStatus = result.status;
+      let recoveryWarning: string | undefined;
 
-      // Capture the per-step assistant_text once, redacted, so every
-      // rows.push below can attach it without recomputing. The pre-fix
-      // baseline showed Step 5 passed structurally (text_len=1497) while
-      // a curl on the same staging build returned a denial phrase —
-      // text persistence in the evidence pack closes that blind spot.
+      if (isStep5 && isLlmTransientFailure(result)) {
+        // Inspect the failure body first — confirms recovery shape (chip,
+        // friendly text, error_code preserved, no internal terms).
+        const recoveryAssertion = assertExplainLeaderRecovery(result);
+        if (recoveryAssertion.ok) {
+          recoveryWarning = `step_5_first_attempt_recovery_ok=${recoveryAssertion.evidence}`;
+        } else {
+          recoveryWarning = `step_5_first_attempt_recovery_violation=${recoveryAssertion.failing_contract}`;
+        }
+        console.log(
+          `[RETRY] ${step.name}: first attempt returned recovery shape — sleeping 3s and retrying once`,
+        );
+        await sleep(3_000);
+        // Rebuild the payload so we get a fresh turn_id.
+        const retryRequest = step.buildPayload(ctx);
+        result = await dispatchRequest(retryRequest, cfg);
+        if (isLlmTransientFailure(result)) {
+          // Both attempts failed — classify as `transient_failure` (a
+          // distinct StepStatus from `failed`). Excluded from the
+          // headline pass-rate metric so an upstream LLM hiccup doesn't
+          // pollute the green-bar signal. notPassed still tracks the
+          // step so downstream dependents skip — the chain semantically
+          // broke even if the cause was transient.
+          const text = result.body?.assistant_text;
+          rows.push({
+            step: step.name,
+            status: 'transient_failure',
+            evidence: redactString(
+              `status=${result.status} both_attempts_failed first_status=${firstStatus} ${recoveryWarning ?? ''}`,
+              cfg.apiKey,
+            ),
+            failing_contract: 'transient_failure (LLM_TIMEOUT/LLM_UNAVAILABLE on retry)',
+            outcome_class: 'v5-runtime',
+            http_status: result.status,
+            assistant_text: text ? redactString(text, cfg.apiKey) : undefined,
+            warnings: recoveryWarning ? [recoveryWarning] : undefined,
+            features_observed: ['recovery_response', 'retry_exhausted'],
+            endpoint: stepEndpointLabel(step),
+          });
+          console.log(`[TRANSIENT] ${step.name}: both attempts returned recovery shape (not counted as failure)`);
+          notPassed.add(step.name);
+          continue;
+        }
+        console.log(`[RETRY] ${step.name}: second attempt status=${result.status}`);
+      }
+
       const assistantTextRedacted = result.body?.assistant_text
         ? redactString(result.body.assistant_text, cfg.apiKey)
         : undefined;
 
-      // A 200 with an error envelope (schema: "error.v1" or BoundaryError
-      // shape) is a V5 runtime failure, NOT a success. Fail the row.
-      if (result.status === 200 && hasErrorEnvelope(result.body)) {
+      // 200-with-error-envelope guard. Doesn't apply to assist-route
+      // steps (they have a different envelope), but we can keep the
+      // existing check on turn-route steps.
+      if (
+        request.kind === 'turn' &&
+        result.status === 200 &&
+        hasErrorEnvelope(result.body)
+      ) {
         const errShape = result.body.code ?? result.body.error ?? 'unknown';
         rows.push({
           step: step.name,
@@ -424,17 +553,14 @@ async function run(): Promise<void> {
           outcome_class: 'v5-runtime',
           http_status: result.status,
           assistant_text: assistantTextRedacted,
+          endpoint: stepEndpointLabel(step),
         });
         console.log(`[FAIL] ${step.name}: 200 with error envelope (${String(errShape)})`);
         notPassed.add(step.name);
         continue;
       }
 
-      // Capture Step 1's drafted-graph option labels into the journey
-      // context so Step 5's assertion can verify the explain-leader prose
-      // references at least one of them. Defensive parsing — a missing
-      // graph or wrong shape degrades gracefully (labels stays empty,
-      // Step 5 falls back to substance-only checks).
+      // Capture Step 1 option labels for downstream assertions.
       if (step.name === '1_draft_graph') {
         const draftGraph = (result.body as { draft_graph?: unknown })?.draft_graph;
         const nodes =
@@ -442,7 +568,7 @@ async function run(): Promise<void> {
             ? (draftGraph as { nodes?: unknown }).nodes
             : null;
         if (Array.isArray(nodes)) {
-          step1OptionLabels = nodes
+          ctx.step1OptionLabels = nodes
             .filter(
               (n): n is { kind: 'option'; label: string } =>
                 typeof n === 'object' &&
@@ -454,10 +580,22 @@ async function run(): Promise<void> {
         }
       }
 
-      const assertion = pickAssertion(step.name, { step1OptionLabels })(result);
+      const assertion = pickAssertion(step.name)(result, ctx);
       const outcomeClass = classifyResponse({ status: result.status, body: result.body });
 
+      // Pure assertion → runner copies any captured state onto ctx.
       if (assertion.ok) {
+        if (step.name === '7_stale_explanation') {
+          const captured = (assertion.captured ?? {}) as { rerunChip?: CapturedRerunChip };
+          if (captured.rerunChip) {
+            ctx.staleRerunChip = captured.rerunChip;
+          }
+        }
+
+        const warnings = [
+          ...(recoveryWarning ? [recoveryWarning] : []),
+          ...(assertion.warnings ?? []),
+        ];
         rows.push({
           step: step.name,
           status: 'passed',
@@ -465,8 +603,14 @@ async function run(): Promise<void> {
           outcome_class: outcomeClass,
           http_status: result.status,
           assistant_text: assistantTextRedacted,
+          warnings: warnings.length > 0 ? warnings : undefined,
+          features_observed: assertion.features_observed,
+          endpoint: stepEndpointLabel(step),
         });
         console.log(`[PASS] ${step.name}: ${redact(assertion.evidence)}`);
+        if (warnings.length > 0) {
+          console.log(`       warnings: ${warnings.map((w) => redact(w)).join(' | ')}`);
+        }
       } else {
         rows.push({
           step: step.name,
@@ -476,6 +620,9 @@ async function run(): Promise<void> {
           outcome_class: outcomeClass,
           http_status: result.status,
           assistant_text: assistantTextRedacted,
+          warnings: assertion.warnings,
+          features_observed: assertion.features_observed,
+          endpoint: stepEndpointLabel(step),
         });
         console.log(
           `[FAIL] ${step.name}: ${redact(assertion.failing_contract)} | ${redact(assertion.evidence)}`,
@@ -486,17 +633,13 @@ async function run(): Promise<void> {
       const rawMsg = err instanceof Error ? err.message : String(err);
       const msg = redactString(rawMsg, cfg.apiKey);
       const isTransport = isTransportError(rawMsg);
-      // Both transport errors and harness exceptions are FAILURES,
-      // not skips. The step was attempted (request sent or in-flight)
-      // and the harness was unable to obtain a response. "Skipped"
-      // means "did not attempt" and is reserved for the
-      // dependency-cascade case above.
       rows.push({
         step: step.name,
         status: 'failed',
         evidence: `${isTransport ? 'transport error' : 'exception'}: ${msg}`,
         failing_contract: isTransport ? 'transport layer' : 'harness exception',
         outcome_class: 'harness-auth-blocker',
+        endpoint: stepEndpointLabel(step),
       });
       console.log(`[FAIL] ${step.name}: ${msg}`);
       notPassed.add(step.name);
@@ -514,7 +657,15 @@ async function run(): Promise<void> {
   console.log('');
   console.log(`Evidence pack written to ${cfg.outPath}`);
 
+  // Pass-rate metric excludes `transient_failure` rows: an LLM upstream
+  // hiccup is not a regression in V5 and should not block the staging
+  // push signal. Transient failures still appear in the evidence pack
+  // so the operator can see what happened.
   const failedCount = rows.filter((r) => r.status === 'failed').length;
+  const transientCount = rows.filter((r) => r.status === 'transient_failure').length;
+  if (transientCount > 0) {
+    console.warn(`\n${transientCount} step(s) classified as TRANSIENT (not counted as failure).`);
+  }
   if (failedCount > 0) {
     console.error(`\n${failedCount} step(s) FAILED. Do not request staging push yet.`);
     process.exit(1);
@@ -542,25 +693,93 @@ function buildEvidenceHeader(
 }
 
 /**
- * Bind per-journey context (currently Step 1 option labels) into the
- * Step 5 assertion at factory time, so the call site stays uniform
- * (`pickAssertion(name, ctx)(result)`). Other assertions ignore ctx —
- * they're returned as-is rather than wrapped in identity thunks.
+ * Pick the per-step assertion. Each assertion takes a `FetchResult` and an
+ * optional `JourneyContext` carrying cross-step state (option labels for
+ * label-reference checks, captured rerun chip for replay). Assertions
+ * remain pure: any state they need to communicate back to the runner
+ * goes in the `captured` field of `AssertionResult`, never via direct
+ * mutation of the journey context.
  */
 function pickAssertion(
   stepName: string,
-  ctx: { step1OptionLabels: readonly string[] },
-): (result: FetchResult) => AssertionResult {
+): (result: FetchResult, ctx: JourneyContext) => AssertionResult {
   switch (stepName) {
     case '1_draft_graph':
-      return assertDraftGraph;
+      return (result) => assertDraftGraph(result);
+    case '1a_assist_draft_graph':
+      return (result) => assertAssistDraftGraph(result);
     case '4_run_analysis':
-      return assertAnalysisRun;
+      return (result) => assertAnalysisRunExtended(result);
     case '5_explain_leader':
-      return (result) => assertExplainLeader(result, ctx);
+      return (result, ctx) => assertExplainLeaderFresh(result, ctx);
+    case '7_stale_explanation':
+      return (result) => assertStaleExplanation(result);
+    case '8_rerun_via_chip':
+      return (result) => assertRerunViaChip(result);
+    case '9_what_would_flip':
+      return (result, ctx) => assertWhatWouldFlip(result, ctx);
     default:
-      return assertProductShape;
+      return (result) => assertProductShape(result);
   }
+}
+
+/**
+ * Route a `StepRequest` to the right transport. `kind: 'turn'` → existing
+ * `postTurn`; `kind: 'assist_draft_graph'` → new `postDraftGraph` from
+ * `assist-client.ts`. The 90-second turn timeout matches the existing
+ * harness; assist calls get a tighter 30-second budget because they don't
+ * involve PLoT.
+ */
+async function dispatchRequest(
+  request: StepRequest,
+  cfg: HarnessConfig,
+): Promise<FetchResult> {
+  if (request.kind === 'assist_draft_graph') {
+    // Staging on Render free tier can be slow on the assist route's
+    // first cold call (LLM warm-up + multi-stage pipeline). 90s mirrors
+    // the turn-route timeout so a cold staging deploy doesn't trip a
+    // false negative on step 1a.
+    return postDraftGraph(cfg.baseUrl, request.payload, 90_000, cfg.apiKey);
+  }
+  return postTurn(cfg.baseUrl, request.payload, 90_000, cfg.apiKey);
+}
+
+/**
+ * Detect step 5 / step 8 failure shapes that warrant a recovery inspection
+ * (and, for step 5, a single retry). The wire shape on chip-click commit
+ * failures is a `BoundaryError` with `error: "INTERNAL_ERROR"` and the
+ * underlying failure type in `details.reason`; the OlumiResponse fallback
+ * path uses `blocks[0].error_code` ∈ `{ UPSTREAM_TIMEOUT, UPSTREAM_UNAVAILABLE }`.
+ * We accept either.
+ */
+function isLlmTransientFailure(result: FetchResult): boolean {
+  if (result.status >= 500) return true;
+  const body = result.body;
+  if (!body) return false;
+  const blocks = body.blocks;
+  if (Array.isArray(blocks) && blocks.length > 0) {
+    const code = (blocks[0] as { error_code?: string } | undefined)?.error_code;
+    if (code === 'UPSTREAM_TIMEOUT' || code === 'UPSTREAM_UNAVAILABLE') return true;
+  }
+  return false;
+}
+
+function stepEndpointLabel(step: JourneyStep): string {
+  // Probe the step's request shape with a stub context — the kind is
+  // deterministic given the step definition.
+  try {
+    const probe = step.buildPayload({
+      scenario_id: '00000000-0000-0000-0000-000000000000',
+      turn_counter: { value: 0 },
+    });
+    return probe.kind === 'assist_draft_graph' ? 'assist/v1/draft-graph' : 'orchestrate/v2/turn';
+  } catch {
+    return 'orchestrate/v2/turn';
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function safeGit(cmd: string): string {

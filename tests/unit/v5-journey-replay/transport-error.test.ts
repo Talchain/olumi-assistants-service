@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { stubFetchRouter } from './_test-helpers.js';
+import { stubFetchRouter, REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH } from './_test-helpers.js';
 
 const SENTINEL = 'SENTINEL-LEAK-CANARY-DO-NOT-MATCH-PROD-xyz123';
 const STAGING = 'https://cee-staging.onrender.com';
@@ -34,6 +34,10 @@ describe('mid-replay transport error → attempted row fails, dependents skip, e
     vi.unstubAllEnvs();
     delete process.env.OLUMI_REPLAY_API_KEY;
     delete process.env.OLUMI_REPLAY_ALLOW_STALE_DEPLOY;
+    // Bypass the new min-build gate added by the golden-journey replay
+    // extension. These tests mock /healthz with a deliberate older SHA
+    // (66d1adb) and don't care about coaching/provenance gating.
+    vi.stubEnv('OLUMI_REPLAY_ALLOW_STALE_DEPLOY', 'true');
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     originalArgv = process.argv;
@@ -66,7 +70,7 @@ describe('mid-replay transport error → attempted row fails, dependents skip, e
       '/tmp/v5-transport.md',
     ];
     let orchestrateCalls = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, _body) => {
       if (url.endsWith('/healthz')) {
         return { status: 200, jsonValue: { ok: true, build: EXPECTED_BUILD, service: 'assistants' } };
       }
@@ -110,9 +114,18 @@ describe('mid-replay transport error → attempted row fails, dependents skip, e
       '/tmp/v5-transport-mid.md',
     ];
     let orchestrateCalls = 0;
-    stubFetchRouter((url) => {
+    stubFetchRouter((url, _body) => {
       if (url.endsWith('/healthz')) {
         return { status: 200, jsonValue: { ok: true, build: EXPECTED_BUILD, service: 'assistants' } };
+      }
+      // Step 1a hits /assist/v1/draft-graph — return the shared valid
+      // fixture so the new step doesn't add a fail row that would shift
+      // the orchestrate call count or break exit-code expectations.
+      if (url.endsWith('/assist/v1/draft-graph')) {
+        return { status: 200, jsonValue: REPLAY_FIXTURE_ASSIST_DRAFT_GRAPH };
+      }
+      if (!url.endsWith('/orchestrate/v2/turn')) {
+        return { status: 404, jsonValue: {} };
       }
       orchestrateCalls += 1;
       // Preflight = 422 (call #1). Steps 1,2,3 = 200 with valid shape (calls #2-#4).
