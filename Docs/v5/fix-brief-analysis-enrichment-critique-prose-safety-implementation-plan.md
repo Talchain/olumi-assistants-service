@@ -26,13 +26,13 @@ This revision reconciles three blockers raised in review: (1) critique-code coun
 | 0 | `"Node 'X' has kind='option'. Option nodes are filtered before analysis."` (uncoded) | n/a | preprocessing | **D** | Engine preprocessing detail. |
 | 1 | `MISSING_GOAL_NODE` | blocker | validation | **D** | Engine validation; user doesn't author IDs. |
 | 2 | `NO_OPTIONS` | blocker | validation | **U** | "No options provided for comparison." Plain English; product-safe. |
-| 3 | `EMPTY_INTERVENTIONS` | blocker | validation | **S** | Template uses `interventions` jargon. Replace with: `"Option <label> doesn't change anything in the model. Specify what this option modifies."` |
-| 4 | `INVALID_INTERVENTION_TARGET` | blocker | validation | **S** | Uses `intervention_target` + `non-existent node`. Replace with: `"Option <label> references something that's no longer in the model."` |
-| 5 | `NO_EFFECTIVE_PATH_TO_GOAL` | blocker | validation | **S** | Uses `interventions` + `effectively affect`. Replace with: `"Option <label> has no path to your goal."` |
-| 6 | `IDENTICAL_OPTIONS` | blocker | validation | **S** | Uses `interventions`. Replace with: `"Options <a> and <b> do exactly the same thing in the model."` |
+| 3 | `EMPTY_INTERVENTIONS` | blocker | validation | **S** | Template uses `interventions` jargon. **Approved replacement (Paul, 2026-04-30):** `"Option '{label}' does not change anything yet. Specify what makes this option different."` |
+| 4 | `INVALID_INTERVENTION_TARGET` | blocker | validation | **S** | Uses `intervention_target` + `non-existent node`. **Approved replacement:** `"Option '{label}' refers to something that is not currently in the model."` |
+| 5 | `NO_EFFECTIVE_PATH_TO_GOAL` | blocker | validation | **S** | Uses `interventions` + `effectively affect`. **Approved replacement:** `"Option '{label}' does not currently connect to your goal."` |
+| 6 | `IDENTICAL_OPTIONS` | blocker | validation | **S** | Uses `interventions`. **Approved replacement:** `"Options '{label_a}' and '{label_b}' currently make the same changes, so the analysis treats them as equivalent."` |
 | 7 | `GRAPH_CYCLE_DETECTED` | blocker | validation | **D** | Engine validation. |
 | 8 | `GRAPH_EMPTY` | blocker | validation | **D** | Engine validation. |
-| 9 | `GRAPH_DISCONNECTED` | warning | validation | **S** | Uses `disconnected components`. Replace with: `"Some parts of the model aren't connected to your goal."` |
+| 9 | `GRAPH_DISCONNECTED` | warning | validation | **S** | Uses `disconnected components`. **Approved replacement:** `"Some parts of the model are not connected to your goal."` |
 | 10 | `INVALID_NODE_ID` | blocker | validation | **D** | Engine validation. |
 | 11 | `DUPLICATE_NODE_ID` | blocker | validation | **D** | Engine validation. |
 | 12 | `EDGE_STRENGTH_OUT_OF_RANGE` | warning | validation | **D** | Engine vocab. |
@@ -40,7 +40,7 @@ This revision reconciles three blockers raised in review: (1) critique-code coun
 | 14 | `EDGE_ENDPOINT_MISSING` | blocker | validation | **D** | Engine validation. |
 | 15 | `NEGLIGIBLE_EDGE_STRENGTH` | info | validation | **D** | Engine impl detail. |
 | 16 | `INSUFFICIENT_OPTIONS` | blocker | validation | **U** | "At least 2 options required for comparison, got X." Plain English; product-safe. |
-| 17 | `OPTION_NO_INTERVENTIONS` | info | validation | **S** | Uses `interventions` + `status quo`. Replace with: `"Option <label> represents the baseline (no changes from current state)."` |
+| 17 | `OPTION_NO_INTERVENTIONS` | info | validation | **S** | Uses `interventions` + `status quo`. **Approved replacement:** `"Option '{label}' represents the current state, with no changes applied."` |
 | 18 | `DUPLICATE_OPTION_ID` | blocker | validation | **D** | Engine validation. |
 | 19 | `INTERVENTION_VALUE_INVALID` | blocker | validation | **D** | Engine validation. |
 | 20 | `MONTE_CARLO_FAILED` | blocker | analysis | **D** | Engine error; recovery-chip handles user surface. |
@@ -49,10 +49,10 @@ This revision reconciles three blockers raised in review: (1) critique-code coun
 | 23 | `SEED_INVALID` | warning | validation | **D** | Engine validation. |
 | 24 | `DEGENERATE_OUTCOMES` | warning | analysis | **U** | "All options produce nearly identical outcomes." Plain English; product-safe. |
 | 25 | `NUMERICAL_INSTABILITY` | warning | analysis | **D** | Engine-stat detail. |
-| 26 | `LOW_EFFECTIVE_SAMPLES` | warning | analysis | **S** | Uses `samples` + `numerically valid`. Replace with: `"The analysis was less reliable than usual on this run."` |
+| 26 | `LOW_EFFECTIVE_SAMPLES` | warning | analysis | **S** | Uses `samples` + `numerically valid`. **Approved replacement:** `"This analysis is less reliable than usual, so treat the result as a signal to check rather than a settled answer."` |
 | 27 | `IDENTIFIABILITY_ISSUE` | warning | analysis | **D** | Stats vocab. |
-| 28 | `DEGENERATE_OPTION_ZERO_VARIANCE` | warning | analysis | **S** | Uses `variance` + `intervention` + `causal path`. Replace with: `"Option <label> has no detectable effect on the goal."` |
-| 29 | `HIGH_TIE_RATE` | warning | analysis | **S** | Uses `samples` + `win probabilities`. Replace with: `"Many simulated futures gave ties between options — the comparison is finely balanced."` |
+| 28 | `DEGENERATE_OPTION_ZERO_VARIANCE` | warning | analysis | **S** | Uses `variance` + `intervention` + `causal path`. **Approved replacement:** `"Option '{label}' does not currently affect the goal."` |
+| 29 | `HIGH_TIE_RATE` | warning | analysis | **S** | Uses `samples` + `win probabilities`. **Approved replacement:** `"The options are very close in this analysis. Treat the current lead as finely balanced."` |
 | 30 | `CONSTRAINT_NODE_DEFAULT_BASE` | warning | analysis | **D** | Engine internals (`ParameterUncertainty`, `point_mass`). |
 | 31 | `INTERNAL_ERROR` | blocker | engine | **D** | Recovery-chip handles user surface. |
 
@@ -191,6 +191,18 @@ $.blocks[*].enrichment.review_cards[*].items[*].confidence_normalised
 $.blocks[*].enrichment.review_cards[*].items[*].score
 $.blocks[*].enrichment.review_cards[*].items[*].elasticity
 $.analysis_ready.*                                       (existing finaliser path)
+```
+
+### `suggested_action` defensive invariant (approved)
+
+Captured fixture observation: `review_cards[0].suggested_action === 'add_evidence'` — single snake_case enum token, no whitespace. The contract test (`tests/contract/decision-review-egress.test.ts`) asserts this remains an enum-shaped value. If the upstream ever drifts to prose, the field would need to be reclassified from "structural exclusion" to "user-facing allowlist", and this test fails CI to force the conscious update.
+
+```ts
+// tests/contract/decision-review-egress.test.ts
+const SUGGESTED_ACTION_RE = /^[a-z0-9_]{1,32}$/;
+for (const card of fixture.blocks[0].enrichment.review_cards ?? []) {
+  expect(card.suggested_action).toMatch(SUGGESTED_ACTION_RE);
+}
 ```
 
 ### Acceptance check (revised)
