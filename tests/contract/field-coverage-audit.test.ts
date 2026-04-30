@@ -74,6 +74,129 @@ const UI_CONSUMED_FIELDS: Record<string, ReadonlyArray<string>> = {
 };
 
 /**
+ * Explicit JSON paths the UI adapter reads under each audited field. Used
+ * by the path-level audit so that brand-new subfields (e.g. an LLM-emitted
+ * `coaching.unused_new_field`) FAIL the audit unless explicitly added here
+ * or classified in the allowlist.
+ *
+ * Sources (UI repo):
+ *   - mapDraftCoachingFromResponse (src/adapters/cee/client.ts:99-163)
+ *     reads: coaching.summary, coaching.strengthen_items[].{id,label,detail,action_type,bias_category},
+ *            coaching.widening_log[].{node_id,label,reason},
+ *            coaching.bias_signals[].{type,detail,target}
+ *   - adaptDraftResponse v3-fast-path (client.ts:185-240) reads:
+ *            nodes[*].{id,kind/type,label,observed_state,*spread*}, edges[*].{from,to,*spread*},
+ *            analysis_ready (passthrough), schema_version (passthrough),
+ *            trace.pipeline (passthrough), rationales (passthrough)
+ *   - edgeProvenanceDisplayPatch (canvas/utils/draftIngestion.ts) reads: provenance_display
+ *   - For NodeV3.provenance: nodes[*].provenance read directly in adapter spread
+ *   - V5 envelope (responseRouter.ts + useConversation.handleEnvelope) reads:
+ *            assistant_text, blocks (full discriminated union), suggested_actions
+ *
+ * Path syntax mirrors the allowlist: `[]` for arrays, dotted segments,
+ * leaf-level granularity for known consumption.
+ */
+const UI_CONSUMED_PATHS: ReadonlySet<string> = new Set([
+  // Top-level audited fields themselves (presence is consumed)
+  "coaching",
+  "analysis_ready",
+  "assistant_text",
+  "blocks",
+  "suggested_actions",
+  // coaching subtree
+  "coaching.summary",
+  "coaching.strengthen_items",
+  "coaching.strengthen_items[].id",
+  "coaching.strengthen_items[].label",
+  "coaching.strengthen_items[].detail",
+  "coaching.strengthen_items[].action_type",
+  "coaching.strengthen_items[].bias_category",
+  "coaching.widening_log",
+  "coaching.widening_log[].node_id",
+  "coaching.widening_log[].label",
+  "coaching.widening_log[].reason",
+  "coaching.bias_signals",
+  "coaching.bias_signals[].type",
+  "coaching.bias_signals[].detail",
+  "coaching.bias_signals[].target",
+  // V5 envelope blocks (each variant's user-consumed fields)
+  "blocks[].type",
+  "blocks[].content",
+  "blocks[].error_code",
+  "blocks[].severity",
+  "blocks[].details",
+  "blocks[].summary",
+  "blocks[].leading_option_id",
+  "blocks[].win_probabilities",
+  "blocks[].enrichment",
+  "blocks[].status",
+  "blocks[].operation",
+  "blocks[].target_id",
+  "blocks[].before",
+  "blocks[].after",
+  "blocks[].narrative",
+  "blocks[].referenced_option_ids",
+  "blocks[].options",
+  "blocks[].options[].option_id",
+  "blocks[].options[].label",
+  "blocks[].options[].win_probability",
+  "blocks[].options[].attributes",
+  "blocks[].flip_scenarios",
+  "blocks[].flip_scenarios[].factor_id",
+  "blocks[].flip_scenarios[].current_value",
+  "blocks[].flip_scenarios[].flip_threshold",
+  "blocks[].flip_scenarios[].from_option_id",
+  "blocks[].flip_scenarios[].to_option_id",
+  "blocks[].flip_scenarios[].fragile",
+  "blocks[].nodes",
+  "blocks[].edges",
+  "blocks[].node_count",
+  "blocks[].edge_count",
+  // suggested_actions subtree
+  "suggested_actions[].id",
+  "suggested_actions[].label",
+  "suggested_actions[].message",
+  "suggested_actions[].action_type",
+  // provenance/provenance_display: read directly off node/edge spreads
+  // (these path heads collide with audited heads provenance/provenance_display
+  // but at the actual fixture path live under nodes[]/edges[])
+  "nodes[].provenance",
+  "edges[].provenance_display",
+]);
+
+/**
+ * Subtree prefixes the adapter reads as opaque passthrough — every leaf
+ * under these prefixes is forwarded to a downstream consumer (PLoT, an
+ * inline-block renderer, etc.) without leaf-level inspection. New leaves
+ * added under these prefixes ride along automatically and do not require
+ * audit classification.
+ *
+ * Sources:
+ *   - `analysis_ready` — adapt-fast-path forwards the whole object to the
+ *     PLoT call (src/adapters/cee/client.ts:215-216). UI never reads
+ *     individual sub-fields.
+ *   - `blocks[].details` — V5 error block `details` is a `z.passthrough`
+ *     diagnostic bag (boundary/olumi-response.d.ts:46). UI surfaces the
+ *     `details` object as-is to telemetry / dev tooling but does not
+ *     render individual fields. New diagnostic keys ride along.
+ *   - `blocks[].enrichment` — explanation/analysis_result/flip_analysis
+ *     blocks carry an opaque `enrichment` record forwarded to ResultsPanel
+ *     plumbing (z.passthrough in the boundary schema).
+ *   - `blocks[].attributes` — comparison-block per-option attributes,
+ *     opaque passthrough to the comparison renderer.
+ *
+ * Adding a new prefix here requires the same justification rigour as the
+ * allowlist — the entry below must reference the production source path
+ * that proves the subtree is consumed wholesale.
+ */
+const UI_CONSUMED_PASSTHROUGH_PREFIXES: ReadonlyArray<string> = [
+  "analysis_ready",
+  "blocks[].details",
+  "blocks[].enrichment",
+  "blocks[].options[].attributes",
+];
+
+/**
  * Recursively check whether a field name appears anywhere in the JSON tree
  * (as an object key or, for array containers, as a sub-field of an array
  * element).
@@ -172,40 +295,96 @@ describe("field-coverage audit (v1)", () => {
     }
   });
 
-  it("path-level audit: every produced path under an audited field is either consumed by UI or in the allowlist", () => {
-    // v1 scope (per brief): walk all paths but only fail on paths whose
-    // leading segment is one of the 10 audited fields. Anything else is
-    // out of v1 audit scope and treated as out-of-scope diagnostic noise.
+  it("audit detects synthetic drift: a new unclassified subfield under an audited field would fail", () => {
+    // Negative test: prove the audit has teeth. Build a synthetic fixture
+    // with `coaching.unused_new_field`, run the same audit logic, expect
+    // the violation to surface. Without this, a passing audit could mean
+    // the rule is too permissive — this asserts the rule rejects the
+    // class of drift the brief is designed to catch.
+    const driftFixture = {
+      coaching: {
+        summary: "ok",
+        strengthen_items: [],
+        unused_new_field: "this should be flagged",
+      },
+    };
     const allowedPaths = new Set<string>();
     for (const cat of CLASSIFIED_CATEGORIES) {
       const map = typedAllowlist[cat] as Readonly<Record<string, string>>;
       for (const k of Object.keys(map)) allowedPaths.add(k);
     }
-    // UI consumed shorthand → a UI consumer reads at least the named
-    // top-level field; sub-paths under it are presumed consumed via the
-    // adapter's defensive walk (e.g. mapDraftCoachingFromResponse reads
-    // every sub-field of coaching). This matches the brief's v1 stance:
-    // P1 is missing top-level fields, not missing sub-fields.
-    const uiConsumed = new Set(Object.keys(UI_CONSUMED_FIELDS));
+
+    const violations: string[] = [];
+    for (const path of walkPaths(driftFixture, "")) {
+      const head = path.split(/[.[]/)[0];
+      if (!audited.includes(head)) continue;
+      const variants = pathVariants(path);
+      if (variants.some((v) => UI_CONSUMED_PATHS.has(v))) continue;
+      if (
+        UI_CONSUMED_PASSTHROUGH_PREFIXES.some((prefix) =>
+          variants.some(
+            (v) => v === prefix || v.startsWith(`${prefix}.`) || v.startsWith(`${prefix}[`),
+          ),
+        )
+      ) {
+        continue;
+      }
+      if (variants.some((v) => allowedPaths.has(v))) continue;
+      violations.push(path);
+    }
+    expect(
+      violations.includes("coaching.unused_new_field"),
+      `audit failed to flag synthetic drift 'coaching.unused_new_field'. Violations: ${violations.join(", ")}`,
+    ).toBe(true);
+  });
+
+  it("path-level audit: every produced path under an audited field is consumed at the exact path or classified in the allowlist", () => {
+    // v1 scope (per brief): walk all paths but only fail on paths whose
+    // leading segment is one of the 10 audited fields. Anything else is
+    // out of v1 audit scope.
+    //
+    // No top-level shortcut: a brand-new subfield like
+    // `coaching.unused_new_field` MUST appear in either UI_CONSUMED_PATHS
+    // (with a real adapter consumer) or in the allowlist (with a
+    // justification) — otherwise it fails the audit. This is the
+    // schema-drift detector the brief asks for.
+    const allowedPaths = new Set<string>();
+    for (const cat of CLASSIFIED_CATEGORIES) {
+      const map = typedAllowlist[cat] as Readonly<Record<string, string>>;
+      for (const k of Object.keys(map)) allowedPaths.add(k);
+    }
 
     const violations: string[] = [];
     for (const { name, fixture } of FIXTURES) {
       for (const path of walkPaths(fixture, "")) {
         const head = path.split(/[.[]/)[0];
         if (!audited.includes(head)) continue;
-        // Path falls under an audited field. Pass if EITHER:
-        //   (a) head is in UI_CONSUMED_FIELDS — adapter consumes the subtree
-        //   (b) any path-variant is explicitly classified in the allowlist
-        if (uiConsumed.has(head)) continue;
+        // Path falls under an audited field. Pass if ANY:
+        //   (a) the EXACT path (or its no-bracket variant) is in
+        //       UI_CONSUMED_PATHS — adapter reads this leaf directly
+        //   (b) the path falls under a passthrough prefix — adapter
+        //       forwards the whole subtree opaquely
+        //   (c) any path-variant is explicitly classified in the allowlist
         const variants = pathVariants(path);
-        if (variants.some((v) => allowedPaths.has(v))) continue;
+        const consumed = variants.some((v) => UI_CONSUMED_PATHS.has(v));
+        if (consumed) continue;
+        const passthrough = UI_CONSUMED_PASSTHROUGH_PREFIXES.some((prefix) =>
+          variants.some(
+            (v) => v === prefix || v.startsWith(`${prefix}.`) || v.startsWith(`${prefix}[`),
+          ),
+        );
+        if (passthrough) continue;
+        const allowed = variants.some((v) => allowedPaths.has(v));
+        if (allowed) continue;
         violations.push(`${name}: ${path}`);
       }
     }
     expect(
       violations.length,
-      "Produced paths under audited fields must be either UI-consumed (top-level field in UI_CONSUMED_FIELDS) " +
-        "or explicitly classified in field-coverage.allowlist.json. Unclassified paths:\n  " +
+      "Produced paths under audited fields must be either explicitly UI-consumed " +
+        "(in UI_CONSUMED_PATHS — added by the engineer who wires the adapter) " +
+        "or explicitly classified in field-coverage.allowlist.json with a justification. " +
+        "Unclassified paths:\n  " +
         violations.join("\n  "),
     ).toBe(0);
   });

@@ -29,6 +29,7 @@ import v5FreshFixture from "../fixtures/cross-service/v5-turn.explain-fresh.json
 
 import { ENTITY_ID_LEAK_RE } from "../../src/orchestrator/shared/entity-id-pattern.js";
 import { sanitiseUserFacingText } from "../../src/orchestrator-v5/compose/output-safety.js";
+import { narrowCoachingForResponse } from "../../src/orchestrator/draft-coaching.js";
 
 let pipelineReturn: { statusCode: number; body: unknown; headers?: Record<string, string> } = {
   statusCode: 200,
@@ -226,28 +227,34 @@ describe("/assist/v1/draft-graph endpoint contract", () => {
     expect(body.code).toBe("CEE_PIPELINE_FAILED");
   });
 
-  it("mocked coaching containing fac_* leak is sanitised on the route response", async () => {
-    // Inject a synthetic entity-ID leak into the pipeline-mock body and POST
-    // through the live route. The contract: by the time the response leaves
-    // the route handler, sanitiseCoachingForDisplay (Stage 5 chokepoint at
-    // src/cee/unified-pipeline/stages/package.ts:105-135) has scrubbed every
-    // user-facing coaching string. This is the production guard that
-    // protects the UI from raw IDs leaking into rendered prose.
+  it("[stage-5 substitute, not_route_verified] dirty coaching → narrow + sanitise produces no fac_/opt_ leaks", async () => {
+    // Brief test 5: "Mocked coaching containing `fac_test_id` is sanitised
+    // in the response."
     //
-    // Note: route currently emits the body as the pipeline mock returns it
-    // (sanitisation happens INSIDE the pipeline, not in the route handler).
-    // To prove the chokepoint is in the production response path we mock at
-    // the pipeline boundary AFTER sanitisation has run; the leak therefore
-    // tests the EGRESS contract (would-be leaks must already be scrubbed by
-    // the time the body reaches the route's reply.send). If the scrubber
-    // ever moves out of the unified pipeline, this test will fail because
-    // the mock body would carry the leak through unchanged.
-    const dirtyBody = JSON.parse(JSON.stringify(draftWithCoachingFixture));
-    dirtyBody.coaching = {
-      ...dirtyBody.coaching,
-      summary: "The fac_test_id factor leads the analysis.",
+    // Stage 5's chokepoint (sanitiseCoachingForDisplay at
+    // src/cee/unified-pipeline/stages/package.ts:105-135) is NOT exported,
+    // so we cannot route-test scrubbing without booting the full unified
+    // pipeline (LLM provider, structure detection, etc.). Per the brief's
+    // skip-and-substitute policy, this is the closest substitute that
+    // exercises the SAME production composition Stage 5 uses:
+    //
+    //   ctx.coaching → narrowCoachingForResponse → (per-string)
+    //                  sanitiseUserFacingText → display shape
+    //
+    // Both `narrowCoachingForResponse` (src/orchestrator/draft-coaching.ts:113)
+    // and `sanitiseUserFacingText` (src/orchestrator-v5/compose/output-safety.ts:179)
+    // are the production functions Stage 5 calls. This test composes them
+    // exactly as Stage 5 does and asserts: every user-facing string in the
+    // narrowed output is leak-free after the per-string scrubber runs.
+    //
+    // Classified `not_route_verified` in the report — the route-level
+    // integration boundary is not exercised. If `sanitiseCoachingForDisplay`
+    // is ever exported, this test should be replaced with a route-verified
+    // test that mocks at the pipeline INPUT and asserts a clean response
+    // body.
+    const dirtyCoaching = {
+      summary: "The fac_test_id factor leads, with opt_test_id as runner-up.",
       strengthen_items: [
-        ...dirtyBody.coaching.strengthen_items,
         {
           id: "strengthen_test_leak",
           label: "Address opt_test_id mapping",
@@ -255,51 +262,67 @@ describe("/assist/v1/draft-graph endpoint contract", () => {
           action_type: "set_factor_value",
         },
       ],
+      widening_log: [
+        {
+          node_id: "fac_test_id",
+          label: "Consider fac_test_id alternatives",
+          reason: "The factor fac_test_id has no upstream signal.",
+        },
+      ],
+      bias_signals: [
+        {
+          type: "anchoring",
+          detail: "The brief anchors on fac_test_id as the only driver.",
+          target: "fac_test_id",
+        },
+      ],
     };
 
-    pipelineReturn = { statusCode: 200, body: dirtyBody };
+    const narrowed = narrowCoachingForResponse(dirtyCoaching);
+    expect(narrowed).not.toBeNull();
 
-    const res = await app.inject({
-      method: "POST",
-      url: "/assist/v1/draft-graph",
-      headers: HEADERS,
-      payload: { brief: VALID_BRIEF },
-    });
+    // Apply the same per-string scrub Stage 5 applies. Mirrors
+    // sanitiseCoachingForDisplay verbatim (src/cee/unified-pipeline/stages/package.ts:105-135).
+    const scrub = (text: string): string =>
+      sanitiseUserFacingText(text, null).text;
+    const scrubbed = {
+      summary: narrowed!.summary !== null ? scrub(narrowed!.summary) : null,
+      strengthen_items: narrowed!.strengthen_items.map((item) => ({
+        ...item,
+        label: scrub(item.label),
+        detail: scrub(item.detail),
+      })),
+      widening_log: narrowed!.widening_log
+        ? narrowed!.widening_log.map((entry) => ({
+            ...entry,
+            label: scrub(entry.label),
+            reason: scrub(entry.reason),
+          }))
+        : null,
+      bias_signals: narrowed!.bias_signals
+        ? narrowed!.bias_signals.map((signal) => ({
+            ...signal,
+            detail: scrub(signal.detail),
+            // target is structural — not scrubbed (preserves UI highlight link)
+          }))
+        : null,
+    };
 
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
+    // Assert NO user-facing string contains the injected leaks
+    const userFacingStrings = [
+      scrubbed.summary,
+      ...scrubbed.strengthen_items.flatMap((i) => [i.label, i.detail]),
+      ...(scrubbed.widening_log ?? []).flatMap((e) => [e.label, e.reason]),
+      ...(scrubbed.bias_signals ?? []).map((s) => s.detail),
+    ].filter((s): s is string => typeof s === "string");
 
-    // The pipeline-mock injected leaks. Route does NOT re-run sanitisation
-    // (production sanitisation lives inside Stage 5). This test therefore
-    // proves a different invariant: the route is a passthrough — whatever
-    // the pipeline emits, the user sees. So if a real production response
-    // ever contained `fac_*`-shaped entity IDs in user-facing prose, the UI
-    // would see them. The CEE-side guarantee is that Stage 5 scrubs.
-    //
-    // We assert TWO things:
-    //   (a) The route did pass the body through unchanged — the leak is
-    //       visible in the response. This documents the route's role as
-    //       a passthrough, not a sanitiser.
-    //   (b) The production sanitiseUserFacingText (the function Stage 5
-    //       calls) rejects each leak when invoked on the same strings.
-    //       This proves the scrubber identifies these as confirmed leaks.
-    expect(body.coaching.summary).toContain("fac_test_id");
+    for (const text of userFacingStrings) {
+      expect(text, `leak survived in: ${text}`).not.toContain("fac_test_id");
+      expect(text, `leak survived in: ${text}`).not.toContain("opt_test_id");
+    }
 
-    const summaryScrub = sanitiseUserFacingText(body.coaching.summary, null);
-    expect(summaryScrub.matches.length).toBeGreaterThan(0);
-    expect(summaryScrub.text).not.toContain("fac_test_id");
-
-    const detail = body.coaching.strengthen_items.find(
-      (i: { id: string }) => i.id === "strengthen_test_leak",
-    );
-    expect(detail).toBeDefined();
-    const detailScrub = sanitiseUserFacingText(detail.detail, null);
-    expect(detailScrub.matches.length).toBeGreaterThan(0);
-    expect(detailScrub.text).not.toContain("fac_test_id");
-
-    const labelScrub = sanitiseUserFacingText(detail.label, null);
-    expect(labelScrub.matches.length).toBeGreaterThan(0);
-    expect(labelScrub.text).not.toContain("opt_test_id");
+    // Structural pointer (bias_signals[].target) is preserved verbatim
+    expect(scrubbed.bias_signals![0].target).toBe("fac_test_id");
   });
 
   it("response with no coaching succeeds (coaching field absent)", async () => {
