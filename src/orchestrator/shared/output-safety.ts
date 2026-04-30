@@ -72,6 +72,21 @@ function splitMatch(match: string): { prefix: string; suffix: string } | null {
 }
 
 /**
+ * Map an entity-ID-shaped string to its prefix-aware generic fallback,
+ * e.g. `'opt_hire_local'` → `'the relevant option'`. Used by the V5
+ * label resolver (`src/orchestrator-v5/compose/resolve-label.ts`) when
+ * graph + analysis_ready + enrichment lookups all miss.
+ *
+ * Returns `'the relevant node'` for any input that doesn't split on a
+ * known prefix — defensive default that never returns the raw ID.
+ */
+export function genericFallbackForId(id: string): string {
+  const split = splitMatch(id);
+  if (split === null) return 'the relevant node';
+  return PREFIX_GENERIC[split.prefix] ?? 'the relevant node';
+}
+
+/**
  * Prefixes with NO English-word collisions in normal prose. Any
  * `<prefix>_<anything>` for one of these is treated as an internal ID even
  * when the suffix is a single token, so a leaked `fac_churn` or `opt_x` is
