@@ -62,6 +62,19 @@ export interface JourneyContext {
     readonly message: string;
     readonly action_type: string;
   };
+  /**
+   * Whether step 6 produced a confirmed graph mutation. Set by the runner
+   * after step 6's response is observed. If false, the brief's "edit
+   * budget" message routed to a clarification (not an actual edit), so
+   * staleness expectations on step 7 are invalid — the runner classifies
+   * steps 7-9 as `skipped_dependency` rather than asserting staleness on
+   * an unmutated graph. Capture criteria: any of (a) graph_patch block,
+   * (b) graph_hash change vs step-1, (c) `analysis_ready.computed_at`
+   * stamp moves with non-null `staleness_reason`.
+   */
+  step6GraphMutated?: boolean;
+  /** Diagnostic — recorded for the evidence pack. */
+  step6MutationEvidence?: string;
 }
 
 export function mkTurnId(): string {

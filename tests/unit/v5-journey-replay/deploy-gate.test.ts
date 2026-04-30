@@ -447,6 +447,20 @@ describe('run() honours the deploy gate', () => {
       if (isStep7Message(body)) {
         return { status: 200, jsonValue: REPLAY_FIXTURE_STALE_TURN };
       }
+      // Step 6 must emit a graph_patch block so the new step-6 mutation
+      // gate sees a confirmed mutation and lets steps 7-9 run.
+      if (typeof body === 'string' && body.includes('Increase the budget factor')) {
+        return {
+          status: 200,
+          jsonValue: {
+            response_version: 2,
+            assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
+            blocks: [{ type: 'graph_patch', status: 'committed', operation: 'edit_factor', target_id: 'fac_x' }],
+            suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
+            analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
+          },
+        };
+      }
       return {
         status: 200,
         jsonValue: {
@@ -574,6 +588,18 @@ describe('run() honours the deploy gate', () => {
       orchestrateCalls += 1;
       if (isStep7Message(body)) {
         return { status: 200, jsonValue: REPLAY_FIXTURE_STALE_TURN };
+      }
+      if (typeof body === 'string' && body.includes('Increase the budget factor')) {
+        return {
+          status: 200,
+          jsonValue: {
+            response_version: 2,
+            assistant_text: REPLAY_FIXTURE_ASSISTANT_TEXT,
+            blocks: [{ type: 'graph_patch', status: 'committed', operation: 'edit_factor', target_id: 'fac_x' }],
+            suggested_actions: [{ id: 'c', label: 'L', message: 'M' }],
+            analysis_ready: REPLAY_FIXTURE_ANALYSIS_READY,
+          },
+        };
       }
       return {
         status: 200,
