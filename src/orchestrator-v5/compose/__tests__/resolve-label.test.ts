@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  isUnsafeLabel,
   resolveLabel,
   resolveLabelOrFallback,
   type LabelResolverContext,
@@ -283,5 +284,99 @@ describe('genericFallbackForId — pinning the shared mapping', () => {
   it('returns the defensive default for non-prefix inputs', () => {
     expect(genericFallbackForId('not_a_prefix')).toBe('the relevant node');
     expect(genericFallbackForId('')).toBe('the relevant node');
+  });
+});
+
+// =============================================================================
+// isUnsafeLabel — Codex P3 false-positive + true-positive coverage
+// =============================================================================
+//
+// Pins the contract behind the Codex review concern (2026-04-30, P3):
+//   - Legitimate English compound labels MUST NOT be rejected, even when
+//     the broad ENTITY_ID_LEAK_RE matches a substring (e.g.
+//     `Risk-Adjusted Return` matches `risk-adjusted` superficially).
+//   - Slug-formatted labels returned by a lookup MUST be rejected, even
+//     when their suffix is single-segment (e.g. `goal_profitability`
+//     would otherwise pass the slug-shape gate's English-compound rule).
+//
+// If a future refactor of the slug-shape heuristic widens the false-
+// positive surface, the FP block fails. If a future refactor narrows the
+// whole-label slug check, the TP block fails. Both directions are
+// pinned.
+
+describe('isUnsafeLabel — false-positive cases (legitimate English compound labels)', () => {
+  it.each([
+    'Risk-adjusted return',
+    'Risk-Adjusted Return',
+    'Out-of-scope cost',
+    'Out-of-Scope Initiatives',
+    'Goal-setting quality',
+    'Goal-Setting Framework',
+    'Factor Analysis Methodology',
+    'Constraint-Based Decision',
+    'Decision-making process',
+    'Outcome-oriented planning',
+  ])('label %s is SAFE (not rejected)', (label) => {
+    expect(isUnsafeLabel(label, 'lookup_id_unrelated')).toBe(false);
+  });
+
+  it('label === lookupId is always unsafe (defensive)', () => {
+    // The earliest gate fires regardless of slug shape; included here so
+    // the FP block makes the full contract visible.
+    expect(isUnsafeLabel('Hire Two Senior Engineers Locally', 'Hire Two Senior Engineers Locally')).toBe(true);
+  });
+});
+
+describe('isUnsafeLabel — true-positive cases (slug-formatted leaked labels)', () => {
+  it.each([
+    'risk_customer_churn',         // multi-segment, prefix=risk
+    'out_revenue_growth',          // multi-segment, prefix=out
+    'goal_profitability',          // single-segment, prefix=goal — the Codex narrowing case
+    'opt_hire_local',              // unambiguous-short prefix
+    'fac_hiring_cost',             // unambiguous-short prefix
+    'dec_q3_target',               // multi-segment, prefix=dec
+    'risk_5',                      // digit confirms slug
+    'option_market_share',         // full-word prefix, multi-segment
+    'factor_team_morale',          // full-word prefix
+    'decision_buy_or_build',       // full-word prefix
+    'outcome_revenue_uplift',      // full-word prefix
+    'constraint_budget_cap',       // full-word prefix
+  ])('label %s is UNSAFE (rejected)', (label) => {
+    expect(isUnsafeLabel(label, 'lookup_id_unrelated')).toBe(true);
+  });
+});
+
+describe('resolveLabel — isUnsafeLabel integration', () => {
+  it('skips a slug-formatted label from analysis_ready and falls through to next priority', () => {
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'goal_profitability' }] },
+      enrichment: {
+        option_comparison: [{ id: 'opt_x', label: 'Real Profitability Goal' }],
+      },
+    };
+    // priority 2 has a slug-formatted label → skipped. priority 3 has the real label.
+    expect(resolveLabel('opt_x', ctx)).toBe('Real Profitability Goal');
+  });
+
+  it('returns null when every priority returns a slug-formatted label', () => {
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'fac_hidden_cost' }] },
+      enrichment: {
+        option_comparison: [{ id: 'opt_x', label: 'opt_x' }],
+        payloads: { isl_request: { options: [{ id: 'opt_x', label: 'risk_5' }] } },
+      },
+    };
+    expect(resolveLabel('opt_x', ctx)).toBeNull();
+  });
+
+  it('preserves an English-compound label that the broad regex superficially matches', () => {
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'Risk-Adjusted Return Forecast' }] },
+    };
+    // 'risk-adjusted' is matched by ENTITY_ID_LEAK_RE but slug-shape says
+    // English compound (single-segment suffix `adjusted`). Whole-label
+    // slug check doesn't fire because of the space + capital. Label is
+    // returned as-is.
+    expect(resolveLabel('opt_x', ctx)).toBe('Risk-Adjusted Return Forecast');
   });
 });

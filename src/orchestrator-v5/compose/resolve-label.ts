@@ -55,13 +55,52 @@ import type { GraphV3T } from '../../orchestrator/types.js';
  * any `ENTITY_ID_LEAK_RE` match, which over-rejected legitimate English
  * compound labels.
  */
-function isUnsafeLabel(label: string, lookupId: string): boolean {
+// `^prefix[_:-]suffix$` shape — the entire string is a slug, with no
+// surrounding English structure (spaces, capitalisation breaks). Labels
+// in this codebase are human prose ("Hire Two Senior Engineers Locally",
+// "Hiring and Staffing Cost"); a label that IS a slug is a leak even when
+// the slug-shape gate would classify it as an English compound on
+// suffix-shape grounds. Catches single-segment ids like
+// `goal_profitability` and `dec_q3_target` that the broader heuristic
+// rejects because their suffix is one word.
+const WHOLE_LABEL_SLUG_RE =
+  /^(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[_:-][a-z0-9_:-]+$/i;
+
+/**
+ * Decide whether a label returned from a label lookup is itself a leaked
+ * entity ID and must be rejected.
+ *
+ * Two-tier gate:
+ *   1. Strict whole-label slug check — if the entire label string is a
+ *      slug-shaped token (matches `^prefix[_:-]suffix$`), it's a leak,
+ *      regardless of suffix shape. Catches `goal_profitability`,
+ *      `dec_q3_target`, `risk_5`, etc. that look like real labels but are
+ *      slug-formatted.
+ *   2. Substring scan with confirmation — for each ENTITY_ID_LEAK_RE
+ *      match in the label, apply the slug-shape confirmation gate. This
+ *      preserves legitimate English compound labels like
+ *      `Risk-Adjusted Return`, `Out-of-Scope Initiatives`, and
+ *      `Goal-Setting Framework`.
+ *
+ * Codex review 2026-04-30 finding #3 (P3): the original implementation
+ * used only tier 2 and missed `goal_profitability` (single-segment after
+ * `goal_` falls through the slug-shape gate). The whole-label slug check
+ * (tier 1) closes that gap without breaking the documented English-
+ * compound false-positive cases — those have spaces and capitals so they
+ * cannot match `^...$`.
+ */
+export function isUnsafeLabel(label: string, lookupId: string): boolean {
   if (label === lookupId) return true;
-  // Walk every ENTITY_ID_LEAK_RE substring within the label; the broad
-  // regex over-matches English compounds, so each match must pass the
-  // graph-free slug-shape gate before we treat the label as unsafe.
-  // The source regex is non-global by contract — see
-  // entity-id-pattern.ts:9-14. Build a per-call global matcher.
+
+  // Tier 1: whole-label slug shape — fires when the label is itself a
+  // bare slug (no English structure breaking the start-to-end match).
+  if (WHOLE_LABEL_SLUG_RE.test(label)) return true;
+
+  // Tier 2: substring scan with slug-shape confirmation. Walks every
+  // ENTITY_ID_LEAK_RE match in the label; rejects if any passes the
+  // graph-free slug-shape gate. The source regex is non-global by
+  // contract — see entity-id-pattern.ts:9-14. Build a per-call global
+  // matcher.
   const global = new RegExp(ENTITY_ID_LEAK_RE.source, 'gi');
   let m: RegExpExecArray | null;
   while ((m = global.exec(label)) !== null) {

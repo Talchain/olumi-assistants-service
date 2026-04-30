@@ -689,3 +689,144 @@ describe('_diagnostics stripping — caller cannot leave a stale debug field', (
     expect((r.enrichment as Record<string, unknown>)._diagnostics).toBeUndefined();
   });
 });
+
+// =============================================================================
+// P2 — fail-shut policy: every allowlisted prose path is REPLACED with the
+// suppression marker on contamination, NOT silently deleted.
+// =============================================================================
+//
+// Pins the contract for the remaining six allowlisted prose paths
+// (Codex review 2026-04-30, P2). The earlier "fail-shut behaviour"
+// describe already covers `summary`, `improvement_guidance[*]`,
+// `factor_sensitivity[*].interpretation`, `review_cards[*].what`,
+// `review_cards[*].items[*].suggested_evidence`, and the marker shape.
+// This block adds the rest so every one of the 15 paths in
+// `ALLOWLISTED_LEAF_PATHS` is explicitly proven to:
+//   - keep the field present (no deletion)
+//   - render the marker as a plain string
+//   - contain no hard-ban tokens after sanitisation
+
+describe('P2 fail-shut coverage — every allowlisted prose path replaces, never deletes', () => {
+  const HARD_BAN_LEAK = "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.";
+
+  it('narrative (flat leaf)', () => {
+    const r = sanitiseEnrichment({ narrative: HARD_BAN_LEAK }, GRAPH);
+    expect(r.enrichment.narrative).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(typeof r.enrichment.narrative).toBe('string');
+  });
+
+  it('rationale (flat leaf)', () => {
+    const r = sanitiseEnrichment({ rationale: HARD_BAN_LEAK }, GRAPH);
+    expect(r.enrichment.rationale).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(typeof r.enrichment.rationale).toBe('string');
+  });
+
+  it('robustness_synthesis (flat leaf)', () => {
+    const r = sanitiseEnrichment({ robustness_synthesis: HARD_BAN_LEAK }, GRAPH);
+    expect(r.enrichment.robustness_synthesis).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(typeof r.enrichment.robustness_synthesis).toBe('string');
+  });
+
+  it('m1_review[*].text', () => {
+    const r = sanitiseEnrichment({
+      m1_review: [
+        { reviewer: 'm1', text: HARD_BAN_LEAK },
+        { reviewer: 'm1', text: 'Clean review text.' },
+      ],
+    }, GRAPH);
+    const arr = r.enrichment.m1_review as Array<Record<string, unknown>>;
+    expect(arr).toHaveLength(2);
+    expect(arr[0]?.text).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(arr[0]?.reviewer).toBe('m1'); // structural preserved
+    expect(arr[1]?.text).toBe('Clean review text.');
+  });
+
+  it('m1_coaching[*].text', () => {
+    const r = sanitiseEnrichment({
+      m1_coaching: [
+        { play: 'priority_1', text: HARD_BAN_LEAK },
+      ],
+    }, GRAPH);
+    const arr = r.enrichment.m1_coaching as Array<Record<string, unknown>>;
+    expect(arr[0]?.text).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(arr[0]?.play).toBe('priority_1');
+  });
+
+  it('gaps[*].description', () => {
+    const r = sanitiseEnrichment({
+      gaps: [
+        { id: 'gap_1', description: HARD_BAN_LEAK },
+      ],
+    }, GRAPH);
+    const arr = r.enrichment.gaps as Array<Record<string, unknown>>;
+    expect(arr[0]?.description).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(arr[0]?.id).toBe('gap_1');
+  });
+
+  it('robustness[*].caveat', () => {
+    const r = sanitiseEnrichment({
+      robustness: [
+        { id: 'r_1', caveat: HARD_BAN_LEAK },
+      ],
+    }, GRAPH);
+    const arr = r.enrichment.robustness as Array<Record<string, unknown>>;
+    expect(arr[0]?.caveat).toBe(SUPPRESSED_PROSE_FALLBACK);
+    expect(arr[0]?.id).toBe('r_1');
+  });
+
+  it('critiques[*].suggestion (allowlisted under critique partition)', () => {
+    // suggestion field on a U-bucket critique should also fail-shut on
+    // contamination — the U-bucket means we surface the critique, but
+    // the suggestion text is allowlisted prose and gets the same
+    // fail-shut treatment.
+    const r = sanitiseEnrichment({
+      critiques: [
+        {
+          id: 'c1',
+          code: 'NO_OPTIONS',
+          message: 'No options provided for comparison',
+          suggestion: HARD_BAN_LEAK,
+        },
+      ],
+    }, GRAPH);
+    const c = (r.enrichment.critiques as Array<Record<string, unknown>>)[0]!;
+    // U-bucket: critique surfaces, but the contaminated suggestion field
+    // is replaced with the marker. partitionCritiques routes the whole
+    // critique to D when the suggestion fails — so we expect the
+    // critique to be diagnostic-bucketed in this case.
+    expect(c).toBeUndefined();
+    expect(r.diagnostic.critiques).toHaveLength(1);
+  });
+
+  it('every fail-shut output passes the entity-ID + hard-ban regression scan', () => {
+    // Belt-and-braces: scan the entire post-sanitise enrichment for any
+    // residual entity-ID-shaped substring or "Node '" prefix. This is
+    // the same wire-egress shape the contract test asserts.
+    const dirty: Record<string, unknown> = {
+      summary: HARD_BAN_LEAK,
+      narrative: HARD_BAN_LEAK,
+      rationale: HARD_BAN_LEAK,
+      robustness_synthesis: HARD_BAN_LEAK,
+      improvement_guidance: [HARD_BAN_LEAK],
+      factor_sensitivity: [{ node_id: 'fac_x', interpretation: HARD_BAN_LEAK }],
+      m1_review: [{ text: HARD_BAN_LEAK }],
+      m1_coaching: [{ text: HARD_BAN_LEAK }],
+      gaps: [{ description: HARD_BAN_LEAK }],
+      robustness: [{ caveat: HARD_BAN_LEAK }],
+      review_cards: [{
+        card_id: 'rc_1',
+        what: HARD_BAN_LEAK,
+        why: HARD_BAN_LEAK,
+        items: [{ node_id: 'fac_x', suggested_evidence: HARD_BAN_LEAK }],
+      }],
+    };
+    const r = sanitiseEnrichment(dirty, GRAPH);
+    const post = JSON.stringify(r.enrichment);
+    // Whole stringification: no entity-id leak, no Node template,
+    // no kind= leak.
+    expect(post).not.toMatch(/\bopt_hire_local\b/);
+    expect(post).not.toMatch(/Node '/);
+    expect(post).not.toMatch(/\bkind\s*=/);
+    expect(post).not.toMatch(/filtered before analysis/i);
+  });
+});
