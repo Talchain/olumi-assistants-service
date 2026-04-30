@@ -186,13 +186,14 @@ export function isAllowlistedPath(path: string): boolean {
 //   2. Deletion changes the wire shape; replacement keeps the field
 //      present with neutral copy, preserving the structural contract.
 //
-// The marker is a single Unicode horizontal ellipsis ("…") — short,
-// neutral, semantically obvious as "content withheld", and survives
-// any downstream string-typing assertions. UI can treat the field as
-// an empty signal (the structural sibling fields like `card_id`,
-// `factor_label`, `node_id`, etc. carry the actionable data).
+// Copy approved by Paul (2026-04-30) — replaces the previous Unicode
+// ellipsis. The full sentence carries clear product semantics: it
+// tells the user this part of the model is unsafe to rely on without
+// a manual review, rather than rendering as a silent ellipsis that
+// could be mistaken for "loading" or "truncated for length".
 
-export const SUPPRESSED_PROSE_FALLBACK = '…';
+export const SUPPRESSED_PROSE_FALLBACK =
+  'Review this part of the model before relying on this guidance.';
 
 // ============================================================================
 // Per-string scrubber
