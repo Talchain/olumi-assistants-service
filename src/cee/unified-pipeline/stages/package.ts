@@ -41,6 +41,98 @@ import {
 import { buildLLMRawTrace } from "../../llm-output-store.js";
 import { SERVICE_VERSION } from "../../../version.js";
 import { assembleContextPack } from "../../../context/context-pack.js";
+import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.js";
+import { sanitiseUserFacingText } from "../../../orchestrator-v5/compose/output-safety.js";
+import type { DraftCoaching } from "../../../orchestrator/types.js";
+import type { GraphV3T, NodeV3T } from "../../../schemas/cee-v3.js";
+import type { GraphV1 } from "../../../contracts/plot/engine.js";
+
+/**
+ * Project a V1 graph into the minimal GraphV3T shape the sanitiser needs
+ * for label resolution. The sanitiser's `resolveLabel` only reads
+ * `nodes[].id` and `nodes[].label`; we additionally satisfy `kind` because
+ * NodeV3T requires it. Edges are not consulted by `sanitiseUserFacingText`,
+ * so an empty edge array is fine.
+ *
+ * This avoids both (a) sanitising with a null graph (which loses label
+ * resolution) and (b) reaching for an `as unknown as GraphV3T` cast.
+ */
+const V3_VALID_NODE_KINDS = new Set<NodeV3T["kind"]>([
+  "goal", "factor", "outcome", "decision", "risk", "action", "option",
+]);
+
+function projectGraphForLabelLookup(graph: GraphV1 | undefined): GraphV3T | null {
+  if (!graph || !Array.isArray(graph.nodes)) return null;
+  const nodes: NodeV3T[] = [];
+  for (const n of graph.nodes) {
+    if (typeof n.id !== "string" || n.id.length === 0) continue;
+    // Skip nodes without a usable label, including the degenerate case where
+    // label === id. If we kept these, resolveLabel(graph, id) would "succeed"
+    // by returning the raw ID, and the sanitiser would silently re-emit the
+    // leaked entity ID it was meant to scrub. By dropping them here, the
+    // sanitiser falls through to the prefix-aware generic ("the relevant
+    // factor"), which is the correct safety behaviour for a missing label.
+    if (typeof n.label !== "string" || n.label.length === 0 || n.label === n.id) continue;
+    const rawKind = typeof n.kind === "string" ? (n.kind as NodeV3T["kind"]) : "factor";
+    const kind: NodeV3T["kind"] = V3_VALID_NODE_KINDS.has(rawKind) ? rawKind : "factor";
+    nodes.push({ id: n.id, kind, label: n.label });
+  }
+  return { nodes, edges: [] };
+}
+
+/**
+ * Decide whether a narrowed coaching block has anything worth surfacing.
+ * A null or whitespace-only summary alone with empty arrays is silence —
+ * drop. Any populated field (including a non-blank string summary) makes
+ * the panel worth rendering.
+ */
+function hasMeaningfulCoaching(coaching: DraftCoaching): boolean {
+  if (typeof coaching.summary === "string" && coaching.summary.trim().length > 0) return true;
+  if (coaching.strengthen_items.length > 0) return true;
+  if (coaching.widening_log && coaching.widening_log.length > 0) return true;
+  if (coaching.bias_signals && coaching.bias_signals.length > 0) return true;
+  return false;
+}
+
+/**
+ * Scrub user-facing coaching strings against the entity-ID leak guard.
+ * Returns a new DraftCoaching with the same shape; original input is untouched.
+ *
+ * The graph (projected from V1 to a minimal GraphV3T-shaped object) is
+ * threaded through so the sanitiser can resolve leaked IDs to the actual
+ * node label rather than falling back to the generic ("the relevant factor").
+ */
+function sanitiseCoachingForDisplay(
+  coaching: DraftCoaching | null,
+  graph: GraphV3T | null,
+): DraftCoaching | null {
+  if (!coaching) return null;
+  const scrub = (text: string): string => sanitiseUserFacingText(text, graph).text;
+  return {
+    summary: coaching.summary !== null ? scrub(coaching.summary) : null,
+    strengthen_items: coaching.strengthen_items.map((item) => ({
+      ...item,
+      label: scrub(item.label),
+      detail: scrub(item.detail),
+    })),
+    widening_log: coaching.widening_log
+      ? coaching.widening_log.map((entry) => ({
+          ...entry,
+          label: scrub(entry.label),
+          reason: scrub(entry.reason),
+        }))
+      : null,
+    bias_signals: coaching.bias_signals
+      ? coaching.bias_signals.map((signal) => ({
+          ...signal,
+          detail: scrub(signal.detail),
+          // target is a structural node-ID pointer the UI uses to highlight
+          // the referenced node — leaving it unscrubbed preserves that link.
+          // detail (above) is the user-facing prose and is sanitised.
+        }))
+      : null,
+  };
+}
 
 /**
  * Derive a single status_quo_action enum from the sweep trace.
@@ -196,14 +288,48 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     ? sortBiasFindings(detectBiases(ctx.graph as any, ctx.archetype), ctx.input.seed)
     : [];
 
+  // Narrow + sanitise coaching for the user-facing response.
+  // ctx.coaching is the raw LLM passthrough block; narrow to typed display
+  // shape and scrub any entity-ID leaks (e.g. "fac_churn") from user-visible
+  // strings before the response leaves the boundary. Project the V1 graph
+  // into a minimal GraphV3T shape so label resolution works (sanitiser
+  // replaces `fac_churn` with the actual node label rather than the generic
+  // "the relevant factor" fallback).
+  const labelGraph = projectGraphForLabelLookup(ctx.graph);
+  const sanitisedCoaching: DraftCoaching | null = ctx.coaching
+    ? sanitiseCoachingForDisplay(narrowCoachingForResponse(ctx.coaching), labelGraph)
+    : null;
+
   const payload: Record<string, unknown> = {
     graph: ctx.graph,
     rationales: ctx.rationales,
     confidence: ctx.confidence,
     goal_constraints: ctx.goalConstraints,
     bias_findings: biasFindings,
-    // Coaching passthrough from LLM output (undefined if not present)
-    ...(ctx.coaching ? { coaching: ctx.coaching } : {}),
+    // Display-shape coaching for the UI (sanitised, narrowed). Attach when
+    // any coaching field is meaningful — summary may be null and other
+    // fields populated (e.g. LLM produced widening_log without a summary),
+    // and the UI renders null as "no summary" rather than dropping the panel.
+    // widening_log / bias_signals are spread conditionally because the wire
+    // schemas mark them optional (undefined) rather than nullable, while
+    // DraftCoaching uses null to signal "absent".
+    ...(sanitisedCoaching && hasMeaningfulCoaching(sanitisedCoaching)
+      ? {
+          coaching: {
+            summary: sanitisedCoaching.summary,
+            strengthen_items: sanitisedCoaching.strengthen_items,
+            // Omit empty arrays too — DraftCoachingWire treats absent fields
+            // as undefined rather than empty, so a present-but-empty array
+            // would contradict the type contract.
+            ...(sanitisedCoaching.widening_log && sanitisedCoaching.widening_log.length > 0
+              ? { widening_log: sanitisedCoaching.widening_log }
+              : {}),
+            ...(sanitisedCoaching.bias_signals && sanitisedCoaching.bias_signals.length > 0
+              ? { bias_signals: sanitisedCoaching.bias_signals }
+              : {}),
+          },
+        }
+      : {}),
     // Causal claims passthrough (Phase 2B):
     //   LLM didn't emit → omit field (absent provenance)
     //   LLM emitted but all dropped → causal_claims: [] (emptied provenance)

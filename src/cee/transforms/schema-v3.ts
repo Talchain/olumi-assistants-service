@@ -41,6 +41,7 @@ import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD, EDGE_STRENGTH_NEGLI
 import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
+import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 
 // ============================================================================
 // V3 Types
@@ -330,6 +331,17 @@ export function transformNodeToV3(
     }
   }
 
+  // UI provenance display. Read extractionType from whichever location holds
+  // it on this node — observed_state (factor with value), node-level
+  // (external/repaired factors), or data (factor without observed_state).
+  // Decisions/options/goals fall through to the ai_inferred default.
+  const dataExtractionType = isFactorData(node.data) ? node.data.extractionType : undefined;
+  const extractionTypeForDisplay =
+    v3Node.observed_state?.extractionType
+    ?? v3Node.extractionType
+    ?? dataExtractionType;
+  v3Node.provenance = nodeProvenanceDisplay(extractionTypeForDisplay);
+
   return v3Node;
 }
 
@@ -546,6 +558,9 @@ export function transformEdgeToV3(
       exists_probability: beliefExists,
       effect_direction: effectDirection,
       provenance,
+      // UI display vocabulary derived from structured provenance.source.
+      // Sibling of `provenance` (structured); leaves the structural enum intact.
+      provenance_display: edgeProvenanceDisplay(provenance?.source),
       // Edge origin: tracks creation source (ai, user, repair, enrichment, default)
       origin: edge.origin ?? "ai",
       // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.

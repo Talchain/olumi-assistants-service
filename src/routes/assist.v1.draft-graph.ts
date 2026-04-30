@@ -19,6 +19,7 @@ import {
   parseSchemaVersion,
 } from "../cee/transforms/index.js";
 import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
+import type { DraftCoachingWire } from "../orchestrator/types.js";
 
 // ============================================================================
 // Response contract — discriminated union on `status`
@@ -36,10 +37,24 @@ import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
 //
 // NeedsClarificationPayload is defined in preflight-decision.ts and re-used here.
 
-/** Graph-generated success response (V1 shape — V3 is flat nodes/edges at root). */
+/** Graph-generated success response (V1 shape — V3 is flat nodes/edges at root).
+ *
+ *  Notable wire fields the UI consumes (set by Stage 5 + V3 boundary):
+ *    - `coaching` — typed `DraftCoachingWire` from `src/orchestrator/types.ts`
+ *      (summary may be null; widening_log / bias_signals are OMITTED — not
+ *      null — when absent, matching the V3 schema's optional-undefined
+ *      semantics). Shape decision: we reuse the V3 schema's existing
+ *      `coaching` field rather than introducing a parallel `draft_coaching`
+ *      root, since the V3 schema already passes the same shape verbatim.
+ *    - each node carries `provenance: 'from_brief' | 'ai_inferred' | 'user_set'`
+ *    - each edge carries `provenance_display` with the same enum, sibling of
+ *      the structured `provenance.source` (which stays untouched).
+ */
 export interface DraftGraphSuccessResponse {
   status?: "ok";
   graph: Record<string, unknown>;
+  /** Display-shape coaching projection. Absent on error/clarification paths. */
+  coaching?: DraftCoachingWire;
   [key: string]: unknown;
 }
 

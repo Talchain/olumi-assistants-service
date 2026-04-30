@@ -234,12 +234,26 @@ export interface DraftCoachingStrengthenItem {
 /** Draft-time coaching payload stamped onto the response envelope after a
  *  successful draft_graph turn. summary / widening_log / bias_signals are
  *  null when the LLM did not produce that field; strengthen_items defaults
- *  to []. */
+ *  to []. Used as the internal narrowed shape; consumers reading the wire
+ *  response should use `DraftCoachingWire` (sibling type) which omits
+ *  `widening_log` / `bias_signals` rather than emitting null. */
 export interface DraftCoaching {
   summary: string | null;
   strengthen_items: DraftCoachingStrengthenItem[];
   widening_log: DraftCoachingWideningEntry[] | null;
   bias_signals: DraftCoachingBiasSignal[] | null;
+}
+
+/** Wire shape of the `coaching` field on `/assist/v1/draft-graph` responses.
+ *  Differs from `DraftCoaching` in that empty/absent `widening_log` and
+ *  `bias_signals` are OMITTED from the response (undefined) rather than
+ *  emitted as null — matches the V3 `coaching` schema (z.array(...).optional()).
+ *  `summary` may still be null when the LLM produced no summary string. */
+export interface DraftCoachingWire {
+  summary: string | null;
+  strengthen_items: DraftCoachingStrengthenItem[];
+  widening_log?: DraftCoachingWideningEntry[];
+  bias_signals?: DraftCoachingBiasSignal[];
 }
 
 /** @deprecated Re-exported from `tools/draft-graph.ts` as `StrengthenItem` for

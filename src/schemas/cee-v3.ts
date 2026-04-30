@@ -134,6 +134,13 @@ export const NodeV3 = z.object({
   interventions: z.record(z.string(), z.any()).optional(),
   /** Marks the status-quo / baseline option node (option-kind nodes only, v191+). */
   is_baseline: z.boolean().optional(),
+  /** UI display vocabulary for the node's origin. Set by the V3 transform from
+   *  `extractionType`: `explicit`/`observed` → `from_brief`,
+   *  `inferred`/`range` → `ai_inferred`, absent/unknown → `ai_inferred`.
+   *  RESPONSE-ONLY: recomputed deterministically by `transformResponseToV3`
+   *  on every response. Not read by analysis, repair, or PLoT pipelines.
+   *  Safe to ignore on round-tripped graphs — value is regenerated. */
+  provenance: z.enum(["from_brief", "ai_inferred", "user_set"]).optional(),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 
@@ -180,6 +187,14 @@ export const EdgeV3 = z.object({
   effect_direction: z.enum(["positive", "negative"]),
   /** Provenance */
   provenance: EdgeProvenanceV3.optional(),
+  /** UI display vocabulary for the edge's origin. Set by the V3 transform
+   *  from `provenance.source`: `brief_extraction` → `from_brief`,
+   *  `user_specified` → `user_set`, otherwise `ai_inferred`. Sibling of the
+   *  structured `provenance` enum so existing consumers of `provenance.source`
+   *  are unaffected. RESPONSE-ONLY: recomputed deterministically by
+   *  `transformResponseToV3` on every response. Not read by analysis, repair,
+   *  or PLoT pipelines. Safe to ignore on round-tripped edges. */
+  provenance_display: z.enum(["from_brief", "ai_inferred", "user_set"]).optional(),
   /** Edge creation source: ai, user, repair, enrichment, default */
   origin: z.string().optional(),
   /** Edge type: directed (default) or bidirected (unmeasured confounder). Phase 3A-trust. */
@@ -449,14 +464,17 @@ export const CEEGraphResponseV3 = z.object({
   goal_constraints: z.array(GoalConstraintSchema).optional(),
   /** LLM coaching output, optional decision-quality insights. widening_log
    *  and bias_signals are kept as `unknown[]` here so the LLM's byte-for-byte
-   *  output reaches V5 ContextPack via the draft_coaching cache; the
-   *  envelope-facing `draft_coaching` field narrows them to typed display
-   *  shapes at the wire boundary (see src/orchestrator/draft-coaching.ts).
-   *  The wrapper is `.passthrough()` so additive future coaching fields
-   *  (e.g. a new bias_findings) reach downstream consumers instead of being
-   *  stripped silently. */
+   *  output reaches V5 ContextPack via the raw coaching cache. The wire-
+   *  facing `coaching` field on /assist/v1/draft-graph is narrowed to typed
+   *  display shapes at the Stage 5 boundary by `narrowCoachingForResponse`
+   *  in src/orchestrator/draft-coaching.ts (`DraftCoachingWire` is the
+   *  resulting shape). The wrapper is `.passthrough()` so additive future
+   *  coaching fields reach downstream consumers instead of being stripped. */
   coaching: z.object({
-    summary: z.string(),
+    // Nullable so that a coaching block with widening_log / bias_signals but
+    // no LLM-produced summary still reaches the UI. The UI renders null as
+    // "no summary" rather than dropping the entire panel.
+    summary: z.string().nullable(),
     strengthen_items: z.array(z.object({
       id: z.string(),
       label: z.string(),

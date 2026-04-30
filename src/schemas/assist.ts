@@ -174,9 +174,11 @@ export const DraftGraphOutput = z.object({
    * PLoT merges these with compiled constraint nodes (explicit wins on conflict).
    */
   goal_constraints: z.array(GoalConstraintSchema).optional(),
-  /** LLM coaching output — optional decision-quality insights */
+  /** LLM coaching output — optional decision-quality insights.
+   *  summary is nullable to keep coaching reachable when the LLM produces
+   *  widening_log / bias_signals without a summary string. */
   coaching: z.object({
-    summary: z.string(),
+    summary: z.string().nullable(),
     strengthen_items: z.array(z.object({
       id: z.string(),
       label: z.string(),

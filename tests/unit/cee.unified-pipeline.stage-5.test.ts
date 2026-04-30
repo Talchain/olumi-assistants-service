@@ -464,6 +464,253 @@ describe("runStagePackage", () => {
     expect(items[1].action_type).toBe("refine");
   });
 
+  // ── Coaching narrow + sanitise on the response ──────────────────────────
+
+  it("narrows ctx.coaching onto ceeResponse.coaching with widening_log + bias_signals", async () => {
+    // Use a graph with a status-quo option so Stage 5's synthetic
+    // str_status_quo injection is a no-op — keeps the assertion focused on
+    // the narrower's output.
+    const ctx = makeCtx({
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Goal" },
+          { id: "o1", kind: "option", label: "Option A", data: { is_status_quo: true } },
+          { id: "f1", kind: "factor", label: "Factor A", category: "controllable" },
+        ],
+        edges: [
+          { id: "e1", from: "o1", to: "g1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+          { id: "e2", from: "f1", to: "o1", strength_mean: 0.5, strength_std: 0.2, belief_exists: 0.8, effect_direction: "positive" },
+        ],
+        version: "1.2",
+        default_seed: 42,
+      },
+      coaching: {
+        summary: "Solid scaffold; broaden the competitor scope.",
+        strengthen_items: [
+          { id: "s1", label: "Add a churn driver", detail: "Missing churn elasticity.", action_type: "add_node" },
+        ],
+        widening_log: [
+          { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternatives" },
+        ],
+        bias_signals: [
+          { type: "anchoring", detail: "pinned to last quarter's figure", target: "fac_revenue" },
+        ],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const coaching = (ctx.ceeResponse as any).coaching;
+    expect(coaching).toBeDefined();
+    expect(coaching.summary).toBe("Solid scaffold; broaden the competitor scope.");
+    expect(coaching.strengthen_items).toHaveLength(1);
+    expect(coaching.strengthen_items[0].id).toBe("s1");
+    expect(coaching.widening_log).toEqual([
+      { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternatives" },
+    ]);
+    expect(coaching.bias_signals).toEqual([
+      { type: "anchoring", detail: "pinned to last quarter's figure", target: "fac_revenue" },
+    ]);
+  });
+
+  it("sanitises raw entity IDs out of coaching.summary at the wire boundary", async () => {
+    const ctx = makeCtx({
+      coaching: {
+        summary: "We should add fac_churn_rate to widen the model.",
+        strengthen_items: [
+          { id: "s1", label: "Add fac_churn_rate", detail: "Missing fac_churn_rate.", action_type: "add_node" },
+        ],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const coaching = (ctx.ceeResponse as any).coaching;
+    // The graph projection has no node id "fac_churn_rate", so resolveLabel
+    // returns null and we fall through to the prefix-aware generic. Either
+    // outcome is correct — the invariant is that raw IDs never reach the wire.
+    expect(coaching.summary).not.toContain("fac_churn_rate");
+    expect(coaching.summary).toContain("the relevant factor");
+    expect(coaching.strengthen_items[0].label).not.toContain("fac_churn_rate");
+    expect(coaching.strengthen_items[0].detail).not.toContain("fac_churn_rate");
+  });
+
+  it("resolves leaked entity IDs to actual node labels when the graph contains them", async () => {
+    // When the leaked ID matches a node in the projected graph, the
+    // sanitiser substitutes the node's label rather than the generic.
+    const ctx = makeCtx({
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Goal" },
+          { id: "o1", kind: "option", label: "Option A", data: { is_status_quo: true } },
+          { id: "fac_churn_rate", kind: "factor", label: "Customer churn rate", category: "controllable" },
+        ],
+        edges: [
+          { id: "e1", from: "fac_churn_rate", to: "g1", strength_mean: 0.5, strength_std: 0.2, belief_exists: 0.9, effect_direction: "positive" },
+        ],
+        version: "1.2",
+        default_seed: 42,
+      },
+      coaching: {
+        summary: "Consider widening fac_churn_rate.",
+        strengthen_items: [
+          { id: "s1", label: "Refine fac_churn_rate", detail: "fac_churn_rate is underspecified.", action_type: "refine" },
+        ],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const coaching = (ctx.ceeResponse as any).coaching;
+    expect(coaching.summary).toContain("Customer churn rate");
+    expect(coaching.summary).not.toContain("fac_churn_rate");
+    expect(coaching.strengthen_items[0].label).toContain("Customer churn rate");
+    expect(coaching.strengthen_items[0].detail).toContain("Customer churn rate");
+  });
+
+  it("falls back to generic when a graph node's label equals its id (label-less projection)", async () => {
+    // Direct regression for the label-less guard in projectGraphForLabelLookup:
+    // when a node's label is the raw id (or absent), the projection skips it
+    // so resolveLabel returns null and the sanitiser substitutes the
+    // prefix-aware generic instead of re-emitting the leaked id as itself.
+    const ctx = makeCtx({
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Goal" },
+          { id: "o1", kind: "option", label: "Continue as-is" },
+          // label === id → must be skipped by the projection
+          { id: "fac_revenue", kind: "factor", label: "fac_revenue", category: "controllable" },
+        ],
+        edges: [
+          { id: "e1", from: "fac_revenue", to: "g1", strength_mean: 0.5, strength_std: 0.2, belief_exists: 0.9, effect_direction: "positive" },
+        ],
+        version: "1.2",
+        default_seed: 42,
+      },
+      coaching: {
+        summary: "Consider widening fac_revenue.",
+        strengthen_items: [
+          { id: "s1", label: "Refine fac_revenue", detail: "fac_revenue underspecified.", action_type: "refine" },
+        ],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const coaching = (ctx.ceeResponse as any).coaching;
+    // Must NOT echo the raw id (which would happen if projection kept the
+    // node and resolveLabel returned the id-as-label).
+    expect(coaching.summary).not.toContain("fac_revenue");
+    expect(coaching.strengthen_items[0].label).not.toContain("fac_revenue");
+    expect(coaching.strengthen_items[0].detail).not.toContain("fac_revenue");
+    // Generic-fallback path fires.
+    expect(coaching.summary).toContain("the relevant factor");
+  });
+
+  it("preserves bias_signals[].target as a structural node-ID pointer (not scrubbed)", async () => {
+    // target is the UI's link to highlight the referenced node; scrubbing
+    // it would break that link. detail (the prose) is the only user-facing
+    // field on bias_signals that gets sanitised.
+    const ctx = makeCtx({
+      coaching: {
+        summary: "ok",
+        strengthen_items: [],
+        bias_signals: [
+          { type: "anchoring", detail: "Pinned on fac_revenue last quarter.", target: "fac_revenue" },
+        ],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const sig = (ctx.ceeResponse as any).coaching.bias_signals[0];
+    expect(sig.target).toBe("fac_revenue"); // structural pointer survives
+    expect(sig.detail).not.toContain("fac_revenue"); // prose scrubbed
+  });
+
+  it("omits coaching when ctx.coaching is absent and no synthetic injection runs", async () => {
+    // Graph without options → status-quo synthesiser is a no-op, so a missing
+    // ctx.coaching stays missing through Stage 5.
+    const ctx = makeCtx({
+      coaching: undefined,
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Goal" },
+          { id: "f1", kind: "factor", label: "Factor A", category: "controllable" },
+        ],
+        edges: [
+          { id: "e1", from: "f1", to: "g1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        ],
+        version: "1.2",
+        default_seed: 42,
+      },
+    });
+    await runStagePackage(ctx);
+
+    const resp = ctx.ceeResponse as any;
+    expect(resp).toBeDefined();
+    expect(resp.coaching).toBeUndefined();
+  });
+
+  it("preserves coaching with summary: null when other fields are meaningful", async () => {
+    // summary missing → narrower returns null. Coaching still surfaces
+    // because strengthen_items carries usable content. UI renders null as
+    // "no summary" rather than dropping the entire panel.
+    const ctx = makeCtx({
+      coaching: {
+        strengthen_items: [
+          { id: "s1", label: "L", detail: "D", action_type: "add_node" },
+        ],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const coaching = (ctx.ceeResponse as any).coaching;
+    expect(coaching).toBeDefined();
+    expect(coaching.summary).toBeNull();
+    // strengthen_items contains the user-provided s1 plus the synthetic
+    // str_status_quo entry injected by Stage 5 when the graph has options
+    // without a baseline.
+    expect(coaching.strengthen_items.length).toBeGreaterThanOrEqual(1);
+    expect(coaching.strengthen_items.find((i: any) => i.id === "s1")).toBeDefined();
+  });
+
+  it("drops coaching when nothing is meaningful (null summary, no other fields)", async () => {
+    // No summary, no strengthen_items, no widening_log, no bias_signals,
+    // and no synthetic injection (no options on the graph) → nothing to surface.
+    const ctx = makeCtx({
+      coaching: {},
+      graph: {
+        nodes: [
+          { id: "g1", kind: "goal", label: "Goal" },
+          { id: "f1", kind: "factor", label: "Factor A", category: "controllable" },
+        ],
+        edges: [
+          { id: "e1", from: "f1", to: "g1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        ],
+        version: "1.2",
+        default_seed: 42,
+      },
+    });
+    await runStagePackage(ctx);
+
+    const resp = ctx.ceeResponse as any;
+    expect(resp.coaching).toBeUndefined();
+  });
+
+  it("omits widening_log + bias_signals when source arrays are null", async () => {
+    const ctx = makeCtx({
+      coaching: {
+        summary: "Coaching with no log or signals.",
+        strengthen_items: [],
+      },
+    });
+    await runStagePackage(ctx);
+
+    const coaching = (ctx.ceeResponse as any).coaching;
+    expect(coaching).toBeDefined();
+    expect(coaching.summary).toBe("Coaching with no log or signals.");
+    // Null arrays must be absent on the wire (V3 schema marks them optional,
+    // not nullable — leaving them as null would fail safeParse).
+    expect("widening_log" in coaching).toBe(false);
+    expect("bias_signals" in coaching).toBe(false);
+  });
+
   // ── Verification pipeline ──────────────────────────────────────────────
 
   it("calls verificationPipeline.verify with CEEDraftGraphResponseV1Schema", async () => {
