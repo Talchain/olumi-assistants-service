@@ -1,0 +1,3166 @@
+{
+  "response_version": 2,
+  "assistant_text": "Ran analysis on your current scenario.",
+  "blocks": [
+    {
+      "type": "analysis_result",
+      "summary": "Ran analysis on your current scenario.",
+      "leading_option_id": "opt_hire_local",
+      "win_probabilities": {
+        "Hire Two Senior Engineers Locally": 0.948,
+        "Engage Offshore Partner": 0.046,
+        "Maintain Current Team (Status Quo)": 0.006,
+        "Introduce Tiered Pricing to Fund Gradual Hiring": 0
+      },
+      "enrichment": {
+        "request_schema_version": "v3",
+        "endpoint_version": "v2/run",
+        "preflight_version": "2025-12-26",
+        "request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+        "analysis_status": "computed",
+        "option_comparison_status": "computed",
+        "robustness_status": "computed",
+        "drivers_status": "computed",
+        "isl_analysis_status": "computed",
+        "critiques": [],
+        "option_comparison": [
+          {
+            "option_id": "opt_hire_local",
+            "option_label": "Hire Two Senior Engineers Locally",
+            "id": "opt_hire_local",
+            "label": "Hire Two Senior Engineers Locally",
+            "outcome": {
+              "mean": 0.8132319756140622,
+              "std": 0.30332013086097914,
+              "p10": 0.4001864583114018,
+              "p50": 0.8306516509548484,
+              "p90": 1.1888318976982775,
+              "n_samples": 1000,
+              "n_valid_samples": 1000,
+              "validity_ratio": 1
+            },
+            "status": "computed",
+            "win_probability": 0.948
+          },
+          {
+            "option_id": "opt_offshore",
+            "option_label": "Engage Offshore Partner",
+            "id": "opt_offshore",
+            "label": "Engage Offshore Partner",
+            "outcome": {
+              "mean": 0.6677431475669133,
+              "std": 0.22801917461949633,
+              "p10": 0.3606723201703379,
+              "p50": 0.6878869508749893,
+              "p90": 0.948239884248076,
+              "n_samples": 1000,
+              "n_valid_samples": 1000,
+              "validity_ratio": 1
+            },
+            "status": "computed",
+            "win_probability": 0.046
+          },
+          {
+            "option_id": "opt_status_quo",
+            "option_label": "Maintain Current Team (Status Quo)",
+            "id": "opt_status_quo",
+            "label": "Maintain Current Team (Status Quo)",
+            "outcome": {
+              "mean": 0.3422126543676048,
+              "std": 0.11196571638443592,
+              "p10": 0.19017503150895917,
+              "p50": 0.35028196615854895,
+              "p90": 0.4781934898108626,
+              "n_samples": 1000,
+              "n_valid_samples": 1000,
+              "validity_ratio": 1
+            },
+            "status": "computed",
+            "win_probability": 0.006
+          },
+          {
+            "option_id": "opt_tiered_pricing",
+            "option_label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+            "id": "opt_tiered_pricing",
+            "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+            "outcome": {
+              "mean": 0.4268398848392611,
+              "std": 0.1690681896157409,
+              "p10": 0.20264822620280773,
+              "p50": 0.4351294163176319,
+              "p90": 0.6323601230841863,
+              "n_samples": 1000,
+              "n_valid_samples": 1000,
+              "validity_ratio": 1
+            },
+            "status": "computed",
+            "win_probability": 0
+          }
+        ],
+        "edge_sensitivity": [],
+        "edge_e_values": [],
+        "conditional_winners": [],
+        "factor_sensitivity": [
+          {
+            "factor_id": "fac_team_capacity",
+            "factor_label": "Engineering Team Capacity",
+            "influence_score": 1,
+            "influence_rank": 1,
+            "sensitivity_score": 0.8425,
+            "elasticity": 1,
+            "direction": "positive",
+            "importance_rank": 1,
+            "value_of_information": 0,
+            "confidence": 0.25,
+            "confidence_source": "isl",
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "attribution_stability": "negligible",
+            "elasticity_std": 0,
+            "rank_flip_rate": 0,
+            "stability_method": "bootstrap_20",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic",
+            "range_derivation_source": "default"
+          },
+          {
+            "factor_id": "fac_delivery_speed",
+            "factor_label": "Delivery Velocity",
+            "influence_score": 0.8011869436201781,
+            "influence_rank": 2,
+            "sensitivity_score": 0.675,
+            "elasticity": 0.8011869436201781,
+            "direction": "positive",
+            "importance_rank": 2,
+            "value_of_information": 0,
+            "confidence": 0.25,
+            "confidence_source": "isl",
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "attribution_stability": "negligible",
+            "elasticity_std": 0,
+            "rank_flip_rate": 0,
+            "stability_method": "bootstrap_20",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic",
+            "range_derivation_source": "default"
+          },
+          {
+            "factor_id": "fac_talent_availability",
+            "factor_label": "Local Engineering Talent Availability",
+            "influence_score": 0.33827893175074186,
+            "influence_rank": 3,
+            "sensitivity_score": 0.28500000000000003,
+            "elasticity": 0.33827893175074186,
+            "direction": "positive",
+            "importance_rank": 3,
+            "value_of_information": 0,
+            "confidence": 0.25,
+            "confidence_source": "isl",
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "source": "graph",
+            "flip_risk_category": "negligible",
+            "attribution_stability": "low",
+            "elasticity_std": 0.00199861,
+            "rank_flip_rate": 0.1,
+            "stability_method": "bootstrap_20",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic"
+          },
+          {
+            "factor_id": "fac_hiring_cost",
+            "factor_label": "Incremental Staffing Cost",
+            "influence_score": 0.21364985163204747,
+            "influence_rank": 4,
+            "sensitivity_score": -0.18,
+            "elasticity": 0.21364985163204747,
+            "direction": "negative",
+            "importance_rank": 4,
+            "value_of_information": 0,
+            "confidence": 0.25,
+            "confidence_source": "isl",
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "source": "graph",
+            "flip_risk_category": "negligible",
+            "attribution_stability": "negligible",
+            "elasticity_std": 0,
+            "rank_flip_rate": 0,
+            "stability_method": "bootstrap_20",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic",
+            "range_derivation_source": "default"
+          },
+          {
+            "factor_id": "fac_market_demand",
+            "factor_label": "Customer Demand for New Features",
+            "influence_score": 0.10385756676557863,
+            "influence_rank": 5,
+            "sensitivity_score": 0.0875,
+            "elasticity": 0.10385756676557863,
+            "direction": "positive",
+            "importance_rank": 5,
+            "value_of_information": 0,
+            "confidence": 0.25,
+            "confidence_source": "isl",
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "source": "graph",
+            "flip_risk_category": "negligible",
+            "attribution_stability": "low",
+            "elasticity_std": 0.0009262,
+            "rank_flip_rate": 0.25,
+            "stability_method": "bootstrap_20",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic"
+          }
+        ],
+        "factor_stability": [
+          {
+            "factor_id": "fac_talent_availability",
+            "factor_label": "Local Engineering Talent Availability",
+            "elasticity_std": 0.00199861,
+            "attribution_stability": "low",
+            "rank_flip_rate": 0.1,
+            "stability_method": "bootstrap_20"
+          },
+          {
+            "factor_id": "fac_market_demand",
+            "factor_label": "Customer Demand for New Features",
+            "elasticity_std": 0.0009262,
+            "attribution_stability": "low",
+            "rank_flip_rate": 0.25,
+            "stability_method": "bootstrap_20"
+          },
+          {
+            "factor_id": "fac_delivery_speed",
+            "factor_label": "Delivery Velocity",
+            "elasticity_std": 0,
+            "attribution_stability": "negligible",
+            "rank_flip_rate": 0,
+            "stability_method": "bootstrap_20"
+          },
+          {
+            "factor_id": "fac_hiring_cost",
+            "factor_label": "Incremental Staffing Cost",
+            "elasticity_std": 0,
+            "attribution_stability": "negligible",
+            "rank_flip_rate": 0,
+            "stability_method": "bootstrap_20"
+          },
+          {
+            "factor_id": "fac_team_capacity",
+            "factor_label": "Engineering Team Capacity",
+            "elasticity_std": 0,
+            "attribution_stability": "negligible",
+            "rank_flip_rate": 0,
+            "stability_method": "bootstrap_20"
+          }
+        ],
+        "stability_thresholds": {
+          "high_moderate_boundary": 0.1,
+          "moderate_low_boundary": 0.3,
+          "version": "v1.0-operational-defaults",
+          "provisional": true
+        },
+        "inference_warnings": [],
+        "m1_coaching": {
+          "story_headlines": {
+            "opt_hire_local": "Hire Two Senior Engineers Locally outperforms by 90 points with high confidence",
+            "opt_offshore": "Runner-up with 5% win probability",
+            "opt_status_quo": "Runner-up with 1% win probability",
+            "opt_tiered_pricing": "Runner-up with 0% win probability"
+          },
+          "evidence_gaps": [
+            {
+              "factor_id": "fac_talent_availability",
+              "factor_label": "Local Engineering Talent Availability",
+              "voi_score": 0.6302,
+              "confidence": 0.3698,
+              "confidence_display": "37%",
+              "confidence_defaulted": false,
+              "influence": 1,
+              "influence_display": "100%",
+              "suggestion": "Gather data on \"Local Engineering Talent Availability\" to reduce uncertainty",
+              "notes": [],
+              "evpi_percentage_points": 56.8,
+              "evpi_method": "heuristic"
+            },
+            {
+              "factor_id": "fac_market_demand",
+              "factor_label": "Customer Demand for New Features",
+              "voi_score": 0.18225982904136773,
+              "confidence": 0.3303,
+              "confidence_display": "33%",
+              "confidence_defaulted": false,
+              "influence": 0.2721514544443299,
+              "influence_display": "27%",
+              "suggestion": "Gather data on \"Customer Demand for New Features\" to reduce uncertainty",
+              "notes": [],
+              "evpi_percentage_points": 16.4,
+              "evpi_method": "heuristic"
+            },
+            {
+              "factor_id": "fac_delivery_speed",
+              "factor_label": "Delivery Velocity",
+              "voi_score": 0,
+              "confidence": 0.1,
+              "confidence_display": "10%",
+              "confidence_defaulted": false,
+              "influence": 0,
+              "influence_display": "0%",
+              "suggestion": "Gather data on \"Delivery Velocity\" to reduce uncertainty",
+              "notes": [],
+              "value": 0.25,
+              "raw_value": 0,
+              "unit": "scale",
+              "cap": 0,
+              "evpi_percentage_points": 0,
+              "evpi_method": "heuristic"
+            }
+          ],
+          "model_critiques": [
+            {
+              "type": "DOMINANT_FACTOR",
+              "severity": "warn",
+              "challenge_question": "One factor dominates. What would change if Local Engineering Talent Availability had less influence?",
+              "suggested_action": "Consider whether Local Engineering Talent Availability's importance is evidence-based or assumed",
+              "targets": [
+                "fac_talent_availability"
+              ]
+            },
+            {
+              "type": "INFLUENTIAL_EXTERNALS",
+              "severity": "warn",
+              "challenge_question": "External factors Local Engineering Talent Availability, Customer Demand for New Features significantly affect your outcome but are inherently uncertain. How might you bound these?",
+              "suggested_action": "Consider converting to observable (if you can estimate baseline) or add proxy factors with explicit 0-1 scales",
+              "targets": [
+                "fac_talent_availability",
+                "fac_market_demand"
+              ]
+            }
+          ],
+          "next_actions": [
+            {
+              "priority": 2,
+              "action": "Gather evidence on Local Engineering Talent Availability",
+              "rationale": "This factor has high impact (100%) but low confidence (37%)",
+              "target_type": "factor",
+              "target_id": "fac_talent_availability",
+              "target_label": "Local Engineering Talent Availability"
+            }
+          ],
+          "readiness": "needs_evidence",
+          "headline_type": "clear_winner",
+          "assumptions_ledger": {
+            "assumptions": [
+              {
+                "dedup_key": "isl_engine:flagged:node:fac_talent_availability:confidence",
+                "source_service": "isl_engine",
+                "action": "flagged",
+                "entity_type": "node",
+                "entity_id": "fac_talent_availability",
+                "field": "confidence",
+                "from_value": null,
+                "to_value": 0.3698,
+                "reason": "Factor Local Engineering Talent Availability has low confidence (37%)",
+                "impact": "high",
+                "impact_reason_code": "HIGH_INFLUENCE_FACTOR"
+              },
+              {
+                "dedup_key": "isl_engine:flagged:node:fac_market_demand:confidence",
+                "source_service": "isl_engine",
+                "action": "flagged",
+                "entity_type": "node",
+                "entity_id": "fac_market_demand",
+                "field": "confidence",
+                "from_value": null,
+                "to_value": 0.3303,
+                "reason": "Factor Customer Demand for New Features has low confidence (33%)",
+                "impact": "high",
+                "impact_reason_code": "HIGH_INFLUENCE_FACTOR"
+              },
+              {
+                "dedup_key": "isl_engine:flagged:node:fac_delivery_speed:confidence",
+                "source_service": "isl_engine",
+                "action": "flagged",
+                "entity_type": "node",
+                "entity_id": "fac_delivery_speed",
+                "field": "confidence",
+                "from_value": null,
+                "to_value": 0.1,
+                "reason": "Factor Delivery Velocity has low confidence (10%)",
+                "impact": "high",
+                "impact_reason_code": "HIGH_INFLUENCE_FACTOR"
+              },
+              {
+                "dedup_key": "isl_engine:flagged:node:fac_hiring_cost:confidence",
+                "source_service": "isl_engine",
+                "action": "flagged",
+                "entity_type": "node",
+                "entity_id": "fac_hiring_cost",
+                "field": "confidence",
+                "from_value": null,
+                "to_value": 0.1,
+                "reason": "Factor Incremental Staffing Cost has low confidence (10%)",
+                "impact": "low",
+                "impact_reason_code": "STRUCTURAL_ONLY"
+              },
+              {
+                "dedup_key": "isl_engine:flagged:node:fac_team_capacity:confidence",
+                "source_service": "isl_engine",
+                "action": "flagged",
+                "entity_type": "node",
+                "entity_id": "fac_team_capacity",
+                "field": "confidence",
+                "from_value": null,
+                "to_value": 0.1,
+                "reason": "Factor Engineering Team Capacity has low confidence (10%)",
+                "impact": "low",
+                "impact_reason_code": "STRUCTURAL_ONLY"
+              }
+            ],
+            "total_count": 5,
+            "high_impact_count": 3,
+            "medium_impact_count": 0,
+            "low_impact_count": 2
+          },
+          "thresholds_used": {
+            "headline_clear_winner_delta": 0.2,
+            "headline_clear_winner_stability": 0.7,
+            "headline_moderate_winner_delta": 0.1,
+            "headline_moderate_winner_stability": 0.5,
+            "headline_close_call_delta": 0.1,
+            "headline_high_uncertainty_voi": 0.3,
+            "headline_high_uncertainty_fragile": 0.25,
+            "headline_fragile_edge_min": 0.15,
+            "evidence_gap_min_voi": 0,
+            "evidence_gap_top_quartile": true,
+            "evidence_gap_floor": 3,
+            "evidence_gap_cap": 3,
+            "critique_dominant_factor_threshold": 0.5,
+            "critique_influential_external_quartile": 0.25,
+            "critique_narrow_framing_max_options": 2,
+            "critique_anchoring_baseline_value": 0.5,
+            "critique_overconfidence_threshold": 0.85,
+            "action_fragile_edge_threshold": 0.2,
+            "action_high_voi_threshold": 0.4,
+            "readiness_high_evidence_gap_count": 2,
+            "readiness_high_voi_threshold": 0.4,
+            "readiness_joint_prob_floor": 0.05,
+            "readiness_joint_prob_close_call": 0.3
+          },
+          "readiness_signals": {
+            "overall": "needs_evidence",
+            "overall_score": 0.35,
+            "computed_score_raw": 0.84,
+            "dimensions": {
+              "evidence_quality": 0.6,
+              "model_robustness": 1,
+              "framing_quality": 1
+            },
+            "signals": [
+              {
+                "dimension": "evidence",
+                "signal": "3 evidence gaps",
+                "impact": "negative",
+                "weight": 0.2
+              },
+              {
+                "dimension": "evidence",
+                "signal": "Low average confidence (20%)",
+                "impact": "negative",
+                "weight": 0.2
+              },
+              {
+                "dimension": "robustness",
+                "signal": "High recommendation stability (95%)",
+                "impact": "positive",
+                "weight": 0.2
+              },
+              {
+                "dimension": "robustness",
+                "signal": "Clear 90-point margin",
+                "impact": "positive",
+                "weight": 0.15
+              },
+              {
+                "dimension": "framing",
+                "signal": "4 options considered",
+                "impact": "positive",
+                "weight": 0.1
+              }
+            ]
+          },
+          "key_drivers": [
+            {
+              "factor_id": "fac_talent_availability",
+              "factor_label": "Local Engineering Talent Availability",
+              "influence_score": 0.002,
+              "normalised_impact": 1,
+              "impact_display": "Very High",
+              "direction": "positive",
+              "rank": 1
+            },
+            {
+              "factor_id": "fac_market_demand",
+              "factor_label": "Customer Demand for New Features",
+              "influence_score": 0.001,
+              "normalised_impact": 0.27,
+              "impact_display": "Medium",
+              "direction": "positive",
+              "rank": 2
+            },
+            {
+              "factor_id": "fac_delivery_speed",
+              "factor_label": "Delivery Velocity",
+              "influence_score": 0,
+              "normalised_impact": 0,
+              "impact_display": "Low",
+              "direction": "negative",
+              "rank": 3
+            },
+            {
+              "factor_id": "fac_hiring_cost",
+              "factor_label": "Incremental Staffing Cost",
+              "influence_score": 0,
+              "normalised_impact": 0,
+              "impact_display": "Low",
+              "direction": "negative",
+              "rank": 4
+            },
+            {
+              "factor_id": "fac_team_capacity",
+              "factor_label": "Engineering Team Capacity",
+              "influence_score": 0,
+              "normalised_impact": 0,
+              "impact_display": "Low",
+              "direction": "negative",
+              "rank": 5
+            }
+          ],
+          "executive_summary": {
+            "summary": "Hire Two Senior Engineers Locally is the clear leading option with a 90-point advantage. Key uncertainty: Local Engineering Talent Availability has high impact but low evidence quality. Gather evidence on Local Engineering Talent Availability before deciding.",
+            "decision_statement": "Hire Two Senior Engineers Locally is the clear leading option with a 90-point advantage.",
+            "key_qualifier": "Key uncertainty: Local Engineering Talent Availability has high impact but low evidence quality.",
+            "action_implication": "Gather evidence on Local Engineering Talent Availability before deciding."
+          },
+          "coaching_version": "1.1.0",
+          "computed_at": "2026-04-30T18:46:53.019Z"
+        },
+        "confidence_tier": "needs_work",
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_team_capacity",
+            "factor_label": "Engineering Team Capacity",
+            "current_value": 0.3,
+            "flip_value": null,
+            "direction": "decrease",
+            "unit": "scale",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null,
+            "flip_reason": "no_effect_within_bounds",
+            "iterations_used": 0
+          },
+          {
+            "factor_id": "fac_delivery_speed",
+            "factor_label": "Delivery Velocity",
+            "current_value": 0.25,
+            "flip_value": null,
+            "direction": "decrease",
+            "unit": "scale",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null,
+            "flip_reason": "no_effect_within_bounds",
+            "iterations_used": 0
+          },
+          {
+            "factor_id": "fac_hiring_cost",
+            "factor_label": "Incremental Staffing Cost",
+            "current_value": 0,
+            "flip_value": null,
+            "direction": "increase",
+            "unit": "scale",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null,
+            "flip_reason": "no_effect_within_bounds",
+            "iterations_used": 0
+          }
+        ],
+        "identifiability": {
+          "status": "identifiable",
+          "method": "backdoor",
+          "pairs_checked": 3,
+          "pairs_identifiable": 3
+        },
+        "m1_review": null,
+        "review_status": "skipped",
+        "review_skip_reason": "BRIEF_MISSING",
+        "robustness": {
+          "fragile_edges": [
+            {
+              "edge_id": "out_roadmap_delivery->goal_q3_delivery",
+              "from_id": "out_roadmap_delivery",
+              "to_id": "goal_q3_delivery",
+              "switch_probability": 0.092,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Q3 Roadmap Delivery",
+              "to_label": "Deliver Q3 Roadmap Commitments on Time",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "risk_delivery_slip->goal_q3_delivery",
+              "from_id": "risk_delivery_slip",
+              "to_id": "goal_q3_delivery",
+              "switch_probability": 0.028,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Q3 Commitment Delivery Slip",
+              "to_label": "Deliver Q3 Roadmap Commitments on Time",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "fac_team_capacity->out_roadmap_delivery",
+              "from_id": "fac_team_capacity",
+              "to_id": "out_roadmap_delivery",
+              "switch_probability": 0.08,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Engineering Team Capacity",
+              "to_label": "Q3 Roadmap Delivery",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "fac_delivery_speed->out_roadmap_delivery",
+              "from_id": "fac_delivery_speed",
+              "to_id": "out_roadmap_delivery",
+              "switch_probability": 0.092,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Delivery Velocity",
+              "to_label": "Q3 Roadmap Delivery",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "fac_team_capacity->risk_delivery_slip",
+              "from_id": "fac_team_capacity",
+              "to_id": "risk_delivery_slip",
+              "switch_probability": 0.048,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Engineering Team Capacity",
+              "to_label": "Q3 Commitment Delivery Slip",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "out_revenue_capacity->goal_q3_delivery",
+              "from_id": "out_revenue_capacity",
+              "to_id": "goal_q3_delivery",
+              "switch_probability": 0.044,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Revenue-Generating Capacity",
+              "to_label": "Deliver Q3 Roadmap Commitments on Time",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "fac_hiring_cost->risk_cost_overrun",
+              "from_id": "fac_hiring_cost",
+              "to_id": "risk_cost_overrun",
+              "switch_probability": 0.004,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Incremental Staffing Cost",
+              "to_label": "Budget Overrun Risk",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "fac_delivery_speed->risk_delivery_slip",
+              "from_id": "fac_delivery_speed",
+              "to_id": "risk_delivery_slip",
+              "switch_probability": 0.028,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Delivery Velocity",
+              "to_label": "Q3 Commitment Delivery Slip",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            },
+            {
+              "edge_id": "risk_cost_overrun->goal_q3_delivery",
+              "from_id": "risk_cost_overrun",
+              "to_id": "goal_q3_delivery",
+              "switch_probability": 0.148,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "opt_offshore",
+              "from_label": "Budget Overrun Risk",
+              "to_label": "Deliver Q3 Roadmap Commitments on Time",
+              "severity": "warning",
+              "alternative_winner_label": "Engage Offshore Partner"
+            }
+          ],
+          "robust_edges": [
+            {
+              "edge_id": "fac_talent_availability->risk_delivery_slip",
+              "from_id": "fac_talent_availability",
+              "to_id": "risk_delivery_slip",
+              "switch_probability": 1,
+              "from_label": "Local Engineering Talent Availability",
+              "to_label": "Q3 Commitment Delivery Slip",
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "edge_id": "fac_delivery_speed->risk_coordination",
+              "from_id": "fac_delivery_speed",
+              "to_id": "risk_coordination",
+              "switch_probability": 1,
+              "from_label": "Delivery Velocity",
+              "to_label": "Coordination and Quality Risk",
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "edge_id": "fac_market_demand->out_revenue_capacity",
+              "from_id": "fac_market_demand",
+              "to_id": "out_revenue_capacity",
+              "switch_probability": 1,
+              "from_label": "Customer Demand for New Features",
+              "to_label": "Revenue-Generating Capacity",
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            },
+            {
+              "edge_id": "fac_talent_availability->out_roadmap_delivery",
+              "from_id": "fac_talent_availability",
+              "to_id": "out_roadmap_delivery",
+              "switch_probability": 1,
+              "from_label": "Local Engineering Talent Availability",
+              "to_label": "Q3 Roadmap Delivery",
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            }
+          ],
+          "recommendation_stability": 0.948,
+          "is_robust": true,
+          "level": "high",
+          "confidence": 0.9180216077816037,
+          "recommended_option_id": "opt_hire_local",
+          "recommended_option_label": "Hire Two Senior Engineers Locally",
+          "near_tie": {
+            "is_tie": false,
+            "top_option_id": "opt_hire_local",
+            "second_option_id": "opt_offshore",
+            "tied_option_ids": [
+              "opt_hire_local"
+            ],
+            "gap": 0.9019999999999999,
+            "threshold": 0.1
+          }
+        },
+        "robustness_synthesis": null,
+        "cee_status": "skipped",
+        "decision_quality": null,
+        "insights": null,
+        "improvement_guidance": null,
+        "rationale": null,
+        "processing_time_ms": 3353.2327530384064,
+        "response_hash": "9ab9d975735aa135",
+        "decision_brief": {
+          "brief_id": "c32e8f93-6631-48b7-951a-accab2c1a97a",
+          "version": "1",
+          "graph_hash": "9ab9d975735aa135",
+          "seed": 1379478516,
+          "created_at": "2026-04-30T18:46:54.823Z",
+          "headline": "Hire Two Senior Engineers Locally is the clear leading option with a 90-point advantage. Key uncertainty: Local Engineering Talent Availability has high impact but low evidence quality. Gather evidence on Local Engineering Talent Availability before deciding.",
+          "options": [
+            {
+              "option_id": "opt_hire_local",
+              "label": "Hire Two Senior Engineers Locally",
+              "win_probability": 0.948,
+              "rank": 1
+            },
+            {
+              "option_id": "opt_offshore",
+              "label": "Engage Offshore Partner",
+              "win_probability": 0.046,
+              "rank": 2
+            },
+            {
+              "option_id": "opt_status_quo",
+              "label": "Maintain Current Team (Status Quo)",
+              "win_probability": 0.006,
+              "rank": 3
+            },
+            {
+              "option_id": "opt_tiered_pricing",
+              "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+              "win_probability": 0,
+              "rank": 4
+            }
+          ],
+          "top_drivers": [
+            {
+              "factor_label": "Engineering Team Capacity",
+              "sensitivity": 1,
+              "direction": "positive"
+            },
+            {
+              "factor_label": "Delivery Velocity",
+              "sensitivity": 0.8011869436201781,
+              "direction": "positive"
+            },
+            {
+              "factor_label": "Local Engineering Talent Availability",
+              "sensitivity": 0.33827893175074186,
+              "direction": "positive"
+            },
+            {
+              "factor_label": "Incremental Staffing Cost",
+              "sensitivity": 0.21364985163204747,
+              "direction": "positive"
+            },
+            {
+              "factor_label": "Customer Demand for New Features",
+              "sensitivity": 0.10385756676557863,
+              "direction": "positive"
+            }
+          ],
+          "key_assumptions": [
+            "Local Engineering Talent Availability",
+            "Customer Demand for New Features",
+            "Delivery Velocity"
+          ],
+          "what_would_change": [
+            "Q3 Roadmap Delivery → Deliver Q3 Roadmap Commitments on Time",
+            "Q3 Commitment Delivery Slip → Deliver Q3 Roadmap Commitments on Time",
+            "Engineering Team Capacity → Q3 Roadmap Delivery",
+            "Delivery Velocity → Q3 Roadmap Delivery",
+            "Engineering Team Capacity → Q3 Commitment Delivery Slip",
+            "Revenue-Generating Capacity → Deliver Q3 Roadmap Commitments on Time",
+            "Incremental Staffing Cost → Budget Overrun Risk",
+            "Delivery Velocity → Q3 Commitment Delivery Slip",
+            "Budget Overrun Risk → Deliver Q3 Roadmap Commitments on Time"
+          ],
+          "robustness": "robust",
+          "warnings": [
+            {
+              "code": "DOMINANT_FACTOR",
+              "message": "One factor dominates. What would change if Local Engineering Talent Availability had less influence?",
+              "severity": "warning"
+            },
+            {
+              "code": "INFLUENTIAL_EXTERNALS",
+              "message": "External factors Local Engineering Talent Availability, Customer Demand for New Features significantly affect your outcome but are inherently uncertain. How might you bound these?",
+              "severity": "warning"
+            },
+            {
+              "code": "M2_UNAVAILABLE",
+              "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+              "severity": "warning"
+            }
+          ],
+          "lineage": {
+            "config_version": "893d0f42bc8f",
+            "response_hash": "9ab9d975735aa135"
+          }
+        },
+        "review_cards": [
+          {
+            "card_id": "ep_fac_team_capacity_fac_delivery_speed_fac_talent_availability",
+            "card_type": "evidence_priority",
+            "review_phase": "post_analysis",
+            "what": "Gathering better evidence on Engineering Team Capacity, Delivery Velocity, Local Engineering Talent Availability could change the recommendation.",
+            "why": "These factors have high sensitivity but low confidence — better data would most improve decision quality.",
+            "supporting_refs": [
+              {
+                "kind": "fact",
+                "id": "sensitivity_fac_team_capacity",
+                "role": "derived_from"
+              },
+              {
+                "kind": "fact",
+                "id": "sensitivity_fac_delivery_speed",
+                "role": "derived_from"
+              },
+              {
+                "kind": "fact",
+                "id": "sensitivity_fac_talent_availability",
+                "role": "derived_from"
+              }
+            ],
+            "priority": 2,
+            "priority_band": "high",
+            "suggested_action": "add_evidence",
+            "provenance": {
+              "source": "isl",
+              "origin_id": "evidence_priority"
+            },
+            "items": [
+              {
+                "node_id": "fac_team_capacity",
+                "factor_id": "fac_team_capacity",
+                "factor_label": "Engineering Team Capacity",
+                "sensitivity_rank": 1,
+                "sensitivity_value": 1,
+                "confidence_normalised": 0.25,
+                "score": 0.75,
+                "suggested_evidence": "Gather evidence on how Engineering Team Capacity affects the goal — this factor is highly sensitive but your confidence in its strength is low.",
+                "elasticity": 1
+              },
+              {
+                "node_id": "fac_delivery_speed",
+                "factor_id": "fac_delivery_speed",
+                "factor_label": "Delivery Velocity",
+                "sensitivity_rank": 2,
+                "sensitivity_value": 0.8011869436201781,
+                "confidence_normalised": 0.25,
+                "score": 0.6008902077151336,
+                "suggested_evidence": "Gather evidence on how Delivery Velocity affects the goal — this factor is highly sensitive but your confidence in its strength is low.",
+                "elasticity": 0.8011869436201781
+              },
+              {
+                "node_id": "fac_talent_availability",
+                "factor_id": "fac_talent_availability",
+                "factor_label": "Local Engineering Talent Availability",
+                "sensitivity_rank": 3,
+                "sensitivity_value": 0.33827893175074186,
+                "confidence_normalised": 0.25,
+                "score": 0.2537091988130564,
+                "suggested_evidence": "Gather evidence on how Local Engineering Talent Availability affects the goal — this factor is highly sensitive but your confidence in its strength is low.",
+                "elasticity": 0.33827893175074186
+              }
+            ]
+          }
+        ],
+        "fact_objects": [
+          {
+            "fact_id": "0f0ddf34cfcde42f",
+            "fact_key": {
+              "type": "probability",
+              "option_id": "opt_hire_local"
+            },
+            "fact_type": "probability",
+            "data": {
+              "type": "probability",
+              "option_id": "opt_hire_local",
+              "option_label": "Hire Two Senior Engineers Locally",
+              "p10": 0.4001864583114018,
+              "p50": 0.8306516509548484,
+              "p90": 1.1888318976982775,
+              "mean": 0.8132319756140622
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "50c0561517fd9d33"
+          },
+          {
+            "fact_id": "7d06c2ec06f49741",
+            "fact_key": {
+              "type": "probability",
+              "option_id": "opt_offshore"
+            },
+            "fact_type": "probability",
+            "data": {
+              "type": "probability",
+              "option_id": "opt_offshore",
+              "option_label": "Engage Offshore Partner",
+              "p10": 0.3606723201703379,
+              "p50": 0.6878869508749893,
+              "p90": 0.948239884248076,
+              "mean": 0.6677431475669133
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "71f6ab5eca8dffc2"
+          },
+          {
+            "fact_id": "17561e33b75d4bc6",
+            "fact_key": {
+              "type": "probability",
+              "option_id": "opt_status_quo"
+            },
+            "fact_type": "probability",
+            "data": {
+              "type": "probability",
+              "option_id": "opt_status_quo",
+              "option_label": "Maintain Current Team (Status Quo)",
+              "p10": 0.19017503150895917,
+              "p50": 0.35028196615854895,
+              "p90": 0.4781934898108626,
+              "mean": 0.3422126543676048
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "689b2d67afe11c8b"
+          },
+          {
+            "fact_id": "b4b5ec2ed6ec349f",
+            "fact_key": {
+              "type": "probability",
+              "option_id": "opt_tiered_pricing"
+            },
+            "fact_type": "probability",
+            "data": {
+              "type": "probability",
+              "option_id": "opt_tiered_pricing",
+              "option_label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+              "p10": 0.20264822620280773,
+              "p50": 0.4351294163176319,
+              "p90": 0.6323601230841863,
+              "mean": 0.4268398848392611
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "6a389620433dcf0c"
+          },
+          {
+            "fact_id": "10eb23012b67aff2",
+            "fact_key": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_delivery_speed",
+              "metric": "sensitivity_score"
+            },
+            "fact_type": "factor_sensitivity",
+            "data": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_delivery_speed",
+              "label": "Delivery Velocity",
+              "sensitivity_score": 0.8011869436201781,
+              "importance_score": 0.8011869436201781,
+              "importance_rank": 2,
+              "elasticity": 0.8011869436201781,
+              "direction": "positive",
+              "confidence": 0.25,
+              "attribution_stability": "negligible"
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "56f7eba4da1955c6"
+          },
+          {
+            "fact_id": "b672b9bdf8e19f8f",
+            "fact_key": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_hiring_cost",
+              "metric": "sensitivity_score"
+            },
+            "fact_type": "factor_sensitivity",
+            "data": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_hiring_cost",
+              "label": "Incremental Staffing Cost",
+              "sensitivity_score": 0.21364985163204747,
+              "importance_score": 0.21364985163204747,
+              "importance_rank": 4,
+              "elasticity": 0.21364985163204747,
+              "direction": "negative",
+              "confidence": 0.25,
+              "attribution_stability": "negligible"
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "c6e9e17434626971"
+          },
+          {
+            "fact_id": "05ccb28e56d45dd2",
+            "fact_key": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_market_demand",
+              "metric": "sensitivity_score"
+            },
+            "fact_type": "factor_sensitivity",
+            "data": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_market_demand",
+              "label": "Customer Demand for New Features",
+              "sensitivity_score": 0.10385756676557863,
+              "importance_score": 0.10385756676557863,
+              "importance_rank": 5,
+              "elasticity": 0.10385756676557863,
+              "direction": "positive",
+              "confidence": 0.25,
+              "attribution_stability": "low"
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "42df3ac22da543a9"
+          },
+          {
+            "fact_id": "5588e46fcbbcbe44",
+            "fact_key": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_talent_availability",
+              "metric": "sensitivity_score"
+            },
+            "fact_type": "factor_sensitivity",
+            "data": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_talent_availability",
+              "label": "Local Engineering Talent Availability",
+              "sensitivity_score": 0.33827893175074186,
+              "importance_score": 0.33827893175074186,
+              "importance_rank": 3,
+              "elasticity": 0.33827893175074186,
+              "direction": "positive",
+              "confidence": 0.25,
+              "attribution_stability": "low"
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "d7dd893fa7cb259a"
+          },
+          {
+            "fact_id": "6397355847d22437",
+            "fact_key": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_team_capacity",
+              "metric": "sensitivity_score"
+            },
+            "fact_type": "factor_sensitivity",
+            "data": {
+              "type": "factor_sensitivity",
+              "node_id": "fac_team_capacity",
+              "label": "Engineering Team Capacity",
+              "sensitivity_score": 1,
+              "importance_score": 1,
+              "importance_rank": 1,
+              "elasticity": 1,
+              "direction": "positive",
+              "confidence": 0.25,
+              "attribution_stability": "negligible"
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "b62172815a965269"
+          },
+          {
+            "fact_id": "a2e7548185fcd589",
+            "fact_key": {
+              "type": "critique",
+              "node_id": "45636133-56a7-4a28-9db5-88ea212d755d",
+              "metric": "NORMALIZATION_WARNING"
+            },
+            "fact_type": "critique",
+            "data": {
+              "type": "critique",
+              "id": "45636133-56a7-4a28-9db5-88ea212d755d",
+              "code": "NORMALIZATION_WARNING",
+              "severity": "info",
+              "message": "Node 'opt_status_quo' has kind='option'. Option nodes are filtered before analysis."
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "b337010b8dbd78fc"
+          },
+          {
+            "fact_id": "1c8bd848254394ee",
+            "fact_key": {
+              "type": "critique",
+              "node_id": "74162c8b-47a4-4c11-90fe-10dea31426b6",
+              "metric": "NORMALIZATION_WARNING"
+            },
+            "fact_type": "critique",
+            "data": {
+              "type": "critique",
+              "id": "74162c8b-47a4-4c11-90fe-10dea31426b6",
+              "code": "NORMALIZATION_WARNING",
+              "severity": "info",
+              "message": "Node 'opt_tiered_pricing' has kind='option'. Option nodes are filtered before analysis."
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "8278e7ecb0990fee"
+          },
+          {
+            "fact_id": "f8af3270c2c1ec1c",
+            "fact_key": {
+              "type": "critique",
+              "node_id": "9ba9e619-5ba7-4b59-bbd3-376832142a02",
+              "metric": "NORMALIZATION_WARNING"
+            },
+            "fact_type": "critique",
+            "data": {
+              "type": "critique",
+              "id": "9ba9e619-5ba7-4b59-bbd3-376832142a02",
+              "code": "NORMALIZATION_WARNING",
+              "severity": "info",
+              "message": "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis."
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "28a5c1495df76e3f"
+          },
+          {
+            "fact_id": "333333a44fa214d7",
+            "fact_key": {
+              "type": "critique",
+              "node_id": "e1a69b23-d1d1-4bf7-bf6b-bb78f283217d",
+              "metric": "NORMALIZATION_WARNING"
+            },
+            "fact_type": "critique",
+            "data": {
+              "type": "critique",
+              "id": "e1a69b23-d1d1-4bf7-bf6b-bb78f283217d",
+              "code": "NORMALIZATION_WARNING",
+              "severity": "info",
+              "message": "Node 'opt_offshore' has kind='option'. Option nodes are filtered before analysis."
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "1ed0499a539765c8"
+          },
+          {
+            "fact_id": "e5e8a4fb56427eab",
+            "fact_key": {
+              "type": "robustness",
+              "metric": "robustness_score"
+            },
+            "fact_type": "robustness",
+            "data": {
+              "type": "robustness",
+              "robustness_level": "moderate",
+              "robustness_score": 0.5
+            },
+            "lineage": {
+              "graph_hash": "42b2bd337f5d82e3",
+              "seed": 1379478516,
+              "config_version": "1",
+              "isl_request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637"
+            },
+            "content_hash": "746563481e476303"
+          }
+        ],
+        "_meta": {
+          "source_path": "isl",
+          "repairs_applied": [],
+          "request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+          "plot_build": "26dab62",
+          "hash_version": 6,
+          "response_hash": "9ab9d975735aa135",
+          "builds": {
+            "ui": null,
+            "cee": "orchestrator",
+            "plot": "26dab62",
+            "isl": "1da810f"
+          },
+          "payloads": {
+            "isl_request": {
+              "request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+              "graph": {
+                "nodes": [
+                  {
+                    "id": "fac_delivery_speed",
+                    "kind": "factor",
+                    "label": "Delivery Velocity",
+                    "observed_state": {
+                      "value": 0.25,
+                      "unit": "scale",
+                      "raw_value": 0,
+                      "cap": 0,
+                      "factor_type": "time",
+                      "uncertainty_drivers": [
+                        "Coordination overhead with offshore teams",
+                        "Onboarding time for new hires"
+                      ]
+                    },
+                    "intercept": 0.25,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "fac_hiring_cost",
+                    "kind": "factor",
+                    "label": "Incremental Staffing Cost",
+                    "observed_state": {
+                      "value": 0,
+                      "unit": "scale",
+                      "raw_value": 0,
+                      "cap": 0,
+                      "factor_type": "cost",
+                      "uncertainty_drivers": [
+                        "Local salary benchmarks not specified",
+                        "Offshore partner rates unknown"
+                      ]
+                    },
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "fac_market_demand",
+                    "kind": "factor",
+                    "label": "Customer Demand for New Features",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "fac_talent_availability",
+                    "kind": "factor",
+                    "label": "Local Engineering Talent Availability",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "fac_team_capacity",
+                    "kind": "factor",
+                    "label": "Engineering Team Capacity",
+                    "observed_state": {
+                      "value": 0.3,
+                      "unit": "scale",
+                      "raw_value": 0,
+                      "cap": 0,
+                      "factor_type": "other",
+                      "uncertainty_drivers": [
+                        "Hiring timelines uncertain",
+                        "Ramp-up period for new hires varies"
+                      ]
+                    },
+                    "intercept": 0.3,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "goal_q3_delivery",
+                    "kind": "goal",
+                    "label": "Deliver Q3 Roadmap Commitments on Time",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "out_revenue_capacity",
+                    "kind": "outcome",
+                    "label": "Revenue-Generating Capacity",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "out_roadmap_delivery",
+                    "kind": "outcome",
+                    "label": "Q3 Roadmap Delivery",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "risk_coordination",
+                    "kind": "risk",
+                    "label": "Coordination and Quality Risk",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "risk_cost_overrun",
+                    "kind": "risk",
+                    "label": "Budget Overrun Risk",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  },
+                  {
+                    "id": "risk_delivery_slip",
+                    "kind": "risk",
+                    "label": "Q3 Commitment Delivery Slip",
+                    "intercept": 0,
+                    "epsilon_std": 0
+                  }
+                ],
+                "edges": [
+                  {
+                    "from": "fac_delivery_speed",
+                    "to": "out_roadmap_delivery",
+                    "exists_probability": 0.88,
+                    "strength": {
+                      "mean": 0.55,
+                      "std": 0.14
+                    }
+                  },
+                  {
+                    "from": "fac_delivery_speed",
+                    "to": "risk_coordination",
+                    "exists_probability": 0.75,
+                    "strength": {
+                      "mean": -0.35,
+                      "std": 0.18
+                    }
+                  },
+                  {
+                    "from": "fac_delivery_speed",
+                    "to": "risk_delivery_slip",
+                    "exists_probability": 0.85,
+                    "strength": {
+                      "mean": -0.4,
+                      "std": 0.15
+                    }
+                  },
+                  {
+                    "from": "fac_hiring_cost",
+                    "to": "risk_cost_overrun",
+                    "exists_probability": 0.9,
+                    "strength": {
+                      "mean": 0.6,
+                      "std": 0.12
+                    }
+                  },
+                  {
+                    "from": "fac_market_demand",
+                    "to": "out_revenue_capacity",
+                    "exists_probability": 0.72,
+                    "strength": {
+                      "mean": 0.35,
+                      "std": 0.2
+                    }
+                  },
+                  {
+                    "from": "fac_talent_availability",
+                    "to": "out_roadmap_delivery",
+                    "exists_probability": 0.7,
+                    "strength": {
+                      "mean": 0.25,
+                      "std": 0.18
+                    }
+                  },
+                  {
+                    "from": "fac_talent_availability",
+                    "to": "risk_delivery_slip",
+                    "exists_probability": 0.68,
+                    "strength": {
+                      "mean": -0.2,
+                      "std": 0.15
+                    }
+                  },
+                  {
+                    "from": "fac_team_capacity",
+                    "to": "out_revenue_capacity",
+                    "exists_probability": 0.85,
+                    "strength": {
+                      "mean": 0.45,
+                      "std": 0.15
+                    }
+                  },
+                  {
+                    "from": "fac_team_capacity",
+                    "to": "out_roadmap_delivery",
+                    "exists_probability": 0.92,
+                    "strength": {
+                      "mean": 0.65,
+                      "std": 0.12
+                    }
+                  },
+                  {
+                    "from": "fac_team_capacity",
+                    "to": "risk_delivery_slip",
+                    "exists_probability": 0.9,
+                    "strength": {
+                      "mean": -0.5,
+                      "std": 0.15
+                    }
+                  },
+                  {
+                    "from": "out_revenue_capacity",
+                    "to": "goal_q3_delivery",
+                    "exists_probability": 0.8,
+                    "strength": {
+                      "mean": 0.25,
+                      "std": 0.12
+                    }
+                  },
+                  {
+                    "from": "out_roadmap_delivery",
+                    "to": "goal_q3_delivery",
+                    "exists_probability": 0.95,
+                    "strength": {
+                      "mean": 0.7,
+                      "std": 0.1
+                    }
+                  },
+                  {
+                    "from": "risk_coordination",
+                    "to": "goal_q3_delivery",
+                    "exists_probability": 0.75,
+                    "strength": {
+                      "mean": -0.2,
+                      "std": 0.15
+                    }
+                  },
+                  {
+                    "from": "risk_cost_overrun",
+                    "to": "goal_q3_delivery",
+                    "exists_probability": 0.85,
+                    "strength": {
+                      "mean": -0.3,
+                      "std": 0.14
+                    }
+                  },
+                  {
+                    "from": "risk_delivery_slip",
+                    "to": "goal_q3_delivery",
+                    "exists_probability": 0.92,
+                    "strength": {
+                      "mean": -0.55,
+                      "std": 0.12
+                    }
+                  }
+                ]
+              },
+              "options": [
+                {
+                  "id": "opt_hire_local",
+                  "label": "Hire Two Senior Engineers Locally",
+                  "interventions": {
+                    "fac_hiring_cost": 0.8,
+                    "fac_team_capacity": 0.8,
+                    "fac_delivery_speed": 0.7
+                  }
+                },
+                {
+                  "id": "opt_offshore",
+                  "label": "Engage Offshore Partner",
+                  "interventions": {
+                    "fac_hiring_cost": 0.35,
+                    "fac_team_capacity": 0.65,
+                    "fac_delivery_speed": 0.5
+                  }
+                },
+                {
+                  "id": "opt_status_quo",
+                  "label": "Maintain Current Team (Status Quo)",
+                  "interventions": {
+                    "fac_hiring_cost": 0,
+                    "fac_team_capacity": 0.3,
+                    "fac_delivery_speed": 0.25
+                  }
+                },
+                {
+                  "id": "opt_tiered_pricing",
+                  "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+                  "interventions": {
+                    "fac_hiring_cost": 0.5,
+                    "fac_team_capacity": 0.45,
+                    "fac_delivery_speed": 0.35
+                  }
+                }
+              ],
+              "goal_node_id": "goal_q3_delivery",
+              "n_samples": 1000,
+              "analysis_types": [
+                "comparison",
+                "sensitivity",
+                "robustness"
+              ],
+              "parameter_uncertainties": [
+                {
+                  "node_id": "fac_delivery_speed",
+                  "distribution": "normal",
+                  "mean": 0.25,
+                  "std": 0.1
+                },
+                {
+                  "node_id": "fac_hiring_cost",
+                  "distribution": "normal",
+                  "mean": 0,
+                  "std": 0.5
+                },
+                {
+                  "node_id": "fac_team_capacity",
+                  "distribution": "normal",
+                  "mean": 0.3,
+                  "std": 0.1
+                },
+                {
+                  "node_id": "fac_market_demand",
+                  "distribution": "normal",
+                  "mean": 0.55,
+                  "std": 0.14433756729740646
+                },
+                {
+                  "node_id": "fac_talent_availability",
+                  "distribution": "normal",
+                  "mean": 0.44999999999999996,
+                  "std": 0.14433756729740643
+                }
+              ],
+              "include_e_values": true,
+              "include_voi": true,
+              "seed": "1379478516"
+            },
+            "isl_response": {
+              "version": "2.0",
+              "endpoint_version": "analyze/v2",
+              "engine_version": "1.0.0",
+              "build": "1da810f",
+              "timestamp": "2026-04-30T18:46:53.007398Z",
+              "analysis_status": "computed",
+              "robustness_status": "computed",
+              "factor_sensitivity_status": "computed",
+              "critiques": [],
+              "request_echo": {
+                "graph_node_count": 11,
+                "graph_edge_count": 15,
+                "options_count": 4,
+                "goal_node_id_hash": "8e52bf3b880f",
+                "n_samples": 1000,
+                "response_version_requested": 2,
+                "include_diagnostics": false
+              },
+              "options": [
+                {
+                  "id": "opt_hire_local",
+                  "label": "Hire Two Senior Engineers Locally",
+                  "outcome": {
+                    "mean": 0.8132319756140622,
+                    "std": 0.30332013086097914,
+                    "p10": 0.4001864583114018,
+                    "p50": 0.8306516509548484,
+                    "p90": 1.1888318976982775,
+                    "n_samples": 1000,
+                    "n_valid_samples": 1000,
+                    "validity_ratio": 1,
+                    "percentiles_source": "samples"
+                  },
+                  "win_probability": 0.948,
+                  "status": "computed"
+                },
+                {
+                  "id": "opt_offshore",
+                  "label": "Engage Offshore Partner",
+                  "outcome": {
+                    "mean": 0.6677431475669133,
+                    "std": 0.22801917461949633,
+                    "p10": 0.3606723201703379,
+                    "p50": 0.6878869508749893,
+                    "p90": 0.948239884248076,
+                    "n_samples": 1000,
+                    "n_valid_samples": 1000,
+                    "validity_ratio": 1,
+                    "percentiles_source": "samples"
+                  },
+                  "win_probability": 0.046,
+                  "status": "computed"
+                },
+                {
+                  "id": "opt_status_quo",
+                  "label": "Maintain Current Team (Status Quo)",
+                  "outcome": {
+                    "mean": 0.3422126543676048,
+                    "std": 0.11196571638443592,
+                    "p10": 0.19017503150895917,
+                    "p50": 0.35028196615854895,
+                    "p90": 0.4781934898108626,
+                    "n_samples": 1000,
+                    "n_valid_samples": 1000,
+                    "validity_ratio": 1,
+                    "percentiles_source": "samples"
+                  },
+                  "win_probability": 0.006,
+                  "status": "computed"
+                },
+                {
+                  "id": "opt_tiered_pricing",
+                  "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+                  "outcome": {
+                    "mean": 0.4268398848392611,
+                    "std": 0.1690681896157409,
+                    "p10": 0.20264822620280773,
+                    "p50": 0.4351294163176319,
+                    "p90": 0.6323601230841863,
+                    "n_samples": 1000,
+                    "n_valid_samples": 1000,
+                    "validity_ratio": 1,
+                    "percentiles_source": "samples"
+                  },
+                  "win_probability": 0,
+                  "status": "computed"
+                }
+              ],
+              "robustness": {
+                "level": "high",
+                "confidence": 0.9180216077816037,
+                "fragile_edges": [
+                  {
+                    "edge_id": "out_roadmap_delivery->goal_q3_delivery",
+                    "from_id": "out_roadmap_delivery",
+                    "to_id": "goal_q3_delivery",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.092,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "risk_delivery_slip->goal_q3_delivery",
+                    "from_id": "risk_delivery_slip",
+                    "to_id": "goal_q3_delivery",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.028,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "fac_team_capacity->out_roadmap_delivery",
+                    "from_id": "fac_team_capacity",
+                    "to_id": "out_roadmap_delivery",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.08,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "fac_delivery_speed->out_roadmap_delivery",
+                    "from_id": "fac_delivery_speed",
+                    "to_id": "out_roadmap_delivery",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.092,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "fac_team_capacity->risk_delivery_slip",
+                    "from_id": "fac_team_capacity",
+                    "to_id": "risk_delivery_slip",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.048,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "out_revenue_capacity->goal_q3_delivery",
+                    "from_id": "out_revenue_capacity",
+                    "to_id": "goal_q3_delivery",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.044,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "fac_hiring_cost->risk_cost_overrun",
+                    "from_id": "fac_hiring_cost",
+                    "to_id": "risk_cost_overrun",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.004,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "fac_delivery_speed->risk_delivery_slip",
+                    "from_id": "fac_delivery_speed",
+                    "to_id": "risk_delivery_slip",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.028,
+                    "marginal_switch_probability": 0
+                  },
+                  {
+                    "edge_id": "risk_cost_overrun->goal_q3_delivery",
+                    "from_id": "risk_cost_overrun",
+                    "to_id": "goal_q3_delivery",
+                    "alternative_winner_id": "opt_offshore",
+                    "switch_probability": 0.148,
+                    "marginal_switch_probability": 0
+                  }
+                ],
+                "is_robust": true,
+                "fragile_edges_v1": [
+                  "risk_delivery_slip->goal_q3_delivery",
+                  "fac_delivery_speed->risk_delivery_slip",
+                  "out_revenue_capacity->goal_q3_delivery",
+                  "risk_cost_overrun->goal_q3_delivery",
+                  "fac_hiring_cost->risk_cost_overrun",
+                  "fac_delivery_speed->out_roadmap_delivery",
+                  "fac_team_capacity->out_roadmap_delivery",
+                  "out_roadmap_delivery->goal_q3_delivery",
+                  "fac_team_capacity->risk_delivery_slip"
+                ],
+                "robust_edges": [
+                  "fac_talent_availability->risk_delivery_slip",
+                  "fac_delivery_speed->risk_coordination",
+                  "fac_market_demand->out_revenue_capacity",
+                  "fac_talent_availability->out_roadmap_delivery"
+                ],
+                "recommendation_stability": 0.948,
+                "edge_e_values": [
+                  {
+                    "edge_id": "fac_delivery_speed->out_roadmap_delivery",
+                    "from_id": "fac_delivery_speed",
+                    "to_id": "out_roadmap_delivery",
+                    "e_value": 1.3297,
+                    "is_unflippable": false,
+                    "flip_direction": "decrease",
+                    "current_mean": 0.55,
+                    "flip_mean": -0.731362
+                  },
+                  {
+                    "edge_id": "fac_delivery_speed->risk_coordination",
+                    "from_id": "fac_delivery_speed",
+                    "to_id": "risk_coordination",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": -0.35,
+                    "flip_mean": -0.35
+                  },
+                  {
+                    "edge_id": "fac_delivery_speed->risk_delivery_slip",
+                    "from_id": "fac_delivery_speed",
+                    "to_id": "risk_delivery_slip",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": -0.4,
+                    "flip_mean": -0.4
+                  },
+                  {
+                    "edge_id": "fac_hiring_cost->risk_cost_overrun",
+                    "from_id": "fac_hiring_cost",
+                    "to_id": "risk_cost_overrun",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": 0.6,
+                    "flip_mean": 0.6
+                  },
+                  {
+                    "edge_id": "fac_market_demand->out_revenue_capacity",
+                    "from_id": "fac_market_demand",
+                    "to_id": "out_revenue_capacity",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": 0.35,
+                    "flip_mean": 0.35
+                  },
+                  {
+                    "edge_id": "fac_talent_availability->out_roadmap_delivery",
+                    "from_id": "fac_talent_availability",
+                    "to_id": "out_roadmap_delivery",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": 0.25,
+                    "flip_mean": 0.25
+                  },
+                  {
+                    "edge_id": "fac_talent_availability->risk_delivery_slip",
+                    "from_id": "fac_talent_availability",
+                    "to_id": "risk_delivery_slip",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": -0.2,
+                    "flip_mean": -0.2
+                  },
+                  {
+                    "edge_id": "fac_team_capacity->out_revenue_capacity",
+                    "from_id": "fac_team_capacity",
+                    "to_id": "out_revenue_capacity",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": 0.45,
+                    "flip_mean": 0.45
+                  },
+                  {
+                    "edge_id": "fac_team_capacity->out_roadmap_delivery",
+                    "from_id": "fac_team_capacity",
+                    "to_id": "out_roadmap_delivery",
+                    "e_value": 1.4178,
+                    "is_unflippable": false,
+                    "flip_direction": "decrease",
+                    "current_mean": 0.65,
+                    "flip_mean": -0.921589
+                  },
+                  {
+                    "edge_id": "fac_team_capacity->risk_delivery_slip",
+                    "from_id": "fac_team_capacity",
+                    "to_id": "risk_delivery_slip",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": -0.5,
+                    "flip_mean": -0.5
+                  },
+                  {
+                    "edge_id": "out_revenue_capacity->goal_q3_delivery",
+                    "from_id": "out_revenue_capacity",
+                    "to_id": "goal_q3_delivery",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": 0.25,
+                    "flip_mean": 0.25
+                  },
+                  {
+                    "edge_id": "out_roadmap_delivery->goal_q3_delivery",
+                    "from_id": "out_roadmap_delivery",
+                    "to_id": "goal_q3_delivery",
+                    "e_value": 1,
+                    "is_unflippable": false,
+                    "flip_direction": "decrease",
+                    "current_mean": 0.7,
+                    "flip_mean": -0.146454
+                  },
+                  {
+                    "edge_id": "risk_coordination->goal_q3_delivery",
+                    "from_id": "risk_coordination",
+                    "to_id": "goal_q3_delivery",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": -0.2,
+                    "flip_mean": -0.2
+                  },
+                  {
+                    "edge_id": "risk_cost_overrun->goal_q3_delivery",
+                    "from_id": "risk_cost_overrun",
+                    "to_id": "goal_q3_delivery",
+                    "is_unflippable": true,
+                    "flip_direction": "increase",
+                    "current_mean": -0.3,
+                    "flip_mean": -0.3
+                  },
+                  {
+                    "edge_id": "risk_delivery_slip->goal_q3_delivery",
+                    "from_id": "risk_delivery_slip",
+                    "to_id": "goal_q3_delivery",
+                    "e_value": 1.1873,
+                    "is_unflippable": false,
+                    "flip_direction": "increase",
+                    "current_mean": -0.55,
+                    "flip_mean": 0.653037
+                  }
+                ]
+              },
+              "factor_sensitivity": [
+                {
+                  "node_id": "fac_talent_availability",
+                  "label": "Local Engineering Talent Availability",
+                  "sensitivity_score": 1,
+                  "importance_score": 1,
+                  "elasticity": 0.0022772223123686684,
+                  "elasticity_display": 0.0022772223123686684,
+                  "direction": "positive",
+                  "confidence": 0.3698,
+                  "confidence_source": "bootstrap_sampling",
+                  "importance_rank": 1,
+                  "interpretation": "Decision is robust to Local Engineering Talent Availability value variation",
+                  "baseline_near_zero": false,
+                  "influence_score": 0.2638537051020844,
+                  "influence_rank": 3,
+                  "elasticity_std": 0.00199861,
+                  "attribution_stability": "low",
+                  "rank_flip_rate": 0.1,
+                  "stability_method": "bootstrap_20"
+                },
+                {
+                  "node_id": "fac_market_demand",
+                  "label": "Customer Demand for New Features",
+                  "sensitivity_score": 0.2721514544443299,
+                  "importance_score": 0.75,
+                  "elasticity": 0.0006197493644042134,
+                  "elasticity_display": 0.0006197493644042134,
+                  "direction": "positive",
+                  "confidence": 0.3303,
+                  "confidence_source": "bootstrap_sampling",
+                  "importance_rank": 2,
+                  "interpretation": "Decision is robust to Customer Demand for New Features value variation",
+                  "baseline_near_zero": false,
+                  "influence_score": 0.07180816960405773,
+                  "influence_rank": 5,
+                  "elasticity_std": 0.0009262,
+                  "attribution_stability": "low",
+                  "rank_flip_rate": 0.25,
+                  "stability_method": "bootstrap_20"
+                },
+                {
+                  "node_id": "fac_delivery_speed",
+                  "label": "Delivery Velocity",
+                  "sensitivity_score": 0,
+                  "importance_score": 0.5,
+                  "elasticity": 0,
+                  "elasticity_display": 0,
+                  "direction": "negative",
+                  "confidence": 0.1,
+                  "confidence_source": "bootstrap_sampling",
+                  "importance_rank": 3,
+                  "observed_value": 0.25,
+                  "interpretation": "Decision is robust to Delivery Velocity value variation",
+                  "zero_reason": "intervention_override",
+                  "baseline_near_zero": false,
+                  "influence_score": 0.7597916993175374,
+                  "influence_rank": 2,
+                  "elasticity_std": 0,
+                  "attribution_stability": "negligible",
+                  "rank_flip_rate": 0,
+                  "stability_method": "bootstrap_20"
+                },
+                {
+                  "node_id": "fac_hiring_cost",
+                  "label": "Incremental Staffing Cost",
+                  "sensitivity_score": 0,
+                  "importance_score": 0.25,
+                  "elasticity": 0,
+                  "elasticity_display": 0,
+                  "direction": "negative",
+                  "confidence": 0.1,
+                  "confidence_source": "bootstrap_sampling",
+                  "importance_rank": 4,
+                  "observed_value": 0,
+                  "interpretation": "Decision is robust to Incremental Staffing Cost value variation",
+                  "zero_reason": "intervention_override",
+                  "baseline_near_zero": false,
+                  "influence_score": 0.19619017766822916,
+                  "influence_rank": 4,
+                  "elasticity_std": 0,
+                  "attribution_stability": "negligible",
+                  "rank_flip_rate": 0,
+                  "stability_method": "bootstrap_20"
+                },
+                {
+                  "node_id": "fac_team_capacity",
+                  "label": "Engineering Team Capacity",
+                  "sensitivity_score": 0,
+                  "importance_score": 0,
+                  "elasticity": 0,
+                  "elasticity_display": 0,
+                  "direction": "negative",
+                  "confidence": 0.1,
+                  "confidence_source": "bootstrap_sampling",
+                  "importance_rank": 5,
+                  "observed_value": 0.3,
+                  "interpretation": "Decision is robust to Engineering Team Capacity value variation",
+                  "zero_reason": "intervention_override",
+                  "baseline_near_zero": false,
+                  "influence_score": 1,
+                  "influence_rank": 1,
+                  "elasticity_std": 0,
+                  "attribution_stability": "negligible",
+                  "rank_flip_rate": 0,
+                  "stability_method": "bootstrap_20"
+                }
+              ],
+              "inference_warnings": [],
+              "stability_thresholds": {
+                "high_moderate_boundary": 0.1,
+                "moderate_low_boundary": 0.3,
+                "version": "v1.0-operational-defaults",
+                "provisional": true
+              },
+              "factor_evpi": [
+                {
+                  "factor_id": "fac_market_demand",
+                  "evpi": 0,
+                  "evpi_percentage_points": 0,
+                  "current_metric": 0.968,
+                  "perfect_metric": 0.968,
+                  "metric_type": "p_win_recommended",
+                  "n_evpi_samples": 500
+                },
+                {
+                  "factor_id": "fac_team_capacity",
+                  "evpi": -0.004,
+                  "evpi_percentage_points": -0.4,
+                  "current_metric": 0.968,
+                  "perfect_metric": 0.964,
+                  "metric_type": "p_win_recommended",
+                  "n_evpi_samples": 500
+                },
+                {
+                  "factor_id": "fac_talent_availability",
+                  "evpi": -0.006,
+                  "evpi_percentage_points": -0.6,
+                  "current_metric": 0.968,
+                  "perfect_metric": 0.962,
+                  "metric_type": "p_win_recommended",
+                  "n_evpi_samples": 500
+                },
+                {
+                  "factor_id": "fac_delivery_speed",
+                  "evpi": -0.008,
+                  "evpi_percentage_points": -0.8,
+                  "current_metric": 0.968,
+                  "perfect_metric": 0.96,
+                  "metric_type": "p_win_recommended",
+                  "n_evpi_samples": 500
+                },
+                {
+                  "factor_id": "fac_hiring_cost",
+                  "evpi": -0.008,
+                  "evpi_percentage_points": -0.8,
+                  "current_metric": 0.968,
+                  "perfect_metric": 0.96,
+                  "metric_type": "p_win_recommended",
+                  "n_evpi_samples": 500
+                }
+              ],
+              "request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+              "processing_time_ms": 1493,
+              "seed_used": "1379478516",
+              "seed_source": "client_provided"
+            }
+          },
+          "request_id_chain": {
+            "ui": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "plot": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "isl": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "isl_echoed": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "all_match": true,
+            "chain_complete": true
+          },
+          "range_derivation_sources": {
+            "fac_hiring_cost": "default",
+            "fac_team_capacity": "default",
+            "fac_delivery_speed": "default"
+          },
+          "feature_flags_snapshot": {
+            "SCM_LITE_ENABLE": "0",
+            "PROD_SCM_LITE_PLACEHOLDER": "0",
+            "ADAPTIVE_K_ENABLE": "0",
+            "CONFIDENCE_CALIBRATED": "0",
+            "IDENT_TAG_ENABLE": "1",
+            "PROVENANCE_ENABLE": "1",
+            "ENABLE_DUAL_BELIEFS": "0",
+            "ENABLE_NOISY_OR": "0",
+            "ENABLE_LOGISTIC": "0",
+            "ENABLE_NOISY_AND_NOT": "0",
+            "ENABLE_MIXED_COMBINATION": "1",
+            "ENABLE_TRACE_CACHING": "0",
+            "ENABLE_STRATIFIED_SAMPLING": "1",
+            "ENABLE_IMPORTANCE_SAMPLING": "1",
+            "ENABLE_OPTION_PROBABILITIES": "0",
+            "RATE_LIMIT_ENABLED": "1",
+            "TOKEN_RL_ENABLE": "0",
+            "RL_CB_ENABLE": "0",
+            "PROMETHEUS_METRICS": "0",
+            "PROMETHEUS_ENABLE": "1",
+            "OPS_SNAPSHOT_ENABLE": "0",
+            "METRICS": "0",
+            "AUTH_ENABLED": "0",
+            "TEST_ROUTES": "0",
+            "CORS_DEV": "0",
+            "OPENAPI_DEV": "0",
+            "COMPARE_VIEW_ENABLE": "1",
+            "INSPECTOR_DEBUG_ENABLE": "0",
+            "FEATURE_STREAM": "0",
+            "STREAM_PARITY_ENABLE": "0",
+            "WHATIF_DELTA_ENABLE": "0",
+            "CEE_ORCHESTRATOR_ENABLED": "1",
+            "DECISION_REVIEW_ENABLE": "1",
+            "ENABLE_FACTS_ASSEMBLY": "1",
+            "ENABLE_REVIEW_PASS": "1",
+            "ENABLE_VALIDATE_PATCH": "1"
+          },
+          "decision_brief_assembled": true,
+          "review_cards_count": 1,
+          "evidence_priority_card_present": true
+        },
+        "downstream_calls": {
+          "isl": [
+            {
+              "service": "isl",
+              "endpoint": "/api/v1/robustness/analyze/v2",
+              "status": 200,
+              "elapsed_ms": 1544,
+              "payload_hash": "aab19f7cd088",
+              "response_hash": "df7f4c4475f3",
+              "request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+              "request_payload": {
+                "request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+                "graph": {
+                  "nodes": [
+                    {
+                      "id": "fac_delivery_speed",
+                      "kind": "factor",
+                      "label": "Delivery Velocity",
+                      "observed_state": {
+                        "value": 0.25,
+                        "unit": "scale",
+                        "raw_value": 0,
+                        "cap": 0,
+                        "factor_type": "time",
+                        "uncertainty_drivers": [
+                          "Coordination overhead with offshore teams",
+                          "Onboarding time for new hires"
+                        ]
+                      },
+                      "intercept": 0.25,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "fac_hiring_cost",
+                      "kind": "factor",
+                      "label": "Incremental Staffing Cost",
+                      "observed_state": {
+                        "value": 0,
+                        "unit": "scale",
+                        "raw_value": 0,
+                        "cap": 0,
+                        "factor_type": "cost",
+                        "uncertainty_drivers": [
+                          "Local salary benchmarks not specified",
+                          "Offshore partner rates unknown"
+                        ]
+                      },
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "fac_market_demand",
+                      "kind": "factor",
+                      "label": "Customer Demand for New Features",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "fac_talent_availability",
+                      "kind": "factor",
+                      "label": "Local Engineering Talent Availability",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "fac_team_capacity",
+                      "kind": "factor",
+                      "label": "Engineering Team Capacity",
+                      "observed_state": {
+                        "value": 0.3,
+                        "unit": "scale",
+                        "raw_value": 0,
+                        "cap": 0,
+                        "factor_type": "other",
+                        "uncertainty_drivers": [
+                          "Hiring timelines uncertain",
+                          "Ramp-up period for new hires varies"
+                        ]
+                      },
+                      "intercept": 0.3,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "goal_q3_delivery",
+                      "kind": "goal",
+                      "label": "Deliver Q3 Roadmap Commitments on Time",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "out_revenue_capacity",
+                      "kind": "outcome",
+                      "label": "Revenue-Generating Capacity",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "out_roadmap_delivery",
+                      "kind": "outcome",
+                      "label": "Q3 Roadmap Delivery",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "risk_coordination",
+                      "kind": "risk",
+                      "label": "Coordination and Quality Risk",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "risk_cost_overrun",
+                      "kind": "risk",
+                      "label": "Budget Overrun Risk",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    },
+                    {
+                      "id": "risk_delivery_slip",
+                      "kind": "risk",
+                      "label": "Q3 Commitment Delivery Slip",
+                      "intercept": 0,
+                      "epsilon_std": 0
+                    }
+                  ],
+                  "edges": [
+                    {
+                      "from": "fac_delivery_speed",
+                      "to": "out_roadmap_delivery",
+                      "exists_probability": 0.88,
+                      "strength": {
+                        "mean": 0.55,
+                        "std": 0.14
+                      }
+                    },
+                    {
+                      "from": "fac_delivery_speed",
+                      "to": "risk_coordination",
+                      "exists_probability": 0.75,
+                      "strength": {
+                        "mean": -0.35,
+                        "std": 0.18
+                      }
+                    },
+                    {
+                      "from": "fac_delivery_speed",
+                      "to": "risk_delivery_slip",
+                      "exists_probability": 0.85,
+                      "strength": {
+                        "mean": -0.4,
+                        "std": 0.15
+                      }
+                    },
+                    {
+                      "from": "fac_hiring_cost",
+                      "to": "risk_cost_overrun",
+                      "exists_probability": 0.9,
+                      "strength": {
+                        "mean": 0.6,
+                        "std": 0.12
+                      }
+                    },
+                    {
+                      "from": "fac_market_demand",
+                      "to": "out_revenue_capacity",
+                      "exists_probability": 0.72,
+                      "strength": {
+                        "mean": 0.35,
+                        "std": 0.2
+                      }
+                    },
+                    {
+                      "from": "fac_talent_availability",
+                      "to": "out_roadmap_delivery",
+                      "exists_probability": 0.7,
+                      "strength": {
+                        "mean": 0.25,
+                        "std": 0.18
+                      }
+                    },
+                    {
+                      "from": "fac_talent_availability",
+                      "to": "risk_delivery_slip",
+                      "exists_probability": 0.68,
+                      "strength": {
+                        "mean": -0.2,
+                        "std": 0.15
+                      }
+                    },
+                    {
+                      "from": "fac_team_capacity",
+                      "to": "out_revenue_capacity",
+                      "exists_probability": 0.85,
+                      "strength": {
+                        "mean": 0.45,
+                        "std": 0.15
+                      }
+                    },
+                    {
+                      "from": "fac_team_capacity",
+                      "to": "out_roadmap_delivery",
+                      "exists_probability": 0.92,
+                      "strength": {
+                        "mean": 0.65,
+                        "std": 0.12
+                      }
+                    },
+                    {
+                      "from": "fac_team_capacity",
+                      "to": "risk_delivery_slip",
+                      "exists_probability": 0.9,
+                      "strength": {
+                        "mean": -0.5,
+                        "std": 0.15
+                      }
+                    },
+                    {
+                      "from": "out_revenue_capacity",
+                      "to": "goal_q3_delivery",
+                      "exists_probability": 0.8,
+                      "strength": {
+                        "mean": 0.25,
+                        "std": 0.12
+                      }
+                    },
+                    {
+                      "from": "out_roadmap_delivery",
+                      "to": "goal_q3_delivery",
+                      "exists_probability": 0.95,
+                      "strength": {
+                        "mean": 0.7,
+                        "std": 0.1
+                      }
+                    },
+                    {
+                      "from": "risk_coordination",
+                      "to": "goal_q3_delivery",
+                      "exists_probability": 0.75,
+                      "strength": {
+                        "mean": -0.2,
+                        "std": 0.15
+                      }
+                    },
+                    {
+                      "from": "risk_cost_overrun",
+                      "to": "goal_q3_delivery",
+                      "exists_probability": 0.85,
+                      "strength": {
+                        "mean": -0.3,
+                        "std": 0.14
+                      }
+                    },
+                    {
+                      "from": "risk_delivery_slip",
+                      "to": "goal_q3_delivery",
+                      "exists_probability": 0.92,
+                      "strength": {
+                        "mean": -0.55,
+                        "std": 0.12
+                      }
+                    }
+                  ]
+                },
+                "options": [
+                  {
+                    "id": "opt_hire_local",
+                    "label": "Hire Two Senior Engineers Locally",
+                    "interventions": {
+                      "fac_hiring_cost": 0.8,
+                      "fac_team_capacity": 0.8,
+                      "fac_delivery_speed": 0.7
+                    }
+                  },
+                  {
+                    "id": "opt_offshore",
+                    "label": "Engage Offshore Partner",
+                    "interventions": {
+                      "fac_hiring_cost": 0.35,
+                      "fac_team_capacity": 0.65,
+                      "fac_delivery_speed": 0.5
+                    }
+                  },
+                  {
+                    "id": "opt_status_quo",
+                    "label": "Maintain Current Team (Status Quo)",
+                    "interventions": {
+                      "fac_hiring_cost": 0,
+                      "fac_team_capacity": 0.3,
+                      "fac_delivery_speed": 0.25
+                    }
+                  },
+                  {
+                    "id": "opt_tiered_pricing",
+                    "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+                    "interventions": {
+                      "fac_hiring_cost": 0.5,
+                      "fac_team_capacity": 0.45,
+                      "fac_delivery_speed": 0.35
+                    }
+                  }
+                ],
+                "goal_node_id": "goal_q3_delivery",
+                "n_samples": 1000,
+                "analysis_types": [
+                  "comparison",
+                  "sensitivity",
+                  "robustness"
+                ],
+                "parameter_uncertainties": [
+                  {
+                    "node_id": "fac_delivery_speed",
+                    "distribution": "normal",
+                    "mean": 0.25,
+                    "std": 0.1
+                  },
+                  {
+                    "node_id": "fac_hiring_cost",
+                    "distribution": "normal",
+                    "mean": 0,
+                    "std": 0.5
+                  },
+                  {
+                    "node_id": "fac_team_capacity",
+                    "distribution": "normal",
+                    "mean": 0.3,
+                    "std": 0.1
+                  },
+                  {
+                    "node_id": "fac_market_demand",
+                    "distribution": "normal",
+                    "mean": 0.55,
+                    "std": 0.14433756729740646
+                  },
+                  {
+                    "node_id": "fac_talent_availability",
+                    "distribution": "normal",
+                    "mean": 0.44999999999999996,
+                    "std": 0.14433756729740643
+                  }
+                ],
+                "include_e_values": true,
+                "include_voi": true,
+                "seed": "1379478516"
+              },
+              "response_payload": {
+                "version": "2.0",
+                "endpoint_version": "analyze/v2",
+                "engine_version": "1.0.0",
+                "build": "1da810f",
+                "timestamp": "2026-04-30T18:46:53.007398Z",
+                "analysis_status": "computed",
+                "robustness_status": "computed",
+                "factor_sensitivity_status": "computed",
+                "critiques": [],
+                "request_echo": {
+                  "graph_node_count": 11,
+                  "graph_edge_count": 15,
+                  "options_count": 4,
+                  "goal_node_id_hash": "8e52bf3b880f",
+                  "n_samples": 1000,
+                  "response_version_requested": 2,
+                  "include_diagnostics": false
+                },
+                "options": [
+                  {
+                    "id": "opt_hire_local",
+                    "label": "Hire Two Senior Engineers Locally",
+                    "outcome": {
+                      "mean": 0.8132319756140622,
+                      "std": 0.30332013086097914,
+                      "p10": 0.4001864583114018,
+                      "p50": 0.8306516509548484,
+                      "p90": 1.1888318976982775,
+                      "n_samples": 1000,
+                      "n_valid_samples": 1000,
+                      "validity_ratio": 1,
+                      "percentiles_source": "samples"
+                    },
+                    "win_probability": 0.948,
+                    "status": "computed"
+                  },
+                  {
+                    "id": "opt_offshore",
+                    "label": "Engage Offshore Partner",
+                    "outcome": {
+                      "mean": 0.6677431475669133,
+                      "std": 0.22801917461949633,
+                      "p10": 0.3606723201703379,
+                      "p50": 0.6878869508749893,
+                      "p90": 0.948239884248076,
+                      "n_samples": 1000,
+                      "n_valid_samples": 1000,
+                      "validity_ratio": 1,
+                      "percentiles_source": "samples"
+                    },
+                    "win_probability": 0.046,
+                    "status": "computed"
+                  },
+                  {
+                    "id": "opt_status_quo",
+                    "label": "Maintain Current Team (Status Quo)",
+                    "outcome": {
+                      "mean": 0.3422126543676048,
+                      "std": 0.11196571638443592,
+                      "p10": 0.19017503150895917,
+                      "p50": 0.35028196615854895,
+                      "p90": 0.4781934898108626,
+                      "n_samples": 1000,
+                      "n_valid_samples": 1000,
+                      "validity_ratio": 1,
+                      "percentiles_source": "samples"
+                    },
+                    "win_probability": 0.006,
+                    "status": "computed"
+                  },
+                  {
+                    "id": "opt_tiered_pricing",
+                    "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+                    "outcome": {
+                      "mean": 0.4268398848392611,
+                      "std": 0.1690681896157409,
+                      "p10": 0.20264822620280773,
+                      "p50": 0.4351294163176319,
+                      "p90": 0.6323601230841863,
+                      "n_samples": 1000,
+                      "n_valid_samples": 1000,
+                      "validity_ratio": 1,
+                      "percentiles_source": "samples"
+                    },
+                    "win_probability": 0,
+                    "status": "computed"
+                  }
+                ],
+                "robustness": {
+                  "level": "high",
+                  "confidence": 0.9180216077816037,
+                  "fragile_edges": [
+                    {
+                      "edge_id": "out_roadmap_delivery->goal_q3_delivery",
+                      "from_id": "out_roadmap_delivery",
+                      "to_id": "goal_q3_delivery",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.092,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "risk_delivery_slip->goal_q3_delivery",
+                      "from_id": "risk_delivery_slip",
+                      "to_id": "goal_q3_delivery",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.028,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "fac_team_capacity->out_roadmap_delivery",
+                      "from_id": "fac_team_capacity",
+                      "to_id": "out_roadmap_delivery",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.08,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "fac_delivery_speed->out_roadmap_delivery",
+                      "from_id": "fac_delivery_speed",
+                      "to_id": "out_roadmap_delivery",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.092,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "fac_team_capacity->risk_delivery_slip",
+                      "from_id": "fac_team_capacity",
+                      "to_id": "risk_delivery_slip",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.048,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "out_revenue_capacity->goal_q3_delivery",
+                      "from_id": "out_revenue_capacity",
+                      "to_id": "goal_q3_delivery",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.044,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "fac_hiring_cost->risk_cost_overrun",
+                      "from_id": "fac_hiring_cost",
+                      "to_id": "risk_cost_overrun",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.004,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "fac_delivery_speed->risk_delivery_slip",
+                      "from_id": "fac_delivery_speed",
+                      "to_id": "risk_delivery_slip",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.028,
+                      "marginal_switch_probability": 0
+                    },
+                    {
+                      "edge_id": "risk_cost_overrun->goal_q3_delivery",
+                      "from_id": "risk_cost_overrun",
+                      "to_id": "goal_q3_delivery",
+                      "alternative_winner_id": "opt_offshore",
+                      "switch_probability": 0.148,
+                      "marginal_switch_probability": 0
+                    }
+                  ],
+                  "is_robust": true,
+                  "fragile_edges_v1": [
+                    "risk_delivery_slip->goal_q3_delivery",
+                    "fac_delivery_speed->risk_delivery_slip",
+                    "out_revenue_capacity->goal_q3_delivery",
+                    "risk_cost_overrun->goal_q3_delivery",
+                    "fac_hiring_cost->risk_cost_overrun",
+                    "fac_delivery_speed->out_roadmap_delivery",
+                    "fac_team_capacity->out_roadmap_delivery",
+                    "out_roadmap_delivery->goal_q3_delivery",
+                    "fac_team_capacity->risk_delivery_slip"
+                  ],
+                  "robust_edges": [
+                    "fac_talent_availability->risk_delivery_slip",
+                    "fac_delivery_speed->risk_coordination",
+                    "fac_market_demand->out_revenue_capacity",
+                    "fac_talent_availability->out_roadmap_delivery"
+                  ],
+                  "recommendation_stability": 0.948,
+                  "edge_e_values": [
+                    {
+                      "edge_id": "fac_delivery_speed->out_roadmap_delivery",
+                      "from_id": "fac_delivery_speed",
+                      "to_id": "out_roadmap_delivery",
+                      "e_value": 1.3297,
+                      "is_unflippable": false,
+                      "flip_direction": "decrease",
+                      "current_mean": 0.55,
+                      "flip_mean": -0.731362
+                    },
+                    {
+                      "edge_id": "fac_delivery_speed->risk_coordination",
+                      "from_id": "fac_delivery_speed",
+                      "to_id": "risk_coordination",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": -0.35,
+                      "flip_mean": -0.35
+                    },
+                    {
+                      "edge_id": "fac_delivery_speed->risk_delivery_slip",
+                      "from_id": "fac_delivery_speed",
+                      "to_id": "risk_delivery_slip",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": -0.4,
+                      "flip_mean": -0.4
+                    },
+                    {
+                      "edge_id": "fac_hiring_cost->risk_cost_overrun",
+                      "from_id": "fac_hiring_cost",
+                      "to_id": "risk_cost_overrun",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": 0.6,
+                      "flip_mean": 0.6
+                    },
+                    {
+                      "edge_id": "fac_market_demand->out_revenue_capacity",
+                      "from_id": "fac_market_demand",
+                      "to_id": "out_revenue_capacity",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": 0.35,
+                      "flip_mean": 0.35
+                    },
+                    {
+                      "edge_id": "fac_talent_availability->out_roadmap_delivery",
+                      "from_id": "fac_talent_availability",
+                      "to_id": "out_roadmap_delivery",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": 0.25,
+                      "flip_mean": 0.25
+                    },
+                    {
+                      "edge_id": "fac_talent_availability->risk_delivery_slip",
+                      "from_id": "fac_talent_availability",
+                      "to_id": "risk_delivery_slip",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": -0.2,
+                      "flip_mean": -0.2
+                    },
+                    {
+                      "edge_id": "fac_team_capacity->out_revenue_capacity",
+                      "from_id": "fac_team_capacity",
+                      "to_id": "out_revenue_capacity",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": 0.45,
+                      "flip_mean": 0.45
+                    },
+                    {
+                      "edge_id": "fac_team_capacity->out_roadmap_delivery",
+                      "from_id": "fac_team_capacity",
+                      "to_id": "out_roadmap_delivery",
+                      "e_value": 1.4178,
+                      "is_unflippable": false,
+                      "flip_direction": "decrease",
+                      "current_mean": 0.65,
+                      "flip_mean": -0.921589
+                    },
+                    {
+                      "edge_id": "fac_team_capacity->risk_delivery_slip",
+                      "from_id": "fac_team_capacity",
+                      "to_id": "risk_delivery_slip",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": -0.5,
+                      "flip_mean": -0.5
+                    },
+                    {
+                      "edge_id": "out_revenue_capacity->goal_q3_delivery",
+                      "from_id": "out_revenue_capacity",
+                      "to_id": "goal_q3_delivery",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": 0.25,
+                      "flip_mean": 0.25
+                    },
+                    {
+                      "edge_id": "out_roadmap_delivery->goal_q3_delivery",
+                      "from_id": "out_roadmap_delivery",
+                      "to_id": "goal_q3_delivery",
+                      "e_value": 1,
+                      "is_unflippable": false,
+                      "flip_direction": "decrease",
+                      "current_mean": 0.7,
+                      "flip_mean": -0.146454
+                    },
+                    {
+                      "edge_id": "risk_coordination->goal_q3_delivery",
+                      "from_id": "risk_coordination",
+                      "to_id": "goal_q3_delivery",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": -0.2,
+                      "flip_mean": -0.2
+                    },
+                    {
+                      "edge_id": "risk_cost_overrun->goal_q3_delivery",
+                      "from_id": "risk_cost_overrun",
+                      "to_id": "goal_q3_delivery",
+                      "is_unflippable": true,
+                      "flip_direction": "increase",
+                      "current_mean": -0.3,
+                      "flip_mean": -0.3
+                    },
+                    {
+                      "edge_id": "risk_delivery_slip->goal_q3_delivery",
+                      "from_id": "risk_delivery_slip",
+                      "to_id": "goal_q3_delivery",
+                      "e_value": 1.1873,
+                      "is_unflippable": false,
+                      "flip_direction": "increase",
+                      "current_mean": -0.55,
+                      "flip_mean": 0.653037
+                    }
+                  ]
+                },
+                "factor_sensitivity": [
+                  {
+                    "node_id": "fac_talent_availability",
+                    "label": "Local Engineering Talent Availability",
+                    "sensitivity_score": 1,
+                    "importance_score": 1,
+                    "elasticity": 0.0022772223123686684,
+                    "elasticity_display": 0.0022772223123686684,
+                    "direction": "positive",
+                    "confidence": 0.3698,
+                    "confidence_source": "bootstrap_sampling",
+                    "importance_rank": 1,
+                    "interpretation": "Decision is robust to Local Engineering Talent Availability value variation",
+                    "baseline_near_zero": false,
+                    "influence_score": 0.2638537051020844,
+                    "influence_rank": 3,
+                    "elasticity_std": 0.00199861,
+                    "attribution_stability": "low",
+                    "rank_flip_rate": 0.1,
+                    "stability_method": "bootstrap_20"
+                  },
+                  {
+                    "node_id": "fac_market_demand",
+                    "label": "Customer Demand for New Features",
+                    "sensitivity_score": 0.2721514544443299,
+                    "importance_score": 0.75,
+                    "elasticity": 0.0006197493644042134,
+                    "elasticity_display": 0.0006197493644042134,
+                    "direction": "positive",
+                    "confidence": 0.3303,
+                    "confidence_source": "bootstrap_sampling",
+                    "importance_rank": 2,
+                    "interpretation": "Decision is robust to Customer Demand for New Features value variation",
+                    "baseline_near_zero": false,
+                    "influence_score": 0.07180816960405773,
+                    "influence_rank": 5,
+                    "elasticity_std": 0.0009262,
+                    "attribution_stability": "low",
+                    "rank_flip_rate": 0.25,
+                    "stability_method": "bootstrap_20"
+                  },
+                  {
+                    "node_id": "fac_delivery_speed",
+                    "label": "Delivery Velocity",
+                    "sensitivity_score": 0,
+                    "importance_score": 0.5,
+                    "elasticity": 0,
+                    "elasticity_display": 0,
+                    "direction": "negative",
+                    "confidence": 0.1,
+                    "confidence_source": "bootstrap_sampling",
+                    "importance_rank": 3,
+                    "observed_value": 0.25,
+                    "interpretation": "Decision is robust to Delivery Velocity value variation",
+                    "zero_reason": "intervention_override",
+                    "baseline_near_zero": false,
+                    "influence_score": 0.7597916993175374,
+                    "influence_rank": 2,
+                    "elasticity_std": 0,
+                    "attribution_stability": "negligible",
+                    "rank_flip_rate": 0,
+                    "stability_method": "bootstrap_20"
+                  },
+                  {
+                    "node_id": "fac_hiring_cost",
+                    "label": "Incremental Staffing Cost",
+                    "sensitivity_score": 0,
+                    "importance_score": 0.25,
+                    "elasticity": 0,
+                    "elasticity_display": 0,
+                    "direction": "negative",
+                    "confidence": 0.1,
+                    "confidence_source": "bootstrap_sampling",
+                    "importance_rank": 4,
+                    "observed_value": 0,
+                    "interpretation": "Decision is robust to Incremental Staffing Cost value variation",
+                    "zero_reason": "intervention_override",
+                    "baseline_near_zero": false,
+                    "influence_score": 0.19619017766822916,
+                    "influence_rank": 4,
+                    "elasticity_std": 0,
+                    "attribution_stability": "negligible",
+                    "rank_flip_rate": 0,
+                    "stability_method": "bootstrap_20"
+                  },
+                  {
+                    "node_id": "fac_team_capacity",
+                    "label": "Engineering Team Capacity",
+                    "sensitivity_score": 0,
+                    "importance_score": 0,
+                    "elasticity": 0,
+                    "elasticity_display": 0,
+                    "direction": "negative",
+                    "confidence": 0.1,
+                    "confidence_source": "bootstrap_sampling",
+                    "importance_rank": 5,
+                    "observed_value": 0.3,
+                    "interpretation": "Decision is robust to Engineering Team Capacity value variation",
+                    "zero_reason": "intervention_override",
+                    "baseline_near_zero": false,
+                    "influence_score": 1,
+                    "influence_rank": 1,
+                    "elasticity_std": 0,
+                    "attribution_stability": "negligible",
+                    "rank_flip_rate": 0,
+                    "stability_method": "bootstrap_20"
+                  }
+                ],
+                "inference_warnings": [],
+                "stability_thresholds": {
+                  "high_moderate_boundary": 0.1,
+                  "moderate_low_boundary": 0.3,
+                  "version": "v1.0-operational-defaults",
+                  "provisional": true
+                },
+                "factor_evpi": [
+                  {
+                    "factor_id": "fac_market_demand",
+                    "evpi": 0,
+                    "evpi_percentage_points": 0,
+                    "current_metric": 0.968,
+                    "perfect_metric": 0.968,
+                    "metric_type": "p_win_recommended",
+                    "n_evpi_samples": 500
+                  },
+                  {
+                    "factor_id": "fac_team_capacity",
+                    "evpi": -0.004,
+                    "evpi_percentage_points": -0.4,
+                    "current_metric": 0.968,
+                    "perfect_metric": 0.964,
+                    "metric_type": "p_win_recommended",
+                    "n_evpi_samples": 500
+                  },
+                  {
+                    "factor_id": "fac_talent_availability",
+                    "evpi": -0.006,
+                    "evpi_percentage_points": -0.6,
+                    "current_metric": 0.968,
+                    "perfect_metric": 0.962,
+                    "metric_type": "p_win_recommended",
+                    "n_evpi_samples": 500
+                  },
+                  {
+                    "factor_id": "fac_delivery_speed",
+                    "evpi": -0.008,
+                    "evpi_percentage_points": -0.8,
+                    "current_metric": 0.968,
+                    "perfect_metric": 0.96,
+                    "metric_type": "p_win_recommended",
+                    "n_evpi_samples": 500
+                  },
+                  {
+                    "factor_id": "fac_hiring_cost",
+                    "evpi": -0.008,
+                    "evpi_percentage_points": -0.8,
+                    "current_metric": 0.968,
+                    "perfect_metric": 0.96,
+                    "metric_type": "p_win_recommended",
+                    "n_evpi_samples": 500
+                  }
+                ],
+                "request_id": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+                "processing_time_ms": 1493,
+                "seed_used": "1379478516",
+                "seed_source": "client_provided"
+              }
+            }
+          ]
+        },
+        "meta": {
+          "seed_used": "1379478516",
+          "seed_source": "server_generated",
+          "n_samples": 1000,
+          "detail_level": "standard",
+          "latency_ms": 3353.2327530384064,
+          "normalization_ms": 0.367887020111084,
+          "validation_ms": 0.17553281784057617,
+          "isl_ms": 1546.6999690532684,
+          "cee_ms": 0,
+          "build": "26dab62",
+          "computed_at": "2026-04-30T18:46:53.018Z",
+          "request_id_chain": {
+            "ui": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "plot": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "isl": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "isl_echoed": "edb7ec87-b485-45ad-bbfa-b316ac201637",
+            "all_match": true,
+            "chain_complete": true
+          },
+          "feature_flags": {
+            "SCM_LITE_ENABLE": "0",
+            "PROD_SCM_LITE_PLACEHOLDER": "0",
+            "ADAPTIVE_K_ENABLE": "0",
+            "CONFIDENCE_CALIBRATED": "0",
+            "IDENT_TAG_ENABLE": "1",
+            "PROVENANCE_ENABLE": "1",
+            "ENABLE_DUAL_BELIEFS": "0",
+            "ENABLE_NOISY_OR": "0",
+            "ENABLE_LOGISTIC": "0",
+            "ENABLE_NOISY_AND_NOT": "0",
+            "ENABLE_MIXED_COMBINATION": "1",
+            "ENABLE_TRACE_CACHING": "0",
+            "ENABLE_STRATIFIED_SAMPLING": "1",
+            "ENABLE_IMPORTANCE_SAMPLING": "1",
+            "ENABLE_OPTION_PROBABILITIES": "0",
+            "RATE_LIMIT_ENABLED": "1",
+            "TOKEN_RL_ENABLE": "0",
+            "RL_CB_ENABLE": "0",
+            "PROMETHEUS_METRICS": "0",
+            "PROMETHEUS_ENABLE": "1",
+            "OPS_SNAPSHOT_ENABLE": "0",
+            "METRICS": "0",
+            "AUTH_ENABLED": "0",
+            "TEST_ROUTES": "0",
+            "CORS_DEV": "0",
+            "OPENAPI_DEV": "0",
+            "COMPARE_VIEW_ENABLE": "1",
+            "INSPECTOR_DEBUG_ENABLE": "0",
+            "FEATURE_STREAM": "0",
+            "STREAM_PARITY_ENABLE": "0",
+            "WHATIF_DELTA_ENABLE": "0",
+            "CEE_ORCHESTRATOR_ENABLED": "1",
+            "DECISION_REVIEW_ENABLE": "1",
+            "ENABLE_FACTS_ASSEMBLY": "1",
+            "ENABLE_REVIEW_PASS": "1",
+            "ENABLE_VALIDATE_PATCH": "1",
+            "facts_assembly": true,
+            "review_pass": true
+          }
+        }
+      }
+    }
+  ],
+  "suggested_actions": [],
+  "insights": [],
+  "stage_indicator": "analyse",
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "opt_hire_local",
+        "label": "Hire Two Senior Engineers Locally",
+        "status": "ready",
+        "interventions": {
+          "fac_hiring_cost": 0.8,
+          "fac_team_capacity": 0.8,
+          "fac_delivery_speed": 0.7
+        },
+        "is_baseline": false
+      },
+      {
+        "option_id": "opt_offshore",
+        "label": "Engage Offshore Partner",
+        "status": "ready",
+        "interventions": {
+          "fac_hiring_cost": 0.35,
+          "fac_team_capacity": 0.65,
+          "fac_delivery_speed": 0.5
+        },
+        "is_baseline": false
+      },
+      {
+        "option_id": "opt_status_quo",
+        "label": "Maintain Current Team (Status Quo)",
+        "status": "ready",
+        "interventions": {
+          "fac_hiring_cost": 0,
+          "fac_team_capacity": 0.3,
+          "fac_delivery_speed": 0.25
+        },
+        "is_baseline": true
+      },
+      {
+        "option_id": "opt_tiered_pricing",
+        "label": "Introduce Tiered Pricing to Fund Gradual Hiring",
+        "status": "ready",
+        "interventions": {
+          "fac_hiring_cost": 0.5,
+          "fac_team_capacity": 0.45,
+          "fac_delivery_speed": 0.35
+        },
+        "is_baseline": false
+      }
+    ],
+    "goal_node_id": "goal_q3_delivery",
+    "status": "ready",
+    "computed_at": "2026-04-30T18:46:55.136Z"
+  }
+}

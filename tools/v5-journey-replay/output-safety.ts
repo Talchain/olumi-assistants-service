@@ -66,6 +66,13 @@ export const INTERNAL_TERM_RE_LENIENT = /\b(handler|winner|recommended)\b/i;
 const EXCLUDED_FIELD_NAMES: ReadonlySet<string> = new Set([
   'id',
   'target',
+  // Plural sibling of `target` — same structural-pointer semantic.
+  // Production emits `m1_coaching.model_critiques[*].targets[*]` as an
+  // array of node-id references (per the schema in
+  // src/prompts/defaults.ts:1240, this is the same role as
+  // `affected_node_ids`). The naming convention is uniform: `target` /
+  // `targets` carry machine-routing pointers, never user-facing prose.
+  'targets',
   'referenced_option_ids',
   'flip_scenarios',
   'action_type',
@@ -99,12 +106,45 @@ const EXCLUDED_FIELD_NAMES: ReadonlySet<string> = new Set([
   'extraction_metadata',
   'intervention_details',
   'blockers',
+  // m1_coaching scaffolding subtrees. The brief's allowlist names
+  // `$.m1_coaching[*].text` as the ONLY user-facing prose path inside
+  // m1_coaching; everything else is deterministic-coaching machinery
+  // (assumption ledgers, dedup keys, evidence-priority cards) consumed
+  // by the LLM/UI as structural data. Whole-subtree exclusions match
+  // the brief contract.
+  'assumptions_ledger',
+  'evidence_priority',
+  // Top-level enrichment subtree — deterministic-coaching fact catalogue
+  // (each entry has `fact_type`, `data.type`, `data.payload`, etc., where
+  // `fact_type` / `type` carry enum values like `factor_sensitivity`,
+  // `flip_threshold`, `rank_flip_rate` that match ENTITY_ID_LEAK_RE
+  // superficially but are category discriminators, not entity IDs).
+  // Per the brief's m1_coaching scope, this whole subtree is
+  // machine-consumed metadata — not user-facing.
+  'fact_objects',
+  // ISL/PLoT downstream-call audit trail. Peer of the already-excluded
+  // `payloads` — full machine-consumed request/response capture for
+  // operator debugging. Contains nested ISL response objects with
+  // structural fields (fragile_edges_v1, top_drivers, etc.) that
+  // legitimately carry edge/option ID strings.
+  'downstream_calls',
 ]);
 
 function isExcludedField(name: string): boolean {
   if (EXCLUDED_FIELD_NAMES.has(name)) return true;
   // Any field whose name ends in `_id` is a structural identifier.
   if (name.endsWith('_id')) return true;
+  // Plural sibling — fields ending in `_ids` carry an array of node-id
+  // references (`tied_option_ids`, `affected_option_ids`,
+  // `affected_node_ids`, etc.). Same structural-pointer semantic as
+  // singular `_id`. Production deterministic-coaching schema in
+  // src/prompts/defaults.ts emits multiple of these.
+  if (name.endsWith('_ids')) return true;
+  // Fields ending in `_key` are structural identifiers (deduplication
+  // keys, fact keys, lookup keys). Production m1_coaching emits
+  // `dedup_key`, `fact_key`, and similar — all carrying ID-shaped
+  // strings as machine-routing pointers, never user-facing prose.
+  if (name.endsWith('_key')) return true;
   return false;
 }
 

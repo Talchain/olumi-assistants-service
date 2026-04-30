@@ -16,24 +16,24 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 ## Run metadata
 
 - **Branch:** `claude/v5-journey-replay-harness-extension`
-- **Pack generated from commit SHA:** `cc849e0388ed2130d34e92706e13cf3175fcd679` (if this does not match HEAD, regenerate with the harness)
+- **Pack generated from commit SHA:** `7bba5e1856dcdde83b48f2aba4db71ec19367702` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-04-30T15:15:40.850Z
+- **Started at:** 2026-04-30T18:29:12.828Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
-- **Expected build:** `3bb151b`
+- **Expected build:** `7a21604`
 
 ## Deploy confirmation (Phase 2)
 
 - **GET /healthz status:** 200
-- **build (commit short):** `3bb151b`
+- **build (commit short):** `7a21604`
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 273ms
+- **elapsed:** 472ms
 
-Deploy confirmed: `/healthz` build `3bb151b` matches `--expected-build 3bb151b`.
+Deploy confirmed: `/healthz` build `7a21604` matches `--expected-build 7a21604`.
 
 **Per-turn prompt evidence:** not capturable from the current response envelope. The runtime emits `prompt_version` / `system_chars` to structured telemetry at server startup, but the `/orchestrate/v2/turn` response payload does not surface them. Deploy confirmation relies on `/healthz.build` + Render dashboard as the externally-verifiable signal.
 
@@ -47,13 +47,13 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=29595ms | — |
-| `1a_assist_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 nodes=17 edges=32 node_provenance=17/17 edge_provenance_display=32/32 coaching=absent | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1200 chip_count=1 elapsed=10240ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=364 chip_count=0 elapsed=7016ms stage=frame | — |
-| `4_run_analysis` | [FAIL] failed | v5-runtime | 200 | leaks=[$.blocks[0].enrichment.critiques[0].message:opt_hire_local, $.blocks[0].enrichment.critiques[1].message:opt_offshore, $.blocks[0].enrichment.critiques[2].message:opt_status_quo, $.blocks[0].enrichment] | analysis_run entity_id_leak |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=32545ms | — |
+| `1a_assist_draft_graph` | [FAIL] failed | harness-auth-blocker | — | transport error: This operation was aborted | transport layer |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1318 chip_count=1 elapsed=16132ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=349 chip_count=0 elapsed=6722ms stage=frame | — |
+| `4_run_analysis` | [FAIL] failed | v5-runtime | 200 | leaks=[$.blocks[0].enrichment.m1_coaching.model_critiques[0].targets[0]:fac_hiring_cost, $.blocks[0].enrichment.m1_coaching.model_critiques[1].targets[0]:fac_talent_market, $.blocks[0].enrichment.m1_coaching] | analysis_run entity_id_leak |
 | `5_explain_leader` | [SKIP] skipped | skipped | — | skipped_dependency: prerequisite 4_run_analysis did not pass | skipped_dependency: 4_run_analysis |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=75 chip_count=1 elapsed=1323ms stage=frame | — |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=76 chip_count=1 elapsed=873ms stage=frame | — |
 | `7_stale_explanation` | [SKIP] skipped | skipped | — | skipped_dependency: step 6 did not produce a confirmed graph mutation (graph_patch_block=false staleness_reason=absent block_count=0). Staleness assertions require an actual edit; "Increase the budget factor" routed to a clarification on this run. Re-run with a deterministic edit message (e.g. "Set the Hiring and Staffing Cost factor to 0.7") to exercise this path. | skipped_dependency: step_6_no_graph_mutation |
 | `8_rerun_via_chip` | [SKIP] skipped | skipped | — | skipped_dependency: prerequisite 7_stale_explanation did not pass | skipped_dependency: 7_stale_explanation |
 | `9_what_would_flip` | [SKIP] skipped | skipped | — | skipped_dependency: prerequisite 8_rerun_via_chip did not pass | skipped_dependency: 8_rerun_via_chip |
@@ -65,7 +65,7 @@ Layered on top of the pass/fail table above. Captures *what features the respons
 | step | endpoint | status | features observed | warnings | failures | response saved |
 |---|---|---|---|---|---|---|
 | `1_draft_graph` | orchestrate/v2/turn | [PASS] passed | — | — | — | yes |
-| `1a_assist_draft_graph` | assist/v1/draft-graph | [PASS] passed | node_provenance, edge_provenance_display | coaching_absent (CEE may not produce coaching on every draft) | — | no |
+| `1a_assist_draft_graph` | assist/v1/draft-graph | [FAIL] failed | — | — | transport layer | no |
 | `2_weakest_option` | orchestrate/v2/turn | [PASS] passed | — | — | — | yes |
 | `3_add_option` | orchestrate/v2/turn | [PASS] passed | — | — | — | yes |
 | `4_run_analysis` | orchestrate/v2/turn | [FAIL] failed | — | — | analysis_run entity_id_leak | yes |
@@ -80,27 +80,25 @@ Layered on top of the pass/fail table above. Captures *what features the respons
 #### `1_draft_graph`
 
 ```
-Drafted a decision graph with 14 nodes and 28 edges.
+Drafted a decision graph with 17 nodes and 27 edges.
 ```
 
 #### `2_weakest_option`
 
 ```
-Looking at the model structure, the weakest option is almost certainly **Continue with Current Team (Status Quo)**.
+Based on the model structure, the Status Quo option looks weakest against your goal of delivering Q3 roadmap commitments on time. It has no direct positive mechanism of its own: it routes through Local Senior Hire, Offshore Partnership, and Tiered Pricing simultaneously, but without activating any of them meaningfully. In effect, it inherits the risks of the other options (Onboarding and Ramp-Up Delay, Coordination and Integration Overhead, and Revenue Shortfall from Pricing Change) without the capacity gains those options bring.
 
-Here is the reasoning from the causal links. Every option influences your goal through three shared pathways: Delivery Velocity, Engineering Capacity, and Incremental Hiring Cost. The Status Quo option leaves Engineering Capacity unchanged at 15 engineers, which is the lowest starting point relative to the cap of 40. Engineering Capacity has the strongest direct causal link to Q3 Roadmap Delivery at 0.6, and that outcome carries the heaviest link to your goal at 0.7. Staying put means forgoing the capacity uplift that the other three options each provide in different ways.
+By contrast, Hire Two Senior Engineers Locally has the strongest single causal link to Engineering Delivery Capacity at 0.65, which in turn has the strongest link to your goal at 0.65. Engage Offshore Partner also drives delivery capacity, albeit at a lower link strength of 0.45 and with meaningful integration overhead risk at 0.6. Introduce Tiered Pricing for Gradual Hiring has the weakest positive link to Q3 Roadmap Velocity at 0.25, and that link carries the most uncertainty at 0.65 confidence, but it at least has a focused mechanism.
 
-It also does nothing to reduce Q3 Delivery Slip risk, which has a moderately negative link to your goal at -0.45. The other options at least shift Delivery Velocity and Engineering Capacity in ways that push back against that risk.
-
-That said, no simulation has run yet, so this is structural reasoning rather than a computed ranking. Running the analysis would give you actual probabilities across all four options and show whether the Status Quo gap is decisive or marginal. Would you like to run it?
+The Status Quo has no focused positive pathway and no analysis has run yet, so this is a structural observation rather than a computed result. Running the simulation would confirm whether this holds across the full range of uncertainty.
 ```
 
 #### `3_add_option`
 
 ```
-I'd be happy to help add another option, but I want to make sure I add something genuinely useful for your decision rather than a placeholder.
+I'd be happy to help add another option, but I want to make sure I add something genuinely useful for your decision rather than a generic placeholder.
 
-What option did you have in mind? For example, you might be considering something like a contractor or freelancer arrangement, a hybrid approach combining local and offshore, or something else specific to your situation.
+What option did you have in mind? For example, are you thinking of something like a contractor or freelancer arrangement, a hybrid approach combining local and offshore, or something else entirely?
 ```
 
 #### `4_run_analysis`
@@ -112,7 +110,7 @@ Ran analysis on your current scenario.
 #### `6_edit_budget`
 
 ```
-I wasn't sure which factor you meant. Did you mean Incremental Hiring Cost?
+I wasn't sure which factor you meant. Did you mean Hiring and Staffing Cost?
 ```
 
 ## Canonical steps (from brief)
