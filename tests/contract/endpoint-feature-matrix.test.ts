@@ -27,7 +27,6 @@ import v5StaleFixture from "../fixtures/cross-service/v5-turn.explain-stale.json
 import v5FailureFixture from "../fixtures/cross-service/v5-turn.failure-with-recovery-chip.json";
 import v5FreshFixture from "../fixtures/cross-service/v5-turn.explain-fresh.json";
 
-import { ENTITY_ID_LEAK_RE } from "../../src/orchestrator/shared/entity-id-pattern.js";
 import { sanitiseUserFacingText } from "../../src/orchestrator-v5/compose/output-safety.js";
 
 let pipelineReturn: { statusCode: number; body: unknown; headers?: Record<string, string> } = {
