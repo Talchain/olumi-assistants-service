@@ -363,12 +363,20 @@ describe('chip-click-dispatch — freshness derivation runs against produced fac
     const snapshot = snapshotFor(READY_GRAPH);
     loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshot);
 
-    // Compute the actual analysis-affecting hash for the snapshot graph.
+    // Compute the actual analysis-affecting hash for the snapshot.
+    // The dispatcher hashes the FULL analysis input (graph + options +
+    // goal_node_id + goal_constraints) so the test's expected hash
+    // must match — hashing snapshot.graph alone would diverge.
     const { computeAnalysisAffectingGraphHash } = await import(
       '../../context/graph-hash.js'
     );
+    const hashInput = {
+      ...(snapshot.graph as Record<string, unknown>),
+      options: snapshot.options,
+      goal_node_id: snapshot.goal_node_id,
+    };
     const expectedHash = computeAnalysisAffectingGraphHash(
-      snapshot.graph as never,
+      hashInput as never,
     )!;
 
     // Handler returns a fact stamped with the matching hash. The

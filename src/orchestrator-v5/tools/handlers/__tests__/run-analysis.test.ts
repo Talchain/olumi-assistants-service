@@ -277,7 +277,9 @@ describe('run_analysis handler — freshness fields on the fact', () => {
     expect(baseFact.result.graph_hash_at_run).not.toBe(editedFact.result.graph_hash_at_run);
   });
 
-  it('graph_hash_at_run is omitted when graph is structurally empty (no nodes, no edges, no options, no goal)', async () => {
+  it('graph_hash_at_run IS recorded when only graph nodes/edges are empty but options are present (analysis input non-empty)', async () => {
+    // Sanity check counterpart: the merged hash input means options
+    // alone make the analysis input non-empty.
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(
@@ -287,9 +289,7 @@ describe('run_analysis handler — freshness fields on the fact', () => {
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
-    expect(fact.result.graph_hash_at_run).toBeUndefined();
-    // computed_at is always recorded even when the graph is empty
-    expect(fact.result.computed_at).toBeDefined();
+    expect(fact.result.graph_hash_at_run).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('freshness fields live on result alongside enrichment, NOT inside it', async () => {

@@ -398,9 +398,24 @@ export async function dispatchChipClickRunAnalysis(
         ...enrichedFacts,
         ...context.prior_facts,
       ];
-      const currentGraphHash = computeAnalysisAffectingGraphHash(
-        cachedSnapshot?.graph as GraphStateIngress | null | undefined,
-      );
+      // Build the hash input as the UNION of snapshot graph + options +
+      // goal_node_id + goal_constraints — same shape the run_analysis
+      // handler uses (see run-analysis.ts §3.5). snapshot.graph is V3-
+      // parsed so options/goal_node_id are stripped from it; turn-
+      // executor's ingress-parsed graph keeps them. Hashing snapshot.graph
+      // alone produces a different hash than the explain-turn path and
+      // would surface false-stale.
+      const graphHashInput: GraphStateIngress | null = cachedSnapshot
+        ? ({
+            ...((cachedSnapshot.graph as Record<string, unknown> | null | undefined) ?? {}),
+            options: cachedSnapshot.options,
+            goal_node_id: cachedSnapshot.goal_node_id,
+            ...(cachedSnapshot.goal_constraints !== undefined
+              ? { goal_constraints: cachedSnapshot.goal_constraints }
+              : {}),
+          } as GraphStateIngress)
+        : null;
+      const currentGraphHash = computeAnalysisAffectingGraphHash(graphHashInput);
       const freshness = deriveAnalysisFreshness(postDispatchFacts, currentGraphHash);
       emitFreshnessTelemetry(
         freshness,

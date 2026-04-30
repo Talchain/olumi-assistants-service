@@ -272,13 +272,26 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // — `enrichment` is byte-for-byte PLoT and the handler-ownership
     // invariant forbids derived CEE fields there). Schema 0.10.0+.
     //
-    // `snapshot.graph` is typed `unknown` because PLoT consumes it as-is;
-    // the hash function only reads the GraphStateIngress-compatible
-    // shape (nodes, edges, options, goal_node_id, goal_constraints) so
-    // the cast is safe at this boundary.
-    const graphHashAtRun = computeAnalysisAffectingGraphHash(
-      snapshot.graph as GraphStateIngress | null | undefined,
-    );
+    // The hash MUST cover the FULL analysis input — graph + options +
+    // goal_node_id + goal_constraints — not just snapshot.graph alone.
+    // `loadScenarioSnapshotForRunAnalysis` parses with `GraphV3.safeParse`
+    // which strips top-level `options`/`goal_node_id`/`goal_constraints`
+    // (those fields aren't on the V3 graph schema), but the same
+    // persisted JSON parsed by turn-executor via `GraphStateIngressSchema`
+    // KEEPS them. Hashing snapshot.graph alone produces a different
+    // hash than hashing the ingress shape — false-stale on the very
+    // next explain turn. Reconstruct the hash input as the union of
+    // {graph fields, options, goal_node_id, goal_constraints} so both
+    // sides see the same projection.
+    const graphHashInput = {
+      ...((snapshot.graph as Record<string, unknown> | null | undefined) ?? {}),
+      options: snapshot.options,
+      goal_node_id: snapshot.goal_node_id,
+      ...(snapshot.goal_constraints !== undefined
+        ? { goal_constraints: snapshot.goal_constraints }
+        : {}),
+    } as GraphStateIngress;
+    const graphHashAtRun = computeAnalysisAffectingGraphHash(graphHashInput);
     const runComputedAt = new Date().toISOString();
 
     // --- 4. Invoke PLoT ---------------------------------------------------
