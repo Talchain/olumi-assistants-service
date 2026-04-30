@@ -86,6 +86,7 @@ import {
   attachComputedAt,
   type AnalysisReadyPayload,
 } from './compose/analysis-ready-emit.js';
+import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -185,12 +186,58 @@ export function finaliseV5Response(
   // is preserved for operator inspection; otherwise it is removed before
   // analysis_ready stamping so internal trace shapes never reach the wire.
   const debugEnabled = config.cee?.turnDebugEnabled === true;
-  const scrubbed = debugEnabled ? response : stripCeeTrace(response);
+  const ceeTraceClean = debugEnabled ? response : stripCeeTrace(response);
+  // Phase 1 / Commit 6 — analysis-enrichment-critique-prose-safety:
+  // Defensive second-pass sanitisation over every block's enrichment.
+  // The decision-review enricher (decision-review-enricher.ts) is the
+  // primary scrub site; this backstop catches any future enrichment
+  // producer that bypasses the enricher (cached blocks, fallback
+  // composers, future analysis_result variants). Same CEE_TURN_DEBUG_ENABLED
+  // gating as the ceeTrace scrub: when debug is on, enrichment passes
+  // through verbatim; otherwise the enrichment is sanitised and bucket-D
+  // critiques are removed from the wire.
+  //
+  // analysisReady is threaded into the resolver's priority-2 lookup so
+  // option_id → label resolution works even when graph is unavailable
+  // (the finaliser doesn't carry the V3 graph; analysis_ready.options
+  // covers most enrichment-prose label needs in practice).
+  const scrubbed = debugEnabled
+    ? ceeTraceClean
+    : sanitiseEnrichmentBlocks(ceeTraceClean, ctx.analysisReady ?? null);
   const stamped: OlumiResponse = ctx.analysisReady
     ? { ...scrubbed, analysis_ready: attachComputedAt(ctx.analysisReady) }
     : { ...scrubbed };
   FINALISED_RESPONSES.add(stamped);
   return stamped as FinalisedV5Response;
+}
+
+function sanitiseEnrichmentBlocks(
+  response: OlumiResponse,
+  analysisReady: AnalysisReadyPayload | null,
+): OlumiResponse {
+  const asRecord = response as Record<string, unknown>;
+  const blocks = Array.isArray(asRecord.blocks) ? (asRecord.blocks as Array<Record<string, unknown>>) : null;
+  if (!blocks || blocks.length === 0) return response;
+  let mutated = false;
+  const newBlocks = blocks.map((b) => {
+    if (b == null || typeof b !== 'object') return b;
+    const enrichment = b.enrichment as Record<string, unknown> | undefined;
+    if (enrichment == null || typeof enrichment !== 'object') return b;
+    // Skip if there's nothing to sanitise: no critiques, no allowlisted
+    // text leaves. The walker is cheap, so this is purely a perf
+    // micro-opt — but the empty-enrichment case is the common one for
+    // non-analysis_result blocks.
+    const hasCritiques = Array.isArray(enrichment.critiques) && enrichment.critiques.length > 0;
+    const hasAnyText = ['summary', 'narrative', 'rationale', 'robustness_synthesis']
+      .some((k) => typeof enrichment[k] === 'string' && (enrichment[k] as string).length > 0);
+    if (!hasCritiques && !hasAnyText) return b;
+
+    const result = sanitiseEnrichment(enrichment, null, analysisReady);
+    mutated = true;
+    return { ...b, enrichment: result.enrichment };
+  });
+  if (!mutated) return response;
+  return { ...asRecord, blocks: newBlocks } as OlumiResponse;
 }
 
 function stripCeeTrace(response: OlumiResponse): OlumiResponse {
