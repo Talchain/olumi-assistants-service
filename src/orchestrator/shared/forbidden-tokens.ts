@@ -125,18 +125,35 @@ export const INTERNAL_TEMPLATE_TOKENS: readonly string[] = [
  * HARD-BAN — precise template patterns from engine code with no
  * legitimate user-facing use. A match in user-facing prose is a
  * sanitiser failure.
+ *
+ * Coverage rule: every entry in `INTERNAL_TEMPLATE_TOKENS` (the flat
+ * registry above) must be reachable via at least one pattern below.
+ * The contract test
+ * `src/orchestrator-v5/compose/__tests__/sanitise-enrichment.test.ts`
+ * pins this — adding a token to the flat list without a matching
+ * pattern fails CI.
+ *
+ * Casing notes:
+ *   - `Node '` (capital N + space + quote) only catches the captured
+ *     ISL leak shape. Bare `Node` is legitimate English ("the goal
+ *     node"); we do NOT flag it.
+ *   - `kind\s*=` (without requiring an apostrophe) catches both
+ *     `kind='option'` and the unquoted `kind=option` variant.
+ *   - `option\s+nodes?` (case-insensitive, allowing singular/plural)
+ *     catches `option nodes`, `Option Nodes`, and `option node` —
+ *     which is the engine taxonomy regardless of casing.
  */
 export const HARD_BAN_PATTERNS: readonly RegExp[] = [
-  /\bNode '/,                              // capital-N "Node '" — captured-leak prefix
-  /\bkind\s*=\s*'/,                        // kind='option' template literal
-  /filtered before analysis/i,              // captured-leak suffix
-  /Option nodes are/,                       // capital-O template prefix
-  /_pipeline_outcome/,                      // wire-shape internal field name
-  /\bmonte\s+carlo\b/i,                     // engine algorithm name
-  /\bepsilon-guarded\b/i,                   // engine numerical-stability term
-  /\bbootstrap_sampling\b/i,                // confidence_source enum value
-  /\bParameterUncertainty\b/,               // ISL class name
-  /\bpoint_mass\b/,                         // distribution enum value
+  /\bNode '/,                              // captured-leak prefix (capital N + apostrophe)
+  /\bkind\s*=/,                            // kind=option / kind='option' / kind = "option"
+  /filtered before analysis/i,             // captured-leak suffix
+  /\boption\s+nodes?\b/i,                  // engine taxonomy, all casings, sing/plural
+  /_pipeline_outcome/,                     // wire-shape internal field name
+  /\bmonte\s+carlo\b/i,                    // engine algorithm name
+  /\bepsilon-guarded\b/i,                  // engine numerical-stability term
+  /\bbootstrap_sampling\b/i,               // confidence_source enum value
+  /\bParameterUncertainty\b/,              // ISL class name
+  /\bpoint_mass\b/,                        // distribution enum value
 ];
 
 /**

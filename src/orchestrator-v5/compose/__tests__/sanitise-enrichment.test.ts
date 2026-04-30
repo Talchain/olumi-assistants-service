@@ -544,7 +544,7 @@ describe('sanitiseEnrichment — full subtree walker', () => {
         },
       ],
     };
-    const before = structuredClone(enrichment);
+    const before = globalThis.structuredClone(enrichment);
     const r = sanitiseEnrichment(enrichment, GRAPH);
 
     // Diagnostic critiques routed
@@ -597,5 +597,80 @@ describe('sanitiseEnrichment — full subtree walker', () => {
     const r = sanitiseEnrichment(enrichment, GRAPH);
     expect(r.hardBans).toEqual([]);
     expect(r.warnings).toEqual([]);
+  });
+});
+
+// =============================================================================
+// Codex review fixes (2026-04-30)
+// =============================================================================
+
+describe('HARD_BAN_PATTERNS — flat-token coverage', () => {
+  it('catches kind=option without quotes (the unquoted variant)', () => {
+    const enrichment: Record<string, unknown> = {
+      summary: 'Engine reported kind=option for the filtered nodes.',
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    expect(r.hardBans.some((h) => h.path === '$.summary')).toBe(true);
+    expect(r.enrichment['summary']).toBeUndefined();
+  });
+
+  it('catches lowercase "option nodes" and singular "option node"', () => {
+    for (const text of [
+      'option nodes are skipped here',
+      'Option Nodes Are skipped here',
+      'we skip the option node before sampling',
+    ]) {
+      const r = sanitiseEnrichment({ summary: text }, GRAPH);
+      expect(
+        r.hardBans.some((h) => h.path === '$.summary'),
+        `failed for: ${text}`,
+      ).toBe(true);
+    }
+  });
+
+  it('every entry in INTERNAL_TEMPLATE_TOKENS is reachable via at least one HARD_BAN_PATTERN or WARNING_PATTERN', async () => {
+    // Coverage rule: the flat token registry must not have an entry that
+    // no regex pattern matches. Drift between the two surfaces is the
+    // exact bug Codex flagged.
+    const { INTERNAL_TEMPLATE_TOKENS, HARD_BAN_PATTERNS, WARNING_PATTERNS } =
+      await import('../../../orchestrator/shared/forbidden-tokens.js');
+    const allPatterns: ReadonlyArray<RegExp> = [...HARD_BAN_PATTERNS, ...WARNING_PATTERNS];
+    const orphans: string[] = [];
+    for (const token of INTERNAL_TEMPLATE_TOKENS) {
+      // Use the token as-is in a representative carrier sentence so the
+      // pattern's word-boundaries / anchors fire correctly.
+      const carrier = `prefix ${token} suffix`;
+      const matched = allPatterns.some((re) => re.test(carrier));
+      if (!matched) orphans.push(token);
+    }
+    expect(
+      orphans,
+      `tokens without matching pattern: ${JSON.stringify(orphans)}`,
+    ).toEqual([]);
+  });
+});
+
+describe('_diagnostics stripping — caller cannot leave a stale debug field', () => {
+  it('strips a pre-existing _diagnostics on the input regardless of debug flag', () => {
+    const enrichment: Record<string, unknown> = {
+      _diagnostics: { critiques: [{ id: 'cached_diag', message: 'cached engine detail' }] },
+      critiques: [],
+      summary: 'Clean copy.',
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    // Sanitiser-side guarantee: the output never has _diagnostics.
+    // Callers (decision-review-enricher.ts, response-finaliser.ts) attach
+    // it back ONLY when CEE_TURN_DEBUG_ENABLED=true. With the flag off,
+    // _diagnostics is absent from the wire by sanitiser construction —
+    // not by accident of the input shape.
+    expect((r.enrichment as Record<string, unknown>)._diagnostics).toBeUndefined();
+  });
+
+  it('strips _diagnostics even when the rest of the enrichment is empty', () => {
+    const r = sanitiseEnrichment(
+      { _diagnostics: { critiques: [{ id: 'leak' }] } } as Record<string, unknown>,
+      GRAPH,
+    );
+    expect((r.enrichment as Record<string, unknown>)._diagnostics).toBeUndefined();
   });
 });

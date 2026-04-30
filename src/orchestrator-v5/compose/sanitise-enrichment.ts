@@ -399,9 +399,21 @@ export function sanitiseEnrichment(
   analysisReady: LabelResolverContext['analysisReady'] = null,
 ): SanitiseEnrichmentResult {
   const ctx: LabelResolverContext = { graph, analysisReady, enrichment };
-  const cloned = structuredClone(enrichment) as Record<string, unknown>;
+  // Node 17+ global; `globalThis.` prefix avoids a no-undef lint hit
+  // under the project's lint config (matches src/orchestrator/patch-applier.ts pattern).
+  const cloned = globalThis.structuredClone(enrichment) as Record<string, unknown>;
   const hardBans: Array<{ path: string; hit: string }> = [];
   const warnings: Array<{ path: string; hit: string }> = [];
+
+  // ── strip any pre-existing _diagnostics ───────────────────────────────
+  // Hard contract: `_diagnostics` is CEE-owned, debug-only, and is
+  // attached EXCLUSIVELY by the enricher (Commit 5) when
+  // CEE_TURN_DEBUG_ENABLED=true. Any `_diagnostics` already present on
+  // the input — from a cached upstream producer, a future regression,
+  // or a misbehaving handler — is removed here so the
+  // "absent when debug=false" acceptance is guaranteed by the
+  // sanitiser's own output, not by the caller-side gate alone.
+  delete cloned._diagnostics;
 
   // ── critiques (bucket-aware partition) ────────────────────────────────
   let diagnosticCritiques: ReadonlyArray<CritiqueLike> = [];

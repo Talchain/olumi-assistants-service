@@ -12,7 +12,7 @@
  *   - CEE_TURN_DEBUG_ENABLED=true            → enrichment passes verbatim
  */
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { finaliseV5Response } from '../response-finaliser.js';
