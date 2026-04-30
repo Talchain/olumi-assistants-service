@@ -54,7 +54,6 @@ import { HandlerResultInvalidError } from '../handler-errors.js';
 import { buildAnalysisAbsentTemplate, resolveOptionCount } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
-import { applyStalenessPrefix } from './staleness-prefix.js';
 
 export function createExplainResultsHandler(): HandlerFn {
   return async function explainResultsHandler(
@@ -110,14 +109,15 @@ export function createExplainResultsHandler(): HandlerFn {
       ? explanation!.answer_text
       : composeExplainResultsFallback(invocation.analysisProjection);
 
-    // Trust contract: when the analysis is loaded from a prior run, prepend
-    // the staleness caveat in code. The chip-generator separately surfaces a
-    // "Rerun analysis" chip from the projection's staleness_reason.
-    const stalenessReason = invocation.analysisProjection?.staleness_reason ?? null;
-    const { text: assistantText, prefixed } = applyStalenessPrefix(
-      rawText,
-      stalenessReason,
-    );
+    // V5 state-trust: CEE no longer prefixes assistant_text with the
+    // staleness caveat. The wire field analysis_ready.freshness drives UI
+    // staleness display in a separate brief; the chip-generator emits a
+    // "Rerun analysis" chip when freshness === 'stale' (retargeted from
+    // staleness_reason in the same commit). The applyStalenessPrefix
+    // function is preserved for now (removal is a follow-up); call sites
+    // are removed here. `staleness_prefixed` stays on the fact as `false`
+    // for backwards compat with telemetry consumers.
+    const assistantText = rawText;
 
     const fact: ExplainResultsHandlerFact = {
       fact_type: 'explain_results',
@@ -131,7 +131,7 @@ export function createExplainResultsHandler(): HandlerFn {
           ? null
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,
-        staleness_prefixed: prefixed,
+        staleness_prefixed: false,
       },
     };
     const parsed = ExplainResultsHandlerFactSchema.safeParse(fact);

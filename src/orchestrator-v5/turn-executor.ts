@@ -1374,6 +1374,7 @@ export async function runTurnExecutor(
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+        ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
       composedOk = composeToolCallResponse({
         orientation: orientationForCompose,
@@ -1412,6 +1413,7 @@ export async function runTurnExecutor(
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+        ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
       composedOk = composeClarifyResponse({
         assistant_text: sanitised.output,
@@ -1447,6 +1449,7 @@ export async function runTurnExecutor(
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+        ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
@@ -1477,6 +1480,7 @@ export async function runTurnExecutor(
         graphOptionCount: contextPackForLog?.graph.counts.options ?? 0,
         analysisReady: analysisReadyForTurn,
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+        ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
@@ -1659,6 +1663,29 @@ export async function runTurnExecutor(
   // ==================================================================
   // Helpers closured over mutable state
   // ==================================================================
+  /**
+   * V5 state-trust: build the per-turn TurnOutcome from the freshness
+   * derivation + the dispatched handler identity. Used by:
+   *   - chip-generator (gates the rerun chip on analysis_freshness === 'stale')
+   *   - finalizeRun (surfaces the contract on TurnExecutorRunResult)
+   *
+   * Returns undefined when freshness has not yet been derived (early-
+   * return paths that fire before the freshness block at ~line 480).
+   */
+  function buildTurnOutcome(): TurnOutcome | undefined {
+    if (!freshness) return undefined;
+    return {
+      graph_mutated:
+        proposedHandlerIdForOutcome === 'draft_graph' ||
+        proposedHandlerIdForOutcome === 'edit_graph',
+      analysis_run:
+        proposedHandlerIdForOutcome === 'run_analysis' && commitPerformed,
+      analysis_selected_fact_index: freshness.selected_fact_index,
+      analysis_freshness: freshness.freshness,
+      freshness_reason: freshness.reason,
+    };
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
@@ -1667,23 +1694,10 @@ export async function runTurnExecutor(
     // the actual emitted vs. computed comparison is meaningful, since the
     // wire stamping happens after this function returns.
     //
-    // V5 state-trust: build the per-turn TurnOutcome contract from the
-    // freshness derivation + the dispatched handler identity. Surfaced
-    // alongside the freshness derivation itself so the response-finaliser
-    // can thread freshness onto the analysis_ready wire fields without
-    // re-deriving.
-    const turnOutcome: TurnOutcome | undefined = freshness
-      ? {
-          graph_mutated:
-            proposedHandlerIdForOutcome === 'draft_graph' ||
-            proposedHandlerIdForOutcome === 'edit_graph',
-          analysis_run:
-            proposedHandlerIdForOutcome === 'run_analysis' && commitPerformed,
-          analysis_selected_fact_index: freshness.selected_fact_index,
-          analysis_freshness: freshness.freshness,
-          freshness_reason: freshness.reason,
-        }
-      : undefined;
+    // V5 state-trust: surface the per-turn outcome alongside the
+    // freshness derivation so the response-finaliser can thread freshness
+    // onto the analysis_ready wire fields without re-deriving.
+    const turnOutcome = buildTurnOutcome();
     return {
       response,
       analysisReady: analysisReadyForTurn,

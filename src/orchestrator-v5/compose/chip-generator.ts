@@ -100,6 +100,14 @@ export interface ChipGeneratorInput {
    * the current turn's facts.
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * V5 state-trust: turn outcome contract. The freshness verdict drives
+   * the "Rerun analysis" chip — emitted only when `analysis_freshness ===
+   * 'stale'`. Optional for backwards-compatibility with call sites that
+   * don't yet derive freshness (chip-suppression / regression tests pass
+   * fewer fields). When omitted, the chip suppresses (safe default).
+   */
+  readonly turnOutcome?: import('../turn-outcome.js').TurnOutcome;
 }
 
 const MAX_CHIPS = 3;
@@ -206,24 +214,24 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     ]);
   }
 
-  // V5 explain-stabilisation Task 2 — stale-analysis recovery chip.
+  // V5 state-trust — stale-analysis recovery chip.
   //
-  // When the analysis projection carries a staleness_reason (the analysis
-  // was loaded from a prior run and the handler just answered using it)
-  // AND the graph is currently analysable (analysisReady.status === 'ready'),
-  // surface an executable "Rerun analysis" chip so the user can refresh in
-  // one click. Trigger keys on the projection's staleness_reason — NOT on
-  // any per-turn `staleness_prefixed` flag — because applyStalenessPrefix
-  // is idempotent and may set prefixed=false when Sonnet's prose already
-  // contains a caveat. The staleness STATE is the source of truth.
+  // When the freshness derivation reports `analysis_freshness === 'stale'`
+  // (graph hash diverged since the last run_analysis fact) AND the graph
+  // is currently analysable, surface an executable "Rerun analysis" chip
+  // so the user can refresh in one click.
+  //
+  // Retargeted from the legacy `input.analysis?.staleness_reason` gate:
+  // the freshness verdict is now the source of truth (deterministic hash
+  // comparison), replacing the always-set "loaded_from_prior_run_
+  // freshness_unknown" fallback that fired even on fresh analysis. The
+  // chip suppresses on fresh / unknown / none — only stale produces it.
   //
   // Placed BEFORE the precondition-unmet and facts_absent rules so the
-  // staleness recovery wins for turns that have a stale analysis (those
-  // other rules require facts_absent or precondition_unmet — by definition
-  // a staleness_reason means analysis IS present, just outdated).
+  // staleness recovery wins for turns that have a stale analysis.
   if (
     noopExplanationHandlerJustRan != null &&
-    input.analysis?.staleness_reason != null &&
+    input.turnOutcome?.analysis_freshness === 'stale' &&
     input.analysisReady?.status === 'ready'
   ) {
     const curated = curatedHandlerChips(input.validationRegistry);

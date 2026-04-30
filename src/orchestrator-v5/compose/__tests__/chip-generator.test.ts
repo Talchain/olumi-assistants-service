@@ -667,22 +667,13 @@ describe('generateChips — V5 spec §7 explicit precondition_unmet rule', () =>
   });
 });
 
-describe('generateChips — V5 explain-stabilisation stale-rerun rule', () => {
-  // Brief task 2: when the analysis projection carries staleness_reason
-  // (loaded from a prior run) AND the graph is currently analysable
-  // (analysisReady.status === 'ready'), surface an executable
-  // "Rerun analysis" chip so the user can refresh in one click. The
-  // trigger keys on the projection's staleness_reason — NOT on the
-  // handler's per-turn staleness_prefixed flag — because applyStalenessPrefix
-  // is idempotent and may set prefixed=false when Sonnet's prose already
-  // contains a caveat.
-
-  function staleAnalysis(): ContextPackAnalysis {
-    return {
-      ...analysisAt('stable'),
-      staleness_reason: 'loaded_from_prior_run_freshness_unknown',
-    };
-  }
+describe('generateChips — V5 state-trust stale-rerun rule', () => {
+  // V5 state-trust retarget: the rerun-analysis chip is now gated on
+  // turnOutcome.analysis_freshness === 'stale', NOT on the legacy
+  // analysis.staleness_reason. Freshness is derived from a deterministic
+  // graph-hash comparison (not the always-set fallback string), so a
+  // fresh-after-run_analysis turn correctly suppresses the chip and a
+  // post-edit stale-explain turn correctly emits exactly one.
 
   function staleExplainResultsFact(): HandlerFact {
     return {
@@ -695,19 +686,39 @@ describe('generateChips — V5 explain-stabilisation stale-rerun rule', () => {
         answer_source: 'sonnet',
         fallback_reason: null,
         answer_text_length: 200,
-        staleness_prefixed: true,
+        staleness_prefixed: false,
       },
     } as HandlerFact;
   }
 
-  it('staleness_reason set + analysisReady=ready → executable Rerun analysis chip', () => {
+  function turnOutcomeWithFreshness(
+    freshness: 'fresh' | 'stale' | 'unknown' | 'none',
+  ): import('../../turn-outcome.js').TurnOutcome {
+    return {
+      graph_mutated: false,
+      analysis_run: false,
+      analysis_selected_fact_index: freshness === 'none' ? null : 0,
+      analysis_freshness: freshness,
+      freshness_reason:
+        freshness === 'fresh'
+          ? 'graph_hash_match'
+          : freshness === 'stale'
+            ? 'graph_hash_diverged'
+            : freshness === 'unknown'
+              ? 'legacy_fact_missing_hash'
+              : 'no_successful_run_analysis_fact',
+    };
+  }
+
+  it('turnOutcome.analysis_freshness=stale + analysisReady=ready → executable Rerun analysis chip', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [staleExplainResultsFact()],
       priorFacts: [runAnalysisFact()],
-      analysis: staleAnalysis(),
+      analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+      turnOutcome: turnOutcomeWithFreshness('stale'),
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].label).toBe('Rerun analysis');
@@ -715,23 +726,55 @@ describe('generateChips — V5 explain-stabilisation stale-rerun rule', () => {
     expect(chips[0].id).toBe('chip_action_rerun_analysis');
   });
 
-  it('staleness_reason set + analysisReady=needs_user_input → no rerun chip', () => {
+  it('turnOutcome.analysis_freshness=stale + analysisReady=needs_user_input → no rerun chip', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [staleExplainResultsFact()],
       priorFacts: [runAnalysisFact()],
-      analysis: staleAnalysis(),
+      analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
       analysisReady: { status: 'needs_user_input', options: [], goal_node_id: 'g' } as never,
+      turnOutcome: turnOutcomeWithFreshness('stale'),
     });
     for (const c of chips) {
       expect(c.id).not.toBe('chip_action_rerun_analysis');
     }
   });
 
-  it('staleness_reason absent → no rerun chip (the staleness state, not the prefix flag, is the trigger)', () => {
-    // analysis.staleness_reason is null even though a noop explanation
-    // handler ran — the projection is fresh, no rerun needed.
+  it('turnOutcome.analysis_freshness=fresh → no rerun chip (the P0 fix)', () => {
+    // Pre-state-trust this branch unconditionally fired the chip because
+    // staleness_reason was always set. With the freshness verdict driving
+    // the gate, fresh analysis correctly suppresses the chip.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [staleExplainResultsFact()],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+      turnOutcome: turnOutcomeWithFreshness('fresh'),
+    });
+    for (const c of chips) {
+      expect(c.id).not.toBe('chip_action_rerun_analysis');
+    }
+  });
+
+  it('turnOutcome.analysis_freshness=unknown → no rerun chip', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [staleExplainResultsFact()],
+      priorFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+      analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+      turnOutcome: turnOutcomeWithFreshness('unknown'),
+    });
+    for (const c of chips) {
+      expect(c.id).not.toBe('chip_action_rerun_analysis');
+    }
+  });
+
+  it('turnOutcome absent → no rerun chip (safe default)', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [staleExplainResultsFact()],
@@ -745,14 +788,15 @@ describe('generateChips — V5 explain-stabilisation stale-rerun rule', () => {
     }
   });
 
-  it('exactly one run_analysis-action_type chip overall (no duplicate from facts_absent rule)', () => {
+  it('exactly one run_analysis-action_type chip overall when stale (no duplicate from facts_absent rule)', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [staleExplainResultsFact()],
       priorFacts: [runAnalysisFact()],
-      analysis: staleAnalysis(),
+      analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
       analysisReady: { status: 'ready', options: [], goal_node_id: 'g' } as never,
+      turnOutcome: turnOutcomeWithFreshness('stale'),
     });
     const runAnalysisChips = chips.filter((c) => c.action_type === 'run_analysis');
     expect(runAnalysisChips).toHaveLength(1);
