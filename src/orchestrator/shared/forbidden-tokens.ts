@@ -15,9 +15,18 @@
  *     callsite keeps its import path.
  *
  *   - `INTERNAL_TEMPLATE_TOKENS` (new — enrichment user-facing prose
- *     scrub). Tokens that betray engine implementation detail and must
- *     never reach user-rendered text under the path-aware enrichment
- *     allowlist (see `Docs/v5/fix-brief-analysis-enrichment-critique-prose-safety.md`).
+ *     scrub). Flat catalogue of engine-implementation tokens the
+ *     enrichment scrubber knows about. **Tier matters**: this flat
+ *     array is the union of two regex sets (`HARD_BAN_PATTERNS` —
+ *     suppression; `WARNING_PATTERNS` — log-only, never blocks).
+ *     Membership in the flat array does NOT by itself guarantee
+ *     suppression. Callers that need the "must never reach the wire"
+ *     contract must consume `HARD_BAN_PATTERNS` directly — those are
+ *     the precise template patterns the sanitiser fail-shuts on.
+ *     `WARNING_PATTERNS` covers ambiguous tokens (e.g. `interventions`,
+ *     `payloads`, `ISL`) that may legitimately appear in coaching prose
+ *     and are tracked as evidence rather than blocked. See
+ *     `Docs/v5/fix-brief-analysis-enrichment-critique-prose-safety.md`.
  *
  * The two sets have intentional overlap (`handler`, `zod`, `executor`,
  * `enricher`) — both module surfaces want them flagged. Keep tokens here
@@ -54,34 +63,49 @@ export const FORBIDDEN_USER_TEXT_TERMS: readonly string[] = [
 ] as const;
 
 /**
- * Internal-template tokens that must never appear in user-facing
- * enrichment prose. Used by the enrichment-text scrubber (Commit 4 —
- * `compose/sanitise-enrichment.ts`).
+ * Catalogue of engine-implementation tokens the enrichment scrubber
+ * (Commit 4 — `compose/sanitise-enrichment.ts`) knows about. This flat
+ * array is documentation + a coverage anchor for the regex tiers
+ * defined immediately below — it is NOT itself the enforcement surface.
  *
- * Path-scoped: checked ONLY in the 15 user-facing prose paths defined by
- * the enrichment allowlist. Structural fields (`payloads`,
- * `feature_flags_snapshot`, etc.) legitimately contain some of these
- * tokens as object keys and are excluded from the scrub.
+ * **Enforcement is tiered. Tier matters.**
+ *   - Entries reachable via `HARD_BAN_PATTERNS` are SUPPRESSED — a
+ *     match in user-facing prose is a sanitiser failure and the leaf
+ *     is dropped.
+ *   - Entries reachable only via `WARNING_PATTERNS` are LOG-ONLY —
+ *     the sanitiser records the path and continues; the user still
+ *     sees the prose. Used for ambiguous tokens that might be
+ *     legitimate coaching copy (`interventions`, `payloads`, `ISL`,
+ *     `e-value`, `causal path`, plain `bootstrap`).
+ *
+ * The unit test `HARD_BAN_PATTERNS — flat-token coverage` enforces
+ * that every entry in this array is reachable via at least one tier;
+ * adding a token without a matching pattern fails CI.
+ *
+ * Path-scoped: every check runs ONLY in the 15 user-facing prose
+ * paths defined by the enrichment allowlist. Structural fields
+ * (`payloads`, `feature_flags_snapshot`, etc.) legitimately contain
+ * some of these tokens as object keys and are excluded from the scrub.
  *
  * Pattern notes:
  *   - `Node '` (capital N, space, single quote) — engine validation
  *     prefix from the captured ISL leak `"Node 'opt_X' has kind=..."`.
  *     Distinguished from bare `Node` (legitimate English in coaching
  *     prose like "the goal node").
- *   - `kind=` and `kind='` — engine vocabulary for graph node types.
- *   - `filtered before analysis` — engine preprocessing detail.
- *   - `option nodes` (case-insensitive) — engine internal taxonomy.
- *   - `_pipeline_outcome`, `payloads`, `ISL` — engine internals that
- *     leak when ISL Pydantic-serialises diagnostic data.
- *   - `intervention_target`, `interventions` — schema field names that
- *     surface in engine-coded critique templates.
- *   - `monte carlo`, `numerically valid samples`, `epsilon-guarded`,
- *     `e-value`, `bootstrap`, `causal path` — engine-statistics
- *     vocabulary that survived uncoded critiques.
- *
- * Detection is case-insensitive substring match. Tokens are listed
- * verbatim in the casing the captured leak emits; matching uses
- * `.toLowerCase()` on both sides.
+ *   - `kind=` — engine vocabulary for graph node types; `HARD_BAN`
+ *     pattern catches both `kind=option` and `kind='option'`.
+ *   - `filtered before analysis` — engine preprocessing detail
+ *     (`HARD_BAN`).
+ *   - `option nodes` — engine internal taxonomy; `HARD_BAN` pattern
+ *     is case-insensitive and matches `option node` too.
+ *   - `_pipeline_outcome` — wire-shape internal field (`HARD_BAN`).
+ *   - `monte carlo`, `epsilon-guarded`, `bootstrap_sampling` — engine
+ *     algorithm vocabulary (`HARD_BAN`).
+ *   - `payloads`, `ISL`, `intervention_target`, `interventions`,
+ *     `numerically valid samples`, `e-value`, `bootstrap`,
+ *     `causal path` — ambiguous: sometimes legitimate coaching prose,
+ *     so `WARNING` only. The sanitiser logs evidence but does not
+ *     suppress.
  */
 export const INTERNAL_TEMPLATE_TOKENS: readonly string[] = [
   // ── Engine validation prefixes ────────────────────────────────────────
