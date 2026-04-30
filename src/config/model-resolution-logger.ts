@@ -78,7 +78,12 @@ function resolveTaskModel(task: CeeTask): { model: string; source: ModelSource }
 
 // Derived from TASK_MODEL_DEFAULTS so new tasks are automatically included.
 // TASK_MODEL_DEFAULTS is Record<CeeTask, string>, so Object.keys is exhaustive.
-const ALL_CEE_TASKS = Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[];
+// `routing` is excluded — its TASK_MODEL_DEFAULTS entry is display-only
+// (admin UI parity); the v5 routing call site controls its own model
+// selection independently and does not consume task_resolved logs.
+const ALL_CEE_TASKS = (Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[]).filter(
+  (t) => t !== 'routing',
+);
 
 /**
  * Emit one log line per CeeTask showing resolved model and source tier.

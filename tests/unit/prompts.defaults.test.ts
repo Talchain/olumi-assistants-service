@@ -192,6 +192,10 @@ describe('Prompt Content Quality', () => {
       'explain_result_narrate',
       'compare_options_narrate',
       'what_would_flip_narrate',
+      // V5 routing prompt (v40) — uses tool-call (Anthropic native tool_use)
+      // routing, not JSON envelopes. Output is a structured tool call, not
+      // a JSON document.
+      'routing',
     ]);
 
     for (const [task, prompt] of Object.entries(defaults)) {

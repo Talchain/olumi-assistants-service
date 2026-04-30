@@ -53,6 +53,12 @@
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';
 import { registerAllDefaultPrompts, DECISION_REVIEW_PROMPT_VERSION } from '../../prompts/defaults.js';
 import { isPromptManagementEnabled } from '../../prompts/loader.js';
+import {
+  isTrackedKey,
+  mapSource,
+  resolvePublicVersion,
+  type TrackedKey,
+} from '../../prompts/tracked.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { shouldUseStagingPrompts, config } from '../../config/index.js';
@@ -150,6 +156,35 @@ interface CacheEntry {
 }
 
 const promptCache = new Map<CeeTaskId, CacheEntry>();
+
+/**
+ * Emit `v5.prompt_resolved` for cache-served loads of tracked prompts. The
+ * underlying `loadPrompt()` call only fires the event on cache miss; this
+ * helper closes the gap so every runtime resolution emits exactly once.
+ *
+ * Tracked-key gating mirrors the loader: untracked task_ids are silent.
+ */
+function emitTrackedResolvedFromCache(
+  taskId: CeeTaskId,
+  entry: CacheEntry,
+  cache: 'hit' | 'miss',
+): void {
+  if (!isTrackedKey(taskId)) return;
+  const internalSource: 'store' | 'default' = entry.source === 'store' ? 'store' : 'default';
+  // Public content_hash convention is the 16-hex prefix of SHA-256 — the
+  // adapter cache stores the full digest in `promptHash`, so always slice.
+  const contentHash = (
+    entry.promptHash ?? createHash('sha256').update(entry.content).digest('hex')
+  ).slice(0, 16);
+  emit(TelemetryEvents.V5PromptResolved, {
+    key: taskId,
+    source: mapSource(internalSource),
+    version: resolvePublicVersion(taskId as TrackedKey, internalSource, entry.version),
+    content_hash: contentHash,
+    trigger: 'runtime',
+    cache,
+  });
+}
 const CACHE_TTL_MS = 300_000; // 5 minutes - cache is considered "fresh" for this long
 const PROACTIVE_REFRESH_THRESHOLD = 0.8; // Trigger background refresh at 80% of TTL (4 min)
 const STALE_GRACE_PERIOD_MS = 600_000; // 10 minutes - return stale store prompts rather than defaults
@@ -203,6 +238,16 @@ export async function getSystemPrompt(
     log.info({ taskId, forceDefault: true }, 'Force default prompt requested - skipping cache and store');
     const content = loadPromptSync(taskId, variables ?? {});
     emit(TelemetryEvents.PromptLoadedFromDefault, { taskId, reason: 'force_default' });
+    if (isTrackedKey(taskId)) {
+      emit(TelemetryEvents.V5PromptResolved, {
+        key: taskId,
+        source: mapSource('default'),
+        version: resolvePublicVersion(taskId as TrackedKey, 'default', undefined),
+        content_hash: createHash('sha256').update(content).digest('hex').slice(0, 16),
+        trigger: 'runtime',
+        cache: 'miss',
+      });
+    }
     return content;
   }
 
@@ -215,6 +260,7 @@ export async function getSystemPrompt(
   // Return cached value if still fresh
   if (cached && cacheAge < CACHE_TTL_MS) {
     emit(TelemetryEvents.PromptStoreCacheHit, { taskId });
+    emitTrackedResolvedFromCache(taskId, cached, 'hit');
 
     // Proactive refresh: trigger background refresh when cache is > 80% through TTL
     // This ensures cache stays fresh without blocking requests
@@ -234,6 +280,9 @@ export async function getSystemPrompt(
       reason: 'stale_while_revalidate',
       cacheAge,
     });
+    // Stale cache is still being served — emit a hit-flavoured tracked event
+    // so the public stream reflects what was actually returned.
+    emitTrackedResolvedFromCache(taskId, cached, 'hit');
 
     // Trigger background refresh if not already in-flight
     triggerBackgroundRefresh(taskId, variables);
@@ -254,6 +303,10 @@ export async function getSystemPrompt(
   // vs a permanent condition (no managed prompt exists, prompt management disabled).
   // We should NOT cache defaults on transient failures - let the next request retry.
   let isTransientFailure = false;
+  // Track whether the underlying `loadPrompt()` call already emitted
+  // `v5.prompt_resolved` so the cold-default fallback path below doesn't
+  // double-emit when the store legitimately returned defaults via the loader.
+  let loadPromptAlreadyEmitted = false;
 
   // Cache expired - try synchronous store fetch BEFORE falling back to defaults
   // This ensures store prompts are used when available, even after cache expiry
@@ -263,7 +316,7 @@ export async function getSystemPrompt(
   if (isPromptManagementEnabled()) {
     const useStaging = shouldUseStagingPrompts();
     try {
-      const fetchPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging });
+      const fetchPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging, cache: 'miss' });
       const timeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), STORE_FETCH_TIMEOUT_MS)
       );
@@ -304,6 +357,9 @@ export async function getSystemPrompt(
         // Store returned defaults - this is a permanent condition (no managed prompt exists)
         // It's OK to cache defaults in this case
         log.debug({ taskId, useStaging }, 'Cache expired - store returned defaults, using hardcoded default');
+        // loadPrompt() already emitted v5.prompt_resolved with source=default
+        // when the store returned no managed prompt. Don't emit again below.
+        loadPromptAlreadyEmitted = true;
       }
     } catch (err) {
       // Store fetch failed - transient failure, don't cache defaults
@@ -362,6 +418,23 @@ export async function getSystemPrompt(
       cached: willCache,
     });
 
+    // Tracked-key public emission. The cold-fallback paths (PMS disabled,
+    // store fetch timeout, store fetch error) land here via `loadPromptSync()`,
+    // which never goes through `loadPrompt()` and therefore never emits
+    // `v5.prompt_resolved`. Skip when `loadPrompt()` already emitted
+    // (loadPromptAlreadyEmitted=true means the store returned defaults via
+    // the loader — that emission already covered this call).
+    if (isTrackedKey(taskId) && !loadPromptAlreadyEmitted) {
+      emit(TelemetryEvents.V5PromptResolved, {
+        key: taskId,
+        source: mapSource('default'),
+        version: resolvePublicVersion(taskId as TrackedKey, 'default', undefined),
+        content_hash: promptHash.slice(0, 16),
+        trigger: 'runtime',
+        cache: 'miss',
+      });
+    }
+
     // Trigger background refresh from store to update cache for next request
     triggerBackgroundRefresh(taskId, variables);
 
@@ -395,7 +468,7 @@ function triggerBackgroundRefresh(
   }
 
   const useStaging = shouldUseStagingPrompts();
-  const refreshPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging })
+  const refreshPromise = loadPrompt(taskId, { variables: variables ?? {}, useStaging, trigger: 'background_refresh' })
     .then((loaded) => {
       // Log when background refresh returns defaults instead of store data
       if (loaded.source !== 'store') {

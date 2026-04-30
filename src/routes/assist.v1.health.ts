@@ -7,6 +7,7 @@ import { getAllFeatureFlags } from "../utils/feature-flags.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { getRecentCeeErrors } from "../cee/logging.js";
 import { DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS } from "../config/timeouts.js";
+import { arePromptsReady } from "../prompts/readiness.js";
 
 export default async function route(app: FastifyInstance) {
   app.get("/assist/v1/health", async (_req, reply) => {
@@ -81,8 +82,11 @@ export default async function route(app: FastifyInstance) {
       };
     }
 
+    const prompts_ready = await arePromptsReady();
+
     const summary = {
       service: "assistants",
+      prompts_ready,
       version: SERVICE_VERSION,
       commit: GIT_COMMIT_SHORT,
       build_timestamp: BUILD_TIMESTAMP,

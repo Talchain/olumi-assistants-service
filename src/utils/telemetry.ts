@@ -511,6 +511,13 @@ export const TelemetryEvents = {
   // chip_labels, scenario_id, turn_id, is_retry, handler_id.
   V5RecoveryChipServed: "v5.recovery_chip_served",
 
+  // PMS-tracked prompt resolution. Fires on every prompt load for the five
+  // tracked keys (routing, edit_graph, draft_graph, decision_review,
+  // repair_graph), at runtime, healthz/status probes, reload, and startup
+  // snapshot build. Payload: { key, source: 'pms' | 'default', version,
+  // content_hash, trigger, cache?: 'hit' | 'miss' }.
+  V5PromptResolved: "v5.prompt_resolved",
+
   // V5 decision_review call-site safety net. The enricher itself catches
   // its own failures (see V5DecisionReviewFailed). This event fires only
   // when an exception escaped the enricher and was caught by the

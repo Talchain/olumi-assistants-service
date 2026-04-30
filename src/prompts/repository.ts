@@ -514,7 +514,22 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     let seeded = 0;
     let skipped = 0;
 
+    // PMS migration: the v5 routing prompt (task_id 'routing') is registered
+    // as a code-level default fallback only. Manual seeding into PMS is
+    // performed out-of-band; the brief explicitly forbids auto-seeding
+    // routing into Supabase on startup. Skip it here.
+    const SEED_BLOCKLIST = new Set<CeeTaskId>(['routing']);
+
     for (const taskId of taskIds) {
+      if (SEED_BLOCKLIST.has(taskId)) {
+        log.debug({
+          event: 'prompt.seed.skipped',
+          task_id: taskId,
+          reason: 'seed_blocklist_no_auto_seed',
+        }, `Skipping seed - ${taskId} is in the no-auto-seed blocklist`);
+        skipped++;
+        continue;
+      }
       const content = defaults[taskId];
       if (!content) continue;
 

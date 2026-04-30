@@ -34,6 +34,7 @@ export const PROMPT_TASKS = [
   'edit_graph',
   'repair_edit_graph',
   'orchestrator',
+  'routing',
 ] as const;
 
 export type PromptTask = typeof PROMPT_TASKS[number];
@@ -57,6 +58,7 @@ export const PROMPT_TASK_LABELS: Record<PromptTask, string> = {
   edit_graph: 'Edit Graph',
   repair_edit_graph: 'Repair Edit Graph',
   orchestrator: 'Orchestrator',
+  routing: 'Routing (v5)',
 };
 
 /**

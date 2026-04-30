@@ -63,6 +63,7 @@ import { ceeOrchestratorRouteV1 } from "./orchestrator/route.js";
 import { ceeOrchestratorRouteV2 } from "./orchestrator/route-v2.js";
 import ceeEditGraphRouteV1 from "./routes/assist.v1.edit-graph.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
+import { adminPromptStatusRoutes } from "./routes/admin.prompts.status.js";
 import { publicPromptRoutes } from "./routes/v1.prompts.js";
 import { adminUIRoutes } from "./routes/admin.ui.js";
 import { adminDraftFailureRoutes } from "./routes/admin.v1.draft-failures.js";
@@ -230,6 +231,11 @@ export async function build() {
   // Register default prompts (fallbacks for prompt management system)
   // This must happen before routes are registered so prompts are available
   registerAllDefaultPrompts();
+  // Note: the v5 routing prompt snapshot is built later in the boot sequence,
+  // AFTER initializePromptStore() + warmPromptCacheFromStore(). Building here
+  // would resolve via the unhealthy store and pin the default fallback even
+  // when Supabase has the routing prompt populated. See `buildRoutingPromptSnapshot()`
+  // call below the prompt-store initialisation block.
 
   // DSK v0 bundle — no-op unless ENABLE_DSK_V0=true or DSK_ENABLED=true
   loadDskBundle();
@@ -581,6 +587,8 @@ function buildCeeConfig() {
 // /healthz — minimal public probe (load balancers, readiness checks, CI)
 // ---------------------------------------------------------------------------
 app.get("/healthz", async () => {
+  const { arePromptsReady } = await import("./prompts/readiness.js");
+  const prompts_ready = await arePromptsReady();
   const promptStoreStatus = getPromptStoreStatus();
   const promptStoreHealthy = isPromptStoreHealthy();
   const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
@@ -619,6 +627,7 @@ app.get("/healthz", async () => {
     degraded_reasons: isDegraded ? degradationReasons : undefined,
     service: "assistants",
     version: SERVICE_VERSION,
+    prompts_ready,
   };
 });
 
@@ -1007,6 +1016,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       app.log.info('Admin routes disabled via ADMIN_ROUTES_ENABLED=false');
     } else if (config.prompts?.enabled || config.prompts?.adminApiKey || config.prompts?.adminApiKeyRead) {
       await adminPromptRoutes(app);
+      await adminPromptStatusRoutes(app);
       await adminUIRoutes(app);
       await adminModelRoutes(app);
       await adminDraftFailureRoutes(app);
@@ -1025,6 +1035,18 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       }
     }
   }
+
+  // V5 routing prompt snapshot — built unconditionally at startup so both
+  // PMS-enabled and default-only deployments fail fast on a missing or
+  // out-of-range routing prompt. When PMS is enabled, the snapshot resolves
+  // through the store first; when PMS is disabled or unreachable, it falls
+  // back to the registered default (Prompts/v40.txt). The build runs AFTER
+  // the optional PMS init/warm block above so PMS content takes precedence
+  // on the first resolution.
+  const { buildRoutingPromptSnapshot } = await import(
+    './orchestrator-v5/routing/prompt-loader.js'
+  );
+  await buildRoutingPromptSnapshot();
 
   // Sentry: register Fastify error handler AFTER all routes
   setupSentryFastify(app);

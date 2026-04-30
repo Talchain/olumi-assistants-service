@@ -55,7 +55,10 @@ import {
   parseToolCallResponse,
   type ToolCallResponse,
 } from './tool-schema.js';
-import { LOADED_PROMPT } from './prompt-loader.js';
+import {
+  LOADED_PROMPT,
+  ensureRoutingPromptSnapshot,
+} from './prompt-loader.js';
 import { log } from '../../utils/telemetry.js';
 
 // -----------------------------------------------------------------------
@@ -438,7 +441,17 @@ export async function routeWithToolUse(
 
   const userMessage = buildUserMessage(contextPack, message);
 
-  const promptText = options.systemPromptOverride ?? ROUTING_SYSTEM_PROMPT;
+  // PMS-backed routing prompt snapshot. Built once at startup; this call is
+  // a cheap cached read on every routing turn after boot. The snapshot's
+  // `text` is the normalised content sent to Anthropic; `sent_hash` is the
+  // cache-key hash; `version` carries through PMS overrides if present.
+  // Falls back to the registered default (Prompts/v40.txt) when Supabase is
+  // empty or unreachable. The model/temperature/tools selection below is
+  // controlled here, not by PMS modelConfig.
+  const snapshot = await ensureRoutingPromptSnapshot();
+  const promptText = options.systemPromptOverride ?? snapshot.text;
+  const promptVersion = snapshot.version;
+  const promptSentHash = snapshot.sent_hash;
   const initialSystem = buildSystemForRouting(promptText);
   let cacheMode: V5PromptCacheMode = initialSystem.cacheMode;
 
@@ -475,8 +488,8 @@ export async function routeWithToolUse(
       request_id: options.requestId,
       v5_journey_id: options.sessionId ?? null,
       llm_call: 1,
-      prompt_version: ROUTING_PROMPT_VERSION,
-      prompt_hash: ROUTING_PROMPT_HASH,
+      prompt_version: promptVersion,
+      prompt_hash: promptSentHash,
       system_chars: systemPromptChars,
       context_pack_chars: contextPackChars,
       handler_proposed: null,
@@ -583,8 +596,8 @@ export async function routeWithToolUse(
       request_id: options.requestId,
       v5_journey_id: options.sessionId ?? null,
       llm_call: 2,
-      prompt_version: ROUTING_PROMPT_VERSION,
-      prompt_hash: ROUTING_PROMPT_HASH,
+      prompt_version: promptVersion,
+      prompt_hash: promptSentHash,
       system_chars: systemPromptChars,
       context_pack_chars: contextPackChars,
       handler_proposed: null,

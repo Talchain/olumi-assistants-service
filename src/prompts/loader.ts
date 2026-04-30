@@ -6,10 +6,30 @@
  * or prompts are not found.
  */
 
+import { createHash } from 'node:crypto';
 import { type CeeTaskId, interpolatePrompt } from './schema.js';
 import { getPromptStore, isDbBackedStoreHealthy } from './store.js';
-import { log, emit } from '../utils/telemetry.js';
+import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
+import {
+  isTrackedKey,
+  mapSource,
+  resolvePublicVersion,
+  type TrackedKey,
+} from './tracked.js';
+
+/** Source of a `loadPrompt()` call. Lets dashboards filter probe noise. */
+export type PromptResolveTrigger =
+  | 'runtime'
+  | 'healthz'
+  | 'status'
+  | 'reload'
+  | 'startup'
+  | 'background_refresh';
+
+function shortSha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
 
 /**
  * Telemetry events for prompt loading
@@ -51,6 +71,19 @@ export interface LoadPromptOptions {
   version?: number;
   /** Correlation ID for telemetry */
   correlationId?: string;
+  /**
+   * Origin of this resolution call. Defaults to 'runtime'. Healthz/status
+   * probes pass 'healthz' / 'status' so dashboards can filter probe noise.
+   * Admin reload passes 'reload'; the routing snapshot build passes 'startup'.
+   */
+  trigger?: PromptResolveTrigger;
+  /**
+   * Marks whether the caller served this resolution from a cache layer.
+   * The adapter-level cache passes 'hit' on cache hit; underlying store
+   * misses pass 'miss'. Used in `v5.prompt_resolved` so dashboards can
+   * separate cold loads from cache-served loads. Optional.
+   */
+  cache?: 'hit' | 'miss';
 }
 
 /**
@@ -116,11 +149,13 @@ export async function loadPrompt(
     useStaging = false,
     version,
     correlationId,
+    trigger = 'runtime',
+    cache,
   } = options;
 
   // Check if we should use defaults
   if (forceDefault || !isPromptManagementEnabled()) {
-    return loadDefaultPrompt(taskId, variables, correlationId);
+    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache);
   }
 
   try {
@@ -154,6 +189,22 @@ export async function loadPrompt(
         correlationId,
       });
 
+      if (isTrackedKey(taskId)) {
+        emit(TelemetryEvents.V5PromptResolved, {
+          key: taskId,
+          source: mapSource('store'),
+          version: resolvePublicVersion(
+            taskId as TrackedKey,
+            'store',
+            compiled.version,
+          ),
+          content_hash: shortSha256(compiled.content),
+          trigger,
+          ...(cache ? { cache } : {}),
+          correlationId,
+        });
+      }
+
       log.debug(
         { taskId, promptId: compiled.promptId, version: compiled.version, isStaging },
         isStaging ? 'Staging prompt loaded from store' : 'Prompt loaded from store'
@@ -171,7 +222,7 @@ export async function loadPrompt(
 
     // No managed prompt found, fall back to default
     log.debug({ taskId }, 'No managed prompt found, using default');
-    return loadDefaultPrompt(taskId, variables, correlationId);
+    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache);
   } catch (error) {
     // Error loading from store, fall back to default
     log.warn(
@@ -185,7 +236,7 @@ export async function loadPrompt(
       correlationId,
     });
 
-    return loadDefaultPrompt(taskId, variables, correlationId);
+    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache);
   }
 }
 
@@ -195,7 +246,9 @@ export async function loadPrompt(
 function loadDefaultPrompt(
   taskId: CeeTaskId,
   variables: Record<string, string | number>,
-  correlationId?: string
+  correlationId?: string,
+  trigger: PromptResolveTrigger = 'runtime',
+  cache?: 'hit' | 'miss'
 ): LoadedPrompt {
   const defaultContent = DEFAULT_PROMPTS[taskId];
 
@@ -210,6 +263,18 @@ function loadDefaultPrompt(
     taskId,
     correlationId,
   });
+
+  if (isTrackedKey(taskId)) {
+    emit(TelemetryEvents.V5PromptResolved, {
+      key: taskId,
+      source: mapSource('default'),
+      version: resolvePublicVersion(taskId as TrackedKey, 'default', undefined),
+      content_hash: shortSha256(content),
+      trigger,
+      ...(cache ? { cache } : {}),
+      correlationId,
+    });
+  }
 
   return {
     content,
