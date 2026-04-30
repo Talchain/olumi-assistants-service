@@ -1,0 +1,37 @@
+{
+  "_doc": "Field-coverage audit (v1) — see tests/contract/field-coverage-audit.test.ts and Docs/v5/cross-boundary-contract-test-report.md.",
+  "audited_fields": [
+    "coaching",
+    "strengthen_items",
+    "widening_log",
+    "bias_signals",
+    "provenance",
+    "provenance_display",
+    "suggested_actions",
+    "assistant_text",
+    "analysis_ready",
+    "blocks"
+  ],
+  "diagnostic_allowed": [
+    "answer_source",
+    "fallback_reason",
+    "_meta.*",
+    "trace.*"
+  ],
+  "machine_routing_allowed": [
+    "action_type",
+    "id",
+    "error_code",
+    "request_id",
+    "correlation_id"
+  ],
+  "structured_pointer_allowed": [
+    "bias_signals[].target",
+    "referenced_option_ids",
+    "node_id",
+    "edge_id",
+    "factor_id",
+    "option_id"
+  ],
+  "currently_unrendered_but_intentional": []
+}
