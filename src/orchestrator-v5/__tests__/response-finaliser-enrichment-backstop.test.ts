@@ -108,6 +108,77 @@ describe('response-finaliser — enrichment-prose backstop', () => {
     expect(enrichment.summary).toBe('opt_a is the leading option.');
   });
 
+  it('runs sanitiser on review-cards-only enrichment (no critiques, no flat leaves) — Codex finding #2', () => {
+    if (config.cee) {
+      (config.cee as { turnDebugEnabled: boolean }).turnDebugEnabled = false;
+    }
+    const response: OlumiResponse = {
+      response_version: 2,
+      assistant_text: 'ok',
+      blocks: [
+        {
+          type: 'analysis_result',
+          enrichment: {
+            // Deliberately NO critiques, NO summary/narrative/rationale/robustness_synthesis.
+            // The previous cheap-gate would have skipped sanitisation entirely.
+            review_cards: [
+              {
+                card_id: 'ep_x',
+                what: "Node 'opt_a' has kind='option'. Option nodes are filtered before analysis.",
+              },
+            ],
+            factor_sensitivity: [
+              { node_id: 'fac_x', interpretation: "Node 'opt_b' has kind='option'." },
+            ],
+          } as Record<string, unknown>,
+        } as never,
+      ],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse',
+    } as OlumiResponse;
+    const out = finaliseV5Response(response, { analysisReady: ANALYSIS_READY_STUB });
+    const block = (out.blocks as Array<Record<string, unknown>>)[0]!;
+    const enrichment = block.enrichment as Record<string, unknown>;
+    // Both contaminated prose leaves are deleted.
+    const rc = (enrichment.review_cards as Array<Record<string, unknown>>);
+    expect(rc[0]?.what).toBeUndefined();
+    expect(rc[0]?.card_id).toBe('ep_x'); // structural preserved
+    const fs = (enrichment.factor_sensitivity as Array<Record<string, unknown>>);
+    expect(fs[0]?.interpretation).toBeUndefined();
+    expect(fs[0]?.node_id).toBe('fac_x'); // structural preserved
+  });
+
+  it('runs sanitiser on improvement_guidance-only enrichment — Codex finding #2', () => {
+    if (config.cee) {
+      (config.cee as { turnDebugEnabled: boolean }).turnDebugEnabled = false;
+    }
+    const response: OlumiResponse = {
+      response_version: 2,
+      assistant_text: 'ok',
+      blocks: [
+        {
+          type: 'analysis_result',
+          enrichment: {
+            improvement_guidance: [
+              'Clean entry one.',
+              "Node 'opt_x' has kind='option'.",
+              'Clean entry two.',
+            ],
+          } as Record<string, unknown>,
+        } as never,
+      ],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse',
+    } as OlumiResponse;
+    const out = finaliseV5Response(response, { analysisReady: ANALYSIS_READY_STUB });
+    const block = (out.blocks as Array<Record<string, unknown>>)[0]!;
+    const enrichment = block.enrichment as Record<string, unknown>;
+    const ig = enrichment.improvement_guidance as string[];
+    expect(ig).toEqual(['Clean entry one.', 'Clean entry two.']);
+  });
+
   it('no-op when no blocks have enrichment', () => {
     if (config.cee) {
       (config.cee as { turnDebugEnabled: boolean }).turnDebugEnabled = false;

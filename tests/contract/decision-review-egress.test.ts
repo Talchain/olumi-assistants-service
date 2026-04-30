@@ -40,6 +40,8 @@ import {
   bucketFor,
   type CritiqueLike,
 } from '../../src/orchestrator-v5/compose/sanitise-enrichment.js';
+import { ENTITY_ID_LEAK_RE } from '../../src/orchestrator/shared/entity-id-pattern.js';
+import { HARD_BAN_PATTERNS } from '../../src/orchestrator/shared/forbidden-tokens.js';
 
 const FIXTURE_PATH = resolve(
   process.cwd(),
@@ -58,18 +60,12 @@ function loadFixture(): CapturedFixture {
 }
 
 const SUGGESTED_ACTION_RE = /^[a-z0-9_]{1,32}$/;
-const ENTITY_ID_RE =
-  /\b(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[_:-][a-z0-9_:-]+\b/i;
-const HARD_BAN_PHRASES = [
-  /\bNode '/,
-  /\bkind\s*=\s*'/,
-  /filtered before analysis/i,
-  /Option nodes are/,
-  /_pipeline_outcome/,
-  /\bmonte\s+carlo\b/i,
-  /\bepsilon-guarded\b/i,
-  /\bbootstrap_sampling\b/i,
-];
+// Use the production registries directly so the test fails fast if
+// production widens patterns without updating callers (Codex review
+// 2026-04-30, finding #4 — was previously redefined here, allowing
+// silent test/production drift).
+const ENTITY_ID_RE = ENTITY_ID_LEAK_RE;
+const HARD_BAN_PHRASES = HARD_BAN_PATTERNS;
 
 const STRUCTURAL_SUBTREE_KEYS = [
   'payloads',

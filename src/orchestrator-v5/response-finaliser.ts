@@ -215,6 +215,20 @@ function sanitiseEnrichmentBlocks(
   response: OlumiResponse,
   analysisReady: AnalysisReadyPayload | null,
 ): OlumiResponse {
+  // Cheap-gate intentionally OMITTED: a previous version of this function
+  // skipped the walker when `critiques` was empty AND none of the four flat
+  // string leaves (`summary`, `narrative`, `rationale`, `robustness_synthesis`)
+  // were present. That gate created a hole — enrichment shaped only with
+  // `review_cards`, `factor_sensitivity.interpretation`, `gaps.description`,
+  // `robustness.caveat`, `m1_review`, `m1_coaching`, or `improvement_guidance`
+  // bypassed the backstop entirely (Codex review 2026-04-30, finding #2).
+  // The walker's per-leaf checks are already O(1) when fields are absent;
+  // running it unconditionally on every block with non-null enrichment is
+  // the safe contract.
+  //
+  // We DO still skip blocks without an enrichment object — those are the
+  // common case for non-analysis_result block types (`text`, `error`,
+  // `graph_patch`, etc.) and the walker has nothing to do.
   const asRecord = response as Record<string, unknown>;
   const blocks = Array.isArray(asRecord.blocks) ? (asRecord.blocks as Array<Record<string, unknown>>) : null;
   if (!blocks || blocks.length === 0) return response;
@@ -223,15 +237,11 @@ function sanitiseEnrichmentBlocks(
     if (b == null || typeof b !== 'object') return b;
     const enrichment = b.enrichment as Record<string, unknown> | undefined;
     if (enrichment == null || typeof enrichment !== 'object') return b;
-    // Skip if there's nothing to sanitise: no critiques, no allowlisted
-    // text leaves. The walker is cheap, so this is purely a perf
-    // micro-opt — but the empty-enrichment case is the common one for
-    // non-analysis_result blocks.
-    const hasCritiques = Array.isArray(enrichment.critiques) && enrichment.critiques.length > 0;
-    const hasAnyText = ['summary', 'narrative', 'rationale', 'robustness_synthesis']
-      .some((k) => typeof enrichment[k] === 'string' && (enrichment[k] as string).length > 0);
-    if (!hasCritiques && !hasAnyText) return b;
-
+    // Always run the walker — see comment on the function header above.
+    // Per-leaf checks inside `sanitiseEnrichment` are O(1) when fields
+    // are absent, and the walker is the only path that covers
+    // review_cards / factor_sensitivity / gaps / robustness /
+    // m1_review / m1_coaching / improvement_guidance.
     const result = sanitiseEnrichment(enrichment, null, analysisReady);
     mutated = true;
     return { ...b, enrichment: result.enrichment };

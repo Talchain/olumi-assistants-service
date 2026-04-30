@@ -179,30 +179,48 @@ export function isAllowlistedPath(path: string): boolean {
 
 export interface SanitiseTextResult {
   readonly text: string;
-  /** Tier A hits — sanitiser failure when non-empty (caller decides). */
+  /**
+   * Tier A hits found in the user-facing prose. Always non-empty when
+   * `suppress === true`. Surfaced for telemetry; the `text` field is
+   * authoritative for what should land on the wire.
+   */
   readonly hardBans: ReadonlyArray<string>;
   /** Tier B hits — warnings only. */
   readonly warnings: ReadonlyArray<string>;
   /** Entity-ID matches that were replaced via the resolver. */
   readonly resolved: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+  /**
+   * **Fail-shut signal.** True when one or more `HARD_BAN_PATTERNS`
+   * matched after ID resolution. Callers MUST suppress the field
+   * entirely (route critique to bucket D, drop prose leaf) rather than
+   * shipping `text` — the engine vocabulary still contaminates user-
+   * facing prose even with IDs resolved.
+   */
+  readonly suppress: boolean;
 }
 
 /**
  * Scrub a single user-facing string:
  *   1. Replace every ENTITY_ID_LEAK_RE match with `resolveLabelOrFallback`.
  *   2. After ID resolution, scan for HARD_BAN_PATTERNS (Tier A).
- *   3. Scan for WARNING_PATTERNS (Tier B) — does not modify text.
+ *      → if ANY match: set `suppress=true`. Caller fails closed.
+ *   3. Scan for WARNING_PATTERNS (Tier B) — does not modify `suppress`.
  *
- * The output `text` always has IDs resolved. Hard-ban hits are
- * surfaced for the caller (the enricher and the contract test fail on
- * any hard-ban hit). Warnings are recorded only.
+ * Fail-shut policy: `suppress=true` means the field MUST NOT ship
+ * verbatim. Caller decides the replacement (route critique to bucket
+ * D; drop a prose leaf to a generic "_redacted_" or null). The
+ * sanitiser intentionally does NOT auto-replace because the right
+ * response varies by surface — a critique routes to `_diagnostics`
+ * with structural fields preserved; a `summary` leaf is simply
+ * removed; a `review_card.what` may be replaced with the card's
+ * structured fields.
  */
 export function sanitiseEnrichmentText(
   text: string,
   ctx: LabelResolverContext,
 ): SanitiseTextResult {
   if (typeof text !== 'string' || text.length === 0) {
-    return { text: text ?? '', hardBans: [], warnings: [], resolved: [] };
+    return { text: text ?? '', hardBans: [], warnings: [], resolved: [], suppress: false };
   }
 
   const resolved: Array<{ id: string; label: string }> = [];
@@ -225,7 +243,7 @@ export function sanitiseEnrichmentText(
     if (m && typeof m[0] === 'string') warnings.push(m[0]);
   }
 
-  return { text: out, hardBans, warnings, resolved };
+  return { text: out, hardBans, warnings, resolved, suppress: hardBans.length > 0 };
 }
 
 // ============================================================================
@@ -301,7 +319,15 @@ export function partitionCritiques(
       for (const hit of scrubbed.warnings) {
         warnings.push({ path: `$.critiques[${i}].message`, hit });
       }
-      user.push({ ...c, message: scrubbed.text });
+      // Fail-shut: if the S-bucket replacement itself trips a hard-ban
+      // (catalogue regression OR an injected label contains an engine
+      // token), route the critique to D rather than ship contaminated
+      // copy. Structural fields preserved.
+      if (scrubbed.suppress) {
+        diagnostic.push(c);
+      } else {
+        user.push({ ...c, message: scrubbed.text });
+      }
       continue;
     }
 
@@ -314,6 +340,7 @@ export function partitionCritiques(
       warnings.push({ path: `$.critiques[${i}].message`, hit });
     }
     let updated: CritiqueLike = { ...c, message: scrubbed.text };
+    let suppressDueToSuggestion = false;
     if (typeof c.suggestion === 'string') {
       const scrubbedSug = sanitiseEnrichmentText(c.suggestion, ctx);
       for (const hit of scrubbedSug.hardBans) {
@@ -323,8 +350,19 @@ export function partitionCritiques(
         warnings.push({ path: `$.critiques[${i}].suggestion`, hit });
       }
       updated = { ...updated, suggestion: scrubbedSug.text };
+      if (scrubbedSug.suppress) suppressDueToSuggestion = true;
     }
-    user.push(updated);
+    // Fail-shut: a U-bucket critique whose message OR suggestion tripped
+    // a hard-ban after ID resolution must not ship verbatim. Engine
+    // vocabulary survived the resolver, which is exactly what the
+    // brief warned about. Route the whole critique to D so structural
+    // fields are still preserved (caller surfaces them in
+    // _diagnostics for engineers).
+    if (scrubbed.suppress || suppressDueToSuggestion) {
+      diagnostic.push(c);
+    } else {
+      user.push(updated);
+    }
   }
 
   return { user, diagnostic, hardBans, warnings };
@@ -377,6 +415,12 @@ export function sanitiseEnrichment(
   }
 
   // ── flat string leaves ────────────────────────────────────────────────
+  // Fail-shut policy: a hard-ban hit on a prose leaf means engine
+  // vocabulary survived ID resolution. The leaf is DELETED rather than
+  // shipped — the structural shape stays consistent (the field becomes
+  // optional/missing) and downstream consumers fall back to whatever
+  // they render when the field is absent. This is the same fail-shut
+  // contract `partitionCritiques` applies to critique-array entries.
   const flatStringLeaves: ReadonlyArray<string> = [
     'summary',
     'narrative',
@@ -391,7 +435,11 @@ export function sanitiseEnrichment(
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
       for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-      cloned[key] = scrubbed.text;
+      if (scrubbed.suppress) {
+        delete cloned[key];
+      } else {
+        cloned[key] = scrubbed.text;
+      }
     }
   }
 
@@ -415,6 +463,10 @@ export function sanitiseEnrichment(
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
       for (const hit of scrubbed.warnings) warnings.push({ path, hit });
+      // Fail-shut: drop the offending entry from the array. The array
+      // shape is preserved (string[]) but the contaminated entry is
+      // omitted.
+      if (scrubbed.suppress) continue;
       out.push(scrubbed.text);
     }
     cloned[key] = out;
@@ -443,7 +495,13 @@ export function sanitiseEnrichment(
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
       for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-      rec[field] = scrubbed.text;
+      // Fail-shut: drop the prose field but leave the structural item
+      // intact (sensitivity_value, node_id, etc. still surface).
+      if (scrubbed.suppress) {
+        delete rec[field];
+      } else {
+        rec[field] = scrubbed.text;
+      }
     }
   }
 
@@ -461,7 +519,11 @@ export function sanitiseEnrichment(
         const scrubbed = sanitiseEnrichmentText(v, ctx);
         for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
         for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-        cardRec[f] = scrubbed.text;
+        if (scrubbed.suppress) {
+          delete cardRec[f];
+        } else {
+          cardRec[f] = scrubbed.text;
+        }
       }
       const items = cardRec['items'];
       if (Array.isArray(items)) {
@@ -475,7 +537,11 @@ export function sanitiseEnrichment(
           const scrubbed = sanitiseEnrichmentText(v, ctx);
           for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
           for (const hit of scrubbed.warnings) warnings.push({ path, hit });
-          itRec['suggested_evidence'] = scrubbed.text;
+          if (scrubbed.suppress) {
+            delete itRec['suggested_evidence'];
+          } else {
+            itRec['suggested_evidence'] = scrubbed.text;
+          }
         }
       }
     }

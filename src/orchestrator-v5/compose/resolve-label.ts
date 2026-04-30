@@ -21,9 +21,31 @@
  * effects, no logging.
  */
 
-import { resolveLabel as resolveLabelFromGraph } from '../../orchestrator/shared/entity-id-pattern.js';
+import {
+  resolveLabel as resolveLabelFromGraph,
+  ENTITY_ID_LEAK_RE,
+} from '../../orchestrator/shared/entity-id-pattern.js';
 import { genericFallbackForId } from '../../orchestrator/shared/output-safety.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
+
+/**
+ * Unsafe-label predicate. A label is unsafe if it equals the lookup id
+ * (upstream stored the raw id in the label slot) OR contains an entity-
+ * ID-shaped token (`fac_*`, `opt_*`, etc.). Used by both `resolveLabel`
+ * and `resolveLabelOrFallback` so the contract "never returns the raw
+ * ID" holds even when an upstream source emits a malformed label.
+ *
+ * The check is structural — we DON'T want to assume that every label
+ * containing a hyphen is unsafe (legitimate labels can have hyphens).
+ * `ENTITY_ID_LEAK_RE` already encodes the prefix-discriminated pattern.
+ */
+function isUnsafeLabel(label: string, lookupId: string): boolean {
+  if (label === lookupId) return true;
+  // Per-call global matcher; the source regex is non-global by contract
+  // (see entity-id-pattern.ts:9-14 — the 7 .test() callsites in
+  // patch-summary.ts depend on it staying non-global).
+  return new RegExp(ENTITY_ID_LEAK_RE.source, 'i').test(label);
+}
 
 /**
  * Subset of the V3 wire shape this resolver needs. Defined as a
@@ -67,7 +89,7 @@ export function resolveLabel(id: string, ctx: LabelResolverContext): string | nu
   // Priority 1: graph.nodes (V3 root)
   if (ctx.graph) {
     const fromGraph = resolveLabelFromGraph(ctx.graph, id);
-    if (fromGraph !== null) return fromGraph;
+    if (fromGraph !== null && !isUnsafeLabel(fromGraph, id)) return fromGraph;
   }
 
   // Priority 2: analysis_ready.options (option_id keyed)
@@ -76,6 +98,7 @@ export function resolveLabel(id: string, ctx: LabelResolverContext): string | nu
     for (const o of arOptions) {
       const oid = o?.option_id ?? o?.id;
       if (oid === id && typeof o?.label === 'string' && o.label.length > 0) {
+        if (isUnsafeLabel(o.label, id)) continue;
         return o.label;
       }
     }
@@ -86,6 +109,7 @@ export function resolveLabel(id: string, ctx: LabelResolverContext): string | nu
   if (Array.isArray(oc)) {
     for (const o of oc) {
       if (o?.id === id && typeof o?.label === 'string' && o.label.length > 0) {
+        if (isUnsafeLabel(o.label, id)) continue;
         return o.label;
       }
     }
@@ -96,6 +120,7 @@ export function resolveLabel(id: string, ctx: LabelResolverContext): string | nu
   if (Array.isArray(islOptions)) {
     for (const o of islOptions) {
       if (o?.id === id && typeof o?.label === 'string' && o.label.length > 0) {
+        if (isUnsafeLabel(o.label, id)) continue;
         return o.label;
       }
     }

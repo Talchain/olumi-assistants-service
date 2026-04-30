@@ -240,7 +240,168 @@ describe('sanitiseEnrichmentText — per-string scrubber', () => {
       hardBans: [],
       warnings: [],
       resolved: [],
+      suppress: false,
     });
+  });
+});
+
+// =============================================================================
+// Fail-shut behaviour (Codex review 2026-04-30, findings #1–#3)
+// =============================================================================
+
+describe('fail-shut behaviour — hard-ban hits suppress the field, not just record', () => {
+  it('sanitiseEnrichmentText sets suppress=true when ANY hard-ban pattern matches', () => {
+    const r = sanitiseEnrichmentText(
+      "Node 'opt_hire_local' has kind='option'.",
+      CTX,
+    );
+    expect(r.suppress).toBe(true);
+    expect(r.hardBans.length).toBeGreaterThan(0);
+  });
+
+  it('sanitiseEnrichmentText sets suppress=false on clean prose', () => {
+    const r = sanitiseEnrichmentText('Option opt_hire_local leads.', CTX);
+    expect(r.suppress).toBe(false);
+    expect(r.text).toBe('Option Hire Two Senior Engineers Locally leads.');
+  });
+
+  it('U-bucket critique routes to D when message tripped a hard-ban after ID resolution', () => {
+    const c: CritiqueLike = {
+      id: 'c1',
+      code: 'NO_OPTIONS', // U-bucket
+      severity: 'blocker',
+      message: "Node 'opt_hire_local' is an option.",
+    };
+    const r = partitionCritiques([c], CTX);
+    expect(r.user).toHaveLength(0);
+    expect(r.diagnostic).toHaveLength(1);
+    expect(r.diagnostic[0]?.id).toBe('c1');
+    // Structural fields preserved on the routed critique
+    expect(r.diagnostic[0]?.code).toBe('NO_OPTIONS');
+  });
+
+  it('U-bucket critique routes to D when SUGGESTION tripped a hard-ban (message clean)', () => {
+    const c: CritiqueLike = {
+      id: 'c1',
+      code: 'NO_OPTIONS',
+      severity: 'blocker',
+      message: 'No options provided for comparison.',
+      suggestion: "Add an option. Option nodes are filtered before analysis.",
+    };
+    const r = partitionCritiques([c], CTX);
+    expect(r.user).toHaveLength(0);
+    expect(r.diagnostic).toHaveLength(1);
+  });
+
+  it('S-bucket critique routes to D if the replacement itself trips a hard-ban', () => {
+    // Construct a label that:
+    //  1. Passes the unsafe-label check (no `ENTITY_ID_LEAK_RE` token)
+    //     so the resolver returns it.
+    //  2. Contains a HARD_BAN token so the post-resolution scan trips
+    //     the sanitiser's fail-shut.
+    // "Filtered before analysis result" matches the case-insensitive
+    // "filtered before analysis" hard-ban pattern but contains no
+    // entity-id-shaped tokens.
+    const poisonedCtx = {
+      analysisReady: {
+        options: [
+          { option_id: 'opt_h', label: 'Filtered before analysis result' },
+        ],
+      },
+    };
+    const c: CritiqueLike = {
+      id: 'c1',
+      code: 'IDENTICAL_OPTIONS',
+      severity: 'blocker',
+      affected_option_ids: ['opt_h', 'opt_h'],
+      message: 'engine wording',
+    };
+    const r = partitionCritiques([c], poisonedCtx);
+    expect(r.user).toHaveLength(0);
+    expect(r.diagnostic).toHaveLength(1);
+  });
+
+  it('flat string leaf is DELETED (not shipped verbatim) on a hard-ban hit', () => {
+    const enrichment: Record<string, unknown> = {
+      summary: "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    expect(r.enrichment.summary).toBeUndefined();
+    expect(r.hardBans.length).toBeGreaterThan(0);
+  });
+
+  it('improvement_guidance entry is DROPPED on a hard-ban hit; structural array preserved', () => {
+    const enrichment: Record<string, unknown> = {
+      improvement_guidance: [
+        'Clean entry one.',
+        "Node 'opt_x' has kind='option'.",  // hard-ban
+        'Clean entry two.',
+      ],
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    const out = r.enrichment.improvement_guidance as string[];
+    expect(Array.isArray(out)).toBe(true);
+    expect(out).toEqual(['Clean entry one.', 'Clean entry two.']);
+  });
+
+  it('factor_sensitivity[*].interpretation field is DELETED on hard-ban; structural fields preserved', () => {
+    const enrichment: Record<string, unknown> = {
+      factor_sensitivity: [
+        {
+          node_id: 'fac_hiring_cost',
+          sensitivity_value: 0.7,
+          interpretation: "Node 'opt_hire_local' has kind='option'.",
+        },
+      ],
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    const fs = (r.enrichment.factor_sensitivity as Array<Record<string, unknown>>);
+    expect(fs[0]?.interpretation).toBeUndefined();
+    // Structural fields preserved
+    expect(fs[0]?.node_id).toBe('fac_hiring_cost');
+    expect(fs[0]?.sensitivity_value).toBe(0.7);
+  });
+
+  it('review_cards[*].what is DELETED on hard-ban; structural fields preserved', () => {
+    const enrichment: Record<string, unknown> = {
+      review_cards: [
+        {
+          card_id: 'ep_x',
+          card_type: 'evidence_priority',
+          what: "Node 'opt_hire_local' has kind='option'.",
+          why: 'Clean why text.',
+        },
+      ],
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    const rc = (r.enrichment.review_cards as Array<Record<string, unknown>>);
+    expect(rc[0]?.what).toBeUndefined();
+    expect(rc[0]?.why).toBe('Clean why text.');
+    expect(rc[0]?.card_id).toBe('ep_x');
+    expect(rc[0]?.card_type).toBe('evidence_priority');
+  });
+
+  it('review_cards[*].items[*].suggested_evidence is DELETED on hard-ban', () => {
+    const enrichment: Record<string, unknown> = {
+      review_cards: [
+        {
+          card_id: 'ep_x',
+          items: [
+            {
+              node_id: 'fac_hiring_cost',
+              factor_label: 'Hiring',
+              suggested_evidence: "Option nodes are filtered before analysis.",
+            },
+          ],
+        },
+      ],
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    const items = ((r.enrichment.review_cards as Array<Record<string, unknown>>)[0]
+      ?.items as Array<Record<string, unknown>>);
+    expect(items[0]?.suggested_evidence).toBeUndefined();
+    expect(items[0]?.node_id).toBe('fac_hiring_cost');
+    expect(items[0]?.factor_label).toBe('Hiring');
   });
 });
 

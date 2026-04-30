@@ -166,6 +166,65 @@ describe('resolveLabelOrFallback — never returns the raw ID', () => {
   });
 });
 
+describe('unsafe-label rejection (Codex review 2026-04-30, finding #3)', () => {
+  it('rejects label === id and falls through to fallback', () => {
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'opt_x' }] },
+    };
+    expect(resolveLabel('opt_x', ctx)).toBeNull();
+    expect(resolveLabelOrFallback('opt_x', ctx)).toBe('the relevant option');
+  });
+
+  it('rejects a label that contains a raw entity-id-shaped token', () => {
+    const ctx: LabelResolverContext = {
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'See fac_churn_rate' }] },
+    };
+    expect(resolveLabel('opt_x', ctx)).toBeNull();
+    expect(resolveLabelOrFallback('opt_x', ctx)).toBe('the relevant option');
+  });
+
+  it('priority-1 graph hit is rejected when the graph stores the raw id as the label', () => {
+    const ctx: LabelResolverContext = {
+      graph: {
+        nodes: [{ id: 'opt_x', label: 'opt_x', kind: 'option' }],
+        edges: [],
+      } as unknown as LabelResolverContext['graph'],
+    };
+    expect(resolveLabel('opt_x', ctx)).toBeNull();
+    expect(resolveLabelOrFallback('opt_x', ctx)).toBe('the relevant option');
+  });
+
+  it('falls through priorities until a SAFE label is found', () => {
+    const ctx: LabelResolverContext = {
+      graph: {
+        nodes: [{ id: 'opt_x', label: 'opt_x', kind: 'option' }], // unsafe
+        edges: [],
+      } as unknown as LabelResolverContext['graph'],
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'See fac_churn' }] }, // unsafe
+      enrichment: {
+        option_comparison: [{ id: 'opt_x', label: 'Hire Two Senior Engineers' }], // safe
+      },
+    };
+    expect(resolveLabel('opt_x', ctx)).toBe('Hire Two Senior Engineers');
+  });
+
+  it('returns null when EVERY priority has only unsafe labels', () => {
+    const ctx: LabelResolverContext = {
+      graph: {
+        nodes: [{ id: 'opt_x', label: 'opt_x', kind: 'option' }],
+        edges: [],
+      } as unknown as LabelResolverContext['graph'],
+      analysisReady: { options: [{ option_id: 'opt_x', label: 'See opt_y' }] },
+      enrichment: {
+        option_comparison: [{ id: 'opt_x', label: 'fac_churn ref' }],
+        payloads: { isl_request: { options: [{ id: 'opt_x', label: 'opt_x_again' }] } },
+      },
+    };
+    expect(resolveLabel('opt_x', ctx)).toBeNull();
+    expect(resolveLabelOrFallback('opt_x', ctx)).toBe('the relevant option');
+  });
+});
+
 describe('genericFallbackForId — pinning the shared mapping', () => {
   it('matches resolveLabelOrFallback fallback behaviour exactly', () => {
     const PREFIXES = [
