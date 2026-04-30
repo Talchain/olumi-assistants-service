@@ -166,6 +166,14 @@ function sendFinalised200(
   ctx: {
     readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
     readonly graph: GraphV3T | null;
+    /** V5 state-trust freshness derivation. Threaded into the finaliser
+     *  so the analysisReady payload carries freshness fields and
+     *  computed_at reflects the selected fact's timestamp. Populated on
+     *  every CEE dispatch path that produces an analysisReady payload
+     *  (turn_executor, chip_click, draft_graph, edit_graph). system_event
+     *  omits today; graph-mutating system events are scoped narrowly and
+     *  most do not ship the readiness field. */
+    readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -518,6 +526,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
           analysisReady: cc.analysisReady,
           graph: cc.graph,
+          ...(cc.freshness ? { freshness: cc.freshness } : {}),
         });
       } catch (err) {
         log.error(
@@ -586,6 +595,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
+          ...(dg.freshness ? { freshness: dg.freshness } : {}),
         });
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
@@ -667,6 +677,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
           analysisReady: eg.analysisReady,
           graph: eg.graph,
+          ...(eg.freshness ? { freshness: eg.freshness } : {}),
         });
       } catch (err) {
         log.error(
@@ -766,6 +777,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
       graph: turnGraph,
+      ...(run.freshness ? { freshness: run.freshness } : {}),
     });
   });
 }

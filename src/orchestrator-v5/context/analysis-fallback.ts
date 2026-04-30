@@ -44,6 +44,7 @@ import {
   type OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
+import { selectRunAnalysisFact } from './freshness.js';
 
 export const FALLBACK_STALENESS_REASON = 'loaded_from_prior_run_freshness_unknown';
 
@@ -161,10 +162,17 @@ export function buildAnalysisFromPriorFacts(
   priorFacts: readonly HandlerFact[],
   optionLabelSource?: readonly OptionLabelSource[],
 ): AnalysisResponseSummary | null {
-  const fact = priorFacts.find(
-    (f) => f.fact_type === 'run_analysis' && f.noop === false,
-  );
-  if (!fact || fact.fact_type !== 'run_analysis') return null;
+  // V5 state-trust: route both the projection and the freshness verdict
+  // through the SAME selector. Pre-state-trust this used `priorFacts.find`
+  // which picked the FIRST non-noop fact regardless of analysis_status —
+  // so a partial / older fact could ground the projection while the
+  // freshness verdict (built from the latest successful fact) reflected a
+  // different one. The user saw analysis details from fact A but a
+  // freshness verdict about fact B.
+  const selected = selectRunAnalysisFact(priorFacts);
+  if (!selected) return null;
+  const fact = selected.fact;
+  if (fact.fact_type !== 'run_analysis') return null; // narrow for the type checker
 
   const result = fact.result;
   const labelMap = buildLabelMap(optionLabelSource);

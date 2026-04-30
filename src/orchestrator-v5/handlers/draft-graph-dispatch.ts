@@ -50,12 +50,18 @@ import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import {
+  emitFreshnessTelemetry,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -82,6 +88,13 @@ export interface DispatchDraftGraphResult {
    * not produce a graph — sanitiser falls back to prefix-aware generic.
    */
   readonly graph: GraphV3T | null;
+  /**
+   * V5 state-trust freshness derivation. Draft is the first-turn brief
+   * shape — there is no prior run_analysis fact yet. Expected to be
+   * `none` in normal use; surfaced for telemetry / contract consistency
+   * and to make the wire field present on every CEE dispatch path.
+   */
+  readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
 }
 
 /**
@@ -262,6 +275,54 @@ export async function dispatchDraftGraph(
       commitResult.graphPersisted && draftResult.analysisReady
         ? (draftResult.analysisReady as AnalysisReadyPayload)
         : undefined;
+
+    // V5 state-trust: derive freshness WITHOUT a session-store read.
+    // Draft is the first-turn brief shape — the dispatcher invariant
+    // pinned by route-v2-draft-graph-persistence.test.ts forbids
+    // readRecent here.
+    //
+    // Wire freshness is `none` — the canonical "no successful
+    // run_analysis fact" verdict. That's the honest user-facing state:
+    // a brand new session has no prior analysis. UI handles `none`
+    // exactly the same as it handles "no fact found via lookup", so
+    // the wire stays consistent with non-shortcut dispatch paths.
+    //
+    // A separate telemetry-only event (`first_turn_assumed`) records
+    // the operator-facing assumption that we did not read the chain
+    // to verify it was empty. Replay scenarios (where a "first-turn"
+    // shape lands on a session with prior facts) surface as a divergence
+    // between the wire `none` and any later turn's actual `freshness`
+    // verdict — operators have a grep target.
+    const currentGraphHash = computeAnalysisAffectingGraphHash(
+      draftResult.graphOutput as GraphStateIngress | null | undefined,
+    );
+    const freshness: FreshnessDerivation = {
+      freshness: 'none',
+      reason: 'no_successful_run_analysis_fact',
+      selected_fact_index: null,
+      graph_hash_at_run: null,
+      current_graph_hash: currentGraphHash,
+      computed_at: null,
+    };
+    emitFreshnessTelemetry(
+      freshness,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'draft_graph',
+      },
+      {
+        prior_fact_count: 0,
+        current_turn_fact_count: 0,
+      },
+    );
+    emit(TelemetryEvents.AnalysisFreshnessFirstTurnAssumed, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'draft_graph',
+      reason: 'dispatcher_invariant_forbids_readRecent',
+    });
+
     log.info(
       {
         request_id: requestId,
@@ -273,7 +334,13 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch committed',
     );
-    return { response, commitPerformed: true, analysisReady, graph: draftResult.graphOutput };
+    return {
+      response,
+      commitPerformed: true,
+      analysisReady,
+      graph: draftResult.graphOutput,
+      freshness,
+    };
   } catch (err) {
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
     // Client sees the generic retry prompt; the response built below is server-side only.

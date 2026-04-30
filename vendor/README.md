@@ -7,18 +7,20 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.8.1.tgz`
+### `talchain-schemas-0.10.0.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.8.1.
-Adds `DraftGraphBlockSchema` to the `Block` discriminated union (v0.8.0)
-and `draft_graph` + `analysis_ready` optional top-level fields to
-`OlumiResponseSchema` (v0.8.1). Source lives at
-`~/Documents/GitHub/olumi-schemas/`; built via `npm pack` from source
-(not patched in-place). Not yet published to a private registry.
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.10.0.
+Adds optional `graph_hash_at_run` and `computed_at` fields to
+`RunAnalysisResultSchema` (v0.10.0) for V5 state-trust freshness
+derivation, and bundles the in-flight v0.9.0 work
+(`ExplainResultsResultSchema`, `ExplainFromStructureResultSchema`,
+`WhatWouldFlipResultSchema` reshape, plus the matching handler-fact
+schemas). Source lives at `~/Documents/GitHub/olumi-schemas/`; built
+via `npm pack` from source. Not yet published to a private registry.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at B+C,
-0.6.0 at D, 0.7.0 at E) are removed on each bump — only the
-currently-pinned version lives in `vendor/`.
+0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G) are removed on each
+bump — only the currently-pinned version lives in `vendor/`.
 
 **How to update:**
 

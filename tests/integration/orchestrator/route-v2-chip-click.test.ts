@@ -213,6 +213,145 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
     expect(new Date(ts).toISOString()).toBe(ts);
   });
 
+  it('chip_click run_analysis with freshness → wire response carries analysis_ready.freshness fields and selected-fact computed_at', async () => {
+    // V5 state-trust route-level wire-shape test. Proves the entire chain:
+    // chip-click dispatch surfaces freshness on its result → route-v2.ts
+    // sendFinalised200 forwards it to finaliseV5Response → attachComputedAt
+    // stamps both freshness fields AND uses the selected-fact computed_at
+    // (NOT Date.now). Catches regressions where the dispatcher forgets to
+    // thread cc.freshness through, or where the schema rejects the new
+    // optional fields.
+    const FACT_COMPUTED_AT = '2026-04-30T12:34:56.789Z';
+    const dispatchAnalysisReady = {
+      status: 'ready' as const,
+      goal_node_id: 'goal_revenue',
+      options: [
+        { option_id: 'opt_a', label: 'Option A', status: 'ready', interventions: { fac_x: 0.6 } },
+      ],
+    };
+    const dispatchFreshness = {
+      freshness: 'fresh' as const,
+      reason: 'graph_hash_match' as const,
+      selected_fact_index: 0,
+      graph_hash_at_run: 'aaaa1111bbbb2222',
+      current_graph_hash: 'aaaa1111bbbb2222',
+      computed_at: FACT_COMPUTED_AT,
+    };
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      ...makeMockResult(),
+      analysisReady: dispatchAnalysisReady,
+      freshness: dispatchFreshness,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111ccf1',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.analysis_ready).toBeDefined();
+    // Freshness wire fields
+    expect(body.analysis_ready.freshness).toBe('fresh');
+    expect(body.analysis_ready.freshness_reason).toBe('graph_hash_match');
+    expect(body.analysis_ready.graph_hash_at_run).toBe('aaaa1111bbbb2222');
+    expect(body.analysis_ready.current_graph_hash).toBe('aaaa1111bbbb2222');
+    // Selected-fact computed_at — NOT Date.now. Proves attachComputedAt
+    // is using the derivation's timestamp instead of restamping.
+    expect(body.analysis_ready.computed_at).toBe(FACT_COMPUTED_AT);
+  });
+
+  it('chip_click run_analysis with stale freshness → wire response shows divergent hashes', async () => {
+    // Wire-side inspection of the stale verdict. UI uses analysis_ready.
+    // freshness === 'stale' to render the staleness pill (separate UI brief).
+    const FACT_COMPUTED_AT = '2026-04-29T08:00:00.000Z';
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      ...makeMockResult(),
+      analysisReady: {
+        status: 'ready' as const,
+        goal_node_id: 'goal_revenue',
+        options: [{ option_id: 'opt_a', label: 'A', status: 'ready', interventions: {} }],
+      },
+      freshness: {
+        freshness: 'stale' as const,
+        reason: 'graph_hash_diverged' as const,
+        selected_fact_index: 0,
+        graph_hash_at_run: 'old_hash________',
+        current_graph_hash: 'new_hash________',
+        computed_at: FACT_COMPUTED_AT,
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111ccf2',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.analysis_ready.freshness).toBe('stale');
+    expect(body.analysis_ready.graph_hash_at_run).toBe('old_hash________');
+    expect(body.analysis_ready.current_graph_hash).toBe('new_hash________');
+    expect(body.analysis_ready.graph_hash_at_run).not.toBe(body.analysis_ready.current_graph_hash);
+    expect(body.analysis_ready.computed_at).toBe(FACT_COMPUTED_AT);
+  });
+
+  it('chip_click run_analysis without freshness → wire response stamps Date.now ISO (legacy path)', async () => {
+    // Backwards-compat: a dispatcher that doesn't surface freshness still
+    // produces a valid analysis_ready with a wire-emit-time computed_at.
+    // Catches regressions where the legacy code path stops working.
+    dispatchChipClickRunAnalysisMock.mockResolvedValueOnce({
+      ...makeMockResult(),
+      analysisReady: {
+        status: 'ready' as const,
+        goal_node_id: 'g',
+        options: [{ option_id: 'opt_a', label: 'A', status: 'ready', interventions: {} }],
+      },
+      // No `freshness` field — exercises the no-derivation branch.
+    });
+    const before = new Date().toISOString();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-11111111ccf3',
+        scenario_id: SCENARIO_ID,
+        stage: 'analyse',
+        message: 'Run analysis',
+        turn_class: 'propose',
+        source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      },
+    });
+    const after = new Date().toISOString();
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.analysis_ready.freshness).toBeUndefined();
+    expect(body.analysis_ready.computed_at >= before).toBe(true);
+    expect(body.analysis_ready.computed_at <= after).toBe(true);
+  });
+
   it('chip_click run_analysis without analysisReady → wire response omits analysis_ready (finaliser tolerates absence)', async () => {
     dispatchChipClickRunAnalysisMock.mockResolvedValueOnce(makeMockResult());
     const res = await app.inject({
@@ -257,7 +396,7 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
   });
 
   it('chip_click + unregistered action_type (set_factor_value) → NOT dispatched, falls through', async () => {
-    const res = await app.inject({
+    await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: {

@@ -51,6 +51,8 @@ import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
 import { getHandlerBudgetMs } from '../../budgets.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import type {
   HandlerFn,
   HandlerInvocation,
@@ -262,6 +264,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       plotPayload.goal_constraints = snapshot.goal_constraints;
     }
 
+    // --- 3.5. Capture freshness metadata BEFORE PLoT call -----------------
+    // V5 state-trust: record the analysis-affecting graph hash and the ISO
+    // timestamp of the run, so future turns can derive freshness by
+    // comparing the recorded hash against the current graph hash. Both
+    // fields are CEE-owned and live alongside `enrichment` (NOT inside it
+    // — `enrichment` is byte-for-byte PLoT and the handler-ownership
+    // invariant forbids derived CEE fields there). Schema 0.10.0+.
+    //
+    // `snapshot.graph` is typed `unknown` because PLoT consumes it as-is;
+    // the hash function only reads the GraphStateIngress-compatible
+    // shape (nodes, edges, options, goal_node_id, goal_constraints) so
+    // the cast is safe at this boundary.
+    const graphHashAtRun = computeAnalysisAffectingGraphHash(
+      snapshot.graph as GraphStateIngress | null | undefined,
+    );
+    const runComputedAt = new Date().toISOString();
+
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
     const plotStartedAt = Date.now();
@@ -380,6 +399,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // the decision_review auto-fire travels out-of-band via
         // TurnExecutor options; do not reintroduce brief attachment here.
         enrichment: response as Record<string, unknown>,
+        // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
+        // included to keep parity with the existing optional-field idiom —
+        // if the graph was empty (hash null), we omit graph_hash_at_run
+        // rather than emitting an empty string.
+        ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
+        computed_at: runComputedAt,
       },
     };
 

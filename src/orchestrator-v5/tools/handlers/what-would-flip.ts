@@ -43,7 +43,6 @@ import { HandlerResultInvalidError } from '../handler-errors.js';
 import { buildAnalysisAbsentTemplate, resolveOptionCount } from './no-op-helpers.js';
 import { composeWhatWouldFlipFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
-import { applyStalenessPrefix } from './staleness-prefix.js';
 
 export function createWhatWouldFlipHandler(): HandlerFn {
   return async function whatWouldFlipHandler(
@@ -97,14 +96,11 @@ export function createWhatWouldFlipHandler(): HandlerFn {
       ? explanation!.answer_text
       : composeWhatWouldFlipFallback(invocation.analysisProjection);
 
-    // Trust contract: when the analysis is loaded from a prior run, prepend
-    // the staleness caveat in code. The chip-generator separately surfaces a
-    // "Rerun analysis" chip from the projection's staleness_reason.
-    const stalenessReason = invocation.analysisProjection?.staleness_reason ?? null;
-    const { text: assistantText, prefixed } = applyStalenessPrefix(
-      rawText,
-      stalenessReason,
-    );
+    // V5 state-trust: CEE no longer prefixes assistant_text with the
+    // staleness caveat. See explain-results.ts for the rationale; same
+    // contract applies here. staleness_prefixed stays on the fact as
+    // false for backwards-compat with telemetry consumers.
+    const assistantText = rawText;
 
     const fact: WhatWouldFlipHandlerFact = {
       fact_type: 'what_would_flip',
@@ -118,7 +114,7 @@ export function createWhatWouldFlipHandler(): HandlerFn {
           ? null
           : mapFallbackReason(explanation?.answer_validation_error),
         answer_text_length: assistantText.length,
-        staleness_prefixed: prefixed,
+        staleness_prefixed: false,
       },
     };
     const parsed = WhatWouldFlipHandlerFactSchema.safeParse(fact);

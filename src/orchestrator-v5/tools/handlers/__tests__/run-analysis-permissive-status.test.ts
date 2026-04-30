@@ -246,8 +246,14 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
   });
 
   it('does NOT extend the handler fact schema for partial/unknown status', async () => {
-    // Correction 4: the fact carries the caveat through the existing
-    // `summary` string only. No new top-level or result-level fields.
+    // Correction 4 (alpha hardening): the fact carries partial/unknown
+    // caveats through the existing `summary` string only — NO new top-
+    // level fields are introduced for status.
+    //
+    // V5 state-trust (0.10.0): `graph_hash_at_run` and `computed_at` are
+    // now first-class optional fields on RunAnalysisResultSchema —
+    // independent of analysis_status. They appear on EVERY successful
+    // fact (including partial), so the allowlist below includes them.
     const handler = createRunAnalysisHandler({
       plotClient: mkPlot(withStatus('partial')),
       scenarioReader,
@@ -264,6 +270,8 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
           'win_probabilities',
           'summary',
           'enrichment',
+          'graph_hash_at_run',
+          'computed_at',
         ]).toContain(k);
       }
     }

@@ -192,6 +192,127 @@ describe('run_analysis handler — happy path', () => {
 });
 
 // ---------------------------------------------------------------------------
+// V5 state-trust freshness fields (schema 0.10.0+)
+//
+// graph_hash_at_run + computed_at must land on every successful run_analysis
+// fact so future turns can derive freshness deterministically. The fields
+// live on result alongside enrichment — NOT inside it — to keep the
+// handler-ownership invariant intact.
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — freshness fields on the fact', () => {
+  it('records graph_hash_at_run computed from snapshot.graph (analysis-affecting hash)', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(
+        makeScenarioSnapshot({
+          graph: {
+            nodes: [
+              { id: 'g', kind: 'goal' },
+              { id: 'f', kind: 'factor', observed_state: { value: 100 } },
+            ],
+            edges: [],
+          },
+        }),
+      ),
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.graph_hash_at_run).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('records computed_at as an ISO timestamp', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    const computedAt = fact.result.computed_at;
+    expect(computedAt).toBeDefined();
+    expect(() => new Date(computedAt!).toISOString()).not.toThrow();
+    expect(new Date(computedAt!).toISOString()).toBe(computedAt);
+  });
+
+  it('value-only edit on the snapshot graph produces a different graph_hash_at_run', async () => {
+    const baseSnapshot = makeScenarioSnapshot({
+      graph: {
+        nodes: [
+          { id: 'g', kind: 'goal' },
+          { id: 'f', kind: 'factor', observed_state: { value: 100 } },
+        ],
+        edges: [],
+      },
+    });
+    const editedSnapshot = makeScenarioSnapshot({
+      graph: {
+        nodes: [
+          { id: 'g', kind: 'goal' },
+          { id: 'f', kind: 'factor', observed_state: { value: 200 } },
+        ],
+        edges: [],
+      },
+    });
+
+    const baseHandler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(baseSnapshot),
+    });
+    const editedHandler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(editedSnapshot),
+    });
+
+    const baseOutcome = await baseHandler(makeInvocation());
+    const editedOutcome = await editedHandler(makeInvocation());
+    const baseFact = baseOutcome.handler_facts[0]!;
+    const editedFact = editedOutcome.handler_facts[0]!;
+    if (baseFact.fact_type !== 'run_analysis' || editedFact.fact_type !== 'run_analysis') {
+      throw new Error('wrong fact_type');
+    }
+    expect(baseFact.result.graph_hash_at_run).toBeDefined();
+    expect(editedFact.result.graph_hash_at_run).toBeDefined();
+    expect(baseFact.result.graph_hash_at_run).not.toBe(editedFact.result.graph_hash_at_run);
+  });
+
+  it('graph_hash_at_run is omitted when graph is structurally empty (no nodes, no edges, no options, no goal)', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(
+        makeScenarioSnapshot({ graph: { nodes: [], edges: [] } }),
+      ),
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.graph_hash_at_run).toBeUndefined();
+    // computed_at is always recorded even when the graph is empty
+    expect(fact.result.computed_at).toBeDefined();
+  });
+
+  it('freshness fields live on result alongside enrichment, NOT inside it', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    // CEE-owned freshness fields are top-level on result
+    expect(fact.result.graph_hash_at_run).toBeDefined();
+    expect(fact.result.computed_at).toBeDefined();
+    // enrichment is the byte-for-byte PLoT response — must NOT contain CEE
+    // freshness fields inside it
+    const enrichment = fact.result.enrichment ?? {};
+    expect(enrichment).not.toHaveProperty('graph_hash_at_run');
+    expect(enrichment).not.toHaveProperty('computed_at');
+    expect(enrichment).not.toHaveProperty('_cee_meta');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // assistant_text allowlist + forbidden patterns
 // ---------------------------------------------------------------------------
 

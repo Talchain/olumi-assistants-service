@@ -572,13 +572,30 @@ export interface GraphPatchBlockData {
       code?: string;
     }>;
     /**
-     * ISO-8601 UTC timestamp attached at emission time. Used by the UI store
-     * as a monotonic ordering guard so out-of-order V5 responses (which now
-     * carry analysis_ready on every graph-bearing turn, not just draft) cannot
-     * overwrite a fresher value with a stale one. Set by the wire-emit helper;
-     * never populated by computation paths internally.
+     * ISO-8601 UTC timestamp. V5 state-trust: when freshness derivation
+     * selected a prior run_analysis fact, this is THAT fact's
+     * computed_at (i.e. when the analysis ran), so explain / direct-
+     * answer turns do NOT restamp a fresher timestamp than the underlying
+     * analysis. When no fact is selected (freshness === 'none' /
+     * 'unknown' with no fact), it falls back to wire-emit time.
      */
     computed_at?: string;
+    /**
+     * V5 state-trust freshness verdict. Tells the UI whether the analysis
+     * matches the current graph state. Populated on every primary CEE
+     * dispatch path (turn_executor, chip_click, draft_graph, edit_graph).
+     * The `?` means "additive contract for forward compat" — future
+     * dispatch paths can adopt the wire fields gradually without breaking
+     * existing UI consumers; current paths always emit it.
+     */
+    freshness?: 'fresh' | 'stale' | 'unknown' | 'none';
+    /** Stable string code for the freshness reason — debug / telemetry. */
+    freshness_reason?: string;
+    /** Hash of the analysis-affecting graph fields at the moment
+     *  run_analysis executed. Present when freshness is fresh / stale. */
+    graph_hash_at_run?: string;
+    /** Hash of the analysis-affecting graph fields on this turn. */
+    current_graph_hash?: string;
   };
   /**
    * Explicit intervention updates extracted from edit_graph operations.

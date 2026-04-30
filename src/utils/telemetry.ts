@@ -462,6 +462,40 @@ export const TelemetryEvents = {
   HandlerInvocation: "v5.handler_invocation",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
+  // V5 state-trust freshness derivation. Emitted once per projection
+  // build (every turn). Single event is sufficient to reconstruct the
+  // freshness state for any turn. Fields:
+  //   freshness: 'fresh' | 'stale' | 'unknown' | 'none'
+  //   reason: FreshnessReason (graph_hash_match / graph_hash_diverged /
+  //           legacy_fact_missing_hash / current_graph_hash_unavailable /
+  //           no_successful_run_analysis_fact / invariant_failed)
+  //   selected_fact_index: number | null
+  //   graph_hash_at_run: string | null
+  //   current_graph_hash: string | null
+  //   computed_at: ISO string | null
+  //   prior_fact_count: number
+  //   analysis_state_source: 'request' | 'fallback' | 'absent'
+  AnalysisFreshnessDerived: "v5.analysis_freshness.derived",
+  /** Hard invariant violation: hashes were both present but freshness
+   *  derived as 'unknown'. Fall back to 'unknown' (never 'stale'),
+   *  emit so ops can investigate. */
+  AnalysisFreshnessInvariantFailed: "v5.analysis_freshness.invariant_failed",
+  /** Soft signal: current graph hash was null (graph absent on this
+   *  turn) so the comparison was impossible. */
+  AnalysisFreshnessGraphHashMissing: "v5.analysis_freshness.graph_hash_missing",
+  /** Selection signal: which fact won and why. Separate from .derived so
+   *  operators can grep "fact_selected" without parsing the bigger event.
+   *  Fires only when a fact was actually selected (selected_fact_index
+   *  non-null). */
+  AnalysisFreshnessFactSelected: "v5.analysis_freshness.fact_selected",
+  /** Telemetry-only marker for dispatcher paths (currently draft_graph)
+   *  that synthesise the freshness verdict without reading the prior
+   *  fact chain. The wire freshness still reflects the canonical state
+   *  (none / unknown); this event records the assumption so operators
+   *  can investigate replay scenarios where a "first-turn" trigger
+   *  shape lands on a session that already has a prior fact. */
+  AnalysisFreshnessFirstTurnAssumed: "v5.analysis_freshness.first_turn_assumed",
+
   // V5 TurnExecutor per-code failure composition.
   // Emitted once per failure path that runs a per-code composer. Fields:
   //   request_id, session_id, stage,

@@ -237,6 +237,25 @@ export type AnalysisReadyStatusT = z.infer<typeof AnalysisReadyStatus>;
  * - When status is "needs_encoding", some options have raw values awaiting encoding
  * - When status is "needs_user_input", blockers identify missing factor values
  */
+/**
+ * V5 state-trust freshness verdict (additive on analysis_ready). Tells
+ * the UI whether the analysis it can see is up to date with the current
+ * graph. Populated on every primary CEE dispatch path that ships
+ * analysis_ready (turn_executor, chip_click, draft_graph, edit_graph).
+ * The field is `.optional()` for forward compatibility — additive
+ * contract that future dispatch paths can adopt without breaking
+ * existing UI consumers. Not "frequently absent in practice".
+ *
+ *   fresh   → analysis matches the current graph; render figures normally
+ *   stale   → graph has changed since the analysis ran; UI may render a
+ *             pill / rerun affordance
+ *   unknown → freshness could not be derived (legacy fact missing the
+ *             0.10.0 graph_hash_at_run, or no graph on this turn)
+ *   none    → no successful run_analysis fact exists yet
+ */
+export const AnalysisFreshness = z.enum(['fresh', 'stale', 'unknown', 'none']);
+export type AnalysisFreshnessT = z.infer<typeof AnalysisFreshness>;
+
 export const AnalysisReadyPayload = z.object({
   /** Options with numeric interventions */
   options: z.array(OptionForAnalysis),
@@ -262,6 +281,20 @@ export const AnalysisReadyPayload = z.object({
     explanation: z.string().optional(),
     code: z.string().optional(),
   }).passthrough()).default([]),
+  // V5 state-trust additive fields (CEE → UI). All optional so
+  // pre-state-trust dispatch paths still validate.
+  /** Freshness verdict (see AnalysisFreshness). */
+  freshness: AnalysisFreshness.optional(),
+  /** Stable string code for the freshness reason. UI does NOT render
+   *  this directly — surface for debugging / telemetry / contract tests. */
+  freshness_reason: z.string().optional(),
+  /** Hash of the analysis-affecting graph fields at the moment
+   *  run_analysis executed. Present when freshness is fresh / stale. */
+  graph_hash_at_run: z.string().optional(),
+  /** Hash of the analysis-affecting graph fields on this turn. Present
+   *  when the turn has graph state. UI compares against
+   *  graph_hash_at_run to confirm freshness independently. */
+  current_graph_hash: z.string().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type AnalysisReadyPayloadT = z.infer<typeof AnalysisReadyPayload>;
 

@@ -155,6 +155,17 @@ export interface FinaliserContext {
    * not as a blocker.
    */
   readonly analysisReady?: AnalysisReadyPayload;
+  /**
+   * V5 state-trust freshness derivation. When provided, the finaliser
+   * threads it into `attachComputedAt` so analysis_ready.computed_at
+   * uses the selected fact's timestamp (not wire-emit time) and the
+   * freshness wire fields are stamped on the response. Populated on
+   * every primary CEE dispatch path that produces analysis_ready:
+   * turn_executor, chip_click, draft_graph, edit_graph. system_event
+   * may omit (most variants don't ship analysis_ready); the field stays
+   * `optional` in the schema for forward-compat.
+   */
+  readonly freshness?: import('./context/freshness.js').FreshnessDerivation;
 }
 
 // ─── The finaliser ────────────────────────────────────────────────────────
@@ -205,7 +216,7 @@ export function finaliseV5Response(
     ? ceeTraceClean
     : sanitiseEnrichmentBlocks(ceeTraceClean, ctx.analysisReady ?? null);
   const stamped: OlumiResponse = ctx.analysisReady
-    ? { ...scrubbed, analysis_ready: attachComputedAt(ctx.analysisReady) }
+    ? { ...scrubbed, analysis_ready: attachComputedAt(ctx.analysisReady, ctx.freshness) }
     : { ...scrubbed };
   FINALISED_RESPONSES.add(stamped);
   return stamped as FinalisedV5Response;
