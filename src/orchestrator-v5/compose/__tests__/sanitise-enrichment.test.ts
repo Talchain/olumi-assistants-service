@@ -1,0 +1,440 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  CRITIQUE_BUCKETS,
+  S_BUCKET_REPLACEMENTS,
+  bucketFor,
+  isAllowlistedPath,
+  partitionCritiques,
+  sanitiseEnrichment,
+  sanitiseEnrichmentText,
+  type CritiqueLike,
+} from '../sanitise-enrichment.js';
+import type { LabelResolverContext } from '../resolve-label.js';
+
+const GRAPH = {
+  nodes: [
+    { id: 'opt_hire_local', label: 'Hire Two Senior Engineers Locally', kind: 'option' },
+    { id: 'opt_offshore', label: 'Engage Offshore Partner', kind: 'option' },
+    { id: 'fac_hiring_cost', label: 'Hiring and Staffing Cost', kind: 'factor' },
+  ],
+  edges: [],
+} as unknown as LabelResolverContext['graph'];
+
+const CTX: LabelResolverContext = { graph: GRAPH };
+
+// =============================================================================
+// bucketFor — fail-safe rule + classification table coverage
+// =============================================================================
+
+describe('bucketFor — bucket classification', () => {
+  it('every U-bucket entry maps to U', () => {
+    const expectedU = ['NO_OPTIONS', 'INSUFFICIENT_OPTIONS', 'DEGENERATE_OUTCOMES'];
+    for (const code of expectedU) {
+      expect(bucketFor(code)).toBe('U');
+      expect(CRITIQUE_BUCKETS[code]).toBe('U');
+    }
+  });
+
+  it('every S-bucket entry maps to S', () => {
+    const expectedS = [
+      'EMPTY_INTERVENTIONS', 'INVALID_INTERVENTION_TARGET',
+      'NO_EFFECTIVE_PATH_TO_GOAL', 'IDENTICAL_OPTIONS', 'GRAPH_DISCONNECTED',
+      'OPTION_NO_INTERVENTIONS', 'LOW_EFFECTIVE_SAMPLES',
+      'DEGENERATE_OPTION_ZERO_VARIANCE', 'HIGH_TIE_RATE',
+    ];
+    for (const code of expectedS) {
+      expect(bucketFor(code)).toBe('S');
+    }
+  });
+
+  it('every D-bucket entry maps to D', () => {
+    const expectedD = [
+      'MISSING_GOAL_NODE', 'GRAPH_CYCLE_DETECTED', 'GRAPH_EMPTY',
+      'INVALID_NODE_ID', 'DUPLICATE_NODE_ID', 'EDGE_STRENGTH_OUT_OF_RANGE',
+      'EDGE_STD_INVALID', 'EDGE_ENDPOINT_MISSING', 'NEGLIGIBLE_EDGE_STRENGTH',
+      'DUPLICATE_OPTION_ID', 'INTERVENTION_VALUE_INVALID', 'MONTE_CARLO_FAILED',
+      'BASELINE_NEAR_ZERO', 'INFERENCE_TIMEOUT', 'SEED_INVALID',
+      'NUMERICAL_INSTABILITY', 'IDENTIFIABILITY_ISSUE',
+      'CONSTRAINT_NODE_DEFAULT_BASE', 'INTERNAL_ERROR',
+    ];
+    for (const code of expectedD) {
+      expect(bucketFor(code)).toBe('D');
+    }
+  });
+
+  it('classification totals match the plan: D=20, U=3, S=9 (across 31 ISL codes — uncoded is treated D by default)', () => {
+    const counts = { D: 0, U: 0, S: 0 };
+    for (const b of Object.values(CRITIQUE_BUCKETS)) counts[b]++;
+    expect(counts.U).toBe(3);
+    expect(counts.S).toBe(9);
+    // 19 explicit D entries; the captured uncoded leak hits the
+    // fail-safe default (no entry in the map → bucketFor returns 'D').
+    expect(counts.D).toBe(19);
+  });
+
+  it('FAIL-SAFE — unknown codes default to D', () => {
+    expect(bucketFor('UNKNOWN_NEW_CODE_xyzzy')).toBe('D');
+    expect(bucketFor(undefined)).toBe('D');
+    expect(bucketFor(null)).toBe('D');
+    expect(bucketFor('')).toBe('D');
+  });
+});
+
+// =============================================================================
+// S_BUCKET_REPLACEMENTS — Paul-approved copy verbatim
+// =============================================================================
+
+describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', () => {
+  it('EMPTY_INTERVENTIONS', () => {
+    const out = S_BUCKET_REPLACEMENTS.EMPTY_INTERVENTIONS!(CTX, {
+      affected_option_ids: ['opt_hire_local'],
+    });
+    expect(out).toBe(
+      "Option 'Hire Two Senior Engineers Locally' does not change anything yet. Specify what makes this option different.",
+    );
+  });
+
+  it('INVALID_INTERVENTION_TARGET', () => {
+    const out = S_BUCKET_REPLACEMENTS.INVALID_INTERVENTION_TARGET!(CTX, {
+      affected_option_ids: ['opt_offshore'],
+    });
+    expect(out).toBe(
+      "Option 'Engage Offshore Partner' refers to something that is not currently in the model.",
+    );
+  });
+
+  it('NO_EFFECTIVE_PATH_TO_GOAL', () => {
+    const out = S_BUCKET_REPLACEMENTS.NO_EFFECTIVE_PATH_TO_GOAL!(CTX, {
+      affected_option_ids: ['opt_hire_local'],
+    });
+    expect(out).toBe(
+      "Option 'Hire Two Senior Engineers Locally' does not currently connect to your goal.",
+    );
+  });
+
+  it('IDENTICAL_OPTIONS', () => {
+    const out = S_BUCKET_REPLACEMENTS.IDENTICAL_OPTIONS!(CTX, {
+      affected_option_ids: ['opt_hire_local', 'opt_offshore'],
+    });
+    expect(out).toBe(
+      "Options 'Hire Two Senior Engineers Locally' and 'Engage Offshore Partner' currently make the same changes, so the analysis treats them as equivalent.",
+    );
+  });
+
+  it('GRAPH_DISCONNECTED', () => {
+    const out = S_BUCKET_REPLACEMENTS.GRAPH_DISCONNECTED!(CTX, {});
+    expect(out).toBe('Some parts of the model are not connected to your goal.');
+  });
+
+  it('OPTION_NO_INTERVENTIONS', () => {
+    const out = S_BUCKET_REPLACEMENTS.OPTION_NO_INTERVENTIONS!(CTX, {
+      affected_option_ids: ['opt_offshore'],
+    });
+    expect(out).toBe(
+      "Option 'Engage Offshore Partner' represents the current state, with no changes applied.",
+    );
+  });
+
+  it('LOW_EFFECTIVE_SAMPLES', () => {
+    const out = S_BUCKET_REPLACEMENTS.LOW_EFFECTIVE_SAMPLES!(CTX, {});
+    expect(out).toBe(
+      'This analysis is less reliable than usual, so treat the result as a signal to check rather than a settled answer.',
+    );
+  });
+
+  it('DEGENERATE_OPTION_ZERO_VARIANCE', () => {
+    const out = S_BUCKET_REPLACEMENTS.DEGENERATE_OPTION_ZERO_VARIANCE!(CTX, {
+      affected_option_ids: ['opt_hire_local'],
+    });
+    expect(out).toBe("Option 'Hire Two Senior Engineers Locally' does not currently affect the goal.");
+  });
+
+  it('HIGH_TIE_RATE', () => {
+    const out = S_BUCKET_REPLACEMENTS.HIGH_TIE_RATE!(CTX, {});
+    expect(out).toBe(
+      'The options are very close in this analysis. Treat the current lead as finely balanced.',
+    );
+  });
+
+  it('falls back to "the relevant option" when no graph context is available', () => {
+    const out = S_BUCKET_REPLACEMENTS.EMPTY_INTERVENTIONS!({}, {
+      affected_option_ids: ['opt_unknown'],
+    });
+    expect(out).toBe(
+      "Option 'the relevant option' does not change anything yet. Specify what makes this option different.",
+    );
+  });
+
+  it('all 9 replacements are free of the forbidden vocabulary set', () => {
+    const FORBIDDEN = [
+      /\binterventions?\b/i, /\bnode\b/i, /\bsamples?\b/i,
+      /\bmonte\s+carlo\b/i, /\bcausal\s+paths?\b/i, /\bbootstrap\b/i,
+      /\bvariance\b/i, /\bsimulated\s+futures?\b/i, /\bwin\s+probabilit/i,
+    ];
+    const checkAgainstForbidden = (s: string) => {
+      for (const re of FORBIDDEN) {
+        expect(s).not.toMatch(re);
+      }
+    };
+    for (const fn of Object.values(S_BUCKET_REPLACEMENTS)) {
+      const out = fn(CTX, { affected_option_ids: ['opt_hire_local', 'opt_offshore'] });
+      checkAgainstForbidden(out);
+    }
+  });
+});
+
+// =============================================================================
+// sanitiseEnrichmentText — per-string scrubber
+// =============================================================================
+
+describe('sanitiseEnrichmentText — per-string scrubber', () => {
+  it('resolves a known entity ID to its label', () => {
+    const r = sanitiseEnrichmentText("Option 'opt_hire_local' looks weak.", CTX);
+    expect(r.text).toBe("Option 'Hire Two Senior Engineers Locally' looks weak.");
+    expect(r.resolved).toEqual([
+      { id: 'opt_hire_local', label: 'Hire Two Senior Engineers Locally' },
+    ]);
+    expect(r.hardBans).toEqual([]);
+  });
+
+  it('falls back to prefix-aware generic when label is unknown', () => {
+    const r = sanitiseEnrichmentText('opt_mystery is risky.', CTX);
+    expect(r.text).toBe('the relevant option is risky.');
+    expect(r.hardBans).toEqual([]);
+  });
+
+  it('flags HARD_BAN tokens (Tier A) — captured staging leak', () => {
+    const r = sanitiseEnrichmentText(
+      "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
+      CTX,
+    );
+    expect(r.text).toContain('Hire Two Senior Engineers Locally');
+    expect(r.hardBans.length).toBeGreaterThan(0);
+    // Each hard-ban hit is a real engine token
+    expect(r.hardBans.some((h) => /^Node '/.test(h))).toBe(true);
+    expect(r.hardBans.some((h) => /filtered before analysis/i.test(h))).toBe(true);
+  });
+
+  it('flags WARNING tokens (Tier B) — does not modify text', () => {
+    const r = sanitiseEnrichmentText(
+      'The interventions are causal paths through the model.',
+      CTX,
+    );
+    expect(r.warnings.length).toBeGreaterThan(0);
+    // Tier B never goes into hard-bans
+    expect(r.hardBans).toEqual([]);
+  });
+
+  it('returns clean text unchanged with empty resolved/hardBans/warnings', () => {
+    const r = sanitiseEnrichmentText('Decision quality looks good.', CTX);
+    expect(r.text).toBe('Decision quality looks good.');
+    expect(r.resolved).toEqual([]);
+    expect(r.hardBans).toEqual([]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('handles empty / null input safely', () => {
+    expect(sanitiseEnrichmentText('', CTX)).toEqual({
+      text: '',
+      hardBans: [],
+      warnings: [],
+      resolved: [],
+    });
+  });
+});
+
+// =============================================================================
+// isAllowlistedPath
+// =============================================================================
+
+describe('isAllowlistedPath — 15 paths', () => {
+  it.each([
+    '$.critiques[0].message',
+    '$.critiques[3].suggestion',
+    '$.gaps[0].description',
+    '$.robustness[0].caveat',
+    '$.summary',
+    '$.narrative',
+    '$.improvement_guidance[0]',
+    '$.factor_sensitivity[2].interpretation',
+    '$.m1_review[0].text',
+    '$.m1_coaching[0].text',
+    '$.rationale',
+    '$.robustness_synthesis',
+    '$.review_cards[0].what',
+    '$.review_cards[0].why',
+    '$.review_cards[0].items[2].suggested_evidence',
+  ])('allowlists %s', (path) => {
+    expect(isAllowlistedPath(path)).toBe(true);
+  });
+
+  it.each([
+    '$.critiques[0].id',
+    '$.critiques[0].code',
+    '$.critiques[0].severity',
+    '$.critiques[0].affected_option_ids',
+    '$.payloads',
+    '$._meta',
+    '$.review_cards[0].card_id',
+    '$.review_cards[0].suggested_action',
+    '$.review_cards[0].items[0].factor_id',
+    '$.review_cards[0].items[0].factor_label',
+    '$.fragile_edges[0]',
+  ])('rejects structural path %s', (path) => {
+    expect(isAllowlistedPath(path)).toBe(false);
+  });
+});
+
+// =============================================================================
+// partitionCritiques — bucket routing
+// =============================================================================
+
+describe('partitionCritiques — bucket routing + structural preservation', () => {
+  it('routes bucket-D codes to diagnostic, bucket-U/S to user', () => {
+    const critiques: CritiqueLike[] = [
+      { id: 'c1', code: 'NO_OPTIONS', severity: 'blocker', message: 'No options provided for comparison' },
+      { id: 'c2', code: 'IDENTICAL_OPTIONS', severity: 'blocker', message: "Options 'A' and 'B' have identical interventions", affected_option_ids: ['opt_hire_local', 'opt_offshore'] },
+      { id: 'c3', code: 'MISSING_GOAL_NODE', severity: 'blocker', message: 'Goal node not found in graph' },
+    ];
+    const r = partitionCritiques(critiques, CTX);
+    expect(r.user).toHaveLength(2);
+    expect(r.diagnostic).toHaveLength(1);
+    expect(r.diagnostic[0]?.code).toBe('MISSING_GOAL_NODE');
+  });
+
+  it('replaces bucket-S messages with the approved copy', () => {
+    const critiques: CritiqueLike[] = [
+      { id: 'c1', code: 'IDENTICAL_OPTIONS', severity: 'blocker', message: 'engine vocabulary message', affected_option_ids: ['opt_hire_local', 'opt_offshore'] },
+    ];
+    const r = partitionCritiques(critiques, CTX);
+    expect(r.user[0]?.message).toBe(
+      "Options 'Hire Two Senior Engineers Locally' and 'Engage Offshore Partner' currently make the same changes, so the analysis treats them as equivalent.",
+    );
+  });
+
+  it('preserves structural fields verbatim (id, code, severity, source, affected_*)', () => {
+    const c: CritiqueLike = {
+      id: 'c1',
+      code: 'IDENTICAL_OPTIONS',
+      severity: 'blocker',
+      source: 'validation',
+      affected_option_ids: ['opt_hire_local', 'opt_offshore'],
+      affected_node_ids: ['opt_hire_local', 'opt_offshore'],
+      message: 'original',
+    };
+    const r = partitionCritiques([c], CTX);
+    const out = r.user[0]!;
+    expect(out.id).toBe('c1');
+    expect(out.code).toBe('IDENTICAL_OPTIONS');
+    expect(out.severity).toBe('blocker');
+    expect(out.source).toBe('validation');
+    expect(out.affected_option_ids).toEqual(['opt_hire_local', 'opt_offshore']);
+    expect(out.affected_node_ids).toEqual(['opt_hire_local', 'opt_offshore']);
+    // Only `message` changed.
+    expect(out.message).not.toBe('original');
+  });
+
+  it('routes the captured staging leak (uncoded) to diagnostic via fail-safe default', () => {
+    const c: CritiqueLike = {
+      id: 'c1',
+      // no code field — uncoded captured leak
+      severity: 'info',
+      source: 'preprocessing',
+      message: "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
+    };
+    const r = partitionCritiques([c], CTX);
+    expect(r.user).toHaveLength(0);
+    expect(r.diagnostic).toHaveLength(1);
+    // Diagnostic message preserved verbatim
+    expect(r.diagnostic[0]?.message).toBe(
+      "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
+    );
+  });
+});
+
+// =============================================================================
+// sanitiseEnrichment — full subtree walker
+// =============================================================================
+
+describe('sanitiseEnrichment — full subtree walker', () => {
+  it('partitions critiques + scrubs allowlisted leaves + preserves structural fields', () => {
+    const enrichment: Record<string, unknown> = {
+      critiques: [
+        { id: 'c1', code: 'IDENTICAL_OPTIONS', message: 'engine wording', affected_option_ids: ['opt_hire_local', 'opt_offshore'] },
+        { id: 'c2', code: 'MISSING_GOAL_NODE', message: 'engine validation' },
+      ],
+      summary: 'Option opt_hire_local leads.',
+      narrative: 'fac_hiring_cost is the strongest driver.',
+      payloads: { isl_request: { secret: 'preserved verbatim' } },
+      _meta: { response_hash: 'abc123', payloads: 'should not change' },
+      factor_sensitivity: [
+        { node_id: 'fac_hiring_cost', interpretation: 'Decision is sensitive to fac_hiring_cost' },
+      ],
+      review_cards: [
+        {
+          card_id: 'ep_xxx',
+          card_type: 'evidence_priority',
+          what: 'Evidence on opt_hire_local could change the recommendation.',
+          why: 'Reasons.',
+          items: [
+            { node_id: 'fac_hiring_cost', factor_label: 'Hiring and Staffing Cost', suggested_evidence: 'Gather data on opt_offshore.' },
+          ],
+        },
+      ],
+    };
+    const before = structuredClone(enrichment);
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+
+    // Diagnostic critiques routed
+    expect(r.diagnostic.critiques).toHaveLength(1);
+    expect(r.diagnostic.critiques[0]?.code).toBe('MISSING_GOAL_NODE');
+    // User critiques have S-bucket replacement
+    expect((r.enrichment.critiques as CritiqueLike[])[0]?.message).toContain(
+      "Hire Two Senior Engineers Locally",
+    );
+    // Summary/narrative had IDs resolved
+    expect(r.enrichment.summary).toBe('Option Hire Two Senior Engineers Locally leads.');
+    expect(r.enrichment.narrative).toBe('Hiring and Staffing Cost is the strongest driver.');
+    // Factor sensitivity interpretation scrubbed
+    const fs = (r.enrichment.factor_sensitivity as Array<Record<string, unknown>>);
+    expect(fs[0]?.interpretation).toBe('Decision is sensitive to Hiring and Staffing Cost');
+    expect(fs[0]?.node_id).toBe('fac_hiring_cost'); // structural preserved
+    // Review-card prose scrubbed
+    const rc = (r.enrichment.review_cards as Array<Record<string, unknown>>);
+    expect(rc[0]?.what).toBe('Evidence on Hire Two Senior Engineers Locally could change the recommendation.');
+    // Structural fields byte-equal
+    expect(rc[0]?.card_id).toBe('ep_xxx');
+    expect(rc[0]?.card_type).toBe('evidence_priority');
+    const rcItems = (rc[0]?.items as Array<Record<string, unknown>>);
+    expect(rcItems[0]?.node_id).toBe('fac_hiring_cost');
+    expect(rcItems[0]?.factor_label).toBe('Hiring and Staffing Cost');
+    expect(rcItems[0]?.suggested_evidence).toBe('Gather data on Engage Offshore Partner.');
+
+    // Payloads + _meta byte-equal
+    expect(r.enrichment.payloads).toEqual(before.payloads);
+    expect(r.enrichment._meta).toEqual(before._meta);
+  });
+
+  it('reports hard-ban hits when an enrichment leaf carries Tier-A tokens', () => {
+    const enrichment: Record<string, unknown> = {
+      critiques: [],
+      summary: "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    expect(r.hardBans.length).toBeGreaterThan(0);
+    expect(r.hardBans.some((h) => h.path === '$.summary')).toBe(true);
+  });
+
+  it('returns clean (no hard-bans, no warnings) on a captured-fixture-clean enrichment', () => {
+    const enrichment: Record<string, unknown> = {
+      critiques: [
+        { id: 'c1', code: 'NO_OPTIONS', message: 'No options provided for comparison' },
+      ],
+      summary: 'Decision quality looks good.',
+    };
+    const r = sanitiseEnrichment(enrichment, GRAPH);
+    expect(r.hardBans).toEqual([]);
+    expect(r.warnings).toEqual([]);
+  });
+});

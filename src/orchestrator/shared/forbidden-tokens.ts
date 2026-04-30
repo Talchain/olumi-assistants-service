@@ -104,3 +104,52 @@ export const INTERNAL_TEMPLATE_TOKENS: readonly string[] = [
   'bootstrap',
   'causal path',
 ] as const;
+
+// ----------------------------------------------------------------------------
+// Tiered patterns (used by the enrichment scrubber)
+// ----------------------------------------------------------------------------
+//
+// Tier A: hard-ban — match → fail the sanitiser test, fail egress
+// Tier B: warning  — match → log, do not fail
+//
+// Two distinct exports so callers (the V5 enrichment scrubber) can route
+// matches differently. The `INTERNAL_TEMPLATE_TOKENS` array above stays
+// for callers that just want a flat list. Token coverage is a SUPERSET of
+// the flat array: Tier A + Tier B together include every token from the
+// flat array, plus a few additional precise patterns
+// (`bootstrap_sampling`, `ParameterUncertainty`, `point_mass`) that the
+// flat array doesn't enumerate because they're substrings of broader
+// terms it already covers.
+
+/**
+ * HARD-BAN — precise template patterns from engine code with no
+ * legitimate user-facing use. A match in user-facing prose is a
+ * sanitiser failure.
+ */
+export const HARD_BAN_PATTERNS: readonly RegExp[] = [
+  /\bNode '/,                              // capital-N "Node '" — captured-leak prefix
+  /\bkind\s*=\s*'/,                        // kind='option' template literal
+  /filtered before analysis/i,              // captured-leak suffix
+  /Option nodes are/,                       // capital-O template prefix
+  /_pipeline_outcome/,                      // wire-shape internal field name
+  /\bmonte\s+carlo\b/i,                     // engine algorithm name
+  /\bepsilon-guarded\b/i,                   // engine numerical-stability term
+  /\bbootstrap_sampling\b/i,                // confidence_source enum value
+  /\bParameterUncertainty\b/,               // ISL class name
+  /\bpoint_mass\b/,                         // distribution enum value
+];
+
+/**
+ * WARNING — broader terms that *might* be jargon but appear in
+ * legitimate prose. Tracked in evidence/warnings, never block.
+ */
+export const WARNING_PATTERNS: readonly RegExp[] = [
+  /\bISL\b/,                                // could appear in docs / coaching refs
+  /\binterventions?\b/i,                    // already used in some coaching templates
+  /\bintervention[_\s]targets?\b/i,
+  /\bnumerically\s+valid\s+samples?\b/i,
+  /\be-value\b/i,
+  /\bcausal\s+paths?\b/i,
+  /\bbootstrap\b/i,                         // without _sampling — could be unrelated
+  /\bpayloads?\b/i,                         // ambiguous — could be legitimate user copy
+];
