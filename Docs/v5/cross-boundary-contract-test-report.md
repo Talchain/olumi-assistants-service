@@ -45,14 +45,15 @@ No diff on the 6 shared fixtures.
 
 ## 2. Tests added
 
-### CEE (`olumi-assistants-service`) — 40 brief-added tests
+### CEE (`olumi-assistants-service`) — 41 brief-added tests
 | File | Tests | Status |
 |---|---|---|
 | `tests/contract/fixtures-schema.test.ts` | 7 | pass |
-| `tests/contract/endpoint-feature-matrix.test.ts` | 19 | 8 pass route-verified + 11 `not_route_verified` (V5 substitutes + Stage-5 sanitisation substitute) |
+| `tests/contract/endpoint-feature-matrix.test.ts` | 18 | 8 pass route-verified + 10 `not_route_verified` (V5 substitutes) |
+| `tests/contract/stage-5-sanitisation.test.ts` | 2 | pass (`not_route_verified` — Stage 5 boundary substitute for brief test 5) |
 | `tests/contract/field-coverage-audit.test.ts` | 14 | pass (incl. path-level walk against explicit UI_CONSUMED_PATHS, passthrough-prefix exemption, classification structure check, drift-detection meta-test) |
 
-Full CEE contract suite (incl. pre-existing `tests/contract/{ui-cee-contract,cross-service.blocked}.test.ts`): **68 passed | 21 skipped**.
+Full CEE contract suite (incl. pre-existing `tests/contract/{ui-cee-contract,cross-service.blocked}.test.ts`): **69 passed | 21 skipped**.
 
 ### UI (`DecisionGuideAI`) — 29 brief-added tests
 | File | Tests | Status |
@@ -76,7 +77,7 @@ Per the brief's skip-and-substitute policy, V5 turn route-level tests were not i
 | 10. Fresh explanation has no rerun chip | `not_route_verified` | `[fresh-fixture] explain-fresh fixture: no staleness prefix, no run_analysis chip` |
 | 11. No raw entity IDs in user-facing fields | `not_route_verified` | `[egress-guard] sanitiseOlumiResponseForEgress scrubs entity-ID-shaped tokens` + `[egress-scan] all user-facing fixture strings are entity-ID clean (path-aware exclusions)` |
 | 12. No forbidden terms in user-facing copy | `not_route_verified` | included in failure-fixture and egress-scan tests |
-| 5. Mocked coaching containing fac_test_id is sanitised in the response | `not_route_verified` | `[stage-5 substitute] dirty coaching → narrow + sanitise produces no fac_/opt_ leaks` (composes `narrowCoachingForResponse` + per-string `sanitiseUserFacingText` exactly as Stage 5 does) |
+| 5. Mocked coaching containing fac_test_id is sanitised in the response | `not_route_verified` | `tests/contract/stage-5-sanitisation.test.ts` — drives `runStagePackage(ctx)` with dirty coaching at the Stage 5 boundary, asserts `ctx.ceeResponse.coaching` is scrubbed end-to-end. Catches integration drift if Stage 5 stops calling its sanitiser. |
 
 The substitute primitives all share state with the route — the route's job is to call them in sequence — so substitute coverage is functionally equivalent for the field-shape contract this brief is testing.
 
@@ -158,7 +159,12 @@ Substitutes are direct unit tests of `applyStalenessPrefix`, `buildFailureRespon
 Brief tests 7-8 and 17-18 are JSON-level scans on adapter output rather than full RTL component renders. Rationale: the cross-boundary contract is the *shape* of what the adapter produces, and component-level rendering for `PreAnalysisPanel`, message bubbles, and chips is already covered in `src/canvas/components/pre-analysis/__tests__/*.spec.tsx` and adjacent component tests. Mounting those components in the contract-test layer would duplicate render-tree assertions without adding cross-boundary signal — the assertion that no `bias_signals[].target` ever appears in `bias_signals[].detail` (test 7) and no raw entity IDs appear in user-facing prose paths (tests 8, 17, 18) is enforceable on the JSON. If future render code introduces a new path that concatenates structural pointers into rendered text, the corresponding component test catches it.
 
 ### Stage-5 sanitisation substitute (brief test 5, `not_route_verified`)
-The brief's *"Mocked coaching containing `fac_test_id` is sanitised in the response"* contract cannot be route-verified in this branch because the production chokepoint `sanitiseCoachingForDisplay` (`src/cee/unified-pipeline/stages/package.ts:105-135`) is module-private and the brief forbids production code changes. The substitute test composes the same primitives Stage 5 calls — `narrowCoachingForResponse` (exported, `src/orchestrator/draft-coaching.ts:113`) followed by per-string `sanitiseUserFacingText` (exported, `src/orchestrator-v5/compose/output-safety.ts:179`) — applied to a dirty input containing `fac_test_id` and `opt_test_id` in `summary`, `strengthen_items[].label`, `strengthen_items[].detail`, `widening_log[].label`, `widening_log[].reason`, and `bias_signals[].detail`. Asserts: every user-facing string in the output is leak-free; structural pointer `bias_signals[].target` is preserved verbatim. Classified `not_route_verified` and listed in §3 with the recommendation that this test be replaced with a route-verified equivalent if `sanitiseCoachingForDisplay` is exported in a future change.
+The brief's *"Mocked coaching containing `fac_test_id` is sanitised in the response"* contract cannot be route-verified in this branch because the production chokepoint `sanitiseCoachingForDisplay` (`src/cee/unified-pipeline/stages/package.ts:105-135`) is module-private and the brief forbids production code changes. The substitute (`tests/contract/stage-5-sanitisation.test.ts`) drives `runStagePackage(ctx)` — the Stage 5 boundary the unified pipeline calls in production — directly with a minimal `StageContext` carrying a dirty `coaching` block. The test mocks the same ~15 collaborator modules as `tests/unit/cee.unified-pipeline.stage-5.test.ts` (the existing Stage 5 test file) and asserts:
+- `ctx.ceeResponse.coaching.summary` and every `strengthen_items[].{label,detail}`, `widening_log[].{label,reason}`, `bias_signals[].detail` are leak-free
+- structural pointer `bias_signals[].target` is preserved verbatim
+- a clean coaching block is preserved without false-positive scrubbing
+
+This is the closest stable lower-level substitute and catches integration drift if Stage 5 ever stops calling its sanitiser. Classified `not_route_verified` because the route layer (which forwards `ctx.ceeResponse` unchanged via `runUnifiedPipeline`) is not exercised here. Listed in §3.
 
 ---
 
@@ -186,7 +192,7 @@ cd ~/Documents/GitHub/olumi-assistants-service
 ls tests/fixtures/cross-service/*.json | grep -v fixture-metadata | wc -l
 # 9 (7 brief fixtures + 2 pre-existing blocked-response)
 
-pnpm exec vitest run tests/contract/   # 68 passed | 21 skipped (5 files)
+pnpm exec vitest run tests/contract/   # 69 passed | 21 skipped (6 files)
 pnpm exec tsc -p tsconfig.build.json --noEmit   # clean
 git status --short | grep "^?? src/"            # empty
 git diff --name-only origin/staging -- src/ | wc -l   # 0
