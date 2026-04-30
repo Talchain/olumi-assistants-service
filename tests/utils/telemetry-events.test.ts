@@ -411,6 +411,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // v5-maintenance (2026-04-21): V5 additions. When adding new V5
         // telemetry events, ALSO add them here so this canary keeps flagging
         // accidental renames.
+        AnalysisFreshnessDerived: "v5.analysis_freshness.derived",
+        AnalysisFreshnessGraphHashMissing: "v5.analysis_freshness.graph_hash_missing",
+        AnalysisFreshnessInvariantFailed: "v5.analysis_freshness.invariant_failed",
         BoundaryValidation: "boundary.validation",
         ContextPackAssembled: "v5.context_pack.assembled",
         CqeExtraction: "cqe.extraction",
@@ -463,7 +466,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -947,6 +950,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.ValidatorOutcome,
         TelemetryEvents.RecoveryResponse,
         TelemetryEvents.HandlerInvocation,
+        // V5 state-trust freshness derivation (debug-only until Datadog
+        // alignment lands; structured logs are the source of truth).
+        TelemetryEvents.AnalysisFreshnessDerived,
+        TelemetryEvents.AnalysisFreshnessGraphHashMissing,
+        TelemetryEvents.AnalysisFreshnessInvariantFailed,
         // Answer-carrying explanation handlers (debug-only — no Datadog
         // mapping yet; observability is via structured logs).
         TelemetryEvents.V5ExplanationAnswerVerdict,
@@ -1356,6 +1364,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.decision_review_degraded",
         "v5.deterministic_value_update",
         // V5 alpha hardening Phase 2.5: primary lifecycle events.
+        "v5.analysis_freshness.derived",
+        "v5.analysis_freshness.graph_hash_missing",
+        "v5.analysis_freshness.invariant_failed",
         "v5.context_pack.assembled",
         "v5.explanation.answer_verdict",
         "v5.explanation.evidence",
