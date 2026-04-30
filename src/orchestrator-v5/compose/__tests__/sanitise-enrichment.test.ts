@@ -830,3 +830,57 @@ describe('P2 fail-shut coverage — every allowlisted prose path replaces, never
     expect(post).not.toMatch(/filtered before analysis/i);
   });
 });
+
+// =============================================================================
+// Idempotency — running the sanitiser twice must be a no-op
+// =============================================================================
+//
+// The enricher (Commit 5) and the response-finaliser backstop (Commit 6)
+// both call sanitiseEnrichment on overlapping data. If sanitisation is
+// not idempotent, two passes could mangle clean output (e.g. resolve
+// the suppression marker as a token, replace it again). Pin the
+// invariant directly.
+
+describe('idempotency — running sanitiseEnrichment twice is a no-op', () => {
+  it('clean enrichment passes through unchanged on second pass', () => {
+    const enrichment: Record<string, unknown> = {
+      critiques: [
+        { id: 'c1', code: 'NO_OPTIONS', message: 'No options provided for comparison.' },
+      ],
+      summary: 'Decision quality is high. Option Hire Two Senior Engineers Locally leads.',
+      payloads: { isl_request: { secret: 'preserved' } },
+      review_cards: [
+        { card_id: 'rc_1', what: 'Clean review-card prose with no leaks.' },
+      ],
+    };
+    const first = sanitiseEnrichment(enrichment, GRAPH);
+    const second = sanitiseEnrichment(first.enrichment, GRAPH);
+    expect(second.enrichment).toEqual(first.enrichment);
+    expect(second.hardBans).toEqual([]);
+    // Second pass produces no new diagnostic entries either.
+    expect(second.diagnostic.critiques).toEqual([]);
+  });
+
+  it('post-suppression output stays stable on second pass', () => {
+    const dirty: Record<string, unknown> = {
+      summary: "Node 'opt_hire_local' has kind='option'.",
+      improvement_guidance: ["Node 'opt_x' has kind='option'.", 'Clean entry.'],
+      review_cards: [{ card_id: 'rc_1', what: "Node 'opt_y' has kind='option'." }],
+    };
+    const first = sanitiseEnrichment(dirty, GRAPH);
+    const second = sanitiseEnrichment(first.enrichment, GRAPH);
+    // Marker stays a marker; second pass MUST NOT trip a hard-ban on its
+    // own output, MUST NOT replace the marker with anything else.
+    expect(second.enrichment).toEqual(first.enrichment);
+    expect(second.hardBans).toEqual([]);
+  });
+
+  it('SUPPRESSED_PROSE_FALLBACK itself produces no hard-ban hits when scanned', () => {
+    // Sanity check: the marker copy must be safe to write through any
+    // future enrichment producer that re-scans.
+    const r = sanitiseEnrichmentText(SUPPRESSED_PROSE_FALLBACK, CTX);
+    expect(r.suppress).toBe(false);
+    expect(r.hardBans).toEqual([]);
+    expect(r.text).toBe(SUPPRESSED_PROSE_FALLBACK);
+  });
+});
