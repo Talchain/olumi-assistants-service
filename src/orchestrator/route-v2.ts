@@ -166,6 +166,13 @@ function sendFinalised200(
   ctx: {
     readonly analysisReady?: import('../orchestrator-v5/compose/analysis-ready-emit.js').AnalysisReadyPayload;
     readonly graph: GraphV3T | null;
+    /** V5 state-trust freshness derivation (turn_executor path only).
+     *  When provided, threaded into the finaliser so analysis_ready
+     *  carries freshness fields and computed_at reflects the selected
+     *  fact's timestamp. Other dispatch paths (system_event, draft_graph,
+     *  edit_graph, chip_click) omit it; analysis_ready then ships
+     *  without freshness fields and computed_at is wire-emit time. */
+    readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -766,6 +773,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
       graph: turnGraph,
+      ...(run.freshness ? { freshness: run.freshness } : {}),
     });
   });
 }
