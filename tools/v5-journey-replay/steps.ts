@@ -55,6 +55,18 @@ export interface JourneyContext {
   readonly turn_counter: { value: number };
   /** Option labels parsed from step 1's draft-graph block. Populated by the runner. */
   step1OptionLabels?: readonly string[];
+  /**
+   * Factor labels parsed from step 1's draft-graph block (kind='factor'
+   * nodes). Used by step 6 to construct a deterministic edit message
+   * naming the first available factor by its EXACT label, so the
+   * orchestrator's "did you mean?" clarifier doesn't intercept the
+   * edit. Captured priority: prefer a factor whose label or id contains
+   * 'cost' or 'budget' (most natural for "increase the budget" intent),
+   * fall back to the first factor available, fall back to a generic
+   * vague message if no factors were parsed (in which case the step-6
+   * mutation gate will fire and steps 7-9 will skipped_dependency).
+   */
+  step1FactorLabels?: readonly string[];
   /** Rerun chip captured from step 7. Read by step 8 to replay the click. */
   staleRerunChip?: {
     readonly id: string;
@@ -185,18 +197,37 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
   {
     name: '6_edit_budget',
     description:
-      '"Increase the budget factor" → 200, edit proposal or clarifying question. Recoverable validator path is acceptable.',
+      'Deterministic edit using a factor label parsed from step 1 (e.g. "Set the Hiring and Staffing Cost factor to 0.7"). Falls back to a generic message if no factors were parsed; the step-6 mutation gate then skips steps 7-9 with skipped_dependency.',
     depends_on: '1_draft_graph',
-    buildPayload: (ctx) =>
-      turnRequest({
+    buildPayload: (ctx) => {
+      // Phase 1 of the staleness-after-edit fix brief: replace the
+      // non-deterministic "Increase the budget factor" message with a
+      // deterministic edit naming the EXACT factor label parsed from
+      // step 1's draft graph. This bypasses the "did you mean?"
+      // clarifier and produces a real graph mutation, which is required
+      // for steps 7-9's staleness assertions to be meaningful.
+      const factors = ctx.step1FactorLabels ?? [];
+      // Prefer a factor whose label hints at cost / budget / price /
+      // hiring (the original brief intent — "increase the budget"). Fall
+      // back to the first factor we have. The hinting list is broad so
+      // we tolerate variations like "Hiring and Staffing Cost",
+      // "Incremental Hiring Cost", "Hiring Cost", etc.
+      const HINTS = /(cost|budget|price|hiring|staffing|spend|invest)/i;
+      const targetLabel =
+        factors.find((l) => HINTS.test(l)) ?? factors[0] ?? null;
+      const message = targetLabel
+        ? `Set the ${targetLabel} factor to 0.7.`
+        : 'Increase the budget factor.';
+      return turnRequest({
         kind: 'message',
         turn_id: mkTurnId(),
         scenario_id: ctx.scenario_id,
         stage: 'frame',
-        message: 'Increase the budget factor.',
+        message,
         turn_class: 'frame',
         source: 'composer',
-      }),
+      });
+    },
   },
   {
     name: '7_stale_explanation',

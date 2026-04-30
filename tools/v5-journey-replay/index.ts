@@ -593,7 +593,8 @@ async function run(): Promise<void> {
         continue;
       }
 
-      // Capture Step 1 option labels for downstream assertions.
+      // Capture Step 1 option + factor labels for downstream assertions
+      // and step 6's deterministic edit message.
       if (step.name === '1_draft_graph') {
         const draftGraph = (result.body as { draft_graph?: unknown })?.draft_graph;
         const nodes =
@@ -607,6 +608,15 @@ async function run(): Promise<void> {
                 typeof n === 'object' &&
                 n !== null &&
                 (n as { kind?: unknown }).kind === 'option' &&
+                typeof (n as { label?: unknown }).label === 'string',
+            )
+            .map((n) => n.label);
+          ctx.step1FactorLabels = nodes
+            .filter(
+              (n): n is { kind: 'factor'; label: string } =>
+                typeof n === 'object' &&
+                n !== null &&
+                (n as { kind?: unknown }).kind === 'factor' &&
                 typeof (n as { label?: unknown }).label === 'string',
             )
             .map((n) => n.label);
