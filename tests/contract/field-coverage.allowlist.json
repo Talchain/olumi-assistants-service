@@ -1,5 +1,5 @@
 {
-  "_doc": "Field-coverage audit (v1) — see tests/contract/field-coverage-audit.test.ts and Docs/v5/cross-boundary-contract-test-report.md.",
+  "_doc": "Field-coverage audit (v1). Each non-audited category is an object map: key = JSON path actually present in tests/fixtures/cross-service/, value = per-path justification. NO wildcards. See tests/contract/field-coverage-audit.test.ts and Docs/v5/cross-boundary-contract-test-report.md.",
   "audited_fields": [
     "coaching",
     "strengthen_items",
@@ -12,26 +12,38 @@
     "analysis_ready",
     "blocks"
   ],
-  "diagnostic_allowed": [
-    "answer_source",
-    "fallback_reason",
-    "_meta.*",
-    "trace.*"
-  ],
-  "machine_routing_allowed": [
-    "action_type",
-    "id",
-    "error_code",
-    "request_id",
-    "correlation_id"
-  ],
-  "structured_pointer_allowed": [
-    "bias_signals[].target",
-    "referenced_option_ids",
-    "node_id",
-    "edge_id",
-    "factor_id",
-    "option_id"
-  ],
-  "currently_unrendered_but_intentional": []
+  "diagnostic_allowed": {
+    "answer_source": "Handler-internal flag distinguishing Sonnet-emitted text from deterministic-fallback prose; consumed only by telemetry. Never user-facing.",
+    "fallback_reason": "Handler-internal explanation for why a deterministic fallback was chosen; consumed only by telemetry. Never user-facing.",
+    "_meta.input_shape_version": "Decision-review enricher version stamp (DecisionReviewMeta.input_shape_version); consumed by decision_review prompt v12 for adapter-side diagnostics. Never user-facing.",
+    "_meta.flip_threshold_count": "Diagnostic count of populated flip_threshold_data entries; consumed by decision_review prompt v12 for routing decisions. Never user-facing.",
+    "_meta.factor_sensitivity_count": "Diagnostic count of populated isl_results.factor_sensitivity entries. Never user-facing.",
+    "_meta.fragile_edge_count": "Diagnostic count of populated isl_results.fragile_edges entries. Never user-facing.",
+    "_meta.model_critique_count": "Diagnostic count of model_critiques carried by deterministic_coaching (0 until M1 ships). Never user-facing.",
+    "_meta.has_deterministic_coaching": "Diagnostic flag indicating whether deterministic_coaching is the M1 fully-derived shape. Never user-facing.",
+    "_meta.margin": "Winner.win_probability minus runner_up.win_probability. Adapter-side raw signal for prompt routing; not user-facing (the rendered prose owns the human-readable margin description).",
+    "_meta.robustness_level": "Robustness.level pulled defensively from the V2 envelope. Adapter-side raw signal; not user-facing.",
+    "trace.request_id": "Per-request correlation identifier echoed back to the caller for log correlation. Machine routing, not user-facing prose.",
+    "trace.correlation_id": "Distributed-tracing correlation ID. Machine routing, not user-facing prose.",
+    "trace.engine": "LLM engine metadata subtree (provider/model/version) used for telemetry and admin audit dashboards. Never user-facing.",
+    "trace.pipeline": "Stage-by-stage CEE pipeline diagnostics subtree (provenance, llm_metadata, repair, stage_snapshots, validation_summary, threshold_sweep, etc.). Consumed by admin debug panel and telemetry; never user-facing.",
+    "trace.repair_summary": "Top-level repair-stage diagnostic mirror (graph_delta, repair counts, bucket_summary). Consumed by debug bundles; never user-facing.",
+    "trace.transform_defaults": "Defaults applied during V3 transform (defaulted_edge_count, applied defaults). Diagnostic only; never user-facing."
+  },
+  "machine_routing_allowed": {
+    "action_type": "Suggested-action discriminant (run_analysis, set_factor_value, etc.). The UI dispatches on this value to route chip clicks; not rendered as text.",
+    "id": "Stable identifier on chips, insights, blocks, nodes, edges, options. Machine reference for click-handling and graph manipulation; never rendered as text.",
+    "error_code": "Wire-level failure type literal on error blocks (UPSTREAM_TIMEOUT, etc.). UI parser dispatches on this; never rendered raw to users.",
+    "request_id": "Same as trace.request_id at the top level — caller-supplied request correlation ID. Machine routing only.",
+    "correlation_id": "Distributed tracing correlation ID at the top level. Machine routing only."
+  },
+  "structured_pointer_allowed": {
+    "bias_signals[].target": "Node-ID pointer the UI uses to highlight the referenced node in the canvas. detail (sibling) is the user-facing prose; target stays unscrubbed so the link is preserved (sanitiseCoachingForDisplay at src/cee/unified-pipeline/stages/package.ts:125).",
+    "referenced_option_ids": "Array of option IDs cited inside an explanation block (`OlumiResponseSchema.blocks[].referenced_option_ids`). UI uses these to cross-link the message to canvas option nodes; never rendered as text.",
+    "node_id": "Pointer field inside coaching.widening_log[] entries (mapped to camelCase nodeId in the UI store). Identifies which canvas node the widening reason describes; never rendered as text.",
+    "edge_id": "Pointer field inside isl_results.fragile_edges[] entries (decision-review enrichment). Identifies which causal edge is fragile; never rendered as text.",
+    "factor_id": "Pointer field inside flip_threshold_data[] and isl_results.factor_sensitivity[] entries. Identifies which factor the entry describes; from_label / factor_label are the rendered text.",
+    "option_id": "Pointer field inside comparison block options[] entries. Identifies which option each entry describes; the sibling label is the rendered text."
+  },
+  "currently_unrendered_but_intentional": {}
 }

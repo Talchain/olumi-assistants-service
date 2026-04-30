@@ -91,9 +91,23 @@ function fixtureContainsField(fixture: unknown, fieldName: string): boolean {
   return false;
 }
 
-const audited: ReadonlyArray<string> = (
-  allowlist as { audited_fields: ReadonlyArray<string> }
-).audited_fields;
+interface Allowlist {
+  audited_fields: ReadonlyArray<string>;
+  diagnostic_allowed: Readonly<Record<string, string>>;
+  machine_routing_allowed: Readonly<Record<string, string>>;
+  structured_pointer_allowed: Readonly<Record<string, string>>;
+  currently_unrendered_but_intentional: Readonly<Record<string, string>>;
+}
+
+const typedAllowlist = allowlist as unknown as Allowlist;
+const audited: ReadonlyArray<string> = typedAllowlist.audited_fields;
+
+const CLASSIFIED_CATEGORIES = [
+  "diagnostic_allowed",
+  "machine_routing_allowed",
+  "structured_pointer_allowed",
+  "currently_unrendered_but_intentional",
+] as const satisfies ReadonlyArray<keyof Allowlist>;
 
 describe("field-coverage audit (v1)", () => {
   it("allowlist contains every UI-consumed field", () => {
@@ -102,6 +116,26 @@ describe("field-coverage audit (v1)", () => {
         audited.includes(field),
         `UI consumes '${field}' but it is not in audited_fields. Add it to field-coverage.allowlist.json or remove the UI_CONSUMED_FIELDS entry.`,
       ).toBe(true);
+    }
+  });
+
+  it("allowlist classification categories are object maps with non-empty justifications and no wildcard paths", () => {
+    for (const category of CLASSIFIED_CATEGORIES) {
+      const entries = typedAllowlist[category] as Readonly<Record<string, string>>;
+      expect(
+        entries !== null && typeof entries === "object" && !Array.isArray(entries),
+        `category ${category} must be an object map (path → justification), not an array`,
+      ).toBe(true);
+      for (const [path, justification] of Object.entries(entries)) {
+        expect(
+          path.includes("*"),
+          `wildcard path '${path}' in ${category} — entries must be specific paths, not wildcards`,
+        ).toBe(false);
+        expect(
+          typeof justification === "string" && justification.trim().length > 0,
+          `path '${path}' in ${category} has no justification — every entry must explain why the field is intentionally not consumed by UI`,
+        ).toBe(true);
+      }
     }
   });
 
