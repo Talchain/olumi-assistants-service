@@ -376,6 +376,31 @@ export async function loadPersistedGraph(
   }
 }
 
+/**
+ * Strict variant of `loadPersistedGraph` that does NOT swallow errors.
+ *
+ * Same authoritative read against `scenarios.graph` via the session
+ * store, but propagates `SessionReadError` to the caller instead of
+ * collapsing into `null`. Use when the caller needs to distinguish
+ * "store reachable, no graph stored" (returns null) from
+ * "store unreachable / RPC threw" (throws) — for example, the V5
+ * Phase 2.5 edit-routing recovery path uses this distinction to emit
+ * `reason: 'no_persisted_graph'` versus `reason: 'session_store_failed'`
+ * on the `v5.edit_graph.graph_state_unavailable` telemetry event.
+ *
+ * Lives in this module (rather than at the call site) so the
+ * `SessionStore` import surface stays bounded to the three declared
+ * integration points: session/, commit.ts, build-turn-context.ts.
+ * The pre-push `state-write-invariant` check enforces that boundary.
+ */
+export async function loadPersistedGraphStrict(
+  scenarioId: string,
+  sessionStore?: SessionStore,
+): Promise<unknown | null> {
+  const store = sessionStore ?? getSessionStore();
+  return await store.loadGraph(scenarioId);
+}
+
 export async function loadScenarioSnapshotForRunAnalysis(
   scenarioId: string,
   requestId: string,

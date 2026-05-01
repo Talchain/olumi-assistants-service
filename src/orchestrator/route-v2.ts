@@ -104,7 +104,7 @@ import {
   GraphStateIngressSchema,
   type GraphStateIngress,
 } from '../orchestrator-v5/boundary/request-extensions.js';
-import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { loadPersistedGraphStrict } from '../orchestrator-v5/build-turn-context.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 
 // ───────────────────────────────────────────────────────────────────
@@ -741,7 +741,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // falling through to Sonnet (which cannot propose edit_graph).
         let persisted: unknown = null;
         try {
-          persisted = await getSessionStore().loadGraph(ingress.scenario_id);
+          // `loadPersistedGraphStrict` (vs the swallowing
+          // `loadPersistedGraph`) lets the catch below distinguish
+          // `session_store_failed` from `no_persisted_graph` for
+          // telemetry. Both export from build-turn-context.ts so the
+          // `getSessionStore` import surface stays bounded to the
+          // three sites the state-write-invariant check allows.
+          persisted = await loadPersistedGraphStrict(ingress.scenario_id);
         } catch (err) {
           // Session-store / Supabase failure. Distinct from
           // "no_persisted_graph" so dashboards can separate
