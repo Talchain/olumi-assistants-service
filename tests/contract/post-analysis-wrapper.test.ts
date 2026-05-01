@@ -2,14 +2,17 @@
  * V5 Phase 2 workstream A — post-analysis coaching wrapper acceptance
  * tests.
  *
- * Two layers:
- *  1. Pure unit coverage of `generatePostAnalysisCoaching` — pins
- *     trigger conditions, freshness branching, dedup, prefill vs
- *     executable chip-type partition, fact shape, telemetry events.
- *  2. ChatGPT-named regression cases: "What should I do?" and "How can
- *     I improve confidence?" routed as text_only direct_answer in
- *     analyse stage with a fresh run_analysis fact present must yield
- *     ≥1 chip plus a committed `post_analysis_coaching` fact.
+ * Pins:
+ *  - Trigger conditions and skip-telemetry policy (silent for trivial
+ *    non-trigger paths, diagnostic for expected-fire-but-blocked).
+ *  - Stale freshness yields rerun-only chip.
+ *  - Fresh freshness mines review_cards with multi-item scan.
+ *  - Defensive prose sanitisation of card-derived chip text.
+ *  - Recovery state travels on telemetry, NOT on a persisted fact
+ *    (P0 fix — strict-parse of HandlerFactSchema would poison the
+ *    fact chain).
+ *  - ChatGPT-named regression cases ("What should I do?", "How can I
+ *    improve confidence?") yield ≥1 chip + Recovered telemetry.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -37,8 +40,8 @@ afterEach(() => {
 function recoveredEvent(): Event | undefined {
   return events.find((e) => e.event === 'v5.post_analysis.direct_answer_recovered');
 }
-function skippedEvent(): Event | undefined {
-  return events.find((e) => e.event === 'v5.post_analysis.direct_answer_recovery_skipped');
+function skippedEvents(): Event[] {
+  return events.filter((e) => e.event === 'v5.post_analysis.direct_answer_recovery_skipped');
 }
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -46,7 +49,6 @@ const REQUEST_ID = 'req-coaching-test';
 
 interface FactBuilderOpts {
   reviewCards?: ReadonlyArray<Record<string, unknown>>;
-  withGraphHash?: boolean;
 }
 
 function makeRunAnalysisFact(opts: FactBuilderOpts = {}): HandlerFact {
@@ -64,9 +66,7 @@ function makeRunAnalysisFact(opts: FactBuilderOpts = {}): HandlerFact {
         review_cards: opts.reviewCards ?? [],
       },
       computed_at: computedAt,
-      ...(opts.withGraphHash === false
-        ? {}
-        : { graph_hash_at_run: 'abc123def456' }),
+      graph_hash_at_run: 'abc123def456',
     },
   } as unknown as HandlerFact;
 }
@@ -83,46 +83,83 @@ function makeInput(overrides: Partial<PostAnalysisWrapperInput>): PostAnalysisWr
   };
 }
 
-// ─── trigger conditions ───────────────────────────────────────────────────
+// ─── trigger conditions + telemetry policy ────────────────────────────────
 
-describe('generatePostAnalysisCoaching — trigger conditions', () => {
-  it('skips when stage is not analyse', () => {
+describe('generatePostAnalysisCoaching — silent non-trigger paths', () => {
+  it('skips silently when stage is not analyse (no telemetry noise)', () => {
     const result = generatePostAnalysisCoaching(makeInput({ stage: 'frame' }));
     expect(result.fired).toBe(false);
     expect(result.chips).toEqual([]);
-    expect(result.fact).toBeNull();
-    expect(skippedEvent()?.data).toMatchObject({ reason: 'non_analyse_stage' });
+    expect(result.skipReason).toBe('non_analyse_stage');
+    // Every direct_answer turn passes through here — telemetry would
+    // dwarf the diagnostic signal. Silent.
+    expect(skippedEvents()).toHaveLength(0);
   });
 
-  it('skips when freshness is "none"', () => {
+  it('skips silently when freshness is "none" (pre-analysis turn)', () => {
     const result = generatePostAnalysisCoaching(makeInput({ freshness: 'none' }));
     expect(result.fired).toBe(false);
-    expect(skippedEvent()?.data).toMatchObject({ reason: 'freshness_unknown' });
+    expect(result.skipReason).toBe('freshness_unknown');
+    expect(skippedEvents()).toHaveLength(0);
   });
 
-  it('skips when freshness is "unknown"', () => {
+  it('skips silently when freshness is "unknown"', () => {
     const result = generatePostAnalysisCoaching(makeInput({ freshness: 'unknown' }));
     expect(result.fired).toBe(false);
-    expect(skippedEvent()?.data).toMatchObject({ reason: 'freshness_unknown' });
+    expect(skippedEvents()).toHaveLength(0);
   });
+});
 
-  it('skips when no run_analysis fact exists', () => {
+describe('generatePostAnalysisCoaching — diagnostic skip paths', () => {
+  it('emits telemetry when no run_analysis fact exists (expected-fire blocked)', () => {
     const result = generatePostAnalysisCoaching(makeInput({
       priorFacts: [],
       freshness: 'fresh',
     }));
     expect(result.fired).toBe(false);
-    expect(skippedEvent()?.data).toMatchObject({ reason: 'no_run_fact' });
+    expect(skippedEvents()).toHaveLength(1);
+    expect(skippedEvents()[0].data).toMatchObject({ reason: 'no_run_fact' });
   });
 
-  it('skips when fresh fact has no review_cards', () => {
+  it('emits telemetry when fresh fact has no review_cards', () => {
     const fact = makeRunAnalysisFact({ reviewCards: [] });
     const result = generatePostAnalysisCoaching(makeInput({
       priorFacts: [fact],
       freshness: 'fresh',
     }));
     expect(result.fired).toBe(false);
-    expect(skippedEvent()?.data).toMatchObject({ reason: 'no_review_cards' });
+    expect(skippedEvents()[0].data).toMatchObject({ reason: 'no_review_cards' });
+  });
+});
+
+// ─── no-fact-persistence pin (P0) ─────────────────────────────────────────
+
+describe('generatePostAnalysisCoaching — does NOT emit a persisted fact', () => {
+  it('result has no `fact` field; recovery state lives on telemetry', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [{ card_id: 'rc1', card_type: 'evidence_priority', items: [{ factor_label: 'Cost' }] }],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+      answerText: 'What should I do?',
+    }));
+    expect(result.fired).toBe(true);
+    // No `fact` field on the result type — recovery state is telemetry only.
+    expect((result as Record<string, unknown>).fact).toBeUndefined();
+
+    // The recovery telemetry carries the fact-equivalent payload so ops
+    // can reconstruct what happened without reading the ledger.
+    const ev = recoveredEvent();
+    expect(ev).toBeDefined();
+    expect(ev!.data).toMatchObject({
+      chip_count: 1,
+      selected_card_count: 1,
+      selected_review_card_ids: ['rc1'],
+      freshness_at_response: 'fresh',
+    });
+    expect(ev!.data.answer_text_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(Array.isArray(ev!.data.generated_chip_ids)).toBe(true);
   });
 });
 
@@ -140,7 +177,6 @@ describe('generatePostAnalysisCoaching — stale freshness', () => {
     expect(result.fired).toBe(true);
     expect(result.chips).toHaveLength(1);
     expect(result.chips[0]).toMatchObject({ action_type: 'run_analysis' });
-    expect(result.fact).not.toBeNull();
   });
 
   it('does NOT mix rerun chip with coaching chips', () => {
@@ -159,7 +195,7 @@ describe('generatePostAnalysisCoaching — stale freshness', () => {
   });
 });
 
-// ─── fresh: chip generation ───────────────────────────────────────────────
+// ─── fresh: chip generation + multi-item scan ─────────────────────────────
 
 describe('generatePostAnalysisCoaching — fresh: chip generation', () => {
   it('maps card_type=evidence_priority → prefill chip (no action_type)', () => {
@@ -177,12 +213,11 @@ describe('generatePostAnalysisCoaching — fresh: chip generation', () => {
     expect(result.fired).toBe(true);
     expect(result.chips).toHaveLength(1);
     expect(result.chips[0]).toMatchObject({ label: 'Add evidence' });
-    // Prefill chip has no action_type — UI populates composer with message.
     expect(result.chips[0].action_type).toBeUndefined();
     expect(result.chips[0].message).toContain('Cost');
   });
 
-  it('uses items[0].suggested_evidence as message when present (specific over generic)', () => {
+  it('uses suggested_evidence as message when present (specific over generic)', () => {
     const fact = makeRunAnalysisFact({
       reviewCards: [{
         card_id: 'card_1',
@@ -200,6 +235,47 @@ describe('generatePostAnalysisCoaching — fresh: chip generation', () => {
     expect(result.chips[0].message).toBe('Find published 2024 hiring cost benchmarks.');
   });
 
+  it('scans ALL items[] for suggested_evidence — picks first usable', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [{
+        card_id: 'card_1',
+        card_type: 'evidence_priority',
+        items: [
+          { factor_label: 'Cost' /* no suggested_evidence on items[0] */ },
+          { factor_label: 'Quality', suggested_evidence: 'Survey current customers about quality.' },
+          { factor_label: 'Speed', suggested_evidence: 'Benchmark competitor rollout times.' },
+        ],
+      }],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+    }));
+    // First item has no suggested_evidence; second item's wins.
+    expect(result.chips[0].message).toBe('Survey current customers about quality.');
+  });
+
+  it('scans ALL items[] for node_id when items[0] lacks one', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [
+        { card_id: 'c1', card_type: 'evidence_priority', items: [
+          { factor_label: 'A' /* no node_id */ },
+          { node_id: 'fac_target', factor_label: 'B' },
+        ]},
+        { card_id: 'c2', card_type: 'evidence_priority', items: [
+          { factor_label: 'C' /* no node_id */ },
+          { node_id: 'fac_target', factor_label: 'D' },
+        ]},
+      ],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+    }));
+    // Both cards' second-item node_id is 'fac_target' → dedupe collapses them.
+    expect(result.chips).toHaveLength(1);
+  });
+
   it('caps chip count at 3 even with many cards', () => {
     const fact = makeRunAnalysisFact({
       reviewCards: Array.from({ length: 8 }, (_, i) => ({
@@ -213,23 +289,6 @@ describe('generatePostAnalysisCoaching — fresh: chip generation', () => {
       freshness: 'fresh',
     }));
     expect(result.chips).toHaveLength(3);
-  });
-
-  it('dedupes by intent + target_node_id', () => {
-    const fact = makeRunAnalysisFact({
-      reviewCards: [
-        { card_id: 'c1', card_type: 'evidence_priority', items: [{ node_id: 'fac_cost', factor_label: 'Cost' }] },
-        // Same intent + same target → deduped
-        { card_id: 'c2', card_type: 'evidence_priority', items: [{ node_id: 'fac_cost', factor_label: 'Cost (alt)' }] },
-        // Different target → kept
-        { card_id: 'c3', card_type: 'evidence_priority', items: [{ node_id: 'fac_quality', factor_label: 'Quality' }] },
-      ],
-    });
-    const result = generatePostAnalysisCoaching(makeInput({
-      priorFacts: [fact],
-      freshness: 'fresh',
-    }));
-    expect(result.chips).toHaveLength(2);
   });
 
   it('falls back to conversational prefill chip for unknown card_type with title', () => {
@@ -261,64 +320,57 @@ describe('generatePostAnalysisCoaching — fresh: chip generation', () => {
       freshness: 'fresh',
     }));
     expect(result.chips).toHaveLength(1);
-    const skipEv = events.find(
-      (e) => e.event === 'v5.post_analysis.direct_answer_recovery_skipped'
-        && e.data.reason === 'unsupported_chip_actions',
-    );
+    const skipEv = skippedEvents().find((e) => e.data.reason === 'unsupported_chip_actions');
     expect(skipEv?.data).toMatchObject({ unsupported_count: 1 });
   });
 });
 
-// ─── fact + telemetry ─────────────────────────────────────────────────────
+// ─── defensive sanitisation (P1) ──────────────────────────────────────────
 
-describe('generatePostAnalysisCoaching — fact + telemetry', () => {
-  it('builds post_analysis_coaching fact with hashed answer + chip ids + selected card ids', () => {
+describe('generatePostAnalysisCoaching — defensive prose sanitisation', () => {
+  it('suppresses chip when title carries an entity-id leak', () => {
     const fact = makeRunAnalysisFact({
-      reviewCards: [
-        { card_id: 'rc_1', card_type: 'evidence_priority', items: [{ factor_label: 'Cost' }] },
-      ],
+      reviewCards: [{
+        card_id: 'card_1',
+        card_type: 'novel_unknown_type',
+        // Bad input: surfaces a raw factor id token in user-visible prose.
+        title: "Node 'fac_hiring_cost' needs review.",
+      }],
     });
     const result = generatePostAnalysisCoaching(makeInput({
       priorFacts: [fact],
       freshness: 'fresh',
-      answerText: 'Some coaching prose.',
     }));
-    expect(result.fact).not.toBeNull();
-    const factResult = (result.fact as { result: Record<string, unknown> }).result;
-    expect(factResult.answer_text_hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(factResult.selected_review_card_ids).toEqual(['rc_1']);
-    expect(factResult.generated_chip_ids).toEqual(result.chips.map((c) => c.id));
-    expect(factResult.freshness_at_response).toBe('fresh');
-    expect(factResult.invalidates).toEqual([]);
+    expect(result.fired).toBe(false); // no chip → no fire
+    expect(skippedEvents().some((e) => e.data.reason === 'no_review_cards')).toBe(true);
   });
 
-  it('emits PostAnalysisDirectAnswerRecovered when fired with chips', () => {
+  it('suppresses suggested_evidence when it leaks an entity id', () => {
     const fact = makeRunAnalysisFact({
-      reviewCards: [{ card_id: 'rc_1', card_type: 'evidence_priority', items: [{ factor_label: 'Cost' }] }],
+      reviewCards: [{
+        card_id: 'card_1',
+        card_type: 'evidence_priority',
+        items: [{
+          factor_label: 'Cost',
+          suggested_evidence: 'Compare opt_a vs opt_b on cost.',
+        }],
+      }],
     });
-    generatePostAnalysisCoaching(makeInput({
+    const result = generatePostAnalysisCoaching(makeInput({
       priorFacts: [fact],
       freshness: 'fresh',
     }));
-    expect(recoveredEvent()).toBeDefined();
-    expect(recoveredEvent()!.data).toMatchObject({
-      request_id: REQUEST_ID,
-      session_id: SCENARIO_ID,
-      chip_count: 1,
-      selected_card_count: 1,
-    });
+    // The leaky suggested_evidence is suppressed; falls back to the
+    // deterministic phrasing keyed on factor_label.
+    expect(result.chips).toHaveLength(1);
+    expect(result.chips[0].message).not.toContain('opt_a');
+    expect(result.chips[0].message).toContain('Cost');
   });
 });
 
 // ─── ChatGPT-named regression cases ───────────────────────────────────────
 
 describe('generatePostAnalysisCoaching — ChatGPT-named regressions', () => {
-  /**
-   * Both prompts target the same pre-Phase-2 bug: an analyse-stage
-   * direct_answer with a fresh run_analysis fact yielded zero chips.
-   * The wrapper closes that gap. These cases pin the contract for the
-   * two specific user prompts ChatGPT named in feedback.
-   */
   const FRESH_FACT = makeRunAnalysisFact({
     reviewCards: [
       {
@@ -338,7 +390,7 @@ describe('generatePostAnalysisCoaching — ChatGPT-named regressions', () => {
     ],
   });
 
-  it('"What should I do?" → ≥1 chip + post_analysis_coaching fact', () => {
+  it('"What should I do?" → ≥1 chip + Recovered telemetry', () => {
     const result = generatePostAnalysisCoaching(makeInput({
       priorFacts: [FRESH_FACT],
       freshness: 'fresh',
@@ -347,12 +399,12 @@ describe('generatePostAnalysisCoaching — ChatGPT-named regressions', () => {
 
     expect(result.fired).toBe(true);
     expect(result.chips.length).toBeGreaterThanOrEqual(1);
-    expect(result.fact).not.toBeNull();
-    expect((result.fact as { fact_type: string }).fact_type).toBe('post_analysis_coaching');
-    expect(recoveredEvent()).toBeDefined();
+    const ev = recoveredEvent();
+    expect(ev).toBeDefined();
+    expect(ev!.data.freshness_at_response).toBe('fresh');
   });
 
-  it('"How can I improve confidence?" → ≥1 chip + post_analysis_coaching fact', () => {
+  it('"How can I improve confidence?" → ≥1 chip + Recovered telemetry', () => {
     const result = generatePostAnalysisCoaching(makeInput({
       priorFacts: [FRESH_FACT],
       freshness: 'fresh',
@@ -361,10 +413,6 @@ describe('generatePostAnalysisCoaching — ChatGPT-named regressions', () => {
 
     expect(result.fired).toBe(true);
     expect(result.chips.length).toBeGreaterThanOrEqual(1);
-    expect(result.fact).not.toBeNull();
-    expect((result.fact as { fact_type: string }).fact_type).toBe('post_analysis_coaching');
-    // Different answer text → different hash → distinct fact from prior turn
-    const factResult = (result.fact as { result: Record<string, unknown> }).result;
-    expect(factResult.answer_text_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(recoveredEvent()).toBeDefined();
   });
 });

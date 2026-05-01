@@ -40,6 +40,7 @@ import type { SuggestedAction } from '../compose/types.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import type { AnalysisFreshness } from '../context/freshness.js';
+import { sanitiseChipProse } from './chip-prose-sanitiser.js';
 
 const MAX_CHIPS = 3;
 
@@ -99,7 +100,21 @@ export interface PostAnalysisWrapperInput {
 
 export interface PostAnalysisWrapperResult {
   readonly chips: readonly SuggestedAction[];
-  readonly fact: HandlerFact | null;
+  /**
+   * The wrapper does NOT emit a HandlerFact. The strict-parse path in
+   * `supabase-store.ts:readFactsFor` validates every persisted fact
+   * through `HandlerFactSchema`; an unschemaed `post_analysis_coaching`
+   * variant would poison the entire scenario's fact chain (one bad row
+   * → SessionReadError → degraded prior_facts → broken freshness
+   * derivation). Recovery state is emitted via the
+   * PostAnalysisDirectAnswerRecovered telemetry event instead, which
+   * carries the same structured fields (answer_text_hash, chip ids,
+   * selected card ids, freshness at response).
+   *
+   * TODO: when @talchain/schemas adds a PostAnalysisCoachingFactSchema
+   * variant to HandlerFactSchema, swap to ledger persistence and drop
+   * the telemetry-only path. Tracking via the upstream schema package.
+   */
   readonly fired: boolean;
   readonly skipReason?: SkipReason;
 }
@@ -112,38 +127,45 @@ const STALE_RERUN_CHIP: SuggestedAction = {
 };
 
 /**
- * Generate post-analysis coaching chips and the accompanying fact.
+ * Generate post-analysis coaching chips.
  *
  * Trigger conditions:
  *   - stage must be 'analyse'
  *   - latest successful run_analysis fact must exist
  *   - freshness 'fresh' → mine review_cards for coaching chips
  *   - freshness 'stale' → emit single rerun chip (no coaching mix)
- *   - freshness 'none' / 'unknown' → skip the wrapper entirely
+ *   - freshness 'none' / 'unknown' → silent skip (pre-analysis turn)
  *
- * Does NOT re-derive freshness — the caller is expected to pass the
- * verdict already computed by deriveAnalysisFreshness.
+ * Telemetry policy: skip events only fire when the wrapper was
+ * EXPECTED to fire and was blocked by something diagnostic
+ * (no_run_fact, no_review_cards, unsupported_chip_actions). Trivial
+ * non-trigger paths (non_analyse_stage, freshness_unknown) are silent
+ * — every direct_answer turn passes through here, so noise on those
+ * paths would dwarf the signal.
+ *
+ * Does NOT re-derive freshness — the caller passes the verdict already
+ * computed by deriveAnalysisFreshness.
  */
 export function generatePostAnalysisCoaching(
   input: PostAnalysisWrapperInput,
 ): PostAnalysisWrapperResult {
+  // Silent non-trigger paths — the wrapper was never expected to fire.
   if (input.stage !== 'analyse') {
-    return skip(input, 'non_analyse_stage');
+    return silentSkip('non_analyse_stage');
   }
-
   if (input.freshness === 'none' || input.freshness === 'unknown') {
-    return skip(input, 'freshness_unknown');
+    return silentSkip('freshness_unknown');
   }
 
+  // From here down, the wrapper WAS expected to fire. Skips are diagnostic.
   const selected = selectRunAnalysisFact(input.priorFacts);
   if (selected === null) {
-    return skip(input, 'no_run_fact');
+    return diagnosticSkip(input, 'no_run_fact');
   }
 
   if (input.freshness === 'stale') {
     return {
       chips: [STALE_RERUN_CHIP],
-      fact: buildFact(input, [STALE_RERUN_CHIP], [], 'stale'),
       fired: true,
     };
   }
@@ -152,7 +174,7 @@ export function generatePostAnalysisCoaching(
   const enrichment = (fact.result.enrichment ?? {}) as Record<string, unknown>;
   const reviewCards = readReviewCards(enrichment);
   if (reviewCards.length === 0) {
-    return skip(input, 'no_review_cards');
+    return diagnosticSkip(input, 'no_review_cards');
   }
 
   const generation = generateChipsFromCards(reviewCards);
@@ -166,26 +188,49 @@ export function generatePostAnalysisCoaching(
   }
 
   if (generation.chips.length === 0) {
-    return skip(input, 'no_review_cards');
+    return diagnosticSkip(input, 'no_review_cards');
   }
 
+  // Fact-equivalent payload travels on the recovered event so the
+  // ledger does not have to carry an unschemaed fact_type.
+  const answerHash = createHash('sha256').update(input.answerText).digest('hex');
   emit(TelemetryEvents.PostAnalysisDirectAnswerRecovered, {
     request_id: input.requestId,
     session_id: input.scenarioId,
     chip_count: generation.chips.length,
     selected_card_count: generation.selectedCardIds.length,
+    answer_text_hash: answerHash,
+    generated_chip_ids: generation.chips.map((c) => c.id),
+    selected_review_card_ids: [...generation.selectedCardIds],
+    freshness_at_response: 'fresh',
   });
 
   return {
     chips: generation.chips,
-    fact: buildFact(input, generation.chips, generation.selectedCardIds, 'fresh'),
     fired: true,
   };
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
-function skip(
+/**
+ * Silent skip for trivial non-trigger paths (non_analyse_stage,
+ * freshness_unknown). Every direct_answer turn passes through here,
+ * so emitting a skip event on these paths would generate per-turn
+ * noise with no diagnostic value.
+ */
+function silentSkip(reason: SkipReason): PostAnalysisWrapperResult {
+  return { chips: [], fired: false, skipReason: reason };
+}
+
+/**
+ * Diagnostic skip for paths where the wrapper was EXPECTED to fire
+ * but was blocked. These are operationally interesting and warrant a
+ * telemetry event so ops can investigate (no_run_fact suggests a
+ * fact-loading bug; no_review_cards suggests a producer regression;
+ * unsupported_chip_actions suggests a card_type drift).
+ */
+function diagnosticSkip(
   input: PostAnalysisWrapperInput,
   reason: SkipReason,
 ): PostAnalysisWrapperResult {
@@ -194,7 +239,7 @@ function skip(
     session_id: input.scenarioId,
     reason,
   });
-  return { chips: [], fact: null, fired: false, skipReason: reason };
+  return { chips: [], fired: false, skipReason: reason };
 }
 
 function readReviewCards(enrichment: Record<string, unknown>): ReadonlyArray<ReviewCard> {
@@ -321,14 +366,32 @@ function buildPrefillMessage(
   factorLabel: string | null,
   card: ReviewCard,
 ): string | null {
-  // Prefer the card's first item suggested_evidence (specific) over a
-  // generic phrasing. Both are sanitised at the enrichment layer.
-  const firstItemEvidence = card.items?.[0]?.suggested_evidence;
-  if (typeof firstItemEvidence === 'string' && firstItemEvidence.length > 0) {
-    return firstItemEvidence;
+  // Prefer card-derived suggested_evidence (specific) over a generic
+  // phrasing. Scan ALL items (not just items[0]) to find the first
+  // usable suggested_evidence — multi-item cards otherwise lose
+  // signal. Each candidate goes through the local sanitiser; entity-id
+  // leaks and HARD_BAN matches are suppressed.
+  if (Array.isArray(card.items)) {
+    for (const item of card.items) {
+      const candidate = item?.suggested_evidence;
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        const cleaned = sanitiseChipProse(candidate);
+        if (!cleaned.suppressed) {
+          return cleaned.text;
+        }
+      }
+    }
   }
 
-  const subject = factorLabel ?? 'this factor';
+  // Fallback: deterministic phrasing keyed on factor_label. The
+  // factorLabel candidate is already a label (not a prose blob), so
+  // it gets a lighter sanitiser treatment via the wrapping prose.
+  const subjectLabel = factorLabel
+    ? sanitiseChipProse(factorLabel)
+    : null;
+  const subject = subjectLabel && !subjectLabel.suppressed
+    ? subjectLabel.text
+    : 'this factor';
   switch (intent) {
     case 'add_evidence':
       return `Help me add evidence about ${subject}.`;
@@ -358,27 +421,49 @@ function pickTargetNodeId(card: ReviewCard): string | null {
   if (typeof card.node_id === 'string' && card.node_id.length > 0) {
     return card.node_id;
   }
-  const firstItemNodeId = card.items?.[0]?.node_id;
-  if (typeof firstItemNodeId === 'string' && firstItemNodeId.length > 0) {
-    return firstItemNodeId;
+  // Scan ALL items, not just items[0]. The first item with a node_id
+  // wins; the field is structural (not user-visible prose), so no
+  // sanitisation needed.
+  if (Array.isArray(card.items)) {
+    for (const item of card.items) {
+      const id = item?.node_id;
+      if (typeof id === 'string' && id.length > 0) {
+        return id;
+      }
+    }
   }
   return null;
 }
 
 function pickFactorLabel(card: ReviewCard): string | null {
-  const firstItemLabel = card.items?.[0]?.factor_label;
-  if (typeof firstItemLabel === 'string' && firstItemLabel.length > 0) {
-    return firstItemLabel;
+  // Scan ALL items, not just items[0]. The first item with a
+  // factor_label wins.
+  if (Array.isArray(card.items)) {
+    for (const item of card.items) {
+      const label = item?.factor_label;
+      if (typeof label === 'string' && label.length > 0) {
+        return label;
+      }
+    }
   }
   return null;
 }
 
 function pickConversationalMessage(card: ReviewCard): string | null {
+  // `title` and `what` are user-visible prose. Sanitise before use;
+  // suppress the chip when the candidate fails the safety check
+  // (caller treats null as "no usable prose").
   if (typeof card.title === 'string' && card.title.length > 0) {
-    return `Tell me more about: ${card.title}`;
+    const cleaned = sanitiseChipProse(card.title);
+    if (!cleaned.suppressed) {
+      return `Tell me more about: ${cleaned.text}`;
+    }
   }
   if (typeof card.what === 'string' && card.what.length > 0) {
-    return card.what;
+    const cleaned = sanitiseChipProse(card.what);
+    if (!cleaned.suppressed) {
+      return cleaned.text;
+    }
   }
   return null;
 }
@@ -393,35 +478,3 @@ function chipIdForText(text: string): string {
   return `chip_text_${hash}`;
 }
 
-// ─── fact builder ─────────────────────────────────────────────────────────
-
-function buildFact(
-  input: PostAnalysisWrapperInput,
-  chips: readonly SuggestedAction[],
-  selectedCardIds: readonly string[],
-  freshnessAtResponse: 'fresh' | 'stale',
-): HandlerFact {
-  const answerHash = createHash('sha256')
-    .update(input.answerText)
-    .digest('hex');
-
-  // The HandlerFact union in @talchain/schemas does not include a
-  // `post_analysis_coaching` variant in the current pinned version. We
-  // construct the fact as an unknown-cast HandlerFact so it persists
-  // through the existing commit pipeline (the ledger column is JSONB —
-  // shape is enforced at boundary, not in storage). Schema bump to add
-  // the variant is a follow-up.
-  const fact = {
-    fact_type: 'post_analysis_coaching',
-    fact_version: 1,
-    noop: false,
-    result: {
-      answer_text_hash: answerHash,
-      selected_review_card_ids: [...selectedCardIds],
-      generated_chip_ids: chips.map((c) => c.id),
-      freshness_at_response: freshnessAtResponse,
-      invalidates: [] as string[],
-    },
-  } as unknown as HandlerFact;
-  return fact;
-}

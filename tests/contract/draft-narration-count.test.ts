@@ -133,6 +133,33 @@ describe('checkDraftNarrationCounts — mismatch detection', () => {
   });
 });
 
+describe('checkDraftNarrationCounts — explicit 8 nodes / 15 edges fixture (Phase 2 P1)', () => {
+  it('matches the canonical fallback shape with **8** nodes and **15** edges', () => {
+    const FALLBACK_8_15 = 'Drafted a decision graph with **8** nodes and **15** edges.';
+    // Narration agrees with final counts → preserved verbatim.
+    const result = checkDraftNarrationCounts({
+      narration: FALLBACK_8_15,
+      finalNodeCount: 8,
+      finalEdgeCount: 15,
+      fallback: FALLBACK_8_15,
+      requestId: 'req-test',
+    });
+    expect(result.chosenText).toBe(FALLBACK_8_15);
+    expect(result.mismatchDetected).toBe(false);
+
+    // Different narration counts → mismatch + fallback used.
+    const result2 = checkDraftNarrationCounts({
+      narration: 'Drafted a decision graph with **5** nodes and **9** edges.',
+      finalNodeCount: 8,
+      finalEdgeCount: 15,
+      fallback: FALLBACK_8_15,
+      requestId: 'req-test',
+    });
+    expect(result2.chosenText).toBe(FALLBACK_8_15);
+    expect(result2.mismatchDetected).toBe(true);
+  });
+});
+
 describe('checkDraftNarrationCounts — markdown-bolded counts (Phase 2 P1)', () => {
   it('parses **N** nodes and **M** edges format and recognises agreement', () => {
     const narration = 'Drafted a decision graph with **7** nodes and **8** edges.';

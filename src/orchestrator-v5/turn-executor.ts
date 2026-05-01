@@ -1488,9 +1488,12 @@ export async function runTurnExecutor(
       const coachComposedChips = coachWrapper.fired
         ? [...coachWrapper.chips, ...coachChips]
         : coachChips;
-      if (coachWrapper.fact !== null) {
-        handlerFactsForCommit = [...handlerFactsForCommit, coachWrapper.fact];
-      }
+      // No handler_fact append: the wrapper's recovery state ships via
+      // the PostAnalysisDirectAnswerRecovered telemetry event because
+      // @talchain/schemas has no `post_analysis_coaching` fact_type
+      // variant in the pinned version, and supabase-store.readFactsFor
+      // strict-parses every persisted fact through HandlerFactSchema —
+      // an unschemaed row would poison the entire scenario's chain.
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
         stage: context.stage,
@@ -1536,9 +1539,7 @@ export async function runTurnExecutor(
       const converseComposedChips = converseWrapper.fired
         ? [...converseWrapper.chips, ...converseChips]
         : converseChips;
-      if (converseWrapper.fact !== null) {
-        handlerFactsForCommit = [...handlerFactsForCommit, converseWrapper.fact];
-      }
+      // See coach-path comment above re: telemetry-only recovery state.
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
         stage: context.stage,
