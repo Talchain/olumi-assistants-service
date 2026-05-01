@@ -538,6 +538,30 @@ export const TelemetryEvents = {
   V5DecisionReviewSkipped: "v5.decision_review.skipped",
   V5DecisionReviewFailed: "v5.decision_review.failed",
 
+  // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
+  // events cover the graphState resolution outcomes for an edit-intent turn,
+  // so the routing-contract invariant (edit intent → mutation OR clarification
+  // OR typed recovery; never silent fallthrough) is observable end-to-end:
+  //
+  //  - V5EditGraphGraphStatePresent: edit intent detected and `graphState`
+  //    arrived on the request. Baseline counter for future audit; useful when
+  //    triaging "edit intent matched but dispatch never fired" — if this
+  //    event fires but no edit_graph dispatch follows, the failure is
+  //    upstream (an earlier branch returned first).
+  //  - V5EditGraphGraphStateReloaded: edit intent detected, `graphState`
+  //    absent on request, persisted graph reload from `scenarios.graph`
+  //    succeeded; dispatch proceeds against the reloaded graph.
+  //  - V5EditGraphGraphStateUnavailable: edit intent detected, `graphState`
+  //    absent and persisted graph either missing or invalid. The route
+  //    returns a typed recovery response (`turn_class: direct_answer`)
+  //    rather than silently falling through to TurnExecutor / Sonnet.
+  //    Carries `reason: 'no_persisted_graph' | 'persisted_graph_invalid' |
+  //    'session_store_failed'` so operators can distinguish the failure
+  //    modes in dashboards.
+  V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
+  V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
+  V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
+
   // V5 recovery chips — fired when the egress safety layer
   // (failure-response.ts) attaches one or more recovery chips to a failure
   // response. Distinct from V5DecisionReviewFailed: this event is about the

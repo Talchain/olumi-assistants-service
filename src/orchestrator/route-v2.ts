@@ -86,7 +86,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
-import { log } from '../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
@@ -100,6 +100,12 @@ import { getRequestId } from '../utils/request-id.js';
 import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
+import {
+  GraphStateIngressSchema,
+  type GraphStateIngress,
+} from '../orchestrator-v5/boundary/request-extensions.js';
+import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 
 // ───────────────────────────────────────────────────────────────────
 // Commit-failure BoundaryError helper
@@ -645,10 +651,117 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // Sonnet's coaching tone via `stage_indicator` and the context
     // pack, but they no longer block deterministic edit dispatch when
     // a graph is already present.
-    const isEditGraphShape =
-      extensions.graphState != null &&
+    //
+    // ────────────────────────────────────────────────────────────────────
+    // V5 Phase 2.5 Defect A — edit-intent recovery on missing graphState.
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // Pre-correction: when the regex matched but `extensions.graphState`
+    // was null (e.g. the UI did not echo graph_state on this turn even
+    // though a draft existed in `scenarios.graph`), `isEditGraphShape`
+    // evaluated to false and the turn fell through to TurnExecutor.
+    // Sonnet's L1 enum has no `edit_graph`, so the turn was routed to
+    // `explain_from_structure` and the user's mutation intent was lost
+    // silently. This violated the routing-contract invariant:
+    //
+    //     "When edit intent is detected, the turn must end in mutation
+    //      committed, clarification requested, or typed recovery —
+    //      never explain_from_structure or unflagged direct_answer."
+    //
+    // The block below restores that invariant for the missing-graphState
+    // failure mode. It does NOT close the referential-resolution gap
+    // ("let's add this" vs. "add opportunity cost as a risk"); that is
+    // Part 2 of the fix and lives in the context pack assembler.
+    //
+    // Local resolution variable: we never mutate `extensions.graphState`
+    // because later route branches (TurnExecutor fallthrough) read the
+    // same object; mutating it would create cross-branch side effects.
+    const editIntentDetected =
       EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message) &&
       !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
+    let resolvedGraphState: GraphStateIngress | null = null;
+    if (editIntentDetected) {
+      if (extensions.graphState != null) {
+        emit(TelemetryEvents.V5EditGraphGraphStatePresent, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+        });
+      } else {
+        // Edit intent detected but graphState absent on the request.
+        // Attempt reload from `scenarios.graph` rather than silently
+        // falling through to Sonnet (which cannot propose edit_graph).
+        let persisted: unknown = null;
+        try {
+          persisted = await getSessionStore().loadGraph(ingress.scenario_id);
+        } catch (err) {
+          // Session-store / Supabase failure. Distinct from
+          // "no_persisted_graph" so dashboards can separate
+          // infrastructure issues from a genuine empty-state.
+          log.error(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'V5 edit_graph graphState reload failed — returning typed recovery',
+          );
+          emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            reason: 'session_store_failed',
+          });
+          return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
+            assistant_text:
+              "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.",
+            stage: ingress.stage,
+          }), { graph: null });
+        }
+        if (persisted == null) {
+          emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            reason: 'no_persisted_graph',
+          });
+          return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
+            assistant_text:
+              "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.",
+            stage: ingress.stage,
+          }), { graph: null });
+        }
+        // Validate the reloaded graph through the same ingress schema the
+        // request body would have gone through. A persisted-but-invalid
+        // shape is a different operational signal than absence — write a
+        // distinct telemetry reason so it can be alerted on.
+        const parsed = GraphStateIngressSchema.safeParse(persisted);
+        if (!parsed.success) {
+          log.error(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              issue_count: parsed.error.issues.length,
+            },
+            'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
+          );
+          emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            reason: 'persisted_graph_invalid',
+          });
+          return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
+            assistant_text:
+              "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.",
+            stage: ingress.stage,
+          }), { graph: null });
+        }
+        resolvedGraphState = parsed.data;
+        emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+        });
+      }
+    }
+    const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
+    const isEditGraphShape = effectiveGraphState != null && editIntentDetected;
     if (isEditGraphShape) {
       try {
         // graphState confirmed non-null by the `isEditGraphShape` guard.
@@ -660,7 +773,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           payload: ingress,
           requestId,
           request: req,
-          graphState: extensions.graphState!,
+          graphState: effectiveGraphState!,
           analysisState: extensions.analysisState ?? null,
         });
         if (!eg.commitPerformed) {
