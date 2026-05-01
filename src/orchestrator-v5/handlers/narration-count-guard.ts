@@ -70,8 +70,10 @@ export function checkDraftNarrationCounts(
   const nodeMatch = narration.match(NODE_COUNT_RE);
   const edgeMatch = narration.match(EDGE_COUNT_RE);
 
-  // Narration carries no explicit counts → no quantitative mismatch
-  // possible. Accept Sonnet's prose verbatim.
+  // Narration carries NEITHER an explicit node count NOR an explicit
+  // edge count → no quantitative mismatch is detectable. Accept the
+  // narration verbatim. (When only one side is present, we still
+  // compare it against the corresponding final count below.)
   if (!nodeMatch && !edgeMatch) {
     return { chosenText: narration, mismatchDetected: false };
   }
