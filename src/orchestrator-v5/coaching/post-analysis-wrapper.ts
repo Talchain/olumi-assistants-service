@@ -111,9 +111,25 @@ export interface PostAnalysisWrapperResult {
    * carries the same structured fields (answer_text_hash, chip ids,
    * selected card ids, freshness at response).
    *
-   * TODO: when @talchain/schemas adds a PostAnalysisCoachingFactSchema
-   * variant to HandlerFactSchema, swap to ledger persistence and drop
-   * the telemetry-only path. Tracking via the upstream schema package.
+   * KNOWN LIMITATION (deliberate, documented for review): telemetry
+   * does NOT ride on `prior_facts`. The next turn cannot read what
+   * happened on this turn — the original brief implied a persisted
+   * cross-turn signal, and that part of the contract is deferred.
+   * Two follow-up paths:
+   *   1. Bump `@talchain/schemas` to add `PostAnalysisCoachingFactSchema`
+   *      to the `HandlerFactSchema` discriminated union. After it
+   *      lands, swap this telemetry-only emission for a typed fact
+   *      and drop the TODO. Test
+   *      `tests/contract/post-analysis-wrapper.test.ts >
+   *      cross-turn limitation` will start failing — that test is
+   *      pinned to the CURRENT behaviour and should flip when the
+   *      schema bump lands, forcing the wiring update.
+   *   2. If a cross-turn signal is needed before the schema bump
+   *      ships, attach the recovery state to the most recent
+   *      run_analysis fact's enrichment via a new optional field —
+   *      pass-through is already the contract for enrichment, so
+   *      no schema change required. This is a more invasive change
+   *      and should not happen without explicit alignment.
    */
   readonly fired: boolean;
   readonly skipReason?: SkipReason;
@@ -178,17 +194,35 @@ export function generatePostAnalysisCoaching(
   }
 
   const generation = generateChipsFromCards(reviewCards);
+  if (generation.chips.length === 0) {
+    // Terminal skip — single event, accurate semantics.
+    //   - cards existed but every one was unmappable / had no usable
+    //     prose / leaked tokens → unsupported_chip_actions
+    //   - cards existed and at least one was structurally valid but
+    //     the producer routed them all to dedupe collisions or other
+    //     non-emit paths → no_review_cards (rare; defensive default)
+    if (generation.unsupportedCount > 0) {
+      emit(TelemetryEvents.PostAnalysisDirectAnswerRecoverySkipped, {
+        request_id: input.requestId,
+        session_id: input.scenarioId,
+        reason: 'unsupported_chip_actions' satisfies SkipReason,
+        unsupported_count: generation.unsupportedCount,
+      });
+      return { chips: [], fired: false, skipReason: 'unsupported_chip_actions' };
+    }
+    return diagnosticSkip(input, 'no_review_cards');
+  }
+
   if (generation.unsupportedCount > 0) {
+    // Cards produced ≥1 valid chip AND ≥1 unsupported; emit a partial-
+    // skip event alongside the Recovered event so ops still sees the
+    // unsupported count without the misleading terminal-skip semantic.
     emit(TelemetryEvents.PostAnalysisDirectAnswerRecoverySkipped, {
       request_id: input.requestId,
       session_id: input.scenarioId,
       reason: 'unsupported_chip_actions' satisfies SkipReason,
       unsupported_count: generation.unsupportedCount,
     });
-  }
-
-  if (generation.chips.length === 0) {
-    return diagnosticSkip(input, 'no_review_cards');
   }
 
   // Fact-equivalent payload travels on the recovered event so the
@@ -307,11 +341,23 @@ function buildChipFromCard(card: ReviewCard): BuiltChip | null {
     }
   }
 
-  // Path 2: unknown card_type → conversational prefill chip with card prose.
+  // Path 2: unknown card_type → conversational prefill chip with card
+  // prose. Both the message AND the label must come from sanitised
+  // sources — using `card.title` raw for the label would leak whatever
+  // the sanitiser rejected for the message (e.g. dirty title + clean
+  // `what` would silently route the dirty title into the user-visible
+  // chip label). Sanitise the title independently for the label slot;
+  // fall back to the already-sanitised message when the title fails.
   const message = pickConversationalMessage(card);
   if (!message) return null;
 
-  const label = truncateLabel(card.title ?? message);
+  const cleanedTitle = typeof card.title === 'string' && card.title.length > 0
+    ? sanitiseChipProse(card.title)
+    : null;
+  const labelSource = cleanedTitle && !cleanedTitle.suppressed
+    ? cleanedTitle.text
+    : message;
+  const label = truncateLabel(labelSource);
   return {
     chip: {
       id: chipIdForText(message),

@@ -19,6 +19,7 @@
  */
 
 import { HARD_BAN_PATTERNS } from '../../orchestrator/shared/forbidden-tokens.js';
+import { SUPPRESSED_PROSE_FALLBACK } from '../compose/sanitise-enrichment.js';
 
 /**
  * Loose entity-id token detector. Matches the prefixes the existing
@@ -29,8 +30,6 @@ import { HARD_BAN_PATTERNS } from '../../orchestrator/shared/forbidden-tokens.js
  */
 const ENTITY_ID_TOKEN =
   /\b(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[_:-]\w/i;
-
-const SUPPRESSED_FALLBACK_MARKER = 'review-card prose was suppressed';
 
 export interface SanitiseChipProseResult {
   /** The cleaned text (same reference when no transform was applied). */
@@ -51,10 +50,14 @@ export function sanitiseChipProse(input: string | null | undefined): SanitiseChi
     return { text: '', suppressed: true, reason: 'empty' };
   }
 
-  // The parent sanitiser replaces blocked prose with its own marker.
-  // If a card carries that marker, surfacing it in a chip would expose
-  // internal mechanics — drop instead.
-  if (input.includes(SUPPRESSED_FALLBACK_MARKER)) {
+  // The parent sanitiser replaces blocked prose with the canonical
+  // SUPPRESSED_PROSE_FALLBACK marker. If a card carries that marker,
+  // it has already been judged unsafe — surfacing it in a chip would
+  // either expose the marker text itself (operational leak) or read
+  // as nonsensical user-facing prose. Drop instead. Imported from
+  // sanitise-enrichment so a future rename surfaces here at compile
+  // time, not silently.
+  if (input.includes(SUPPRESSED_PROSE_FALLBACK)) {
     return { text: '', suppressed: true, reason: 'suppressed_marker' };
   }
 

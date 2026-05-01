@@ -342,7 +342,14 @@ describe('generatePostAnalysisCoaching — defensive prose sanitisation', () => 
       freshness: 'fresh',
     }));
     expect(result.fired).toBe(false); // no chip → no fire
-    expect(skippedEvents().some((e) => e.data.reason === 'no_review_cards')).toBe(true);
+    // Per the terminal-reason consolidation: when cards existed but
+    // none could produce a valid chip (here, the only card had its
+    // sole prose source — title — rejected by the sanitiser), the
+    // single skip event uses 'unsupported_chip_actions', NOT
+    // 'no_review_cards'.
+    expect(result.skipReason).toBe('unsupported_chip_actions');
+    expect(skippedEvents()).toHaveLength(1);
+    expect(skippedEvents()[0].data.reason).toBe('unsupported_chip_actions');
   });
 
   it('suppresses suggested_evidence when it leaks an entity id', () => {
@@ -365,6 +372,128 @@ describe('generatePostAnalysisCoaching — defensive prose sanitisation', () => 
     expect(result.chips).toHaveLength(1);
     expect(result.chips[0].message).not.toContain('opt_a');
     expect(result.chips[0].message).toContain('Cost');
+  });
+});
+
+// ─── Round-2 review fixes ─────────────────────────────────────────────────
+
+describe('generatePostAnalysisCoaching — label cannot leak dirty title (P1 round 2)', () => {
+  it('dirty title + clean what → label uses sanitised message, NOT raw title', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [{
+        card_id: 'card_1',
+        card_type: 'novel_unknown_type',
+        // Dirty title carries an entity-id leak — sanitiser will reject it.
+        title: "Node 'fac_hiring_cost' needs review",
+        // Clean what — used for the message.
+        what: 'Reconsider how the cost factor is modelled.',
+      }],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+    }));
+    expect(result.fired).toBe(true);
+    expect(result.chips).toHaveLength(1);
+    const chip = result.chips[0];
+    // The chip MUST NOT contain any token from the dirty title in either
+    // the message OR the label.
+    expect(chip.message).not.toContain('fac_hiring_cost');
+    expect(chip.label).not.toContain('fac_hiring_cost');
+    // Label falls back to the sanitised message (truncated) since the
+    // title was suppressed.
+    expect(chip.label.length).toBeGreaterThan(0);
+  });
+
+  it('clean title → label uses sanitised title (truncated)', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [{
+        card_id: 'card_1',
+        card_type: 'novel_unknown_type',
+        title: 'Reconsider option B carefully',
+        what: 'Different prose for the message body.',
+      }],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+    }));
+    expect(result.chips[0].label).toContain('Reconsider option B');
+  });
+});
+
+describe('generatePostAnalysisCoaching — terminal skip when ALL cards unsupported', () => {
+  it('emits a SINGLE unsupported_chip_actions event (no follow-up no_review_cards)', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [
+        // Three cards, all unmappable: unknown card_type and no usable prose.
+        { card_id: 'c1', card_type: 'novel_unknown_type' },
+        { card_id: 'c2', card_type: 'novel_other' },
+        { card_id: 'c3' /* no card_type, no prose */ },
+      ],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+    }));
+    expect(result.fired).toBe(false);
+    expect(result.skipReason).toBe('unsupported_chip_actions');
+
+    // Exactly ONE skipped event with the unsupported reason — no
+    // follow-up no_review_cards event with the misleading semantic
+    // (cards DID exist; they were just all unmappable).
+    const skipped = skippedEvents();
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].data).toMatchObject({
+      reason: 'unsupported_chip_actions',
+      unsupported_count: 3,
+    });
+  });
+
+  it('partial success (some chips, some unsupported) emits BOTH Recovered and partial-skip', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [
+        { card_id: 'c1', card_type: 'evidence_priority', items: [{ factor_label: 'Cost' }] },
+        { card_id: 'c2', card_type: 'novel_unknown_type' /* no prose */ },
+      ],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+    }));
+    expect(result.fired).toBe(true);
+    expect(result.chips).toHaveLength(1);
+    expect(recoveredEvent()).toBeDefined();
+    const partialSkip = skippedEvents().find((e) => e.data.reason === 'unsupported_chip_actions');
+    expect(partialSkip?.data).toMatchObject({ unsupported_count: 1 });
+  });
+});
+
+describe('generatePostAnalysisCoaching — cross-turn limitation pinned (P1 deferred)', () => {
+  /**
+   * KNOWN LIMITATION: telemetry-only recovery state means the next
+   * turn cannot read what the wrapper did on this turn. This test
+   * pins that current behaviour. When @talchain/schemas adds a
+   * PostAnalysisCoachingFactSchema variant to HandlerFactSchema,
+   * persistence becomes safe; this test should start failing as the
+   * wrapper begins emitting a real fact, forcing the wiring update.
+   * That failure is the trigger to migrate from telemetry-only to
+   * ledger-persisted recovery state.
+   */
+  it('result has no `fact` field → next turn has no prior_facts entry to read', () => {
+    const fact = makeRunAnalysisFact({
+      reviewCards: [{ card_id: 'rc1', card_type: 'evidence_priority', items: [{ factor_label: 'Cost' }] }],
+    });
+    const result = generatePostAnalysisCoaching(makeInput({
+      priorFacts: [fact],
+      freshness: 'fresh',
+    }));
+    expect(result.fired).toBe(true);
+    // Pin: the result type carries no `fact`. When this test fails
+    // because a `fact` field appears, the schema bump has landed and
+    // the cross-turn limitation is resolved — update both the test
+    // and the wrapper to ride on prior_facts.
+    expect((result as Record<string, unknown>).fact).toBeUndefined();
   });
 });
 
