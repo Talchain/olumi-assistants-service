@@ -214,11 +214,26 @@ function assertRoutingContractHonoured(): void {
         `Telemetry: ${JSON.stringify(emittedNames())}`,
     );
   }
-  const finaliseEvent = logInfoCalls.find((c) => c.event === 'v5.response.finalised');
-  if (finaliseEvent && finaliseEvent.exit_path === 'turn_executor') {
+  // Inspect ALL `v5.response.finalised` events, not just the first.
+  // A missing-`return` regression after `sendEditGraphRecovery(...)`
+  // would emit two finalise events on the same request: the
+  // edit_graph recovery (first) followed by a turn_executor
+  // fallthrough (second). `find()` would short-circuit on the first
+  // and miss the second. `filter` + length-1 catches the leak even
+  // though Fastify rejects the second `reply.send` — the telemetry
+  // is emitted *before* the send.
+  const finaliseEvents = logInfoCalls.filter((c) => c.event === 'v5.response.finalised');
+  if (finaliseEvents.length !== 1) {
+    throw new Error(
+      `Routing contract violated: expected exactly one v5.response.finalised event, got ${finaliseEvents.length}. ` +
+        `Events: ${JSON.stringify(finaliseEvents)}`,
+    );
+  }
+  const turnExecutorLeak = finaliseEvents.find((c) => c.exit_path === 'turn_executor');
+  if (turnExecutorLeak) {
     throw new Error(
       `Routing contract violated: edit intent finalised via turn_executor exit path. ` +
-        `Finalise event: ${JSON.stringify(finaliseEvent)}`,
+        `Finalise event: ${JSON.stringify(turnExecutorLeak)}`,
     );
   }
 }
@@ -279,12 +294,22 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     expect(loadGraphMock).toHaveBeenCalledWith(SCENARIO_ID);
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
     // The whole point of reload is that the dispatcher receives the
-    // RELOADED graph (post-validate, with required fields), not null
-    // and not the unparsed raw object. A future regression that fed
-    // `extensions.graphState` (still null on this turn) or the raw
-    // pre-validate `persisted` value to the dispatcher would slip past
-    // a count-only assertion.
+    // reloaded graph, not null. `extensions.graphState` is null on this
+    // request, so without the reload code path the dispatcher would
+    // either not be called or be called with `null`. A count-only
+    // assertion would not catch a regression that called the dispatcher
+    // with `null` or with `extensions.graphState`.
+    //
+    // Caveat on what `toEqual` proves here: `GraphStateIngressSchema`
+    // uses Zod `.passthrough()`, so a successfully parsed graph is
+    // structurally identical to the raw input. The structural-equality
+    // check therefore does not by itself distinguish "raw persisted
+    // object" from "post-validate parsed object" — they are equal under
+    // `.passthrough()`. What this assertion DOES prove: the dispatcher
+    // received the reloaded graph (not null, not a different value),
+    // which is the load-bearing requirement of the reload contract.
     const dispatchArgs = dispatchEditGraphMock.mock.calls[0]?.[0];
+    expect(dispatchArgs?.graphState).not.toBeNull();
     expect(dispatchArgs?.graphState).toEqual(VALID_GRAPH_STATE);
     expect(emittedNames()).toContain('v5.edit_graph.graph_state_reloaded');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_present');

@@ -69,14 +69,23 @@ exercise edit intent should call this helper.
 
 ### Scope limitation
 
-The Part 1 fix closes the missing-`graphState` failure mode. It does not
-close the referential-resolution gap: messages like "let's add this"
-where the edit verb matches but the system has no referent for "this"
-still misroute when `graphState` is reachable. That gap is Part 2's
-responsibility and depends on a `v5_coaching_state` (or equivalent)
-persistence path that surfaces structured prior-assistant suggestions
-to the L1 context pack. Until Part 2 lands, referential phrasing without
-an explicit entity name remains a user-visible regression.
+The Part 1 fix closes the missing-`graphState` failure mode for the
+**route-classification** half of the contract. With `graphState`
+reachable (on the request or via reload), an edit-verb message —
+including referential phrasing like "let's add this" — now reaches
+`dispatchEditGraph` rather than falling through to TurnExecutor.
+
+What Part 1 does NOT close is **target resolution inside the edit
+handler**. Messages like "let's add this" carry an unresolved referent;
+the handler may still fail to identify *which* entity the user meant,
+and the user-visible outcome can be a confused or ineffective edit.
+That gap is Part 2's responsibility and depends on a
+`v5_coaching_state` (or equivalent) persistence path that surfaces
+structured prior-assistant suggestions to the L1 context pack so
+referential terms can be resolved before reaching the handler. Until
+Part 2 lands, referential phrasing without an explicit entity name
+remains a user-visible regression at the handler layer, even though the
+route-level invariant in this contract is now honoured.
 
 ---
 
