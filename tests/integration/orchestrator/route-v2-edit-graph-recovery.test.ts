@@ -487,4 +487,34 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     expect(emittedNames()).toContain('v5.edit_graph.graph_state_present');
     assertRoutingContractHonoured({ expectsFinalised200: false });
   });
+
+  // ─── Case 8 (reload path + downstream throw — outcome 4 via reload) ───
+  it('edit intent + graphState absent + reload success + dispatcher throws → typed BoundaryError 500', async () => {
+    // The reload path must not mask post-reload failures. This case is
+    // the intersection of the new reload code (Case 2) with the typed-
+    // 500 path (Case 7): reload succeeds, dispatch is attempted on the
+    // reloaded graph, then the dispatcher throws. The route MUST still
+    // surface the typed BoundaryError 500 — not swallow the throw and
+    // emit a finalised 200 — and the `_reloaded` telemetry must still
+    // fire (proving the reload happened before the failure).
+    loadGraphMock.mockResolvedValueOnce(VALID_GRAPH_STATE);
+    dispatchEditGraphMock.mockRejectedValueOnce(new Error('post-reload pipeline blew up'));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'Add opportunity cost of founder time as a risk',
+      }),
+    });
+    expect(res.statusCode).toBe(500);
+    expect(loadGraphMock).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(dispatchEditGraphMock.mock.calls[0]?.[0]?.graphState).toEqual(VALID_GRAPH_STATE);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('edit_graph_pipeline_threw');
+    expect(emittedNames()).toContain('v5.edit_graph.graph_state_reloaded');
+    expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_unavailable');
+    assertRoutingContractHonoured({ expectsFinalised200: false });
+  });
 });
