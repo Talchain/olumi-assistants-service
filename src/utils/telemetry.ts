@@ -602,6 +602,45 @@ export const TelemetryEvents = {
   // { matched, dispatch?, candidate_count?, top_score?, skip_reason?,
   //   cqe_quantity_count }.
   V5DeterministicValueUpdate: "v5.deterministic_value_update",
+
+  // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
+  // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
+  // so any new PLoT field is covered automatically. Payload:
+  // { request_id, session_id, field_path, value_repr }.
+  // Handler responds by throwing HandlerInvocationFailedError; UI surfaces
+  // the standard recovery chip via buildFailureResponse.
+  PlotResponseInvalidNumeric: "v5.plot_response.invalid_numeric",
+
+  // V5 Phase 2 workstream C — defence-in-depth signal from the display
+  // formatters. Workstream E rejects non-finite values at ingress; if a
+  // value still reaches `formatProbability` / `formatPercentagePoints`
+  // outside the legal range, this event fires so ops can trace the
+  // upstream root cause. Payload: { field_path, value_kind, detail }.
+  // value_kind: 'non_finite' (NaN/Infinity) | 'out_of_range' (<0 or >1).
+  ProbabilityOutOfRange: "v5.probability_out_of_range",
+
+  // V5 Phase 2 workstream B — Sonnet's draft_graph narration explicitly
+  // states a node/edge count that disagrees with the final post-repair
+  // graph. Dispatcher prefers the deterministic fallback in this case
+  // and emits this event so ops can chase the upstream prompt drift.
+  // Payload: { request_id, final_node_count, final_edge_count,
+  //            narration_node_count, narration_edge_count,
+  //            narration_length }.
+  DraftNarrationCountMismatch: "v5.draft_narration.count_mismatch",
+
+  // V5 Phase 2 workstream A — post-analysis coaching wrapper fired.
+  // Emitted when an analyse-stage direct_answer with a fresh
+  // run_analysis fact yields ≥1 review-card-derived chip and a
+  // post_analysis_coaching fact is committed. Payload:
+  // { request_id, session_id, chip_count, selected_card_count }.
+  PostAnalysisDirectAnswerRecovered: "v5.post_analysis.direct_answer_recovered",
+  // Companion to ...Recovered: emitted when the wrapper's trigger
+  // conditions fail (or unsupported card_types are filtered out).
+  // Payload: { request_id, session_id, reason, unsupported_count? }.
+  // reason: 'no_run_fact' | 'stale_analysis' | 'no_review_cards'
+  //       | 'unsupported_chip_actions' | 'non_analyse_stage'
+  //       | 'freshness_unknown'.
+  PostAnalysisDirectAnswerRecoverySkipped: "v5.post_analysis.direct_answer_recovery_skipped",
 } as const;
 
 /**

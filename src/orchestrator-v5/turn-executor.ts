@@ -83,6 +83,7 @@ import {
 } from './tools/registry.js';
 import { sanitiseNarrateOutput } from './sanitise.js';
 import { generateChips } from './compose/chip-generator.js';
+import { generatePostAnalysisCoaching } from './coaching/post-analysis-wrapper.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
 
 
@@ -1472,10 +1473,31 @@ export async function runTurnExecutor(
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
+      // Phase 2 workstream A: post-analysis coaching wrapper for the
+      // `analyse` stage direct_answer path. Mines the latest fresh
+      // run_analysis fact's review_cards for structured chips so the
+      // user always has a next step. No-op outside `analyse` stage.
+      const coachWrapper = generatePostAnalysisCoaching({
+        stage: context.stage,
+        priorFacts: context.prior_facts,
+        freshness: freshness?.freshness ?? 'none',
+        requestId,
+        scenarioId: context.session_id,
+        answerText: sanitised.output,
+      });
+      const coachComposedChips = coachWrapper.fired
+        ? [...coachWrapper.chips, ...coachChips]
+        : coachChips;
+      // No handler_fact append: the wrapper's recovery state ships via
+      // the PostAnalysisDirectAnswerRecovered telemetry event because
+      // @talchain/schemas has no `post_analysis_coaching` fact_type
+      // variant in the pinned version, and supabase-store.readFactsFor
+      // strict-parses every persisted fact through HandlerFactSchema —
+      // an unschemaed row would poison the entire scenario's chain.
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
         stage: context.stage,
-        suggested_actions: coachChips,
+        suggested_actions: coachComposedChips,
       });
       stagesCompleted.push('compose');
     } else {
@@ -1503,10 +1525,25 @@ export async function runTurnExecutor(
         validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
         ...(buildTurnOutcome() ? { turnOutcome: buildTurnOutcome()! } : {}),
       });
+      // Phase 2 workstream A: same wrapper as the coach path. Catches
+      // the LLM's text-only direct_answer in `analyse` stage and
+      // injects review-card-derived chips. Skipped outside `analyse`.
+      const converseWrapper = generatePostAnalysisCoaching({
+        stage: context.stage,
+        priorFacts: context.prior_facts,
+        freshness: freshness?.freshness ?? 'none',
+        requestId,
+        scenarioId: context.session_id,
+        answerText: sanitised.output,
+      });
+      const converseComposedChips = converseWrapper.fired
+        ? [...converseWrapper.chips, ...converseChips]
+        : converseChips;
+      // See coach-path comment above re: telemetry-only recovery state.
       composedOk = composeDirectAnswerResponse({
         assistant_text: sanitised.output,
         stage: context.stage,
-        suggested_actions: converseChips,
+        suggested_actions: converseComposedChips,
       });
       stagesCompleted.push('compose');
     }

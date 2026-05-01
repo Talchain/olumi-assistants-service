@@ -214,7 +214,8 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      expect(result.response.assistant_text).toBe('Drafted a decision graph with 2 nodes and 1 edges.');
+      // Phase 2 P1: deterministic fallback emits markdown-bolded counts.
+      expect(result.response.assistant_text).toBe('Drafted a decision graph with **2** nodes and **1** edges.');
     });
   });
 
