@@ -618,6 +618,15 @@ export const TelemetryEvents = {
   // upstream root cause. Payload: { field_path, value_kind, detail }.
   // value_kind: 'non_finite' (NaN/Infinity) | 'out_of_range' (<0 or >1).
   ProbabilityOutOfRange: "v5.probability_out_of_range",
+
+  // V5 Phase 2 workstream B — Sonnet's draft_graph narration explicitly
+  // states a node/edge count that disagrees with the final post-repair
+  // graph. Dispatcher prefers the deterministic fallback in this case
+  // and emits this event so ops can chase the upstream prompt drift.
+  // Payload: { request_id, final_node_count, final_edge_count,
+  //            narration_node_count, narration_edge_count,
+  //            narration_length }.
+  DraftNarrationCountMismatch: "v5.draft_narration.count_mismatch",
 } as const;
 
 /**

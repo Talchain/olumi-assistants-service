@@ -62,6 +62,7 @@ import {
 } from '../context/freshness.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { checkDraftNarrationCounts } from './narration-count-guard.js';
 
 export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
@@ -117,6 +118,7 @@ function draftResultToOlumiResponse(
   result: DraftGraphResult,
   payload: MessageTurnPayload,
   graphPersisted: boolean,
+  requestId: string,
 ): OlumiResponse {
   // Derive node/edge counts from the FINAL graph (post-repair, post-validation)
   // to ensure the assistant_text matches what the UI will render.
@@ -126,10 +128,24 @@ function draftResultToOlumiResponse(
   let assistantText: string;
   if (graphPersisted) {
     // Success path: prefer handler narration, fall back to FINAL node/edge count.
+    // Phase 2 workstream B: when narration explicitly states a count that
+    // disagrees with the final graph, fall back to deterministic prose so
+    // the user never sees numbers that contradict the canvas.
     const successFallback = result.graphOutput
       ? `Drafted a decision graph with ${finalNodeCount} nodes and ${finalEdgeCount} edges.`
       : 'Drafted a decision graph.';
-    assistantText = result.assistantText ?? successFallback;
+    if (result.assistantText !== null) {
+      const guardCheck = checkDraftNarrationCounts({
+        narration: result.assistantText,
+        finalNodeCount,
+        finalEdgeCount,
+        fallback: successFallback,
+        requestId,
+      });
+      assistantText = guardCheck.chosenText;
+    } else {
+      assistantText = successFallback;
+    }
   } else {
     // Failure path: route discards this response and returns 500 INTERNAL_ERROR.
     // Use neutral narration; the client never sees this text.
@@ -266,7 +282,7 @@ export async function dispatchDraftGraph(
       },
     );
 
-    const response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted);
+    const response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId);
     // V5 finaliser contract: surface the rich pipeline payload on the
     // dispatch result so route-v2.ts can stamp it via finaliseV5Response.
     // Only surface when the graph actually persisted — a non-persisted
@@ -354,7 +370,7 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch — commit failed; route returns 500 INTERNAL_ERROR',
     );
-    const response = draftResultToOlumiResponse(draftResult, payload, false);
+    const response = draftResultToOlumiResponse(draftResult, payload, false, requestId);
     return { response, commitPerformed: false, graph: draftResult.graphOutput };
   }
 }
