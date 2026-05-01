@@ -419,7 +419,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         BoundaryValidation: "boundary.validation",
         ContextPackAssembled: "v5.context_pack.assembled",
         CqeExtraction: "cqe.extraction",
+        // V5 Phase 2 additions (2026-05-01).
+        DraftNarrationCountMismatch: "v5.draft_narration.count_mismatch",
         HandlerInvocation: "v5.handler_invocation",
+        PlotResponseInvalidNumeric: "v5.plot_response.invalid_numeric",
+        ProbabilityOutOfRange: "v5.probability_out_of_range",
         RecoveryResponse: "v5.recovery_response",
         SessionReadDegraded: "session.read_degraded",
         TurnExecutorCompleted: "turn_executor.completed",
@@ -468,7 +472,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness|plot_response|probability_out_of_range|draft_narration)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -970,6 +974,18 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // into Datadog (intentionally, until cardinality is bounded by the
         // five tracked-key allowlist in src/prompts/tracked.ts).
         TelemetryEvents.V5PromptResolved,
+        // V5 Phase 2 (2026-05-01) additions — diagnostic-only:
+        //  - PlotResponseInvalidNumeric: defence-in-depth ingress guard.
+        //    Structured log + handler error are the operational signal.
+        //  - ProbabilityOutOfRange: defence-in-depth display formatter
+        //    guard. Workstream E rejects upstream; this fires only if a
+        //    bypass is observed.
+        //  - DraftNarrationCountMismatch: Sonnet drift signal on the
+        //    draft_graph dispatcher. Operational signal is the structured
+        //    log; the dispatcher continues with the deterministic fallback.
+        TelemetryEvents.PlotResponseInvalidNumeric,
+        TelemetryEvents.ProbabilityOutOfRange,
+        TelemetryEvents.DraftNarrationCountMismatch,
       ];
 
       for (const event of allEvents) {
@@ -1374,10 +1390,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.analysis_freshness.graph_hash_missing",
         "v5.analysis_freshness.invariant_failed",
         "v5.context_pack.assembled",
+        // V5 Phase 2 additions (2026-05-01).
+        "v5.draft_narration.count_mismatch",
         "v5.explanation.answer_verdict",
         "v5.explanation.evidence",
         "v5.handler_invocation",
         "v5.mutation_language_guard",
+        "v5.plot_response.invalid_numeric",
+        "v5.probability_out_of_range",
         "v5.prompt_cache",
         "v5.prompt_resolved",
         "v5.recovery_chip_served",
