@@ -627,6 +627,20 @@ export const TelemetryEvents = {
   //            narration_node_count, narration_edge_count,
   //            narration_length }.
   DraftNarrationCountMismatch: "v5.draft_narration.count_mismatch",
+
+  // V5 Phase 2 workstream A — post-analysis coaching wrapper fired.
+  // Emitted when an analyse-stage direct_answer with a fresh
+  // run_analysis fact yields ≥1 review-card-derived chip and a
+  // post_analysis_coaching fact is committed. Payload:
+  // { request_id, session_id, chip_count, selected_card_count }.
+  PostAnalysisDirectAnswerRecovered: "v5.post_analysis.direct_answer_recovered",
+  // Companion to ...Recovered: emitted when the wrapper's trigger
+  // conditions fail (or unsupported card_types are filtered out).
+  // Payload: { request_id, session_id, reason, unsupported_count? }.
+  // reason: 'no_run_fact' | 'stale_analysis' | 'no_review_cards'
+  //       | 'unsupported_chip_actions' | 'non_analyse_stage'
+  //       | 'freshness_unknown'.
+  PostAnalysisDirectAnswerRecoverySkipped: "v5.post_analysis.direct_answer_recovery_skipped",
 } as const;
 
 /**
