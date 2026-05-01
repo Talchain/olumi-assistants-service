@@ -109,8 +109,11 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
   };
 });
 
-// Capture telemetry events emitted during each test.
+// Capture telemetry events emitted during each test, plus the
+// `v5.response.finalised` log lines (used by the routing-contract
+// invariant to detect TurnExecutor fallthrough on edit-intent turns).
 const telemetryEvents: Array<{ name: string; payload: Record<string, unknown> }> = [];
+const logInfoCalls: Array<Record<string, unknown>> = [];
 vi.mock('../../../src/utils/telemetry.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../src/utils/telemetry.js')>();
   return {
@@ -119,6 +122,19 @@ vi.mock('../../../src/utils/telemetry.js', async (importOriginal) => {
       telemetryEvents.push({ name, payload });
       return original.emit(name as never, payload as never);
     },
+    log: new Proxy(original.log, {
+      get(target, prop, receiver) {
+        if (prop === 'info') {
+          return (obj: unknown, msg?: string) => {
+            if (typeof obj === 'object' && obj !== null) {
+              logInfoCalls.push(obj as Record<string, unknown>);
+            }
+            return Reflect.get(target, 'info', receiver).call(target, obj, msg);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }),
   };
 });
 
@@ -170,20 +186,39 @@ function findEvent(name: string): Record<string, unknown> | undefined {
 }
 
 /**
- * Routing-contract invariant. Asserts that for any turn where edit intent
- * was detected, exactly one of the three permitted outcomes occurred:
- * (1) edit_graph dispatched, (2) clarification (Part 2 — never seen here),
- * (3) typed recovery telemetry fired. Falling through to TurnExecutor /
- * Sonnet without one of those signals is a routing-contract violation.
+ * Routing-contract invariant. For any turn where edit intent was detected,
+ * the route MUST produce **exactly one** of the three permitted outcomes:
+ *   (1) edit_graph dispatched (`dispatchEditGraph` called),
+ *   (2) clarification response (Part 2 — never observed in this suite),
+ *   (3) typed recovery (`v5.edit_graph.graph_state_unavailable` emitted).
+ *
+ * Two stronger assertions over the brief's text:
+ *   - **Exactly one**, not "at least one". A future regression that fired
+ *     both a recovery AND a dispatch call (e.g. a missing `return`) would
+ *     slip past `dispatchCalled || recoveryEmitted`.
+ *   - **No `exit_path: 'turn_executor'`** on the `v5.response.finalised`
+ *     log line. This is the canonical signal of the silent-fallthrough bug
+ *     this fix exists to prevent. If a turn with detected edit intent ever
+ *     finalises via the TurnExecutor exit path, the contract is violated
+ *     even if other telemetry looks correct.
  */
 function assertRoutingContractHonoured(): void {
   const dispatchCalled = dispatchEditGraphMock.mock.calls.length > 0;
+  const clarificationFired = false; // Part 2 — never produced by Part 1 code paths.
   const recoveryEmitted = emittedNames().includes('v5.edit_graph.graph_state_unavailable');
-  const handled = dispatchCalled || recoveryEmitted;
-  if (!handled) {
+  const outcomeCount = [dispatchCalled, clarificationFired, recoveryEmitted].filter(Boolean).length;
+  if (outcomeCount !== 1) {
     throw new Error(
-      `Routing contract violated: edit intent detected but neither edit_graph dispatch nor typed recovery occurred. ` +
+      `Routing contract violated: expected exactly one of (dispatch, clarification, typed recovery), got ${outcomeCount}. ` +
+        `dispatchCalled=${dispatchCalled} clarificationFired=${clarificationFired} recoveryEmitted=${recoveryEmitted}. ` +
         `Telemetry: ${JSON.stringify(emittedNames())}`,
+    );
+  }
+  const finaliseEvent = logInfoCalls.find((c) => c.event === 'v5.response.finalised');
+  if (finaliseEvent && finaliseEvent.exit_path === 'turn_executor') {
+    throw new Error(
+      `Routing contract violated: edit intent finalised via turn_executor exit path. ` +
+        `Finalise event: ${JSON.stringify(finaliseEvent)}`,
     );
   }
 }
@@ -206,6 +241,7 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     appendMock.mockClear();
     loadGraphMock.mockReset();
     telemetryEvents.length = 0;
+    logInfoCalls.length = 0;
   });
 
   // ─── Case 1 ────────────────────────────────────────────────────────────
@@ -242,6 +278,14 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     expect(res.statusCode).toBe(200);
     expect(loadGraphMock).toHaveBeenCalledWith(SCENARIO_ID);
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    // The whole point of reload is that the dispatcher receives the
+    // RELOADED graph (post-validate, with required fields), not null
+    // and not the unparsed raw object. A future regression that fed
+    // `extensions.graphState` (still null on this turn) or the raw
+    // pre-validate `persisted` value to the dispatcher would slip past
+    // a count-only assertion.
+    const dispatchArgs = dispatchEditGraphMock.mock.calls[0]?.[0];
+    expect(dispatchArgs?.graphState).toEqual(VALID_GRAPH_STATE);
     expect(emittedNames()).toContain('v5.edit_graph.graph_state_reloaded');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_present');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_unavailable');

@@ -288,6 +288,48 @@ export function buildCommitFailureBoundaryError(params: {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Edit_graph typed-recovery helper (V5 Phase 2.5 Defect A Part 1)
+// ────────────────────────────────────────────────────────────────────
+//
+// Three failure branches in the edit-intent recovery path emit the same
+// wire shape: a direct_answer 200 with a fixed recovery message and a
+// telemetry event tagged with the failure reason. Centralised here so
+// the message text and the response shape cannot drift between branches.
+//
+// The wire `turn_class` is `direct_answer` (the only schema-permitted
+// option for non-handler 200s — `ConversationTurnClassSchema` is strict
+// and has no `'recovery'` literal). The exit_path label on
+// `sendFinalised200` stays `'edit_graph'` so dashboards see these
+// recoveries within the edit_graph telemetry stream rather than mixed in
+// with TurnExecutor fallthroughs.
+
+const EDIT_GRAPH_RECOVERY_TEXT =
+  "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.";
+
+type EditGraphRecoveryReason =
+  | 'no_persisted_graph'
+  | 'persisted_graph_invalid'
+  | 'session_store_failed';
+
+function sendEditGraphRecovery(
+  reply: import('fastify').FastifyReply<{ Reply: V5RouteReply }>,
+  requestId: string,
+  scenarioId: string,
+  stage: import('@talchain/schemas/boundary').StageType,
+  reason: EditGraphRecoveryReason,
+): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
+  emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
+    request_id: requestId,
+    scenario_id: scenarioId,
+    reason,
+  });
+  return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
+    assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
+    stage,
+  }), { graph: null });
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Dispatch-trigger regexes (hoisted to module scope — constructing these
 // inside the request handler would rebuild RegExp objects on every turn).
 // ────────────────────────────────────────────────────────────────────
@@ -676,6 +718,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // Local resolution variable: we never mutate `extensions.graphState`
     // because later route branches (TurnExecutor fallthrough) read the
     // same object; mutating it would create cross-branch side effects.
+    //
+    // The recovery message is centralised in `EDIT_GRAPH_RECOVERY_TEXT`
+    // and threaded through `composeDirectAnswerResponse` so all three
+    // failure branches emit identical wire shape. The wire `turn_class`
+    // is `direct_answer` (no `'recovery'` literal exists in
+    // ConversationTurnClassSchema; introducing one would break ingress
+    // validation across the boundary).
     const editIntentDetected =
       EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message) &&
       !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
@@ -705,28 +754,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph graphState reload failed — returning typed recovery',
           );
-          emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
-            request_id: requestId,
-            scenario_id: ingress.scenario_id,
-            reason: 'session_store_failed',
-          });
-          return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
-            assistant_text:
-              "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.",
-            stage: ingress.stage,
-          }), { graph: null });
+          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed');
         }
         if (persisted == null) {
-          emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
-            request_id: requestId,
-            scenario_id: ingress.scenario_id,
-            reason: 'no_persisted_graph',
-          });
-          return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
-            assistant_text:
-              "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.",
-            stage: ingress.stage,
-          }), { graph: null });
+          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph');
         }
         // Validate the reloaded graph through the same ingress schema the
         // request body would have gone through. A persisted-but-invalid
@@ -742,16 +773,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
           );
-          emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
-            request_id: requestId,
-            scenario_id: ingress.scenario_id,
-            reason: 'persisted_graph_invalid',
-          });
-          return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
-            assistant_text:
-              "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.",
-            stage: ingress.stage,
-          }), { graph: null });
+          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid');
         }
         resolvedGraphState = parsed.data;
         emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
