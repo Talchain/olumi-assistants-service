@@ -610,6 +610,14 @@ export const TelemetryEvents = {
   // Handler responds by throwing HandlerInvocationFailedError; UI surfaces
   // the standard recovery chip via buildFailureResponse.
   PlotResponseInvalidNumeric: "v5.plot_response.invalid_numeric",
+
+  // V5 Phase 2 workstream C — defence-in-depth signal from the display
+  // formatters. Workstream E rejects non-finite values at ingress; if a
+  // value still reaches `formatProbability` / `formatPercentagePoints`
+  // outside the legal range, this event fires so ops can trace the
+  // upstream root cause. Payload: { field_path, value_kind, detail }.
+  // value_kind: 'non_finite' (NaN/Infinity) | 'out_of_range' (<0 or >1).
+  ProbabilityOutOfRange: "v5.probability_out_of_range",
 } as const;
 
 /**

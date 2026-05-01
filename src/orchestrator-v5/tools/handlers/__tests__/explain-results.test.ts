@@ -258,10 +258,11 @@ describe('explain_results — answer-carrying contract', () => {
       }),
     );
     expect(outcome.assistant_text).toContain('Hire Senior Engineer');
-    // Raw probability value (0-1 fraction), not per-cent conversion.
-    expect(outcome.assistant_text).toContain('0.62');
+    // Phase 2 workstream C: probability rendered as percentage (0.62 → "62%").
+    expect(outcome.assistant_text).toContain('62%');
     expect(outcome.assistant_text).toContain('Engineering Capacity');
-    // Driver sensitivity value surfaced.
+    // Driver sensitivity value surfaced raw — sensitivity is not a probability
+    // and converting it to a percentage would misrepresent the magnitude.
     expect(outcome.assistant_text).toContain('0.65');
   });
 

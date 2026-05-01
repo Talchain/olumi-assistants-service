@@ -67,17 +67,21 @@ function expectNaturalProse(text: string) {
 }
 
 describe('composeExplainResultsFallback', () => {
-  it('cites leading option label, raw probability, runner-up margin, and top drivers with sensitivity values', () => {
+  it('cites leading option label, probability as percentage, runner-up margin in percentage points, and top drivers with raw sensitivity values', () => {
     const text = composeExplainResultsFallback(ANALYSIS);
     expectNaturalProse(text);
     expect(text).toContain('Hire Senior Engineer');
-    // Raw probability value (0-1 fraction) — no per-cent conversion
-    expect(text).toContain('0.62');
+    // Phase 2 workstream C: probabilities render as percentages, not raw
+    // decimals. 0.62 → "62%". The legacy raw-decimal form must not appear
+    // alongside the probability prose.
+    expect(text).toContain('62%');
+    expect(text).not.toContain('probability of 0.62');
     expect(text).not.toContain('per cent');
-    // Runner-up label and raw margin
+    // Runner-up label and margin in "N percentage points" prose form
     expect(text).toContain('Hire Two Mid-Level');
-    expect(text).toContain('35');
-    // Driver labels AND sensitivity values both surfaced
+    expect(text).toContain('35 percentage points');
+    // Driver labels AND sensitivity values both surfaced (sensitivity stays raw —
+    // it is not a probability and converting would misrepresent the magnitude)
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('0.65');
     expect(text).toContain('Hiring Cost');
@@ -117,15 +121,18 @@ describe('composeExplainResultsFallback', () => {
 });
 
 describe('composeWhatWouldFlipFallback', () => {
-  it('cites leading option, raw margin, and top drivers WITH sensitivity values — no mutation language', () => {
+  it('cites leading option, margin in percentage points, and top drivers WITH sensitivity values — no mutation language', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expectNaturalProse(text);
     expect(text).toContain('Hire Senior Engineer');
-    // Raw probability value
-    expect(text).toContain('0.62');
+    // Phase 2 workstream C: probability rendered as percentage
+    expect(text).toContain('62%');
+    expect(text).not.toContain('probability of 0.62');
     expect(text).not.toContain('per cent');
     expect(text).toContain('Hire Two Mid-Level');
-    // Driver labels AND sensitivity values
+    // Margin rendered as full "N percentage points" prose
+    expect(text).toContain('35 percentage points');
+    // Driver labels AND sensitivity values (sensitivity stays raw)
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('0.65');
     expect(text).toContain('-0.42');

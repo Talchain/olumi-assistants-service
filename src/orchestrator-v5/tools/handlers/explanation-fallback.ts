@@ -7,10 +7,12 @@
  * Olumi explaining — never a bullet list, never a template dump.
  *
  * F.6 invariant: format only. Sort and slice; do NOT calculate new metrics,
- * derive new margins, or synthesise causality. Numeric values (probability,
- * margin_pp, sensitivity, edge strength) are surfaced verbatim as supplied
- * by the context pack — no ×100 conversion, no fixed-precision rounding,
- * no unit substitution. The fallback is a formatter, not a derivation step.
+ * derive new margins, or synthesise causality. Numeric values are surfaced
+ * via the centralised formatters in `format-analysis-value.ts` (Phase 2
+ * workstream C): probabilities render as percentages, margins as
+ * percentage points, sensitivities and edge strengths pass through raw
+ * (their range is not normalised; surfacing them as percentages would
+ * misrepresent the underlying signal).
  *
  * Copy rules:
  *  - Sentence case, British English.
@@ -25,13 +27,17 @@ import type {
   AnalysisProjectionDriver,
   StructureProjectionSummary,
 } from '../../context/projection-summaries.js';
+import {
+  formatPercentagePoints,
+  formatProbability,
+} from '../../format/format-analysis-value.js';
 
 function formatRawNumber(value: number): string {
-  // Brief: "Use raw values as provided in context. Do not convert formats."
-  // String(value) preserves the underlying number verbatim — JS already
-  // emits 0.62 as "0.62" and 35 as "35". The integer guard is purely
-  // cosmetic (avoids "35.0" if a future caller hands us a float-typed
-  // integer); it does not change the numeric value.
+  // Sensitivity / edge-strength passthrough. These are not probabilities
+  // and not on the percentage-points scale — they are unitless signed
+  // magnitudes whose presentation is owned by the upstream model. The
+  // integer guard avoids "35.0" if a caller hands us a float-typed
+  // integer; otherwise String() preserves the value verbatim.
   if (Number.isInteger(value)) return String(value);
   return String(value);
 }
@@ -66,18 +72,18 @@ export function composeExplainResultsFallback(
   // ran, and keeps prose ordering decisions in one place.
 
   sentences.push(
-    `${leading.label} performs best, with a probability of ${formatRawNumber(leading.probability)}.`,
+    `${leading.label} performs best, with a probability of ${formatProbability(leading.probability)}.`,
   );
 
   if (projection.runner_up && projection.margin_pp !== null) {
     sentences.push(
-      `That is ahead of ${projection.runner_up.label} by ${formatRawNumber(
+      `That is ahead of ${projection.runner_up.label} by ${formatPercentagePoints(
         projection.margin_pp,
-      )} percentage points, so the lead is meaningful rather than marginal.`,
+      )}, so the lead is meaningful rather than marginal.`,
     );
   } else if (projection.runner_up) {
     sentences.push(
-      `${projection.runner_up.label} sits in second place, with a probability of ${formatRawNumber(projection.runner_up.probability)}.`,
+      `${projection.runner_up.label} sits in second place, with a probability of ${formatProbability(projection.runner_up.probability)}.`,
     );
   }
 
@@ -126,14 +132,14 @@ export function composeWhatWouldFlipFallback(
   // is set on the projection.
 
   sentences.push(
-    `${leading.label} is currently performing best, with a probability of ${formatRawNumber(leading.probability)}.`,
+    `${leading.label} is currently performing best, with a probability of ${formatProbability(leading.probability)}.`,
   );
 
   if (projection.runner_up && projection.margin_pp !== null) {
     sentences.push(
-      `For ${projection.runner_up.label} to overtake it, the lead of ${formatRawNumber(
+      `For ${projection.runner_up.label} to overtake it, the lead of ${formatPercentagePoints(
         projection.margin_pp,
-      )} percentage points would need to close.`,
+      )} would need to close.`,
     );
   } else if (projection.runner_up) {
     sentences.push(
