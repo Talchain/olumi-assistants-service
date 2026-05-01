@@ -133,6 +133,32 @@ describe('checkDraftNarrationCounts — mismatch detection', () => {
   });
 });
 
+describe('checkDraftNarrationCounts — markdown-bolded counts (Phase 2 P1)', () => {
+  it('parses **N** nodes and **M** edges format and recognises agreement', () => {
+    const narration = 'Drafted a decision graph with **7** nodes and **8** edges.';
+    const res = check(narration, 7, 8);
+    expect(res.chosenText).toBe(narration);
+    expect(res.mismatchDetected).toBe(false);
+  });
+
+  it('parses bolded counts and detects mismatch', () => {
+    const narration = 'Drafted a decision graph with **3** nodes and **2** edges.';
+    const res = check(narration, 7, 8);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.mismatchDetected).toBe(true);
+    expect(mismatchEvent()!.data).toMatchObject({
+      narration_node_count: 3,
+      narration_edge_count: 2,
+    });
+  });
+
+  it('parses single-asterisk emphasis (*N*) too', () => {
+    const narration = 'Drafted a decision graph with *7* nodes and *8* edges.';
+    const res = check(narration, 7, 8);
+    expect(res.mismatchDetected).toBe(false);
+  });
+});
+
 describe('checkDraftNarrationCounts — defensive parsing', () => {
   it('does not match word numerals (preserves narration since no quantitative match)', () => {
     const narration = 'Drafted a graph with seven nodes and eight edges.';

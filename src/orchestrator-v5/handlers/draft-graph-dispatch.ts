@@ -132,7 +132,7 @@ function draftResultToOlumiResponse(
     // disagrees with the final graph, fall back to deterministic prose so
     // the user never sees numbers that contradict the canvas.
     const successFallback = result.graphOutput
-      ? `Drafted a decision graph with ${finalNodeCount} nodes and ${finalEdgeCount} edges.`
+      ? `Drafted a decision graph with **${finalNodeCount}** nodes and **${finalEdgeCount}** edges.`
       : 'Drafted a decision graph.';
     if (result.assistantText !== null) {
       const guardCheck = checkDraftNarrationCounts({

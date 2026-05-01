@@ -32,8 +32,10 @@ import { emit, TelemetryEvents } from '../../utils/telemetry.js';
  * preserves the narration. That is conservative: false negatives accept
  * a less-precise narration, but never reject a valid one.
  */
-const NODE_COUNT_RE = /\b(\d+)\s+nodes?\b/i;
-const EDGE_COUNT_RE = /\b(\d+)\s+edges?\b/i;
+// Tolerant of optional markdown-bold wrapping (e.g. "**7** nodes") which
+// the deterministic fallback at draft-graph-dispatch.ts emits.
+const NODE_COUNT_RE = /(?:^|[^\w*])\*{0,2}(\d+)\*{0,2}\s+nodes?\b/i;
+const EDGE_COUNT_RE = /(?:^|[^\w*])\*{0,2}(\d+)\*{0,2}\s+edges?\b/i;
 
 export interface NarrationCountCheckInput {
   readonly narration: string | undefined;
