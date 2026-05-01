@@ -24,7 +24,6 @@ const ANALYSIS: ContextPackAnalysis = {
     { factor_label: 'Hiring Cost', sensitivity_value: -0.42 },
   ],
   fragile_edges: [],
-  staleness_reason: null,
 };
 
 function makeGraph(
@@ -70,7 +69,9 @@ describe('buildAnalysisProjectionSummary', () => {
     expect(summary?.margin_pp).toBe(35);
     expect(summary?.robustness_band).toBe('stable');
     expect(summary?.top_drivers).toHaveLength(2);
-    expect(summary?.staleness_reason).toBeNull();
+    // V5 state-trust: `staleness_reason` removed from the projection
+    // entirely. The field MUST NOT be present.
+    expect('staleness_reason' in (summary as object)).toBe(false);
   });
 });
 

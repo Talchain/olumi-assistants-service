@@ -116,7 +116,11 @@ describe('assembleContextPack', () => {
       { factor_label: 'Customer Churn', sensitivity_value: -0.41 },
     ]);
     expect(pack.analysis?.fragile_edges).toEqual(['Marketing Spend → New Leads']);
-    expect(pack.analysis?.staleness_reason).toBeNull();
+    // V5 state-trust: staleness_reason removed from the prompt-visible
+    // ContextPackAnalysis. The field MUST NOT be present on the
+    // projection at all (not "present and null") so Sonnet's context
+    // doesn't carry the legacy fallback semantic.
+    expect('staleness_reason' in (pack.analysis as object)).toBe(false);
   });
 
   it('returns null analysis when the caller passes null explicitly', () => {

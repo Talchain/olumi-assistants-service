@@ -87,7 +87,14 @@ export interface ContextPackAnalysis {
   readonly robustness_band: string | null;
   readonly top_drivers: readonly ContextPackAnalysisDriver[];
   readonly fragile_edges: readonly string[];
-  readonly staleness_reason: string | null;
+  // V5 state-trust: `staleness_reason` removed from the prompt-visible
+  // analysis section — freshness is now a deterministic verdict on the
+  // wire (`analysis_ready.freshness`) and a telemetry signal
+  // (`v5.analysis_freshness.derived`). The legacy fallback string fired
+  // even on freshly-completed analysis turns and contaminated Sonnet's
+  // context with a misleading caveat. Telemetry retains the legacy
+  // `analysis_state_source` / `analysis_staleness_reason` fields for
+  // operator continuity in turn-executor's log payloads.
 }
 
 export interface ContextPackConversationTurn {
@@ -392,6 +399,12 @@ function projectAnalysis(
       ? rawBand
       : null;
 
+  // stalenessReason is intentionally not threaded into the projection —
+  // V5 state-trust removed it from the prompt-visible shape. Reading the
+  // parameter here keeps the assembler's signature stable for callers
+  // that still pass it (turn-executor's telemetry log fields), but the
+  // value is dropped on the floor.
+  void stalenessReason;
   return {
     status: analysis.analysis_status,
     leading_option: leading,
@@ -400,7 +413,6 @@ function projectAnalysis(
     robustness_band: robustnessBand,
     top_drivers: topDrivers,
     fragile_edges: (analysis.top_fragile_edges ?? []).map((e) => `${e.from_label} → ${e.to_label}`),
-    staleness_reason: stalenessReason,
   };
 }
 

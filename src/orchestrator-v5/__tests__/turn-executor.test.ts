@@ -25,7 +25,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import type { OrchestratorTurnPayload, MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import type {
@@ -1216,11 +1216,16 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         { routingAdapter },
       );
 
-      // The fallback should have populated `analysis.status === "complete"`
-      // and stamped the unknown-freshness staleness reason.
+      // The fallback should have populated `analysis.status === "complete"`.
+      // V5 state-trust: `staleness_reason` was removed from the prompt-
+      // visible analysis section — Sonnet's context no longer carries
+      // the legacy fallback string. Freshness is now a deterministic
+      // verdict on the wire (`analysis_ready.freshness`) and a
+      // telemetry signal, NOT contaminating the prompt.
       expect(seen.userMessage).toContain('"analysis"');
       expect(seen.userMessage).toContain('"status": "complete"');
-      expect(seen.userMessage).toContain('loaded_from_prior_run_freshness_unknown');
+      expect(seen.userMessage).not.toContain('loaded_from_prior_run_freshness_unknown');
+      expect(seen.userMessage).not.toContain('staleness_reason');
     });
   });
 });

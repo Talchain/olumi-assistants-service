@@ -40,7 +40,11 @@ export interface AnalysisProjectionSummary {
   readonly margin_pp: number | null;
   readonly robustness_band: string | null;
   readonly top_drivers: readonly AnalysisProjectionDriver[];
-  readonly staleness_reason: string | null;
+  // V5 state-trust: `staleness_reason` removed. Freshness is now a
+  // deterministic four-state verdict on TurnOutcome / analysis_ready.
+  // The handler-facing projection no longer carries the legacy reason
+  // string — the only consumer was applyStalenessPrefix, which is no
+  // longer called from explain_results / what_would_flip.
 }
 
 export interface StructureLink {
@@ -71,7 +75,6 @@ export function buildAnalysisProjectionSummary(
     margin_pp: analysis.margin_pp,
     robustness_band: analysis.robustness_band,
     top_drivers: analysis.top_drivers,
-    staleness_reason: analysis.staleness_reason,
   };
 }
 
