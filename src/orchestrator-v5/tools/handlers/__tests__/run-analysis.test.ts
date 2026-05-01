@@ -13,7 +13,9 @@
  *   - AbortSignal + budget propagation
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setTestSink } from '../../../../utils/telemetry.js';
 import { z } from 'zod';
 import * as talchainSchemas from '@talchain/schemas/orchestrator';
 
@@ -1008,5 +1010,114 @@ describe('run_analysis handler — immutability of invocation inputs', () => {
       requestId: invocation.requestId,
     });
     expect(after).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 workstream E — numeric integrity guard (NaN/Infinity rejection)
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — numeric integrity guard', () => {
+  type Event = { event: string; data: Record<string, unknown> };
+  let events: Event[] = [];
+
+  beforeEach(() => {
+    events = [];
+    setTestSink((eventName, data) => events.push({ event: eventName, data }));
+  });
+  afterEach(() => {
+    setTestSink(null);
+  });
+
+  function findInvalidNumericEvent(): Event | undefined {
+    return events.find((e) => e.event === 'v5.plot_response.invalid_numeric');
+  }
+
+  /**
+   * Inject a non-finite value into a clone of the happy fixture and assert
+   * the handler rejects via HandlerInvocationFailedError + telemetry.
+   *
+   * NB: cloning via JSON.parse(JSON.stringify(...)) silently coerces NaN /
+   * Infinity to null. The trick: clone first (the fixture has only finite
+   * values, so the clone is faithful), then mutate the cloned object to
+   * inject the non-finite value into a real reference. Pass via the
+   * function form of `makePlotClient` to bypass its own JSON deep-clone.
+   */
+  async function assertRejected(
+    mutate: (envelope: Record<string, unknown>) => string /* expected field_path */,
+    expectedRepr: 'NaN' | 'Infinity' | '-Infinity',
+  ): Promise<void> {
+    const envelope = JSON.parse(JSON.stringify(happyFixture)) as Record<string, unknown>;
+    const expectedPath = mutate(envelope);
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(() =>
+        Promise.resolve(envelope as unknown as V2RunResponseEnvelope),
+      ),
+      scenarioReader: makeScenarioReader(),
+    });
+
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      kind: 'HANDLER_INVOCATION_FAILED',
+      cause_kind: 'analysis_failed',
+      details: {
+        handler_id: 'run_analysis',
+        specific_issue: 'invalid_numeric',
+        invalid_field: expectedPath,
+        invalid_value_repr: expectedRepr,
+      },
+    });
+
+    const ev = findInvalidNumericEvent();
+    expect(ev).toBeDefined();
+    expect(ev!.data).toMatchObject({
+      field_path: expectedPath,
+      value_repr: expectedRepr,
+    });
+  }
+
+  it('rejects NaN in results[*].win_probability', async () => {
+    await assertRejected((env) => {
+      const results = env.results as Array<Record<string, unknown>>;
+      results[0].win_probability = Number.NaN;
+      return 'results[0].win_probability';
+    }, 'NaN');
+  });
+
+  it('rejects Infinity in factor_sensitivity[*].elasticity', async () => {
+    await assertRejected((env) => {
+      const fs = env.factor_sensitivity as Array<Record<string, unknown>>;
+      fs[0].elasticity = Number.POSITIVE_INFINITY;
+      return 'factor_sensitivity[0].elasticity';
+    }, 'Infinity');
+  });
+
+  it('rejects -Infinity in robustness.recommendation_stability', async () => {
+    await assertRejected((env) => {
+      const rob = env.robustness as Record<string, unknown>;
+      rob.recommendation_stability = Number.NEGATIVE_INFINITY;
+      return 'robustness.recommendation_stability';
+    }, '-Infinity');
+  });
+
+  it('rejects NaN in option outcome p10', async () => {
+    await assertRejected((env) => {
+      const results = env.results as Array<Record<string, unknown>>;
+      const first = results[0];
+      // Inject the outcome shape if not present in this fixture
+      const outcome = (first.outcome as Record<string, unknown> | undefined) ?? {};
+      outcome.p10 = Number.NaN;
+      first.outcome = outcome;
+      return 'results[0].outcome.p10';
+    }, 'NaN');
+  });
+
+  it('passes the happy fixture unchanged (no false positives)', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    expect(findInvalidNumericEvent()).toBeUndefined();
   });
 });

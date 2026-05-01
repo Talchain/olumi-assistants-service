@@ -62,7 +62,9 @@ import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
 } from '../handler-errors.js';
-import { log } from '../../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
+
+import { findFirstInvalidNumeric } from './numeric-integrity.js';
 
 // Re-export handler-generic errors for backwards compatibility with test
 // modules that imported them directly from run-analysis.js. The canonical
@@ -368,6 +370,35 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           retryable: true,
           details: { handler_id: 'run_analysis' },
           cause: runError,
+        },
+      );
+    }
+
+    // --- 4.5. Numeric integrity guard (Phase 2 workstream E) -------------
+    // Reject NaN / Infinity / -Infinity in any numeric field anywhere in the
+    // PLoT response before downstream consumers (analysis projection, review-
+    // card enricher, prose composer, format-analysis-value) see it. Structural
+    // walk: every number is checked, so adding a new PLoT field cannot regress
+    // the guard. Fail-fast: returns at the first non-finite value found.
+    const invalidNumeric = findFirstInvalidNumeric(response);
+    if (invalidNumeric !== null) {
+      emit(TelemetryEvents.PlotResponseInvalidNumeric, {
+        request_id: invocation.requestId,
+        session_id: args.scenario_id,
+        field_path: invalidNumeric.path,
+        value_repr: invalidNumeric.value_repr,
+      });
+      throw new HandlerInvocationFailedError(
+        'PLoT response carries non-finite numeric value',
+        {
+          cause_kind: 'analysis_failed',
+          retryable: true,
+          details: {
+            handler_id: 'run_analysis',
+            specific_issue: 'invalid_numeric',
+            invalid_field: invalidNumeric.path,
+            invalid_value_repr: invalidNumeric.value_repr,
+          },
         },
       );
     }

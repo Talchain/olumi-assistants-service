@@ -602,6 +602,14 @@ export const TelemetryEvents = {
   // { matched, dispatch?, candidate_count?, top_score?, skip_reason?,
   //   cqe_quantity_count }.
   V5DeterministicValueUpdate: "v5.deterministic_value_update",
+
+  // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
+  // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
+  // so any new PLoT field is covered automatically. Payload:
+  // { request_id, session_id, field_path, value_repr }.
+  // Handler responds by throwing HandlerInvocationFailedError; UI surfaces
+  // the standard recovery chip via buildFailureResponse.
+  PlotResponseInvalidNumeric: "v5.plot_response.invalid_numeric",
 } as const;
 
 /**
