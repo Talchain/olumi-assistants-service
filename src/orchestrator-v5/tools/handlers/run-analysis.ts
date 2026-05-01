@@ -52,7 +52,7 @@ import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.j
 
 import { getHandlerBudgetMs } from '../../budgets.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import type {
   HandlerFn,
   HandlerInvocation,
@@ -132,6 +132,14 @@ export interface RunAnalysisScenarioSnapshot {
   readonly n_samples?: number;
   /** PLoT's `goal_constraints` field (not called `constraints`). */
   readonly goal_constraints?: unknown;
+  /**
+   * V5 state-trust: raw persisted graph BEFORE any parse, so the
+   * freshness hash matches what turn-executor sees on follow-up
+   * explain turns. Optional for backwards compat with test snapshots
+   * built without it; production snapshots from
+   * loadScenarioSnapshotForRunAnalysis always populate it.
+   */
+  readonly rawPersistedGraph?: unknown;
 }
 
 /**
@@ -272,26 +280,30 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // — `enrichment` is byte-for-byte PLoT and the handler-ownership
     // invariant forbids derived CEE fields there). Schema 0.10.0+.
     //
-    // The hash MUST cover the FULL analysis input — graph + options +
-    // goal_node_id + goal_constraints — not just snapshot.graph alone.
-    // `loadScenarioSnapshotForRunAnalysis` parses with `GraphV3.safeParse`
-    // which strips top-level `options`/`goal_node_id`/`goal_constraints`
-    // (those fields aren't on the V3 graph schema), but the same
-    // persisted JSON parsed by turn-executor via `GraphStateIngressSchema`
-    // KEEPS them. Hashing snapshot.graph alone produces a different
-    // hash than hashing the ingress shape — false-stale on the very
-    // next explain turn. Reconstruct the hash input as the union of
-    // {graph fields, options, goal_node_id, goal_constraints} so both
-    // sides see the same projection.
-    const graphHashInput = {
-      ...((snapshot.graph as Record<string, unknown> | null | undefined) ?? {}),
-      options: snapshot.options,
-      goal_node_id: snapshot.goal_node_id,
-      ...(snapshot.goal_constraints !== undefined
-        ? { goal_constraints: snapshot.goal_constraints }
-        : {}),
-    } as GraphStateIngress;
-    const graphHashAtRun = computeAnalysisAffectingGraphHash(graphHashInput);
+    // The hash MUST be computed from the SAME representation turn-
+    // executor sees on the next explain turn. snapshot.graph is V3-
+    // parsed (top-level options/goal_node_id stripped) AND
+    // snapshot.options is the PLoT-projection (numeric interventions,
+    // missing target_match/status/raw_interventions). Hashing either
+    // would produce a value that differs from what turn-executor
+    // computes from the Ingress-parsed persisted graph — false-stale
+    // on every explain turn (live regression observed at staging
+    // build abc7d29).
+    //
+    // The single representation both sides agree on: the raw
+    // persisted graph as stored in scenarios.graph BEFORE any parse.
+    // Run it through GraphStateIngressSchema (the same parser turn-
+    // executor uses) so the hash projection sees the same field shape.
+    let graphHashAtRun: string | null = null;
+    if (
+      snapshot.rawPersistedGraph !== undefined &&
+      snapshot.rawPersistedGraph !== null
+    ) {
+      const parsedForHash = GraphStateIngressSchema.safeParse(snapshot.rawPersistedGraph);
+      if (parsedForHash.success) {
+        graphHashAtRun = computeAnalysisAffectingGraphHash(parsedForHash.data);
+      }
+    }
     const runComputedAt = new Date().toISOString();
 
     // --- 4. Invoke PLoT ---------------------------------------------------

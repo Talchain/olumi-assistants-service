@@ -43,13 +43,22 @@ const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TEST_REQUEST_ID = 'req-c2-test';
 
 function makeScenarioSnapshot(overrides?: Partial<RunAnalysisScenarioSnapshot>): RunAnalysisScenarioSnapshot {
+  const graph = overrides?.graph ?? { nodes: [{ id: 'g', kind: 'goal', label: 'Goal' }], edges: [] };
   return {
-    graph: { nodes: [{ id: 'g', kind: 'goal' }], edges: [] },
+    graph,
     options: [
       { id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { fac_price: 1.2 } },
       { id: 'opt_b', option_id: 'opt_b', label: 'B', interventions: { fac_price: 0.9 } },
     ],
     goal_node_id: 'g',
+    // V5 state-trust: production snapshots populate rawPersistedGraph with
+    // the pre-parse JSON. Tests don't have a separate raw form, so we
+    // mirror `graph` here — the hash function reads only the projected
+    // analysis-affecting fields, so using the V3-shape graph as both is
+    // hash-equivalent in fixtures (real Supabase reads have richer
+    // top-level options/goal_node_id; tests inject those via the snapshot
+    // directly when needed).
+    rawPersistedGraph: graph,
     ...overrides,
   };
 }
@@ -208,8 +217,8 @@ describe('run_analysis handler — freshness fields on the fact', () => {
         makeScenarioSnapshot({
           graph: {
             nodes: [
-              { id: 'g', kind: 'goal' },
-              { id: 'f', kind: 'factor', observed_state: { value: 100 } },
+              { id: 'g', kind: 'goal', label: 'Goal' },
+              { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 100 } },
             ],
             edges: [],
           },
@@ -240,8 +249,8 @@ describe('run_analysis handler — freshness fields on the fact', () => {
     const baseSnapshot = makeScenarioSnapshot({
       graph: {
         nodes: [
-          { id: 'g', kind: 'goal' },
-          { id: 'f', kind: 'factor', observed_state: { value: 100 } },
+          { id: 'g', kind: 'goal', label: 'Goal' },
+          { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 100 } },
         ],
         edges: [],
       },
@@ -249,8 +258,8 @@ describe('run_analysis handler — freshness fields on the fact', () => {
     const editedSnapshot = makeScenarioSnapshot({
       graph: {
         nodes: [
-          { id: 'g', kind: 'goal' },
-          { id: 'f', kind: 'factor', observed_state: { value: 200 } },
+          { id: 'g', kind: 'goal', label: 'Goal' },
+          { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 200 } },
         ],
         edges: [],
       },
@@ -277,13 +286,26 @@ describe('run_analysis handler — freshness fields on the fact', () => {
     expect(baseFact.result.graph_hash_at_run).not.toBe(editedFact.result.graph_hash_at_run);
   });
 
-  it('graph_hash_at_run IS recorded when only graph nodes/edges are empty but options are present (analysis input non-empty)', async () => {
-    // Sanity check counterpart: the merged hash input means options
-    // alone make the analysis input non-empty.
+  it('graph_hash_at_run IS recorded when rawPersistedGraph carries top-level options (Ingress shape)', async () => {
+    // V5 state-trust: the hash reads from the persisted graph parsed
+    // via GraphStateIngressSchema, which preserves top-level `options`
+    // / `goal_node_id`. A persisted JSON shaped like Supabase reads —
+    // empty nodes/edges plus top-level options — still produces a
+    // non-null hash because options are analysis-affecting.
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(
-        makeScenarioSnapshot({ graph: { nodes: [], edges: [] } }),
+        makeScenarioSnapshot({
+          graph: { nodes: [], edges: [] },
+          rawPersistedGraph: {
+            nodes: [],
+            edges: [],
+            options: [
+              { id: 'opt_a', status: 'ready', interventions: { fac_price: { value: 1.2 } } },
+            ],
+            goal_node_id: 'g',
+          },
+        }),
       ),
     });
     const outcome = await handler(makeInvocation());

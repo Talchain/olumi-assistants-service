@@ -68,6 +68,23 @@ export interface RunAnalysisScenarioSnapshot {
     readonly interventions: Record<string, number>;
   }>;
   readonly goal_node_id: string;
+  /**
+   * V5 state-trust: the RAW persisted graph as stored in
+   * `scenarios.graph` BEFORE GraphV3.safeParse. This is the same shape
+   * turn-executor sees when it falls back to loadPersistedGraph +
+   * GraphStateIngressSchema.safeParse on a follow-up explain turn.
+   *
+   * Why surface this alongside the V3-parsed `graph` field: the V3
+   * schema strips top-level `options` / `goal_node_id` /
+   * `goal_constraints` (they're not on GraphV3) AND it transforms the
+   * V3 options shape to the PLoT-projection here in
+   * loadScenarioSnapshotForRunAnalysis. Hashing either of those
+   * projections would produce a hash that differs from what the
+   * turn-executor freshness derivation computes from the same
+   * persisted JSON. The raw persisted graph is the single
+   * representation both sides can hash to a matching value.
+   */
+  readonly rawPersistedGraph: unknown;
 }
 
 // v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
@@ -388,6 +405,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
       interventions: normaliseNumericInterventions(option.interventions),
     })),
     goal_node_id: readiness.goal_node_id,
+    rawPersistedGraph: persistedGraph,
   };
 }
 

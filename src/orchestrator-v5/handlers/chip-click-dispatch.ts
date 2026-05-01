@@ -42,7 +42,7 @@ import type { GraphV3T } from '../../schemas/cee-v3.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { deriveAnalysisFreshness, emitFreshnessTelemetry } from '../context/freshness.js';
-import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import {
@@ -398,24 +398,24 @@ export async function dispatchChipClickRunAnalysis(
         ...enrichedFacts,
         ...context.prior_facts,
       ];
-      // Build the hash input as the UNION of snapshot graph + options +
-      // goal_node_id + goal_constraints — same shape the run_analysis
-      // handler uses (see run-analysis.ts §3.5). snapshot.graph is V3-
-      // parsed so options/goal_node_id are stripped from it; turn-
-      // executor's ingress-parsed graph keeps them. Hashing snapshot.graph
-      // alone produces a different hash than the explain-turn path and
-      // would surface false-stale.
-      const graphHashInput: GraphStateIngress | null = cachedSnapshot
-        ? ({
-            ...((cachedSnapshot.graph as Record<string, unknown> | null | undefined) ?? {}),
-            options: cachedSnapshot.options,
-            goal_node_id: cachedSnapshot.goal_node_id,
-            ...(cachedSnapshot.goal_constraints !== undefined
-              ? { goal_constraints: cachedSnapshot.goal_constraints }
-              : {}),
-          } as GraphStateIngress)
-        : null;
-      const currentGraphHash = computeAnalysisAffectingGraphHash(graphHashInput);
+      // Hash from the RAW persisted graph (parsed via GraphStateIngressSchema,
+      // the same parser turn-executor uses on follow-up explain turns).
+      // snapshot.graph is V3-parsed and snapshot.options is the PLoT-
+      // projection — neither matches what turn-executor sees, so hashing
+      // either would surface false-stale. See run-analysis.ts §3.5 for
+      // the canonical explanation.
+      let currentGraphHash: string | null = null;
+      if (
+        cachedSnapshot?.rawPersistedGraph !== undefined &&
+        cachedSnapshot?.rawPersistedGraph !== null
+      ) {
+        const parsedForHash = GraphStateIngressSchema.safeParse(
+          cachedSnapshot.rawPersistedGraph,
+        );
+        if (parsedForHash.success) {
+          currentGraphHash = computeAnalysisAffectingGraphHash(parsedForHash.data);
+        }
+      }
       const freshness = deriveAnalysisFreshness(postDispatchFacts, currentGraphHash);
       emitFreshnessTelemetry(
         freshness,

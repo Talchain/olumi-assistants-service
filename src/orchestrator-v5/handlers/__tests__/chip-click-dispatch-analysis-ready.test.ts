@@ -154,6 +154,11 @@ function snapshotFor(graph: GraphV3T): RunAnalysisScenarioSnapshot {
       { id: 'opt_status_quo', option_id: 'opt_status_quo', label: 'Status quo', interventions: { fac_marketing: 0.3 } },
     ],
     goal_node_id: 'goal_revenue',
+    // V5 state-trust: tests use the V3-shape graph as both the parsed
+    // and the raw form (no separate Supabase round-trip in unit tests).
+    // The hash function projects the same analysis-affecting fields
+    // either way.
+    rawPersistedGraph: graph,
   };
 }
 
@@ -364,20 +369,20 @@ describe('chip-click-dispatch — freshness derivation runs against produced fac
     loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshot);
 
     // Compute the actual analysis-affecting hash for the snapshot.
-    // The dispatcher hashes the FULL analysis input (graph + options +
-    // goal_node_id + goal_constraints) so the test's expected hash
-    // must match — hashing snapshot.graph alone would diverge.
+    // The dispatcher hashes from `rawPersistedGraph` (parsed via
+    // GraphStateIngressSchema) so the test's expected hash must come
+    // from the same path. snapshotFor() sets rawPersistedGraph to the
+    // V3-shape graph; the Ingress schema accepts that shape via
+    // passthrough().
     const { computeAnalysisAffectingGraphHash } = await import(
       '../../context/graph-hash.js'
     );
-    const hashInput = {
-      ...(snapshot.graph as Record<string, unknown>),
-      options: snapshot.options,
-      goal_node_id: snapshot.goal_node_id,
-    };
-    const expectedHash = computeAnalysisAffectingGraphHash(
-      hashInput as never,
-    )!;
+    const { GraphStateIngressSchema } = await import(
+      '../../boundary/request-extensions.js'
+    );
+    const parsedForExpected = GraphStateIngressSchema.safeParse(snapshot.rawPersistedGraph);
+    if (!parsedForExpected.success) throw new Error('test setup: ingress parse failed');
+    const expectedHash = computeAnalysisAffectingGraphHash(parsedForExpected.data)!;
 
     // Handler returns a fact stamped with the matching hash. The
     // dispatcher's freshness derivation block must read this fact and
