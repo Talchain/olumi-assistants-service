@@ -186,27 +186,53 @@ function findEvent(name: string): Record<string, unknown> | undefined {
 }
 
 /**
- * Routing-contract invariant. For any turn where edit intent was detected,
- * the route MUST produce **exactly one** of the three permitted outcomes:
- *   (1) edit_graph dispatched (`dispatchEditGraph` called),
- *   (2) clarification response (Part 2 — never observed in this suite),
- *   (3) typed recovery (`v5.edit_graph.graph_state_unavailable` emitted).
+ * Routing-contract invariant (C-EDIT-1). For any turn where edit intent
+ * was detected, the route MUST produce **exactly one** of these
+ * permitted outcomes:
+ *   (1) edit_graph dispatched (`dispatchEditGraph` called) —
+ *       finalises via `sendFinalised200(..., 'edit_graph', ...)`.
+ *   (2) clarification response (Part 2 — never observed in this suite) —
+ *       finalises via `sendFinalised200(..., 'edit_graph', ...)`.
+ *   (3) typed recovery (`v5.edit_graph.graph_state_unavailable` emitted) —
+ *       finalises via `sendFinalised200(..., 'edit_graph', ...)`.
+ *   (4) typed BoundaryError 500 — dispatch failure / pipeline throw.
+ *       NOT routed through `sendFinalised200`; uses
+ *       `reply.code(500).send(boundaryError)` directly. Emits ZERO
+ *       `v5.response.finalised` events. Still satisfies the contract:
+ *       the failure is surfaced as a typed wire response, not a silent
+ *       fallthrough.
  *
- * Two stronger assertions over the brief's text:
- *   - **Exactly one**, not "at least one". A future regression that fired
- *     both a recovery AND a dispatch call (e.g. a missing `return`) would
- *     slip past `dispatchCalled || recoveryEmitted`.
- *   - **No `exit_path: 'turn_executor'`** on the `v5.response.finalised`
- *     log line. This is the canonical signal of the silent-fallthrough bug
- *     this fix exists to prevent. If a turn with detected edit intent ever
- *     finalises via the TurnExecutor exit path, the contract is violated
- *     even if other telemetry looks correct.
+ * Stronger assertions than the brief's wording:
+ *   - **Exactly one** outcome, not "at least one". A regression that
+ *     fired both a recovery AND a dispatch call (e.g. a missing
+ *     `return`) would slip past `dispatchCalled || recoveryEmitted`.
+ *   - **No `exit_path: 'turn_executor'`** on any `v5.response.finalised`
+ *     event. This is the canonical signal of the silent-fallthrough bug
+ *     this fix exists to prevent. Inspect ALL events (not just the
+ *     first via `find()`) — a missing-return after
+ *     `sendEditGraphRecovery(...)` would emit two finalise events on
+ *     the same request, edit_graph first then turn_executor; `find()`
+ *     would short-circuit on the edit_graph match and miss the leak.
+ *
+ * Parameter `expectsFinalised200` discriminates outcomes (1)-(3) from
+ * outcome (4). 200-emitting cases set true (default) and require
+ * exactly one finalise event. Tests that exercise the typed-500 path
+ * pass false: the helper then asserts ZERO finalise events (the 500
+ * branch must never accidentally emit one), and skips the per-event
+ * `exit_path` check (no events to inspect).
  */
-function assertRoutingContractHonoured(): void {
+function assertRoutingContractHonoured({
+  expectsFinalised200 = true,
+}: { expectsFinalised200?: boolean } = {}): void {
   const dispatchCalled = dispatchEditGraphMock.mock.calls.length > 0;
   const clarificationFired = false; // Part 2 — never produced by Part 1 code paths.
   const recoveryEmitted = emittedNames().includes('v5.edit_graph.graph_state_unavailable');
   const outcomeCount = [dispatchCalled, clarificationFired, recoveryEmitted].filter(Boolean).length;
+  // For typed-500 cases the dispatcher IS called (the failure happens
+  // downstream of dispatch); we still want exactly one outcome signal.
+  // For pipeline-throws-pre-dispatch (no test covers this today), the
+  // outcome count would be 0 and this assertion would catch a silent
+  // fallthrough where the throw was swallowed.
   if (outcomeCount !== 1) {
     throw new Error(
       `Routing contract violated: expected exactly one of (dispatch, clarification, typed recovery), got ${outcomeCount}. ` +
@@ -214,27 +240,32 @@ function assertRoutingContractHonoured(): void {
         `Telemetry: ${JSON.stringify(emittedNames())}`,
     );
   }
-  // Inspect ALL `v5.response.finalised` events, not just the first.
-  // A missing-`return` regression after `sendEditGraphRecovery(...)`
-  // would emit two finalise events on the same request: the
-  // edit_graph recovery (first) followed by a turn_executor
-  // fallthrough (second). `find()` would short-circuit on the first
-  // and miss the second. `filter` + length-1 catches the leak even
-  // though Fastify rejects the second `reply.send` — the telemetry
-  // is emitted *before* the send.
   const finaliseEvents = logInfoCalls.filter((c) => c.event === 'v5.response.finalised');
-  if (finaliseEvents.length !== 1) {
-    throw new Error(
-      `Routing contract violated: expected exactly one v5.response.finalised event, got ${finaliseEvents.length}. ` +
-        `Events: ${JSON.stringify(finaliseEvents)}`,
-    );
-  }
-  const turnExecutorLeak = finaliseEvents.find((c) => c.exit_path === 'turn_executor');
-  if (turnExecutorLeak) {
-    throw new Error(
-      `Routing contract violated: edit intent finalised via turn_executor exit path. ` +
-        `Finalise event: ${JSON.stringify(turnExecutorLeak)}`,
-    );
+  if (expectsFinalised200) {
+    if (finaliseEvents.length !== 1) {
+      throw new Error(
+        `Routing contract violated: expected exactly one v5.response.finalised event, got ${finaliseEvents.length}. ` +
+          `Events: ${JSON.stringify(finaliseEvents)}`,
+      );
+    }
+    const turnExecutorLeak = finaliseEvents.find((c) => c.exit_path === 'turn_executor');
+    if (turnExecutorLeak) {
+      throw new Error(
+        `Routing contract violated: edit intent finalised via turn_executor exit path. ` +
+          `Finalise event: ${JSON.stringify(turnExecutorLeak)}`,
+      );
+    }
+  } else {
+    // Typed-500 outcome: the route must use `reply.code(500).send(...)`
+    // directly, NOT `sendFinalised200`. Any finalise event here would
+    // mean a 500 path accidentally went through the 200 finaliser —
+    // a contract violation distinct from the turn_executor leak.
+    if (finaliseEvents.length !== 0) {
+      throw new Error(
+        `Routing contract violated: typed-500 outcome should emit ZERO v5.response.finalised events, got ${finaliseEvents.length}. ` +
+          `Events: ${JSON.stringify(finaliseEvents)}`,
+      );
+    }
   }
 }
 
@@ -424,5 +455,36 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     expect(recovery).toBeDefined();
     expect(recovery!.reason).toBe('session_store_failed');
     assertRoutingContractHonoured();
+  });
+
+  // ─── Case 7 (typed-500 outcome — exercises expectsFinalised200: false) ─
+  it('edit intent + graphState present + dispatcher throws → typed BoundaryError 500 (no finalisation)', async () => {
+    // Outcome (4) of the C-EDIT-1 contract: a downstream dispatch
+    // failure surfaces as `reply.code(500).send(boundaryError)`, NOT
+    // through `sendFinalised200`. The contract is still honoured
+    // because the failure is typed and observable, not a silent
+    // fallthrough. The helper variant `expectsFinalised200: false`
+    // asserts ZERO finalise events (a 500 path must not accidentally
+    // route through the 200 finaliser).
+    dispatchEditGraphMock.mockRejectedValueOnce(new Error('pipeline blew up'));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payload({
+        message: 'Add opportunity cost of founder time as a risk',
+        graph_state: VALID_GRAPH_STATE,
+      }),
+    });
+    expect(res.statusCode).toBe(500);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('edit_graph_pipeline_threw');
+    // graph_state_present STILL fired before dispatch was attempted —
+    // proves edit-intent classification ran, then dispatch failed
+    // downstream, then the route surfaced a typed BoundaryError
+    // (not a silent fallthrough).
+    expect(emittedNames()).toContain('v5.edit_graph.graph_state_present');
+    assertRoutingContractHonoured({ expectsFinalised200: false });
   });
 });

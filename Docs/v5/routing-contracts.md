@@ -12,24 +12,40 @@ integration test; new contracts must arrive with an enforcing test
 with `kind: 'message'`, the route MUST produce **exactly one** of:
 
 1. **Mutation dispatched** — `dispatchEditGraph` is called and its
-   `commitPerformed` outcome is honoured by the route's downstream
-   commit-status check.
+   `commitPerformed: true` outcome flows through `sendFinalised200(...,
+   'edit_graph', ...)`. (HTTP 200, OlumiResponse with the dispatcher's
+   `assistant_text`.)
 2. **Clarification requested** — a typed clarify response is emitted
    (Part 2 — not yet wired; reserved for the referential-resolution
    path that resolves "let's add this" against
-   `recent_assistant_suggestions`).
+   `recent_assistant_suggestions`). (HTTP 200, finalised via
+   `sendFinalised200`.)
 3. **Typed recovery** — a `direct_answer` 200 with the recovery message
    plus a `v5.edit_graph.graph_state_unavailable` telemetry event whose
    `reason` is one of `no_persisted_graph | persisted_graph_invalid |
-   session_store_failed`.
+   session_store_failed`. (HTTP 200, finalised via `sendFinalised200`.)
+4. **Typed BoundaryError failure** — `dispatchEditGraph` is called but
+   either reports `commitPerformed: false` (commit failed) or throws
+   (pipeline error). The route surfaces this as `reply.code(500).send(
+   boundaryError)` with `details.reason ∈ { 'edit_graph_commit_failed',
+   'edit_graph_pipeline_threw' }`. This path **bypasses
+   `sendFinalised200`**, so it emits ZERO `v5.response.finalised`
+   events. The contract is still honoured: the failure is typed and
+   observable on the wire, not a silent fallthrough.
 
 The route MUST NEVER:
 
 - Fall through to `runTurnExecutor` and finalise via
   `exit_path: 'turn_executor'` (the canonical signal of the silent-
   fallthrough bug this contract exists to prevent).
-- Return an unflagged `direct_answer` (one without the
+- Return an unflagged `direct_answer` 200 (one without either a
+  `dispatchEditGraph` call or the
   `v5.edit_graph.graph_state_unavailable` telemetry signal).
+- Emit a `v5.response.finalised` event on the typed-500 path. A 500
+  outcome that accidentally went through `sendFinalised200` would
+  conflate failure surfacing with success and break the
+  `commit_performed === false ⇒ non-200` invariant elsewhere in the
+  route.
 
 ### Edit-intent definition
 
@@ -47,25 +63,39 @@ mutating the graph on a meta-question.
 
 ### Telemetry envelope
 
-The contract is observable end-to-end through three events:
+The contract is observable end-to-end through three pre-dispatch events
+plus the standard `v5.response.finalised` finaliser-emission log:
 
 | Event | When | Payload |
 |---|---|---|
-| `v5.edit_graph.graph_state_present` | Edit intent detected, `graphState` arrived on the request body. Baseline counter; no recovery action taken. | `{ request_id, scenario_id }` |
+| `v5.edit_graph.graph_state_present` | Edit intent detected, `graphState` arrived on the request body. Baseline counter; no recovery action taken. Fires on both outcome (1) and outcome (4) — i.e. the dispatch was attempted, regardless of whether it ultimately succeeded. | `{ request_id, scenario_id }` |
 | `v5.edit_graph.graph_state_reloaded` | Edit intent detected, `graphState` absent, persisted reload succeeded; dispatch proceeds against the reloaded graph. | `{ request_id, scenario_id }` |
-| `v5.edit_graph.graph_state_unavailable` | Edit intent detected, recovery returned. | `{ request_id, scenario_id, reason }` where reason ∈ `'no_persisted_graph' \| 'persisted_graph_invalid' \| 'session_store_failed'` |
+| `v5.edit_graph.graph_state_unavailable` | Edit intent detected, outcome (3) returned. | `{ request_id, scenario_id, reason }` where reason ∈ `'no_persisted_graph' \| 'persisted_graph_invalid' \| 'session_store_failed'` |
 
-A successful turn under this contract emits **at most one** of the three.
+A turn under this contract emits **at most one** of the three.
 For `_present` and `_reloaded`, a follow-on `dispatchEditGraph` call is
-expected. For `_unavailable`, no dispatch occurs.
+expected (outcome 1) — or a typed BoundaryError 500 (outcome 4) if
+that dispatch fails. For `_unavailable`, no dispatch occurs (outcome 3).
+
+`v5.response.finalised` events are emitted by `sendFinalised200`.
+Outcomes (1)-(3) emit exactly one such event with
+`exit_path: 'edit_graph'`. Outcome (4) emits zero (the 500 path uses
+`reply.code(500).send` directly).
 
 ### Enforcement
 
-`assertRoutingContractHonoured()` in
+`assertRoutingContractHonoured({ expectsFinalised200 })` in
 [`tests/integration/orchestrator/route-v2-edit-graph-recovery.test.ts`](../../tests/integration/orchestrator/route-v2-edit-graph-recovery.test.ts).
-The helper checks both **exactly one** outcome and **no
-turn_executor exit_path** on `v5.response.finalised`. New cases that
-exercise edit intent should call this helper.
+
+- Default (`expectsFinalised200: true`) — outcomes (1)-(3): asserts
+  exactly one outcome signal AND exactly one `v5.response.finalised`
+  event AND no event has `exit_path: 'turn_executor'`.
+- `expectsFinalised200: false` — outcome (4): asserts exactly one
+  outcome signal AND ZERO `v5.response.finalised` events (the typed-500
+  path must not accidentally route through the 200 finaliser).
+
+New cases that exercise edit intent should call this helper with the
+parameter that matches the expected wire HTTP status.
 
 ### Scope limitation
 
