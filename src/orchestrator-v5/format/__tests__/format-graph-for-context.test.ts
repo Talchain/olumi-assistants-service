@@ -134,6 +134,19 @@ describe('formatGraphForContext — edge transformation', () => {
     expect(out.edges[0]!.to_label).toBe('New Leads');
   });
 
+  it('from_label / to_label carry human labels when the node lookup resolves (no internal ID prefixes)', () => {
+    const out = formatGraphForContext(rawGraph());
+    const ID_PREFIX = /^(fac|opt|goal|risk|out|edge)_/;
+    for (const edge of out.edges) {
+      // When the lookup resolves (every fixture edge endpoint is present
+      // in the node list), display labels MUST be human-readable strings,
+      // not internal `fac_…`/`opt_…` IDs. The structured `from`/`to` ID
+      // handles are kept separately for routing/traceability.
+      expect(edge.from_label).not.toMatch(ID_PREFIX);
+      expect(edge.to_label).not.toMatch(ID_PREFIX);
+    }
+  });
+
   it('drops _raw_provenance and never emits strength_mean/std/exists_probability', () => {
     const out = formatGraphForContext(rawGraph());
     const json = JSON.stringify(out);
@@ -156,14 +169,17 @@ describe('formatGraphForContext — edge transformation', () => {
 });
 
 describe('formatGraphForContext — node transformation', () => {
-  it('keeps id/label/kind plus optional category, unit, intervention_summary', () => {
+  it('keeps id/label/kind plus optional category, unit, intervention_summary, value', () => {
     const out = formatGraphForContext(rawGraph());
+    // Node 0 was constructed with `value: 100`; brief A2.1 explicitly
+    // preserves user-supplied node values.
     expect(out.nodes[0]).toEqual({
       id: 'fac_marketing',
       label: 'Marketing Spend',
       kind: 'factor',
       category: 'spend',
       unit: 'k',
+      value: 100,
     });
     const optionNode = out.nodes.find((n) => n.id === 'opt_a')!;
     expect(optionNode).toEqual({
@@ -174,14 +190,30 @@ describe('formatGraphForContext — node transformation', () => {
     });
   });
 
-  it('strips value, raw_value, cap, source, _raw_provenance from display nodes', () => {
+  it('preserves user-supplied node value (numeric and string forms)', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', value: 250 },
+          { id: 'fac_b', kind: 'factor', label: 'B', value: 'high' },
+          { id: 'fac_c', kind: 'factor', label: 'C', value: 0 },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.value).toBe(250);
+    expect(out.nodes[1]!.value).toBe('high');
+    expect(out.nodes[2]!.value).toBe(0);
+  });
+
+  it('strips raw_value, cap, source, _raw_provenance (model-internal) but keeps value', () => {
     const out = formatGraphForContext(rawGraph());
     const json = JSON.stringify(out.nodes);
-    expect(json).not.toMatch(/"value":/);
     expect(json).not.toMatch(/"raw_value":/);
     expect(json).not.toMatch(/"cap":/);
     expect(json).not.toMatch(/"source":/);
     expect(json).not.toMatch(/_raw_provenance/);
+    // `value` is user-meaningful and must survive.
+    expect(json).toMatch(/"value":/);
   });
 
   it('drops nodes missing required id/label/kind defensively', () => {
@@ -199,6 +231,78 @@ describe('formatGraphForContext — node transformation', () => {
   });
 });
 
+describe('formatGraphForContext — canonical & legacy edge shapes', () => {
+  it('handles canonical GraphV3T edges with strength: { mean, std } + effect_direction', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        edges: [
+          {
+            from: 'fac_marketing',
+            to: 'fac_leads',
+            strength: { mean: 0.55, std: 0.12 },
+            exists_probability: 0.9,
+            effect_direction: 'positive',
+          },
+          {
+            from: 'fac_leads',
+            to: 'goal_growth',
+            strength: { mean: 0.4, std: 0.1 },
+            exists_probability: 0.7,
+            effect_direction: 'negative',
+          },
+        ],
+      }),
+    );
+    expect(out.edges[0]!.relationship).toBe('moderate positive link');
+    expect(out.edges[1]!.relationship).toBe('moderate negative link');
+    // Raw fields fully stripped from canonical-shape output.
+    const json = JSON.stringify(out.edges);
+    expect(json).not.toMatch(/"strength":/);
+    expect(json).not.toMatch(/"strength_mean":/);
+    expect(json).not.toMatch(/"strength_std":/);
+    expect(json).not.toMatch(/"exists_probability":/);
+    expect(json).not.toMatch(/"effect_direction":/);
+    expect(json).not.toMatch(/\b-?0\.\d/);
+  });
+
+  it('handles legacy edges with top-level strength_mean + effect_direction', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        edges: [
+          {
+            from: 'fac_marketing',
+            to: 'fac_leads',
+            strength_mean: 0.85,
+            effect_direction: 'positive',
+          },
+          {
+            from: 'fac_leads',
+            to: 'goal_growth',
+            strength_mean: 0.6,
+            effect_direction: 'negative',
+          },
+        ],
+      }),
+    );
+    expect(out.edges[0]!.relationship).toBe('strong positive link');
+    expect(out.edges[1]!.relationship).toBe('moderate negative link');
+  });
+
+  it('treats signed numeric strength as the source of truth (no direction inversion)', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        edges: [
+          { from: 'fac_marketing', to: 'fac_leads', strength: -0.5, effect_direction: 'positive' },
+        ],
+      }),
+    );
+    // Numeric `strength` is already signed — `effect_direction` MUST NOT
+    // overwrite a signed numeric. The brief defines compact edges as
+    // sign-bearing; only canonical {mean} gets direction applied.
+    expect(out.edges[0]!.relationship).toBe('moderate negative link');
+  });
+});
+
 describe('formatGraphForContext — passthrough fields', () => {
   it('preserves options, goals, constraints, counts unchanged', () => {
     const raw = rawGraph();
@@ -211,22 +315,13 @@ describe('formatGraphForContext — passthrough fields', () => {
 });
 
 describe('formatGraphForContext — idempotency', () => {
-  it('produces an equivalent shape when re-projected through itself', () => {
+  it('re-projection preserves relationship phrases (does not overwrite to "negligible")', () => {
     const out1 = formatGraphForContext(rawGraph());
-    // Display-safe graph satisfies ContextPackGraph structurally — re-running
-    // the formatter on it should not corrupt the output. Strength is absent,
-    // so every edge falls into the negligible-link branch on the second pass.
-    // We assert that nodes/options/goals/constraints/counts pass through and
-    // edges keep their from/to/labels (relationship may shift to "negligible").
     const out2 = formatGraphForContext(out1 as unknown as ContextPackGraph);
-    expect(out2.nodes).toEqual(out1.nodes);
-    expect(out2.counts).toEqual(out1.counts);
-    out2.edges.forEach((edge, i) => {
-      expect(edge.from).toBe(out1.edges[i]!.from);
-      expect(edge.to).toBe(out1.edges[i]!.to);
-      expect(edge.from_label).toBe(out1.edges[i]!.from_label);
-      expect(edge.to_label).toBe(out1.edges[i]!.to_label);
-    });
+    // Strict deep equality — the second pass sees no `strength`, but
+    // honours the existing `relationship` rather than degrading every
+    // edge to "negligible link".
+    expect(out2).toEqual(out1);
   });
 });
 

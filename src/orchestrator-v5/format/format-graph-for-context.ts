@@ -32,6 +32,14 @@ export interface DisplaySafeNode {
   readonly category?: string;
   readonly unit?: string;
   readonly intervention_summary?: string;
+  /**
+   * User-supplied quantity (e.g. observed factor value) carried through
+   * verbatim. Brief A2.1 explicitly preserves this — it is not a model
+   * coefficient, and rebanding it would corrupt user-meaningful data
+   * (e.g. "Marketing Spend = 100k"). The model-normalised siblings
+   * `raw_value` and `cap` are stripped because they're internal scaling.
+   */
+  readonly value?: number | string;
 }
 
 export interface DisplaySafeEdge {
@@ -61,21 +69,26 @@ interface RawNodeShape {
   readonly category?: unknown;
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
+  readonly value?: unknown;
 }
 
 interface RawEdgeShape {
   readonly from?: unknown;
   readonly to?: unknown;
+  /** Compact form: numeric signed mean. */
   readonly strength?: unknown;
+  /** Canonical GraphV3T form: `{ mean, std }` object. */
+  readonly strength_mean?: unknown;
+  /** Legacy form: a top-level `strength_mean` numeric field. */
+  readonly effect_direction?: unknown;
   readonly provenance?: unknown;
+  /** Idempotency: a second pass through the formatter sees no `strength`
+   *  but should preserve the existing relationship phrase. */
+  readonly relationship?: unknown;
 }
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function asProvenance(value: unknown): CompactProvenance | undefined {
@@ -114,6 +127,7 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     category?: string;
     unit?: string;
     intervention_summary?: string;
+    value?: number | string;
   } = { id, label, kind };
   const category = asString(raw.category);
   if (category !== undefined) node.category = category;
@@ -121,14 +135,66 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   if (unit !== undefined) node.unit = unit;
   const interventionSummary = asString(raw.intervention_summary);
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
+  // User-supplied `value`: numeric or string carried through verbatim.
+  // Brief A2.1: do not format node values — they may be user-meaningful
+  // quantities (e.g. "Marketing Spend = 100"). Other types (booleans,
+  // arrays, objects) are not in the canonical node-value vocabulary;
+  // dropped defensively.
+  if (typeof raw.value === 'number' && Number.isFinite(raw.value)) node.value = raw.value;
+  else if (typeof raw.value === 'string') node.value = raw.value;
   return node;
+}
+
+/**
+ * Resolve the signed edge strength across all canonical and legacy shapes
+ * that can reach `ContextPack.graph`:
+ *
+ *   - compact (`compactGraph`)         → `strength: number`
+ *   - canonical GraphV3T               → `strength: { mean: number }` (+ optional `effect_direction`)
+ *   - legacy / `editCompactGraph`-like → top-level `strength_mean: number` (+ optional `effect_direction`)
+ *
+ * Returns `null` when no usable strength is found, signalling the caller
+ * to either preserve an existing relationship (idempotent re-projection)
+ * or omit the relationship rather than emit a misleading "negligible link".
+ */
+function resolveSignedStrength(raw: RawEdgeShape): number | null {
+  if (typeof raw.strength === 'number' && Number.isFinite(raw.strength)) {
+    return raw.strength;
+  }
+  let magnitude: number | null = null;
+  if (
+    typeof raw.strength === 'object'
+    && raw.strength !== null
+    && 'mean' in raw.strength
+    && typeof (raw.strength as { mean?: unknown }).mean === 'number'
+  ) {
+    const mean = (raw.strength as { mean: number }).mean;
+    if (Number.isFinite(mean)) magnitude = mean;
+  } else if (typeof raw.strength_mean === 'number' && Number.isFinite(raw.strength_mean)) {
+    magnitude = raw.strength_mean;
+  }
+  if (magnitude === null) return null;
+  // Apply effect_direction sign override only when supplied AND the
+  // magnitude is non-negative — canonical GraphV3T emits non-negative
+  // means with sign carried separately; legacy shapes may emit signed
+  // means without a separate direction.
+  if (raw.effect_direction === 'negative' && magnitude >= 0) return -magnitude;
+  return magnitude;
 }
 
 function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): DisplaySafeEdge | null {
   const from = asString(raw.from);
   const to = asString(raw.to);
   if (from === undefined || to === undefined) return null;
-  const strength = asNumber(raw.strength) ?? 0;
+  const strength = resolveSignedStrength(raw);
+  // Idempotency: re-projecting an already display-safe edge has no
+  // numeric strength but carries an existing `relationship`. Preserve
+  // it rather than defaulting to "negligible link" — that would silently
+  // overwrite the upstream classification on every re-pass.
+  const existingRelationship = asString(raw.relationship);
+  const relationship = strength !== null
+    ? relationshipPhrase(strength)
+    : existingRelationship ?? 'negligible link';
   const edge: {
     from: string;
     to: string;
@@ -141,7 +207,7 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
     to,
     from_label: labelMap.get(from) ?? from,
     to_label: labelMap.get(to) ?? to,
-    relationship: relationshipPhrase(strength),
+    relationship,
   };
   const provenance = asProvenance(raw.provenance);
   if (provenance !== undefined) edge.provenance = provenance;
@@ -157,10 +223,18 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     are kept on `from`/`to`; human labels are surfaced as `from_label` /
  *     `to_label`. `_raw_provenance` is stripped (diagnostic-only).
  *
- *   - Nodes: only `id`, `label`, `kind`, `category?`, `unit?`,
- *     `intervention_summary?` survive. Numeric `value`/`raw_value`/`cap` and
- *     internal `source` / `_raw_provenance` are dropped — they leak raw
- *     model state into prose.
+ *   - Nodes: `id`, `label`, `kind`, `category?`, `unit?`,
+ *     `intervention_summary?`, and user-supplied `value?` survive.
+ *     Model-normalised `raw_value`/`cap` and internal `source` /
+ *     `_raw_provenance` are dropped — they leak raw model state into
+ *     prose. `value` is preserved per brief A2.1 because it may be a
+ *     user-meaningful quantity (e.g. "Marketing Spend = 100k").
+ *
+ *   - Edge strength resolution accepts every shape that can reach
+ *     `ContextPack.graph`: compact (`strength: number`), canonical
+ *     GraphV3T (`strength: { mean }` + optional `effect_direction`),
+ *     and legacy `strength_mean`. When no strength is present an
+ *     existing `relationship` (idempotent re-projection) is preserved.
  *
  *   - `options`, `goals`, `constraints`, `counts`: pass through unchanged.
  */
