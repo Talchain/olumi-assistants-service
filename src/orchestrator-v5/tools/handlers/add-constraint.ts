@@ -175,11 +175,24 @@ export function createAddConstraintHandler(): HandlerFn {
           { details: { handler_id: 'add_constraint', target_id: targetId } },
         );
       }
-      // Constraints attach to the constrained entity. The brief allows
-      // factors and outcomes; we accept those plus goals (a constraint on
-      // a goal targets the goal threshold). decision/option/risk are not
-      // valid constrained entities — reject as ENTITY_KIND_MISMATCH.
-      const ALLOWED_TARGET_KINDS = new Set(['factor', 'outcome', 'goal']);
+      // Constraints attach to the constrained entity. Accepted kinds:
+      //   - factor   ("budget can't exceed £50k")
+      //   - outcome  ("retention must be at least 90%")
+      //   - goal     (constraint on the goal threshold)
+      //   - risk     ("keep churn risk below 5%")
+      //
+      // V5 D1 golden-path closure (A3.1 Task 5): added 'risk' here.
+      // GoalConstraintSchema's `node_id` is `z.string()` — kind-agnostic,
+      // and PLoT forwards constraints regardless of the constrained-node
+      // kind (verified via loadScenarioSnapshotForRunAnalysis →
+      // run-analysis.ts:273 plotPayload.goal_constraints; the snapshot
+      // reader does no kind filtering). Risk-node constraints are a
+      // common user phrasing the prior allowlist rejected as
+      // ENTITY_KIND_MISMATCH.
+      //
+      // decision/option/action stay rejected — those aren't valid
+      // constrained entities (no threshold semantics).
+      const ALLOWED_TARGET_KINDS = new Set(['factor', 'outcome', 'goal', 'risk']);
       if (!ALLOWED_TARGET_KINDS.has(targetNode.kind)) {
         throw new D1HandlerError(
           'ENTITY_KIND_MISMATCH',
