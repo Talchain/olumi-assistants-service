@@ -281,7 +281,16 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
       priorTurns: [],
       graph: {
         nodes: [
-          { id: 'fac_marketing', kind: 'factor', label: 'Marketing Spend' },
+          // Canonical GraphV3T nests user-supplied node values under
+          // observed_state. A2.1 must surface them on the display node
+          // through the raw-graph fallback path too — otherwise canonical
+          // user quantities silently disappear from Sonnet's view.
+          {
+            id: 'fac_marketing',
+            kind: 'factor',
+            label: 'Marketing Spend',
+            observed_state: { value: 100, unit: 'k' },
+          },
           { id: 'fac_leads', kind: 'factor', label: 'New Leads' },
           { id: 'goal_growth', kind: 'goal', label: 'Quarterly Growth' },
         ],
@@ -323,6 +332,15 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
       expect(edge).not.toHaveProperty('exists_probability');
       expect(edge).not.toHaveProperty('effect_direction');
     }
+    // Canonical observed_state.value survives display projection on the
+    // raw-graph fallback path — the LLM still sees the user-supplied
+    // quantity even when the caller never pre-compacted the graph.
+    const marketingNode = parsed.graph.nodes.find((n) => n['id'] === 'fac_marketing');
+    expect(marketingNode).toBeDefined();
+    expect(marketingNode!['value']).toBe(100);
+    // Raw GraphV3T `observed_state` wrapper itself MUST NOT leak — only
+    // the extracted user value reaches Sonnet.
+    expect(marketingNode).not.toHaveProperty('observed_state');
   });
 
   it('does not mutate the caller\'s ContextPack — raw graph survives intact for handlers', async () => {

@@ -69,7 +69,10 @@ interface RawNodeShape {
   readonly category?: unknown;
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
+  /** Compact / display-safe top-level user value. */
   readonly value?: unknown;
+  /** Canonical GraphV3T nests user-supplied node value under `observed_state`. */
+  readonly observed_state?: unknown;
 }
 
 interface RawEdgeShape {
@@ -95,6 +98,50 @@ function asProvenance(value: unknown): CompactProvenance | undefined {
   return value === 'from_brief' || value === 'ai_inferred' || value === 'user_set'
     ? value
     : undefined;
+}
+
+/**
+ * Allowlist of phrases the formatter is permitted to emit on
+ * `DisplaySafeEdge.relationship`. Pre-built once: every band × sign plus
+ * the near-zero suppression phrase. Anything outside this set is treated
+ * as an unsafe upstream string and dropped (defaults to "negligible link"
+ * via the projectEdge fallback) — important when re-projecting an edge
+ * carrying an unrecognised legacy `relationship` such as
+ * `"strength of 0.55"`, which would otherwise leak verbatim.
+ */
+const RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
+  'negligible link',
+  'weak positive link',
+  'weak negative link',
+  'moderate positive link',
+  'moderate negative link',
+  'strong positive link',
+  'strong negative link',
+  'very strong positive link',
+  'very strong negative link',
+]);
+
+function asAllowedRelationship(value: unknown): string | undefined {
+  return typeof value === 'string' && RELATIONSHIP_PHRASES.has(value) ? value : undefined;
+}
+
+/**
+ * Extract a user-supplied node `value` from either the compact top-level
+ * field or the canonical GraphV3T `observed_state.value` nesting. Numbers
+ * and strings carried through verbatim per brief A2.1; other JSON shapes
+ * dropped defensively.
+ */
+function extractNodeValue(raw: RawNodeShape): number | string | undefined {
+  const top = raw.value;
+  if (typeof top === 'number' && Number.isFinite(top)) return top;
+  if (typeof top === 'string') return top;
+  const observed = raw.observed_state;
+  if (typeof observed === 'object' && observed !== null && 'value' in observed) {
+    const inner = (observed as { value?: unknown }).value;
+    if (typeof inner === 'number' && Number.isFinite(inner)) return inner;
+    if (typeof inner === 'string') return inner;
+  }
+  return undefined;
 }
 
 /**
@@ -137,11 +184,12 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
   // User-supplied `value`: numeric or string carried through verbatim.
   // Brief A2.1: do not format node values — they may be user-meaningful
-  // quantities (e.g. "Marketing Spend = 100"). Other types (booleans,
-  // arrays, objects) are not in the canonical node-value vocabulary;
-  // dropped defensively.
-  if (typeof raw.value === 'number' && Number.isFinite(raw.value)) node.value = raw.value;
-  else if (typeof raw.value === 'string') node.value = raw.value;
+  // quantities (e.g. "Marketing Spend = 100"). Reads from the compact
+  // top-level `value` first, falling back to canonical
+  // `observed_state.value` (raw assembler passthrough path). Other
+  // types (booleans, arrays, objects) are dropped defensively.
+  const userValue = extractNodeValue(raw);
+  if (userValue !== undefined) node.value = userValue;
   return node;
 }
 
@@ -189,9 +237,11 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
   const strength = resolveSignedStrength(raw);
   // Idempotency: re-projecting an already display-safe edge has no
   // numeric strength but carries an existing `relationship`. Preserve
-  // it rather than defaulting to "negligible link" — that would silently
-  // overwrite the upstream classification on every re-pass.
-  const existingRelationship = asString(raw.relationship);
+  // it ONLY when it is one of the formatter's allowlisted phrases —
+  // unknown strings (e.g. legacy `"strength of 0.55"` prose) MUST NOT
+  // pass through verbatim, since they would defeat the entire point of
+  // the display-safe projection. Unknown / missing → "negligible link".
+  const existingRelationship = asAllowedRelationship(raw.relationship);
   const relationship = strength !== null
     ? relationshipPhrase(strength)
     : existingRelationship ?? 'negligible link';
@@ -228,7 +278,11 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     Model-normalised `raw_value`/`cap` and internal `source` /
  *     `_raw_provenance` are dropped — they leak raw model state into
  *     prose. `value` is preserved per brief A2.1 because it may be a
- *     user-meaningful quantity (e.g. "Marketing Spend = 100k").
+ *     user-meaningful quantity (e.g. "Marketing Spend = 100k"). The
+ *     extractor reads compact top-level `value` first and canonical
+ *     `observed_state.value` second, so the assembler raw-graph
+ *     fallback (which passes canonical nodes through unchanged)
+ *     preserves user values too.
  *
  *   - Edge strength resolution accepts every shape that can reach
  *     `ContextPack.graph`: compact (`strength: number`), canonical
