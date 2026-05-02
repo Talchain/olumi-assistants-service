@@ -32,7 +32,12 @@ import { D1HandlerError } from './d1-shared/errors.js';
 import { formatEdgeAdjustment } from './d1-shared/format-confirmation.js';
 
 export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
-export const AdjustEdgeStrengthStdSchema = z.number().min(0).max(0.5);
+// V5 D1 (P1-6 follow-up): EdgeStrengthV3.std requires `.positive()`,
+// so a value of 0 would pass parameter validation but fail the
+// post-mutation `GraphV3.parse`, surfacing as a misleading
+// GRAPH_INVARIANT_VIOLATED. Match the canonical schema's lower
+// bound here so the user-visible error is the right class.
+export const AdjustEdgeStrengthStdSchema = z.number().gt(0).max(0.5);
 
 const STRENGTH_CLAMP_MIN = -1;
 const STRENGTH_CLAMP_MAX = 1;

@@ -1404,9 +1404,24 @@ export async function runTurnExecutor(
       // would ship `freshness === 'none'` (or the prior verdict) on
       // the same turn that produced the fresh fact. Re-derivation is
       // free — it's a pure function over the in-memory fact arrays.
+      //
+      // V5 D1 (P1-3 follow-up): when a mutation handler emits
+      // `mutated_graph`, the pre-handler hash (computed from
+      // `graphStateForTurn`, the ingress) is stale relative to what
+      // we're about to commit. Compute the post-mutation hash so the
+      // freshness verdict on this same response correctly reads
+      // `'stale'` against any prior run_analysis fact, and the rerun
+      // chip surfaces. Falls back to the pre-handler hash for
+      // computation/explanation handlers that don't mutate.
+      const hashForPostHandlerFreshness =
+        handlerOutcome.mutated_graph !== undefined
+          ? computeAnalysisAffectingGraphHash(
+              handlerOutcome.mutated_graph as GraphStateIngress | null | undefined,
+            )
+          : currentAnalysisGraphHashForTurn;
       freshness = deriveAnalysisFreshness(
         [...handlerFactsForCommit, ...context.prior_facts],
-        currentAnalysisGraphHashForTurn,
+        hashForPostHandlerFreshness,
       );
       emitFreshnessTelemetry(
         freshness,

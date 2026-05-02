@@ -100,6 +100,15 @@ export interface RunAnalysisScenarioSnapshot {
   }>;
   readonly goal_node_id: string;
   /**
+   * V5 D1 (Brief: D1 deterministic handlers, P0-2 follow-up):
+   * `add_constraint` persists to `graph.goal_constraints` (top-level
+   * field on GraphV3). PLoT consumes them via the run payload's
+   * top-level `goal_constraints`, not via the graph object — so the
+   * handler must explicitly forward them. Surfaced on the snapshot
+   * so `runAnalysisHandler` can attach without a second graph parse.
+   */
+  readonly goal_constraints?: unknown;
+  /**
    * V5 state-trust: the RAW persisted graph as stored in
    * `scenarios.graph` BEFORE GraphV3.safeParse. This is the same shape
    * turn-executor sees when it falls back to loadPersistedGraph +
@@ -521,6 +530,12 @@ export async function loadScenarioSnapshotForRunAnalysis(
     })),
     goal_node_id: readiness.goal_node_id,
     rawPersistedGraph: persistedGraph,
+    // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
+    // constraints added via `add_constraint`. Omitted when absent so
+    // run-analysis can use the existing optional-field idiom.
+    ...(parsedGraph.data.goal_constraints !== undefined
+      ? { goal_constraints: parsedGraph.data.goal_constraints }
+      : {}),
   };
 }
 

@@ -97,6 +97,27 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     );
   }
 
+  // V5 D1 (P1-5 follow-up): when a unit IS supplied and the input
+  // exceeds the cap, refuse the mutation rather than producing a
+  // model-unit value > 1. "150% on a 100% cap" is the canonical case
+  // — silently storing 1.5 would corrupt analysis assumptions
+  // downstream. Negative raw_values on a positive-cap factor are
+  // similarly nonsensical.
+  if (inputHasUnit && (rawInput < 0 || rawInput > cap)) {
+    const unitSuffix = effectiveUnit ?? '';
+    throw new D1HandlerError(
+      'PARAMETER_INVALID',
+      `Value ${rawInput}${unitSuffix} exceeds the factor's cap of ${cap}${unitSuffix}.`,
+      {
+        details: { rawInput, cap, unit: effectiveUnit ?? null },
+        userGuidance:
+          rawInput > cap
+            ? `${rawInput}${unitSuffix} exceeds the ${cap}${unitSuffix} cap on this factor — pick a value within range.`
+            : `Negative values aren't allowed on this factor (cap is ${cap}${unitSuffix}).`,
+      },
+    );
+  }
+
   // When the input arrives with a percentage-style unit and the factor is
   // capped at 100, treat the raw input as a percentage on its own scale —
   // value=raw/100. This matches the V3 convention where a "5% churn"
