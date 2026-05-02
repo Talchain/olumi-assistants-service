@@ -425,7 +425,7 @@ export async function runTurnExecutor(
             graphStateForTurn = parsed.data;
             log.info(
               { request_id: requestId, scenario_id: payload.scenario_id },
-              'V5 TurnExecutor loaded persisted graph from database for graph lookup fallback',
+              'V5 TurnExecutor using persisted graph loaded during buildTurnContext for graph lookup fallback',
             );
           } else {
             log.warn(

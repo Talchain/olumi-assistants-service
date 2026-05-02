@@ -71,13 +71,23 @@
 -- 1. Add the brief_text column.
 ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS brief_text TEXT;
 
--- 2. CHECK constraint with btrim for whitespace-only protection at the
---    DB layer (defence-in-depth alongside app-side normaliseBriefText).
+-- 2. CHECK constraint enforces BOTH bounds at the DB layer
+--    (defence-in-depth alongside app-side normaliseBriefText):
+--      a. Stored length 1..8000 (prevents over-length values reaching
+--         storage via direct RPC or SQL that bypasses normaliseBriefText —
+--         e.g. a 9000-char string padded with trailing whitespace would
+--         pass a btrim-only check while still bloating the row).
+--      b. Trimmed content non-empty (rejects whitespace-only stores
+--         that the app-side normaliser already collapses to undefined).
 --    Drop-then-add for migration idempotency.
 ALTER TABLE scenarios DROP CONSTRAINT IF EXISTS scenarios_brief_text_length;
 ALTER TABLE scenarios
   ADD CONSTRAINT scenarios_brief_text_length
-  CHECK (brief_text IS NULL OR char_length(btrim(brief_text)) BETWEEN 1 AND 8000);
+  CHECK (
+    brief_text IS NULL
+    OR (char_length(brief_text) BETWEEN 1 AND 8000
+        AND char_length(btrim(brief_text)) >= 1)
+  );
 
 -- 3. Documentation. Operators reading \d scenarios should immediately
 --    understand the source of truth and the distinction from brief.
@@ -98,9 +108,13 @@ DROP FUNCTION IF EXISTS public.append_turn_atomic(
 
 -- 5. CREATE OR REPLACE the 11-arg version. The body below is the
 --    20260422210000 body verbatim plus ONE new block (the brief_text
---    UPDATE), placed after the FOUND-based idempotency guard so it
---    is unreachable on conflict-replay (preserves the same idempotency
---    invariant the graph write enjoys).
+--    UPDATE), inserted between the existing handler_facts insert and
+--    the final RETURN, matching the brief's contract for surgical
+--    placement. The new block is still downstream of the FOUND-based
+--    idempotency guard (which short-circuits much earlier in the body),
+--    so it inherits the same conflict-replay protection the graph
+--    write enjoys — but the load-bearing placement constraint is
+--    "after handler_facts, before RETURN", not the FOUND ordering.
 CREATE OR REPLACE FUNCTION append_turn_atomic(
   p_scenario_id      UUID,
   p_turn_id          TEXT,
