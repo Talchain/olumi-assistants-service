@@ -17,6 +17,8 @@
  */
 
 import type { GraphV3T } from '../../../../../schemas/cee-v3.js';
+import type { ProposalAction } from '../../../../routing/types.js';
+import type { HandlerInvocation } from '../../../registry.js';
 
 export function buildD1Fixture(): GraphV3T {
   return {
@@ -95,5 +97,67 @@ export function buildD1Fixture(): GraphV3T {
         effect_direction: 'positive',
       },
     ],
+  };
+}
+
+/**
+ * Typed fixture helper for D1 handler unit tests. Constructs a
+ * `HandlerInvocation` whose `context` and `payload` carry the
+ * minimum fields handlers consult, narrowed to satisfy the wire
+ * `EnrichedTurnContext` / `MessageTurnPayload` types via a single
+ * documented cast at the boundary. New A3.1 tests use this helper
+ * instead of inlining `as never` / `as unknown as` casts in every
+ * test body.
+ *
+ * Required fields filled with safe defaults; everything that's
+ * actually meaningful for a given test (`graph`, `proposal`) is
+ * still passed explicitly via the options bag.
+ */
+export interface BuildHandlerInvocationOptions {
+  readonly proposal: ProposalAction;
+  readonly graph?: unknown;
+  readonly scenarioId?: string;
+  readonly turnId?: string;
+  readonly stage?: 'frame' | 'analyse' | 'decide' | 'review';
+  readonly message?: string;
+  readonly requestId?: string;
+}
+
+export function buildHandlerInvocation(
+  opts: BuildHandlerInvocationOptions,
+): HandlerInvocation {
+  const stage = opts.stage ?? 'frame';
+  const scenarioId = opts.scenarioId ?? 'scn-fixture';
+  const turnId = opts.turnId ?? 'turn-fixture';
+  const requestId = opts.requestId ?? 'req-fixture';
+  const message = opts.message ?? 'mutate';
+  return {
+    // The wire EnrichedTurnContext is `.strict()` and includes
+    // CEE-internal fields (prior_turns, prior_facts, scenarioBriefText,
+    // persistedGraph) that production builds populate via
+    // build-turn-context. Tests don't exercise those reads, so the
+    // narrow boundary cast lives in this single helper rather than
+    // every test body.
+    context: {
+      session_id: scenarioId,
+      stage,
+      request_id: requestId,
+      prior_turns: [],
+      prior_facts: [],
+      scenarioBriefText: null,
+      persistedGraph: null,
+    } as unknown as HandlerInvocation['context'],
+    payload: {
+      kind: 'message',
+      scenario_id: scenarioId,
+      turn_id: turnId,
+      stage,
+      message,
+    } as unknown as HandlerInvocation['payload'],
+    requestId,
+    signal: new AbortController().signal,
+    orientationText: '',
+    proposal: opts.proposal,
+    graphForTurn: opts.graph,
   };
 }

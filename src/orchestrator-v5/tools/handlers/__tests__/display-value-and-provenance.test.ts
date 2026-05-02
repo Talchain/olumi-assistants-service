@@ -22,36 +22,22 @@ import { describe, it, expect } from 'vitest';
 
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import type { ProposalAction } from '../../../routing/types.js';
-import type { HandlerInvocation } from '../../registry.js';
 
 import { createSetFactorValueHandler } from '../set-factor-value.js';
 import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
-import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
+import {
+  buildD1Fixture,
+  buildHandlerInvocation,
+} from '../d1-shared/__tests__/fixtures.js';
 
-function buildInvocation(graph: GraphV3T, proposal: ProposalAction): HandlerInvocation {
-  return {
-    context: {
-      session_id: 'scn-prov',
-      stage: 'frame',
-      request_id: 'req-prov',
-      prior_turns: [],
-      prior_facts: [],
-      scenarioBriefText: null,
-      persistedGraph: null,
-    } as unknown as HandlerInvocation['context'],
-    payload: {
-      kind: 'message',
-      scenario_id: 'scn-prov',
-      turn_id: 'turn-prov',
-      stage: 'frame',
-      message: 'mutate',
-    } as unknown as HandlerInvocation['payload'],
-    requestId: 'req-prov',
-    signal: new AbortController().signal,
-    orientationText: '',
+function buildInvocation(graph: GraphV3T, proposal: ProposalAction) {
+  return buildHandlerInvocation({
+    graph,
     proposal,
-    graphForTurn: graph,
-  };
+    scenarioId: 'scn-prov',
+    turnId: 'turn-prov',
+    requestId: 'req-prov',
+  });
 }
 
 describe('A3.1 Task 3 — set_factor_value recomputes display_value and stamps provenance', () => {

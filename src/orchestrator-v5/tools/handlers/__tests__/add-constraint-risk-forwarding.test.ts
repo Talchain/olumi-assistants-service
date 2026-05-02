@@ -19,35 +19,22 @@ import { describe, it, expect } from 'vitest';
 
 import type { GraphV3T } from '../../../../schemas/cee-v3.js';
 import type { ProposalAction } from '../../../routing/types.js';
-import type { HandlerInvocation } from '../../registry.js';
 
 import { createAddConstraintHandler } from '../add-constraint.js';
-import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
+import {
+  buildD1Fixture,
+  buildHandlerInvocation,
+} from '../d1-shared/__tests__/fixtures.js';
 
-function buildInvocation(graph: GraphV3T, proposal: ProposalAction): HandlerInvocation {
-  return {
-    context: {
-      session_id: 'scn-risk',
-      stage: 'frame',
-      request_id: 'req-risk',
-      prior_turns: [],
-      prior_facts: [],
-      scenarioBriefText: null,
-      persistedGraph: null,
-    } as unknown as HandlerInvocation['context'],
-    payload: {
-      kind: 'message',
-      scenario_id: 'scn-risk',
-      turn_id: 'turn-risk',
-      stage: 'frame',
-      message: 'add risk constraint',
-    } as unknown as HandlerInvocation['payload'],
-    requestId: 'req-risk',
-    signal: new AbortController().signal,
-    orientationText: '',
+function buildInvocation(graph: GraphV3T, proposal: ProposalAction) {
+  return buildHandlerInvocation({
+    graph,
     proposal,
-    graphForTurn: graph,
-  };
+    scenarioId: 'scn-risk',
+    turnId: 'turn-risk',
+    requestId: 'req-risk',
+    message: 'add risk constraint',
+  });
 }
 
 function withRiskNode(): GraphV3T {

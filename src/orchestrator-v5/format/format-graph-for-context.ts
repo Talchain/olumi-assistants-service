@@ -304,19 +304,22 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     are kept on `from`/`to`; human labels are surfaced as `from_label` /
  *     `to_label`. `_raw_provenance` is stripped (diagnostic-only).
  *
- *   - Nodes: `id`, `label`, `kind`, `category?`, `unit?`,
- *     `intervention_summary?`, and user-supplied `value?` survive.
- *     Model-normalised `raw_value`/`cap` and internal `source` /
- *     `_raw_provenance` are dropped — they leak raw model state into
- *     prose. `value` is preserved per brief A2.1 because it may be a
- *     user-meaningful quantity (e.g. "Marketing Spend = 100k"). The
- *     extractor reads compact top-level `value` first and canonical
- *     `observed_state.value` second, so the assembler raw-graph
- *     fallback (which passes canonical nodes through unchanged)
- *     preserves user values too. The same compact-then-canonical
- *     fallback applies to `unit` — without it the raw-graph path
- *     drops user units, which can change a value's meaning
- *     (`100` vs `100k`).
+ *   - Nodes: `id`, `label`, `kind`, `category?`, `unit?` (label only),
+ *     and `intervention_summary?` survive. Per V5 D1 golden-path
+ *     closure (A3.1 Task 6), node-level `value`, `raw_value`, and
+ *     `cap` are stripped from the LLM-facing projection (including
+ *     when nested under canonical `observed_state.{value,raw_value,
+ *     cap}`). Brief A2.1 originally preserved `value` as a "user-
+ *     meaningful quantity"; the post-A3 review reversed that
+ *     decision because exposing any node numeric encouraged Sonnet
+ *     to echo it as structural fact and reuse it as a coefficient
+ *     in narration. The raw `ContextPack.graph` retains all node
+ *     numerics for handlers, freshness hashing, and edit_graph
+ *     dispatch — Sonnet just doesn't see them. Internal `source` /
+ *     `_raw_provenance` are dropped (diagnostic-only).
+ *     The `unit` extractor still reads compact top-level `unit`
+ *     first and canonical `observed_state.unit` second so the
+ *     assembler raw-graph fallback preserves the user-facing label.
  *
  *   - Edge strength resolution accepts every shape that can reach
  *     `ContextPack.graph`: compact (`strength: number`), canonical

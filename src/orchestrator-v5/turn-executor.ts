@@ -752,12 +752,39 @@ export async function runTurnExecutor(
         },
       });
 
-      // V5 explain-stabilisation Task 4 — deterministic value-update
-      // pre-route. Catches explicit "Set X to N" / "Increase Y to N"
-      // phrasings before they reach the LLM and dispatches them as a
-      // clarify direct_answer with candidate factor chips. Negative gate
-      // suppresses on hypothetical phrasings ("what if budget increased").
-      // Pure function; falls through to the LLM when no candidate match.
+      // V5 explain-stabilisation Task 4 + V5 D1 golden-path closure
+      // (A3.1 Task 1) — deterministic value-update pre-route. Catches
+      // explicit "Set X to N" / "Increase Y to N" phrasings before
+      // they reach the LLM. Two-path dispatch:
+      //
+      //   1. UNAMBIGUOUS factor + executable handler:
+      //      Single substring match (score=1) on a 'factor'-kind
+      //      node, AND set_factor_value is registered in both the
+      //      active validation and handler registries. Synthesises
+      //      a RoutingToolCallResult so the existing Step 2-7
+      //      lifecycle (validate → execute → confirm → commit) runs
+      //      unchanged. No LLM call, identical telemetry / fact /
+      //      commit shape to a Sonnet-routed tool-call.
+      //
+      //   2. AMBIGUOUS / NON-FACTOR / NON-EXECUTABLE:
+      //      Multi-candidate matches stay clarify; single-substring
+      //      matches on a non-factor node downgrade to clarify
+      //      (kind gate); any path that requires set_factor_value
+      //      but cannot resolve it in the active registries
+      //      downgrades to clarify (registry guard). Telemetry
+      //      records the original pre-guard dispatch plus a
+      //      `downgrade_reason`. Clarify chips fire from the
+      //      existing branch; the chip click on the next turn
+      //      re-enters Sonnet's normal routing.
+      //
+      //   3. NO MATCH:
+      //      Negative gate suppresses on hypothetical phrasings
+      //      ("what if budget increased"); no edit verb / no CQE
+      //      quantity / no graph also short-circuits. Falls through
+      //      to the LLM via routeWithToolUse.
+      //
+      // Pure detection function; the guards + dispatch live in this
+      // executor.
       let deterministicValueUpdate = tryDeterministicValueUpdate(
         payload.message,
         contextPack.parsed_quantities,
@@ -813,12 +840,23 @@ export async function runTurnExecutor(
         // time with HANDLER_NOT_FOUND. Falling through to clarify is
         // the safe degradation — the chip click on the next turn
         // re-enters Sonnet's normal routing.
-        const activeValidationRegistry =
-          options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
-        const activeHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
-        const handlerExecutable =
-          activeValidationRegistry.set_factor_value !== undefined &&
-          resolveHandler(activeHandlerRegistry, 'set_factor_value') !== null;
+        //
+        // Order matters: the kind check is cheap (an array find),
+        // the registry resolution may invoke `getDefaultRegistry()`
+        // which constructs the production PLoT client on first call.
+        // Short-circuiting on `isFactor === false` skips the
+        // registry resolution for clarify-bound non-factor matches
+        // and avoids unnecessary PLoT client init on the
+        // clarify-only path.
+        let handlerExecutable = false;
+        if (isFactor) {
+          const activeValidationRegistry =
+            options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+          const activeHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
+          handlerExecutable =
+            activeValidationRegistry.set_factor_value !== undefined &&
+            resolveHandler(activeHandlerRegistry, 'set_factor_value') !== null;
+        }
         if (isFactor && handlerExecutable) {
           const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
             deterministicValueUpdate.quantity,

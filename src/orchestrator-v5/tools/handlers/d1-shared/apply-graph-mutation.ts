@@ -22,8 +22,25 @@
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import { D1HandlerError } from './errors.js';
 
+/**
+ * The runtime shape of a graph returned by `applyAndValidateMutation`:
+ * a `GraphV3T` (validated structural fields) intersected with a
+ * passthrough record so callers can still read top-level ingress
+ * fields like `options`, `goal_node_id`, `meta`, `coaching`,
+ * `causal_claims`, `topology_plan`, `validation_warnings`,
+ * `schema_version` that GraphV3 strips on parse.
+ *
+ * Type contract matches the runtime contract (A3.1 Task 2): the
+ * helper does NOT return the GraphV3-narrowed projection, it returns
+ * the merged ingress shape with mutated structural fields stamped in.
+ * Callers and the commit layer treat it as `unknown` (CommitMetadata.graph
+ * is `unknown`), so the wider intersection is structurally compatible
+ * everywhere downstream.
+ */
+export type PersistedGraphV3T = GraphV3T & Record<string, unknown>;
+
 export interface MutationResult {
-  readonly mutatedGraph: GraphV3T;
+  readonly mutatedGraph: PersistedGraphV3T;
   readonly before: Record<string, unknown> | null;
   readonly after: Record<string, unknown> | null;
 }
@@ -57,7 +74,7 @@ export function applyAndValidateMutation<TBefore, TAfter>(
   ingressGraph: unknown,
   mutator: (clone: GraphV3T) => { before: TBefore; after: TAfter },
 ): {
-  readonly mutatedGraph: GraphV3T;
+  readonly mutatedGraph: PersistedGraphV3T;
   readonly before: TBefore;
   readonly after: TAfter;
 } {
@@ -105,14 +122,14 @@ export function applyAndValidateMutation<TBefore, TAfter>(
     !Array.isArray(ingressGraph)
       ? (ingressGraph as Record<string, unknown>)
       : {};
-  const mutatedGraph = {
+  const mutatedGraph: PersistedGraphV3T = {
     ...ingressShape,
     nodes: postParse.data.nodes,
     edges: postParse.data.edges,
     ...(postParse.data.goal_constraints !== undefined
       ? { goal_constraints: postParse.data.goal_constraints }
       : {}),
-  } as unknown as GraphV3T;
+  };
 
   return { mutatedGraph, before, after };
 }

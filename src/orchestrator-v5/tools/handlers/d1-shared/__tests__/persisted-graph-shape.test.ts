@@ -25,12 +25,11 @@ import { describe, it, expect } from 'vitest';
 
 import { GraphV3 } from '../../../../../schemas/cee-v3.js';
 import type { ProposalAction } from '../../../../routing/types.js';
-import type { HandlerInvocation } from '../../../registry.js';
 
 import { createSetFactorValueHandler } from '../../set-factor-value.js';
 import { createAddConstraintHandler } from '../../add-constraint.js';
 import { createAdjustEdgeStrengthHandler } from '../../adjust-edge-strength.js';
-import { buildD1Fixture } from './fixtures.js';
+import { buildD1Fixture, buildHandlerInvocation } from './fixtures.js';
 
 /**
  * Build an ingress graph carrying every top-level field a real
@@ -59,33 +58,15 @@ function buildWideIngress(): Record<string, unknown> {
   };
 }
 
-function buildInvocation(
-  ingress: unknown,
-  proposal: ProposalAction,
-): HandlerInvocation {
-  return {
-    context: {
-      session_id: 'scn-shape',
-      stage: 'frame',
-      request_id: 'req-shape',
-      prior_turns: [],
-      prior_facts: [],
-      scenarioBriefText: null,
-      persistedGraph: null,
-    } as unknown as HandlerInvocation['context'],
-    payload: {
-      kind: 'message',
-      scenario_id: 'scn-shape',
-      turn_id: 'turn-shape',
-      stage: 'frame',
-      message: 'mutate it',
-    } as unknown as HandlerInvocation['payload'],
-    requestId: 'req-shape',
-    signal: new AbortController().signal,
-    orientationText: '',
+function buildInvocation(ingress: unknown, proposal: ProposalAction) {
+  return buildHandlerInvocation({
+    graph: ingress,
     proposal,
-    graphForTurn: ingress,
-  };
+    scenarioId: 'scn-shape',
+    turnId: 'turn-shape',
+    requestId: 'req-shape',
+    message: 'mutate it',
+  });
 }
 
 const PRESERVED_TOP_LEVEL_KEYS = [
