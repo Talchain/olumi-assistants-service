@@ -120,6 +120,36 @@
       "source": "synthetic",
       "text": "The response_hash: 4da7e62f208e was attached to the turn.",
       "expectations": "unchanged: hash content has no decimals"
+    },
+    {
+      "id": "leg-008-probability-variance",
+      "source": "synthetic",
+      "text": "The probability variance is 0.12 across runs.",
+      "expectations": "unchanged: variance is a magnitude statistic, not a probability value"
+    },
+    {
+      "id": "leg-009-likelihood-ratio",
+      "source": "synthetic",
+      "text": "The likelihood ratio is 0.42 between scenarios.",
+      "expectations": "unchanged: ratio is a ratio, not a [0,1] probability"
+    },
+    {
+      "id": "leg-010-calibration-error",
+      "source": "synthetic",
+      "text": "The probability calibration error is 0.12 in the latest run.",
+      "expectations": "unchanged: calibration error is a diagnostic metric"
+    },
+    {
+      "id": "leg-011-probability-gap",
+      "source": "synthetic",
+      "text": "The probability gap of 0.08 narrowed after the change.",
+      "expectations": "unchanged: gap is a delta / diagnostic, not a probability"
+    },
+    {
+      "id": "leg-012-likelihood-divergence",
+      "source": "synthetic",
+      "text": "The likelihood divergence is 0.55 across models.",
+      "expectations": "unchanged: divergence is a diagnostic statistic"
     }
   ]
 }

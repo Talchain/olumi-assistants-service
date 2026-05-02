@@ -273,11 +273,14 @@ describe('suppressStructuralEdgeLanguage — rules and rule_ids', () => {
     expect(r.rule_ids.filter((id) => id === 'carries_strength').length).toBe(1);
   });
 
-  it('is idempotent', () => {
+  it('is text-idempotent (text unchanged across re-runs)', () => {
+    // Note: `matched` may stay non-zero across passes if a rule keeps
+    // matching but is always reverted by the grammar guards. The
+    // contract is text-stability, not counter-stability.
     const once = suppressStructuralEdgeLanguage('Carries a strength of 0.55.');
     const twice = suppressStructuralEdgeLanguage(once.text);
     expect(twice.text).toBe(once.text);
-    expect(twice.matched).toBe(0);
+    expect(twice.suppressed).toBe(0);
   });
 
   it('returns empty result on empty input', () => {
@@ -335,25 +338,123 @@ describe('suppressStructuralEdgeLanguage — grammar guards prevent ungrammatica
   });
 });
 
-describe('translateSensitivityLanguage — grammar guard via combined sanitiser', () => {
-  // The standalone translate function naively replaces the matched
-  // span; combined with surrounding "with a …" prose this can
-  // produce "with a a very strong sensitivity signal". The combined
-  // sanitiseAssistantTextProse should produce grammatical output. We
-  // assert against the combined helper since that is the user-facing
-  // entry point.
-  it('produces clean output for "with a sensitivity value of 1.0"', () => {
-    const r = sanitiseAssistantTextProse('Headline driver with a sensitivity value of 1.0 dominates.');
-    // Either the formatter produces a clean splice ("with a very strong …")
-    // or a self-contained one ("a very strong …") — the assertion is
-    // that no doubled article appears.
-    expect(r.text).not.toMatch(/\b(a|an|the)\s+(a|an|the)\b/i);
-    expect(r.sensitivity_rewrites).toBeGreaterThanOrEqual(0);
+describe('translateSensitivityLanguage — exact output for article cases', () => {
+  // Article-consuming sensitivity translation: when a leading "a" /
+  // "an" / "the" is captured as part of the match, the band label's
+  // own leading "a" is stripped and the captured article is preserved
+  // verbatim (including its capitalisation). These tests pin the
+  // exact splice rather than just asserting absence of doubled
+  // articles.
+  it('"with a sensitivity value of 1.0" → "with a very strong sensitivity signal"', () => {
+    const r = sanitiseAssistantTextProse(
+      'Headline driver with a sensitivity value of 1.0 dominates.',
+    );
+    expect(r.text).toBe(
+      'Headline driver with a very strong sensitivity signal dominates.',
+    );
   });
 
-  it('produces clean output for "with a sensitivity of -0.40"', () => {
-    const r = sanitiseAssistantTextProse('Driver shows with a sensitivity of -0.40 in the second run.');
-    expect(r.text).not.toMatch(/\b(a|an|the)\s+(a|an|the)\b/i);
+  it('"with a sensitivity of -0.40" → "with a negative sensitivity signal"', () => {
+    const r = sanitiseAssistantTextProse(
+      'Driver shows with a sensitivity of -0.40 in the second run.',
+    );
+    expect(r.text).toBe(
+      'Driver shows with a negative sensitivity signal in the second run.',
+    );
+  });
+
+  it('"the sensitivity value of 0.42" → "the moderate sensitivity signal"', () => {
+    const r = sanitiseAssistantTextProse(
+      'We measured the sensitivity value of 0.42 across runs.',
+    );
+    expect(r.text).toBe(
+      'We measured the moderate sensitivity signal across runs.',
+    );
+  });
+
+  it('sentence-initial "A sensitivity of 0.80 …" preserves capitalisation', () => {
+    const r = sanitiseAssistantTextProse('A sensitivity of 0.80 emerged.');
+    // The captured article "A " is preserved (capital), the label's
+    // leading "a " is stripped, so the result is "A strong sensitivity
+    // signal emerged." preserving sentence-initial caps.
+    expect(r.text).toBe('A strong sensitivity signal emerged.');
+  });
+});
+
+describe('suppressStructuralEdgeLanguage — noun-pileup regressions (round 3)', () => {
+  // These cases exposed a bug where bare_strength_int consumed an
+  // article that was qualifying an adjacent noun, orphaning the noun.
+  // The fix: bare_strength_int no longer consumes leading articles;
+  // the grammar guard catches the resulting noun pileups and reverts.
+  it('"The factor strength 1 is high." reverts (factor would be orphaned)', () => {
+    const input = 'The factor strength 1 is high.';
+    const r = suppressStructuralEdgeLanguage(input);
+    expect(r.text).toBe(input);
+    expect(r.missed_grammar).toBeGreaterThanOrEqual(1);
+  });
+
+  it('"A strength 1 edge was reported." reverts (edge would be orphaned)', () => {
+    const input = 'A strength 1 edge was reported.';
+    const r = suppressStructuralEdgeLanguage(input);
+    expect(r.text).toBe(input);
+    expect(r.missed_grammar).toBeGreaterThanOrEqual(1);
+  });
+
+  it('sentence-initial "Carries a strength of 0.55." cleanly text-stable across passes', () => {
+    // Consequence of cross-rule revert propagation: once
+    // carries_strength is reverted, downstream causal_strength_value
+    // can no longer match the inner "a strength of 0.55" span.
+    // Result: text unchanged, both rules flagged as missed_grammar.
+    const input = 'Carries a strength of 0.55. The other path is fine.';
+    const r = suppressStructuralEdgeLanguage(input);
+    expect(r.text).toBe(input);
+    expect(r.suppressed).toBe(0);
+  });
+});
+
+describe('formatNumericProse — diagnostic probability terms (round 3)', () => {
+  // Pattern 5's relaxed lazy match was over-firing on diagnostic
+  // metrics — variance, calibration error, ratio etc. — where the
+  // decimal is a magnitude statistic rather than a [0,1] probability.
+  // The delta-context guard now also covers these terms.
+  it('"probability variance is 0.12" unchanged', () => {
+    const r = formatNumericProse('The probability variance is 0.12 across runs.');
+    expect(r.text).toBe('The probability variance is 0.12 across runs.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('"probability calibration error is 0.12" unchanged', () => {
+    const r = formatNumericProse(
+      'The probability calibration error is 0.12 in the latest run.',
+    );
+    expect(r.text).toBe(
+      'The probability calibration error is 0.12 in the latest run.',
+    );
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('"likelihood ratio is 0.42" unchanged', () => {
+    const r = formatNumericProse('The likelihood ratio is 0.42 between scenarios.');
+    expect(r.text).toBe('The likelihood ratio is 0.42 between scenarios.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('"probability gap of 0.08" unchanged', () => {
+    const r = formatNumericProse('The probability gap of 0.08 narrowed.');
+    expect(r.text).toBe('The probability gap of 0.08 narrowed.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('"probability coefficient is 0.30" unchanged', () => {
+    const r = formatNumericProse('The probability coefficient is 0.30 here.');
+    expect(r.text).toBe('The probability coefficient is 0.30 here.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('"likelihood divergence is 0.55" unchanged', () => {
+    const r = formatNumericProse('The likelihood divergence is 0.55 across models.');
+    expect(r.text).toBe('The likelihood divergence is 0.55 across models.');
+    expect(r.rewrites).toBe(0);
   });
 });
 
@@ -375,14 +476,18 @@ describe('sanitiseAssistantTextProse — combined ordering structural → sensit
     expect(r.structural_rule_ids).toContain('carries_strength');
   });
 
-  it('is idempotent on combined output', () => {
+  it('is text-idempotent on combined output (text stable across re-runs)', () => {
+    // structural_matches may stay non-zero on the second pass if a
+    // structural rule keeps matching but is always reverted by the
+    // grammar guards. The contract is text-stability + zero
+    // probability/sensitivity rewrites + zero NEW suppressions.
     const input = 'Probability of 0.74. Carries a strength of 0.30. Sensitivity of -0.5.';
     const once = sanitiseAssistantTextProse(input);
     const twice = sanitiseAssistantTextProse(once.text);
     expect(twice.text).toBe(once.text);
     expect(twice.probability_rewrites).toBe(0);
     expect(twice.sensitivity_rewrites).toBe(0);
-    expect(twice.structural_matches).toBe(0);
+    expect(twice.structural_suppressed).toBe(0);
   });
 
   it('returns zero counters and unchanged text for empty input', () => {

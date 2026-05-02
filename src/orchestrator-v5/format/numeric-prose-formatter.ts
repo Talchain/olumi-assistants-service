@@ -115,13 +115,22 @@ const PROB_RULES: readonly ProbRule[] = [
 ];
 
 /**
- * Tokens that signal the matched decimal is a delta / magnitude of
- * change rather than a raw probability. Tested against the full
- * relaxed-pattern match (case-insensitive). When ANY of these appears
- * inside the match the rebuilder declines and the decimal stays raw.
+ * Tokens that signal the matched decimal is a non-probability quantity
+ * — either a delta / magnitude of change, or a diagnostic statistic
+ * (variance, calibration error, gap, ratio, coefficient, correlation,
+ * divergence). Tested against the full relaxed-pattern match
+ * (case-insensitive). When ANY of these appears inside the match the
+ * rebuilder declines and the decimal stays raw.
+ *
+ * Coverage:
+ *   - delta verbs: changed, moved, shifted, drops/dropped, rose/rises,
+ *     increased, decreased
+ *   - delta nouns / markers: delta, "by 0.X", ±
+ *   - diagnostic statistics: variance, calibration, error, gap, ratio,
+ *     coefficient, correlation, divergence
  */
 const DELTA_CONTEXT_RE =
-  /\b(?:changed|moved|shifted|shifts?|drops?|dropped|rises?|rose|increased?|decreased?|delta|by\s+\d?\.|±)\b/i;
+  /\b(?:changed|moved|shifted|shifts?|drops?|dropped|rises?|rose|increased?|decreased?|delta|by\s+\d?\.|±|variance|calibration|error|gap|ratio|coefficient|correlation|divergence)\b/i;
 
 /**
  * Returns true if the match position sits inside an unbalanced
@@ -335,8 +344,14 @@ const STRUCTURAL_RULES: readonly StructuralRule[] = [
     replacement: 'this causal relationship',
   },
   {
+    // bare_strength_int does NOT consume a leading article: when an
+    // article is present it usually qualifies a noun adjacent to
+    // "strength" (e.g. "The factor strength 1 is high.", "A strength 1
+    // edge was reported.") and consuming it would orphan the noun. The
+    // grammar guard below catches the resulting noun pileups and
+    // reverts the splice when needed.
     id: 'bare_strength_int',
-    pattern: /(?:\b(?:the|a|an)\s+)?\bstrength\s+\d+(?:\.\d+)?\b/gi,
+    pattern: /\bstrength\s+\d+(?:\.\d+)?\b/gi,
     replacement: 'this relationship',
     contextTokens: ['edge', 'causal', 'relationship', 'factor', 'path', 'driver'],
     tokenWindow: 5,
@@ -423,6 +438,18 @@ function looksBroken(text: string): boolean {
   if (/\b(?:a|an|the)\s+(?:a|an|the)\b/i.test(text)) return true;
   if (/\b(?:a|an|the)\s+(?:this|that|these|those)\b/i.test(text)) return true;
   if (/\b(?:this|that|these|those)\s+(?:this|that|these|those)\b/i.test(text)) return true;
+  // Noun-pileup after a "this {noun}" replacement that landed against
+  // a stranded modifier — e.g. "The factor this relationship is high"
+  // or "This relationship edge was reported". Both read as broken
+  // post-modifier sequences. We catch the structural pattern of
+  // "{noun} this {noun}" and "this {noun} {noun}" where the second
+  // noun is a known structural-domain term.
+  if (/\b(?:factor|edge|driver|path|node|outcome|risk|option)\s+this\s+(?:relationship|causal|link)\b/i.test(text)) {
+    return true;
+  }
+  if (/\bthis\s+(?:relationship|causal\s+(?:link|relationship))\s+(?:factor|edge|driver|path|node|outcome|risk|option)\b/i.test(text)) {
+    return true;
+  }
   if (/[.,!?;:]{2,}/.test(text)) return true;
   return false;
 }
@@ -456,6 +483,31 @@ function isVerbInitialAtSentenceStart(
   return ch === '.' || ch === '!' || ch === '?';
 }
 
+/**
+ * Returns true if a downstream structural splice would land inside a
+ * span that an earlier rule's grammar guard already rejected. We track
+ * those spans (start/end indices in the ORIGINAL input) so that, for
+ * example, after `carries_strength` is reverted on `Carries a strength
+ * of 0.55.`, the downstream `causal_strength_value` rule doesn't fire
+ * on the `a strength of 0.55` substring and produce the verb-initial
+ * fragment `Carries this causal relationship.`
+ *
+ * The check is: does the proposed match overlap any reverted span by
+ * even a single character? Tested against the input string used at
+ * scan time (we re-create patterns per rule iteration so positions are
+ * relative to the same `working` snapshot).
+ */
+function overlapsRevertedSpan(
+  start: number,
+  end: number,
+  reverted: ReadonlyArray<{ start: number; end: number }>,
+): boolean {
+  for (const span of reverted) {
+    if (start < span.end && end > span.start) return true;
+  }
+  return false;
+}
+
 export interface StructuralResult {
   readonly text: string;
   readonly matched: number;
@@ -469,28 +521,57 @@ export function suppressStructuralEdgeLanguage(text: string): StructuralResult {
     return { text: text ?? '', matched: 0, suppressed: 0, missed_grammar: 0, rule_ids: [] };
   }
 
-  let working = text;
+  // Two-pass design (refactored to support cross-rule revert
+  // propagation):
+  //
+  //   Pass 1 — scan all rules against the ORIGINAL `text`. For each
+  //   match, dry-run the splice and the grammar guards. Classify as
+  //   APPLIED or REVERTED. Track reverted spans so subsequent rules
+  //   cannot match inside them (this fixes the case where
+  //   `carries_strength` is reverted on `Carries a strength of 0.55.`
+  //   and `causal_strength_value` would otherwise rematch the inner
+  //   `a strength of 0.55` span and produce another verb-initial
+  //   fragment `Carries this causal relationship.`).
+  //
+  //   Pass 2 — apply only the surviving (APPLIED) splices to the
+  //   original text right-to-left, so earlier offsets stay valid.
+  //
+  // Earlier rules win on overlap: once a rule's match has been
+  // applied, downstream rules' overlapping matches are dropped
+  // (without counting toward `matched`, since they would have been
+  // hidden by the prior splice anyway).
   let matched = 0;
-  let suppressed = 0;
   let missedGrammar = 0;
   const ruleIds = new Set<string>();
+  const revertedSpans: { start: number; end: number }[] = [];
+  const applied: { start: number; end: number; replacement: string; ruleId: string }[] = [];
 
   for (const rule of STRUCTURAL_RULES) {
-    // Re-create per-iteration since exec() mutates lastIndex.
     const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
     let result: RegExpExecArray | null;
-    // We perform non-mutating scan first, capturing all candidate
-    // ranges, then apply replacements right-to-left so earlier offsets
-    // remain valid after substitution.
-    const candidates: { start: number; end: number; match: string }[] = [];
-    while ((result = pattern.exec(working)) !== null) {
-      // Apply context-guard if specified.
+    while ((result = pattern.exec(text)) !== null) {
+      const matchStart = result.index;
+      const matchEnd = matchStart + result[0].length;
+
+      // Skip if this match overlaps a span that was already either
+      // applied or explicitly reverted by an earlier rule. Reverted
+      // spans block downstream rules; applied spans block them too,
+      // since splicing inside an already-replaced region would be
+      // garbled.
+      if (overlapsRevertedSpan(matchStart, matchEnd, revertedSpans)) continue;
+      if (
+        applied.some((a) => matchStart < a.end && matchEnd > a.start)
+      ) {
+        continue;
+      }
+
+      // Optional context-token guard.
       if (rule.contextTokens && rule.tokenWindow) {
         if (
           !hasContextToken(
-            working,
-            result.index,
-            result.index + result[0].length,
+            text,
+            matchStart,
+            matchEnd,
             rule.contextTokens,
             rule.tokenWindow,
           )
@@ -498,63 +579,58 @@ export function suppressStructuralEdgeLanguage(text: string): StructuralResult {
           continue;
         }
       }
-      candidates.push({
-        start: result.index,
-        end: result.index + result[0].length,
-        match: result[0],
-      });
-    }
-    if (candidates.length === 0) continue;
 
-    matched += candidates.length;
-    // Apply right-to-left.
-    for (let i = candidates.length - 1; i >= 0; i--) {
-      const { start, end, match: matchedText } = candidates[i];
+      matched++;
 
-      // If the rule consumed a leading article, decide whether to
-      // capitalise the replacement to preserve sentence-initial case.
-      // We capitalise when the captured article was the start of the
-      // sentence (start-of-string or preceded by `.`/`!`/`?` + space).
+      // If the rule consumed a leading article, capitalise the
+      // replacement when the article sat at sentence start.
       let replacement = rule.replacement;
-      if (startsWithArticle(matchedText)) {
-        let walker = start - 1;
-        while (walker >= 0 && /\s/.test(working.charAt(walker))) walker--;
+      if (startsWithArticle(result[0])) {
+        let walker = matchStart - 1;
+        while (walker >= 0 && /\s/.test(text.charAt(walker))) walker--;
         const atSentenceStart =
           walker < 0 ||
-          working.charAt(walker) === '.' ||
-          working.charAt(walker) === '!' ||
-          working.charAt(walker) === '?';
+          text.charAt(walker) === '.' ||
+          text.charAt(walker) === '!' ||
+          text.charAt(walker) === '?';
         if (atSentenceStart) {
           replacement = replacement.charAt(0).toUpperCase() + replacement.slice(1);
         }
       }
 
-      const candidate = working.slice(0, start) + replacement + working.slice(end);
-      // Verb-initial guard: revert if the replacement produces a
-      // sentence-initial verb fragment (e.g. `is causally linked.`
-      // with no subject).
-      if (isVerbInitialAtSentenceStart(candidate, start, replacement)) {
+      // Dry-run splice for the grammar guards.
+      const candidate = text.slice(0, matchStart) + replacement + text.slice(matchEnd);
+
+      if (isVerbInitialAtSentenceStart(candidate, matchStart, replacement)) {
         missedGrammar++;
+        revertedSpans.push({ start: matchStart, end: matchEnd });
         continue;
       }
-      // Look at a small window around the splice for the grammar guard.
-      const guardStart = Math.max(0, start - 8);
-      const guardEnd = Math.min(candidate.length, start + replacement.length + 8);
-      const guardWindow = candidate.slice(guardStart, guardEnd);
-      if (looksBroken(guardWindow)) {
+
+      const guardStart = Math.max(0, matchStart - 8);
+      const guardEnd = Math.min(candidate.length, matchStart + replacement.length + 8);
+      if (looksBroken(candidate.slice(guardStart, guardEnd))) {
         missedGrammar++;
+        revertedSpans.push({ start: matchStart, end: matchEnd });
         continue;
       }
-      working = candidate;
-      suppressed++;
+
+      applied.push({ start: matchStart, end: matchEnd, replacement, ruleId: rule.id });
       ruleIds.add(rule.id);
     }
+  }
+
+  // Pass 2 — apply right-to-left so earlier offsets stay valid.
+  applied.sort((a, b) => b.start - a.start);
+  let working = text;
+  for (const a of applied) {
+    working = working.slice(0, a.start) + a.replacement + working.slice(a.end);
   }
 
   return {
     text: working,
     matched,
-    suppressed,
+    suppressed: applied.length,
     missed_grammar: missedGrammar,
     rule_ids: Array.from(ruleIds),
   };
