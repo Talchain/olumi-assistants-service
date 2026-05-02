@@ -141,6 +141,47 @@ function userMessageContent(args: ChatWithToolsArgs): string {
     .join('\n');
 }
 
+interface ParsedContextPack {
+  graph: {
+    edges: Array<Record<string, unknown>>;
+    nodes: Array<Record<string, unknown>>;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+/**
+ * Parse the ContextPack JSON out of the routing user message. The user
+ * message format is `## ContextPack\n<json>\n\n## User turn\n<message>`.
+ * Parsing the JSON (rather than regex-slicing) lets per-field assertions
+ * be precise — a stray `"strength":` somewhere in display_analysis labels
+ * or coaching prose can't fool a structural assertion on `graph.edges`.
+ */
+function parseContextPackFromUserMessage(content: string): ParsedContextPack {
+  const headingIdx = content.indexOf('## ContextPack');
+  expect(headingIdx).toBeGreaterThanOrEqual(0);
+  const jsonStart = content.indexOf('{', headingIdx);
+  expect(jsonStart).toBeGreaterThan(headingIdx);
+  let depth = 0;
+  let jsonEnd = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = jsonStart; i < content.length; i++) {
+    const ch = content[i]!;
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) { jsonEnd = i + 1; break; }
+    }
+  }
+  expect(jsonEnd).toBeGreaterThan(jsonStart);
+  return JSON.parse(content.slice(jsonStart, jsonEnd)) as ParsedContextPack;
+}
+
 describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => {
   it('substitutes display_graph for graph in the outbound user message', async () => {
     const pack = makePackWithGraph();
@@ -166,7 +207,7 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
     expect(content).toContain('Quarterly Growth');
   });
 
-  it('strips raw strength / exists / strength_mean / strength_std / exists_probability', async () => {
+  it('graph.edges in the parsed ContextPack carry no raw numeric edge fields', async () => {
     const pack = makePackWithGraph();
     const { adapter, calls } = makeAdapter();
 
@@ -177,27 +218,33 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
     });
 
     const content = userMessageContent(calls[0]!.args);
+    const parsed = parseContextPackFromUserMessage(content);
 
-    expect(content).not.toMatch(/strength_mean/);
-    expect(content).not.toMatch(/strength_std/);
-    expect(content).not.toMatch(/exists_probability/);
-    expect(content).not.toMatch(/"mean":/);
-    expect(content).not.toMatch(/mean=/);
+    expect(Array.isArray(parsed.graph.edges)).toBe(true);
+    expect(parsed.graph.edges.length).toBeGreaterThan(0);
 
-    // Within the graph block of the JSON, no `"strength":` / `"exists":` keys.
-    // (The whole JSON also includes `display_analysis` etc — we narrow to the
-    //  graph slice via a forgiving substring match.)
-    const graphSliceMatch = content.match(/"graph":\s\{[\s\S]*?\n {2}\}/);
-    expect(graphSliceMatch).not.toBeNull();
-    const graphSlice = graphSliceMatch![0];
-    expect(graphSlice).not.toMatch(/"strength":/);
-    expect(graphSlice).not.toMatch(/"exists":/);
-    expect(graphSlice).not.toMatch(/plain_interpretation/);
-    // Raw decimal floats should not appear inside edge data.
-    // (Counts are integers; bare `: 0.xx` would only come from leaked floats.)
-    const edgesBlockMatch = graphSlice.match(/"edges":\s\[[\s\S]*?\]/);
-    expect(edgesBlockMatch).not.toBeNull();
-    expect(edgesBlockMatch![0]).not.toMatch(/-?0\.\d/);
+    const ID_PREFIX = /^(fac|opt|goal|risk|out|edge)_/;
+    for (const edge of parsed.graph.edges) {
+      // No raw numeric leakage in any shape.
+      expect(edge).not.toHaveProperty('strength');
+      expect(edge).not.toHaveProperty('strength_mean');
+      expect(edge).not.toHaveProperty('strength_std');
+      expect(edge).not.toHaveProperty('exists');
+      expect(edge).not.toHaveProperty('exists_probability');
+      expect(edge).not.toHaveProperty('plain_interpretation');
+      expect(edge).not.toHaveProperty('effect_direction');
+      expect(edge).not.toHaveProperty('_raw_provenance');
+      // Decision-language relationship phrase present.
+      expect(typeof edge['relationship']).toBe('string');
+      // Human labels surfaced; no internal ID prefixes in the prose-shaped fields.
+      expect(typeof edge['from_label']).toBe('string');
+      expect(typeof edge['to_label']).toBe('string');
+      expect(edge['from_label'] as string).not.toMatch(ID_PREFIX);
+      expect(edge['to_label'] as string).not.toMatch(ID_PREFIX);
+      // No raw decimal floats survive on any edge field at any depth.
+      const json = JSON.stringify(edge);
+      expect(json).not.toMatch(/-?\d+\.\d/);
+    }
   });
 
   it('Track 2A: serialised user message yields zero structural matches', async () => {
@@ -213,6 +260,69 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
     const content = userMessageContent(calls[0]!.args);
     const result = sanitiseAssistantTextProse(content);
     expect(result.structural_matches).toBe(0);
+  });
+
+  it('assembler raw-graph fallback (no compactedGraph) also yields decision-language edges', async () => {
+    // The assembler has TWO graph projection paths: `compactedGraph` (used
+    // by the V5 turn executor) and `graph` (raw passthrough fallback).
+    // The raw-graph path preserves canonical GraphV3T edge shape
+    // (`strength: { mean, std }` + `effect_direction`); A2.1 must handle
+    // that shape too — otherwise the public API silently degrades to
+    // "negligible link" on every edge when callers don't pre-compact.
+    const rawPack = assembleContextPack({
+      payload: {
+        kind: 'message',
+        stage: 'analyse',
+        message: 'run analysis',
+        scenario_id: 'scen-2',
+        turn_id: 'turn-2',
+        created_at: new Date().toISOString(),
+      } as Parameters<typeof assembleContextPack>[0]['payload'],
+      priorTurns: [],
+      graph: {
+        nodes: [
+          { id: 'fac_marketing', kind: 'factor', label: 'Marketing Spend' },
+          { id: 'fac_leads', kind: 'factor', label: 'New Leads' },
+          { id: 'goal_growth', kind: 'goal', label: 'Quarterly Growth' },
+        ],
+        edges: [
+          {
+            from: 'fac_marketing',
+            to: 'fac_leads',
+            strength: { mean: 0.55, std: 0.12 },
+            exists_probability: 0.9,
+            effect_direction: 'positive',
+          },
+          {
+            from: 'fac_leads',
+            to: 'goal_growth',
+            strength: { mean: 0.4, std: 0.1 },
+            exists_probability: 0.7,
+            effect_direction: 'negative',
+          },
+        ],
+      },
+    });
+
+    const { adapter, calls } = makeAdapter();
+    await routeWithToolUse(rawPack, 'run analysis', {
+      requestId: 'req-raw',
+      adapter,
+      systemPromptOverride: ROUTING_SYSTEM_PROMPT,
+    });
+
+    const parsed = parseContextPackFromUserMessage(userMessageContent(calls[0]!.args));
+    expect(parsed.graph.edges).toHaveLength(2);
+    expect(parsed.graph.edges[0]!['relationship']).toBe('moderate positive link');
+    expect(parsed.graph.edges[1]!['relationship']).toBe('moderate negative link');
+    // No raw fields leak from the canonical-shape input either.
+    for (const edge of parsed.graph.edges) {
+      expect(edge).not.toHaveProperty('strength');
+      expect(edge).not.toHaveProperty('strength_mean');
+      expect(edge).not.toHaveProperty('strength_std');
+      expect(edge).not.toHaveProperty('exists_probability');
+      expect(edge).not.toHaveProperty('effect_direction');
+    }
   });
 
   it('does not mutate the caller\'s ContextPack — raw graph survives intact for handlers', async () => {
