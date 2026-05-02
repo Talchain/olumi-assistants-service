@@ -630,6 +630,17 @@ export const TelemetryEvents = {
   // the final text is NOT mutated at this stage. Payload:
   // { handler_id, text_length }.
   V5MutationLanguageGuard: "v5.mutation_language_guard",
+  // V5ResponseProseSanitised — STEP 6.4 defence-in-depth post-compose
+  // prose sanitiser. Emitted when at least one rewrite/match occurred
+  // on the final composed assistant_text — covers raw decimal
+  // probabilities, raw sensitivity values, and structural edge-strength
+  // language that survived the LLM despite prompt-level guidance. The
+  // sanitiser MUTATES assistant_text only; chips and other structured
+  // fields are untouched. Payload:
+  // { handler_id, probability_rewrites, sensitivity_rewrites,
+  //   structural_matches, structural_suppressed,
+  //   structural_missed_grammar, structural_rule_ids }.
+  V5ResponseProseSanitised: "v5.response.prose_sanitised",
   // V5DeterministicValueUpdate — emitted when the pre-LLM value-update
   // pre-route runs. `matched: true` means the turn was dispatched as a
   // clarify direct_answer without an LLM call; `matched: false` means the

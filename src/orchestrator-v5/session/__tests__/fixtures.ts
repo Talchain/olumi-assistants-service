@@ -46,6 +46,11 @@ export interface NoopSessionStoreOptions {
   readonly priorTurns?: readonly SessionTurn[];
   readonly facts?: readonly HandlerFact[];
   readonly loadGraphResult?: unknown | null;
+  /**
+   * V5 Phase 1 brief persistence: scenarios.brief_text returned by
+   * loadGraphAndBriefText. Defaults to null (no persisted brief).
+   */
+  readonly loadBriefTextResult?: string | null;
   readonly throwOnRead?: Error;
   readonly throwOnAppend?: Error;
   /**
@@ -103,6 +108,19 @@ export function createNoopSessionStore(
       // graph via loadGraphResult. Returning null by default mirrors the
       // "no graph stored" branch of the real Supabase-backed implementation.
       return opts.loadGraphResult ?? null;
+    },
+    async loadGraphAndBriefText(_scenarioId: string): Promise<{
+      readonly graph: unknown | null;
+      readonly briefText: string | null;
+    }> {
+      // V5 Phase 1 brief persistence noop: tests that care about
+      // canonical-state reads inject a concrete brief via
+      // loadBriefTextResult. Returning null defaults mirrors the
+      // "no scenario row / no brief stored" branch.
+      return {
+        graph: opts.loadGraphResult ?? null,
+        briefText: opts.loadBriefTextResult ?? null,
+      };
     },
   } satisfies SessionStore;
 }

@@ -98,6 +98,8 @@ function makeInvocation(
       budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
       prior_turns: [],
       prior_facts: overrides?.priorFacts ?? [],
+      scenarioBriefText: null,
+      persistedGraph: null,
     } as unknown as HandlerInvocation['context'],
     payload: {
       turn_id: 't1',

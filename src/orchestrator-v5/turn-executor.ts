@@ -52,7 +52,7 @@ import {
   composeToolCallResponse,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext, loadPersistedGraph } from './build-turn-context.js';
+import { buildTurnContext } from './build-turn-context.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -82,6 +82,7 @@ import {
   type HandlerRegistry,
 } from './tools/registry.js';
 import { sanitiseNarrateOutput } from './sanitise.js';
+import { sanitiseAssistantTextProse } from './format/numeric-prose-formatter.js';
 import { generateChips } from './compose/chip-generator.js';
 import { generatePostAnalysisCoaching } from './coaching/post-analysis-wrapper.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
@@ -257,6 +258,15 @@ export interface RunTurnExecutorOptions {
    * to the decision-review enricher without ever touching the run_analysis
    * handler fact's enrichment (F.6 / handler-ownership invariant).
    * When null/absent, the enricher skips with reason `no_brief`.
+   *
+   * @deprecated V5 Phase 1 brief persistence (2026-05-02): the brief is
+   *   now sourced from canonical state via
+   *   `EnrichedTurnContext.scenarioBriefText` (populated by
+   *   `buildTurnContext` from `scenarios.brief_text`). No caller in the
+   *   current codebase populates this field. It is retained for one
+   *   release as a fallback if a non-null value is supplied — a
+   *   deprecation warning is logged when that happens. Remove in
+   *   Phase 2.
    */
   readonly scenarioBrief?: string | null;
 }
@@ -401,18 +411,22 @@ export async function runTurnExecutor(
         dropped_by_missing_id: 0,
       });
     } else {
-      // Fallback: when graphState is absent (follow-up turns), load the
-      // persisted graph via build-turn-context (the declared session access
-      // boundary). Errors are absorbed there; null means no graph available.
+      // Fallback: when graphState is absent (follow-up turns), use the
+      // persisted graph already loaded by buildTurnContext via
+      // loadGraphAndBriefText (the declared session access boundary).
+      // V5 Phase 1: this avoids a second Supabase round trip — buildTurnContext
+      // reads scenarios.* once for both graph and brief_text on every turn,
+      // and the result is surfaced on context.persistedGraph for the
+      // executor's fallback to consume.
       if (!graphStateForTurn) {
-        const persistedGraph = await loadPersistedGraph(payload.scenario_id, requestId);
+        const persistedGraph = context.persistedGraph;
         if (persistedGraph) {
           const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
           if (parsed.success) {
             graphStateForTurn = parsed.data;
             log.info(
               { request_id: requestId, scenario_id: payload.scenario_id },
-              'V5 TurnExecutor loaded persisted graph from database for graph lookup fallback',
+              'V5 TurnExecutor using persisted graph loaded during buildTurnContext for graph lookup fallback',
             );
           } else {
             log.warn(
@@ -1255,13 +1269,31 @@ export async function runTurnExecutor(
       // the soft-fail path inside the enricher, where the field is simply
       // not set).
       if (proposedHandlerId === 'run_analysis') {
+        // V5 Phase 1 brief persistence: prefer the canonical-state value
+        // from buildTurnContext (`scenarios.brief_text`). Fall back to
+        // the legacy out-of-band `options.scenarioBrief` for one release
+        // — emit a deprecation warning when it is the source so
+        // operators see the legacy channel still in use.
+        let resolvedBrief: string | null = context.scenarioBriefText;
+        if (resolvedBrief === null && options.scenarioBrief != null && options.scenarioBrief.length > 0) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              source: 'options.scenarioBrief',
+            },
+            'V5 decision_review: legacy options.scenarioBrief used as fallback. ' +
+              'This channel is deprecated and will be removed in Phase 2.',
+          );
+          resolvedBrief = options.scenarioBrief;
+        }
         try {
           handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
             handlerFacts: handlerOutcome.handler_facts,
             requestId,
             scenarioId: context.session_id,
             signal: turnAbort.signal,
-            brief: options.scenarioBrief ?? null,
+            brief: resolvedBrief,
           });
         } catch (err) {
           log.error(
@@ -1562,6 +1594,54 @@ export async function runTurnExecutor(
       },
       'V5 TurnExecutor composed response chips',
     );
+
+    // STEP 6.4 — defence-in-depth prose sanitation (Track 2A).
+    //
+    // Strips raw decimals in probability prose, translates raw
+    // sensitivity values into banded language, and removes structural
+    // edge-strength references that survived the LLM despite
+    // prompt-level guidance. Pure, idempotent; fails open.
+    //
+    // Mutation policy: this block mutates ONLY composedOk.assistant_text.
+    // It does NOT touch chips (suggested_actions), blocks, graph_patches,
+    // or any other structured field on the response. Chips don't carry
+    // numeric/structural prose patterns (they are short, label-shaped),
+    // so user-visible chip↔text consistency is not at risk here.
+    // STEP 6.5 below remains the authoritative log-only guard for
+    // chip/text mutation-language consistency. If V5ResponseProseSanitised
+    // ever fires on a chip-bearing turn whose chip text contains the
+    // same probability/structural patterns, that is a regression and
+    // should be escalated.
+    try {
+      const sanitised = sanitiseAssistantTextProse(composedOk.assistant_text ?? '');
+      if (sanitised.text !== (composedOk.assistant_text ?? '')) {
+        composedOk = { ...composedOk, assistant_text: sanitised.text };
+      }
+      const totalCounters =
+        sanitised.probability_rewrites +
+        sanitised.sensitivity_rewrites +
+        sanitised.structural_matches +
+        sanitised.structural_suppressed +
+        sanitised.structural_missed_grammar;
+      if (totalCounters > 0) {
+        emit(TelemetryEvents.V5ResponseProseSanitised, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: handlerIdForCommit ?? null,
+          probability_rewrites: sanitised.probability_rewrites,
+          sensitivity_rewrites: sanitised.sensitivity_rewrites,
+          structural_matches: sanitised.structural_matches,
+          structural_suppressed: sanitised.structural_suppressed,
+          structural_missed_grammar: sanitised.structural_missed_grammar,
+          structural_rule_ids: sanitised.structural_rule_ids,
+        });
+      }
+    } catch (err) {
+      log.warn(
+        { request_id: requestId, err: err instanceof Error ? err.message : String(err) },
+        'V5 prose sanitiser failure — passing through original text',
+      );
+    }
 
     // STEP 6.5 — log-only mutation-language guard (defence-in-depth).
     //

@@ -33,6 +33,8 @@ function makeInvocation(overrides: {
       budgets: { turn_ms: 1000, llm_narrate_ms: 500 },
       prior_turns: [],
       prior_facts: [],
+      scenarioBriefText: null,
+      persistedGraph: null,
     } as unknown as HandlerInvocation['context'],
     payload: {
       turn_id: 't',

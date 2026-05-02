@@ -129,11 +129,12 @@ describe('SupabaseSessionStore.append', () => {
     expect(args.p_llm_calls_used).toBe(2);
     expect(args.p_duration_ms).toBe(40);
     expect(args.p_handler_facts).toEqual([]);
-    // p_graph must be sent as `null` (not omitted) when the write has no
-    // graph. This is required to keep PostgREST overload resolution
-    // deterministic — see the always-10-args invariant test below and
+    // p_graph and p_brief_text must be sent as `null` (not omitted) when
+    // the write has neither. This keeps PostgREST overload resolution
+    // deterministic — see the always-11-args invariant test below and
     // the comment in supabase-store.ts:append.
     expect(args.p_graph).toBeNull();
+    expect(args.p_brief_text).toBeNull();
   });
 
   it('passes p_graph when write.graph is provided (atomic graph commit)', async () => {
@@ -234,7 +235,7 @@ const RUN_ANALYSIS_FACT: HandlerFact = {
 };
 
 describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overload disambiguation)', () => {
-  it('always passes all 10 named args to append_turn_atomic, p_graph=null when absent', async () => {
+  it('always passes all 11 named args to append_turn_atomic, p_graph & p_brief_text=null when absent', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -247,9 +248,12 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     const args = rpcCalls[0].args as Record<string, unknown>;
     const keys = Object.keys(args).sort();
 
-    // The 10-arg invariant. Drift here = PostgREST overload ambiguity
-    // can re-emerge if a future migration ever adds another overload.
+    // The 11-arg invariant (V5 Phase 1 brief persistence,
+    // 20260502120000_v5_brief_text_persistence). Drift here = PostgREST
+    // overload ambiguity can re-emerge if a future migration ever adds
+    // another overload.
     expect(keys).toEqual([
+      'p_brief_text',
       'p_duration_ms',
       'p_graph',
       'p_handler_facts',
@@ -262,9 +266,10 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
       'p_turn_id',
     ]);
     expect(args.p_graph).toBeNull();
+    expect(args.p_brief_text).toBeNull();
   });
 
-  it('always passes all 10 named args even when write.graph IS provided', async () => {
+  it('always passes all 11 named args even when write.graph IS provided', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -275,8 +280,40 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, graph });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(10);
+    expect(Object.keys(args)).toHaveLength(11);
     expect(args.p_graph).toEqual(graph);
+    expect(args.p_brief_text).toBeNull();
+  });
+
+  it('threads write.briefText to the RPC as p_brief_text (V5 Phase 1)', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const briefText = 'Should I accept the offer at company X over staying at Y?';
+    await store.append({ ...WRITE, briefText });
+
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(Object.keys(args)).toHaveLength(11);
+    expect(args.p_brief_text).toBe(briefText);
+  });
+
+  it('passes both p_graph and p_brief_text together (initial draft turn shape)', async () => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const graph = { nodes: [{ id: 'goal-1', kind: 'goal', label: 'g' }], edges: [] };
+    const briefText = 'My decision';
+    await store.append({ ...WRITE, graph, briefText });
+
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_graph).toEqual(graph);
+    expect(args.p_brief_text).toBe(briefText);
   });
 
   it('serialises a RunAnalysisHandlerFact into the inner-FOR-LOOP payload shape', async () => {
@@ -637,7 +674,7 @@ describe('SupabaseSessionStore.readFactsFor', () => {
 describe('SupabaseSessionStore.loadGraph', () => {
   it('returns null when scenarios.graph is null (no graph stored yet)', async () => {
     const { client, selectCalls } = makeClient({
-      selectResult: { data: { graph: null }, error: null },
+      selectResult: { data: { graph: null, brief_text: null }, error: null },
     });
     const store = new SupabaseSessionStore(
       client,
@@ -662,7 +699,7 @@ describe('SupabaseSessionStore.loadGraph', () => {
 
   it('returns the graph when present', async () => {
     const graph = { nodes: [{ id: 'n1', kind: 'factor', label: 'Churn' }], edges: [] };
-    const { client } = makeClient({ selectResult: { data: { graph }, error: null } });
+    const { client } = makeClient({ selectResult: { data: { graph, brief_text: null }, error: null } });
     const store = new SupabaseSessionStore(
       client,
       new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
@@ -681,6 +718,108 @@ describe('SupabaseSessionStore.loadGraph', () => {
       { defaultReadLimit: 20 },
     );
     await expect(store.loadGraph(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
+  });
+});
+
+describe('SupabaseSessionStore.loadGraphAndBriefText (V5 Phase 1)', () => {
+  it('SELECTs graph and brief_text from scenarios in one round trip', async () => {
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: { graph: null, brief_text: null }, error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await store.loadGraphAndBriefText(SCENARIO);
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0].table).toBe('scenarios');
+    // Explicit column list — never select('*'), per the V5 read invariant.
+    expect(selectCalls[0].cols).toBe('graph, brief_text');
+  });
+
+  it('returns { graph: null, briefText: null } when scenario row absent', async () => {
+    const { client } = makeClient({ selectResult: { data: null, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const result = await store.loadGraphAndBriefText(SCENARIO);
+    expect(result).toEqual({ graph: null, briefText: null });
+  });
+
+  it('returns the graph and brief_text when both are present', async () => {
+    const graph = { nodes: [{ id: 'n1', kind: 'factor', label: 'Churn' }], edges: [] };
+    const briefText = 'Should I take the offer?';
+    const { client } = makeClient({
+      selectResult: { data: { graph, brief_text: briefText }, error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const result = await store.loadGraphAndBriefText(SCENARIO);
+    expect(result.graph).toEqual(graph);
+    expect(result.briefText).toBe(briefText);
+  });
+
+  it('coerces empty-string brief_text to null (defensive)', async () => {
+    // The DB CHECK constraint forbids whitespace-only/empty brief_text but
+    // historical rows or a constraint bypass should not surface to callers
+    // as truthy. Empty string → null collapse.
+    const { client } = makeClient({
+      selectResult: { data: { graph: null, brief_text: '' }, error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const result = await store.loadGraphAndBriefText(SCENARIO);
+    expect(result.briefText).toBeNull();
+  });
+
+  it('coerces non-string brief_text to null (defensive)', async () => {
+    const { client } = makeClient({
+      selectResult: { data: { graph: null, brief_text: 123 }, error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const result = await store.loadGraphAndBriefText(SCENARIO);
+    expect(result.briefText).toBeNull();
+  });
+
+  it('throws SessionReadError on DB error', async () => {
+    const { client } = makeClient({
+      selectResult: { error: { message: 'permission denied', code: '42501' } },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    await expect(store.loadGraphAndBriefText(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
+  });
+
+  it('loadGraph delegates to loadGraphAndBriefText and discards brief', async () => {
+    const graph = { nodes: [], edges: [] };
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: { graph, brief_text: 'a brief' }, error: null },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    expect(await store.loadGraph(SCENARIO)).toEqual(graph);
+    // Single SELECT — confirms loadGraph is a thin wrapper, not a separate query.
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0].cols).toBe('graph, brief_text');
   });
 });
 

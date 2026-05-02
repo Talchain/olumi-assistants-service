@@ -453,6 +453,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ExplanationEvidence: "v5.explanation.evidence",
         V5MutationLanguageGuard: "v5.mutation_language_guard",
         V5PromptCache: "v5.prompt_cache",
+        V5ResponseProseSanitised: "v5.response.prose_sanitised",
         V5PromptResolved: "v5.prompt_resolved",
         V5RecoveryChipServed: "v5.recovery_chip_served",
         V5UnexpectedExplanationPayload: "v5.unexpected_explanation_payload",
@@ -1432,6 +1433,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.prompt_resolved",
         "v5.recovery_chip_served",
         "v5.recovery_response",
+        "v5.response.prose_sanitised",
         "v5.unexpected_explanation_payload",
         "v5.validator_outcome",
       ];

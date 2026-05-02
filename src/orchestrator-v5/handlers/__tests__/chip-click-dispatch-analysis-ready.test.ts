@@ -38,6 +38,13 @@ const {
   createRegistryMock: vi.fn(),
 }));
 
+// V5 Phase 1 brief persistence: stash a mutable holder so individual tests
+// can override the stubbed context's scenarioBriefText (the field is read by
+// chip-click-dispatch and forwarded to the decision-review enricher).
+const buildTurnContextStub: { scenarioBriefText: string | null } = {
+  scenarioBriefText: null,
+};
+
 vi.mock('../../build-turn-context.js', async () => {
   const actual = await vi.importActual<typeof import('../../build-turn-context.js')>(
     '../../build-turn-context.js',
@@ -45,7 +52,7 @@ vi.mock('../../build-turn-context.js', async () => {
   return {
     ...actual,
     loadScenarioSnapshotForRunAnalysis: loadScenarioSnapshotForRunAnalysisMock,
-    buildTurnContext: vi.fn().mockResolvedValue({
+    buildTurnContext: vi.fn(async () => ({
       stage: 'analyse',
       entity_registry: { option_ids: [], goal_id: null },
       capabilities: {
@@ -68,7 +75,9 @@ vi.mock('../../build-turn-context.js', async () => {
       },
       prior_turns: [],
       prior_facts: [],
-    }),
+      scenarioBriefText: buildTurnContextStub.scenarioBriefText,
+      persistedGraph: null,
+    })),
   };
 });
 
@@ -463,5 +472,125 @@ describe('chip-click-dispatch — freshness derivation runs against produced fac
     expect(out.freshness!.freshness).toBe('stale');
     expect(out.freshness!.reason).toBe('graph_hash_diverged');
     expect(out.freshness!.graph_hash_at_run).toBe('forced_mismatch_');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 Phase 1 brief persistence — chip-click sources brief from canonical
+// state via EnrichedTurnContext.scenarioBriefText. Pre-fix: chip-click
+// hardcoded brief: null at the enricher invocation, so decision_review
+// always skipped with reason `no_brief` on the chip-click leg
+// (independent of TurnExecutor's parallel defect B bug).
+// ---------------------------------------------------------------------------
+
+describe('chip-click-dispatch — decision_review brief sourcing (V5 Phase 1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
+    enrichRunAnalysisMock.mockImplementation(async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts);
+    // Reset stub to default null between tests so brief-presence does
+    // not leak across the suite.
+    buildTurnContextStub.scenarioBriefText = null;
+  });
+
+  it('passes context.scenarioBriefText to enrichRunAnalysisWithDecisionReview when persisted', async () => {
+    buildTurnContextStub.scenarioBriefText = 'Should I take the offer?';
+
+    handlerFnMock.mockResolvedValue({
+      assistant_text: 'ran',
+      handler_facts: [
+        {
+          fact_type: 'run_analysis' as const,
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: SCENARIO_ID,
+            leading_option_id: 'opt_launch',
+            win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+            summary: 'Analysis ran with two options compared.',
+            enrichment: { analysis_status: 'computed' },
+          },
+        },
+      ],
+      llm_calls_used: 0,
+    });
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-brief-canonical',
+    });
+
+    expect(out.outcome).toBe('ok');
+    expect(enrichRunAnalysisMock).toHaveBeenCalled();
+    const call = enrichRunAnalysisMock.mock.calls[enrichRunAnalysisMock.mock.calls.length - 1];
+    expect(call[0].brief).toBe('Should I take the offer?');
+  });
+
+  it('passes null brief to enricher when no brief is persisted (graceful skip preserved)', async () => {
+    buildTurnContextStub.scenarioBriefText = null;
+
+    handlerFnMock.mockResolvedValue({
+      assistant_text: 'ran',
+      handler_facts: [
+        {
+          fact_type: 'run_analysis' as const,
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: SCENARIO_ID,
+            leading_option_id: 'opt_launch',
+            win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+            summary: 'Analysis ran with two options compared.',
+            enrichment: { analysis_status: 'computed' },
+          },
+        },
+      ],
+      llm_calls_used: 0,
+    });
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-no-brief',
+    });
+
+    expect(out.outcome).toBe('ok');
+    const call = enrichRunAnalysisMock.mock.calls[enrichRunAnalysisMock.mock.calls.length - 1];
+    expect(call[0].brief).toBeNull();
+  });
+
+  it('Defect B regression — chip-click no longer hardcodes brief: null', async () => {
+    // Pre-fix: chip-click-dispatch.ts:323 had `brief: null` hardcoded,
+    // making decision_review always skip with reason `no_brief` on the
+    // chip-click path even when a brief was supplied on the draft turn.
+    // Post-fix: the persisted brief reaches the enricher.
+    buildTurnContextStub.scenarioBriefText = 'A brief that must reach the enricher';
+
+    handlerFnMock.mockResolvedValue({
+      assistant_text: 'ran',
+      handler_facts: [
+        {
+          fact_type: 'run_analysis' as const,
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: SCENARIO_ID,
+            leading_option_id: 'opt_launch',
+            win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+            summary: 'Analysis ran.',
+            enrichment: { analysis_status: 'computed' },
+          },
+        },
+      ],
+      llm_calls_used: 0,
+    });
+
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-defect-b',
+    });
+
+    const call = enrichRunAnalysisMock.mock.calls[enrichRunAnalysisMock.mock.calls.length - 1];
+    expect(call[0].brief).not.toBeNull();
+    expect(call[0].brief).toBe('A brief that must reach the enricher');
   });
 });
