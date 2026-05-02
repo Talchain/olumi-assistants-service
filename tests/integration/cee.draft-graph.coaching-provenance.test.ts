@@ -78,9 +78,12 @@ const TEST_COACHING = {
       action_type: "add_node",
     },
   ],
-  widening_log: [
-    { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternative competitors" },
-  ],
+  // v0.11.0 schema amendment: widening_log is the canonical OBJECT shape.
+  widening_log: {
+    elements_added: ["fac_competition"],
+    elements_considered_but_excluded: ["considered alternative competitors"],
+    brief_completeness: "partial",
+  },
   bias_signals: [
     { type: "anchoring", detail: "Pinned to last quarter's price.", target: "fac_price" },
   ],
@@ -211,9 +214,11 @@ describe("POST /assist/v1/draft-graph — coaching + provenance survival end-to-
     expect(Array.isArray(body.coaching.strengthen_items)).toBe(true);
     expect(body.coaching.strengthen_items.find((i: any) => i.id === "s_churn")).toBeDefined();
 
-    expect(body.coaching.widening_log).toEqual([
-      { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternative competitors" },
-    ]);
+    expect(body.coaching.widening_log).toEqual({
+      elements_added: ["fac_competition"],
+      elements_considered_but_excluded: ["considered alternative competitors"],
+      brief_completeness: "partial",
+    });
 
     expect(body.coaching.bias_signals).toEqual([
       { type: "anchoring", detail: "Pinned to last quarter's price.", target: "fac_price" },

@@ -2096,18 +2096,17 @@
         "bias_category": "action_bias"
       }
     ],
-    "widening_log": [
-      {
-        "node_id": "factor_integration_cost",
-        "label": "Integration cost",
-        "reason": "The brief mentions cultural fit concerns but no quantified integration cost. Adding this factor lets the analysis express the downside the team raised."
-      },
-      {
-        "node_id": "factor_opportunity_cost",
-        "label": "Opportunity cost of 50M",
-        "reason": "Capital deployed on the acquisition cannot be deployed on organic R&D or buybacks. Surfacing this factor lets the model compare returns across uses."
-      }
-    ],
+    "widening_log": {
+      "elements_added": [
+        "factor_integration_cost",
+        "factor_opportunity_cost"
+      ],
+      "elements_considered_but_excluded": [
+        "The brief mentions cultural fit concerns but no quantified integration cost. Adding this factor lets the analysis express the downside the team raised.",
+        "Capital deployed on the acquisition cannot be deployed on organic R&D or buybacks. Surfacing this factor lets the model compare returns across uses."
+      ],
+      "brief_completeness": "partial"
+    },
     "bias_signals": [
       {
         "type": "confirmation_bias",

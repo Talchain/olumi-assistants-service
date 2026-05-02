@@ -97,7 +97,13 @@ export type ValidationWarningCode =
   | "STRUCTURAL_EDGE_NOT_CANONICAL"
   | "LOW_STD_NON_STRUCTURAL"
   | "ENUM_VALUE_CORRECTED"
-  | "SIGN_CORRECTED";
+  | "SIGN_CORRECTED"
+  // v0.11.0 schema amendment — coaching + causal-claims referential integrity
+  | "CAUSAL_CLAIM_INVALID_REF"
+  | "CAUSAL_CLAIM_BETWEEN_INVALID"
+  | "CAUSAL_CLAIM_GOAL_TARGET"
+  | "CAUSAL_CLAIMS_CARDINALITY_OFF"
+  | "WIDENING_LOG_INVALID_REF";
 
 // =============================================================================
 // Info Codes (non-blocking observability hints)
@@ -165,6 +171,14 @@ export interface GraphValidationInput {
   requestId?: string;
   /** Optional phase label for log disambiguation */
   phase?: ValidatorPhase;
+  /** Optional coaching object — enables referential integrity checks
+   *  (`coaching.widening_log.elements_added[*]` must reference existing
+   *  nodes). v0.11.0 schema amendment. */
+  coaching?: unknown;
+  /** Optional causal claims array — enables referential integrity checks
+   *  (claim from/to/via/between must reference existing nodes). v0.11.0
+   *  schema amendment. */
+  causalClaims?: unknown;
 }
 
 export interface ConstraintNormalisationResult {

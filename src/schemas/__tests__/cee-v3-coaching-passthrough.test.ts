@@ -25,13 +25,18 @@ const MINIMAL_BASE = {
 };
 
 describe('CEE V3 coaching schema (V5 Group 1, Task A.1)', () => {
-  it('preserves widening_log when present in the coaching block', () => {
+  it('preserves widening_log when present in the coaching block (v0.11.0 canonical object)', () => {
     const input = {
       ...MINIMAL_BASE,
       coaching: {
         summary: 'short',
         strengthen_items: [],
-        widening_log: [{ step: 1, note: 'widened options' }],
+        // v0.11.0 schema amendment: canonical OBJECT shape, not array.
+        widening_log: {
+          elements_added: ['fac_alpha'],
+          elements_considered_but_excluded: ['regulatory pause unlikely'],
+          brief_completeness: 'partial',
+        },
       },
     };
 
@@ -76,7 +81,12 @@ describe('CEE V3 coaching schema (V5 Group 1, Task A.1)', () => {
         strengthen_items: [
           { id: 's1', label: 'option B', detail: 'add a reversible alternative', action_type: 'widen' },
         ],
-        widening_log: [{ step: 1 }],
+        // v0.11.0 schema amendment: canonical OBJECT shape, not array.
+        widening_log: {
+          elements_added: ['fac_x'],
+          elements_considered_but_excluded: [],
+          brief_completeness: 'thin',
+        },
         bias_signals: [{ type: 'anchoring' }],
       },
     };
@@ -84,7 +94,7 @@ describe('CEE V3 coaching schema (V5 Group 1, Task A.1)', () => {
     const parsed = CEEGraphResponseV3.parse(input);
     expect(parsed.coaching?.summary).toBe('the whole picture');
     expect(parsed.coaching?.strengthen_items).toHaveLength(1);
-    expect(parsed.coaching?.widening_log).toHaveLength(1);
+    expect(parsed.coaching?.widening_log?.elements_added).toEqual(['fac_x']);
     expect(parsed.coaching?.bias_signals).toHaveLength(1);
   });
 

@@ -447,7 +447,12 @@ describe("runStagePackage", () => {
 
   // ── Strengthen item action_type defaulting ─────────────────────────────
 
-  it("defaults action_type to 'improve' on LLM strengthen_items missing it", async () => {
+  it("defaults action_type to 'add_constraint' on LLM strengthen_items missing it (v0.11.0 canonical enum)", async () => {
+    // v0.11.0 schema amendment: StrengthenItemActionType canonical enum
+    // is `add_option | add_constraint | add_risk | reframe_goal`. Pre-
+    // amendment default `"improve"` was outside the canonical enum and
+    // would fail the tightened Zod parse. Default migrated to
+    // `"add_constraint"`.
     const ctx = makeCtx({
       coaching: {
         summary: "Some coaching",
@@ -460,7 +465,7 @@ describe("runStagePackage", () => {
     await runStagePackage(ctx);
 
     const items = (ctx.coaching as any).strengthen_items;
-    expect(items[0].action_type).toBe("improve");
+    expect(items[0].action_type).toBe("add_constraint");
     expect(items[1].action_type).toBe("refine");
   });
 
@@ -489,9 +494,13 @@ describe("runStagePackage", () => {
         strengthen_items: [
           { id: "s1", label: "Add a churn driver", detail: "Missing churn elasticity.", action_type: "add_node" },
         ],
-        widening_log: [
-          { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternatives" },
-        ],
+        // v0.11.0 schema amendment: widening_log is the canonical OBJECT
+        // (was per-entry array pre-amendment).
+        widening_log: {
+          elements_added: ["fac_competition"],
+          elements_considered_but_excluded: ["considered alternatives"],
+          brief_completeness: "partial",
+        },
         bias_signals: [
           { type: "anchoring", detail: "pinned to last quarter's figure", target: "fac_revenue" },
         ],
@@ -504,9 +513,11 @@ describe("runStagePackage", () => {
     expect(coaching.summary).toBe("Solid scaffold; broaden the competitor scope.");
     expect(coaching.strengthen_items).toHaveLength(1);
     expect(coaching.strengthen_items[0].id).toBe("s1");
-    expect(coaching.widening_log).toEqual([
-      { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternatives" },
-    ]);
+    expect(coaching.widening_log).toEqual({
+      elements_added: ["fac_competition"],
+      elements_considered_but_excluded: ["considered alternatives"],
+      brief_completeness: "partial",
+    });
     expect(coaching.bias_signals).toEqual([
       { type: "anchoring", detail: "pinned to last quarter's figure", target: "fac_revenue" },
     ]);
@@ -623,9 +634,10 @@ describe("runStagePackage", () => {
     expect(sig.detail).not.toContain("fac_revenue"); // prose scrubbed
   });
 
-  it("omits coaching when ctx.coaching is absent and no synthetic injection runs", async () => {
-    // Graph without options → status-quo synthesiser is a no-op, so a missing
-    // ctx.coaching stays missing through Stage 5.
+  it("emits canonical-empty coaching when ctx.coaching is absent (v0.11.0 contract)", async () => {
+    // v0.11.0 schema amendment: Stage 5 always emits a coaching block —
+    // populated when meaningful, canonical-empty when not — so the V3
+    // boundary always carries the field per canonical-required contract.
     const ctx = makeCtx({
       coaching: undefined,
       graph: {
@@ -644,7 +656,11 @@ describe("runStagePackage", () => {
 
     const resp = ctx.ceeResponse as any;
     expect(resp).toBeDefined();
-    expect(resp.coaching).toBeUndefined();
+    expect(resp.coaching).toBeDefined();
+    expect(resp.coaching.summary).toBeNull();
+    expect(resp.coaching.strengthen_items).toEqual([]);
+    expect(resp.coaching.widening_log.brief_completeness).toBe("thin");
+    expect(resp.coaching.bias_signals).toEqual([]);
   });
 
   it("preserves coaching with summary: null when other fields are meaningful", async () => {
@@ -670,9 +686,10 @@ describe("runStagePackage", () => {
     expect(coaching.strengthen_items.find((i: any) => i.id === "s1")).toBeDefined();
   });
 
-  it("drops coaching when nothing is meaningful (null summary, no other fields)", async () => {
-    // No summary, no strengthen_items, no widening_log, no bias_signals,
-    // and no synthetic injection (no options on the graph) → nothing to surface.
+  it("emits canonical-empty coaching when nothing is meaningful (v0.11.0 contract)", async () => {
+    // v0.11.0 schema amendment: Stage 5 always emits a coaching block.
+    // When `hasMeaningfulCoaching` returns false, the canonical-empty
+    // shape is emitted (vs. dropping the field pre-amendment).
     const ctx = makeCtx({
       coaching: {},
       graph: {
@@ -690,7 +707,9 @@ describe("runStagePackage", () => {
     await runStagePackage(ctx);
 
     const resp = ctx.ceeResponse as any;
-    expect(resp.coaching).toBeUndefined();
+    expect(resp.coaching).toBeDefined();
+    expect(resp.coaching.summary).toBeNull();
+    expect(resp.coaching.strengthen_items).toEqual([]);
   });
 
   it("omits widening_log + bias_signals when source arrays are null", async () => {

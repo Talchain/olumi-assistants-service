@@ -43,6 +43,7 @@ import { SERVICE_VERSION } from "../../../version.js";
 import { assembleContextPack } from "../../../context/context-pack.js";
 import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.js";
 import { sanitiseUserFacingText } from "../../../orchestrator-v5/compose/output-safety.js";
+import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
 import type { DraftCoaching } from "../../../orchestrator/types.js";
 import type { GraphV3T, NodeV3T } from "../../../schemas/cee-v3.js";
 import type { GraphV1 } from "../../../contracts/plot/engine.js";
@@ -89,7 +90,17 @@ function projectGraphForLabelLookup(graph: GraphV1 | undefined): GraphV3T | null
 function hasMeaningfulCoaching(coaching: DraftCoaching): boolean {
   if (typeof coaching.summary === "string" && coaching.summary.trim().length > 0) return true;
   if (coaching.strengthen_items.length > 0) return true;
-  if (coaching.widening_log && coaching.widening_log.length > 0) return true;
+  // v0.11.0 schema amendment: widening_log is the canonical object shape;
+  // meaningful when any sub-array is populated or completeness signals more
+  // than the default "thin".
+  if (
+    coaching.widening_log &&
+    (coaching.widening_log.elements_added.length > 0 ||
+      coaching.widening_log.elements_considered_but_excluded.length > 0 ||
+      coaching.widening_log.brief_completeness !== "thin")
+  ) {
+    return true;
+  }
   if (coaching.bias_signals && coaching.bias_signals.length > 0) return true;
   return false;
 }
@@ -115,12 +126,18 @@ function sanitiseCoachingForDisplay(
       label: scrub(item.label),
       detail: scrub(item.detail),
     })),
+    // v0.11.0 schema amendment: widening_log is the canonical object.
+    // Scrub `elements_considered_but_excluded` (free-text reason
+    // descriptions). `elements_added` is a string[] of NODE IDS by
+    // contract — do NOT scrub those (they would be stripped as ID-shaped
+    // tokens by the sanitiser).
     widening_log: coaching.widening_log
-      ? coaching.widening_log.map((entry) => ({
-          ...entry,
-          label: scrub(entry.label),
-          reason: scrub(entry.reason),
-        }))
+      ? {
+          elements_added: coaching.widening_log.elements_added,
+          elements_considered_but_excluded:
+            coaching.widening_log.elements_considered_but_excluded.map((s) => scrub(s)),
+          brief_completeness: coaching.widening_log.brief_completeness,
+        }
       : null,
     bias_signals: coaching.bias_signals
       ? coaching.bias_signals.map((signal) => ({
@@ -221,10 +238,38 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     });
 
     if (!hasStatusQuo && options.length > 0) {
-      const coaching = (ctx.coaching ?? { summary: "", strengthen_items: [] }) as {
+      // v0.11.0 schema amendment: coaching default is now schema-valid against
+      // the canonical CoachingSchema (widening_log + bias_signals required;
+      // empty arrays + brief_completeness "thin" are valid). Insertion fires
+      // DraftGraphContractDefaultApplied telemetry — observable so a regression
+      // after v194 is detectable. The status-quo strengthen_item uses the
+      // canonical BiasType "narrow_framing" (was legacy "framing").
+      let inserted = false;
+      const coaching = (ctx.coaching ?? (() => {
+        inserted = true;
+        return {
+          summary: "",
+          strengthen_items: [],
+          widening_log: {
+            elements_added: [],
+            elements_considered_but_excluded: [],
+            brief_completeness: "thin",
+          },
+          bias_signals: [],
+        };
+      })()) as {
         summary: string;
         strengthen_items: Array<Record<string, unknown>>;
+        widening_log?: Record<string, unknown>;
+        bias_signals?: unknown[];
       };
+      if (inserted) {
+        emit(TelemetryEvents.DraftGraphContractDefaultApplied, {
+          field: "coaching",
+          request_id: ctx.requestId,
+          prompt_version: (ctx as { promptVersion?: string }).promptVersion,
+        });
+      }
       if (!Array.isArray(coaching.strengthen_items)) {
         coaching.strengthen_items = [];
       }
@@ -237,7 +282,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
           label: "Add baseline option",
           detail: "No status quo option detected — add one to measure improvement. If one of your existing options is the baseline (e.g. 'Continue as-is', 'Maintain current approach'), rename it to make the baseline intent explicit.",
           action_type: "add_option",
-          bias_category: "framing",
+          bias_category: "narrow_framing",
         });
         ctx.coaching = coaching;
       }
@@ -246,12 +291,16 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
 
   // ── Step 2c: Default missing strengthen_item fields ───────────────────────
   // LLM structured output schema does not include action_type, but the Zod
-  // response schema (DraftGraphOutput) requires it. Default to "improve" for
-  // any LLM-generated items missing the field.
+  // response schema (DraftGraphOutput) requires it. v0.11.0 schema
+  // amendment: `StrengthenItemActionType` canonical enum is
+  // `add_option | add_constraint | add_risk | reframe_goal`. Pre-v0.11.0
+  // default `"improve"` was outside the canonical enum and would fail the
+  // tightened Zod parse. Default to `"add_constraint"` — the most generic
+  // canonical action when the LLM gives no signal.
   if (ctx.coaching && Array.isArray((ctx.coaching as any).strengthen_items)) {
     for (const item of (ctx.coaching as any).strengthen_items) {
       if (!item.action_type) {
-        item.action_type = "improve";
+        item.action_type = "add_constraint";
       }
     }
   }
@@ -296,8 +345,36 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // replaces `fac_churn` with the actual node label rather than the generic
   // "the relevant factor" fallback).
   const labelGraph = projectGraphForLabelLookup(ctx.graph);
-  const sanitisedCoaching: DraftCoaching | null = ctx.coaching
-    ? sanitiseCoachingForDisplay(narrowCoachingForResponse(ctx.coaching), labelGraph)
+  const narrowedCoaching: DraftCoaching | null = ctx.coaching
+    ? narrowCoachingForResponse(ctx.coaching)
+    : null;
+
+  // v0.11.0 schema amendment: output-safety scan runs on the NARROWED-but-
+  // PRE-SANITISATION coaching object. Sanitisation strips raw IDs, so a
+  // post-sanitisation scan would miss the exact leaks it is meant to flag.
+  // The scanner emits warning telemetry only — never rejects. Fields scanned:
+  // summary, strengthen_items.label/.detail,
+  // widening_log.elements_considered_but_excluded, bias_signals.detail.
+  // widening_log.elements_added is intentionally NOT scanned (structural
+  // node IDs by contract).
+  if (narrowedCoaching) {
+    const idLeakHits = scanCoachingForIdLeakage(narrowedCoaching);
+    if (idLeakHits.length > 0) {
+      log.warn(
+        {
+          event: "cee.draft_graph.coaching_id_leakage_detected",
+          request_id: ctx.requestId,
+          hit_count: idLeakHits.length,
+          // Cap at 10 hits for log payload bloat protection.
+          hits: idLeakHits.slice(0, 10),
+        },
+        `${idLeakHits.length} raw node-ID leak(s) detected in coaching prose (pre-sanitisation)`,
+      );
+    }
+  }
+
+  const sanitisedCoaching: DraftCoaching | null = narrowedCoaching
+    ? sanitiseCoachingForDisplay(narrowedCoaching, labelGraph)
     : null;
 
   const payload: Record<string, unknown> = {
@@ -313,28 +390,44 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     // widening_log / bias_signals are spread conditionally because the wire
     // schemas mark them optional (undefined) rather than nullable, while
     // DraftCoaching uses null to signal "absent".
-    ...(sanitisedCoaching && hasMeaningfulCoaching(sanitisedCoaching)
+    // v0.11.0 schema amendment: coaching is REQUIRED at the V3 boundary
+    // per canonical contract. Always emit a coaching block — populated
+    // when the LLM produced meaningful content; canonical-empty when not.
+    // Stage 6 V3 transform also has a fallback for the truly-absent case
+    // (legacy callers); this is the primary emit point.
+    coaching: sanitisedCoaching && hasMeaningfulCoaching(sanitisedCoaching)
       ? {
-          coaching: {
-            summary: sanitisedCoaching.summary,
-            strengthen_items: sanitisedCoaching.strengthen_items,
-            // Omit empty arrays too — DraftCoachingWire treats absent fields
-            // as undefined rather than empty, so a present-but-empty array
-            // would contradict the type contract.
-            ...(sanitisedCoaching.widening_log && sanitisedCoaching.widening_log.length > 0
-              ? { widening_log: sanitisedCoaching.widening_log }
-              : {}),
-            ...(sanitisedCoaching.bias_signals && sanitisedCoaching.bias_signals.length > 0
-              ? { bias_signals: sanitisedCoaching.bias_signals }
-              : {}),
-          },
+          summary: sanitisedCoaching.summary,
+          strengthen_items: sanitisedCoaching.strengthen_items,
+          // widening_log: emit when present (object shape always preserved).
+          // bias_signals: emit when present and non-empty.
+          ...(sanitisedCoaching.widening_log
+            ? { widening_log: sanitisedCoaching.widening_log }
+            : {}),
+          ...(sanitisedCoaching.bias_signals && sanitisedCoaching.bias_signals.length > 0
+            ? { bias_signals: sanitisedCoaching.bias_signals }
+            : {}),
         }
-      : {}),
+      : {
+          // Canonical empty coaching shape (matches Stage 6 V3 fallback).
+          summary: null,
+          strengthen_items: [],
+          widening_log: {
+            elements_added: [],
+            elements_considered_but_excluded: [],
+            brief_completeness: "thin",
+          },
+          bias_signals: [],
+        },
     // Causal claims passthrough (Phase 2B):
     //   LLM didn't emit → omit field (absent provenance)
     //   LLM emitted but all dropped → causal_claims: [] (emptied provenance)
     //   LLM emitted valid claims → causal_claims: [...] (normal)
     ...(llmEmittedCausalClaims ? { causal_claims: validatedCausalClaims } : {}),
+    // v0.11.0 schema amendment: topology_plan (string array) carried
+    // through from Stage 1 Parse to V3 boundary. Stage 6 V1 → V3 transform
+    // preserves length + order + string contents exactly.
+    ...(Array.isArray(ctx.topologyPlan) ? { topology_plan: ctx.topologyPlan } : {}),
   };
 
   // ── Step 4: Apply response caps ──────────────────────────────────────────

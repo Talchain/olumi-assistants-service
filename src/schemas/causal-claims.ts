@@ -1,74 +1,40 @@
 /**
- * Causal Claims Schema (Phase 2B)
+ * Causal Claims — re-export shim (v0.11.0 schema amendment).
  *
- * Zod schemas for the `causal_claims` array emitted by the LLM in
- * draft_graph_v17+. Claims represent the LLM's stated causal reasoning
- * (direct effects, mediations, absence of effects, confounders) and are
- * passed through to PLoT for semantic consistency checks.
+ * As of `@talchain/schemas` 0.11.0 the canonical `CausalClaim` discriminated
+ * union, `CausalClaimSchema`, `CausalClaimsArraySchema`, and `StrengthBand`
+ * live in the shared schemas package. This module re-exports them so existing
+ * import sites in CEE compile unchanged. CEE-side warning codes and the max-
+ * claims constant remain co-located here — they are validation concerns, not
+ * contract shape.
  *
- * Claims are NOT modified by STRP or any repair pass — they represent what
- * the LLM stated, not what the pipeline produced.
+ * **New code**: prefer `import { CausalClaimSchema } from "@talchain/schemas"`.
+ *
+ * Note: the v0.11.0 contract is 4-band (`very_strong | strong | moderate |
+ * slight`); the prior CEE-local shape was 3-band (`strong | moderate | weak`).
+ * Existing fixtures or LLM responses carrying `weak` will fail this Zod
+ * validation downstream — they should be migrated, or repaired by a future
+ * normaliser, not passed through.
  */
 
-import { z } from "zod";
-
-// ---------------------------------------------------------------------------
-// Individual Claim Schemas (discriminated union on `type`)
-// ---------------------------------------------------------------------------
-
-/** Non-empty node ID string — rejects blank/whitespace-only IDs early. */
-const nodeIdString = z.string().min(1);
-
-export const DirectEffectClaimSchema = z.object({
-  type: z.literal("direct_effect"),
-  from: nodeIdString,
-  to: nodeIdString,
-  stated_strength: z.enum(["strong", "moderate", "weak"]),
-});
-
-export const MediationOnlyClaimSchema = z.object({
-  type: z.literal("mediation_only"),
-  from: nodeIdString,
-  via: nodeIdString,
-  to: nodeIdString,
-});
-
-export const NoDirectEffectClaimSchema = z.object({
-  type: z.literal("no_direct_effect"),
-  from: nodeIdString,
-  to: nodeIdString,
-});
-
-export const UnmeasuredConfounderClaimSchema = z.object({
-  type: z.literal("unmeasured_confounder"),
-  between: z.array(nodeIdString).length(2),
-  stated_source: z.string().optional(),
-});
-
-export const CausalClaimSchema = z.discriminatedUnion("type", [
+export {
+  CausalClaimSchema,
+  CausalClaimsArraySchema,
   DirectEffectClaimSchema,
   MediationOnlyClaimSchema,
   NoDirectEffectClaimSchema,
   UnmeasuredConfounderClaimSchema,
-]);
+  StrengthBand,
+} from "@talchain/schemas";
+export type {
+  CausalClaim,
+  CausalClaimsArray,
+} from "@talchain/schemas";
 
-export type CausalClaim = z.infer<typeof CausalClaimSchema>;
-
-// ---------------------------------------------------------------------------
-// Array Schema
-// ---------------------------------------------------------------------------
-
-/** Max claims per response — excess truncated with warning. */
+/** Max claims per response — excess truncated with warning. CEE-side cap. */
 export const CAUSAL_CLAIMS_MAX = 20;
 
-export const CausalClaimsArraySchema = z.array(CausalClaimSchema).max(CAUSAL_CLAIMS_MAX).optional();
-
-export type CausalClaimsArray = z.infer<typeof CausalClaimsArraySchema>;
-
-// ---------------------------------------------------------------------------
-// Warning Codes
-// ---------------------------------------------------------------------------
-
+/** CEE-side validation warning codes for causal claims. */
 export const CAUSAL_CLAIMS_WARNING_CODES = {
   /** causal_claims present but not an array */
   MALFORMED: "CAUSAL_CLAIMS_MALFORMED",

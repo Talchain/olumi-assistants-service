@@ -155,11 +155,16 @@ describe("Tier 1 — envelope.draft_coaching wiring (parallel_generate path)", (
     expect(draftCoaching.summary).toBe("Watch ramp-up time and seniority signal cost.");
     expect(draftCoaching.strengthen_items).toHaveLength(2);
     expect(draftCoaching.strengthen_items[0]).toMatchObject({ id: "s1", label: "Ramp-up time", action_type: "evidence_needed" });
-    // widening_log: narrowed entry-by-entry — only entries matching the display
-    // shape survive; the malformed second entry is dropped silently.
-    expect(draftCoaching.widening_log).toEqual([
-      { node_id: "fac_ramp", label: "Ramp-up time", reason: "implicit in brief — broaden window" },
-    ]);
+    // v0.11.0 schema amendment: buildDraftCoaching converts legacy array
+    // shape (`{node_id,label,reason}[]`) into canonical object shape —
+    // node_ids → elements_added, reasons → elements_considered_but_excluded,
+    // brief_completeness defaults to "thin". Malformed entries (missing
+    // node_id and reason) are dropped before conversion.
+    expect(draftCoaching.widening_log).toEqual({
+      elements_added: ["fac_ramp"],
+      elements_considered_but_excluded: ["implicit in brief — broaden window"],
+      brief_completeness: "thin",
+    });
     // bias_signals: optional `target` round-trips when present, omitted when absent.
     expect(draftCoaching.bias_signals).toEqual([
       { type: "anchoring", detail: "Anchored on £150k senior salary" },
@@ -226,7 +231,13 @@ describe("Tier 1 — envelope.draft_coaching wiring (parallel_generate path)", (
     const wire = JSON.parse(JSON.stringify(result.envelope));
     expect(wire.draft_coaching).toBeDefined();
     expect(wire.draft_coaching.summary).toBe("wire-shape sanity check");
-    expect(wire.draft_coaching.widening_log[0]).toEqual({ node_id: "n", label: "l", reason: "r" });
+    // v0.11.0 schema amendment: widening_log is the canonical object after
+    // buildDraftCoaching converts the legacy array shape.
+    expect(wire.draft_coaching.widening_log).toEqual({
+      elements_added: ["n"],
+      elements_considered_but_excluded: ["r"],
+      brief_completeness: "thin",
+    });
     expect(wire.draft_coaching.bias_signals[0]).toEqual({ type: "t", detail: "d" });
   });
 });

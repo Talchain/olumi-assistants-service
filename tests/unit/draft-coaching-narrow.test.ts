@@ -15,16 +15,21 @@ describe("narrowCoachingForResponse", () => {
     expect(narrowCoachingForResponse(42)).toBeNull();
   });
 
-  it("preserves a well-formed coaching block", () => {
+  it("preserves a well-formed coaching block (v0.11.0 canonical shape)", () => {
+    // v0.11.0: widening_log is an OBJECT (canonical), not an array.
+    // The Anthropic-adapter ingress normaliser converts legacy array
+    // shape to canonical before this narrowing runs.
     const out = narrowCoachingForResponse({
       summary: "Looks solid overall.",
       strengthen_items: [
         { id: "s1", label: "Add a baseline option", detail: "You're missing status quo.", action_type: "add_node" },
         { id: "s2", label: "Tighten the goal", detail: "Threshold is fuzzy.", action_type: "edit_node", bias_category: "ambiguity" },
       ],
-      widening_log: [
-        { node_id: "fac_churn", label: "Churn", reason: "Considered alternatives" },
-      ],
+      widening_log: {
+        elements_added: ["fac_churn"],
+        elements_considered_but_excluded: ["Considered alternatives"],
+        brief_completeness: "partial",
+      },
       bias_signals: [
         { type: "anchoring", detail: "Pinned to last quarter's number", target: "fac_revenue" },
       ],
@@ -40,9 +45,11 @@ describe("narrowCoachingForResponse", () => {
       action_type: "add_node",
     });
     expect(out!.strengthen_items[1].bias_category).toBe("ambiguity");
-    expect(out!.widening_log).toEqual([
-      { node_id: "fac_churn", label: "Churn", reason: "Considered alternatives" },
-    ]);
+    expect(out!.widening_log).toEqual({
+      elements_added: ["fac_churn"],
+      elements_considered_but_excluded: ["Considered alternatives"],
+      brief_completeness: "partial",
+    });
     expect(out!.bias_signals).toEqual([
       { type: "anchoring", detail: "Pinned to last quarter's number", target: "fac_revenue" },
     ]);
@@ -53,20 +60,35 @@ describe("narrowCoachingForResponse", () => {
     expect(narrowCoachingForResponse({ summary: 42 }).summary).toBeNull();
   });
 
-  it("drops malformed widening_log entries entry-by-entry", () => {
+  it("returns null widening_log when source is the legacy array shape", () => {
+    // v0.11.0 schema amendment: legacy array shape is converted to
+    // canonical at the Anthropic-adapter ingress; if a legacy array
+    // somehow reaches narrowCoachingForResponse without conversion (test
+    // bypass, alternate code path), the narrowing returns null since the
+    // canonical narrower expects an object.
     const out = narrowCoachingForResponse({
       summary: "x",
-      widening_log: [
-        { node_id: "n1", label: "L1", reason: "r1" }, // valid
-        { node_id: "n2", label: "L2" },                // missing reason → drop
-        { label: "L3", reason: "r3" },                 // missing node_id → drop
-        "garbage",                                      // not a record → drop
-      ],
+      widening_log: [{ node_id: "n1", label: "L1", reason: "r1" }],
     });
+    expect(out!.widening_log).toBeNull();
+  });
 
-    expect(out!.widening_log).toEqual([
-      { node_id: "n1", label: "L1", reason: "r1" },
-    ]);
+  it("preserves widening_log as canonical object even when sub-arrays contain non-strings", () => {
+    // Non-string entries are filtered out, but the canonical object shape
+    // is preserved (vs. legacy "drop the whole array" behaviour).
+    const out = narrowCoachingForResponse({
+      summary: "x",
+      widening_log: {
+        elements_added: ["fac_x", 42, "fac_y"],
+        elements_considered_but_excluded: [null, "valid reason"],
+        brief_completeness: "partial",
+      },
+    });
+    expect(out!.widening_log).toEqual({
+      elements_added: ["fac_x", "fac_y"],
+      elements_considered_but_excluded: ["valid reason"],
+      brief_completeness: "partial",
+    });
   });
 
   it("drops malformed bias_signals entries entry-by-entry", () => {

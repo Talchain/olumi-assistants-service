@@ -32,7 +32,12 @@ export interface DraftCoaching {
   readonly produced_at: string;
   readonly summary: string | null;
   readonly strengthen_items: readonly StrengthenItem[];
-  readonly widening_log: readonly unknown[] | null;
+  // v0.11.0 schema amendment: widening_log shape migrated from
+  // `unknown[]` (legacy {node_id,label,reason} entries) to canonical
+  // `WideningLog` object. Stored as `unknown` to tolerate both shapes
+  // through the v192b → v194 transition; the JSONL cache is shape-
+  // agnostic passthrough.
+  readonly widening_log: unknown;
   readonly bias_signals: readonly unknown[] | null;
 }
 

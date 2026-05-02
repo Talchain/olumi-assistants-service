@@ -264,11 +264,18 @@ describe("Three-way schema alignment — Anthropic ↔ Zod ↔ Prompt", () => {
     expect(edgeProps.edge_type.enum).toEqual(["directed", "bidirected"]);
   });
 
-  it("Anthropic schema top-level required matches canonical graph contract", () => {
-    // Only canonical graph fields are schema-enforced. Non-structural fields
-    // (coaching, causal_claims, topology_plan, rationales) are omitted to stay
-    // under the Anthropic grammar size limit.
-    expect(anthropicSchema.required).toEqual(["nodes", "edges", "goal_constraints"]);
+  it("Anthropic schema top-level required matches canonical graph + coaching contract (v0.11.0)", () => {
+    // v0.11.0 schema amendment: coaching, causal_claims, topology_plan are
+    // first-class declared types in @talchain/schemas and required at the
+    // LLM structured-output boundary. `rationales` remains omitted.
+    expect(anthropicSchema.required).toEqual([
+      "nodes",
+      "edges",
+      "goal_constraints",
+      "coaching",
+      "causal_claims",
+      "topology_plan",
+    ]);
   });
 
   it("Anthropic node required fields match Zod LLMNode required fields", () => {

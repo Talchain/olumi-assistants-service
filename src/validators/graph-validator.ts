@@ -1254,8 +1254,176 @@ export function validateGraphPostNormalisation(
  * @param input - The graph to validate with optional request ID
  * @returns Validation result with errors and warnings
  */
+/**
+ * Coaching + causal-claims referential integrity (v0.11.0 schema amendment).
+ *
+ * Checks (all warning-level — never reject, just emit):
+ *  (a) `causal_claims[*].from`/`to`/`via` exist in `nodes[]`
+ *      → CAUSAL_CLAIM_INVALID_REF
+ *  (b) `causal_claims[*].between` (unmeasured_confounder) contains exactly
+ *      two distinct IDs, both pointing at factor-kind nodes
+ *      → CAUSAL_CLAIM_BETWEEN_INVALID
+ *  (c) `coaching.widening_log.elements_added[*]` exist in `nodes[]`
+ *      → WIDENING_LOG_INVALID_REF
+ *  (d) direct_effect / mediation_only / no_direct_effect claims should not
+ *      target the goal node when the claim type implies an intermediate
+ *      causal relation (warn only — goal-edge structural validator already
+ *      rejects most cases)
+ *      → CAUSAL_CLAIM_GOAL_TARGET
+ *  (e) Cardinality: when graph has 5+ causal-typed edges,
+ *      `causal_claims.length` outside `[3, 8]` warns
+ *      → CAUSAL_CLAIMS_CARDINALITY_OFF
+ */
+function validateCoachingAndCausalClaimsRefs(
+  nodeMap: NodeMap,
+  edges: EdgeT[],
+  coaching: unknown,
+  causalClaims: unknown,
+): ValidationIssue[] {
+  const warnings: ValidationIssue[] = [];
+
+  // Goal node ID for check (d). Validator earlier tiers ensure exactly one
+  // goal; pick whichever first.
+  const goalNode = (nodeMap.byKind.get("goal") ?? [])[0];
+  const goalId = goalNode?.id;
+
+  // (a)–(b)–(d) Causal claim references
+  if (Array.isArray(causalClaims)) {
+    for (const claim of causalClaims) {
+      if (!claim || typeof claim !== "object") continue;
+      const c = claim as Record<string, unknown>;
+      const claimType = c.type;
+
+      if (
+        claimType === "direct_effect" ||
+        claimType === "mediation_only" ||
+        claimType === "no_direct_effect"
+      ) {
+        for (const fieldName of ["from", "to", "via"]) {
+          const v = c[fieldName];
+          if (typeof v !== "string") continue;
+          if (!nodeMap.byId.has(v)) {
+            warnings.push({
+              code: "CAUSAL_CLAIM_INVALID_REF",
+              severity: "warn",
+              message: `causal_claims[*].${fieldName}=\"${v}\" does not match any node id`,
+              context: { claim_type: claimType, field: fieldName, value: v },
+            });
+          }
+        }
+        // (d) goal targeting — warn only, goal-edge validator handles errors
+        if (goalId) {
+          for (const fieldName of ["from", "via"]) {
+            const v = c[fieldName];
+            if (typeof v === "string" && v === goalId) {
+              warnings.push({
+                code: "CAUSAL_CLAIM_GOAL_TARGET",
+                severity: "warn",
+                message: `causal_claims[*].${fieldName}=\"${v}\" targets the goal node, but type=\"${claimType}\" implies an intermediate causal relation`,
+                context: { claim_type: claimType as string, field: fieldName, value: v },
+              });
+            }
+          }
+        }
+      } else if (claimType === "unmeasured_confounder") {
+        const between = c.between;
+        if (Array.isArray(between)) {
+          if (between.length !== 2) {
+            warnings.push({
+              code: "CAUSAL_CLAIM_BETWEEN_INVALID",
+              severity: "warn",
+              message: `unmeasured_confounder.between must contain exactly two ids, got ${between.length}`,
+              context: { length: between.length },
+            });
+          } else {
+            const [a, b] = between as [unknown, unknown];
+            if (typeof a === "string" && typeof b === "string") {
+              if (a === b) {
+                warnings.push({
+                  code: "CAUSAL_CLAIM_BETWEEN_INVALID",
+                  severity: "warn",
+                  message: `unmeasured_confounder.between contains the same id twice (\"${a}\")`,
+                  context: { value: a },
+                });
+              }
+              for (const id of [a, b]) {
+                const node = nodeMap.byId.get(id);
+                if (!node) {
+                  warnings.push({
+                    code: "CAUSAL_CLAIM_INVALID_REF",
+                    severity: "warn",
+                    message: `unmeasured_confounder.between id \"${id}\" does not match any node id`,
+                    context: { value: id },
+                  });
+                } else if (node.kind !== "factor") {
+                  warnings.push({
+                    code: "CAUSAL_CLAIM_BETWEEN_INVALID",
+                    severity: "warn",
+                    message: `unmeasured_confounder.between id \"${id}\" must be a factor-kind node (got kind=\"${node.kind}\")`,
+                    context: { value: id, kind: node.kind },
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // (e) Cardinality diagnostic — count causal-typed edges (directed
+    // edges between non-structural nodes). Decision→option and
+    // option→factor are structural; we count factor→outcome / risk /
+    // goal etc. Approximation: any directed edge whose endpoints are
+    // not the decision node or option-kind nodes counts as causal.
+    const decisionNodes = nodeMap.byKind.get("decision") ?? [];
+    const decisionIds = new Set(decisionNodes.map((n) => n.id));
+    const optionIds = new Set((nodeMap.byKind.get("option") ?? []).map((n) => n.id));
+    const causalEdgeCount = edges.filter((e) => {
+      if (!isDirectedEdge(e)) return false;
+      if (decisionIds.has(e.from) && optionIds.has(e.to)) return false; // structural
+      if (optionIds.has(e.from)) return false; // option→factor structural
+      return true;
+    }).length;
+    if (causalEdgeCount >= 5) {
+      const claimsLen = causalClaims.length;
+      if (claimsLen < 3 || claimsLen > 8) {
+        warnings.push({
+          code: "CAUSAL_CLAIMS_CARDINALITY_OFF",
+          severity: "warn",
+          message: `causal_claims.length=${claimsLen} is outside [3, 8] for graph with ${causalEdgeCount} causal-typed edges`,
+          context: { claims_length: claimsLen, causal_edge_count: causalEdgeCount },
+        });
+      }
+    }
+  }
+
+  // (c) widening_log.elements_added refs
+  if (coaching && typeof coaching === "object") {
+    const c = coaching as Record<string, unknown>;
+    const wl = c.widening_log;
+    if (wl && typeof wl === "object") {
+      const added = (wl as Record<string, unknown>).elements_added;
+      if (Array.isArray(added)) {
+        for (const v of added) {
+          if (typeof v !== "string") continue;
+          if (!nodeMap.byId.has(v)) {
+            warnings.push({
+              code: "WIDENING_LOG_INVALID_REF",
+              severity: "warn",
+              message: `coaching.widening_log.elements_added contains \"${v}\" which does not match any node id`,
+              context: { value: v },
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return warnings;
+}
+
 export function validateGraph(input: GraphValidationInput): GraphValidationResult {
-  const { graph, requestId, phase } = input;
+  const { graph, requestId, phase, coaching, causalClaims } = input;
   const startTime = Date.now();
 
   log.info(
@@ -1299,6 +1467,13 @@ export function validateGraph(input: GraphValidationInput): GraphValidationResul
 
   // Collect warnings
   warnings.push(...collectWarnings(graph, nodeMap, factorCategories));
+
+  // v0.11.0 schema amendment: coaching + causal-claims referential integrity
+  // (warning-level only; never reject). When coaching/causalClaims absent
+  // from input, this is a no-op.
+  warnings.push(
+    ...validateCoachingAndCausalClaimsRefs(nodeMap, graph.edges, coaching, causalClaims),
+  );
 
   // Append outcome/risk reachability exemption info issues
   warnings.push(...reachabilityResult.infoIssues);

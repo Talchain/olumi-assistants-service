@@ -421,6 +421,9 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   ctx.coaching = (draftResult as any).coaching;
   // Causal claims passthrough (Phase 2B): stash raw for post-STRP validation
   ctx.causalClaims = (draftResult as any).causal_claims;
+  // v0.11.0 schema amendment: stash topology_plan for Stage 5 packaging
+  // and Stage 6 V1 → V3 deep-equality preservation.
+  ctx.topologyPlan = (draftResult as any).topology_plan;
   // Goal constraints passthrough: LLM-emitted constraints merged with regex in Stage 4
   ctx.llmGoalConstraints = (draftResult as any).goal_constraints;
 

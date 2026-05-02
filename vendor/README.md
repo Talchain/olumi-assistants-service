@@ -7,20 +7,35 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.10.0.tgz`
+### `talchain-schemas-0.11.0.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.10.0.
-Adds optional `graph_hash_at_run` and `computed_at` fields to
-`RunAnalysisResultSchema` (v0.10.0) for V5 state-trust freshness
-derivation, and bundles the in-flight v0.9.0 work
-(`ExplainResultsResultSchema`, `ExplainFromStructureResultSchema`,
-`WhatWouldFlipResultSchema` reshape, plus the matching handler-fact
-schemas). Source lives at `~/Documents/GitHub/olumi-schemas/`; built
-via `npm pack` from source. Not yet published to a private registry.
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.11.0.
+v0.11.0 schema amendment lifts coaching, causal_claims, and topology_plan
+into first-class declared types, replacing consumer-side `.passthrough()`
+survivors. Adds:
+
+- `BiasType`, `BiasSignal`, `BriefCompleteness`, `WideningLog`,
+  `StrengthenItemActionType`, `StrengthenItem`, `Coaching` (canonical
+  coaching contract — required at the LLM structured-output boundary).
+- `StrengthBand` (4-band: `very_strong | strong | moderate | slight`,
+  replaces the prior consumer-side 3-band).
+- `CausalClaim` discriminated union (4 variants).
+- `CausalClaimsArray` (shape only — cardinality rules live in CEE
+  `graph-validator.ts`).
+- `TopologyPlan` (string array).
+
+Source lives at `~/Documents/GitHub/olumi-schemas/` on
+`claude/schema-coaching-amendment` (HEAD `ad6da12`); built via `npm pack`
+from source. Not yet published to a private registry.
+
+**Checksum verification:** `vendor/talchain-schemas-0.11.0.tgz.sha256`
+holds the canonical sha256 hash. The pre-push hook
+(`scripts/validate-tarball-sha.sh`) verifies the tarball bytes against
+this manifest on every push.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at B+C,
-0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G) are removed on each
-bump — only the currently-pinned version lives in `vendor/`.
+0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H) are removed
+on each bump — only the currently-pinned version lives in `vendor/`.
 
 **How to update:**
 
@@ -46,6 +61,6 @@ shasum -a 256 /path/to/olumi-assistants-service/vendor/talchain-schemas-<version
 ```
 
 **Removal criterion:** delete this tarball + the vendor entry and switch
-`package.json` to a registry version (`"@talchain/schemas": "^0.8.1"`)
+`package.json` to a registry version (`"@talchain/schemas": "^0.11.0"`)
 once `olumi-schemas` publishes to the private npm registry. Until then,
 every consuming repo is expected to carry its own `vendor/` copy.

@@ -300,18 +300,29 @@ describe("boundary canary: transformResponseToV3 response-level fields", () => {
     ]);
   });
 
-  it("omits coaching when absent in V1 (no fabrication)", () => {
+  it("emits canonical-empty coaching when absent in V1 (v0.11.0 contract)", () => {
+    // v0.11.0 schema amendment: Stage 6 V3 transform always emits a
+    // coaching block per canonical-required-at-boundary contract.
+    // Legacy absence is normalised to canonical-empty rather than
+    // omitted, so consumers always see the field.
     const v1 = makeV1Response();
     delete (v1 as any).coaching;
     const v3 = transformResponseToV3(v1, { requestId: "test-4" });
-    expect(v3).not.toHaveProperty("coaching");
+    expect((v3 as any).coaching).toBeDefined();
+    expect((v3 as any).coaching.summary).toBeNull();
+    expect((v3 as any).coaching.strengthen_items).toEqual([]);
   });
 
-  it("omits causal_claims when absent in V1 (no fabrication)", () => {
+  it("emits causal_claims=[] when absent in V1 (v0.11.0 contract)", () => {
+    // v0.11.0 schema amendment: Stage 6 V3 transform always emits
+    // causal_claims per canonical-required-at-boundary contract. The
+    // Phase 2B provenance distinction is preserved internally on
+    // ctx.causalClaims for analytics; only the contract-required
+    // surface ([]) reaches the wire.
     const v1 = makeV1Response();
     delete (v1 as any).causal_claims;
     const v3 = transformResponseToV3(v1, { requestId: "test-5" });
-    expect(v3).not.toHaveProperty("causal_claims");
+    expect((v3 as any).causal_claims).toEqual([]);
   });
 
   it("omits goal_constraints when empty array in V1", () => {

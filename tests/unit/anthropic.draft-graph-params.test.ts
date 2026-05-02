@@ -46,14 +46,16 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA", () => {
     expect(kindEnum).toContain("action");
   });
 
-  it("goal_constraints is required; coaching, topology_plan, causal_claims omitted from strict schema", () => {
-    // goal_constraints is schema-enforced (LLM produces [] when none)
+  it("goal_constraints, coaching, causal_claims, topology_plan are all required (v0.11.0)", () => {
+    // v0.11.0 schema amendment: coaching, causal_claims, topology_plan
+    // are first-class declared types in @talchain/schemas and required
+    // at the LLM structured-output boundary. `widening_log` and
+    // `bias_signals` within coaching are optional during the v192b →
+    // v194 transition; CEE's ingress normaliser fills empty defaults.
     expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("goal_constraints");
-    // Non-structural fields omitted to stay under Anthropic grammar size limit.
-    // Pipeline handles absence with safe defaults.
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("coaching");
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("topology_plan");
-    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).not.toContain("causal_claims");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("coaching");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("causal_claims");
+    expect(ANTHROPIC_DRAFT_GRAPH_SCHEMA.required).toContain("topology_plan");
   });
 
   it("top-level type is object with closed envelope (additionalProperties: false)", () => {

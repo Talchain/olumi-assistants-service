@@ -18,16 +18,18 @@
  * use anyOf. All inner fields use plain types; the normaliser coerces
  * sentinels (0, "", [], false) → undefined by node kind post-parse.
  *
- * GRAMMAR BUDGET (v5 — 2026-04-02):
- * Anthropic's grammar compiler has a total complexity limit. To stay
- * under it, only the canonical graph (nodes, edges, goal_constraints)
- * is schema-enforced. Non-structural fields (coaching, causal_claims,
- * rationales, topology_plan) are omitted from the strict schema — the
- * LLM still produces them via prompt instructions, and the pipeline
- * handles them being absent (all are optional or safely defaulted).
+ * GRAMMAR BUDGET (v6 — 2026-05-02 schema amendment):
+ * v0.11.0 lifts coaching, causal_claims, and topology_plan into the
+ * strict schema as required top-level fields. Within `coaching`,
+ * `widening_log` and `bias_signals` are optional during the v192b →
+ * v194 transition; CEE's ingress normaliser at anthropic.ts:884 fills
+ * empty defaults so the canonical Zod parse passes downstream. `rationales`
+ * remains omitted (legacy carry, no consumer enforcement).
  *
- * Current union count: 9 / 16.
- * Current optional count: 7 / 24.
+ * Post-amendment union count: 10 / 16 (one new anyOf for the
+ * causal_claims discriminated-union items).
+ * Post-amendment optional count: 10 / 24 (added widening_log,
+ * bias_signals, strengthen_items[*].bias_category as optional).
  */
 
 // Helpers for nullable types (required field that can be null)
@@ -47,7 +49,8 @@ const nullableObject = (props: Record<string, unknown>, req: string[]) => ({
 export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
   type: "object" as const,
   properties: {
-    // topology_plan omitted — planning scaffolding, not consumed downstream.
+    // v0.11.0 schema amendment: topology_plan, coaching, causal_claims are
+    // declared further below as required top-level fields.
     nodes: {
       type: "array",
       items: {
@@ -162,8 +165,153 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
         additionalProperties: false,
       },
     },
-    // rationales, causal_claims omitted — non-structural, pipeline-optional.
-    // LLM still produces them via prompt; normaliser + Zod handle downstream.
+    // rationales omitted — legacy carry, no consumer enforcement.
+    // causal_claims, coaching, topology_plan: declared below per v0.11.0.
+    causal_claims: {
+      type: "array",
+      items: {
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["direct_effect"] },
+              from: { type: "string" },
+              to: { type: "string" },
+              stated_strength: {
+                type: "string",
+                enum: ["very_strong", "strong", "moderate", "slight"],
+              },
+            },
+            required: ["type", "from", "to", "stated_strength"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["mediation_only"] },
+              from: { type: "string" },
+              via: { type: "string" },
+              to: { type: "string" },
+            },
+            required: ["type", "from", "via", "to"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["no_direct_effect"] },
+              from: { type: "string" },
+              to: { type: "string" },
+            },
+            required: ["type", "from", "to"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["unmeasured_confounder"] },
+              between: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+            required: ["type", "between"],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+    topology_plan: {
+      type: "array",
+      items: { type: "string" },
+    },
+    coaching: {
+      type: "object",
+      properties: {
+        summary: { type: "string" },
+        strengthen_items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              label: { type: "string" },
+              detail: { type: "string" },
+              action_type: {
+                type: "string",
+                enum: ["add_option", "add_constraint", "add_risk", "reframe_goal"],
+              },
+              // Optional during transition — LLM may emit legacy values
+              // (framing|confidence|blindspots) which the ingress normaliser
+              // at anthropic.ts:884 maps to canonical BiasType before any
+              // downstream parse.
+              bias_category: {
+                type: "string",
+                enum: [
+                  "anchoring",
+                  "narrow_framing",
+                  "status_quo_bias",
+                  "overconfidence",
+                ],
+              },
+            },
+            required: ["id", "label", "detail", "action_type"],
+            additionalProperties: false,
+          },
+        },
+        // Optional during v192b → v194 transition. The legacy normaliser at
+        // `src/adapters/llm/normalise-legacy-coaching.ts` converts the
+        // legacy widening_log array shape to canonical object; Stage 5
+        // emits a canonical-empty coaching block (incl. empty widening_log
+        // + bias_signals) when the LLM produces no meaningful coaching,
+        // and Stage 6 V3 transform mirrors that default for legacy paths.
+        widening_log: {
+          type: "object",
+          properties: {
+            elements_added: {
+              type: "array",
+              items: { type: "string" },
+            },
+            elements_considered_but_excluded: {
+              type: "array",
+              items: { type: "string" },
+            },
+            brief_completeness: {
+              type: "string",
+              enum: ["complete", "partial", "thin"],
+            },
+          },
+          required: [
+            "elements_added",
+            "elements_considered_but_excluded",
+            "brief_completeness",
+          ],
+          additionalProperties: false,
+        },
+        bias_signals: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: [
+                  "anchoring",
+                  "narrow_framing",
+                  "status_quo_bias",
+                  "overconfidence",
+                ],
+              },
+              detail: { type: "string" },
+            },
+            required: ["type", "detail"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["summary", "strengthen_items"],
+      additionalProperties: false,
+    },
     goal_constraints: {
       type: "array",
       items: {
@@ -185,10 +333,16 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
         additionalProperties: false,
       },
     },
-    // coaching omitted — meta-commentary, not core graph. Pipeline defaults
-    // to { summary: "", strengthen_items: [] } when absent.
   },
-  required: ["nodes", "edges", "goal_constraints"],
+  required: [
+    "nodes",
+    "edges",
+    "goal_constraints",
+    // v0.11.0 schema amendment: required at the LLM boundary.
+    "coaching",
+    "causal_claims",
+    "topology_plan",
+  ],
   additionalProperties: false,
 };
 

@@ -462,14 +462,17 @@ export const CEEGraphResponseV3 = z.object({
    * PLoT merges these with compiled constraint nodes (explicit wins on conflict).
    */
   goal_constraints: z.array(GoalConstraintSchema).optional(),
-  /** LLM coaching output, optional decision-quality insights. widening_log
-   *  and bias_signals are kept as `unknown[]` here so the LLM's byte-for-byte
-   *  output reaches V5 ContextPack via the raw coaching cache. The wire-
-   *  facing `coaching` field on /assist/v1/draft-graph is narrowed to typed
-   *  display shapes at the Stage 5 boundary by `narrowCoachingForResponse`
-   *  in src/orchestrator/draft-coaching.ts (`DraftCoachingWire` is the
-   *  resulting shape). The wrapper is `.passthrough()` so additive future
-   *  coaching fields reach downstream consumers instead of being stripped. */
+  /** LLM coaching output. v0.11.0 schema amendment: Stage 6 V3 transform
+   *  ALWAYS emits a coaching block (canonical-empty when V1 omits it),
+   *  so production responses always carry the field. The Zod schema
+   *  keeps `.optional()` so existing consumer tests that construct V3
+   *  payloads without coaching still parse — the runtime contract
+   *  ("V3 output carries coaching") is enforced by the transform, not
+   *  by Zod rejection. The wire-facing `coaching` field on
+   *  /assist/v1/draft-graph is narrowed to typed display shapes at the
+   *  Stage 5 boundary by `narrowCoachingForResponse` in
+   *  src/orchestrator/draft-coaching.ts. The wrapper is `.passthrough()`
+   *  so additive future coaching fields reach downstream consumers. */
   coaching: z.object({
     // Nullable so that a coaching block with widening_log / bias_signals but
     // no LLM-produced summary still reaches the UI. The UI renders null as
@@ -482,11 +485,32 @@ export const CEEGraphResponseV3 = z.object({
       action_type: z.string(),
       bias_category: z.string().optional(),
     })), // strict — matches DraftGraphResult.strengthenItems contract
-    widening_log: z.array(z.unknown()).optional(),
+    // v0.11.0 schema amendment: widening_log is the canonical OBJECT
+    // shape. Inner sub-fields use permissive types here so V3 validation
+    // accepts what narrowCoachingForResponse produces; the canonical
+    // shape is enforced at @talchain/schemas/CoachingSchema for cross-
+    // service consumers.
+    widening_log: z.object({
+      elements_added: z.array(z.string()),
+      elements_considered_but_excluded: z.array(z.string()),
+      brief_completeness: z.enum(["complete", "partial", "thin"]),
+    }).passthrough().optional(),
     bias_signals: z.array(z.unknown()).optional(),
   }).passthrough().optional(),
-  /** LLM causal claims — stated reasoning about direct effects, mediations, confounders (Phase 2B) */
-  causal_claims: CausalClaimsArraySchema,
+  /** LLM causal claims — stated reasoning about direct effects, mediations, confounders.
+   *  v0.11.0 schema amendment: Stage 6 V3 transform ALWAYS emits this
+   *  field (defaulting absent V1 input to []), so production responses
+   *  always carry it. Zod schema keeps `.optional()` so consumer tests
+   *  constructing V3 payloads without it still parse — the runtime
+   *  contract is enforced by the transform, not by Zod rejection. The
+   *  Phase 2B provenance distinction (undefined vs [] meaning "LLM
+   *  didn't emit" vs "emitted but dropped") is preserved internally on
+   *  ctx.causalClaims for analytics. */
+  causal_claims: CausalClaimsArraySchema.optional(),
+  /** v0.11.0 schema amendment: topology_plan — string array describing
+   *  graph layout. Required at the canonical contract; preserved
+   *  V1 → V3 with deep-equality (length + order + string contents). */
+  topology_plan: z.array(z.string()).optional(),
   /** Draft warnings from the pipeline — CEEStructuralWarningV1 shape from structure detection.
    *  Fields: id (warning type), severity, affected_node_ids, affected_edge_ids, explanation, fix_hint. */
   draft_warnings: z.array(z.object({

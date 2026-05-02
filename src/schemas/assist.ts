@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Graph } from "./graph.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
+import { BiasType, TopologyPlanSchema, StrengthenItemActionType } from "@talchain/schemas";
 
 /**
  * Minimum brief length for draft_graph input validation.
@@ -174,21 +175,50 @@ export const DraftGraphOutput = z.object({
    * PLoT merges these with compiled constraint nodes (explicit wins on conflict).
    */
   goal_constraints: z.array(GoalConstraintSchema).optional(),
-  /** LLM coaching output — optional decision-quality insights.
-   *  summary is nullable to keep coaching reachable when the LLM produces
-   *  widening_log / bias_signals without a summary string. */
+  /** LLM coaching output — first-class declared contract per
+   *  `@talchain/schemas` v0.11.0. `summary` remains nullable here at the
+   *  ingestion-stage parse (LLM may emit null when the brief is too thin
+   *  for actionable coaching commentary); the canonical `CoachingSchema`
+   *  in the shared package requires it as a string. CEE's Stage 5 Package
+   *  default at `src/cee/unified-pipeline/stages/package.ts` populates
+   *  the empty default when the LLM omits the field.
+   *
+   *  `widening_log` and `bias_signals` are optional at this ingestion
+   *  parse (transitional v192b → v194 rollout); the canonical schema
+   *  declares them required. The legacy normaliser at
+   *  `src/adapters/llm/normalise-legacy-coaching.ts` converts legacy
+   *  array-shape `widening_log` to canonical object shape, but does not
+   *  synthesise an empty default when the field is absent — Stage 6 V3
+   *  transform handles legacy-absence by emitting the canonical empty
+   *  coaching block so the V3 boundary always carries the field.
+   */
   coaching: z.object({
     summary: z.string().nullable(),
     strengthen_items: z.array(z.object({
       id: z.string(),
       label: z.string(),
       detail: z.string(),
-      action_type: z.string(),
-      bias_category: z.string().optional(),
+      action_type: StrengthenItemActionType,
+      bias_category: BiasType.optional(),
     }).passthrough()),
+    widening_log: z.object({
+      elements_added: z.array(z.string()),
+      elements_considered_but_excluded: z.array(z.string()),
+      brief_completeness: z.enum(["complete", "partial", "thin"]),
+    }).passthrough().optional(),
+    bias_signals: z.array(z.object({
+      type: BiasType,
+      detail: z.string(),
+    }).passthrough()).optional(),
   }).passthrough().optional(),
-  /** LLM causal claims — stated reasoning about effects, mediations, confounders (Phase 2B) */
-  causal_claims: CausalClaimsArraySchema,
+  /** LLM causal claims — stated reasoning about effects, mediations, confounders.
+   *  Canonical contract lives in `@talchain/schemas` v0.11.0. */
+  causal_claims: CausalClaimsArraySchema.optional(),
+  /** Topology plan — structural lines describing graph layout, ≤15 lines (soft).
+   *  Canonical contract lives in `@talchain/schemas` v0.11.0. Required at the
+   *  Anthropic structured-output boundary; optional here for legacy callers
+   *  that pre-date v0.11.0. */
+  topology_plan: TopologyPlanSchema.optional(),
   // Graph corrections tracking + pipeline repair observability
   trace: z.object({
     // Pipeline repair tracking fields

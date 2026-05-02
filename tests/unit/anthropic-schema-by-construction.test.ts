@@ -294,17 +294,17 @@ assertFullCompliance(
 describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — prompt contract", () => {
   const schema = ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as SchemaNode;
 
-  it("top-level required matches prompt contract", () => {
+  it("top-level required matches prompt contract (v0.11.0 schema amendment)", () => {
     const required = schema.required as string[];
     expect(required).toContain("nodes");
     expect(required).toContain("edges");
     expect(required).toContain("goal_constraints");
-    // These fields are omitted from the strict schema to stay under the
-    // Anthropic grammar size limit. The LLM still produces them via prompt
-    // instructions; the pipeline handles their absence with safe defaults.
-    expect(required).not.toContain("topology_plan");
-    expect(required).not.toContain("coaching");
-    expect(required).not.toContain("causal_claims");
+    // v0.11.0 schema amendment: coaching, causal_claims, topology_plan
+    // were lifted into the strict schema as required top-level fields.
+    expect(required).toContain("coaching");
+    expect(required).toContain("causal_claims");
+    expect(required).toContain("topology_plan");
+    // `rationales` remains omitted (legacy carry, no consumer enforcement).
     expect(required).not.toContain("rationales");
   });
 

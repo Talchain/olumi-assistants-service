@@ -133,6 +133,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeDraftGraphRequested: "cee.draft_graph.requested",
         CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
         CeeDraftGraphFailed: "cee.draft_graph.failed",
+        // v0.11.0 schema amendment — observable transition signals.
+        DraftGraphLegacyCoachingValueNormalised: "cee.draft_graph.legacy_coaching_value_normalised",
+        DraftGraphContractDefaultApplied: "cee.draft_graph.contract_default_applied",
 
         // Connectivity validation (P0 diagnostics)
         CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
@@ -439,6 +442,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
         V5DeterministicValueUpdate: "v5.deterministic_value_update",
+        // v5.edit_graph.graph_state_* events landed on staging in commit
+        // ead53993 (routing fix); the snapshot was not updated at the time.
+        // Catching up here so the schema-amendment pre-push isn't blocked
+        // by an unrelated upstream gap.
+        V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
+        V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
+        V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
         V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
         V5ExplanationEvidence: "v5.explanation.evidence",
         V5MutationLanguageGuard: "v5.mutation_language_guard",
@@ -672,6 +682,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.requested": [TelemetryEvents.CeeDraftGraphRequested],
         "cee.draft_graph.succeeded": [TelemetryEvents.CeeDraftGraphSucceeded],
         "cee.draft_graph.failed": [TelemetryEvents.CeeDraftGraphFailed],
+        "cee.draft_graph.legacy_coaching_value_normalised": [TelemetryEvents.DraftGraphLegacyCoachingValueNormalised],
+        "cee.draft_graph.contract_default_applied": [TelemetryEvents.DraftGraphContractDefaultApplied],
         "cee.draft_graph.connectivity_check": [TelemetryEvents.CeeConnectivityCheck],
         "cee.draft_graph.uniform_strengths_detected": [TelemetryEvents.CeeUniformStrengthsDetected],
         "cee.draft_graph.goal_inferred": [TelemetryEvents.CeeGoalInferred],
@@ -1089,6 +1101,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.succeeded",
         "cee.draft_graph.failed",
 
+        // v0.11.0 schema amendment — observable transition signals
+        "cee.draft_graph.legacy_coaching_value_normalised",
+        "cee.draft_graph.contract_default_applied",
+
         // Connectivity validation (P0 diagnostics)
         "cee.draft_graph.connectivity_check",
 
@@ -1391,6 +1407,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.decision_review.skipped",
         "v5.decision_review_degraded",
         "v5.deterministic_value_update",
+        // v5.edit_graph.graph_state_* events landed on staging in commit
+        // ead53993 (routing fix); the snapshot was not updated at the time.
+        "v5.edit_graph.graph_state_present",
+        "v5.edit_graph.graph_state_reloaded",
+        "v5.edit_graph.graph_state_unavailable",
         // V5 alpha hardening Phase 2.5: primary lifecycle events.
         "v5.analysis_freshness.derived",
         "v5.analysis_freshness.fact_selected",
