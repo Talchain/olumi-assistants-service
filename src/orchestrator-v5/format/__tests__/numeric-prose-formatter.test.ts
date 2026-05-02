@@ -132,6 +132,52 @@ describe('formatNumericProse — negative passthrough', () => {
   });
 });
 
+describe('formatNumericProse — delta-context guard on relaxed pattern', () => {
+  // Pattern 5 is the lazy "{token} ... {decimal}" rule. When the
+  // intervening prose carries a delta verb / noun, the decimal is a
+  // magnitude of change rather than a raw probability, so the
+  // rewriter must decline.
+  it('leaves "probability changed by 0.12" unchanged', () => {
+    const r = formatNumericProse('The probability changed by 0.12 between runs.');
+    expect(r.text).toBe('The probability changed by 0.12 between runs.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('leaves "probability moved by 0.05" unchanged', () => {
+    const r = formatNumericProse('Win probability moved by 0.05 after the change.');
+    expect(r.text).toBe('Win probability moved by 0.05 after the change.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('leaves "likelihood shifted by 0.20" unchanged', () => {
+    const r = formatNumericProse('The likelihood shifted by 0.20 last week.');
+    expect(r.text).toBe('The likelihood shifted by 0.20 last week.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('leaves "probability dropped by 0.10" unchanged', () => {
+    const r = formatNumericProse('The probability dropped by 0.10.');
+    expect(r.text).toBe('The probability dropped by 0.10.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('leaves "probability delta of 0.08" unchanged', () => {
+    const r = formatNumericProse('The probability delta of 0.08 between scenarios is small.');
+    expect(r.text).toBe('The probability delta of 0.08 between scenarios is small.');
+    expect(r.rewrites).toBe(0);
+  });
+
+  it('still rewrites the non-delta neighbour clause when both appear in same input', () => {
+    // The delta clause stays raw; the legitimate "probability of X is Y"
+    // clause still rewrites.
+    const r = formatNumericProse(
+      'The probability changed by 0.05. Win probability is 0.74 in the latest run.',
+    );
+    expect(r.text).toContain('changed by 0.05');
+    expect(r.text).toContain('Win probability is 74%');
+  });
+});
+
 describe('translateSensitivityLanguage — bands × signs × phrasings', () => {
   // Bands by |v|: <0.3 weak, 0.3-0.7 moderate, 0.7-0.95 strong, >=0.95 very strong.
   const cases = [
@@ -182,20 +228,26 @@ describe('suppressStructuralEdgeLanguage — rules and rule_ids', () => {
 
   it('suppresses "edge strength of N.NN"', () => {
     const r = suppressStructuralEdgeLanguage('We see edge strength of 0.30 from A to B.');
-    expect(r.text).toContain('this causal link');
+    expect(r.text).toMatch(/this causal link/i);
     expect(r.text).not.toContain('0.30');
     expect(r.rule_ids).toContain('edge_strength_weight');
   });
 
-  it('suppresses "edge weight 0.30"', () => {
+  it('suppresses "edge weight 0.30" with article-consumption', () => {
+    // Pattern consumes the leading "The"; replacement is capitalised
+    // because the article sat at sentence start.
     const r = suppressStructuralEdgeLanguage('The edge weight 0.30 is small.');
-    expect(r.text).toContain('this causal link');
+    expect(r.text).toBe('This causal link is small.');
+    expect(r.suppressed).toBe(1);
+    expect(r.missed_grammar).toBe(0);
     expect(r.rule_ids).toContain('edge_strength_weight');
   });
 
-  it('suppresses "causal strength value of N.NN"', () => {
+  it('suppresses "causal strength value of N.NN" with article-consumption', () => {
     const r = suppressStructuralEdgeLanguage('The causal strength value of 0.42 is moderate.');
-    expect(r.text).toContain('this causal relationship');
+    expect(r.text).toBe('This causal relationship is moderate.');
+    expect(r.suppressed).toBe(1);
+    expect(r.missed_grammar).toBe(0);
     expect(r.rule_ids).toContain('causal_strength_value');
   });
 
@@ -233,6 +285,75 @@ describe('suppressStructuralEdgeLanguage — rules and rule_ids', () => {
     expect(r.text).toBe('');
     expect(r.matched).toBe(0);
     expect(r.rule_ids).toEqual([]);
+  });
+});
+
+describe('suppressStructuralEdgeLanguage — grammar guards prevent ungrammatical output', () => {
+  // The article-consuming patterns produce grammatical splices for
+  // determiner-led inputs that a naive replacement would have broken
+  // ("The this causal link …"). These tests pin the behaviour.
+  it('rewrites "The edge weight 0.30 is small" cleanly via article consumption', () => {
+    const r = suppressStructuralEdgeLanguage('The edge weight 0.30 is small.');
+    expect(r.text).toBe('This causal link is small.');
+    expect(r.suppressed).toBe(1);
+    expect(r.missed_grammar).toBe(0);
+  });
+
+  it('rewrites "The causal strength value of 0.42 is moderate" cleanly via article consumption', () => {
+    const r = suppressStructuralEdgeLanguage('The causal strength value of 0.42 is moderate.');
+    expect(r.text).toBe('This causal relationship is moderate.');
+    expect(r.suppressed).toBe(1);
+    expect(r.missed_grammar).toBe(0);
+  });
+
+  // The verb-initial guard catches the `carries_strength` rule when
+  // it would produce a subject-less verb fragment ("is causally
+  // linked.") at sentence start. A later rule may still substitute a
+  // noun-phrase replacement on the same span — that's acceptable and
+  // not what this test is pinning.
+  it('reverts the "is causally linked" splice when it would land sentence-initial', () => {
+    // Standalone input where carries_strength is the only matching rule
+    // (no surrounding "causal" / "edge" tokens to cue causal_strength_value).
+    const input = 'Carries a strength of 0.55.';
+    const r = suppressStructuralEdgeLanguage(input);
+    // The verb-initial fragment "is causally linked." is rejected; a
+    // grammatical splice via the article-aware causal_strength_value
+    // rule is also possible. Either way, missed_grammar must record
+    // at least one revert because carries_strength fired and was
+    // dropped.
+    expect(r.missed_grammar).toBeGreaterThanOrEqual(1);
+    // The output must not be the broken fragment.
+    expect(r.text).not.toBe('is causally linked.');
+  });
+
+  it('still rewrites mid-sentence "carries a strength of 0.55" cleanly (subject precedes)', () => {
+    const r = suppressStructuralEdgeLanguage(
+      'The link from Option A to the outcome carries a strength of 0.55.',
+    );
+    expect(r.text).toContain('is causally linked');
+    expect(r.suppressed).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('translateSensitivityLanguage — grammar guard via combined sanitiser', () => {
+  // The standalone translate function naively replaces the matched
+  // span; combined with surrounding "with a …" prose this can
+  // produce "with a a very strong sensitivity signal". The combined
+  // sanitiseAssistantTextProse should produce grammatical output. We
+  // assert against the combined helper since that is the user-facing
+  // entry point.
+  it('produces clean output for "with a sensitivity value of 1.0"', () => {
+    const r = sanitiseAssistantTextProse('Headline driver with a sensitivity value of 1.0 dominates.');
+    // Either the formatter produces a clean splice ("with a very strong …")
+    // or a self-contained one ("a very strong …") — the assertion is
+    // that no doubled article appears.
+    expect(r.text).not.toMatch(/\b(a|an|the)\s+(a|an|the)\b/i);
+    expect(r.sensitivity_rewrites).toBeGreaterThanOrEqual(0);
+  });
+
+  it('produces clean output for "with a sensitivity of -0.40"', () => {
+    const r = sanitiseAssistantTextProse('Driver shows with a sensitivity of -0.40 in the second run.');
+    expect(r.text).not.toMatch(/\b(a|an|the)\s+(a|an|the)\b/i);
   });
 });
 

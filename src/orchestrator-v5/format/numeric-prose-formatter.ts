@@ -94,16 +94,34 @@ const PROB_RULES: readonly ProbRule[] = [
   // \w+-only, so periods, commas, and other sentence-terminators
   // naturally stop the match — preventing cross-sentence binding.
   // Only the decimal is replaced; the surrounding clause is preserved.
+  //
+  // Delta-context guard: refuse the rewrite when the intervening
+  // tokens contain delta verbs / nouns ("changed", "moved",
+  // "shifted", "delta", "drop", "rise", "increase", "decrease",
+  // "by"-as-modifier). In that case the decimal is a magnitude of
+  // change, not a probability value, and converting to a percentage
+  // would mislead the user. Implemented in `rebuild`: returns null to
+  // leave the match intact.
   {
     pattern:
       /\b(?:probability|likelihood|chance)\b(?:\s+\w+){1,7}?\s+(0?\.\d{2,4})\b/gi,
     decimalIndex: 0,
     rebuild: (match, g, pct) => {
+      if (DELTA_CONTEXT_RE.test(match)) return null;
       const decimal = g[0] as string;
       return match.slice(0, match.length - decimal.length) + pct;
     },
   },
 ];
+
+/**
+ * Tokens that signal the matched decimal is a delta / magnitude of
+ * change rather than a raw probability. Tested against the full
+ * relaxed-pattern match (case-insensitive). When ANY of these appears
+ * inside the match the rebuilder declines and the decimal stays raw.
+ */
+const DELTA_CONTEXT_RE =
+  /\b(?:changed|moved|shifted|shifts?|drops?|dropped|rises?|rose|increased?|decreased?|delta|by\s+\d?\.|±)\b/i;
 
 /**
  * Returns true if the match position sits inside an unbalanced
@@ -212,9 +230,14 @@ export function formatNumericProse(text: string): NumericProseResult {
  * uses "very strong" regardless of sign (matches brief example
  * "1.0 → very strong sensitivity signal").
  */
+// Patterns optionally consume a preceding article ("a", "an", "the")
+// so the splice doesn't produce a doubled article when the band label
+// itself starts with "a" — e.g. "with a sensitivity value of 1.0"
+// must rewrite to "with a very strong sensitivity signal", not
+// "with a a very strong sensitivity signal".
 const SENSITIVITY_PATTERNS: RegExp[] = [
-  /\bsensitivity\s+(value\s+)?(of|is)\s+(-?\d?\.\d+)\b/gi,
-  /\bsensitivity\s*[:=]\s*(-?\d?\.\d+)\b/gi,
+  /(\b(?:a|an|the)\s+)?\bsensitivity\s+(?:value\s+)?(?:of|is)\s+(-?\d?\.\d+)\b/gi,
+  /(\b(?:a|an|the)\s+)?\bsensitivity\s*[:=]\s*(-?\d?\.\d+)\b/gi,
 ];
 
 function bandLabel(value: number): string {
@@ -237,23 +260,42 @@ export function translateSensitivityLanguage(text: string): SensitivityResult {
   let out = text;
   let rewrites = 0;
 
-  // Pattern 0: with "of"/"is" connector. Capture 3 is the decimal.
-  out = out.replace(SENSITIVITY_PATTERNS[0], (match, _vof, _connector, decStr) => {
+  // Pattern 0: with "of"/"is" connector. Captures: [optional article, decimal].
+  out = out.replace(SENSITIVITY_PATTERNS[0], (match, article, decStr) => {
     const value = Number(decStr);
     if (!Number.isFinite(value)) return match;
     rewrites++;
-    return bandLabel(value);
+    return spliceWithArticle(article as string | undefined, bandLabel(value));
   });
 
-  // Pattern 1: with `:` or `=` connector. Capture 1 is the decimal.
-  out = out.replace(SENSITIVITY_PATTERNS[1], (match, decStr) => {
+  // Pattern 1: with `:` or `=` connector. Captures: [optional article, decimal].
+  out = out.replace(SENSITIVITY_PATTERNS[1], (match, article, decStr) => {
     const value = Number(decStr);
     if (!Number.isFinite(value)) return match;
     rewrites++;
-    return bandLabel(value);
+    return spliceWithArticle(article as string | undefined, bandLabel(value));
   });
 
   return { text: out, rewrites };
+}
+
+/**
+ * Compose a sensitivity replacement with the matched preceding article,
+ * preserving its original whitespace and capitalisation. The bandLabel
+ * always starts with "a"; when the captured article is "a" we drop the
+ * label's leading "a " to avoid duplication. When the captured article
+ * is "an" / "the" we keep the original article and drop the label's
+ * leading "a ", deferring to the surrounding-clause's chosen
+ * determiner. When no article was captured the label is used as-is.
+ */
+function spliceWithArticle(article: string | undefined, label: string): string {
+  if (!article) return label;
+  // Strip leading "a " from the band label since the matched article
+  // already supplies a determiner. Capitalisation: if the matched
+  // article was capitalised ("A sensitivity …" at sentence start) the
+  // result preserves it via the article slice itself.
+  const stripped = label.replace(/^a\s+/i, '');
+  return article + stripped;
 }
 
 // ---------------------------------------------------------------
@@ -271,6 +313,11 @@ interface StructuralRule {
   readonly tokenWindow?: number;
 }
 
+// Each pattern optionally consumes a preceding article ("the", "a",
+// "an") so the replacement splice doesn't produce a determiner pileup
+// like "The this causal link is small." When the article is consumed,
+// `applyStructuralReplacement` capitalises the replacement if the
+// original article sat at the start of a sentence.
 const STRUCTURAL_RULES: readonly StructuralRule[] = [
   {
     id: 'carries_strength',
@@ -279,22 +326,32 @@ const STRUCTURAL_RULES: readonly StructuralRule[] = [
   },
   {
     id: 'edge_strength_weight',
-    pattern: /\bedge\s+(?:strength|weight)\s+(?:of\s+)?\d?\.\d+\b/gi,
+    pattern: /(?:\b(?:the|a|an)\s+)?\bedge\s+(?:strength|weight)\s+(?:of\s+)?\d?\.\d+\b/gi,
     replacement: 'this causal link',
   },
   {
     id: 'causal_strength_value',
-    pattern: /\b(?:causal\s+)?strength\s+(?:value\s+)?(?:of\s+)?\d?\.\d+\b/gi,
+    pattern: /(?:\b(?:the|a|an)\s+)?\b(?:causal\s+)?strength\s+(?:value\s+)?(?:of\s+)?\d?\.\d+\b/gi,
     replacement: 'this causal relationship',
   },
   {
     id: 'bare_strength_int',
-    pattern: /\bstrength\s+\d+(?:\.\d+)?\b/gi,
+    pattern: /(?:\b(?:the|a|an)\s+)?\bstrength\s+\d+(?:\.\d+)?\b/gi,
     replacement: 'this relationship',
     contextTokens: ['edge', 'causal', 'relationship', 'factor', 'path', 'driver'],
     tokenWindow: 5,
   },
 ];
+
+/**
+ * Returns true if the candidate match begins with an article ("The ",
+ * "A ", "An " — case-insensitive). Used by the splicer to decide
+ * whether to capitalise the replacement (preserving sentence-initial
+ * capitalisation) when the matched article was at sentence start.
+ */
+function startsWithArticle(matchText: string): boolean {
+  return /^(?:the|a|an)\s+/i.test(matchText);
+}
 
 /**
  * Returns true if any of `tokens` appears within `windowSize`
@@ -340,18 +397,63 @@ function hasContextToken(
 
 /**
  * Cheap grammar guard: returns true if the candidate text after a
- * replacement looks visibly broken — double space, orphan article
- * with no following word ("the ."), broken determiner sequence
- * ("a the"), or doubled punctuation ("..", ",,"). Any single failure
- * causes the caller to revert that one replacement and increment the
+ * replacement looks visibly broken. Any single failure causes the
+ * caller to revert that one replacement and increment the
  * `missed_grammar` counter.
+ *
+ * Patterns guarded:
+ *   - double whitespace (`\s{2,}`)
+ *   - orphan article with no following word (`the .`, `an !`)
+ *   - article-followed-by-article (`a the`)
+ *   - article-followed-by-demonstrative (`the this`, `a this`) — fires
+ *     when a structural replacement starting with `this …` lands after
+ *     an existing determiner from the surrounding clause
+ *   - demonstrative-followed-by-demonstrative (`this this`)
+ *   - doubled punctuation
+ *
+ * Note: a fuller grammar guard for verb-initial sentences (e.g. a
+ * structural replacement of `is causally linked` landing at the start
+ * of a sentence with no subject) is handled at the call site rather
+ * than here, because we need the replacement-start offset relative to
+ * the sentence boundary to detect it.
  */
 function looksBroken(text: string): boolean {
   if (/\s{2,}/.test(text)) return true;
   if (/\b(?:the|a|an)\s+[.,;:!?]/i.test(text)) return true;
   if (/\b(?:a|an|the)\s+(?:a|an|the)\b/i.test(text)) return true;
+  if (/\b(?:a|an|the)\s+(?:this|that|these|those)\b/i.test(text)) return true;
+  if (/\b(?:this|that|these|those)\s+(?:this|that|these|those)\b/i.test(text)) return true;
   if (/[.,!?;:]{2,}/.test(text)) return true;
   return false;
+}
+
+/**
+ * Returns true if the splice starting at `replacementStart` in
+ * `candidate` produces a verb-initial sentence — i.e. the structural
+ * replacement begins with a verb-form like `is causally linked` and
+ * sits at the start of a sentence (no preceding subject in the same
+ * clause). Used to revert replacements like
+ * `Carries a strength of 0.55.` → `is causally linked.`
+ * which read as ungrammatical fragments.
+ */
+function isVerbInitialAtSentenceStart(
+  candidate: string,
+  replacementStart: number,
+  replacementText: string,
+): boolean {
+  // Verb-form replacements that need a subject. The other structural
+  // replacements ("this causal link", "this causal relationship",
+  // "this relationship") read as noun phrases and are fine at clause
+  // boundaries.
+  if (!/^is\b/i.test(replacementText)) return false;
+  // Walk back through whitespace; if we hit start-of-string or a
+  // sentence-terminator immediately before the replacement, this is a
+  // sentence-initial verb fragment.
+  let i = replacementStart - 1;
+  while (i >= 0 && /\s/.test(candidate.charAt(i))) i--;
+  if (i < 0) return true;
+  const ch = candidate.charAt(i);
+  return ch === '.' || ch === '!' || ch === '?';
 }
 
 export interface StructuralResult {
@@ -407,11 +509,37 @@ export function suppressStructuralEdgeLanguage(text: string): StructuralResult {
     matched += candidates.length;
     // Apply right-to-left.
     for (let i = candidates.length - 1; i >= 0; i--) {
-      const { start, end } = candidates[i];
-      const candidate = working.slice(0, start) + rule.replacement + working.slice(end);
+      const { start, end, match: matchedText } = candidates[i];
+
+      // If the rule consumed a leading article, decide whether to
+      // capitalise the replacement to preserve sentence-initial case.
+      // We capitalise when the captured article was the start of the
+      // sentence (start-of-string or preceded by `.`/`!`/`?` + space).
+      let replacement = rule.replacement;
+      if (startsWithArticle(matchedText)) {
+        let walker = start - 1;
+        while (walker >= 0 && /\s/.test(working.charAt(walker))) walker--;
+        const atSentenceStart =
+          walker < 0 ||
+          working.charAt(walker) === '.' ||
+          working.charAt(walker) === '!' ||
+          working.charAt(walker) === '?';
+        if (atSentenceStart) {
+          replacement = replacement.charAt(0).toUpperCase() + replacement.slice(1);
+        }
+      }
+
+      const candidate = working.slice(0, start) + replacement + working.slice(end);
+      // Verb-initial guard: revert if the replacement produces a
+      // sentence-initial verb fragment (e.g. `is causally linked.`
+      // with no subject).
+      if (isVerbInitialAtSentenceStart(candidate, start, replacement)) {
+        missedGrammar++;
+        continue;
+      }
       // Look at a small window around the splice for the grammar guard.
       const guardStart = Math.max(0, start - 8);
-      const guardEnd = Math.min(candidate.length, start + rule.replacement.length + 8);
+      const guardEnd = Math.min(candidate.length, start + replacement.length + 8);
       const guardWindow = candidate.slice(guardStart, guardEnd);
       if (looksBroken(guardWindow)) {
         missedGrammar++;
