@@ -411,3 +411,134 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
     expect(recordSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// V5 Phase 1 brief persistence — Defect B mutual-exclusion regression.
+//
+// Defect B's symptom was: `_meta.decision_brief_assembled === true` (the brief
+// was assembled and present somewhere in the request lifecycle) co-occurring
+// with `v5.decision_review.skipped` `reason: no_brief` for the same request.
+// The two events should be mutually exclusive — if a brief is available, the
+// enricher must not skip with `no_brief`.
+//
+// Pre-fix: turn-executor and chip-click-dispatch both passed `brief: null`
+// to the enricher (one via an unpopulated option, one hardcoded), so even
+// when the brief was assembled and persisted, the enricher saw null and
+// skipped. Post-fix: both call sites read from canonical state, so this
+// test pins the contract at the enricher boundary regardless of caller.
+// ---------------------------------------------------------------------------
+
+import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
+
+describe('Defect B mutual-exclusion: brief present ⇒ no `no_brief` skip', () => {
+  let events: Array<{ name: string; data: Record<string, unknown> }>;
+  beforeEach(() => {
+    // Restore between tests so the success-path spy from one case doesn't
+    // bleed into the negative-path cases that assert the spy was NOT called.
+    vi.restoreAllMocks();
+    events = [];
+    setTestSink((name, data) => events.push({ name, data }));
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.restoreAllMocks();
+  });
+
+  it('non-empty brief + valid run_analysis fact ⇒ enricher does NOT emit v5.decision_review.skipped no_brief', async () => {
+    // Provide a winning invoke result so the enricher takes the success
+    // path (not no_winner skip). The headline assertion is on the absence
+    // of the `no_brief` skip event for this request_id.
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    spy.mockResolvedValue({
+      output: {
+        winner: { option_id: 'opt-1', option_label: 'Option A' },
+        rationale: 'because',
+      },
+      meta: { duration_ms: 5, brief_hash: 'h', model: 'gpt-4.1', kept_node_count: 0, kept_edge_count: 0 },
+      resolution: MOCK_RESOLUTION,
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-defect-b-mux',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: 'a real persisted brief',
+    });
+
+    // Mutual exclusion: when brief is non-empty, NO no_brief skip event
+    // fires for this request.
+    const skipEvents = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewSkipped &&
+        e.data.request_id === 'req-defect-b-mux',
+    );
+    const noBriefSkips = skipEvents.filter((e) => e.data.reason === 'no_brief');
+    expect(noBriefSkips).toHaveLength(0);
+
+    // Sanity check on the contract: the invoke happened (because the
+    // brief and enrichment were both present), so the enricher took the
+    // happy path — not any other skip path.
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('null brief + valid run_analysis fact ⇒ enricher EMITS v5.decision_review.skipped no_brief (negative case)', async () => {
+    // The other half of the mutual exclusion: when brief IS null, the
+    // skip event MUST fire. Without this assertion the regression test
+    // could pass by accident (e.g. if telemetry stopped emitting).
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-no-brief-skip',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: null,
+    });
+
+    const noBriefSkips = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewSkipped &&
+        e.data.request_id === 'req-no-brief-skip' &&
+        e.data.reason === 'no_brief',
+    );
+    expect(noBriefSkips).toHaveLength(1);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('empty-string brief ⇒ no_brief skip fires (treats empty as absent)', async () => {
+    // Defence-in-depth: app-side normaliseBriefText collapses empty
+    // strings to undefined before they reach the enricher, but if a
+    // future caller bypasses normalisation, the enricher must still
+    // treat empty as absent (the existing `!input.brief || input.brief.length === 0`
+    // guard). Pin that semantic here.
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-empty-brief',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: '',
+    });
+
+    const noBriefSkips = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewSkipped &&
+        e.data.request_id === 'req-empty-brief' &&
+        e.data.reason === 'no_brief',
+    );
+    expect(noBriefSkips).toHaveLength(1);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

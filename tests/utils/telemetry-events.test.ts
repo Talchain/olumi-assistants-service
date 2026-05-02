@@ -436,16 +436,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TurnExecutorFailureResponse: "turn_executor.failure_response",
         TurnExecutorGraphLookup: "turn_executor.graph_lookup",
         TurnExecutorStarted: "turn_executor.started",
+        V5BriefTextNormalised: "v5.brief_text.normalised",
         V5CoachingSignalFired: "v5.coaching.signal_fired",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
         V5DecisionReviewFailed: "v5.decision_review.failed",
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
         V5DeterministicValueUpdate: "v5.deterministic_value_update",
-        // v5.edit_graph.graph_state_* events landed on staging in commit
-        // ead53993 (routing fix); the snapshot was not updated at the time.
-        // Catching up here so the schema-amendment pre-push isn't blocked
-        // by an unrelated upstream gap.
         V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
         V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
         V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
@@ -485,7 +482,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(brief_text|coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|edit_graph|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1006,6 +1003,22 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // these telemetry events are diagnostic-only.
         TelemetryEvents.PostAnalysisDirectAnswerRecovered,
         TelemetryEvents.PostAnalysisDirectAnswerRecoverySkipped,
+        // V5 edit-graph routing recovery (debug-only — diagnostic signal
+        // for whether graphState was present, reloaded from canonical
+        // state, or genuinely unavailable).
+        TelemetryEvents.V5EditGraphGraphStatePresent,
+        TelemetryEvents.V5EditGraphGraphStateReloaded,
+        TelemetryEvents.V5EditGraphGraphStateUnavailable,
+        // V5 Phase 1 brief persistence — diagnostic signal that the
+        // user-supplied brief exceeded MAX_BRIEF_TEXT_LENGTH and was
+        // truncated by normaliseBriefText. Operators can alert on a
+        // non-zero rate; the operational signal is the persisted
+        // brief_text, not this event.
+        TelemetryEvents.V5BriefTextNormalised,
+        // Track 2A response-prose sanitiser — diagnostic signal that
+        // the response composer rewrote prose to satisfy the
+        // numeric-prose contract.
+        TelemetryEvents.V5ResponseProseSanitised,
       ];
 
       for (const event of allEvents) {
@@ -1401,14 +1414,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "turn_executor.failure_response",
         "turn_executor.graph_lookup",
         "turn_executor.started",
+        "v5.brief_text.normalised",
         "v5.coaching.signal_fired",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",
         "v5.decision_review_degraded",
         "v5.deterministic_value_update",
-        // v5.edit_graph.graph_state_* events landed on staging in commit
-        // ead53993 (routing fix); the snapshot was not updated at the time.
         "v5.edit_graph.graph_state_present",
         "v5.edit_graph.graph_state_reloaded",
         "v5.edit_graph.graph_state_unavailable",

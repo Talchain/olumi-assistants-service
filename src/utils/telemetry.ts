@@ -598,6 +598,14 @@ export const TelemetryEvents = {
   // the signal_id + turn_id so evaluators can correlate with coaching text.
   V5CoachingSignalFired: "v5.coaching.signal_fired",
 
+  // V5 Phase 1 brief persistence — fires from draft-graph-dispatch when the
+  // user-supplied free-text brief is truncated by normaliseBriefText (input
+  // length exceeded MAX_BRIEF_TEXT_LENGTH). Payload: { request_id,
+  // scenario_id, original_length, truncated_length, reason }. Operators can
+  // alert on a non-zero rate to detect users systematically pasting briefs
+  // exceeding the 8000-char DB cap.
+  V5BriefTextNormalised: "v5.brief_text.normalised",
+
   // CQE (Custom Quantity Extractor — V5 Layer 0) per CQE Design v1.1 §9 and
   // cqe-investigation-proposal.md §7.2. Emits once per turn after the
   // assembler runs extractQuantities(). Carries aggregate signals needed for

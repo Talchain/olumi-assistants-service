@@ -291,7 +291,7 @@ export async function dispatchDraftGraph(
     // undefined → RPC param NULL → no write.
     const briefNorm = normaliseBriefText(payload.message);
     if (briefNorm.truncated) {
-      emit('v5.brief_text.normalised', {
+      emit(TelemetryEvents.V5BriefTextNormalised, {
         request_id: requestId,
         scenario_id: payload.scenario_id,
         original_length: briefNorm.originalLength,
