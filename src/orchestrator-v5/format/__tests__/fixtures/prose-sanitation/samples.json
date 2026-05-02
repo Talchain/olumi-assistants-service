@@ -1,0 +1,125 @@
+{
+  "_meta": {
+    "track": "Track 2A — V5 response prose sanitation",
+    "fixture_sourcing": "synthetic",
+    "tracker_note": "Real Render-log extracts for staging request IDs ae9b2726 and 133d0107 were not available at fixture build time. Samples below mirror the documented offending phrases verbatim from the brief. Replace with real captures when access is restored.",
+    "schema": {
+      "id": "stable identifier for the sample",
+      "source": "synthetic | log:<request_id>",
+      "text": "raw assistant_text candidate",
+      "expectations": "free-form notes on what sanitisation must / must not do"
+    }
+  },
+  "offending": [
+    {
+      "id": "off-001-prob-leading-decimal",
+      "source": "synthetic-from-log:ae9b2726",
+      "text": "Option A wins with a 0.862 probability of reaching the goal.",
+      "expectations": "decimal converted to '86%'; surrounding clause unchanged"
+    },
+    {
+      "id": "off-002-prob-of",
+      "source": "synthetic-from-log:ae9b2726",
+      "text": "The probability of success is around 0.74 across both runs.",
+      "expectations": "rewrite to '... probability is 74%' or 'probability of 74%'; do not introduce double tokens"
+    },
+    {
+      "id": "off-003-likelihood-is",
+      "source": "synthetic",
+      "text": "Likelihood is 0.55 that the new factor flips the ranking.",
+      "expectations": "rewrite '0.55' to '55%' inside the likelihood clause"
+    },
+    {
+      "id": "off-004-chance-of",
+      "source": "synthetic",
+      "text": "There is a chance of 0.12 that the risk fires before Q3.",
+      "expectations": "rewrite '0.12' to '12%' inside the chance clause"
+    },
+    {
+      "id": "off-005-win-prob-colon",
+      "source": "synthetic",
+      "text": "Win probability: 0.91 for Option B.",
+      "expectations": "rewrite to 'Win probability 91% for Option B.'"
+    },
+    {
+      "id": "off-006-goal-prob-equals",
+      "source": "synthetic",
+      "text": "Goal probability = 0.62 in the latest run.",
+      "expectations": "rewrite to 'Goal probability 62% in the latest run.'"
+    },
+    {
+      "id": "off-007-strength-carries",
+      "source": "synthetic-from-log:133d0107",
+      "text": "The link from Option A to the outcome carries a strength of 0.55.",
+      "expectations": "structural phrase suppressed; sentence ends 'is causally linked.'"
+    },
+    {
+      "id": "off-008-edge-strength",
+      "source": "synthetic",
+      "text": "We see edge strength of 0.30 from Marketing Spend to Revenue.",
+      "expectations": "structural phrase suppressed; replaced with 'this causal link'"
+    },
+    {
+      "id": "off-009-causal-strength-value",
+      "source": "synthetic",
+      "text": "The causal strength value of 0.42 is moderate.",
+      "expectations": "structural phrase suppressed"
+    },
+    {
+      "id": "off-010-sensitivity-of",
+      "source": "synthetic-from-log:ae9b2726",
+      "text": "We measured a sensitivity value of 1.0 for the headline driver.",
+      "expectations": "rewritten to 'a very strong sensitivity signal'"
+    },
+    {
+      "id": "off-011-sensitivity-negative",
+      "source": "synthetic",
+      "text": "The driver shows sensitivity of -0.40 in the second run.",
+      "expectations": "rewritten to 'a negative sensitivity signal'"
+    }
+  ],
+  "legitimate": [
+    {
+      "id": "leg-001-already-percent",
+      "source": "synthetic",
+      "text": "This option has an 86% chance of reaching the goal.",
+      "expectations": "unchanged: percentage already in display form"
+    },
+    {
+      "id": "leg-002-confidence-paren",
+      "source": "synthetic",
+      "text": "The forecast carries a moderate band (0.95 confidence interval) across runs.",
+      "expectations": "unchanged: parenthetical CI must not be rewritten"
+    },
+    {
+      "id": "leg-003-pp-delta",
+      "source": "synthetic",
+      "text": "The win-rate moved by -0.40 percentage points after the change.",
+      "expectations": "unchanged: delta context, not a sensitivity"
+    },
+    {
+      "id": "leg-004-version-string",
+      "source": "synthetic",
+      "text": "Updated to version 0.10.0 of the schemas package.",
+      "expectations": "unchanged: version triplet is not a probability"
+    },
+    {
+      "id": "leg-005-entity-id-decimal",
+      "source": "synthetic",
+      "text": "Factor fac_churn_0.5 was extracted from the brief.",
+      "expectations": "unchanged: entity-id with decimal suffix"
+    },
+    {
+      "id": "leg-006-field-name",
+      "source": "synthetic",
+      "text": "The exists_probability field is preserved on every edge.",
+      "expectations": "unchanged: 'exists_probability' is a field name not user-facing prose"
+    },
+    {
+      "id": "leg-007-response-hash",
+      "source": "synthetic",
+      "text": "The response_hash: 4da7e62f208e was attached to the turn.",
+      "expectations": "unchanged: hash content has no decimals"
+    }
+  ]
+}
