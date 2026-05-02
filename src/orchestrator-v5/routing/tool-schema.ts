@@ -211,11 +211,18 @@ export const OLUMI_ACTION_TOOL = {
                 // `anyOf` below is the narrowest concrete non-empty schema
                 // that covers today's registered handlers: primitives (for
                 // simple set/increase parameters) or a structured wrapper
-                // `{ value, raw_value?, unit?, cap? }` for handlers that
-                // need to carry unit/cap alongside the numeric value.
-                // Future handlers that emit arrays or other shapes must
-                // extend this union explicitly so the contract is visible
-                // to Sonnet.
+                // `{ value, unit?, cap? }` for handlers that need to carry
+                // unit/cap alongside the numeric value. Future handlers
+                // that emit arrays or other shapes must extend this union
+                // explicitly so the contract is visible to Sonnet.
+                //
+                // V5 D1 golden-path closure (A3.1 Task 4): the previous
+                // schema also advertised `raw_value` to Sonnet, but the
+                // handler's `parseProposalValue` ignored it — dead
+                // documentation that risked silent double-normalisation.
+                // Dropped here so Sonnet is no longer encouraged to emit
+                // it; the handler's StructuredValueSchema is now strict
+                // and rejects the key explicitly.
                 value: {
                   anyOf: [
                     { type: 'number' },
@@ -226,13 +233,6 @@ export const OLUMI_ACTION_TOOL = {
                       additionalProperties: false,
                       properties: {
                         value: {
-                          anyOf: [
-                            { type: 'number' },
-                            { type: 'string' },
-                            { type: 'boolean' },
-                          ],
-                        },
-                        raw_value: {
                           anyOf: [
                             { type: 'number' },
                             { type: 'string' },

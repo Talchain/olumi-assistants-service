@@ -51,8 +51,13 @@ export const SetFactorValueValueSchema = z.union([
   z.number(),
   z
     .object({
+      // V5 D1 golden-path closure (A3.1 Task 4): `raw_value` was
+      // previously declared optional but ignored by `parseProposalValue`
+      // — it never reached the handler logic. Removing it from the
+      // schema closes the silent-strip footgun: a proposal carrying
+      // `{ value: 5, raw_value: 0.05 }` now fails Zod validation with
+      // "Unrecognized key(s)" rather than silently picking `value`.
       value: z.number(),
-      raw_value: z.number().optional(),
       unit: z.string().optional(),
       cap: z.number().optional(),
     })
