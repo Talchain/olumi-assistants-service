@@ -30,7 +30,7 @@
  * regressions, etc.).
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { commitDirectAnswer } from '../commit.js';
 import { buildTurnContext } from '../build-turn-context.js';
@@ -276,10 +276,14 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
 // via runTurnExecutor on a follow-up run_analysis turn.
 //
 // This is the DEFECT B regression test in its full composed form. Earlier
-// suites prove individual seams; this suite proves the entire chain
+// suites prove individual seams; this suite proves the chain
 // (commit → stateful store → buildTurnContext → turn-executor →
-// enrichRunAnalysisWithDecisionReview) without mocking any boundary above
-// the SessionStore.
+// enrichRunAnalysisWithDecisionReview invocation) by running the executor
+// for real against the stateful fake SessionStore. The enricher itself is
+// spied on with a pass-through mock implementation: the goal is to verify
+// that the executor INVOKES the enricher with the canonical-state brief
+// in the captured arguments — not to exercise the enricher's own logic
+// (which has its own dedicated test suite).
 // ---------------------------------------------------------------------------
 
 // vi.mock calls have to be hoisted, and runTurnExecutor's session module
@@ -352,6 +356,16 @@ function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
 }
 
 describe('V5 Phase 1 brief persistence — full liveness chain through runTurnExecutor', () => {
+  // Restore all spies and mocks between tests in this suite so that
+  // call history on enrichRunAnalysisWithDecisionReview does not bleed
+  // between cases. Each test re-installs its own spy at the top of the
+  // body; restoring after each keeps that idempotent and prevents a
+  // future test that asserts on call counts from silently inheriting
+  // prior invocations.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('Defect B closure: persisted briefText reaches enrichRunAnalysisWithDecisionReview via runTurnExecutor', async () => {
     // Step 1: bind a fresh stateful store to the singleton mock so the
     // executor's getSessionStore() call resolves to it.
@@ -391,8 +405,11 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
     // Step 4: run a follow-up run_analysis turn. The Sonnet routing
     // adapter is stubbed to return a tool-use call resolving to
     // run_analysis on opt_a. The PLoT client is stubbed to return a
-    // golden envelope. NO mocks at the buildTurnContext, executor, or
-    // enricher seam — those run for real against the stateful store.
+    // golden envelope. buildTurnContext and the turn-executor seven-
+    // step assembly run for real against the stateful store; the
+    // enricher implementation is replaced by the pass-through spy
+    // installed above so we can capture the arguments the executor
+    // hands it (the enricher's own logic is tested in its own suite).
     const routingAdapter = {
       chatWithTools: vi
         .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
