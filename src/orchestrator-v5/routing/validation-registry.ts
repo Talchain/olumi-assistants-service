@@ -13,6 +13,7 @@
  */
 
 import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
+import { SetFactorValueValueSchema } from '../tools/handlers/set-factor-value.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -106,6 +107,18 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   what_would_flip: {
     handler_id: 'what_would_flip',
     accepted_entity_kinds: ['goal', 'option'],
+    confirmation_template: noopHandlerConfirmationTemplate,
+  },
+  // V5 D1 mutation handlers. Each accepts the wire `'node'` entity kind
+  // (factor nodes collapse to 'node' on the boundary). The handler body
+  // performs the kind === 'factor' / 'edge' / 'goal-or-factor' check
+  // against the in-memory graph and surfaces ENTITY_KIND_MISMATCH if it
+  // doesn't match. confirmation_template forwards the handler-authored
+  // assistant_text — the handler owns the user-visible string.
+  set_factor_value: {
+    handler_id: 'set_factor_value',
+    accepted_entity_kinds: ['node'],
+    parameter_schemas: { value: SetFactorValueValueSchema },
     confirmation_template: noopHandlerConfirmationTemplate,
   },
 };

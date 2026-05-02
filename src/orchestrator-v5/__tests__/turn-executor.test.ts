@@ -448,17 +448,18 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
   // -------------------------------------------------------------------
   describe('UNSUPPORTED_ACTION — unregistered handler', () => {
     it('validator path: HANDLER_NOT_FOUND → 200 coaching response (no error block, commit_performed=true)', async () => {
-      // Routing LLM proposes `set_factor_value` — an action declared in the
-      // V5ActionType union but NOT in HANDLER_VALIDATION_REGISTRY (which
-      // only has run_analysis today). Validator returns HANDLER_NOT_FOUND.
-      // The graceful fallback returns a 200 coaching response so the user
-      // is pointed at what they can do, rather than a 500 "Something went
-      // wrong" envelope.
+      // Routing LLM proposes `add_constraint` — an action declared in the
+      // V5ActionType union but NOT in HANDLER_VALIDATION_REGISTRY at this
+      // point in D1 (set_factor_value lands first; add_constraint and
+      // adjust_edge_strength land in the next D1 commits). Validator
+      // returns HANDLER_NOT_FOUND. The graceful fallback returns a 200
+      // coaching response so the user is pointed at what they can do,
+      // rather than a 500 "Something went wrong" envelope.
       const routingAdapter = mockRoutingAdapter(async () =>
         mkToolUseResult({
           intent_class: 'execute',
           action: {
-            handler_id: 'set_factor_value',
+            handler_id: 'add_constraint',
             entity: {
               id: 'factor-x',
               kind: 'node',

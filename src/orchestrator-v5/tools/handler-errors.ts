@@ -41,7 +41,17 @@ export type HandlerInvocationFailedCause =
   // no usable fields". See Docs/v5/v5-resilience-contract.md Part C.
   | 'analysis_blocked'
   | 'analysis_failed'
-  | 'options_not_configured';
+  | 'options_not_configured'
+  // V5 D1 mutation handlers (set_factor_value, add_constraint,
+  // adjust_edge_strength). Surface at execute-time when the validator's
+  // structural pass missed the failure — e.g. graph-dependent checks
+  // that fire only after the handler reads the in-memory graph, or
+  // post-mutation Zod validation rejecting an invalid graph.
+  | 'parameter_invalid_at_execute'
+  | 'entity_not_found_in_graph'
+  | 'entity_kind_mismatch_at_execute'
+  | 'graph_invariant_violated'
+  | 'precondition_unmet_at_execute';
 
 /**
  * Handler failure payload. `handler_id` is always present so telemetry and

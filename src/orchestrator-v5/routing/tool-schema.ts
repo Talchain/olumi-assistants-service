@@ -79,6 +79,7 @@ export const OLUMI_ACTION_TOOL = {
               'explain_from_structure',
               'explain_results',
               'what_would_flip',
+              'set_factor_value',
             ],
             description:
               'The action to execute. Pick the handler that matches the user intent:\n' +
@@ -122,9 +123,22 @@ export const OLUMI_ACTION_TOOL = {
               'band, and what changes would alter the outcome. Do not use ' +
               'mutation language.\n' +
               '\n' +
+              '• set_factor_value — change a factor node\'s observed value ' +
+              '("set churn to 5%", "increase budget by £10k", "double the ' +
+              'team size"). Mutates the graph deterministically; the ' +
+              'analysis becomes stale. The entity must be a factor (kind: ' +
+              '"node" with the factor\'s id). Pass the value as a structured ' +
+              'parameter `{ value: <number>, unit: "%" | "£" | …, cap?: ' +
+              '<number> }` so the handler can normalise model units; for ' +
+              'percentage factors capped at 100, "5%" must arrive as ' +
+              '`{ value: 5, unit: "%", cap: 100 }`, NOT `0.05`. Use the ' +
+              '`operator` field for relative changes (set / increase / ' +
+              'decrease / multiply). Do NOT include an `explanation` ' +
+              'payload on this handler.\n' +
+              '\n' +
               'Graph structural changes (draft_graph, edit_graph) are ' +
               'dispatched by the system before routing and never reach this ' +
-              'tool call. Value modifications happen on the canvas UI.',
+              'tool call.',
           },
           entity: {
             type: 'object',

@@ -214,6 +214,63 @@ function composeBody(error: HandlerInvocationFailedError): BranchResult {
       };
     }
 
+    // V5 D1 mutation handlers — typed recovery for execute-time failures
+    // the structural validator could not catch.
+    case 'parameter_invalid_at_execute': {
+      const issue = sanitiseForUser(details.specific_issue ?? 'The value is ambiguous.');
+      return {
+        body: {
+          assistant_text: `I couldn't apply that change. ${issue}`,
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'parameter_invalid_at_execute',
+        chip_type: 'action',
+      };
+    }
+
+    case 'entity_not_found_in_graph':
+      return {
+        body: {
+          assistant_text:
+            "I couldn't find that item in the model. It may have been renamed or removed.",
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'entity_not_found_in_graph',
+        chip_type: 'action',
+      };
+
+    case 'entity_kind_mismatch_at_execute':
+      return {
+        body: {
+          assistant_text:
+            "That change can't be applied to that kind of item. Try targeting a different entity.",
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'entity_kind_mismatch_at_execute',
+        chip_type: 'action',
+      };
+
+    case 'precondition_unmet_at_execute':
+      return {
+        body: {
+          assistant_text: "I can't make that change yet — the model isn't ready for it.",
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'precondition_unmet_at_execute',
+        chip_type: 'action',
+      };
+
+    case 'graph_invariant_violated':
+      return {
+        body: {
+          assistant_text:
+            "Applying that change would have left the model in an invalid state, so it wasn't saved.",
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'graph_invariant_violated',
+        chip_type: 'action',
+      };
+
     default: {
       const _exhaustive: never = error.cause_kind;
       void _exhaustive;

@@ -1224,6 +1224,7 @@ export async function runTurnExecutor(
           explanation: explanationInvocationPayload,
           analysisProjection,
           structureProjection,
+          graphForTurn: graphStateForTurn ?? undefined,
         });
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');
@@ -1683,10 +1684,21 @@ export async function runTurnExecutor(
       // V5 D1 mutation handlers (set_factor_value, add_constraint,
       // adjust_edge_strength) emit a post-mutation graph on
       // HandlerOutcome.mutated_graph. When present it supersedes the
-      // per-turn ingress graph so append_turn_atomic(p_graph) persists
-      // the mutated state. Handlers MUST have validated this graph
-      // through GraphV3.parse before returning it — invalid graphs do
-      // not reach here.
+      // per-turn ingress / persisted graph so append_turn_atomic(p_graph)
+      // persists the mutated state. Handlers MUST have validated this
+      // graph through GraphV3.parse before returning it — invalid graphs
+      // do not reach here.
+      //
+      // Fallback chain when mutated_graph is absent:
+      //   1. options.graphState (request ingress, freshest if UI sent it)
+      //   2. graphStateForTurn (post-fallback per-turn graph — already
+      //      tries options.graphState then context.persistedGraph)
+      // We prefer options.graphState directly (matches pre-D1 behaviour:
+      // commit only echoes the ingress when the UI explicitly sent it,
+      // otherwise leaves scenarios.graph untouched). graphStateForTurn
+      // is used only when a mutation handler emits mutated_graph but the
+      // UI didn't send graph_state — in that case the persisted graph
+      // is the right merge base.
       const graphForCommit =
         handlerOutcome?.mutated_graph !== undefined
           ? handlerOutcome.mutated_graph

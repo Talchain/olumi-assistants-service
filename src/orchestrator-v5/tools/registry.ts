@@ -102,6 +102,7 @@ import {
 import { createExplainFromStructureHandler } from './handlers/explain-from-structure.js';
 import { createExplainResultsHandler } from './handlers/explain-results.js';
 import { createWhatWouldFlipHandler } from './handlers/what-would-flip.js';
+import { createSetFactorValueHandler } from './handlers/set-factor-value.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 
 // Re-exported for the chip-click dispatch path. The handler-ownership
@@ -205,6 +206,15 @@ export interface HandlerInvocation {
    * top causal links, named-factor pathway entries, goal label.
    */
   readonly structureProjection?: StructureProjectionSummary;
+  /**
+   * V5 D1: per-turn graph (post-fallback selection between
+   * `options.graphState` and persisted scenarios.graph). Mutation
+   * handlers (set_factor_value, add_constraint, adjust_edge_strength)
+   * read this and emit a `mutated_graph` on the outcome. Untyped to
+   * avoid a cee-v3 dependency in the registry contract — handlers are
+   * responsible for `GraphV3.parse`.
+   */
+  readonly graphForTurn?: unknown;
 }
 
 /**
@@ -302,11 +312,14 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
   const explainResults = createExplainResultsHandler();
   const whatWouldFlip = createWhatWouldFlipHandler();
 
+  const setFactorValue = createSetFactorValueHandler();
+
   return new Map<V5ActionType, HandlerFn>([
     ['run_analysis', runAnalysis],
     ['explain_from_structure', explainFromStructure],
     ['explain_results', explainResults],
     ['what_would_flip', whatWouldFlip],
+    ['set_factor_value', setFactorValue],
   ]);
 }
 
