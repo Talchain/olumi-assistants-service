@@ -95,19 +95,36 @@ const PROB_RULES: readonly ProbRule[] = [
   // naturally stop the match — preventing cross-sentence binding.
   // Only the decimal is replaced; the surrounding clause is preserved.
   //
-  // Delta-context guard: refuse the rewrite when the intervening
-  // tokens contain delta verbs / nouns ("changed", "moved",
-  // "shifted", "delta", "drop", "rise", "increase", "decrease",
-  // "by"-as-modifier). In that case the decimal is a magnitude of
-  // change, not a probability value, and converting to a percentage
-  // would mislead the user. Implemented in `rebuild`: returns null to
-  // leave the match intact.
+  // Two-class guard:
+  //   (a) delta-context: when the intervening tokens contain delta
+  //       verbs / nouns ("changed", "moved", "shifted", "delta",
+  //       "drop", "rise", "increase", "decrease", "by"-as-modifier,
+  //       "±"), the decimal is a magnitude of change, not a
+  //       probability value — decline the rewrite.
+  //   (b) diagnostic-as-metric-head: when a diagnostic noun
+  //       ("variance", "calibration", "error", "gap", "ratio",
+  //       "coefficient", "correlation", "divergence") appears
+  //       DIRECTLY adjacent to the probability token (e.g.
+  //       "probability variance is 0.12", "likelihood ratio is
+  //       0.42"), it identifies the metric being reported and the
+  //       decimal is its magnitude, not a probability — decline the
+  //       rewrite.
+  //
+  // CRUCIALLY, when the diagnostic noun appears as the OBJECT of an
+  // "of" clause (e.g. "probability of error is 0.12", "chance of
+  // error is 0.12", "probability of a gap opening is 0.42"), the
+  // phrase IS an event probability and we DO rewrite. The structural
+  // test for diagnostic-as-metric-head is encoded in
+  // `DIAGNOSTIC_AS_METRIC_HEAD_RE` below — it requires the
+  // diagnostic noun to immediately follow the probability token with
+  // no intervening "of" / article.
   {
     pattern:
       /\b(?:probability|likelihood|chance)\b(?:\s+\w+){1,7}?\s+(0?\.\d{2,4})\b/gi,
     decimalIndex: 0,
     rebuild: (match, g, pct) => {
       if (DELTA_CONTEXT_RE.test(match)) return null;
+      if (DIAGNOSTIC_AS_METRIC_HEAD_RE.test(match)) return null;
       const decimal = g[0] as string;
       return match.slice(0, match.length - decimal.length) + pct;
     },
@@ -115,22 +132,29 @@ const PROB_RULES: readonly ProbRule[] = [
 ];
 
 /**
- * Tokens that signal the matched decimal is a non-probability quantity
- * — either a delta / magnitude of change, or a diagnostic statistic
- * (variance, calibration error, gap, ratio, coefficient, correlation,
- * divergence). Tested against the full relaxed-pattern match
- * (case-insensitive). When ANY of these appears inside the match the
- * rebuilder declines and the decimal stays raw.
- *
- * Coverage:
- *   - delta verbs: changed, moved, shifted, drops/dropped, rose/rises,
- *     increased, decreased
- *   - delta nouns / markers: delta, "by 0.X", ±
- *   - diagnostic statistics: variance, calibration, error, gap, ratio,
- *     coefficient, correlation, divergence
+ * Tokens that signal the matched decimal is a delta / magnitude of
+ * change. Tested against the full relaxed-pattern match
+ * (case-insensitive).
  */
 const DELTA_CONTEXT_RE =
-  /\b(?:changed|moved|shifted|shifts?|drops?|dropped|rises?|rose|increased?|decreased?|delta|by\s+\d?\.|±|variance|calibration|error|gap|ratio|coefficient|correlation|divergence)\b/i;
+  /\b(?:changed|moved|shifted|shifts?|drops?|dropped|rises?|rose|increased?|decreased?|delta|by\s+\d?\.|±)\b/i;
+
+/**
+ * Diagnostic noun appearing IMMEDIATELY after a probability token,
+ * with no intervening "of" / article / determiner. This signals the
+ * diagnostic noun is the METRIC HEAD ("probability variance is 0.12",
+ * "likelihood ratio is 0.42") — the decimal is the magnitude of that
+ * statistic. By contrast, "probability of error is 0.12" / "chance of
+ * error is 0.12" / "probability of a gap opening is 0.42" are
+ * legitimate event-probability phrases and DO get rewritten.
+ *
+ * The pattern requires direct adjacency: probability-token, then a
+ * single whitespace or hyphen, then the diagnostic noun. The
+ * intentional restriction to direct adjacency keeps "of"-clauses
+ * (which carry the EVENT semantics) safely outside the guard.
+ */
+const DIAGNOSTIC_AS_METRIC_HEAD_RE =
+  /\b(?:probability|likelihood|chance)[-\s]+(?:variance|calibration|error|gap|ratio|coefficient|correlation|divergence)\b/i;
 
 /**
  * Returns true if the match position sits inside an unbalanced
@@ -322,11 +346,12 @@ interface StructuralRule {
   readonly tokenWindow?: number;
 }
 
-// Each pattern optionally consumes a preceding article ("the", "a",
-// "an") so the replacement splice doesn't produce a determiner pileup
-// like "The this causal link is small." When the article is consumed,
-// `applyStructuralReplacement` capitalises the replacement if the
-// original article sat at the start of a sentence.
+// Each pattern optionally consumes a preceding article OR demonstrative
+// ("the", "a", "an", "this", "that", "these", "those") so the
+// replacement splice doesn't produce a determiner pileup like
+// "The this causal link is small." or "This this causal relationship
+// is moderate." When the article was sentence-initial, the splicer
+// capitalises the replacement to preserve sentence case.
 const STRUCTURAL_RULES: readonly StructuralRule[] = [
   {
     id: 'carries_strength',
@@ -335,12 +360,12 @@ const STRUCTURAL_RULES: readonly StructuralRule[] = [
   },
   {
     id: 'edge_strength_weight',
-    pattern: /(?:\b(?:the|a|an)\s+)?\bedge\s+(?:strength|weight)\s+(?:of\s+)?\d?\.\d+\b/gi,
+    pattern: /(?:\b(?:the|a|an|this|that|these|those)\s+)?\bedge\s+(?:strength|weight)\s+(?:of\s+)?\d?\.\d+\b/gi,
     replacement: 'this causal link',
   },
   {
     id: 'causal_strength_value',
-    pattern: /(?:\b(?:the|a|an)\s+)?\b(?:causal\s+)?strength\s+(?:value\s+)?(?:of\s+)?\d?\.\d+\b/gi,
+    pattern: /(?:\b(?:the|a|an|this|that|these|those)\s+)?\b(?:causal\s+)?strength\s+(?:value\s+)?(?:of\s+)?\d?\.\d+\b/gi,
     replacement: 'this causal relationship',
   },
   {
@@ -353,19 +378,20 @@ const STRUCTURAL_RULES: readonly StructuralRule[] = [
     id: 'bare_strength_int',
     pattern: /\bstrength\s+\d+(?:\.\d+)?\b/gi,
     replacement: 'this relationship',
-    contextTokens: ['edge', 'causal', 'relationship', 'factor', 'path', 'driver'],
+    contextTokens: ['edge', 'causal', 'relationship', 'factor', 'path', 'driver', 'link'],
     tokenWindow: 5,
   },
 ];
 
 /**
  * Returns true if the candidate match begins with an article ("The ",
- * "A ", "An " — case-insensitive). Used by the splicer to decide
+ * "A ", "An ") or a demonstrative ("This ", "That ", "These ",
+ * "Those ") — case-insensitive. Used by the splicer to decide
  * whether to capitalise the replacement (preserving sentence-initial
- * capitalisation) when the matched article was at sentence start.
+ * capitalisation) when the matched determiner was at sentence start.
  */
 function startsWithArticle(matchText: string): boolean {
-  return /^(?:the|a|an)\s+/i.test(matchText);
+  return /^(?:the|a|an|this|that|these|those)\s+/i.test(matchText);
 }
 
 /**
@@ -439,15 +465,18 @@ function looksBroken(text: string): boolean {
   if (/\b(?:a|an|the)\s+(?:this|that|these|those)\b/i.test(text)) return true;
   if (/\b(?:this|that|these|those)\s+(?:this|that|these|those)\b/i.test(text)) return true;
   // Noun-pileup after a "this {noun}" replacement that landed against
-  // a stranded modifier — e.g. "The factor this relationship is high"
-  // or "This relationship edge was reported". Both read as broken
-  // post-modifier sequences. We catch the structural pattern of
-  // "{noun} this {noun}" and "this {noun} {noun}" where the second
-  // noun is a known structural-domain term.
-  if (/\b(?:factor|edge|driver|path|node|outcome|risk|option)\s+this\s+(?:relationship|causal|link)\b/i.test(text)) {
+  // a stranded modifier — e.g. "The factor this relationship is high",
+  // "The relationship this relationship is high", or "This
+  // relationship edge was reported". All read as broken post-modifier
+  // sequences. We catch the structural pattern of "{noun} this {noun}"
+  // and "this {noun} {noun}" where the second noun is a known
+  // structural-domain term. Including `relationship` itself in the
+  // first noun-set so the fully-doubled "relationship this
+  // relationship" splice is reverted.
+  if (/\b(?:factor|edge|driver|path|node|outcome|risk|option|relationship|link)\s+this\s+(?:relationship|causal|link)\b/i.test(text)) {
     return true;
   }
-  if (/\bthis\s+(?:relationship|causal\s+(?:link|relationship))\s+(?:factor|edge|driver|path|node|outcome|risk|option)\b/i.test(text)) {
+  if (/\bthis\s+(?:relationship|causal\s+(?:link|relationship))\s+(?:factor|edge|driver|path|node|outcome|risk|option|relationship|link)\b/i.test(text)) {
     return true;
   }
   if (/[.,!?;:]{2,}/.test(text)) return true;
@@ -607,9 +636,26 @@ export function suppressStructuralEdgeLanguage(text: string): StructuralResult {
         continue;
       }
 
-      const guardStart = Math.max(0, matchStart - 8);
-      const guardEnd = Math.min(candidate.length, matchStart + replacement.length + 8);
-      if (looksBroken(candidate.slice(guardStart, guardEnd))) {
+      // The noun-pileup detectors in `looksBroken` are anchored on
+      // `\b` and require word-boundary context that a small slice
+      // around the splice can chop in half (e.g. cutting "relationship"
+      // mid-syllable hides the boundary). Widen to the full sentence
+      // surrounding the splice.
+      const sentenceStart = Math.max(
+        candidate.lastIndexOf('.', matchStart - 1),
+        candidate.lastIndexOf('!', matchStart - 1),
+        candidate.lastIndexOf('?', matchStart - 1),
+      ) + 1;
+      let sentenceEndIdx = candidate.length;
+      for (let k = matchStart + replacement.length; k < candidate.length; k++) {
+        const c = candidate.charAt(k);
+        if (c === '.' || c === '!' || c === '?') {
+          sentenceEndIdx = k + 1;
+          break;
+        }
+      }
+      const guardWindow = candidate.slice(sentenceStart, sentenceEndIdx);
+      if (looksBroken(guardWindow)) {
         missedGrammar++;
         revertedSpans.push({ start: matchStart, end: matchEnd });
         continue;

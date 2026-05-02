@@ -458,6 +458,89 @@ describe('formatNumericProse — diagnostic probability terms (round 3)', () => 
   });
 });
 
+describe('formatNumericProse — diagnostic-as-metric-head guard preserves event-probability phrases (round 4)', () => {
+  // Round 4 sharpening: the diagnostic-noun guard must only block when
+  // the diagnostic noun is the metric head (directly adjacent to the
+  // probability token). When the diagnostic noun appears as the OBJECT
+  // of an "of" clause, it identifies the EVENT whose probability is
+  // being reported and the rewrite must proceed.
+  it('"probability of error is 0.12" rewrites to "probability of error is 12%"', () => {
+    const r = formatNumericProse('The probability of error is 0.12 in the latest run.');
+    expect(r.text).toContain('probability of error is 12%');
+    expect(r.text).not.toContain('0.12');
+    expect(r.rewrites).toBe(1);
+  });
+
+  it('"chance of error is 0.12" rewrites to "chance of error is 12%"', () => {
+    const r = formatNumericProse('The chance of error is 0.12 across the corpus.');
+    expect(r.text).toContain('chance of error is 12%');
+    expect(r.text).not.toContain('0.12');
+    expect(r.rewrites).toBe(1);
+  });
+
+  it('"probability of a gap opening is 0.42" rewrites the trailing decimal', () => {
+    const r = formatNumericProse('The probability of a gap opening is 0.42 next quarter.');
+    expect(r.text).toContain('42%');
+    expect(r.text).not.toContain('0.42');
+    expect(r.rewrites).toBe(1);
+  });
+
+  it('"likelihood of a calibration drift" still rewrites (calibration is the event noun, not the metric)', () => {
+    const r = formatNumericProse('The likelihood of a calibration drift is 0.20 next month.');
+    expect(r.text).toContain('20%');
+    expect(r.text).not.toContain('0.20');
+  });
+});
+
+describe('suppressStructuralEdgeLanguage — demonstrative consumption (round 4)', () => {
+  // Round 4: structural patterns now consume "this/that/these/those"
+  // in addition to "the/a/an", so explanatory prose that opens with
+  // "This causal strength value …" splices grammatically rather than
+  // producing "This this causal relationship …" (which would be
+  // reverted by the determiner-pileup guard, leaving the raw decimal
+  // visible).
+  it('"This causal strength value of 0.42 is moderate." → "This causal relationship is moderate."', () => {
+    const r = suppressStructuralEdgeLanguage('This causal strength value of 0.42 is moderate.');
+    expect(r.text).toBe('This causal relationship is moderate.');
+    expect(r.suppressed).toBe(1);
+    expect(r.missed_grammar).toBe(0);
+  });
+
+  it('"This edge strength of 0.42 is moderate." → "This causal link is moderate."', () => {
+    const r = suppressStructuralEdgeLanguage('This edge strength of 0.42 is moderate.');
+    expect(r.text).toBe('This causal link is moderate.');
+    expect(r.suppressed).toBe(1);
+    expect(r.missed_grammar).toBe(0);
+  });
+
+  it('"That edge weight 0.30 is small." → "This causal link is small." preserves substitution case', () => {
+    // "That" sits at sentence start → replacement capitalised.
+    const r = suppressStructuralEdgeLanguage('That edge weight 0.30 is small.');
+    expect(r.text).toBe('This causal link is small.');
+    expect(r.suppressed).toBe(1);
+  });
+});
+
+describe('suppressStructuralEdgeLanguage — relationship-noun pileup guard (round 4)', () => {
+  // Round 4: bare_strength_int does not consume the leading article,
+  // so "The relationship strength 1 is high" naively splices to "The
+  // relationship this relationship is high." The pileup guard must
+  // catch this — `relationship` is now in the first noun-set.
+  it('"The relationship strength 1 is high." reverts (would produce "relationship this relationship")', () => {
+    const input = 'The relationship strength 1 is high.';
+    const r = suppressStructuralEdgeLanguage(input);
+    expect(r.text).toBe(input);
+    expect(r.missed_grammar).toBeGreaterThanOrEqual(1);
+  });
+
+  it('"The link strength 1 is small." reverts similarly', () => {
+    const input = 'The link strength 1 is small.';
+    const r = suppressStructuralEdgeLanguage(input);
+    expect(r.text).toBe(input);
+    expect(r.missed_grammar).toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe('sanitiseAssistantTextProse — combined ordering structural → sensitivity → numeric', () => {
   it('handles all three classes in one pass', () => {
     const input =
