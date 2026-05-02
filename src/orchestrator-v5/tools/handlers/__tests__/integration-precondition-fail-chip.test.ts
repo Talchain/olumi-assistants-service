@@ -46,6 +46,8 @@ function buildEnrichedTurnContext(message: string): EnrichedTurnContext {
     budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
     prior_turns: [],
     prior_facts: [],
+    scenarioBriefText: null,
+    persistedGraph: null,
   };
 }
 

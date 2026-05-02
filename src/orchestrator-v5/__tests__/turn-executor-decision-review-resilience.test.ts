@@ -17,6 +17,10 @@ import type {
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
 
+// Module-level holder for the session-store stub; tests can mutate it to
+// configure what loadGraphAndBriefText returns for the current run.
+const mockSessionState: { briefText: string | null } = { briefText: null };
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: 'mock-row-id' }),
@@ -31,6 +35,10 @@ vi.mock('../session/index.js', () => ({
       entries_invalidated: [],
     }),
     loadGraph: async () => null,
+    loadGraphAndBriefText: async () => ({
+      graph: null,
+      briefText: mockSessionState.briefText,
+    }),
     storeDraftGraph: async () => undefined,
     ensureScenarioExists: async () => ({ user_id: null }),
   }),
@@ -146,6 +154,9 @@ function degradedEvent(): Event | undefined {
 beforeEach(() => {
   events = [];
   installSink();
+  // Reset the session-store brief stub between tests so brief-presence
+  // does not leak across the suite.
+  mockSessionState.briefText = null;
 });
 afterEach(() => {
   uninstallSink();
@@ -216,5 +227,125 @@ describe('TurnExecutor — decision_review enricher resilience', () => {
     expect(result.telemetry.failure_type).toBeNull();
     expect(result.telemetry.commit_performed).toBe(true);
     expect(degradedEvent()).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 Phase 1 brief persistence — context.scenarioBriefText is the source of
+// truth; options.scenarioBrief is a deprecated fallback only.
+// ---------------------------------------------------------------------------
+
+describe('TurnExecutor — decision_review brief sourcing (V5 Phase 1)', () => {
+  it('passes context.scenarioBriefText to the enricher when persisted in scenarios.brief_text', async () => {
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    mockSessionState.briefText = 'A persisted brief from canonical state';
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-brief-canonical', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+      // options.scenarioBrief deliberately ABSENT — must NOT fall through.
+    });
+
+    expect(enricherSpy).toHaveBeenCalled();
+    const call = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
+    expect(call[0].brief).toBe('A persisted brief from canonical state');
+  });
+
+  it('FAILS-LOUD case: deliberately absent options.scenarioBrief + persisted briefText → enricher receives canonical, never null', async () => {
+    // This is the Defect B regression test. Pre-fix:
+    //   - context.scenarioBriefText did not exist
+    //   - options.scenarioBrief was the only channel and no caller populated it
+    //   - enricher always saw `brief: null` and skipped with reason
+    //     `no_brief` even though the user supplied a brief on the draft turn
+    // Post-fix: the canonical state value reaches the enricher.
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    mockSessionState.briefText = 'Should I take the offer?';
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-defect-b', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+      // No scenarioBrief option — this MUST work via canonical state.
+    });
+
+    const call = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
+    expect(call[0].brief).not.toBeNull();
+    expect(call[0].brief).toBe('Should I take the offer?');
+  });
+
+  it('falls back to options.scenarioBrief (deprecated) when context has no brief', async () => {
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    mockSessionState.briefText = null;
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-fallback', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+      scenarioBrief: 'legacy out-of-band brief',
+    });
+
+    const call = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
+    expect(call[0].brief).toBe('legacy out-of-band brief');
+  });
+
+  it('prefers context.scenarioBriefText over options.scenarioBrief when both are present', async () => {
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    mockSessionState.briefText = 'canonical wins';
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-precedence', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+      scenarioBrief: 'legacy fallback',
+    });
+
+    const call = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
+    expect(call[0].brief).toBe('canonical wins');
+  });
+
+  it('passes null to the enricher (preserving no_brief skip) when neither source has a brief', async () => {
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    mockSessionState.briefText = null;
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(resolvedRunAnalysisToolCall()),
+    );
+
+    await runTurnExecutor(BASE_PAYLOAD, 'req-no-brief', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+      // No scenarioBrief, no persisted briefText → null reaches enricher.
+    });
+
+    const call = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
+    expect(call[0].brief).toBeNull();
   });
 });

@@ -52,7 +52,7 @@ import {
   composeToolCallResponse,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext, loadPersistedGraph } from './build-turn-context.js';
+import { buildTurnContext } from './build-turn-context.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -258,6 +258,15 @@ export interface RunTurnExecutorOptions {
    * to the decision-review enricher without ever touching the run_analysis
    * handler fact's enrichment (F.6 / handler-ownership invariant).
    * When null/absent, the enricher skips with reason `no_brief`.
+   *
+   * @deprecated V5 Phase 1 brief persistence (2026-05-02): the brief is
+   *   now sourced from canonical state via
+   *   `EnrichedTurnContext.scenarioBriefText` (populated by
+   *   `buildTurnContext` from `scenarios.brief_text`). No caller in the
+   *   current codebase populates this field. It is retained for one
+   *   release as a fallback if a non-null value is supplied — a
+   *   deprecation warning is logged when that happens. Remove in
+   *   Phase 2.
    */
   readonly scenarioBrief?: string | null;
 }
@@ -402,18 +411,22 @@ export async function runTurnExecutor(
         dropped_by_missing_id: 0,
       });
     } else {
-      // Fallback: when graphState is absent (follow-up turns), load the
-      // persisted graph via build-turn-context (the declared session access
-      // boundary). Errors are absorbed there; null means no graph available.
+      // Fallback: when graphState is absent (follow-up turns), use the
+      // persisted graph already loaded by buildTurnContext via
+      // loadGraphAndBriefText (the declared session access boundary).
+      // V5 Phase 1: this avoids a second Supabase round trip — buildTurnContext
+      // reads scenarios.* once for both graph and brief_text on every turn,
+      // and the result is surfaced on context.persistedGraph for the
+      // executor's fallback to consume.
       if (!graphStateForTurn) {
-        const persistedGraph = await loadPersistedGraph(payload.scenario_id, requestId);
+        const persistedGraph = context.persistedGraph;
         if (persistedGraph) {
           const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
           if (parsed.success) {
             graphStateForTurn = parsed.data;
             log.info(
               { request_id: requestId, scenario_id: payload.scenario_id },
-              'V5 TurnExecutor loaded persisted graph from database for graph lookup fallback',
+              'V5 TurnExecutor using persisted graph loaded during buildTurnContext for graph lookup fallback',
             );
           } else {
             log.warn(
@@ -1256,13 +1269,31 @@ export async function runTurnExecutor(
       // the soft-fail path inside the enricher, where the field is simply
       // not set).
       if (proposedHandlerId === 'run_analysis') {
+        // V5 Phase 1 brief persistence: prefer the canonical-state value
+        // from buildTurnContext (`scenarios.brief_text`). Fall back to
+        // the legacy out-of-band `options.scenarioBrief` for one release
+        // — emit a deprecation warning when it is the source so
+        // operators see the legacy channel still in use.
+        let resolvedBrief: string | null = context.scenarioBriefText;
+        if (resolvedBrief === null && options.scenarioBrief != null && options.scenarioBrief.length > 0) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              source: 'options.scenarioBrief',
+            },
+            'V5 decision_review: legacy options.scenarioBrief used as fallback. ' +
+              'This channel is deprecated and will be removed in Phase 2.',
+          );
+          resolvedBrief = options.scenarioBrief;
+        }
         try {
           handlerFactsForCommit = await enrichRunAnalysisWithDecisionReview({
             handlerFacts: handlerOutcome.handler_facts,
             requestId,
             scenarioId: context.session_id,
             signal: turnAbort.signal,
-            brief: options.scenarioBrief ?? null,
+            brief: resolvedBrief,
           });
         } catch (err) {
           log.error(

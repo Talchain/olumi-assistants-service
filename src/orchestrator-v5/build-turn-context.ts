@@ -48,6 +48,37 @@ export interface EnrichedTurnContext extends TurnContext {
    * handler turns exist or when the facts read degraded.
    */
   readonly prior_facts: readonly HandlerFact[];
+  /**
+   * V5 Phase 1 brief persistence: the user-supplied free-text decision
+   * brief, sourced from canonical state (`scenarios.brief_text`) rather
+   * than the legacy out-of-band `RunTurnExecutorOptions.scenarioBrief`
+   * channel. Populated on every turn AFTER the first draft turn that
+   * persisted the brief; null on the first draft turn (no brief in DB
+   * yet — that turn is the one writing it) or when no brief has been
+   * persisted for this scenario.
+   *
+   * Consumed by:
+   *   - turn-executor.ts (decision-review enricher invocation, ~L1264)
+   *   - chip-click-dispatch.ts (decision-review enricher invocation, ~L323)
+   *
+   * This field replaces both the legacy `options.scenarioBrief` (always
+   * undefined in practice — no caller populated it) and the hardcoded
+   * `brief: null` in chip-click-dispatch (which made decision_review
+   * always skip with reason `no_brief` on the chip-click path).
+   */
+  readonly scenarioBriefText: string | null;
+  /**
+   * V5 Phase 1 brief persistence: the persisted graph from
+   * `scenarios.graph`, loaded in the same round trip as
+   * `scenarioBriefText` via `loadGraphAndBriefText`. Surfaced on the
+   * context so the turn-executor's no-graphState fallback can avoid a
+   * second Supabase read of the same column.
+   *
+   * Null when no graph is persisted for this scenario, or when the
+   * canonical-state read failed (graceful degradation matches
+   * scenarioBriefText behaviour).
+   */
+  readonly persistedGraph: unknown | null;
 }
 
 export interface BuildTurnContextOptions {
@@ -122,8 +153,49 @@ export async function buildTurnContext(
   const store = options.sessionStore ?? tryGetSessionStore(requestId, payload.scenario_id);
   const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, store);
   const priorFacts = await fetchPriorFacts(priorTurns, requestId, payload.scenario_id, store);
+  // V5 Phase 1 brief persistence: load the persisted brief_text alongside
+  // the graph so callers can read both from canonical state. Failure to
+  // read scenarios.* is non-fatal (graceful degradation); the field
+  // collapses to null and decision_review skips with `no_brief` exactly
+  // as before.
+  const scenarioState = await fetchPersistedScenarioState(
+    payload.scenario_id,
+    requestId,
+    store,
+  );
 
-  return { ...baseContext, prior_turns: priorTurns, prior_facts: priorFacts };
+  return {
+    ...baseContext,
+    prior_turns: priorTurns,
+    prior_facts: priorFacts,
+    scenarioBriefText: scenarioState.briefText,
+    persistedGraph: scenarioState.graph,
+  };
+}
+
+async function fetchPersistedScenarioState(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+  if (!store) return { graph: null, briefText: null };
+  try {
+    return await store.loadGraphAndBriefText(scenarioId);
+  } catch (error) {
+    const errorCode = error instanceof SessionReadError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      'V5 buildTurnContext: scenarios.* read failed, continuing with null graph + null briefText',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode ?? 'unknown',
+      severity: 'warning',
+    });
+    return { graph: null, briefText: null };
+  }
 }
 
 /**
@@ -348,32 +420,50 @@ export async function preflightEnsureScenario(
 }
 
 /**
- * Load the persisted graph for a scenario from the session store.
+ * Load the persisted scenario state (graph + brief_text) from the
+ * session store in a single round trip.
  *
- * Called by TurnExecutor when no graphState was supplied in the request
- * body (follow-up turns in guest mode). Returns null when the scenario
- * has no persisted graph or when the load fails — callers treat null as
- * "no graph available" and continue with no_graph context.
+ * Called by TurnExecutor and ad-hoc handlers when canonical scenario
+ * state is needed (no graphState supplied; brief_text needed for
+ * decision_review enrichment). Failure is swallowed and the result
+ * collapses to `{ graph: null, briefText: null }` — callers treat null
+ * fields as "not available" and continue with degraded context.
  *
  * Centralised here (rather than in turn-executor.ts) so the session
  * store access surface stays bounded to the three declared integration
  * points: session/, commit.ts, build-turn-context.ts.
+ */
+export async function loadPersistedScenarioState(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+  try {
+    const store = sessionStore ?? getSessionStore();
+    return await store.loadGraphAndBriefText(scenarioId);
+  } catch (e) {
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, err: e instanceof Error ? e.message : String(e) },
+      'V5 build-turn-context: loadPersistedScenarioState failed, returning null graph + null briefText',
+    );
+    return { graph: null, briefText: null };
+  }
+}
+
+/**
+ * Load the persisted graph for a scenario from the session store.
+ *
+ * @deprecated Prefer {@link loadPersistedScenarioState} which returns
+ *   both the graph and the persisted brief_text in one round trip.
+ *   Retained as a thin wrapper for callers that only need the graph
+ *   and have not yet been migrated.
  */
 export async function loadPersistedGraph(
   scenarioId: string,
   requestId: string,
   sessionStore?: SessionStore,
 ): Promise<unknown | null> {
-  try {
-    const store = sessionStore ?? getSessionStore();
-    return await store.loadGraph(scenarioId);
-  } catch (e) {
-    log.warn(
-      { request_id: requestId, scenario_id: scenarioId, err: e instanceof Error ? e.message : String(e) },
-      'V5 build-turn-context: loadPersistedGraph failed, returning null',
-    );
-    return null;
-  }
+  return (await loadPersistedScenarioState(scenarioId, requestId, sessionStore)).graph;
 }
 
 /**

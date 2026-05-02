@@ -445,6 +445,135 @@ describe('dispatchDraftGraph', () => {
       expect(result.analysisReady).toBeUndefined();
     });
   });
+
+  // ─── V5 Phase 1 brief persistence: scenarios.brief_text ────────────────────
+  // The first draft turn supplies the user-supplied free-text brief via
+  // payload.message. dispatchDraftGraph normalises it via
+  // normaliseBriefText and threads it through CommitMetadata.briefText
+  // → SessionStore.append → append_turn_atomic(p_brief_text) → row.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('V5 Phase 1 brief persistence — briefText threaded to commit metadata', () => {
+    beforeEach(() => {
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    });
+
+    it('threads payload.message verbatim as briefText (after trim)', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      await dispatchDraftGraph({
+        payload: makePayload({ message: 'Should we launch the product now?' }),
+        requestId: 'req-brief-1',
+        request: STUB_REQUEST,
+      });
+
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.briefText).toBe('Should we launch the product now?');
+    });
+
+    it('trims surrounding whitespace before threading briefText', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      await dispatchDraftGraph({
+        payload: makePayload({ message: '   trimmed message   ' }),
+        requestId: 'req-brief-trim',
+        request: STUB_REQUEST,
+      });
+
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.briefText).toBe('trimmed message');
+    });
+
+    it('truncates an over-8000 char briefText (commit succeeds, never errors on length)', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const huge = 'a '.repeat(10_000); // ~20_000 chars after spaces
+      const result = await dispatchDraftGraph({
+        payload: makePayload({ message: huge }),
+        requestId: 'req-brief-long',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.commitPerformed).toBe(true);
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.briefText).toBeDefined();
+      expect((metadata.briefText as string).length).toBeLessThanOrEqual(8000);
+    });
+
+    it('threads briefText AND graph together in CommitMetadata (initial draft turn shape)', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      await dispatchDraftGraph({
+        payload: makePayload({ message: 'My decision' }),
+        requestId: 'req-brief-shape',
+        request: STUB_REQUEST,
+      });
+
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.graph).toEqual(MINIMAL_GRAPH);
+      expect(metadata.briefText).toBe('My decision');
+    });
+
+    it('does NOT thread briefText when handleDraftGraph produces no graphOutput (graphless first-write lockout protection)', async () => {
+      // Critical: a graphless draft (handleDraftGraph returned null
+      // graphOutput) MUST NOT write brief_text, otherwise a successful
+      // retry on the same scenario would find brief_text already
+      // populated and the WHERE-based first-write-wins clause would
+      // silently drop the real brief. Brief is tied to graph presence:
+      // brief_text only persists alongside a usable graph the user
+      // can act on.
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      await dispatchDraftGraph({
+        payload: makePayload({ message: 'My decision' }),
+        requestId: 'req-brief-no-graph',
+        request: STUB_REQUEST,
+      });
+
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
+      expect(metadata.briefText).toBeUndefined();
+      expect(metadata.graph).toBeUndefined();
+    });
+
+    it('graphless draft retry does not lock out a later successful first-write (regression for graphless first-write bug)', async () => {
+      // Two-call sequence on the same scenario:
+      //   1. handleDraftGraph returns null graphOutput → MUST NOT write briefText.
+      //   2. handleDraftGraph returns a real graph → MUST write briefText.
+      // The dispatch-side guard ensures the WHERE clause never sees a
+      // graphless write that would silently lock out the retry.
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValueOnce(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>)
+        .mockResolvedValueOnce(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValueOnce(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>)
+        .mockResolvedValueOnce(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      await dispatchDraftGraph({
+        payload: makePayload({ message: 'My decision' }),
+        requestId: 'req-brief-graphless-retry-1',
+        request: STUB_REQUEST,
+      });
+      await dispatchDraftGraph({
+        payload: makePayload({ message: 'My decision' }),
+        requestId: 'req-brief-graphless-retry-2',
+        request: STUB_REQUEST,
+      });
+
+      const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
+      expect(calls).toHaveLength(2);
+      // Call 1: graphless → no brief.
+      expect(calls[0][1].briefText).toBeUndefined();
+      // Call 2: successful → brief flows.
+      expect(calls[1][1].briefText).toBe('My decision');
+    });
+  });
 });
 
 // ── B1 egress: OlumiResponseSchema parse ─────────────────────────────────────
