@@ -266,14 +266,24 @@ export async function dispatchDraftGraph(
     // throws (StateCommitFailedError), both graph and turn roll back together
     // and the catch below returns commitPerformed=false.
     // V5 Phase 1 brief persistence: persist payload.message as
-    // scenarios.brief_text on the first draft turn. The RPC enforces
-    // first-write-wins via `WHERE brief_text IS NULL OR brief_text = ''`,
-    // so subsequent repair / edit / regeneration draft_graph turns also
-    // pass through this dispatch path safely — the second write is a
-    // no-op at the DB layer. We do NOT add a load-before-write guard at
-    // the dispatch layer; doubling RPC latency on every draft turn for
-    // zero additional safety is the wrong tradeoff. Brief regeneration
-    // semantics are out of scope for Phase 1.
+    // scenarios.brief_text on the first SUCCESSFUL draft turn. The RPC
+    // enforces first-write-wins via `WHERE brief_text IS NULL OR
+    // brief_text = ''`, so subsequent repair / edit / regeneration
+    // draft_graph turns also pass through this dispatch path safely —
+    // the second write is a no-op at the DB layer.
+    //
+    // CRITICAL guard against graphless first-write lockout: only thread
+    // briefText to commit metadata when draftResult.graphOutput is
+    // present. Without this guard, a graphless draft (handleDraftGraph
+    // returned null graphOutput) would still write briefText, then the
+    // user's retry on a successful draft would find brief_text already
+    // populated → real brief silently dropped by the WHERE clause.
+    // Tying the briefText write to graph presence means brief_text is
+    // only set when the scenario has a usable graph the user can
+    // actually act on.
+    //
+    // Brief regeneration semantics (intentional user edit of brief on a
+    // scenario with existing brief_text) are out of scope for Phase 1.
     //
     // Normalisation: enforces the same length / whitespace invariants
     // as the DB CHECK constraint, with truncation rather than failure
@@ -289,6 +299,8 @@ export async function dispatchDraftGraph(
         reason: 'over_8000_chars',
       });
     }
+    const briefTextForCommit =
+      draftResult.graphOutput != null ? briefNorm.value : undefined;
 
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
@@ -305,7 +317,7 @@ export async function dispatchDraftGraph(
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         graph: draftResult.graphOutput ?? undefined,
-        briefText: briefNorm.value,
+        briefText: briefTextForCommit,
       },
     );
 

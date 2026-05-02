@@ -518,7 +518,14 @@ describe('dispatchDraftGraph', () => {
       expect(metadata.briefText).toBe('My decision');
     });
 
-    it('still threads briefText when handleDraftGraph produces no graphOutput (briefText is independent of graph success)', async () => {
+    it('does NOT thread briefText when handleDraftGraph produces no graphOutput (graphless first-write lockout protection)', async () => {
+      // Critical: a graphless draft (handleDraftGraph returned null
+      // graphOutput) MUST NOT write brief_text, otherwise a successful
+      // retry on the same scenario would find brief_text already
+      // populated and the WHERE-based first-write-wins clause would
+      // silently drop the real brief. Brief is tied to graph presence:
+      // brief_text only persists alongside a usable graph the user
+      // can act on.
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>);
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
@@ -531,11 +538,40 @@ describe('dispatchDraftGraph', () => {
       });
 
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      // briefText is set even when graph is null. The RPC's first-write-wins
-      // WHERE clause handles the no-overwrite invariant if a subsequent
-      // draft on the same scenario tries to write again.
-      expect(metadata.briefText).toBe('My decision');
+      expect(metadata.briefText).toBeUndefined();
       expect(metadata.graph).toBeUndefined();
+    });
+
+    it('graphless draft retry does not lock out a later successful first-write (regression for graphless first-write bug)', async () => {
+      // Two-call sequence on the same scenario:
+      //   1. handleDraftGraph returns null graphOutput → MUST NOT write briefText.
+      //   2. handleDraftGraph returns a real graph → MUST write briefText.
+      // The dispatch-side guard ensures the WHERE clause never sees a
+      // graphless write that would silently lock out the retry.
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValueOnce(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>)
+        .mockResolvedValueOnce(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValueOnce(makeCommitResult(false) as Awaited<ReturnType<typeof commitDirectAnswer>>)
+        .mockResolvedValueOnce(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      await dispatchDraftGraph({
+        payload: makePayload({ message: 'My decision' }),
+        requestId: 'req-brief-graphless-retry-1',
+        request: STUB_REQUEST,
+      });
+      await dispatchDraftGraph({
+        payload: makePayload({ message: 'My decision' }),
+        requestId: 'req-brief-graphless-retry-2',
+        request: STUB_REQUEST,
+      });
+
+      const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
+      expect(calls).toHaveLength(2);
+      // Call 1: graphless → no brief.
+      expect(calls[0][1].briefText).toBeUndefined();
+      // Call 2: successful → brief flows.
+      expect(calls[1][1].briefText).toBe('My decision');
     });
   });
 });

@@ -67,6 +67,18 @@ export interface EnrichedTurnContext extends TurnContext {
    * always skip with reason `no_brief` on the chip-click path).
    */
   readonly scenarioBriefText: string | null;
+  /**
+   * V5 Phase 1 brief persistence: the persisted graph from
+   * `scenarios.graph`, loaded in the same round trip as
+   * `scenarioBriefText` via `loadGraphAndBriefText`. Surfaced on the
+   * context so the turn-executor's no-graphState fallback can avoid a
+   * second Supabase read of the same column.
+   *
+   * Null when no graph is persisted for this scenario, or when the
+   * canonical-state read failed (graceful degradation matches
+   * scenarioBriefText behaviour).
+   */
+  readonly persistedGraph: unknown | null;
 }
 
 export interface BuildTurnContextOptions {
@@ -157,6 +169,7 @@ export async function buildTurnContext(
     prior_turns: priorTurns,
     prior_facts: priorFacts,
     scenarioBriefText: scenarioState.briefText,
+    persistedGraph: scenarioState.graph,
   };
 }
 

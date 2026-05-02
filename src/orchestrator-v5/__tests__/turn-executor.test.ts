@@ -1070,14 +1070,14 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         },
       );
 
-      // V5 Phase 1 brief persistence: scenarios.* is now read from TWO
-      // sites — buildTurnContext.fetchPersistedScenarioState (always) and
-      // turn-executor's loadPersistedGraph fallback (only when graphState
-      // is absent). The counter therefore accumulates 2 entries on a
-      // no-graphState turn. Both reads target the same scenario_id.
-      expect((global as any).__test_loadGraph_calls).toHaveLength(2);
+      // V5 Phase 1 brief persistence: scenarios.* is read EXACTLY ONCE
+      // per turn — buildTurnContext.fetchPersistedScenarioState loads
+      // {graph, brief_text} together and surfaces them on
+      // EnrichedTurnContext. The executor's no-graphState fallback now
+      // consumes context.persistedGraph instead of calling loadGraph
+      // again, eliminating the previous double-read.
+      expect((global as any).__test_loadGraph_calls).toHaveLength(1);
       expect((global as any).__test_loadGraph_calls[0]).toBe(BASE_PAYLOAD.scenario_id);
-      expect((global as any).__test_loadGraph_calls[1]).toBe(BASE_PAYLOAD.scenario_id);
     });
 
     it('threads the persisted graph into the routing context pack for follow-up turns', async () => {
@@ -1140,12 +1140,12 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         },
       );
 
-      // V5 Phase 1 brief persistence: counter accumulates across both
-      // turns. Turn 1 (graphState provided) fires the buildTurnContext
-      // canonical-state read (1). Turn 2 (no graphState) fires
-      // buildTurnContext (1) + the loadPersistedGraph fallback (1).
-      // Total = 3. All target the same scenario_id.
-      expect((global as any).__test_loadGraph_calls).toHaveLength(3);
+      // V5 Phase 1 brief persistence: counter accumulates exactly 1
+      // call per turn. Both turns fire buildTurnContext.loadGraphAndBriefText
+      // ONCE; the executor's no-graphState fallback reads from
+      // context.persistedGraph (no extra DB call). Total = 2 across the
+      // two-turn sequence. All target the same scenario_id.
+      expect((global as any).__test_loadGraph_calls).toHaveLength(2);
       for (const seenId of (global as any).__test_loadGraph_calls as string[]) {
         expect(seenId).toBe(BASE_PAYLOAD.scenario_id);
       }

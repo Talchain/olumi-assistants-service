@@ -52,7 +52,7 @@ import {
   composeToolCallResponse,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext, loadPersistedGraph } from './build-turn-context.js';
+import { buildTurnContext } from './build-turn-context.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -410,11 +410,15 @@ export async function runTurnExecutor(
         dropped_by_missing_id: 0,
       });
     } else {
-      // Fallback: when graphState is absent (follow-up turns), load the
-      // persisted graph via build-turn-context (the declared session access
-      // boundary). Errors are absorbed there; null means no graph available.
+      // Fallback: when graphState is absent (follow-up turns), use the
+      // persisted graph already loaded by buildTurnContext via
+      // loadGraphAndBriefText (the declared session access boundary).
+      // V5 Phase 1: this avoids a second Supabase round trip — buildTurnContext
+      // reads scenarios.* once for both graph and brief_text on every turn,
+      // and the result is surfaced on context.persistedGraph for the
+      // executor's fallback to consume.
       if (!graphStateForTurn) {
-        const persistedGraph = await loadPersistedGraph(payload.scenario_id, requestId);
+        const persistedGraph = context.persistedGraph;
         if (persistedGraph) {
           const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
           if (parsed.success) {

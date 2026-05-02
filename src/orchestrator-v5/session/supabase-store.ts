@@ -295,6 +295,10 @@ export class SupabaseSessionStore implements SessionStore {
     // is scoped to v5_conversation_turns). Every call hits Supabase
     // directly. The cache is invalidated on `append`, but reads here
     // bypass it because the cache holds a different table's rows.
+    // SELECT only the columns this method returns. `id` is intentionally
+    // omitted because it is already known to the caller (it's the
+    // `scenarioId` parameter) and the return shape does not surface it.
+    // Selecting it would be dead bytes on the wire.
     const { data, error } = await this.client
       .from('scenarios')
       .select('graph, brief_text')

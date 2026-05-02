@@ -76,6 +76,7 @@ vi.mock('../../build-turn-context.js', async () => {
       prior_turns: [],
       prior_facts: [],
       scenarioBriefText: buildTurnContextStub.scenarioBriefText,
+      persistedGraph: null,
     })),
   };
 });

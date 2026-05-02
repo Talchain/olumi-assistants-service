@@ -165,23 +165,6 @@ BEGIN
     END IF;
   END IF;
 
-  -- V5 Phase 1 brief persistence: write user-supplied brief_text once.
-  -- The FOUND guard above ensures this block is unreachable on
-  -- conflict-replay (so a retry carrying a different brief cannot mutate
-  -- state). The WHERE predicate adds first-write-wins protection against
-  -- non-conflict callers (different turn_id) that pass a different brief
-  -- (e.g. brief regeneration). First-write-wins is intentional for
-  -- Phase 1; explicit regenerate semantics are out of scope.
-  -- ROW_COUNT is NOT checked here — a "no rows updated" outcome means
-  -- the brief was already set, which is the intended write-once behaviour.
-  IF p_brief_text IS NOT NULL THEN
-    UPDATE scenarios
-       SET brief_text = p_brief_text,
-           updated_at = NOW()
-     WHERE id = p_scenario_id
-       AND (brief_text IS NULL OR brief_text = '');
-  END IF;
-
   IF jsonb_array_length(COALESCE(p_handler_facts, '[]'::jsonb)) > 0 THEN
     FOR v_fact IN SELECT * FROM jsonb_array_elements(p_handler_facts)
     LOOP
@@ -198,6 +181,25 @@ BEGIN
         COALESCE(v_fact->'payload', '{}'::jsonb)
       );
     END LOOP;
+  END IF;
+
+  -- V5 Phase 1 brief persistence: write user-supplied brief_text once.
+  -- Placement is AFTER the handler_facts insert and BEFORE the final
+  -- RETURN, matching the brief's contract for surgical placement.
+  -- The FOUND guard above ensures this block is unreachable on
+  -- conflict-replay (so a retry carrying a different brief cannot mutate
+  -- state). The WHERE predicate adds first-write-wins protection against
+  -- non-conflict callers (different turn_id) that pass a different brief
+  -- (e.g. brief regeneration). First-write-wins is intentional for
+  -- Phase 1; explicit regenerate semantics are out of scope.
+  -- ROW_COUNT is NOT checked here — a "no rows updated" outcome means
+  -- the brief was already set, which is the intended write-once behaviour.
+  IF p_brief_text IS NOT NULL THEN
+    UPDATE scenarios
+       SET brief_text = p_brief_text,
+           updated_at = NOW()
+     WHERE id = p_scenario_id
+       AND (brief_text IS NULL OR brief_text = '');
   END IF;
 
   RETURN v_turn_id;

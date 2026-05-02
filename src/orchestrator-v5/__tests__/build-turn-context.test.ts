@@ -34,12 +34,13 @@ describe('buildTurnContext', () => {
     const ctx = await buildTurnContext(BASE, 'req-1', OPTS);
     // EnrichedTurnContext is a superset; strip the CEE-internal extensions
     // (prior_turns from Slice B, prior_facts from V5 Group 1, and
-    // scenarioBriefText from V5 Phase 1 brief persistence) before asserting
-    // schema parse (TurnContextSchema is strict).
+    // scenarioBriefText + persistedGraph from V5 Phase 1 brief persistence)
+    // before asserting schema parse (TurnContextSchema is strict).
     const {
       prior_turns: _pt,
       prior_facts: _pf,
       scenarioBriefText: _sb,
+      persistedGraph: _pg,
       ...base
     } = ctx;
     const parsed = TurnContextSchema.parse(base);

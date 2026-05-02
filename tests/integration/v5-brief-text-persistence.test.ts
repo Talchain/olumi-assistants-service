@@ -238,6 +238,42 @@ suite('V5 Phase 1 brief persistence — migration smoke (live Supabase)', () => 
     expect(await readBriefText(client, scenarioId)).toBe('seeded brief');
   });
 
+  it('legacy 10-arg call shape (omitting p_brief_text entirely) still works via DEFAULT NULL', async () => {
+    // Pins the contract that old callers — application code that has
+    // not been updated to pass p_brief_text — continue to invoke the
+    // RPC successfully. Without this case the migration smoke only
+    // covers the 11-arg shape and silently regresses if a future
+    // migration removes the DEFAULT NULL.
+    const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scenarioId = await createScenario(client);
+    const turnId = `legacy-${randomUUID()}`;
+
+    // Invoke with the EXACT 10-arg shape the pre-Phase-1 application
+    // code used. p_brief_text is NOT present in the args object — it
+    // must resolve via the function's DEFAULT NULL clause.
+    const { data, error } = await client.rpc('append_turn_atomic', {
+      p_scenario_id: scenarioId,
+      p_turn_id: turnId,
+      p_turn_class: 'direct_answer',
+      p_handler_id: null,
+      p_request_hash: `sha256:${turnId}`,
+      p_response_emitted: true,
+      p_llm_calls_used: 0,
+      p_duration_ms: 0,
+      p_handler_facts: [],
+      p_graph: null,
+    });
+
+    expect(error).toBeNull();
+    expect(typeof data).toBe('string');
+    // brief_text remains null because no value was supplied at any
+    // position — neither explicitly nor by default.
+    expect(await readBriefText(client, scenarioId)).toBeNull();
+  });
+
   it('rejects whitespace-only brief_text via the CHECK constraint', async () => {
     const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
       auth: { persistSession: false, autoRefreshToken: false },
