@@ -101,13 +101,14 @@ describe('createRegistry — V5 0.9.0 handler set', () => {
       scenarioReader: stubScenarioReader,
       plotClient: stubPlotClient,
     });
-    expect(registry.size).toBe(5);
+    expect(registry.size).toBe(6);
     expect(resolveHandler(registry, 'run_analysis')).not.toBeNull();
     expect(resolveHandler(registry, 'explain_from_structure')).not.toBeNull();
     expect(resolveHandler(registry, 'explain_results')).not.toBeNull();
     expect(resolveHandler(registry, 'what_would_flip')).not.toBeNull();
-    // D1 (Brief: D1 deterministic handlers) — set_factor_value registered.
+    // D1 (Brief: D1 deterministic handlers).
     expect(resolveHandler(registry, 'set_factor_value')).not.toBeNull();
+    expect(resolveHandler(registry, 'add_constraint')).not.toBeNull();
   });
 
   it('does not register the deprecated explain_result literal', () => {
@@ -123,8 +124,8 @@ describe('createRegistry — V5 0.9.0 handler set', () => {
       scenarioReader: stubScenarioReader,
       plotClient: stubPlotClient,
     });
-    // add_constraint and adjust_edge_strength land in the next D1 commits.
-    expect(resolveHandler(registry, 'add_constraint')).toBeNull();
+    // adjust_edge_strength lands in the final D1 commit; compare_options
+    // is E1 brief scope, not D1.
     expect(resolveHandler(registry, 'compare_options')).toBeNull();
     expect(resolveHandler(registry, 'adjust_edge_strength')).toBeNull();
   });

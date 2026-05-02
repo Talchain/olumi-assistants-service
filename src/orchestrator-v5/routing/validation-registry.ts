@@ -14,6 +14,12 @@
 
 import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
 import { SetFactorValueValueSchema } from '../tools/handlers/set-factor-value.js';
+import {
+  AddConstraintLabelSchema,
+  AddConstraintTypeSchema,
+  AddConstraintUnitSchema,
+  AddConstraintValueSchema,
+} from '../tools/handlers/add-constraint.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -119,6 +125,17 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
     handler_id: 'set_factor_value',
     accepted_entity_kinds: ['node'],
     parameter_schemas: { value: SetFactorValueValueSchema },
+    confirmation_template: noopHandlerConfirmationTemplate,
+  },
+  add_constraint: {
+    handler_id: 'add_constraint',
+    accepted_entity_kinds: ['node', 'goal'],
+    parameter_schemas: {
+      constraint_type: AddConstraintTypeSchema,
+      value: AddConstraintValueSchema,
+      label: AddConstraintLabelSchema,
+      unit: AddConstraintUnitSchema,
+    },
     confirmation_template: noopHandlerConfirmationTemplate,
   },
 };

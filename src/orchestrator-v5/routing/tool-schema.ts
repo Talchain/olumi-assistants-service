@@ -80,6 +80,7 @@ export const OLUMI_ACTION_TOOL = {
               'explain_results',
               'what_would_flip',
               'set_factor_value',
+              'add_constraint',
             ],
             description:
               'The action to execute. Pick the handler that matches the user intent:\n' +
@@ -122,6 +123,17 @@ export const OLUMI_ACTION_TOOL = {
               'sensitivity explanation: cite margins, top drivers, robustness ' +
               'band, and what changes would alter the outcome. Do not use ' +
               'mutation language.\n' +
+              '\n' +
+              '• add_constraint — attach a threshold constraint to a factor, ' +
+              'outcome, or goal ("budget can\'t exceed £50k", "keep churn ' +
+              'below 5%", "quality must be at least 80%"). Mutates the ' +
+              'graph deterministically. Pass `constraint_type` (at_least | ' +
+              'at_most), `value` (in user units — e.g. 50000 for "£50k", ' +
+              '5 for "5%"; the handler stores user units, not normalised ' +
+              'model units). Optional `label` and `unit` parameters refine ' +
+              'the persisted constraint. Idempotent on (target, operator): ' +
+              'restating the same threshold updates the existing entry. Do ' +
+              'NOT include an `explanation` payload.\n' +
               '\n' +
               '• set_factor_value — change a factor node\'s observed value ' +
               '("set churn to 5%", "increase budget by £10k", "double the ' +
