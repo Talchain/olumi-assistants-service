@@ -9,7 +9,11 @@
  *   - near-zero suppression (|s| < 0.05 → "negligible link", sign dropped)
  *   - label resolution from node lookup (bare ID fallback when missing)
  *   - structural strip of strength / exists / plain_interpretation /
- *     internal node fields
+ *     model-internal node fields (raw_value, cap, source, _raw_provenance)
+ *   - retention of user-supplied node `value` (compact + canonical
+ *     observed_state.value) per brief A2.1
+ *   - relationship-phrase allowlist: unsafe upstream strings (e.g. legacy
+ *     "strength of 0.55") MUST be dropped, not echoed verbatim
  *   - no-raw-floats invariant inside edge data (recursive walk)
  *   - idempotency (re-projecting the output produces equivalent shape)
  *   - Track 2A negative test: serialised display-safe graph yields
@@ -48,9 +52,10 @@ function rawGraph(overrides: Partial<ContextPackGraph> = {}): ContextPackGraph {
 
 /**
  * Recursive walk asserting no `number` values anywhere on edge data.
- * Targets edges only — node `value`/`raw_value`/`cap` are intentionally
- * stripped from display-safe nodes too, but if they ever leak the
- * forbidden-floats check below catches them via JSON.stringify.
+ * Targets edges only — display-safe nodes intentionally KEEP user-supplied
+ * `value` (numeric or string) per brief A2.1, while stripping
+ * model-normalised `raw_value`/`cap`. The forbidden-floats check on
+ * serialised edges below pins the no-raw-decimals invariant.
  */
 function assertNoNumbersInEdges(edges: readonly unknown[]): void {
   function walk(value: unknown, path: string): void {
@@ -229,6 +234,26 @@ describe('formatGraphForContext — node transformation', () => {
     expect(out.nodes).toHaveLength(1);
     expect(out.nodes[0]!.id).toBe('fac_a');
   });
+
+  it('reads canonical observed_state.value when top-level value is absent', () => {
+    // Raw GraphV3T passthrough nests user values under observed_state.
+    // The assembler raw-graph fallback never re-shapes that nesting, so
+    // the formatter must read it or canonical user values are silently
+    // dropped on every turn that doesn't pre-compact.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', observed_state: { value: 250 } },
+          { id: 'fac_b', kind: 'factor', label: 'B', observed_state: { value: 'high' } },
+          // Top-level value wins when both are present.
+          { id: 'fac_c', kind: 'factor', label: 'C', value: 7, observed_state: { value: 99 } },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.value).toBe(250);
+    expect(out.nodes[1]!.value).toBe('high');
+    expect(out.nodes[2]!.value).toBe(7);
+  });
 });
 
 describe('formatGraphForContext — canonical & legacy edge shapes', () => {
@@ -322,6 +347,58 @@ describe('formatGraphForContext — idempotency', () => {
     // honours the existing `relationship` rather than degrading every
     // edge to "negligible link".
     expect(out2).toEqual(out1);
+  });
+});
+
+describe('formatGraphForContext — relationship allowlist (negative test)', () => {
+  it('drops unsafe upstream `relationship` strings rather than echoing them', () => {
+    // Adversarial input: an edge with no numeric strength but an
+    // upstream-supplied `relationship` string that contains raw decimal
+    // prose ("strength of 0.55"). If the formatter passed this through
+    // verbatim it would defeat the entire display-safe projection.
+    // The allowlist guarantees only canonical band×sign phrases survive.
+    const out = formatGraphForContext(
+      rawGraph({
+        edges: [
+          {
+            from: 'fac_marketing',
+            to: 'fac_leads',
+            relationship: 'strength of 0.55',
+          },
+          {
+            from: 'fac_leads',
+            to: 'goal_growth',
+            relationship: 'edge weight 0.4',
+          },
+          {
+            from: 'fac_marketing',
+            to: 'goal_growth',
+            relationship: 'mean=0.7 between Marketing and Growth',
+          },
+        ],
+      }),
+    );
+    for (const edge of out.edges) {
+      expect(edge.relationship).toBe('negligible link');
+      // Belt-and-braces: no raw decimals slipped through anywhere.
+      expect(edge.relationship).not.toMatch(/0\.\d/);
+      expect(edge.relationship).not.toMatch(/strength|weight|mean=/i);
+    }
+  });
+
+  it('preserves a canonical allowlisted `relationship` when no strength is present', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        edges: [
+          {
+            from: 'fac_marketing',
+            to: 'fac_leads',
+            relationship: 'strong positive link',
+          },
+        ],
+      }),
+    );
+    expect(out.edges[0]!.relationship).toBe('strong positive link');
   });
 });
 
