@@ -91,6 +91,29 @@ export type ValueUpdateDispatch =
       readonly dispatch: 'clarify';
       readonly candidates: readonly ValueUpdateCandidate[];
       readonly quantity: QuantityExtractionResult;
+    }
+  /**
+   * V5 D1 golden-path closure (A3.1): unambiguous match on exactly ONE
+   * substring candidate. The caller is responsible for verifying the
+   * candidate's NodeV3.kind === 'factor' against graph state before
+   * dispatching `set_factor_value` — GraphLookup buckets factor with
+   * outcome/decision/risk/action under EntityKind 'node', so this
+   * function cannot do the kind check itself.
+   *
+   * On a positive kind check the caller constructs a synthetic
+   * `RoutingToolCallResult` (proposal carrying handler_id
+   * 'set_factor_value', resolved entity, computed parameters) and
+   * lets the existing Step 2-7 lifecycle run unchanged. No LLM call,
+   * no bespoke handler invocation path.
+   *
+   * On a negative kind check the caller falls back to the clarify
+   * variant (same shape as the multi-match case).
+   */
+  | {
+      readonly matched: true;
+      readonly dispatch: 'set_factor_value';
+      readonly candidate: ValueUpdateCandidate;
+      readonly quantity: QuantityExtractionResult;
     };
 
 export type SkipReason =
@@ -187,6 +210,20 @@ export function tryDeterministicValueUpdate(
     return { matched: false, skip_reason: 'no_candidate_match' };
   }
 
+  // V5 D1 golden-path closure (A3.1): exactly ONE substring match (and
+  // no Dice fuzzies) is the gate for handler dispatch. A single Dice
+  // candidate stays clarify because label confidence is too low; multi-
+  // candidate stays clarify by definition. The kind check (factor only)
+  // is the caller's responsibility — see the discriminated union docs.
+  if (substringMatches.length === 1 && diceMatches.length === 0) {
+    return {
+      matched: true,
+      dispatch: 'set_factor_value',
+      candidate: substringMatches[0],
+      quantity,
+    };
+  }
+
   return {
     matched: true,
     dispatch: 'clarify',
@@ -231,4 +268,95 @@ export function buildClarifyChipMessage(
 function capitalise(s: string): string {
   if (s.length === 0) return s;
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// V5 D1 golden-path closure (A3.1) — proposal construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Map CQE's internal `unit` (e.g. `'percentage'`, `'GBP'`,
+ * `'percentage_points'`) to a user-facing unit string the
+ * `set_factor_value` handler accepts (`'%'`, `'£'`, `'$'`, `'€'`, or
+ * the raw string when no canonical mapping exists).
+ *
+ * The handler's `normaliseFactorValue` interprets the unit + value as
+ * USER UNITS and divides by the factor's cap to derive model units.
+ * This means CQE's own pre-normalisation (e.g. `5%` → `value: 0.05`,
+ * `unit: 'percentage'`) MUST be undone here so the handler sees
+ * `value: 5, unit: '%'` and computes `5 / 100 = 0.05` correctly.
+ * Otherwise the handler would compute `0.05 / 100 = 0.0005` — silent
+ * double-normalisation.
+ */
+export function mapCqeQuantityToProposalValue(
+  quantity: QuantityExtractionResult,
+): { value: number; unit: string | undefined } {
+  if (quantity.value === null) {
+    // The pre-route gate already rejects null-value quantities, so
+    // this is unreachable in practice. Defensive default keeps the
+    // function total.
+    return { value: 0, unit: undefined };
+  }
+  switch (quantity.unit) {
+    case 'percentage':
+      // CQE pre-divides by 100. Multiply back to user units.
+      return { value: quantity.value * 100, unit: '%' };
+    case 'percentage_points':
+      // CQE keeps the raw number ("1 percentage point" → value: 1).
+      // Operator (decrease/increase) carries the delta semantics; the
+      // handler applies it to raw_value (user units) directly.
+      return { value: quantity.value, unit: '%' };
+    case 'GBP':
+      return { value: quantity.value, unit: '£' };
+    case 'USD':
+      return { value: quantity.value, unit: '$' };
+    case 'EUR':
+      return { value: quantity.value, unit: '€' };
+    case null:
+      return { value: quantity.value, unit: undefined };
+    default:
+      // Best-effort passthrough for time / metric / colloquial units.
+      // The handler validates the unit string against the factor's
+      // stored unit; mismatches surface as PARAMETER_INVALID.
+      return { value: quantity.value, unit: quantity.unit };
+  }
+}
+
+/**
+ * Derive the V5 routing `parameter_operator` from the CQE quantity's
+ * operator/direction hints, falling back to the matched edit verb in
+ * the message. The wire enum is `'set' | 'increase' | 'decrease' |
+ * 'multiply'`.
+ *
+ * Precedence:
+ *   1. CQE `operator` — the canonical truth. CQE distinguishes
+ *      "Increase budget TO £50,000" (operator: 'set', direction: 'up')
+ *      from "Increase budget BY £10k" (operator: 'increment',
+ *      direction: 'up'). The verb-flavoured `direction` is auxiliary
+ *      and would otherwise turn every `to`-value phrase into a delta.
+ *      `'set' → set`, `'increment' / 'add' → increase`,
+ *      `'decrement' → decrease`, `'multiply' → multiply`.
+ *   2. CQE `direction` (used only when operator is null):
+ *      `'up' → increase`, `'down' → decrease`, `'set' → set`.
+ *   3. Verb-from-message (set/change/update/make → set;
+ *      increase/raise → increase; reduce/decrease/lower → decrease;
+ *      adjust → set).
+ */
+export function deriveOperator(
+  message: string,
+  quantity: QuantityExtractionResult,
+): 'set' | 'increase' | 'decrease' | 'multiply' {
+  if (quantity.operator === 'set') return 'set';
+  if (quantity.operator === 'increment' || quantity.operator === 'add') return 'increase';
+  if (quantity.operator === 'decrement') return 'decrease';
+  if (quantity.operator === 'multiply') return 'multiply';
+  if (quantity.direction === 'up') return 'increase';
+  if (quantity.direction === 'down') return 'decrease';
+  if (quantity.direction === 'set') return 'set';
+
+  const verbMatch = message.match(EDIT_VERB_PATTERN);
+  const verb = verbMatch ? verbMatch[0].toLowerCase() : 'set';
+  if (verb === 'increase' || verb === 'raise') return 'increase';
+  if (verb === 'reduce' || verb === 'decrease' || verb === 'lower') return 'decrease';
+  return 'set';
 }

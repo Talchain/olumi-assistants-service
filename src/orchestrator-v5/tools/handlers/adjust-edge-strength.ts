@@ -219,7 +219,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         effect_direction: newDirection,
       };
 
-      const result = applyAndValidateMutation(graph, (clone) => {
+      const result = applyAndValidateMutation(rawGraph, (clone) => {
         const edge = clone.edges.find(
           (e) => e.from === parsed.from && e.to === parsed.to,
         );
@@ -231,6 +231,23 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         }
         edge.strength = { mean: newMean, std: finalStd };
         edge.effect_direction = newDirection;
+
+        // V5 D1 golden-path closure (A3.1 Task 3): stamp provenance so
+        // downstream consumers know the strength was user-set.
+        // EdgeV3.provenance.source enum is
+        // 'brief_extraction' | 'cee_hypothesis' | 'domain_knowledge' |
+        // 'user_specified' — closest semantic match is 'user_specified'.
+        // EdgeV3.provenance_display enum supports 'user_set' directly;
+        // the V3 transform usually maps source → display, but we set
+        // both explicitly so downstream consumers don't need to wait
+        // for the next round-trip through transformResponseToV3.
+        const existingProvenance = edge.provenance;
+        edge.provenance = {
+          ...(existingProvenance ?? {}),
+          source: 'user_specified',
+        };
+        edge.provenance_display = 'user_set';
+
         return {
           before: beforeSnapshot as Record<string, unknown>,
           after: afterSnapshot as Record<string, unknown>,

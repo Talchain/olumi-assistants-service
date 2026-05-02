@@ -53,7 +53,6 @@ function quantity(value: number, raw_text: string): QuantityExtractionResult {
 
 const PARSED_300K: QuantityExtractionResult[] = [quantity(300000, '£300k')];
 const PARSED_8: QuantityExtractionResult[] = [quantity(8, '8')];
-const PARSED_20PCT: QuantityExtractionResult[] = [quantity(20, '20%')];
 
 const TWO_COSTS = makeGraph([
   { id: 'fac_hire', label: 'Hiring and Staffing Cost' },
@@ -61,7 +60,11 @@ const TWO_COSTS = makeGraph([
 ]);
 
 describe('tryDeterministicValueUpdate — detection rules', () => {
-  it('exact substring match → top candidate score = 1.0, source = substring', () => {
+  it('exact substring match against multiple candidates → clarify (only "Hiring and Staffing Cost" substring-matches; "Marketing Cost" does not)', () => {
+    // V5 D1 golden-path closure (A3.1): single substring match
+    // dispatches `set_factor_value`; this fixture has only one
+    // substring match (Hiring and Staffing Cost) plus a non-matching
+    // sibling (Marketing Cost), so the dispatch is set_factor_value.
     const result = tryDeterministicValueUpdate(
       'Set Hiring and Staffing Cost to £300k',
       PARSED_300K,
@@ -69,7 +72,9 @@ describe('tryDeterministicValueUpdate — detection rules', () => {
     );
     expect(result.matched).toBe(true);
     if (!result.matched) return;
-    expect(result.candidates[0]).toMatchObject({
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate).toMatchObject({
       id: 'fac_hire',
       label: 'Hiring and Staffing Cost',
       score: 1,
@@ -77,7 +82,7 @@ describe('tryDeterministicValueUpdate — detection rules', () => {
     });
   });
 
-  it('"Set Engineering Capacity to 8" with exact factor → matched, source=substring', () => {
+  it('"Set Engineering Capacity to 8" with single exact factor → set_factor_value dispatch (A3.1)', () => {
     const result = tryDeterministicValueUpdate(
       'Set Engineering Capacity to 8',
       PARSED_8,
@@ -85,8 +90,10 @@ describe('tryDeterministicValueUpdate — detection rules', () => {
     );
     expect(result.matched).toBe(true);
     if (!result.matched) return;
-    expect(result.candidates[0].id).toBe('fac_eng');
-    expect(result.candidates[0].source).toBe('substring');
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('fac_eng');
+    expect(result.candidate.source).toBe('substring');
   });
 
   it('Dice-only match above floor → matched as fuzzy candidate, source=dice', () => {
@@ -273,7 +280,12 @@ describe('tryDeterministicValueUpdate — fall-through cases', () => {
     );
     expect(result.matched).toBe(true);
     if (!result.matched) return;
-    expect(result.candidates.every((c) => c.id !== 'f1')).toBe(true);
+    // V5 D1 golden-path closure (A3.1): single substring match → dispatch
+    // is set_factor_value (a single candidate), not clarify. The
+    // null-labelled f1 must still be excluded from consideration.
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('f2');
   });
 
 });

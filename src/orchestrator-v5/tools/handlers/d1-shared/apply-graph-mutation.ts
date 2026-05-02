@@ -1,20 +1,46 @@
 /**
- * Apply a structural mutation to GraphV3T and validate the result.
+ * Apply a structural mutation to a GraphV3-shaped subset of an ingress
+ * graph and validate the result.
  *
- * Pattern: clone → mutate → Zod-parse the result. Failed parses raise
- * `D1HandlerError('GRAPH_INVARIANT_VIOLATED')` so an invalid post-mutation
- * graph never reaches commit.
+ * Pattern: parse ingress → clone the parsed view → run mutator → re-parse
+ * the mutated view → merge mutated structural fields (`nodes`, `edges`,
+ * `goal_constraints`) back onto the FULL ingress shape so top-level
+ * fields not declared on GraphV3 (e.g. `options`, `goal_node_id`,
+ * `meta`, `coaching`, `causal_claims`, `topology_plan`,
+ * `validation_warnings`, `schema_version`) survive into the persisted
+ * mutatedGraph. Without this merge, every D1 mutation would silently
+ * strip those fields from `scenarios.graph`.
  *
- * Per correction #6 (post-mutation graph validation): every D1 handler
- * routes through this helper so commits cannot persist a graph that
- * violates the canonical schema.
+ * Per correction #6 (post-mutation graph validation): commits never
+ * persist a graph that violates the canonical schema. Schema-violation
+ * errors from `GraphV3.safeParse` are wrapped as
+ * `D1HandlerError('GRAPH_INVARIANT_VIOLATED')` so the commit path can
+ * distinguish "handler logic failed" from "handler produced an invalid
+ * graph".
  */
 
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import { D1HandlerError } from './errors.js';
 
+/**
+ * The runtime shape of a graph returned by `applyAndValidateMutation`:
+ * a `GraphV3T` (validated structural fields) intersected with a
+ * passthrough record so callers can still read top-level ingress
+ * fields like `options`, `goal_node_id`, `meta`, `coaching`,
+ * `causal_claims`, `topology_plan`, `validation_warnings`,
+ * `schema_version` that GraphV3 strips on parse.
+ *
+ * Type contract matches the runtime contract (A3.1 Task 2): the
+ * helper does NOT return the GraphV3-narrowed projection, it returns
+ * the merged ingress shape with mutated structural fields stamped in.
+ * Callers and the commit layer treat it as `unknown` (CommitMetadata.graph
+ * is `unknown`), so the wider intersection is structurally compatible
+ * everywhere downstream.
+ */
+export type PersistedGraphV3T = GraphV3T & Record<string, unknown>;
+
 export interface MutationResult {
-  readonly mutatedGraph: GraphV3T;
+  readonly mutatedGraph: PersistedGraphV3T;
   readonly before: Record<string, unknown> | null;
   readonly after: Record<string, unknown> | null;
 }
@@ -29,42 +55,83 @@ export function cloneGraph(graph: GraphV3T): GraphV3T {
 }
 
 /**
- * Run `mutator` against a clone of `graph`, parse the result through
- * `GraphV3.parse`, return the validated graph.
+ * Run `mutator` against a GraphV3-shaped clone of `ingressGraph`,
+ * validate the result, then merge the mutated structural fields back
+ * onto the full ingress shape. The returned `mutatedGraph` has the
+ * SAME top-level keys as the ingress, with mutated `nodes` / `edges` /
+ * (optional) `goal_constraints` from the validated parse.
  *
- * The mutator may throw — typically a `D1HandlerError` for entity-not-found
- * or kind-mismatch — and that error propagates unchanged. Schema-violation
- * errors from `GraphV3.parse` are wrapped as
- * `D1HandlerError('GRAPH_INVARIANT_VIOLATED')` so the commit path can
- * distinguish "handler logic failed" from "handler produced an invalid
- * graph".
+ * The `ingressGraph` parameter is `unknown` so the executor can pass
+ * the raw `invocation.graphForTurn` directly without first narrowing
+ * to `GraphV3T` (the narrowing would lose the wider ingress shape we
+ * want to preserve).
+ *
+ * The mutator receives a `GraphV3T`-narrowed clone and may throw —
+ * typically a `D1HandlerError` for entity-not-found or kind-mismatch —
+ * and that error propagates unchanged.
  */
 export function applyAndValidateMutation<TBefore, TAfter>(
-  graph: GraphV3T,
+  ingressGraph: unknown,
   mutator: (clone: GraphV3T) => { before: TBefore; after: TAfter },
 ): {
-  readonly mutatedGraph: GraphV3T;
+  readonly mutatedGraph: PersistedGraphV3T;
   readonly before: TBefore;
   readonly after: TAfter;
 } {
-  const clone = cloneGraph(graph);
+  // 1. Parse the ingress to obtain a GraphV3-shaped working copy.
+  //    The parsed output is a fresh object; mutating it does not
+  //    affect the ingress.
+  const ingressParse = GraphV3.safeParse(ingressGraph);
+  if (!ingressParse.success) {
+    throw new D1HandlerError(
+      'GRAPH_INVARIANT_VIOLATED',
+      'Ingress graph failed schema validation.',
+      {
+        details: {
+          first_issue: ingressParse.error.issues[0]?.message,
+          first_issue_path: ingressParse.error.issues[0]?.path.join('.'),
+        },
+      },
+    );
+  }
+  const clone = JSON.parse(JSON.stringify(ingressParse.data)) as GraphV3T;
   const { before, after } = mutator(clone);
 
-  const parsed = GraphV3.safeParse(clone);
-  if (!parsed.success) {
+  // 2. Re-parse the mutated graph for post-mutation validation.
+  const postParse = GraphV3.safeParse(clone);
+  if (!postParse.success) {
     throw new D1HandlerError(
       'GRAPH_INVARIANT_VIOLATED',
       'Post-mutation graph failed schema validation.',
       {
         details: {
-          first_issue: parsed.error.issues[0]?.message,
-          first_issue_path: parsed.error.issues[0]?.path.join('.'),
+          first_issue: postParse.error.issues[0]?.message,
+          first_issue_path: postParse.error.issues[0]?.path.join('.'),
         },
       },
     );
   }
 
-  return { mutatedGraph: parsed.data, before, after };
+  // 3. Merge the mutated structural fields onto the full ingress
+  //    shape so top-level fields not declared on GraphV3 survive the
+  //    round-trip into commit. Mirror of the post-handler hash-merge
+  //    pattern in turn-executor.
+  const ingressShape =
+    ingressGraph !== null &&
+    typeof ingressGraph === 'object' &&
+    !Array.isArray(ingressGraph)
+      ? (ingressGraph as Record<string, unknown>)
+      : {};
+  const mutatedGraph: PersistedGraphV3T = {
+    ...ingressShape,
+    nodes: postParse.data.nodes,
+    edges: postParse.data.edges,
+    ...(postParse.data.goal_constraints !== undefined
+      ? { goal_constraints: postParse.data.goal_constraints }
+      : {}),
+  };
+
+  return { mutatedGraph, before, after };
 }
 
 /**

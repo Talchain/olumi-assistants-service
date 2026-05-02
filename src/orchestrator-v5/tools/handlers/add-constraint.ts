@@ -55,6 +55,30 @@ const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
   at_most: '<=',
 };
 
+/**
+ * Accepted constrained-entity kinds. Module-level constant so the
+ * allowlist, the kind check, and the error metadata stay in one place
+ * (no recreating the Set on every handler invocation, no drift
+ * between the gate and the rejection details).
+ *
+ * Kinds:
+ *   - factor   ("budget can't exceed £50k")
+ *   - outcome  ("retention must be at least 90%")
+ *   - goal     (constraint on the goal threshold)
+ *   - risk     ("keep churn risk below 5%") — added in A3.1 Task 5.
+ *
+ * decision / option / action remain rejected (no threshold semantics).
+ * GoalConstraintSchema's `node_id` is kind-agnostic and PLoT forwards
+ * constraints regardless of the constrained-node kind.
+ */
+const ALLOWED_TARGET_KINDS: readonly string[] = [
+  'factor',
+  'outcome',
+  'goal',
+  'risk',
+];
+const ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(ALLOWED_TARGET_KINDS);
+
 interface ResolvedParams {
   readonly constraint_type: 'at_least' | 'at_most';
   readonly value: number;
@@ -175,12 +199,9 @@ export function createAddConstraintHandler(): HandlerFn {
           { details: { handler_id: 'add_constraint', target_id: targetId } },
         );
       }
-      // Constraints attach to the constrained entity. The brief allows
-      // factors and outcomes; we accept those plus goals (a constraint on
-      // a goal targets the goal threshold). decision/option/risk are not
-      // valid constrained entities — reject as ENTITY_KIND_MISMATCH.
-      const ALLOWED_TARGET_KINDS = new Set(['factor', 'outcome', 'goal']);
-      if (!ALLOWED_TARGET_KINDS.has(targetNode.kind)) {
+      // Allowlist + rejection metadata are sourced from the same
+      // module-level constant so they cannot drift apart.
+      if (!ALLOWED_TARGET_KIND_SET.has(targetNode.kind)) {
         throw new D1HandlerError(
           'ENTITY_KIND_MISMATCH',
           `Cannot add a constraint to a ${targetNode.kind}.`,
@@ -189,7 +210,11 @@ export function createAddConstraintHandler(): HandlerFn {
               handler_id: 'add_constraint',
               target_id: targetId,
               actual_kind: targetNode.kind,
-              accepted_kinds: ['factor', 'outcome', 'goal'],
+              // Includes 'risk' post-A3.1 — must match the allowlist
+              // so user-facing recovery (chip generator reads
+              // accepted_kinds) and telemetry agree with actual
+              // behaviour.
+              accepted_kinds: [...ALLOWED_TARGET_KINDS],
             },
           },
         );
@@ -241,7 +266,7 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
-      const result = applyAndValidateMutation(graph, (clone) => {
+      const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         const next = existing
           ? list.map((c) =>

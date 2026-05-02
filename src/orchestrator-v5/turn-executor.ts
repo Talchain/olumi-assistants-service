@@ -69,7 +69,10 @@ import {
   tryDeterministicValueUpdate,
   buildClarifyAssistantText,
   buildClarifyChipMessage,
+  mapCqeQuantityToProposalValue,
+  deriveOperator,
 } from './routing/deterministic-value-update.js';
+import type { ProposalAction } from './routing/types.js';
 import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
@@ -120,6 +123,7 @@ import {
   RoutingError,
   routeWithToolUse,
   type RoutingResult,
+  type RoutingToolCallResult,
 } from './routing/route-with-tool-use.js';
 import {
   validateToolCall,
@@ -145,6 +149,7 @@ import {
   type AnalysisStateIngress,
 } from './boundary/request-extensions.js';
 import type { V2RunResponseEnvelope } from '../orchestrator/types.js';
+import type { UsageMetrics } from '../adapters/llm/types.js';
 import {
   compactAnalysis,
   type AnalysisResponseSummary,
@@ -514,7 +519,10 @@ export async function runTurnExecutor(
     // ==================================================================
     // STEP 1 — ORIENT
     // ==================================================================
-    let routingResult: RoutingResult;
+    // V5 D1 golden-path closure (A3.1): the deterministic pre-route may
+    // synthesise this before the routeWithToolUse call. Wider type so the
+    // guard below the pre-route block can compare against undefined.
+    let routingResult: RoutingResult | undefined;
     // Phase 1.5: compile analysis summary once per turn. compactAnalysis is
     // the existing V4 utility that projects V2RunResponseEnvelope →
     // AnalysisResponseSummary. AnalysisStateIngress is a structural subset
@@ -744,17 +752,196 @@ export async function runTurnExecutor(
         },
       });
 
-      // V5 explain-stabilisation Task 4 — deterministic value-update
-      // pre-route. Catches explicit "Set X to N" / "Increase Y to N"
-      // phrasings before they reach the LLM and dispatches them as a
-      // clarify direct_answer with candidate factor chips. Negative gate
-      // suppresses on hypothetical phrasings ("what if budget increased").
-      // Pure function; falls through to the LLM when no candidate match.
-      const deterministicValueUpdate = tryDeterministicValueUpdate(
+      // V5 explain-stabilisation Task 4 + V5 D1 golden-path closure
+      // (A3.1 Task 1) — deterministic value-update pre-route. Catches
+      // explicit "Set X to N" / "Increase Y to N" phrasings before
+      // they reach the LLM. Two-path dispatch:
+      //
+      //   1. UNAMBIGUOUS factor + executable handler:
+      //      Single substring match (score=1) on a 'factor'-kind
+      //      node, AND set_factor_value is registered in both the
+      //      active validation and handler registries. Synthesises
+      //      a RoutingToolCallResult so the existing Step 2-7
+      //      lifecycle (validate → execute → confirm → commit) runs
+      //      unchanged. No LLM call, identical telemetry / fact /
+      //      commit shape to a Sonnet-routed tool-call.
+      //
+      //   2. AMBIGUOUS / NON-FACTOR / NON-EXECUTABLE:
+      //      Multi-candidate matches stay clarify; single-substring
+      //      matches on a non-factor node downgrade to clarify
+      //      (kind gate); any path that requires set_factor_value
+      //      but cannot resolve it in the active registries
+      //      downgrades to clarify (registry guard). Telemetry
+      //      records the original pre-guard dispatch plus a
+      //      `downgrade_reason`. Clarify chips fire from the
+      //      existing branch; the chip click on the next turn
+      //      re-enters Sonnet's normal routing.
+      //
+      //   3. NO MATCH:
+      //      Negative gate suppresses on hypothetical phrasings
+      //      ("what if budget increased"); no edit verb / no CQE
+      //      quantity / no graph also short-circuits. Falls through
+      //      to the LLM via routeWithToolUse.
+      //
+      // Pure detection function; the guards + dispatch live in this
+      // executor.
+      let deterministicValueUpdate = tryDeterministicValueUpdate(
         payload.message,
         contextPack.parsed_quantities,
         graphLookupForValidate,
       );
+      // V5 D1 golden-path closure (A3.1): the original (pre-guard)
+      // dispatch is what the pre-route function alone would have
+      // produced. The guards below (kind check + registry executable)
+      // may downgrade `set_factor_value` to clarify, in which case
+      // telemetry needs to record both the original candidate AND the
+      // reason the downgrade fired so dashboards see the final
+      // dispatch path, not just the pre-guard candidate. The single
+      // emit at the end of the block carries `downgrade_reason` when
+      // a downgrade fired.
+      const originalDispatch = deterministicValueUpdate.matched
+        ? deterministicValueUpdate.dispatch
+        : null;
+      let downgradeReason:
+        | 'non_factor_kind'
+        | 'handler_not_executable'
+        | null = null;
+      if (
+        deterministicValueUpdate.matched &&
+        deterministicValueUpdate.dispatch === 'set_factor_value'
+      ) {
+        // V5 D1 golden-path closure (A3.1): unambiguous match — exactly
+        // one substring-matched candidate. Verify the candidate's actual
+        // node kind is 'factor' before dispatching the handler.
+        // GraphLookup buckets factor/outcome/decision/risk/action under
+        // EntityKind 'node', so we re-resolve the kind from raw graph
+        // state. Non-factor matches fall through to the existing clarify
+        // path (handled by the `dispatch === 'clarify'` branch below).
+        //
+        // Shared execution path: rather than invoking the handler
+        // directly, we synthesise a `RoutingToolCallResult` and let the
+        // existing Step 2-7 lifecycle (validate → execute → confirm →
+        // coach → compose → commit) run unchanged. Telemetry, fact
+        // shape, commit shape are identical to a Sonnet-routed
+        // tool-call.
+        const candidate = deterministicValueUpdate.candidate;
+        const nodeKind = (graphStateForTurn?.nodes ?? []).find(
+          (n) => (n as { id?: unknown }).id === candidate.id,
+        ) as { kind?: unknown } | undefined;
+        const isFactor =
+          typeof nodeKind?.kind === 'string' && nodeKind.kind === 'factor';
+        // V5 D1 golden-path closure (A3.1) — registry guard:
+        // Only synthesise the deterministic dispatch when the active
+        // validation AND handler registries can actually execute
+        // `set_factor_value`. Without this guard, a misconfigured
+        // executor (test override that omits the handler, or a future
+        // build that gates handler registration on a flag) would
+        // produce a synthesised handler turn that fails at execute
+        // time with HANDLER_NOT_FOUND. Falling through to clarify is
+        // the safe degradation — the chip click on the next turn
+        // re-enters Sonnet's normal routing.
+        //
+        // Order matters: the kind check is cheap (an array find),
+        // the registry resolution may invoke `getDefaultRegistry()`
+        // which constructs the production PLoT client on first call.
+        // Short-circuiting on `isFactor === false` skips the
+        // registry resolution for clarify-bound non-factor matches
+        // and avoids unnecessary PLoT client init on the
+        // clarify-only path.
+        let handlerExecutable = false;
+        if (isFactor) {
+          const activeValidationRegistry =
+            options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+          const activeHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
+          handlerExecutable =
+            activeValidationRegistry.set_factor_value !== undefined &&
+            resolveHandler(activeHandlerRegistry, 'set_factor_value') !== null;
+        }
+        if (isFactor && handlerExecutable) {
+          const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
+            deterministicValueUpdate.quantity,
+          );
+          const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
+          const proposal: ProposalAction = {
+            handler_id: 'set_factor_value',
+            entity: {
+              id: candidate.id,
+              kind: 'node',
+              label: candidate.label,
+              resolution_status: 'resolved',
+              resolution_method: 'label_match',
+            },
+            parameters: [
+              {
+                name: 'value',
+                value: unit !== undefined ? { value: userUnitValue, unit } : userUnitValue,
+                operator,
+                source: 'user_explicit',
+                ...(unit !== undefined ? { unit } : {}),
+              },
+            ],
+            cited_context_fields: ['graph.nodes'],
+          };
+          // Synthesise a RoutingToolCallResult so the existing Step 2-7
+          // lifecycle treats this exactly like a Sonnet-emitted tool
+          // call. The `usage` shape is the canonical `UsageMetrics`
+          // interface — zero values are accurate (no LLM tokens
+          // consumed on the deterministic path), and a properly typed
+          // stub avoids an `as unknown as` cast at the boundary.
+          const deterministicUsage: UsageMetrics = {
+            input_tokens: 0,
+            output_tokens: 0,
+          };
+          const synthesisedRouting: RoutingToolCallResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: proposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: deterministicUsage,
+              model: 'deterministic-value-update',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+          };
+          routingResult = synthesisedRouting;
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          // Skip the routeWithToolUse call below; control falls through
+          // to STEP 2 (validate) → STEP 3 (execute) → STEP 7 (commit).
+        } else {
+          // Either the candidate is non-factor (outcome, risk,
+          // decision, action — the kind gate per brief correction #3),
+          // OR the active registries cannot execute set_factor_value
+          // (registry guard — protects against misconfigured executors
+          // and future flag-gated handler registration). In both cases
+          // fall back to clarify so the user disambiguates / the chip
+          // click on the next turn re-enters Sonnet's normal routing.
+          // The `downgrade_reason` is recorded for the telemetry emit
+          // below so dashboards see why the dispatch flipped.
+          downgradeReason = !isFactor ? 'non_factor_kind' : 'handler_not_executable';
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'clarify',
+            candidates: [candidate],
+            quantity: deterministicValueUpdate.quantity,
+          };
+        }
+      }
+
+      // V5 D1 golden-path closure (A3.1): widen telemetry to handle
+      // the `set_factor_value` dispatch variant (single `candidate`,
+      // not `candidates[]`) AND surface the post-guard final
+      // dispatch so dashboards reflect what actually ran rather than
+      // the pre-guard candidate. `original_dispatch` is preserved for
+      // observability when a downgrade fires.
+      const telemetryCandidates = deterministicValueUpdate.matched
+        ? deterministicValueUpdate.dispatch === 'set_factor_value'
+          ? [deterministicValueUpdate.candidate]
+          : deterministicValueUpdate.candidates
+        : [];
       emit(TelemetryEvents.V5DeterministicValueUpdate, {
         request_id: requestId,
         scenario_id: context.session_id,
@@ -762,24 +949,24 @@ export async function runTurnExecutor(
         dispatch: deterministicValueUpdate.matched
           ? deterministicValueUpdate.dispatch
           : null,
-        candidate_count: deterministicValueUpdate.matched
-          ? deterministicValueUpdate.candidates.length
-          : 0,
-        top_score: deterministicValueUpdate.matched
-          ? deterministicValueUpdate.candidates[0]?.score ?? null
-          : null,
+        original_dispatch: originalDispatch,
+        downgrade_reason: downgradeReason,
+        candidate_count: telemetryCandidates.length,
+        top_score: telemetryCandidates[0]?.score ?? null,
         // Per-candidate source tags ('substring' | 'dice') so routing
         // diagnostics can distinguish exact-label hits from fuzzy hits
         // without inferring from `score`.
-        candidate_sources: deterministicValueUpdate.matched
-          ? deterministicValueUpdate.candidates.map((c) => c.source)
-          : [],
+        candidate_sources: telemetryCandidates.map((c) => c.source),
         skip_reason: deterministicValueUpdate.matched
           ? null
           : deterministicValueUpdate.skip_reason,
         cqe_quantity_count: contextPack.parsed_quantities.length,
       });
-      if (deterministicValueUpdate.matched) {
+
+      if (
+        deterministicValueUpdate.matched &&
+        deterministicValueUpdate.dispatch === 'clarify'
+      ) {
         // Dispatch a clarify-shape direct_answer. No LLM call, no handler
         // fact persisted — the user's chip click on the next turn is what
         // produces a real factor reference for the LLM to act on.
@@ -843,18 +1030,25 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
-      routingResult = await routeWithToolUse(contextPack, payload.message, {
-        requestId,
-        sessionId: context.session_id,
-        signal: turnAbort.signal,
-        adapter: options.routingAdapter,
-      });
-      // Account for actual routing-call count (1 on first-pass success,
-      // 2 when REPAIR_ONCE used). The router knows; we trust its count.
-      llmCallsUsed = routingResult.llmCallCount;
-      sonnetTextForLog =
-        routingResult.type === 'tool_call' ? routingResult.orientationText : routingResult.text;
-      stagesCompleted.push('orient');
+      // V5 D1 golden-path closure (A3.1): when the deterministic pre-route
+      // already synthesised a `routingResult` (unambiguous factor + value
+      // case), skip the LLM call entirely. The synthetic result already
+      // carries `orientationText: ''` and `llmCallCount: 0`, and the
+      // 'orient' stage marker has been pushed.
+      if (routingResult === undefined) {
+        routingResult = await routeWithToolUse(contextPack, payload.message, {
+          requestId,
+          sessionId: context.session_id,
+          signal: turnAbort.signal,
+          adapter: options.routingAdapter,
+        });
+        // Account for actual routing-call count (1 on first-pass success,
+        // 2 when REPAIR_ONCE used). The router knows; we trust its count.
+        llmCallsUsed = routingResult.llmCallCount;
+        sonnetTextForLog =
+          routingResult.type === 'tool_call' ? routingResult.orientationText : routingResult.text;
+        stagesCompleted.push('orient');
+      }
     } catch (error) {
       if (turnAbort.signal.aborted) {
         failureType = INTERNAL_TO_WIRE.BUDGET_EXCEEDED;

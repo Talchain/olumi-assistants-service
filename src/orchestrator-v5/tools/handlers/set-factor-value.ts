@@ -3,17 +3,21 @@
  *
  * Mutates a factor node's `observed_state.{value, raw_value}` deterministically
  * from a validated proposal. Sonnet supplies user-unit components via the
- * structured parameter shape `{ value, raw_value?, unit?, cap? }`; the handler
- * applies the operator and normalises model units.
+ * structured parameter shape `{ value, unit?, cap? }`; the handler
+ * applies the operator and normalises model units. (`raw_value` was an
+ * optional field on the structured shape pre-A3.1 but was never read by
+ * the handler — removed in A3.1 Task 4. Strict Zod rejects it now.)
  *
  * Per F.6: no LLM calls inside the handler. No re-parsing of user text — the
  * proposal parameters are the source of truth (the validator already passed
  * them through the registered Zod schema).
  *
  * Returns:
- *   - `mutated_graph` — post-mutation GraphV3T (validated). Replaces the
- *     ingress graph at commit time so append_turn_atomic persists the new
- *     state.
+ *   - `mutated_graph` — post-mutation graph (validated). Carries the
+ *     full ingress top-level shape with mutated `nodes`/`edges`/
+ *     `goal_constraints` stamped in (A3.1 Task 2). Replaces the
+ *     ingress graph at commit time so append_turn_atomic persists
+ *     the new state.
  *   - `handler_facts` — single SetFactorValueHandlerFact carrying
  *     {target_id, status, before, after}. Compose maps this to the
  *     boundary `graph_patch` block so the UI sees the change.
@@ -29,6 +33,7 @@ import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
+import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
@@ -40,18 +45,27 @@ import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
  * validation registry can reference the same schema (single source of
  * truth — the validator and the handler check the same shape).
  *
- * Sonnet's tool schema accepts either a primitive or a structured object
- * for `parameters.value`; we accept both here. When the value arrives as
- * a primitive number we treat it as a bare-number proposal (no unit) and
- * the handler defers to the factor's stored unit/cap; when structured,
- * the proposal carries explicit unit/cap.
+ * Sonnet's tool schema accepts either a primitive or a structured
+ * object `{ value, unit?, cap? }` for `parameters.value`; we accept
+ * both here. When the value arrives as a primitive number we treat
+ * it as a bare-number proposal (no unit) and the handler defers to
+ * the factor's stored unit/cap; when structured, the proposal carries
+ * explicit unit/cap. The structured object is `.strict()`, so unknown
+ * keys (notably `raw_value`, removed in A3.1 Task 4 because it was
+ * dead documentation that risked silent double-normalisation) fail
+ * validation loudly.
  */
 export const SetFactorValueValueSchema = z.union([
   z.number(),
   z
     .object({
+      // V5 D1 golden-path closure (A3.1 Task 4): `raw_value` was
+      // previously declared optional but ignored by `parseProposalValue`
+      // — it never reached the handler logic. Removing it from the
+      // schema closes the silent-strip footgun: a proposal carrying
+      // `{ value: 5, raw_value: 0.05 }` now fails Zod validation with
+      // "Unrecognized key(s)" rather than silently picking `value`.
       value: z.number(),
-      raw_value: z.number().optional(),
       unit: z.string().optional(),
       cap: z.number().optional(),
     })
@@ -84,7 +98,7 @@ function parseProposalValue(raw: unknown): ParsedValue {
   }
   throw new D1HandlerError(
     'PARAMETER_INVALID',
-    'set_factor_value: value must be a number or { value, raw_value?, unit?, cap? }.',
+    'set_factor_value: value must be a number or { value, unit?, cap? }.',
     { details: { received: raw } },
   );
 }
@@ -244,7 +258,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     };
 
     // Apply the mutation to a clone and Zod-parse the result.
-    const result = applyAndValidateMutation(graph, (clone) => {
+    const result = applyAndValidateMutation(rawGraph, (clone) => {
       const node = clone.nodes.find((n) => n.id === targetId);
       if (!node) {
         // Should be impossible — we found it on `graph` and clone is a deep
@@ -259,6 +273,34 @@ export function createSetFactorValueHandler(): HandlerFn {
         ...(after.cap !== undefined ? { cap: after.cap } : {}),
       };
       node.observed_state = merged;
+
+      // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value
+      // from the post-mutation observed_state via the canonical pure
+      // formatter. Without this the persisted node carries a stale
+      // display string ("£40,000" after we just mutated raw_value to
+      // 50000). `synthesiseDisplayValue` returns undefined when input
+      // is insufficient — callers who relied on absence handle that
+      // path; we normalise back to undefined-meaning-cleared rather
+      // than persisting the prior value.
+      const recomputedDisplay = synthesiseDisplayValue({
+        value: normalised.value,
+        raw_value: normalised.raw_value,
+        ...(after.unit !== undefined ? { unit: after.unit } : {}),
+        ...(node.factor_type !== undefined ? { factor_type: node.factor_type } : {}),
+        ...(after.cap !== undefined ? { cap: after.cap } : {}),
+      });
+      if (recomputedDisplay !== undefined) {
+        node.display_value = recomputedDisplay;
+      } else if (node.display_value !== undefined) {
+        // Clear the stale display string when the formatter declines
+        // to produce a new one.
+        delete (node as { display_value?: string }).display_value;
+      }
+
+      // Stamp provenance so downstream consumers know the value was
+      // user-set (NodeV3.provenance enum supports 'user_set' directly).
+      node.provenance = 'user_set';
+
       return { before, after };
     });
 

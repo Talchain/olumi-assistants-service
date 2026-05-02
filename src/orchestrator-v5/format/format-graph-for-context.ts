@@ -1,24 +1,31 @@
 /**
- * Display-safe graph projection for the LLM-facing context pack
- * (brief brief-display-safe-graph A2.1).
+ * Display-safe graph projection for the LLM-facing context pack.
+ *
+ * Originally introduced as brief-display-safe-graph A2.1 (strip raw
+ * edge floats / exists / model-internal node fields; preserve user-
+ * supplied `value`). Tightened by V5 D1 golden-path closure (A3.1
+ * Task 6) to also strip node-level `value`, `raw_value`, and `cap`:
+ * exposing any node numeric encouraged Sonnet to echo it as
+ * structural fact ("the model sets X to 5") and reuse it as a
+ * coefficient in narration. Sonnet now sees the label, kind,
+ * category, and unit (label only) — no node numerics, no edge
+ * `strength` floats, no `exists` probabilities.
  *
  * Design principle: raw model values stay in structured state for
- * handlers, telemetry, freshness hashing, and edit_graph dispatch; the
- * LLM-facing context pack uses decision-language projections only.
- * Sonnet never sees raw edge `strength` floats, raw `exists`
- * probabilities, or model-internal node fields. Without raw floats in
- * the prompt, Sonnet stops echoing internal numerics ("strength of
- * 0.55", "direct link of 0.65") in narration.
+ * handlers, telemetry, freshness hashing, and edit_graph dispatch;
+ * the LLM-facing context pack uses decision-language projections
+ * only.
  *
  * Operates strictly downstream of `compactGraphForContextPack()` and
- * `projectCompactGraph()`. The raw `ContextPack.graph` is preserved for
- * handler-side reads (edit_graph dispatch reads from raw boundary
- * graph state via a wholly separate path; freshness hashing and
- * telemetry continue to read raw `ContextPack.graph`).
+ * `projectCompactGraph()`. The raw `ContextPack.graph` is preserved
+ * for handler-side reads (edit_graph dispatch reads from raw
+ * boundary graph state via a wholly separate path; freshness hashing
+ * and telemetry continue to read raw `ContextPack.graph`).
  *
- * Pure function. No side effects. Idempotent on its own output (re-running
- * produces an equivalent shape — `relationship` strings carry no decimals
- * to re-classify).
+ * Pure function. No side effects. Idempotent on its own output
+ * (re-running produces an equivalent shape — `relationship` strings
+ * carry no decimals to re-classify; nodes have nothing numeric to
+ * re-strip).
  */
 
 import type { CompactProvenance } from '../../orchestrator/context/graph-compact.js';
@@ -33,13 +40,19 @@ export interface DisplaySafeNode {
   readonly unit?: string;
   readonly intervention_summary?: string;
   /**
-   * User-supplied quantity (e.g. observed factor value) carried through
-   * verbatim. Brief A2.1 explicitly preserves this — it is not a model
-   * coefficient, and rebanding it would corrupt user-meaningful data
-   * (e.g. "Marketing Spend = 100k"). The model-normalised siblings
-   * `raw_value` and `cap` are stripped because they're internal scaling.
+   * V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
+   * `raw_value`, and `cap` are stripped from the LLM-facing
+   * projection. Brief A2.1 originally preserved `value` (reasoning:
+   * user-supplied quantities are meaningful prose), but the post-A3
+   * review found that exposing any node numeric — even a
+   * "user-meaningful" one — encouraged Sonnet to echo it as structural
+   * fact ("the model sets X to 5") and reuse it as a coefficient in
+   * narration. The display projection now carries no node numerics;
+   * the LLM gets `unit` (label only) and `intervention_summary`. Raw
+   * `ContextPack.graph` retains `value` / `raw_value` / `cap` for
+   * handlers, freshness hashing, and edit_graph dispatch. Sonnet
+   * never sees them.
    */
-  readonly value?: number | string;
 }
 
 export interface DisplaySafeEdge {
@@ -62,6 +75,18 @@ export interface DisplaySafeGraph {
   readonly counts: ContextPackGraph['counts'];
 }
 
+/**
+ * Shape of a raw input node consulted by `projectNode`. Only the
+ * declared display-safe fields (`id`, `label`, `kind`, `category`,
+ * `unit`, `intervention_summary`) are projected onto `DisplaySafeNode`.
+ *
+ * V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
+ * `raw_value`, and `cap` are stripped from the LLM-facing projection
+ * and therefore are NOT read here even if present on the input.
+ * `observed_state` is inspected only for the `unit` fallback (see
+ * `extractNodeUnit`); its inner `value` / `raw_value` / `cap` are
+ * deliberately ignored.
+ */
 interface RawNodeShape {
   readonly id?: unknown;
   readonly label?: unknown;
@@ -69,9 +94,12 @@ interface RawNodeShape {
   readonly category?: unknown;
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
-  /** Compact / display-safe top-level user value. */
-  readonly value?: unknown;
-  /** Canonical GraphV3T nests user-supplied node value under `observed_state`. */
+  /**
+   * Canonical GraphV3T nests `unit` under `observed_state`. Only that
+   * inner field is consulted (label-only); inner numeric fields
+   * (`value`, `raw_value`, `cap`) are stripped from the display
+   * projection.
+   */
   readonly observed_state?: unknown;
 }
 
@@ -132,29 +160,13 @@ function asAllowedRelationship(value: unknown): string | undefined {
 }
 
 /**
- * Extract a user-supplied node `value` from either the compact top-level
- * field or the canonical GraphV3T `observed_state.value` nesting. Numbers
- * and strings carried through verbatim per brief A2.1; other JSON shapes
- * dropped defensively.
- */
-function extractNodeValue(raw: RawNodeShape): number | string | undefined {
-  const top = raw.value;
-  if (typeof top === 'number' && Number.isFinite(top)) return top;
-  if (typeof top === 'string') return top;
-  const observed = raw.observed_state;
-  if (typeof observed === 'object' && observed !== null && 'value' in observed) {
-    const inner = (observed as { value?: unknown }).value;
-    if (typeof inner === 'number' && Number.isFinite(inner)) return inner;
-    if (typeof inner === 'string') return inner;
-  }
-  return undefined;
-}
-
-/**
- * Extract the user-supplied node `unit` symmetrically with value: compact
- * top-level `unit` first, canonical `observed_state.unit` second. Without
- * this fallback the raw-graph passthrough path silently drops the unit
- * label, which can change a value's meaning ("100" vs "100k").
+ * Extract the user-supplied node `unit` (label only) from the compact
+ * top-level field first, falling back to the canonical
+ * `observed_state.unit` nesting. The unit string is the only piece of
+ * `observed_state` that survives into the display projection — the
+ * inner numeric fields (`value`, `raw_value`, `cap`) are stripped per
+ * A3.1 Task 6 because exposing them encouraged Sonnet to echo node
+ * numerics as structural fact.
  */
 function extractNodeUnit(raw: RawNodeShape): string | undefined {
   const top = asString(raw.unit);
@@ -197,7 +209,6 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     category?: string;
     unit?: string;
     intervention_summary?: string;
-    value?: number | string;
   } = { id, label, kind };
   const category = asString(raw.category);
   if (category !== undefined) node.category = category;
@@ -205,14 +216,11 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   if (unit !== undefined) node.unit = unit;
   const interventionSummary = asString(raw.intervention_summary);
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
-  // User-supplied `value`: numeric or string carried through verbatim.
-  // Brief A2.1: do not format node values — they may be user-meaningful
-  // quantities (e.g. "Marketing Spend = 100"). Reads from the compact
-  // top-level `value` first, falling back to canonical
-  // `observed_state.value` (raw assembler passthrough path). Other
-  // types (booleans, arrays, objects) are dropped defensively.
-  const userValue = extractNodeValue(raw);
-  if (userValue !== undefined) node.value = userValue;
+  // V5 D1 golden-path closure (A3.1 Task 6): node `value`, `raw_value`,
+  // and `cap` are deliberately omitted from the display projection.
+  // The raw ContextPack.graph still carries them for handler / freshness
+  // / edit_graph reads; the LLM-facing display graph carries label +
+  // unit + intervention_summary only.
   return node;
 }
 
@@ -296,19 +304,22 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     are kept on `from`/`to`; human labels are surfaced as `from_label` /
  *     `to_label`. `_raw_provenance` is stripped (diagnostic-only).
  *
- *   - Nodes: `id`, `label`, `kind`, `category?`, `unit?`,
- *     `intervention_summary?`, and user-supplied `value?` survive.
- *     Model-normalised `raw_value`/`cap` and internal `source` /
- *     `_raw_provenance` are dropped — they leak raw model state into
- *     prose. `value` is preserved per brief A2.1 because it may be a
- *     user-meaningful quantity (e.g. "Marketing Spend = 100k"). The
- *     extractor reads compact top-level `value` first and canonical
- *     `observed_state.value` second, so the assembler raw-graph
- *     fallback (which passes canonical nodes through unchanged)
- *     preserves user values too. The same compact-then-canonical
- *     fallback applies to `unit` — without it the raw-graph path
- *     drops user units, which can change a value's meaning
- *     (`100` vs `100k`).
+ *   - Nodes: `id`, `label`, `kind`, `category?`, `unit?` (label only),
+ *     and `intervention_summary?` survive. Per V5 D1 golden-path
+ *     closure (A3.1 Task 6), node-level `value`, `raw_value`, and
+ *     `cap` are stripped from the LLM-facing projection (including
+ *     when nested under canonical `observed_state.{value,raw_value,
+ *     cap}`). Brief A2.1 originally preserved `value` as a "user-
+ *     meaningful quantity"; the post-A3 review reversed that
+ *     decision because exposing any node numeric encouraged Sonnet
+ *     to echo it as structural fact and reuse it as a coefficient
+ *     in narration. The raw `ContextPack.graph` retains all node
+ *     numerics for handlers, freshness hashing, and edit_graph
+ *     dispatch — Sonnet just doesn't see them. Internal `source` /
+ *     `_raw_provenance` are dropped (diagnostic-only).
+ *     The `unit` extractor still reads compact top-level `unit`
+ *     first and canonical `observed_state.unit` second so the
+ *     assembler raw-graph fallback preserves the user-facing label.
  *
  *   - Edge strength resolution accepts every shape that can reach
  *     `ContextPack.graph`: compact (`strength: number`), canonical
