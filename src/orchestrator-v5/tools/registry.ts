@@ -225,6 +225,21 @@ export interface HandlerOutcome {
   readonly handler_facts: readonly HandlerFact[];
   readonly llm_calls_used: number;
   readonly suppress_orientation?: boolean;
+  /**
+   * V5 D1 mutation channel. When present, replaces the per-turn ingress
+   * graph in commit metadata so `append_turn_atomic(p_graph)` persists the
+   * post-mutation state. Mutation handlers (set_factor_value, add_constraint,
+   * adjust_edge_strength) populate it; computation/explanation handlers
+   * leave it undefined and the ingress graph is committed unchanged.
+   *
+   * Typed as `unknown` to avoid a cee-v3 import dependency from the
+   * registry contract. STEP 7 in turn-executor passes it through to
+   * `commitDirectAnswer({ graph })` which is also `unknown`-shaped.
+   * Handlers MUST run their candidate post-mutation graph through the
+   * canonical Zod schema before placing it here — invalid graphs must
+   * throw, not commit.
+   */
+  readonly mutated_graph?: unknown;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;

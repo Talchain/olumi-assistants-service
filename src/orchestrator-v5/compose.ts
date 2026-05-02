@@ -113,10 +113,12 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
 }
 
 /**
- * Map recognised handler facts to OlumiResponse blocks. Only the shapes
- * listed in the boundary-schema discriminated union are emitted; unknown
- * or composer-irrelevant fact types (e.g. set_factor_value) do not produce
- * blocks on this path (graph-patch emission stays elsewhere).
+ * Map recognised handler facts to OlumiResponse blocks. Emitted shapes:
+ *  - run_analysis fact → `analysis_result` block.
+ *  - set_factor_value / add_constraint / adjust_edge_strength facts →
+ *    `graph_patch` block (status, operation, target_id, before, after).
+ *    The boundary GraphPatchBlock operation enum mirrors these three D1
+ *    fact_types one-for-one so the mapping is direct.
  */
 function buildBlocksFromFacts(
   facts: readonly HandlerFact[],
@@ -131,6 +133,20 @@ function buildBlocksFromFacts(
         leading_option_id,
         ...(win_probabilities !== undefined ? { win_probabilities } : {}),
         ...(enrichment !== undefined ? { enrichment } : {}),
+      });
+    } else if (
+      fact.fact_type === 'set_factor_value' ||
+      fact.fact_type === 'add_constraint' ||
+      fact.fact_type === 'adjust_edge_strength'
+    ) {
+      const { target_id, status, before, after } = fact.result;
+      blocks.push({
+        type: 'graph_patch',
+        status,
+        operation: fact.fact_type,
+        target_id,
+        before,
+        after,
       });
     }
   }

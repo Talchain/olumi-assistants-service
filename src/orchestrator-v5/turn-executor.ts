@@ -1680,6 +1680,17 @@ export async function runTurnExecutor(
     // STEP 7 — COMMIT (unchanged contract)
     // ==================================================================
     try {
+      // V5 D1 mutation handlers (set_factor_value, add_constraint,
+      // adjust_edge_strength) emit a post-mutation graph on
+      // HandlerOutcome.mutated_graph. When present it supersedes the
+      // per-turn ingress graph so append_turn_atomic(p_graph) persists
+      // the mutated state. Handlers MUST have validated this graph
+      // through GraphV3.parse before returning it — invalid graphs do
+      // not reach here.
+      const graphForCommit =
+        handlerOutcome?.mutated_graph !== undefined
+          ? handlerOutcome.mutated_graph
+          : options.graphState;
       const committed = await commitDirectAnswer(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
@@ -1689,7 +1700,7 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
-        graph: options.graphState,
+        graph: graphForCommit,
       });
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
