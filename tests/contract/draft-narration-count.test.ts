@@ -186,29 +186,49 @@ describe('checkDraftNarrationCounts — mismatch detection', () => {
   });
 });
 
-describe('checkDraftNarrationCounts — defensive parsing', () => {
-  it('does not match word numerals (preserves narration since no quantitative match)', () => {
+describe('checkDraftNarrationCounts — keyword-based suppression (brief A2)', () => {
+  it('suppresses word-numeral count wording ("seven nodes and eight edges")', () => {
     const narration = 'Drafted a graph with seven nodes and eight edges.';
     const res = check(narration, 7, 8);
-    // Word numerals are not parsed → no count detected → preserved verbatim.
-    // (A future tightening could blocklist the literal word "nodes/edges"
-    // too; out of scope for the current contract.)
-    expect(res.chosenText).toBe(narration);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    // No digit counts parseable → mismatchDetected stays false → only
+    // the Suppressed event fires.
     expect(res.mismatchDetected).toBe(false);
-    expect(res.wordingSuppressed).toBe(false);
+    const ev = suppressedEvent();
+    expect(ev).toBeDefined();
+    expect(ev!.data).toMatchObject({
+      narration_node_count: null,
+      narration_edge_count: null,
+    });
+    expect(mismatchEvent()).toBeUndefined();
   });
 
-  it('does not match suffixed integers like "5K nodes"', () => {
+  it('suppresses K-suffixed count wording ("5K nodes")', () => {
     const narration = 'A graph with 5K nodes — far too dense.';
     const res = check(narration, 7, 8);
-    expect(res.chosenText).toBe(narration);
-    expect(res.wordingSuppressed).toBe(false);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    expect(res.mismatchDetected).toBe(false);
+    expect(suppressedEvent()).toBeDefined();
+    expect(mismatchEvent()).toBeUndefined();
   });
 
-  it('matches first occurrence only (regex returns first match)', () => {
+  it('suppresses bare keyword wording with no number ("the nodes capture each step")', () => {
+    const narration = 'The nodes capture each step of the decision.';
+    const res = check(narration, 7, 8);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    expect(res.mismatchDetected).toBe(false);
+    expect(suppressedEvent()).toBeDefined();
+  });
+
+  it('matches first digit occurrence for mismatch classification', () => {
     const narration = 'Initially 3 nodes, but the final graph has 7 nodes and 8 edges.';
     const res = check(narration, 7, 8);
-    // First "3 nodes" disagrees with final 7 → mismatch.
+    // First "3 nodes" disagrees with final 7 → mismatch event fires
+    // (not the suppressed event), text replaced.
+    expect(res.chosenText).toBe(FALLBACK);
     expect(res.mismatchDetected).toBe(true);
     expect(res.wordingSuppressed).toBe(true);
     expect(mismatchEvent()!.data).toMatchObject({

@@ -162,16 +162,24 @@ describe('V5 draft_graph persistence integration', () => {
       expect(writeArg.turn_id).toBe(TURN_ID_1);
     });
 
-    it('assistant_text reflects handler narration on success', async () => {
+    it('assistant_text comes from the decision-language fallback when handler narration is graph-shaped', async () => {
       const result = await dispatchDraftGraph({
         payload: makePayload(TURN_ID_1),
         requestId: 'req-scenario-1',
         request: STUB_REQUEST,
       });
 
-      // The mock sets assistantText from makeDraftResult; dispatchDraftGraph
-      // should prefer it over the fallback.
-      expect(result.response.assistant_text).toContain('Drafted');
+      // brief brief-display-safe-analysis A2: handler narration containing
+      // node/edge wording is suppressed in favour of the decision-language
+      // fallback derived from the final post-repair graph. The fixture
+      // narration at makeDraftResult contains "nodes" → suppressed.
+      // The graph has 1 factor + a goal labelled "Revenue target", no
+      // options → fallback names the goal and counts factor.
+      expect(result.response.assistant_text).toBe(
+        'Your decision model for "Revenue target" is ready, with 0 options and 1 factor to explore.',
+      );
+      expect(result.response.assistant_text).not.toContain('nodes');
+      expect(result.response.assistant_text).not.toContain('edges');
     });
 
     it('response contains empty blocks (graph is persisted via store, not in response body)', async () => {
