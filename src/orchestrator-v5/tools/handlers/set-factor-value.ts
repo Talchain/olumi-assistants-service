@@ -29,6 +29,7 @@ import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
+import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
@@ -259,6 +260,34 @@ export function createSetFactorValueHandler(): HandlerFn {
         ...(after.cap !== undefined ? { cap: after.cap } : {}),
       };
       node.observed_state = merged;
+
+      // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value
+      // from the post-mutation observed_state via the canonical pure
+      // formatter. Without this the persisted node carries a stale
+      // display string ("£40,000" after we just mutated raw_value to
+      // 50000). `synthesiseDisplayValue` returns undefined when input
+      // is insufficient — callers who relied on absence handle that
+      // path; we normalise back to undefined-meaning-cleared rather
+      // than persisting the prior value.
+      const recomputedDisplay = synthesiseDisplayValue({
+        value: normalised.value,
+        raw_value: normalised.raw_value,
+        ...(after.unit !== undefined ? { unit: after.unit } : {}),
+        ...(node.factor_type !== undefined ? { factor_type: node.factor_type } : {}),
+        ...(after.cap !== undefined ? { cap: after.cap } : {}),
+      });
+      if (recomputedDisplay !== undefined) {
+        node.display_value = recomputedDisplay;
+      } else if (node.display_value !== undefined) {
+        // Clear the stale display string when the formatter declines
+        // to produce a new one.
+        delete (node as { display_value?: string }).display_value;
+      }
+
+      // Stamp provenance so downstream consumers know the value was
+      // user-set (NodeV3.provenance enum supports 'user_set' directly).
+      node.provenance = 'user_set';
+
       return { before, after };
     });
 
