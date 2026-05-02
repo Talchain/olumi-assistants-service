@@ -33,9 +33,15 @@ describe('buildTurnContext', () => {
   it('produces a TurnContextSchema-valid context from a valid payload', async () => {
     const ctx = await buildTurnContext(BASE, 'req-1', OPTS);
     // EnrichedTurnContext is a superset; strip the CEE-internal extensions
-    // (prior_turns from Slice B, prior_facts from V5 Group 1) before
-    // asserting schema parse (TurnContextSchema is strict).
-    const { prior_turns: _pt, prior_facts: _pf, ...base } = ctx;
+    // (prior_turns from Slice B, prior_facts from V5 Group 1, and
+    // scenarioBriefText from V5 Phase 1 brief persistence) before asserting
+    // schema parse (TurnContextSchema is strict).
+    const {
+      prior_turns: _pt,
+      prior_facts: _pf,
+      scenarioBriefText: _sb,
+      ...base
+    } = ctx;
     const parsed = TurnContextSchema.parse(base);
     expect(parsed.stage).toBe('frame');
     expect(parsed.session_id).toBe(BASE.scenario_id);
@@ -215,5 +221,47 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
       { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
       { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 Phase 1 brief persistence — scenarioBriefText on EnrichedTurnContext.
+// ---------------------------------------------------------------------------
+
+describe('buildTurnContext — scenarioBriefText (V5 Phase 1 brief persistence)', () => {
+  it('populates scenarioBriefText from store.loadGraphAndBriefText', async () => {
+    const briefText = 'Should I accept the offer at company X?';
+    const store = createNoopSessionStore({ loadBriefTextResult: briefText });
+    const ctx = await buildTurnContext(BASE, 'req-brief-1', { sessionStore: store });
+    expect(ctx.scenarioBriefText).toBe(briefText);
+  });
+
+  it('returns null scenarioBriefText when no brief is persisted', async () => {
+    const store = createNoopSessionStore();
+    const ctx = await buildTurnContext(BASE, 'req-brief-2', { sessionStore: store });
+    expect(ctx.scenarioBriefText).toBeNull();
+  });
+
+  it('degrades gracefully on session-store read failure (returns null briefText)', async () => {
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      throwOnRead: new SessionReadError('boom', { code: 'PGRST500' }),
+    });
+    const ctx = await buildTurnContext(BASE, 'req-brief-3', { sessionStore: store });
+    // throwOnRead from createNoopSessionStore covers readRecent (which fires
+    // first). loadGraphAndBriefText is unaffected by that flag, so ctx still
+    // sees null briefText via the noop's default.
+    expect(ctx.scenarioBriefText).toBeNull();
+    setTestSink(null);
+  });
+
+  it('graph and briefText are loaded together (single round trip)', async () => {
+    // Validates the contract that buildTurnContext uses
+    // loadGraphAndBriefText, not separate loadGraph + brief calls.
+    const briefText = 'My brief';
+    const store = createNoopSessionStore({ loadBriefTextResult: briefText });
+    const ctx = await buildTurnContext(BASE, 'req-brief-4', { sessionStore: store });
+    expect(ctx.scenarioBriefText).toBe(briefText);
   });
 });

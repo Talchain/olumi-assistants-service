@@ -315,12 +315,20 @@ export async function dispatchChipClickRunAnalysis(
     // Decision_review enrichment — same behaviour as TurnExecutor's EXECUTE
     // branch for run_analysis (V5 Group 1 Task B). Non-blocking; enricher
     // internally guards its own timeout and never throws.
+    //
+    // V5 Phase 1 brief persistence (2026-05-02): the brief now sources
+    // from canonical state (`scenarios.brief_text`) via
+    // `EnrichedTurnContext.scenarioBriefText`, populated by
+    // `buildTurnContext` at line 147. The previous hardcoded
+    // `brief: null` made decision_review always skip with reason
+    // `no_brief` on the chip-click path — independently of TurnExecutor's
+    // parallel bug (defect B). Fixing both call sites atomically here.
     const enrichedFacts = await enrichRunAnalysisWithDecisionReview({
       handlerFacts: outcome.handler_facts,
       requestId,
       scenarioId: context.session_id,
       signal: turnAbort.signal,
-      brief: null,
+      brief: context.scenarioBriefText,
     });
 
     // Compose the response using the same composer TurnExecutor uses. The

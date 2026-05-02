@@ -61,9 +61,29 @@ vi.mock('../session/index.js', () => ({
       (global as any).__test_storeDraftGraph_calls.push(graph);
     },
     loadGraph: async (scenarioId: string) => {
+      // V5 Phase 1 brief persistence: production loadPersistedGraph now
+      // delegates to loadPersistedScenarioState which calls
+      // loadGraphAndBriefText. This direct loadGraph entry point is
+      // preserved for backward compatibility but should not be hit by
+      // the standard turn-executor path. Kept to instrument any future
+      // caller that still uses the deprecated method.
       (global as any).__test_loadGraph_calls = (global as any).__test_loadGraph_calls || [];
       (global as any).__test_loadGraph_calls.push(scenarioId);
       return (global as any).__test_persisted_graph || null;
+    },
+    loadGraphAndBriefText: async (scenarioId: string) => {
+      // The production turn-executor reads the persisted graph through
+      // this method (via build-turn-context.loadPersistedScenarioState)
+      // since V5 Phase 1 brief persistence. Increment the SAME counter
+      // (__test_loadGraph_calls) so existing test assertions continue
+      // to fire — the intent is "the executor loaded the persisted
+      // graph", regardless of which method name was used.
+      (global as any).__test_loadGraph_calls = (global as any).__test_loadGraph_calls || [];
+      (global as any).__test_loadGraph_calls.push(scenarioId);
+      return {
+        graph: (global as any).__test_persisted_graph || null,
+        briefText: (global as any).__test_persisted_brief_text || null,
+      };
     },
     ensureScenarioExists: async () => ({ user_id: null }),
   }),
@@ -72,6 +92,7 @@ vi.mock('../session/index.js', () => ({
     delete (global as any).__test_storeDraftGraph_calls;
     delete (global as any).__test_loadGraph_calls;
     delete (global as any).__test_persisted_graph;
+    delete (global as any).__test_persisted_brief_text;
     delete (global as any).__test_prior_turns;
     delete (global as any).__test_prior_facts;
     delete (global as any).__test_readFactsFor_calls;
@@ -1049,8 +1070,14 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         },
       );
 
-      expect((global as any).__test_loadGraph_calls).toHaveLength(1);
+      // V5 Phase 1 brief persistence: scenarios.* is now read from TWO
+      // sites — buildTurnContext.fetchPersistedScenarioState (always) and
+      // turn-executor's loadPersistedGraph fallback (only when graphState
+      // is absent). The counter therefore accumulates 2 entries on a
+      // no-graphState turn. Both reads target the same scenario_id.
+      expect((global as any).__test_loadGraph_calls).toHaveLength(2);
       expect((global as any).__test_loadGraph_calls[0]).toBe(BASE_PAYLOAD.scenario_id);
+      expect((global as any).__test_loadGraph_calls[1]).toBe(BASE_PAYLOAD.scenario_id);
     });
 
     it('threads the persisted graph into the routing context pack for follow-up turns', async () => {
@@ -1113,12 +1140,18 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         },
       );
 
-      // Verify loadGraph was called and returned the persisted graph
-      expect((global as any).__test_loadGraph_calls).toHaveLength(1);
-      expect((global as any).__test_loadGraph_calls[0]).toBe(BASE_PAYLOAD.scenario_id);
+      // V5 Phase 1 brief persistence: counter accumulates across both
+      // turns. Turn 1 (graphState provided) fires the buildTurnContext
+      // canonical-state read (1). Turn 2 (no graphState) fires
+      // buildTurnContext (1) + the loadPersistedGraph fallback (1).
+      // Total = 3. All target the same scenario_id.
+      expect((global as any).__test_loadGraph_calls).toHaveLength(3);
+      for (const seenId of (global as any).__test_loadGraph_calls as string[]) {
+        expect(seenId).toBe(BASE_PAYLOAD.scenario_id);
+      }
     });
 
-    it('loadGraph is NOT called when graphState is provided in the request', async () => {
+    it('loadGraph fallback is NOT called when graphState is provided (only buildTurnContext canonical-state read fires)', async () => {
       const routingAdapter = mockRoutingAdapter(async () => mkTextResult('hi'));
       const graphState = { nodes: [{ id: 'node-1', kind: 'factor', label: 'Node 1' }], edges: [] };
 
@@ -1131,7 +1164,13 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
         },
       );
 
-      expect((global as any).__test_loadGraph_calls).toBeUndefined();
+      // V5 Phase 1 brief persistence: buildTurnContext now ALWAYS reads
+      // scenarios.* (graph + brief_text) for the EnrichedTurnContext —
+      // independent of graphState. The fallback is suppressed when
+      // graphState is provided. Net: exactly 1 call (the canonical-state
+      // read), not 0.
+      expect((global as any).__test_loadGraph_calls).toHaveLength(1);
+      expect((global as any).__test_loadGraph_calls[0]).toBe(BASE_PAYLOAD.scenario_id);
     });
   });
 

@@ -49,6 +49,18 @@ export interface CommitMetadata {
    * scenarios.graph unchanged when p_graph is null.
    */
   readonly graph?: unknown;
+  /**
+   * User-supplied free-text decision brief to persist atomically with the
+   * turn insert via append_turn_atomic(p_brief_text). Set by
+   * `draft-graph-dispatch` on the first draft turn (after normalisation
+   * via `normaliseBriefText`).
+   *
+   * Write-once at the RPC layer: subsequent writes are silently ignored
+   * (`WHERE brief_text IS NULL OR brief_text = ''`). Repair / edit /
+   * regeneration turns may still pass this through but it will not
+   * overwrite. Omit for turns that should not influence brief_text.
+   */
+  readonly briefText?: string;
 }
 
 export interface CommitResult {
@@ -107,6 +119,7 @@ export async function commitDirectAnswer(
     duration_ms: metadata.duration_ms,
     handler_facts: metadata.handler_facts,
     graph: metadata.graph,
+    briefText: metadata.briefText,
   });
 
   const graphPersisted = metadata.graph !== undefined;

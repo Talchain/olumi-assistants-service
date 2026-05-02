@@ -36,6 +36,26 @@ export interface SessionTurnWrite {
    * back together — no split-state risk. Omit for non-draft turns.
    */
   readonly graph?: unknown;
+  /**
+   * When present, the user-supplied free-text decision brief is persisted to
+   * scenarios.brief_text atomically with the turn insert inside
+   * append_turn_atomic.
+   *
+   * Write-once semantics: the RPC silently ignores subsequent writes
+   * (`WHERE brief_text IS NULL OR brief_text = ''`) — first-write-wins.
+   * Set on the first draft turn that supplies a non-null value; subsequent
+   * repair / edit / regeneration turns may pass this field through but it
+   * will NOT overwrite. Brief regeneration is out of scope for Phase 1.
+   *
+   * Distinct from scenarios.brief (JSONB DecisionBriefV1 — V4 residual /
+   * future structured storage).
+   *
+   * Convention: `string | undefined` (omit when absent), not `string | null`.
+   * Empty / whitespace-only strings should be normalised to undefined by
+   * the caller via `normaliseBriefText` — the RPC's CHECK constraint
+   * forbids whitespace-only values.
+   */
+  readonly briefText?: string;
 }
 
 export interface SessionStore {
@@ -76,8 +96,32 @@ export interface SessionStore {
    * Uses the same service-role client access pattern as storeDraftGraph (bypasses RLS).
    * Used by follow-up turns when the UI does not send graph_state in the
    * request body.
+   *
+   * @deprecated Prefer {@link loadGraphAndBriefText} which returns both the
+   * graph and the persisted brief_text in one round trip. This wrapper is
+   * retained for callers that only need the graph and have not yet been
+   * migrated; it delegates to `loadGraphAndBriefText` and discards the brief.
    */
   loadGraph(scenarioId: string): Promise<unknown | null>;
+  /**
+   * Load both the persisted graph and the user-supplied brief_text from
+   * the scenarios row in a single round trip.
+   *
+   * Returns `{ graph: null, briefText: null }` when no scenario row exists
+   * for the given id. Empty-string `brief_text` is coerced to `null` so
+   * callers never receive a value that fails the CHECK constraint or the
+   * downstream `if (briefText)` truthy check. Throws SessionReadError on
+   * any DB/RPC failure.
+   *
+   * Used by `build-turn-context.loadPersistedScenarioState` to populate
+   * `EnrichedTurnContext.scenarioBriefText` so handlers (TurnExecutor,
+   * chip-click-dispatch) can read the brief from canonical state instead
+   * of an out-of-band option field.
+   */
+  loadGraphAndBriefText(scenarioId: string): Promise<{
+    readonly graph: unknown | null;
+    readonly briefText: string | null;
+  }>;
   /**
    * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
    * creating it with `userId` as the owner if absent. `userId` may be null

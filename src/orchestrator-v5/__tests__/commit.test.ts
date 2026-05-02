@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { composeDirectAnswerResponse } from '../compose.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
+import type { SessionStore, SessionTurnWrite } from '../session/store.js';
 
 const META = {
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -50,6 +51,67 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
         createNoopSessionStore({ throwOnAppend: boom }),
       ),
     ).rejects.toBe(boom);
+  });
+
+  // V5 Phase 1 brief persistence: briefText must thread from CommitMetadata
+  // through commit.ts to SessionStore.append.
+  describe('V5 Phase 1 brief persistence — briefText pass-through', () => {
+    function makeSpyStore(): {
+      readonly store: SessionStore;
+      readonly appendCalls: Array<SessionTurnWrite>;
+    } {
+      const appendCalls: Array<SessionTurnWrite> = [];
+      const noop = createNoopSessionStore({ appendId: 'row-spy' });
+      const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
+        appendCalls.push(write);
+        return { id: 'row-spy' };
+      });
+      // Hold the spy alive so vitest does not auto-restore inside async ticks.
+      void spy;
+      return { store: noop, appendCalls };
+    }
+
+    it('threads briefText from CommitMetadata to SessionStore.append', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'drafted',
+        stage: 'frame',
+      });
+      const { store, appendCalls } = makeSpyStore();
+      await commitDirectAnswer(
+        composed,
+        { ...META, briefText: 'My decision brief' },
+        store,
+      );
+      expect(appendCalls).toHaveLength(1);
+      expect(appendCalls[0].briefText).toBe('My decision brief');
+    });
+
+    it('omits briefText (undefined) when not present in metadata', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'hi',
+        stage: 'frame',
+      });
+      const { store, appendCalls } = makeSpyStore();
+      await commitDirectAnswer(composed, META, store);
+      expect(appendCalls).toHaveLength(1);
+      expect(appendCalls[0].briefText).toBeUndefined();
+    });
+
+    it('threads both graph and briefText together (initial draft turn shape)', async () => {
+      const composed = composeDirectAnswerResponse({
+        assistant_text: 'drafted',
+        stage: 'frame',
+      });
+      const graph = { nodes: [], edges: [] };
+      const { store, appendCalls } = makeSpyStore();
+      await commitDirectAnswer(
+        composed,
+        { ...META, graph, briefText: 'brief' },
+        store,
+      );
+      expect(appendCalls[0].graph).toEqual(graph);
+      expect(appendCalls[0].briefText).toBe('brief');
+    });
   });
 });
 

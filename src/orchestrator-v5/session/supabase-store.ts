@@ -71,11 +71,12 @@ export class SupabaseSessionStore implements SessionStore {
   ) {}
 
   async append(write: SessionTurnWrite): Promise<{ id: string }> {
-    // PostgREST overload disambiguation: always pass all 10 named args,
-    // including p_graph as `null` when absent. Omitting p_graph would
-    // make PostgREST consider any 9-arg overload a candidate, and if a
-    // stale 9-arg version of append_turn_atomic ever coexisted with the
-    // current 10-arg signature, the request would fail with
+    // PostgREST overload disambiguation: always pass all 11 named args,
+    // including p_graph and p_brief_text as `null` when absent. Omitting
+    // either would make PostgREST consider lower-arity overloads as
+    // candidates, and if a stale 9-arg or 10-arg version of
+    // append_turn_atomic ever coexisted with the current 11-arg signature,
+    // the request would fail with
     // "Could not choose the best candidate function between …".
     //
     // This was the root cause of the V5 Step 4 staging failure (request_id
@@ -83,9 +84,15 @@ export class SupabaseSessionStore implements SessionStore {
     // overload via CREATE OR REPLACE, which does not drop a different
     // arity. The fix migration
     // 20260426160532_v5_drop_stale_append_turn_atomic_overload.sql drops
-    // the stale 9-arg version; this client-side change is defence-in-depth
-    // so any future overload reintroduction does not silently wedge
-    // commits.
+    // the stale 9-arg version, and 20260502120000_v5_brief_text_persistence
+    // drops the 10-arg version when adding the 11-arg version. This
+    // client-side change is defence-in-depth so any future overload
+    // reintroduction does not silently wedge commits.
+    //
+    // Brief-text write-once: the RPC silently ignores subsequent
+    // brief_text writes via its `WHERE brief_text IS NULL OR brief_text = ''`
+    // predicate. Future briefText updates after the initial draft turn
+    // will not persist. Regenerate semantics are out of scope for Phase 1.
     const { data, error } = await this.client.rpc('append_turn_atomic', {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
@@ -97,6 +104,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_duration_ms: write.duration_ms,
       p_handler_facts: serialiseHandlerFacts(write.handler_facts),
       p_graph: write.graph ?? null,
+      p_brief_text: write.briefText ?? null,
     });
 
     if (error) {
@@ -276,20 +284,44 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async loadGraph(scenarioId: string): Promise<unknown | null> {
+    return (await this.loadGraphAndBriefText(scenarioId)).graph;
+  }
+
+  async loadGraphAndBriefText(scenarioId: string): Promise<{
+    readonly graph: unknown | null;
+    readonly briefText: string | null;
+  }> {
+    // Note: scenarios.* fields are NOT cached by SessionLRUCache (which
+    // is scoped to v5_conversation_turns). Every call hits Supabase
+    // directly. The cache is invalidated on `append`, but reads here
+    // bypass it because the cache holds a different table's rows.
     const { data, error } = await this.client
       .from('scenarios')
-      .select('graph')
+      .select('graph, brief_text')
       .eq('id', scenarioId)
       .maybeSingle();
-    
+
     if (error) {
       throw new SessionReadError(
-        `loadGraph failed for scenario ${scenarioId}: ${errMsg(error)}`,
+        `loadGraphAndBriefText failed for scenario ${scenarioId}: ${errMsg(error)}`,
         { cause: error, code: errCode(error) },
       );
     }
-    
-    return data?.graph ?? null;
+
+    if (data == null) {
+      return { graph: null, briefText: null };
+    }
+
+    const rawBriefText = (data as { brief_text?: unknown }).brief_text;
+    const briefText =
+      typeof rawBriefText === 'string' && rawBriefText.length > 0
+        ? rawBriefText
+        : null;
+
+    return {
+      graph: (data as { graph?: unknown }).graph ?? null,
+      briefText,
+    };
   }
 
   async ensureScenarioExists(

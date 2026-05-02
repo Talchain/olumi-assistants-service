@@ -62,6 +62,7 @@ import {
 } from '../context/freshness.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 
 export interface DispatchDraftGraphParams {
@@ -264,6 +265,31 @@ export async function dispatchDraftGraph(
     // as p_graph and persisted atomically with the turn insert. If the RPC
     // throws (StateCommitFailedError), both graph and turn roll back together
     // and the catch below returns commitPerformed=false.
+    // V5 Phase 1 brief persistence: persist payload.message as
+    // scenarios.brief_text on the first draft turn. The RPC enforces
+    // first-write-wins via `WHERE brief_text IS NULL OR brief_text = ''`,
+    // so subsequent repair / edit / regeneration draft_graph turns also
+    // pass through this dispatch path safely — the second write is a
+    // no-op at the DB layer. We do NOT add a load-before-write guard at
+    // the dispatch layer; doubling RPC latency on every draft turn for
+    // zero additional safety is the wrong tradeoff. Brief regeneration
+    // semantics are out of scope for Phase 1.
+    //
+    // Normalisation: enforces the same length / whitespace invariants
+    // as the DB CHECK constraint, with truncation rather than failure
+    // on over-length inputs. Whitespace-only payloads collapse to
+    // undefined → RPC param NULL → no write.
+    const briefNorm = normaliseBriefText(payload.message);
+    if (briefNorm.truncated) {
+      emit('v5.brief_text.normalised', {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        original_length: briefNorm.originalLength,
+        truncated_length: briefNorm.value?.length ?? 0,
+        reason: 'over_8000_chars',
+      });
+    }
+
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
@@ -279,6 +305,7 @@ export async function dispatchDraftGraph(
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         graph: draftResult.graphOutput ?? undefined,
+        briefText: briefNorm.value,
       },
     );
 

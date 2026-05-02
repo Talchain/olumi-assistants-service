@@ -42,11 +42,24 @@ export interface EnrichDecisionReviewInput {
   /** Outer turn-budget abort signal. */
   readonly signal: AbortSignal;
   /**
-   * Scenario brief text passed out-of-band from the route/TurnExecutor.
-   * Deliberately NOT read from the run_analysis fact's enrichment — the
-   * handler-ownership invariant requires enrichment to be a verbatim
-   * pass-through of the PLoT envelope. When null/absent, the enricher
-   * skips with reason `no_brief` and the turn succeeds with thin content.
+   * Scenario brief text. Deliberately NOT read from the run_analysis
+   * fact's enrichment — the handler-ownership invariant requires
+   * enrichment to be a verbatim pass-through of the PLoT envelope.
+   * When null/absent, the enricher skips with reason `no_brief` and
+   * the turn succeeds with thin content.
+   *
+   * Source (V5 Phase 1 brief persistence, 2026-05-02): callers pass
+   * `EnrichedTurnContext.scenarioBriefText`, populated from
+   * `scenarios.brief_text` via `buildTurnContext`. Both call sites
+   * (turn-executor.ts decision-review block, chip-click-dispatch.ts
+   * line 323) source from canonical state. The legacy out-of-band
+   * `RunTurnExecutorOptions.scenarioBrief` channel is retained as a
+   * deprecated fallback in turn-executor only — chip-click had no
+   * such fallback (it hardcoded `brief: null`, causing defect B's
+   * chip-click leg).
+   *
+   * Field name kept as `brief` (not renamed to `briefText`) to
+   * minimise churn — only the upstream source has changed.
    */
   readonly brief: string | null;
 }
