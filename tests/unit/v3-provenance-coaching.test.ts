@@ -137,9 +137,12 @@ function baseV1(): V1DraftGraphResponse {
         },
       ],
       // The two fields under test — must survive Stage 6 boundary parse.
-      widening_log: [
-        { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternative competitors" },
-      ],
+      // v0.11.0 schema amendment: widening_log is the canonical OBJECT shape.
+      widening_log: {
+        elements_added: ["fac_competition"],
+        elements_considered_but_excluded: ["considered alternative competitors"],
+        brief_completeness: "partial",
+      },
       bias_signals: [
         { type: "anchoring", detail: "pinned to last quarter's price", target: "fac_price" },
       ],
@@ -292,9 +295,11 @@ describe("V3 boundary: coaching widening_log + bias_signals survival", () => {
       const first = result.error.issues[0];
       throw new Error(`V3 parse failed: path=${first?.path.join(".")} ${first?.message}`);
     }
-    expect((result.data.coaching as any)?.widening_log).toEqual([
-      { node_id: "fac_competition", label: "Competitive intensity", reason: "considered alternative competitors" },
-    ]);
+    expect((result.data.coaching as any)?.widening_log).toEqual({
+      elements_added: ["fac_competition"],
+      elements_considered_but_excluded: ["considered alternative competitors"],
+      brief_completeness: "partial",
+    });
   });
 
   it("preserves bias_signals entries through CEEGraphResponseV3.safeParse", () => {

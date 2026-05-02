@@ -69,12 +69,15 @@ const FORBIDDEN_USER_TEXT = [
  * because they ARE entity IDs by design.
  */
 const USER_FACING_DRAFT_GRAPH_PATHS = [
-  // Coaching prose
+  // Coaching prose (v0.11.0 schema amendment: widening_log is the
+  // canonical OBJECT shape; the user-facing-prose path inside is
+  // `widening_log.elements_considered_but_excluded[*]` — free-text reason
+  // strings. `widening_log.elements_added[*]` is structural node IDs by
+  // contract and NOT user-facing prose.)
   "coaching.summary",
   "coaching.strengthen_items[*].label",
   "coaching.strengthen_items[*].detail",
-  "coaching.widening_log[*].label",
-  "coaching.widening_log[*].reason",
+  "coaching.widening_log.elements_considered_but_excluded[*]",
   "coaching.bias_signals[*].detail",
   // Graph prose
   "nodes[*].label",
@@ -142,7 +145,11 @@ describe("/assist/v1/draft-graph endpoint contract", () => {
     expect(body.coaching.summary.length).toBeGreaterThan(0);
     expect(Array.isArray(body.coaching.strengthen_items)).toBe(true);
     expect(body.coaching.strengthen_items.length).toBeGreaterThanOrEqual(2);
-    expect(Array.isArray(body.coaching.widening_log)).toBe(true);
+    // v0.11.0 schema amendment: widening_log is the canonical object
+    // (was array pre-amendment). bias_signals remains an array.
+    expect(typeof body.coaching.widening_log).toBe("object");
+    expect(body.coaching.widening_log).not.toBeNull();
+    expect(Array.isArray(body.coaching.widening_log.elements_added)).toBe(true);
     expect(Array.isArray(body.coaching.bias_signals)).toBe(true);
     for (const item of body.coaching.strengthen_items) {
       expect(item).toMatchObject({

@@ -171,7 +171,9 @@ function makeComprehensiveV1(): V1DraftGraphResponse {
           label: "Add churn data",
           detail: "Include historical churn rates",
           action_type: "add_constraint",
-          bias_category: "blindspots",
+          // v0.11.0: canonical BiasType replaces legacy "blindspots".
+          // Mapping: "blindspots" → "narrow_framing".
+          bias_category: "narrow_framing",
         },
       ],
     },
@@ -329,7 +331,7 @@ describe("V3 field preservation contract", () => {
       expect(item.label).toBe("Add churn data");
       expect(item.detail).toBe("Include historical churn rates");
       expect(item.action_type).toBe("add_constraint");
-      expect(item.bias_category).toBe("blindspots");
+      expect(item.bias_category).toBe("narrow_framing");
     });
   });
 

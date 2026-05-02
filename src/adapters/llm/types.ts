@@ -62,6 +62,15 @@ export interface DraftGraphResult {
   /** Goal constraints emitted by the LLM (from structured outputs).
    *  Merged with regex-extracted constraints in Stage 4 compound-goals. */
   goal_constraints?: Array<Record<string, unknown>>;
+  /** v0.11.0 schema amendment: LLM coaching block, validated against the
+   *  canonical CoachingSchema after the legacy ingress normaliser converts
+   *  v192b array shapes to canonical objects. Required at the LLM boundary;
+   *  optional here so legacy callers that pre-date v0.11.0 still compile. */
+  coaching?: unknown;
+  /** v0.11.0 schema amendment: LLM causal claims discriminated union. */
+  causal_claims?: unknown;
+  /** v0.11.0 schema amendment: LLM topology plan (string[]). */
+  topology_plan?: unknown;
   debug?: {
     influence_scores?: Array<{ node_id: string; score: number }>;
     [key: string]: unknown;

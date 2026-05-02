@@ -239,7 +239,9 @@ describe("STATUS_QUO_ABSENT coaching injection", () => {
     expect(sqItem).toBeDefined();
     expect(sqItem.label).toBe("Add baseline option");
     expect(sqItem.action_type).toBe("add_option");
-    expect(sqItem.bias_category).toBe("framing");
+    // v0.11.0 schema amendment: status-quo coaching now uses canonical BiasType
+    // ("narrow_framing"), replacing the legacy "framing" enum value.
+    expect(sqItem.bias_category).toBe("narrow_framing");
   });
 
   it("does not inject when an option has status-quo-like label", async () => {

@@ -53,7 +53,7 @@ describe("validateCausalClaims", () => {
   it("drops claims referencing non-existent node IDs", () => {
     const raw = [
       { type: "direct_effect", from: "fac_1", to: "out_1", stated_strength: "strong" },
-      { type: "direct_effect", from: "fac_nonexistent", to: "out_1", stated_strength: "weak" },
+      { type: "direct_effect", from: "fac_nonexistent", to: "out_1", stated_strength: "slight" },
     ];
 
     const result = validateCausalClaims(raw, GRAPH_NODE_IDS);
@@ -126,8 +126,12 @@ describe("validateCausalClaims", () => {
     expect((refWarning!.details as any).missing_ids).toContain("Revenue");
   });
 
-  // Test: unmeasured_confounder with stated_source is preserved
-  it("preserves optional stated_source on unmeasured_confounder", () => {
+  // v0.11.0 schema amendment: `stated_source` was dropped from the
+  // canonical UnmeasuredConfounderClaimSchema (Task 0(b) discovery
+  // confirmed zero consumer usage). The discriminated union now uses
+  // `.strict()` mode, so any extra field — including stated_source —
+  // causes the claim to fail Zod parse and be dropped with a warning.
+  it("drops unmeasured_confounder with extra stated_source field (canonical contract is .strict)", () => {
     const raw = [
       {
         type: "unmeasured_confounder",
@@ -137,15 +141,16 @@ describe("validateCausalClaims", () => {
     ];
 
     const result = validateCausalClaims(raw, GRAPH_NODE_IDS);
-    expect(result.claims).toHaveLength(1);
-    expect((result.claims[0] as any).stated_source).toBe("industry report");
+    expect(result.claims).toHaveLength(0);
+    expect(result.warnings.find((w) => w.code === CAUSAL_CLAIMS_WARNING_CODES.DROPPED)).toBeDefined();
   });
 
-  // Test: epsilon floor on outcome_mean_cv is ISL-side, not here,
-  // but we test that invalid stated_strength values are dropped
+  // v0.11.0 schema amendment: StrengthBand is now 4-band
+  // (`very_strong | strong | moderate | slight`); the legacy 3-band
+  // `weak` value is no longer accepted.
   it("drops claims with invalid stated_strength enum value", () => {
     const raw = [
-      { type: "direct_effect", from: "fac_1", to: "out_1", stated_strength: "very_strong" },
+      { type: "direct_effect", from: "fac_1", to: "out_1", stated_strength: "weak" },
     ];
 
     const result = validateCausalClaims(raw, GRAPH_NODE_IDS);
@@ -176,7 +181,7 @@ describe("validateCausalClaims", () => {
       // Malformed (missing 'to')
       { type: "no_direct_effect", from: "fac_1" },
       // Valid but references missing node
-      { type: "direct_effect", from: "fac_1", to: "missing_node", stated_strength: "weak" },
+      { type: "direct_effect", from: "fac_1", to: "missing_node", stated_strength: "slight" },
     ];
 
     const result = validateCausalClaims(raw, GRAPH_NODE_IDS);

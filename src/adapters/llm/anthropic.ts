@@ -6,6 +6,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
+import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
 import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, ClarifyBriefArgs, ClarifyBriefResult, CritiqueGraphArgs, CritiqueGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ChatWithToolsStreamEvent, ToolResponseBlock, ThinkingConfig } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
@@ -882,6 +883,12 @@ export async function draftGraphWithAnthropic(
       }, "[CEE_FIELD_SURVIVAL_TRACE] LLM output field presence at adapter boundary");
     }
 
+    // v0.11.0 schema-amendment legacy normaliser. Production-callable.
+    normaliseLegacyCoachingValues(
+      parsed as { coaching?: unknown },
+      (opts as { request_id?: string } | undefined)?.request_id,
+    );
+
     // Validate and cap node/edge counts
     if (parsed.nodes.length > GRAPH_MAX_NODES) {
       log.warn({ count: parsed.nodes.length, max: GRAPH_MAX_NODES }, "node count exceeded, trimming");
@@ -984,8 +991,16 @@ export async function draftGraphWithAnthropic(
     return {
       graph,
       rationales: parsed.rationales || [],
-      // Coaching passthrough: preserved via .passthrough() on LLMDraftResponse
+      // Coaching passthrough: preserved via .passthrough() on LLMDraftResponse.
+      // The legacy ingress normaliser at line 884 has already converted any
+      // v192b legacy shapes (array widening_log, off-enum bias_category) to
+      // the canonical v0.11.0 shape by this point.
       ...((parsed as any).coaching ? { coaching: (parsed as any).coaching } : {}),
+      // v0.11.0 schema amendment: causal_claims and topology_plan carried
+      // through to Stage 1 Parse → StageContext → Stage 5 Package → Stage 6
+      // V1 → V3 transform with deep-equality preservation.
+      ...((parsed as any).causal_claims ? { causal_claims: (parsed as any).causal_claims } : {}),
+      ...((parsed as any).topology_plan ? { topology_plan: (parsed as any).topology_plan } : {}),
       // Goal constraints passthrough: LLM-emitted constraints have richer metadata
       // (source_quote, confidence, provenance) than the regex extractor.
       ...((parsed as any).goal_constraints ? { goal_constraints: (parsed as any).goal_constraints } : {}),

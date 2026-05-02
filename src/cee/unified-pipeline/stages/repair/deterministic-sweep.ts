@@ -1758,8 +1758,16 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   ctx.detectedEdgeFormat = format;
 
   // Step 3: Collect validation errors using the graph-validator
-  // Pre-sweep diagnostic — informational only, do not fail on these results
-  const validationResult = validateGraphDeterministic({ graph, requestId: ctx.requestId, phase: "pre_sweep_diagnostic" });
+  // Pre-sweep diagnostic — informational only, do not fail on these results.
+  // v0.11.0 schema amendment: pass coaching + causalClaims to enable
+  // referential-integrity warnings (CAUSAL_CLAIM_INVALID_REF, etc).
+  const validationResult = validateGraphDeterministic({
+    graph,
+    requestId: ctx.requestId,
+    phase: "pre_sweep_diagnostic",
+    coaching: ctx.coaching,
+    causalClaims: ctx.causalClaims,
+  });
   const allViolations = validationResult.errors;
 
   log.info({
@@ -2002,8 +2010,16 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     }
   }
 
-  // Step 7: Re-validate using same validator (post-sweep authoritative pass)
-  const revalidation = validateGraphDeterministic({ graph, requestId: ctx.requestId, phase: "post_sweep_authoritative" });
+  // Step 7: Re-validate using same validator (post-sweep authoritative pass).
+  // v0.11.0 schema amendment: pass coaching + causalClaims to enable
+  // referential-integrity warnings against the post-sweep graph IDs.
+  const revalidation = validateGraphDeterministic({
+    graph,
+    requestId: ctx.requestId,
+    phase: "post_sweep_authoritative",
+    coaching: ctx.coaching,
+    causalClaims: ctx.causalClaims,
+  });
   const remainingErrors = revalidation.errors;
 
   // Step 8: Proactive disconnected-option check after all fixes.

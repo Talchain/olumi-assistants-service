@@ -91,6 +91,10 @@ export interface StageContext {
   coaching?: unknown;
   /** LLM causal claims — validated and passed through to response (Phase 2B) */
   causalClaims?: unknown;
+  /** v0.11.0 schema amendment: LLM topology plan — string array describing
+   *  graph layout. Stashed at Stage 1 Parse, packaged at Stage 5, and
+   *  carried V1 → V3 with deep-equality preservation at Stage 6. */
+  topologyPlan?: unknown;
   /** LLM-emitted goal constraints — merged with regex-extracted constraints in Stage 4 */
   llmGoalConstraints?: Array<Record<string, unknown>>;
   /** True if parse stage retried the LLM call due to default strength detection. */

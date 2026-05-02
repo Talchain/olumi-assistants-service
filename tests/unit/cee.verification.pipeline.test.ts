@@ -510,13 +510,18 @@ describe("VerificationPipeline", () => {
       ).rejects.toThrow();
     });
 
-    it("passes schema validation when strengthen_items have action_type", async () => {
+    it("passes schema validation when strengthen_items have action_type (v0.11.0 canonical enum)", async () => {
       const payload = {
         ...buildMinimalDraftResponse(),
         coaching: {
           summary: "Some coaching",
           strengthen_items: [
-            { id: "str_1", label: "Add detail", detail: "More info needed", action_type: "improve" },
+            // v0.11.0 schema amendment: StrengthenItemActionType is the
+            // canonical enum (add_option | add_constraint | add_risk |
+            // reframe_goal). Legacy "improve" was never a valid member;
+            // migrating to add_constraint preserves the test's intent
+            // (assert that a populated action_type survives the pipeline).
+            { id: "str_1", label: "Add detail", detail: "More info needed", action_type: "add_constraint" },
           ],
         },
       };
@@ -527,7 +532,7 @@ describe("VerificationPipeline", () => {
         { endpoint: "draft-graph", requiresEngineValidation: false, requestId: "req_action_type_present" },
       );
 
-      expect((response as any).coaching.strengthen_items[0].action_type).toBe("improve");
+      expect((response as any).coaching.strengthen_items[0].action_type).toBe("add_constraint");
     });
   });
 

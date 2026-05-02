@@ -205,9 +205,20 @@ export interface TurnPlan {
 // Draft Coaching — UI-facing display shapes for envelope.draft_coaching
 // ============================================================================
 
-/** One entry in the LLM's coaching widening_log: a node the model widened
- *  the consideration set around, with a short reason. Strict shape; raw
- *  cache copy retains anything the LLM added under .passthrough(). */
+/** v0.11.0 schema amendment: WideningLog is now an object summary
+ *  describing the widening process. The legacy "per-entry" shape
+ *  (`{node_id,label,reason}[]`) is converted at the Anthropic adapter
+ *  ingress seam in `src/adapters/llm/normalise-legacy-coaching.ts` —
+ *  `node_id`s flow into `elements_added`; `reason` strings flow into
+ *  `elements_considered_but_excluded`. */
+export interface DraftCoachingWideningLog {
+  elements_added: string[];
+  elements_considered_but_excluded: string[];
+  brief_completeness: "complete" | "partial" | "thin";
+}
+
+/** @deprecated Use `DraftCoachingWideningLog`. Retained for legacy
+ *  `tools/draft-graph.ts` consumers during the v192b → v194 transition. */
 export interface DraftCoachingWideningEntry {
   node_id: string;
   label: string;
@@ -240,7 +251,11 @@ export interface DraftCoachingStrengthenItem {
 export interface DraftCoaching {
   summary: string | null;
   strengthen_items: DraftCoachingStrengthenItem[];
-  widening_log: DraftCoachingWideningEntry[] | null;
+  /** v0.11.0 schema amendment: canonical object shape (was
+   *  `DraftCoachingWideningEntry[] | null` pre-amendment). The
+   *  Anthropic-adapter ingress normaliser converts legacy LLM array
+   *  output to this shape so the canonical Zod parse passes. */
+  widening_log: DraftCoachingWideningLog | null;
   bias_signals: DraftCoachingBiasSignal[] | null;
 }
 
@@ -252,7 +267,9 @@ export interface DraftCoaching {
 export interface DraftCoachingWire {
   summary: string | null;
   strengthen_items: DraftCoachingStrengthenItem[];
-  widening_log?: DraftCoachingWideningEntry[];
+  /** v0.11.0 canonical object shape; OMITTED when the canonical object is
+   *  empty (zero elements added, zero excluded, brief_completeness="thin"). */
+  widening_log?: DraftCoachingWideningLog;
   bias_signals?: DraftCoachingBiasSignal[];
 }
 

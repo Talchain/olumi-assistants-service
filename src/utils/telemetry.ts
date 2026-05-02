@@ -60,6 +60,17 @@ export const TelemetryEvents = {
   CeeDraftGraphSucceeded: "cee.draft_graph.succeeded",
   CeeDraftGraphFailed: "cee.draft_graph.failed",
 
+  // v0.11.0 schema amendment — observable transition signals.
+  // LegacyCoachingValueNormalised fires once per substituted off-enum
+  // bias_category / bias_signal value at the Anthropic adapter ingress
+  // seam. Removable after v194 prompt deployment + 7 consecutive days of
+  // zero events.
+  // ContractDefaultApplied fires whenever the schema-valid empty coaching
+  // default is inserted at Stage 5 Package — should be zero in production
+  // after v194 ships; non-zero indicates a prompt regression.
+  DraftGraphLegacyCoachingValueNormalised: "cee.draft_graph.legacy_coaching_value_normalised",
+  DraftGraphContractDefaultApplied: "cee.draft_graph.contract_default_applied",
+
   CeeExplainGraphRequested: "cee.explain_graph.requested",
   CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
   CeeExplainGraphFailed: "cee.explain_graph.failed",

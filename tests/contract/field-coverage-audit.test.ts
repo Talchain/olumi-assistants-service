@@ -111,10 +111,14 @@ const UI_CONSUMED_PATHS: ReadonlySet<string> = new Set([
   "coaching.strengthen_items[].detail",
   "coaching.strengthen_items[].action_type",
   "coaching.strengthen_items[].bias_category",
+  // v0.11.0 schema amendment: widening_log is the canonical OBJECT
+  // shape. Per-entry array shape (`{node_id,label,reason}[]`) is gone.
   "coaching.widening_log",
-  "coaching.widening_log[].node_id",
-  "coaching.widening_log[].label",
-  "coaching.widening_log[].reason",
+  "coaching.widening_log.elements_added",
+  "coaching.widening_log.elements_added[]",
+  "coaching.widening_log.elements_considered_but_excluded",
+  "coaching.widening_log.elements_considered_but_excluded[]",
+  "coaching.widening_log.brief_completeness",
   "coaching.bias_signals",
   "coaching.bias_signals[].type",
   "coaching.bias_signals[].detail",

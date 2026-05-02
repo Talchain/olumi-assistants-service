@@ -16,11 +16,15 @@ import { CAUSAL_CLAIMS_WARNING_CODES } from "../../src/schemas/causal-claims.js"
 
 // ── Test data ────────────────────────────────────────────────────────────────
 
+// v0.11.0 schema amendment: `stated_source` was dropped from the canonical
+// UnmeasuredConfounderClaimSchema (Task 0(b) discovery — zero production
+// consumers, zero fixture occurrences). The fixture below uses the
+// post-amendment shape.
 const TEST_CLAIMS = [
   { type: "direct_effect", from: "fac_1", to: "out_1", stated_strength: "strong" },
   { type: "mediation_only", from: "fac_1", via: "fac_2", to: "out_1" },
   { type: "no_direct_effect", from: "opt_1", to: "goal_1" },
-  { type: "unmeasured_confounder", between: ["fac_1", "fac_2"], stated_source: "market data" },
+  { type: "unmeasured_confounder", between: ["fac_1", "fac_2"] },
 ];
 
 const TEST_GRAPH = {
@@ -186,8 +190,14 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     expect(body.causal_claims[3]).toMatchObject({ type: "unmeasured_confounder", between: ["fac_1", "fac_2"] });
   });
 
-  // Test 5: Absent claims field — LLM response has no causal_claims
-  it("response without causal_claims omits the field entirely", async () => {
+  // Test 5: Absent claims field — LLM response has no causal_claims.
+  // v0.11.0 schema amendment: Stage 6 V3 transform always emits
+  // causal_claims (canonical-required-at-boundary), defaulting absent
+  // V1 input to []. The Phase 2B provenance distinction (undefined vs
+  // [] meaning "LLM didn't emit" vs "emitted but dropped") is
+  // preserved internally on ctx.causalClaims for analytics; only the
+  // contract-required surface reaches the wire.
+  it("response without causal_claims emits [] at the V3 boundary (v0.11.0 contract)", async () => {
     mockDraftGraph.mockResolvedValueOnce({
       graph: TEST_GRAPH,
       rationales: [],
@@ -199,7 +209,7 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     const res = await inject("A straightforward pricing decision about revenue for the business.");
     expect(res.statusCode).toBe(200);
     const body = res.json() as any;
-    expect(body.causal_claims).toBeUndefined();
+    expect(body.causal_claims).toEqual([]);
   });
 
   // Test 6: Empty claims array passes through (provenance preservation)
@@ -254,7 +264,7 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
       rationales: [],
       causal_claims: [
         { type: "direct_effect", from: "fac_1", to: "out_1", stated_strength: "strong" },
-        { type: "direct_effect", from: "fac_nonexistent", to: "out_1", stated_strength: "weak" },
+        { type: "direct_effect", from: "fac_nonexistent", to: "out_1", stated_strength: "slight" },
       ],
       usage: DEFAULT_USAGE,
       meta: DEFAULT_META,
@@ -339,7 +349,9 @@ describe("POST /assist/v1/draft-graph (CEE v1) - causal_claims pipeline", () => 
     expect(body.causal_claims).toHaveLength(4);
     // Verify claim content is unmodified
     expect(body.causal_claims[0].stated_strength).toBe("strong");
-    expect(body.causal_claims[3].stated_source).toBe("market data");
+    // v0.11.0 schema amendment: `stated_source` was dropped from the canonical
+    // UnmeasuredConfounderClaimSchema; the field is no longer carried.
+    expect(body.causal_claims[3].between).toEqual(["fac_1", "fac_2"]);
   });
 
   // Test: not-an-array causal_claims

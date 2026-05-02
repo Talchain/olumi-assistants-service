@@ -254,7 +254,8 @@ describe("Coaching passthrough across schema boundaries", () => {
         label: "Add cost ceiling",
         detail: "Brief mentions budget but no number",
         action_type: "add_constraint",
-        bias_category: "framing",
+        // v0.11.0 schema amendment: canonical BiasType replaces legacy "framing".
+        bias_category: "narrow_framing",
       },
     ],
   };

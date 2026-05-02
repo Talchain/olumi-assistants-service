@@ -21,6 +21,7 @@ import type { DraftGraphResult } from "./tools/draft-graph.js";
 import type {
   DraftCoaching,
   DraftCoachingWideningEntry,
+  DraftCoachingWideningLog,
   DraftCoachingBiasSignal,
   DraftCoachingStrengthenItem,
 } from "./types.js";
@@ -35,6 +36,34 @@ function narrowWideningEntry(value: unknown): DraftCoachingWideningEntry | null 
   if (typeof value.label !== 'string') return null;
   if (typeof value.reason !== 'string') return null;
   return { node_id: value.node_id, label: value.label, reason: value.reason };
+}
+
+/**
+ * v0.11.0 schema amendment: narrow the canonical `WideningLog` object
+ * shape. Returns null for shape-invalid input. Legacy array shape is
+ * converted to canonical at the Anthropic-adapter ingress seam, so by
+ * the time narrowing runs the input is either canonical-object or
+ * absent/null.
+ */
+function narrowWideningLog(value: unknown): DraftCoachingWideningLog | null {
+  if (!isRecord(value)) return null;
+  const elementsAdded = Array.isArray(value.elements_added)
+    ? value.elements_added.filter((s): s is string => typeof s === 'string')
+    : [];
+  const excluded = Array.isArray(value.elements_considered_but_excluded)
+    ? value.elements_considered_but_excluded.filter((s): s is string => typeof s === 'string')
+    : [];
+  const briefCompleteness =
+    value.brief_completeness === 'complete' ||
+    value.brief_completeness === 'partial' ||
+    value.brief_completeness === 'thin'
+      ? value.brief_completeness
+      : 'thin';
+  return {
+    elements_added: elementsAdded,
+    elements_considered_but_excluded: excluded,
+    brief_completeness: briefCompleteness,
+  };
 }
 
 function narrowBiasSignal(value: unknown): DraftCoachingBiasSignal | null {
@@ -90,10 +119,22 @@ function narrowArray<T>(
  * - `bias_signals`: same narrowing pattern.
  */
 export function buildDraftCoaching(result: DraftGraphResult): DraftCoaching {
+  // Legacy path: `result.coachingWideningLog` is the pre-v0.11.0 array of
+  // `{node_id,label,reason}` entries. Convert to the canonical
+  // `DraftCoachingWideningLog` object shape — node_ids → elements_added,
+  // reasons → elements_considered_but_excluded.
+  const legacyEntries = narrowArray(result.coachingWideningLog, narrowWideningEntry);
+  const widening: DraftCoachingWideningLog | null = legacyEntries
+    ? {
+        elements_added: legacyEntries.map((e) => e.node_id),
+        elements_considered_but_excluded: legacyEntries.map((e) => e.reason),
+        brief_completeness: 'thin',
+      }
+    : null;
   return {
     summary: result.coachingSummary ?? null,
     strengthen_items: result.strengthenItems ?? [],
-    widening_log: narrowArray(result.coachingWideningLog, narrowWideningEntry),
+    widening_log: widening,
     bias_signals: narrowArray(result.coachingBiasSignals, narrowBiasSignal),
   };
 }
@@ -120,12 +161,17 @@ export function narrowCoachingForResponse(coaching: unknown): DraftCoaching | nu
   const summary = summaryRaw !== null && summaryRaw.trim().length > 0 ? summaryRaw : null;
   const rawStrengthen = Array.isArray(coaching.strengthen_items) ? coaching.strengthen_items : null;
   const strengthenItems = narrowArray(rawStrengthen, narrowStrengthenItem) ?? [];
-  const rawWidening = Array.isArray(coaching.widening_log) ? coaching.widening_log : null;
+  // v0.11.0 schema amendment: narrow `widening_log` as the canonical
+  // object shape. By the time this runs the Anthropic ingress normaliser
+  // (`src/adapters/llm/normalise-legacy-coaching.ts`) has converted any
+  // legacy array shape to the canonical object, so we narrow the object
+  // form directly. Legacy paths should not reach this function.
+  const widening = narrowWideningLog(coaching.widening_log);
   const rawBias = Array.isArray(coaching.bias_signals) ? coaching.bias_signals : null;
   return {
     summary,
     strengthen_items: strengthenItems,
-    widening_log: narrowArray(rawWidening, narrowWideningEntry),
+    widening_log: widening,
     bias_signals: narrowArray(rawBias, narrowBiasSignal),
   };
 }

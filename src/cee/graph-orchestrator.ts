@@ -235,8 +235,14 @@ export async function generateGraph(
     );
 
     try {
-      // Step 1: Get graph from LLM (draft or repair)
+      // Step 1: Get graph from LLM (draft or repair).
+      // v0.11.0 schema amendment: retain the full draftResult so we can
+      // forward `coaching` and `causal_claims` to the validator at Step 3.
+      // `parsedGraph` is parsed from `draftResult.graph` (graph only) — those
+      // fields live BESIDE `graph` on the adapter result, not on it.
       let rawGraph: unknown;
+      let attemptCoaching: unknown;
+      let attemptCausalClaims: unknown;
 
       if (isRetry && lastGraph && lastErrors.length > 0) {
         // Repair attempt
@@ -251,6 +257,8 @@ export async function generateGraph(
         // Initial draft
         const draftResult = await adapter.draftGraph(brief, attemptRequestId);
         rawGraph = draftResult.graph;
+        attemptCoaching = (draftResult as { coaching?: unknown }).coaching;
+        attemptCausalClaims = (draftResult as { causal_claims?: unknown }).causal_claims;
       }
 
       // Step 2: Zod parse
@@ -332,8 +340,19 @@ export async function generateGraph(
         );
       }
 
-      // Step 3: Graph validator (pre-normalisation)
-      const validationResult = validateGraph({ graph, requestId: attemptRequestId });
+      // Step 3: Graph validator (pre-normalisation). v0.11.0 schema
+      // amendment: forward coaching + causal_claims so the referential-
+      // integrity warnings (CAUSAL_CLAIM_INVALID_REF, etc.) fire on this
+      // initial-generation path as well as the validateAndRepairGraph path.
+      // The fields live BESIDE `graph` on the adapter draftResult — captured
+      // at Step 1 above. Repair-attempt branch leaves them undefined (the
+      // ref-integrity check is a no-op when fields are absent).
+      const validationResult = validateGraph({
+        graph,
+        requestId: attemptRequestId,
+        coaching: attemptCoaching,
+        causalClaims: attemptCausalClaims,
+      });
 
       if (!validationResult.valid) {
         lastErrors = validationResult.errors;
@@ -575,6 +594,13 @@ export interface ValidateAndRepairInput {
   maxRetries?: number;
   /** Optional observability collector for recording validation attempts */
   collector?: ObservabilityCollector;
+  /** v0.11.0 schema amendment: optional coaching block to enable
+   *  referential-integrity warnings (WIDENING_LOG_INVALID_REF). */
+  coaching?: unknown;
+  /** v0.11.0 schema amendment: optional causal claims array to enable
+   *  CAUSAL_CLAIM_INVALID_REF / CAUSAL_CLAIM_BETWEEN_INVALID /
+   *  CAUSAL_CLAIM_GOAL_TARGET / CAUSAL_CLAIMS_CARDINALITY_OFF warnings. */
+  causalClaims?: unknown;
 }
 
 /**
@@ -631,7 +657,7 @@ export async function validateAndRepairGraph(
 ): Promise<ValidateAndRepairResult> {
   // Use config default for maxRetries if not specified
   const defaultMaxRetries = config.cee.maxRepairRetries;
-  const { graph: rawGraph, brief, requestId, maxRetries = defaultMaxRetries, collector: _collector } = input;
+  const { graph: rawGraph, brief, requestId, maxRetries = defaultMaxRetries, collector: _collector, coaching, causalClaims } = input;
 
   let currentGraph: GraphT | undefined;
   let lastErrors: ValidationIssue[] = [];
@@ -719,8 +745,10 @@ export async function validateAndRepairGraph(
       );
     }
 
-    // Phase 2: Deterministic validation
-    const validationResult = validateGraph({ graph: currentGraph });
+    // Phase 2: Deterministic validation. v0.11.0 schema amendment:
+    // forward coaching + causal claims so the validator runs the
+    // referential-integrity warnings against the post-normalisation graph.
+    const validationResult = validateGraph({ graph: currentGraph, coaching, causalClaims });
     const errors = validationResult.errors;
     const warnings = validationResult.warnings;
 

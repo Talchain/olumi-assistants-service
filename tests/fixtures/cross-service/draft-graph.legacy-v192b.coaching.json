@@ -1,0 +1,45 @@
+{
+  "_capture_metadata": {
+    "captured_at": "2026-05-02T00:00:00.000Z",
+    "source_environment": "synthetic-legacy-survival",
+    "prompt_version": "v192b",
+    "prompt_pms_revision": 189,
+    "prompt_hash": "PENDING_V194_DEPLOYMENT",
+    "schemas_package_version": "0.11.0",
+    "cee_commit": "PENDING_GATE_2_COMMIT",
+    "known_gaps": [
+      "Synthetic fixture isolating the legacy bias_category values that v192b emits (framing, blindspots, confidence). Used EXCLUSIVELY to test the ingress normaliser at src/adapters/llm/anthropic.ts:884 — never to assert the strict canonical contract.",
+      "Replace with a real v192b staging capture when one is available; the shape and values are correct per the v192b prompt examples (src/prompts/defaults-v187.ts:665-666)."
+    ]
+  },
+  "coaching": {
+    "summary": "v192b LLM output with legacy bias_category values pre-normalisation.",
+    "strengthen_items": [
+      {
+        "id": "str_legacy_1",
+        "label": "Phased pilot option",
+        "detail": "Consider a pilot before full mid-market expansion.",
+        "action_type": "add_option",
+        "bias_category": "framing"
+      },
+      {
+        "id": "str_legacy_2",
+        "label": "Integration risk",
+        "detail": "Acquisition integration typically increases churn during transition.",
+        "action_type": "add_risk",
+        "bias_category": "confidence"
+      },
+      {
+        "id": "str_legacy_3",
+        "label": "Hidden assumption",
+        "detail": "The synergy figure assumes static market conditions.",
+        "action_type": "add_constraint",
+        "bias_category": "blindspots"
+      }
+    ],
+    "bias_signals": [
+      { "type": "framing", "detail": "Decision framed as binary." },
+      { "type": "confidence", "detail": "Synergy figure carries no uncertainty band." }
+    ]
+  }
+}
