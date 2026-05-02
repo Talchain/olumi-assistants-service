@@ -727,9 +727,19 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
 // -----------------------------------------------------------------------
 
 function buildUserMessage(contextPack: ContextPack, message: string): string {
+  // Design principle: raw model values stay in structured state for
+  // handlers, telemetry, and signals; LLM-facing context uses
+  // decision-language projections only. Strip the raw `analysis`
+  // projection from the serialised pack and surface `display_analysis`
+  // (decision-language strings, no raw floats) under the `analysis`
+  // key so prompt instructions referencing the leading option, drivers,
+  // margin, etc. continue to resolve.
+  const { analysis: _rawAnalysis, display_analysis, ...rest } = contextPack;
+  void _rawAnalysis;
+  const llmFacing = { ...rest, analysis: display_analysis };
   return [
     '## ContextPack',
-    JSON.stringify(contextPack, null, 2),
+    JSON.stringify(llmFacing, null, 2),
     '',
     '## User turn',
     message,

@@ -722,7 +722,10 @@ export async function runTurnExecutor(
           analysis_section_keys: contextPack.analysis
             ? Object.keys(contextPack.analysis)
             : [],
-          analysis_section_chars: JSON.stringify(contextPack.analysis ?? {}).length,
+          // Char-count of the LLM-facing display-safe projection — what
+          // Sonnet actually sees in the prompt. Raw projection size is
+          // observable via the keys above plus drivers count.
+          analysis_section_chars: JSON.stringify(contextPack.display_analysis ?? {}).length,
         },
         'V5 turnExecutor: context-pack analysis projection',
       );
@@ -1624,10 +1627,15 @@ export async function runTurnExecutor(
         sanitised.structural_suppressed +
         sanitised.structural_missed_grammar;
       if (totalCounters > 0) {
+        // Track 2A prose sanitation. Currently rewrite mode. Will flip to
+        // detect_only after staging replay confirms the upstream display-safe
+        // analysis projection drives probability_rewrites and
+        // sensitivity_rewrites to zero (brief brief-display-safe-analysis A2).
         emit(TelemetryEvents.V5ResponseProseSanitised, {
           request_id: requestId,
           scenario_id: context.session_id,
           handler_id: handlerIdForCommit ?? null,
+          mode: 'rewrite' as const,
           probability_rewrites: sanitised.probability_rewrites,
           sensitivity_rewrites: sanitised.sensitivity_rewrites,
           structural_matches: sanitised.structural_matches,

@@ -154,6 +154,10 @@ describe('TurnExecutor STEP 6.4 — post-compose prose sanitation (Track 2A)', (
       Array.isArray(sanitisedEvent!.data.structural_rule_ids) &&
         (sanitisedEvent!.data.structural_rule_ids as string[]).includes('carries_strength'),
     ).toBe(true);
+    // brief brief-display-safe-analysis A2 — mode field present and set to
+    // 'rewrite'. Will flip to 'detect_only' after staging replay confirms
+    // the upstream display-safe analysis projection drives counters to zero.
+    expect(sanitisedEvent!.data.mode).toBe('rewrite');
   });
 
   it('clean assistant_text: no rewrites, no V5ResponseProseSanitised event', async () => {

@@ -168,6 +168,126 @@ describe('routeWithToolUse — happy paths', () => {
     expect(userContent).toContain('## User turn');
     expect(userContent).toContain('hi');
   });
+
+  // brief brief-display-safe-analysis A2 — outbound payload assertion
+  it('serialised user message contains display-safe analysis only — no raw analysis floats', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('ok')], 'end_turn')),
+    };
+
+    // Graph fixture deliberately carries edge `strength.mean` and other
+    // raw coefficients on edges, so the scoped-analysis assertions below
+    // are proven robust: a naive un-scoped substring check would fail on
+    // these legitimate graph fields, but the brace-walked analysis slice
+    // must NOT pick them up.
+    const graph = {
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'Maximise revenue' },
+        { id: 'budget', kind: 'factor', label: 'Budget' },
+        { id: 'opt-a', kind: 'option', label: 'Option A' },
+        { id: 'opt-b', kind: 'option', label: 'Option B' },
+      ],
+      edges: [
+        // Real edge with structural coefficients — these MUST appear
+        // in the graph section but MUST NOT appear in the analysis slice.
+        { from: 'budget', to: 'goal', strength: { mean: 0.55, std: 0.12 }, exists_probability: 0.91 },
+        { from: 'opt-a', to: 'budget', strength: { mean: 0.733, std: 0.04 }, exists_probability: 0.99 },
+      ],
+    };
+    const pack = assembleContextPack({
+      payload: {
+        turn_id: 't-da-01',
+        scenario_id: 'scen-display-safe',
+        message: 'How is option A doing?',
+        turn_class: 'analyse',
+        stage: 'analyse',
+      },
+      priorTurns: [],
+      graph,
+      analysis: {
+        winner: { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.862 },
+        options: [
+          { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.862, outcome_mean: 100 },
+          { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.791, outcome_mean: 80 },
+        ],
+        top_drivers: [
+          { factor_id: 'price', factor_label: 'Price', sensitivity: 1.0, direction: 'positive' },
+          { factor_id: 'demand', factor_label: 'Demand', sensitivity: 0.4, direction: 'negative' },
+        ],
+        robustness_level: 'moderate',
+        fragile_edge_count: 1,
+        top_fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+        margin: 0.071,
+        margin_pp: 7.1,
+        analysis_status: 'complete',
+      },
+    });
+
+    await routeWithToolUse(pack, 'How is option A doing?', { requestId: 'req-display-safe', adapter });
+
+    const args = adapter.chatWithTools.mock.calls[0]![0];
+    const userContent = args.messages[0]!.content as string;
+
+    // Locate the analysis object and walk braces to its matching close,
+    // so subsequent assertions are scoped to the analysis section only.
+    // (The graph section legitimately carries `strength` / `mean` fields
+    // on edges; only the analysis section is the LLM-display boundary
+    // this brief is policing.)
+    const analysisKeyStart = userContent.indexOf('"analysis":');
+    expect(analysisKeyStart).toBeGreaterThan(-1);
+    const objectStart = userContent.indexOf('{', analysisKeyStart);
+    expect(objectStart).toBeGreaterThan(analysisKeyStart);
+    let depth = 0;
+    let objectEnd = -1;
+    for (let i = objectStart; i < userContent.length; i++) {
+      const ch = userContent[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          objectEnd = i + 1;
+          break;
+        }
+      }
+    }
+    expect(objectEnd).toBeGreaterThan(objectStart);
+    const analysisSection = userContent.slice(objectStart, objectEnd);
+
+    // Sonnet must see decision-language values inside the analysis section.
+    expect(analysisSection).toContain('"win_probability": "86%"');
+    expect(analysisSection).toContain('"win_probability": "79%"');
+    expect(analysisSection).toContain('"margin": "7 percentage points"');
+    expect(analysisSection).toContain('"influence": "very strong positive influence"');
+    expect(analysisSection).toContain('"influence": "moderate negative influence"');
+    expect(analysisSection).toContain('"from_label": "Marketing Spend"');
+
+    // Sonnet must NOT see raw analysis floats or internal coefficients
+    // anywhere inside the analysis section.
+    expect(analysisSection).not.toContain('0.862');
+    expect(analysisSection).not.toContain('0.791');
+    expect(analysisSection).not.toContain('"sensitivity_value"');
+    expect(analysisSection).not.toContain('"probability":');
+    expect(analysisSection).not.toContain('"strength"');
+    expect(analysisSection).not.toContain('"mean":');
+    expect(analysisSection).not.toContain('mean=');
+    expect(analysisSection).not.toContain('exists_probability');
+
+    // Targeted invariant from the brief: no raw decimal floats anywhere
+    // inside the serialised analysis object.
+    expect(analysisSection).not.toMatch(/\b0\.\d{2,}/);
+
+    // Sanity check the test is not trivially satisfied: the graph
+    // section legitimately carries `strength.mean` / `exists_probability`
+    // / raw decimals on edges, and those MUST be present somewhere in
+    // the user content (just not inside the analysis slice). This proves
+    // the brace-walked extraction actually isolates analysis from graph.
+    expect(userContent).toContain('"strength"');
+    expect(userContent).toContain('"mean"');
+    expect(userContent).toContain('exists_probability');
+    expect(userContent).toMatch(/\b0\.\d{2,}/);
+  });
 });
 
 // -----------------------------------------------------------------------

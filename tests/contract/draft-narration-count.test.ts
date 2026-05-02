@@ -1,15 +1,17 @@
 /**
- * V5 Phase 2 workstream B — draft narration count guard.
+ * V5 draft narration count guard — contract tests.
  *
- * When Sonnet's draft_graph narration carries explicit node/edge counts
- * that disagree with the final post-repair graph, the dispatcher must
- * prefer the deterministic fallback prose (which interpolates the
- * correct counts) and emit `DraftNarrationCountMismatch` telemetry so
- * ops can chase the upstream prompt drift.
+ * Brief brief-display-safe-analysis A2 tightened the contract: users
+ * don't think in graph terms, so any node/edge-count wording in the
+ * narration — matched OR mismatched — is replaced by the
+ * decision-language fallback.
  *
- * The narration is otherwise preserved verbatim — qualitative narration
- * without explicit counts, or narration whose counts agree with the
- * final graph, must pass through unchanged.
+ * Telemetry stays split:
+ *   - `DraftNarrationCountMismatch` fires only on real mismatches
+ *     (preserves the original ops-dashboard semantic).
+ *   - `DraftNarrationCountSuppressed` fires when the counts match but
+ *     the wording itself is being scrubbed.
+ * No turn fires both.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -35,7 +37,15 @@ function mismatchEvent(): Event | undefined {
   return events.find((e) => e.event === 'v5.draft_narration.count_mismatch');
 }
 
-const FALLBACK = 'Drafted a decision graph with 7 nodes and 8 edges.';
+function suppressedEvent(): Event | undefined {
+  return events.find((e) => e.event === 'v5.draft_narration.count_suppressed');
+}
+
+// Brief A2: the fallback the dispatcher passes is now the
+// decision-language summary. The guard does not introspect it; these
+// tests use a representative decision-language fallback so failure
+// messages read meaningfully.
+const FALLBACK = 'Your decision model is ready with 7 options and 8 factors to explore.';
 
 function check(narration: string | undefined, finalNodeCount = 7, finalEdgeCount = 8): NarrationCountCheckResult {
   return checkDraftNarrationCounts({
@@ -52,21 +62,16 @@ describe('checkDraftNarrationCounts — pass-through cases', () => {
     const res = check(undefined);
     expect(res.chosenText).toBe(FALLBACK);
     expect(res.mismatchDetected).toBe(false);
+    expect(res.wordingSuppressed).toBe(false);
     expect(mismatchEvent()).toBeUndefined();
+    expect(suppressedEvent()).toBeUndefined();
   });
 
   it('uses fallback when narration is empty', () => {
     const res = check('');
     expect(res.chosenText).toBe(FALLBACK);
     expect(res.mismatchDetected).toBe(false);
-  });
-
-  it('preserves narration that mentions counts agreeing with the final graph', () => {
-    const narration = 'Drafted a decision graph with 7 nodes and 8 edges.';
-    const res = check(narration);
-    expect(res.chosenText).toBe(narration);
-    expect(res.mismatchDetected).toBe(false);
-    expect(mismatchEvent()).toBeUndefined();
+    expect(res.wordingSuppressed).toBe(false);
   });
 
   it('preserves narration with no explicit counts (qualitative prose)', () => {
@@ -74,23 +79,66 @@ describe('checkDraftNarrationCounts — pass-through cases', () => {
     const res = check(narration);
     expect(res.chosenText).toBe(narration);
     expect(res.mismatchDetected).toBe(false);
+    expect(res.wordingSuppressed).toBe(false);
+    expect(mismatchEvent()).toBeUndefined();
+    expect(suppressedEvent()).toBeUndefined();
+  });
+});
+
+describe('checkDraftNarrationCounts — count wording always suppressed (brief A2)', () => {
+  it('matched counts: narration agreeing with final graph is REPLACED by fallback, fires Suppressed event only', () => {
+    const narration = 'Drafted a decision graph with 7 nodes and 8 edges.';
+    const res = check(narration, 7, 8);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.mismatchDetected).toBe(false);
+    expect(res.wordingSuppressed).toBe(true);
+    expect(mismatchEvent()).toBeUndefined();
+    const ev = suppressedEvent();
+    expect(ev).toBeDefined();
+    expect(ev!.data).toMatchObject({
+      request_id: 'req-test',
+      final_node_count: 7,
+      final_edge_count: 8,
+      narration_node_count: 7,
+      narration_edge_count: 8,
+    });
+  });
+
+  it('singular forms with matched counts are still suppressed', () => {
+    const narration = 'Drafted a single 1 node and 1 edge starter graph.';
+    const res = check(narration, 1, 1);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    expect(suppressedEvent()).toBeDefined();
     expect(mismatchEvent()).toBeUndefined();
   });
 
-  it('handles "1 node and 1 edge" (singular) when counts agree', () => {
-    const narration = 'Drafted a single 1 node and 1 edge starter graph.';
-    const res = check(narration, 1, 1);
-    expect(res.chosenText).toBe(narration);
-    expect(res.mismatchDetected).toBe(false);
+  it('markdown-bolded matched counts are still suppressed', () => {
+    const narration = 'Drafted a decision graph with **7** nodes and **8** edges.';
+    const res = check(narration, 7, 8);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    expect(suppressedEvent()).toBeDefined();
+    expect(mismatchEvent()).toBeUndefined();
+  });
+
+  it('single-asterisk emphasis (*N*) on matched counts is still suppressed', () => {
+    const narration = 'Drafted a decision graph with *7* nodes and *8* edges.';
+    const res = check(narration, 7, 8);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    expect(suppressedEvent()).toBeDefined();
+    expect(mismatchEvent()).toBeUndefined();
   });
 });
 
 describe('checkDraftNarrationCounts — mismatch detection', () => {
-  it('the brief reproduction: narration says 3 nodes / 2 edges, graph has 7 / 8 → fallback + telemetry', () => {
+  it('the brief reproduction: narration says 3 nodes / 2 edges, graph has 7 / 8 → fallback + mismatch event', () => {
     const narration = 'Drafted a decision graph with 3 nodes and 2 edges.';
     const res = check(narration, 7, 8);
     expect(res.chosenText).toBe(FALLBACK);
     expect(res.mismatchDetected).toBe(true);
+    expect(res.wordingSuppressed).toBe(true);
     const ev = mismatchEvent();
     expect(ev).toBeDefined();
     expect(ev!.data).toMatchObject({
@@ -100,6 +148,9 @@ describe('checkDraftNarrationCounts — mismatch detection', () => {
       narration_node_count: 3,
       narration_edge_count: 2,
     });
+    // Must NOT also fire the suppressed event — they are mutually
+    // exclusive so ops dashboards stay clean.
+    expect(suppressedEvent()).toBeUndefined();
   });
 
   it('detects edge mismatch alone (node count agrees)', () => {
@@ -111,6 +162,7 @@ describe('checkDraftNarrationCounts — mismatch detection', () => {
       narration_node_count: 7,
       narration_edge_count: 12,
     });
+    expect(suppressedEvent()).toBeUndefined();
   });
 
   it('detects node mismatch alone (edge count agrees)', () => {
@@ -118,98 +170,70 @@ describe('checkDraftNarrationCounts — mismatch detection', () => {
     const res = check(narration, 7, 8);
     expect(res.chosenText).toBe(FALLBACK);
     expect(res.mismatchDetected).toBe(true);
+    expect(suppressedEvent()).toBeUndefined();
   });
 
   it('mismatch when narration mentions node count but final has more', () => {
     const narration = 'A small graph with 2 nodes captures the gist.';
     const res = check(narration, 7, 8);
-    // Only node count is in the narration; it disagrees → mismatch
     expect(res.chosenText).toBe(FALLBACK);
     expect(res.mismatchDetected).toBe(true);
     expect(mismatchEvent()!.data).toMatchObject({
       narration_node_count: 2,
       narration_edge_count: null,
     });
+    expect(suppressedEvent()).toBeUndefined();
   });
 });
 
-describe('checkDraftNarrationCounts — explicit 8 nodes / 15 edges fixture (Phase 2 P1)', () => {
-  it('matches the canonical fallback shape with **8** nodes and **15** edges', () => {
-    const FALLBACK_8_15 = 'Drafted a decision graph with **8** nodes and **15** edges.';
-    // Narration agrees with final counts → preserved verbatim.
-    const result = checkDraftNarrationCounts({
-      narration: FALLBACK_8_15,
-      finalNodeCount: 8,
-      finalEdgeCount: 15,
-      fallback: FALLBACK_8_15,
-      requestId: 'req-test',
-    });
-    expect(result.chosenText).toBe(FALLBACK_8_15);
-    expect(result.mismatchDetected).toBe(false);
-
-    // Different narration counts → mismatch + fallback used.
-    const result2 = checkDraftNarrationCounts({
-      narration: 'Drafted a decision graph with **5** nodes and **9** edges.',
-      finalNodeCount: 8,
-      finalEdgeCount: 15,
-      fallback: FALLBACK_8_15,
-      requestId: 'req-test',
-    });
-    expect(result2.chosenText).toBe(FALLBACK_8_15);
-    expect(result2.mismatchDetected).toBe(true);
-  });
-});
-
-describe('checkDraftNarrationCounts — markdown-bolded counts (Phase 2 P1)', () => {
-  it('parses **N** nodes and **M** edges format and recognises agreement', () => {
-    const narration = 'Drafted a decision graph with **7** nodes and **8** edges.';
-    const res = check(narration, 7, 8);
-    expect(res.chosenText).toBe(narration);
-    expect(res.mismatchDetected).toBe(false);
-  });
-
-  it('parses bolded counts and detects mismatch', () => {
-    const narration = 'Drafted a decision graph with **3** nodes and **2** edges.';
-    const res = check(narration, 7, 8);
-    expect(res.chosenText).toBe(FALLBACK);
-    expect(res.mismatchDetected).toBe(true);
-    expect(mismatchEvent()!.data).toMatchObject({
-      narration_node_count: 3,
-      narration_edge_count: 2,
-    });
-  });
-
-  it('parses single-asterisk emphasis (*N*) too', () => {
-    const narration = 'Drafted a decision graph with *7* nodes and *8* edges.';
-    const res = check(narration, 7, 8);
-    expect(res.mismatchDetected).toBe(false);
-  });
-});
-
-describe('checkDraftNarrationCounts — defensive parsing', () => {
-  it('does not match word numerals (preserves narration since no quantitative match)', () => {
+describe('checkDraftNarrationCounts — keyword-based suppression (brief A2)', () => {
+  it('suppresses word-numeral count wording ("seven nodes and eight edges")', () => {
     const narration = 'Drafted a graph with seven nodes and eight edges.';
     const res = check(narration, 7, 8);
-    // Word numerals are not parsed → no mismatch can be detected → preserve
-    expect(res.chosenText).toBe(narration);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    // No digit counts parseable → mismatchDetected stays false → only
+    // the Suppressed event fires.
     expect(res.mismatchDetected).toBe(false);
+    const ev = suppressedEvent();
+    expect(ev).toBeDefined();
+    expect(ev!.data).toMatchObject({
+      narration_node_count: null,
+      narration_edge_count: null,
+    });
+    expect(mismatchEvent()).toBeUndefined();
   });
 
-  it('does not match suffixed integers like "5K nodes"', () => {
+  it('suppresses K-suffixed count wording ("5K nodes")', () => {
     const narration = 'A graph with 5K nodes — far too dense.';
     const res = check(narration, 7, 8);
-    // "5K" is not a pure-integer match (\b\d+\s+nodes) → no parse → preserve
-    expect(res.chosenText).toBe(narration);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
     expect(res.mismatchDetected).toBe(false);
+    expect(suppressedEvent()).toBeDefined();
+    expect(mismatchEvent()).toBeUndefined();
   });
 
-  it('matches first occurrence only (regex returns first match)', () => {
+  it('suppresses bare keyword wording with no number ("the nodes capture each step")', () => {
+    const narration = 'The nodes capture each step of the decision.';
+    const res = check(narration, 7, 8);
+    expect(res.chosenText).toBe(FALLBACK);
+    expect(res.wordingSuppressed).toBe(true);
+    expect(res.mismatchDetected).toBe(false);
+    expect(suppressedEvent()).toBeDefined();
+  });
+
+  it('matches first digit occurrence for mismatch classification', () => {
     const narration = 'Initially 3 nodes, but the final graph has 7 nodes and 8 edges.';
     const res = check(narration, 7, 8);
-    // First "3 nodes" disagrees with final 7 → mismatch
+    // First "3 nodes" disagrees with final 7 → mismatch event fires
+    // (not the suppressed event), text replaced.
+    expect(res.chosenText).toBe(FALLBACK);
     expect(res.mismatchDetected).toBe(true);
+    expect(res.wordingSuppressed).toBe(true);
     expect(mismatchEvent()!.data).toMatchObject({
       narration_node_count: 3,
     });
+    expect(suppressedEvent()).toBeUndefined();
   });
 });

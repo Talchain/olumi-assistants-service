@@ -424,6 +424,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CqeExtraction: "cqe.extraction",
         // V5 Phase 2 additions (2026-05-01).
         DraftNarrationCountMismatch: "v5.draft_narration.count_mismatch",
+        // brief brief-display-safe-analysis A2 (2026-05-02).
+        DraftNarrationCountSuppressed: "v5.draft_narration.count_suppressed",
         HandlerInvocation: "v5.handler_invocation",
         PlotResponseInvalidNumeric: "v5.plot_response.invalid_numeric",
         PostAnalysisDirectAnswerRecovered: "v5.post_analysis.direct_answer_recovered",
@@ -995,9 +997,16 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         //  - DraftNarrationCountMismatch: Sonnet drift signal on the
         //    draft_graph dispatcher. Operational signal is the structured
         //    log; the dispatcher continues with the deterministic fallback.
+        //  - DraftNarrationCountSuppressed: brief brief-display-safe-analysis
+        //    A2 — fires when narration counts MATCH but the count-shaped
+        //    wording itself was scrubbed in favour of decision-language
+        //    fallback. Distinct from CountMismatch so dashboards can
+        //    track Sonnet's residual graph-shaped-narration rate without
+        //    polluting the mismatch alert. Diagnostic-only.
         TelemetryEvents.PlotResponseInvalidNumeric,
         TelemetryEvents.ProbabilityOutOfRange,
         TelemetryEvents.DraftNarrationCountMismatch,
+        TelemetryEvents.DraftNarrationCountSuppressed,
         // Workstream A — coaching wrapper events. Operational signal is
         // the `post_analysis_coaching` fact persisted to the ledger;
         // these telemetry events are diagnostic-only.
@@ -1433,6 +1442,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.context_pack.assembled",
         // V5 Phase 2 additions (2026-05-01).
         "v5.draft_narration.count_mismatch",
+        // brief brief-display-safe-analysis A2 (2026-05-02).
+        "v5.draft_narration.count_suppressed",
         "v5.explanation.answer_verdict",
         "v5.explanation.evidence",
         "v5.handler_invocation",

@@ -116,6 +116,14 @@ describe('formatPercentagePoints', () => {
     expect(formatPercentagePoints(-5, 'compact')).toBe('-5pp');
   });
 
+  it('uses singular "percentage point" only when |value| === 1', () => {
+    expect(formatPercentagePoints(1)).toBe('1 percentage point');
+    expect(formatPercentagePoints(-1)).toBe('-1 percentage point');
+    expect(formatPercentagePoints(2)).toBe('2 percentage points');
+    expect(formatPercentagePoints(0)).toBe('0 percentage points');
+    expect(formatPercentagePoints(0.7)).toBe('1 percentage point');
+  });
+
   it('returns "Not available" and emits telemetry for NaN', () => {
     expect(formatPercentagePoints(Number.NaN)).toBe('Not available');
     expect(probabilityOutOfRangeEvent()!.data).toMatchObject({
