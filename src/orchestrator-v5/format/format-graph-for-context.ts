@@ -33,13 +33,19 @@ export interface DisplaySafeNode {
   readonly unit?: string;
   readonly intervention_summary?: string;
   /**
-   * User-supplied quantity (e.g. observed factor value) carried through
-   * verbatim. Brief A2.1 explicitly preserves this — it is not a model
-   * coefficient, and rebanding it would corrupt user-meaningful data
-   * (e.g. "Marketing Spend = 100k"). The model-normalised siblings
-   * `raw_value` and `cap` are stripped because they're internal scaling.
+   * V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
+   * `raw_value`, and `cap` are stripped from the LLM-facing
+   * projection. Brief A2.1 originally preserved `value` (reasoning:
+   * user-supplied quantities are meaningful prose), but the post-A3
+   * review found that exposing any node numeric — even a
+   * "user-meaningful" one — encouraged Sonnet to echo it as structural
+   * fact ("the model sets X to 5") and reuse it as a coefficient in
+   * narration. The display projection now carries no node numerics;
+   * the LLM gets `unit` (label only) and `intervention_summary`. Raw
+   * `ContextPack.graph` retains `value` / `raw_value` / `cap` for
+   * handlers, freshness hashing, and edit_graph dispatch. Sonnet
+   * never sees them.
    */
-  readonly value?: number | string;
 }
 
 export interface DisplaySafeEdge {
@@ -132,25 +138,6 @@ function asAllowedRelationship(value: unknown): string | undefined {
 }
 
 /**
- * Extract a user-supplied node `value` from either the compact top-level
- * field or the canonical GraphV3T `observed_state.value` nesting. Numbers
- * and strings carried through verbatim per brief A2.1; other JSON shapes
- * dropped defensively.
- */
-function extractNodeValue(raw: RawNodeShape): number | string | undefined {
-  const top = raw.value;
-  if (typeof top === 'number' && Number.isFinite(top)) return top;
-  if (typeof top === 'string') return top;
-  const observed = raw.observed_state;
-  if (typeof observed === 'object' && observed !== null && 'value' in observed) {
-    const inner = (observed as { value?: unknown }).value;
-    if (typeof inner === 'number' && Number.isFinite(inner)) return inner;
-    if (typeof inner === 'string') return inner;
-  }
-  return undefined;
-}
-
-/**
  * Extract the user-supplied node `unit` symmetrically with value: compact
  * top-level `unit` first, canonical `observed_state.unit` second. Without
  * this fallback the raw-graph passthrough path silently drops the unit
@@ -197,7 +184,6 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     category?: string;
     unit?: string;
     intervention_summary?: string;
-    value?: number | string;
   } = { id, label, kind };
   const category = asString(raw.category);
   if (category !== undefined) node.category = category;
@@ -205,14 +191,11 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   if (unit !== undefined) node.unit = unit;
   const interventionSummary = asString(raw.intervention_summary);
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
-  // User-supplied `value`: numeric or string carried through verbatim.
-  // Brief A2.1: do not format node values — they may be user-meaningful
-  // quantities (e.g. "Marketing Spend = 100"). Reads from the compact
-  // top-level `value` first, falling back to canonical
-  // `observed_state.value` (raw assembler passthrough path). Other
-  // types (booleans, arrays, objects) are dropped defensively.
-  const userValue = extractNodeValue(raw);
-  if (userValue !== undefined) node.value = userValue;
+  // V5 D1 golden-path closure (A3.1 Task 6): node `value`, `raw_value`,
+  // and `cap` are deliberately omitted from the display projection.
+  // The raw ContextPack.graph still carries them for handler / freshness
+  // / edit_graph reads; the LLM-facing display graph carries label +
+  // unit + intervention_summary only.
   return node;
 }
 

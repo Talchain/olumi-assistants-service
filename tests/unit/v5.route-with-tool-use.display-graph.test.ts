@@ -332,17 +332,25 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
       expect(edge).not.toHaveProperty('exists_probability');
       expect(edge).not.toHaveProperty('effect_direction');
     }
-    // Canonical observed_state.{value, unit} both survive display
-    // projection on the raw-graph fallback path — the LLM still sees
-    // the user-supplied quantity AND its unit (without unit, "100"
-    // vs "100k" change meaning).
+    // V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
+    // `raw_value`, and `cap` are stripped from the display projection
+    // (reversal of A2.1's "preserve user-meaningful quantities"
+    // decision). The unit label survives — it carries no numeric.
     const marketingNode = parsed.graph.nodes.find((n) => n['id'] === 'fac_marketing');
     expect(marketingNode).toBeDefined();
-    expect(marketingNode!['value']).toBe(100);
+    expect(marketingNode).not.toHaveProperty('value');
+    expect(marketingNode).not.toHaveProperty('raw_value');
+    expect(marketingNode).not.toHaveProperty('cap');
     expect(marketingNode!['unit']).toBe('k');
-    // Raw GraphV3T `observed_state` wrapper itself MUST NOT leak — only
-    // the extracted user value/unit reach Sonnet.
+    // Raw GraphV3T `observed_state` wrapper itself MUST NOT leak.
     expect(marketingNode).not.toHaveProperty('observed_state');
+    // Outbound-payload assertion (correction-aligned per brief Task 6):
+    // walk the entire serialised graph block and confirm no node
+    // object carries `value`, `raw_value`, or `cap`.
+    const serialisedNodes = JSON.stringify(parsed.graph.nodes);
+    expect(serialisedNodes).not.toMatch(/"value":/);
+    expect(serialisedNodes).not.toMatch(/"raw_value":/);
+    expect(serialisedNodes).not.toMatch(/"cap":/);
   });
 
   it('does not mutate the caller\'s ContextPack — raw graph survives intact for handlers', async () => {

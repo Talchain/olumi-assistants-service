@@ -174,17 +174,18 @@ describe('formatGraphForContext — edge transformation', () => {
 });
 
 describe('formatGraphForContext — node transformation', () => {
-  it('keeps id/label/kind plus optional category, unit, intervention_summary, value', () => {
+  it('keeps id/label/kind plus optional category, unit, intervention_summary (A3.1: no node value)', () => {
     const out = formatGraphForContext(rawGraph());
-    // Node 0 was constructed with `value: 100`; brief A2.1 explicitly
-    // preserves user-supplied node values.
+    // V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
+    // `raw_value`, and `cap` are stripped. The display projection
+    // carries label + unit + intervention_summary only; the LLM no
+    // longer sees node numerics.
     expect(out.nodes[0]).toEqual({
       id: 'fac_marketing',
       label: 'Marketing Spend',
       kind: 'factor',
       category: 'spend',
       unit: 'k',
-      value: 100,
     });
     const optionNode = out.nodes.find((n) => n.id === 'opt_a')!;
     expect(optionNode).toEqual({
@@ -195,30 +196,35 @@ describe('formatGraphForContext — node transformation', () => {
     });
   });
 
-  it('preserves user-supplied node value (numeric and string forms)', () => {
+  it('A3.1: node-level value (compact + canonical observed_state) is stripped from display projection', () => {
     const out = formatGraphForContext(
       rawGraph({
         nodes: [
           { id: 'fac_a', kind: 'factor', label: 'A', value: 250 },
           { id: 'fac_b', kind: 'factor', label: 'B', value: 'high' },
-          { id: 'fac_c', kind: 'factor', label: 'C', value: 0 },
+          { id: 'fac_c', kind: 'factor', label: 'C', observed_state: { value: 99 } },
         ],
       }),
     );
-    expect(out.nodes[0]!.value).toBe(250);
-    expect(out.nodes[1]!.value).toBe('high');
-    expect(out.nodes[2]!.value).toBe(0);
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('value');
+      expect(node).not.toHaveProperty('raw_value');
+      expect(node).not.toHaveProperty('cap');
+    }
   });
 
-  it('strips raw_value, cap, source, _raw_provenance (model-internal) but keeps value', () => {
+  it('strips raw_value, cap, source, _raw_provenance, AND value (A3.1) from the display projection', () => {
     const out = formatGraphForContext(rawGraph());
     const json = JSON.stringify(out.nodes);
     expect(json).not.toMatch(/"raw_value":/);
     expect(json).not.toMatch(/"cap":/);
     expect(json).not.toMatch(/"source":/);
     expect(json).not.toMatch(/_raw_provenance/);
-    // `value` is user-meaningful and must survive.
-    expect(json).toMatch(/"value":/);
+    // V5 D1 golden-path closure (A3.1 Task 6): node-level `value`
+    // also stripped. Brief A2.1 originally retained it; the post-A3
+    // review reversed that decision because exposing any node
+    // numeric encouraged Sonnet to echo it as structural fact.
+    expect(json).not.toMatch(/"value":/);
   });
 
   it('drops nodes missing required id/label/kind defensively', () => {
@@ -235,24 +241,23 @@ describe('formatGraphForContext — node transformation', () => {
     expect(out.nodes[0]!.id).toBe('fac_a');
   });
 
-  it('reads canonical observed_state.value when top-level value is absent', () => {
-    // Raw GraphV3T passthrough nests user values under observed_state.
-    // The assembler raw-graph fallback never re-shapes that nesting, so
-    // the formatter must read it or canonical user values are silently
-    // dropped on every turn that doesn't pre-compact.
+  it('A3.1: canonical observed_state.value is also stripped from the display projection', () => {
+    // V5 D1 golden-path closure (A3.1 Task 6): both compact top-level
+    // `value` and canonical `observed_state.value` are dropped from
+    // the LLM-facing projection. The raw ContextPack.graph still
+    // carries them for handler / freshness / edit_graph reads.
     const out = formatGraphForContext(
       rawGraph({
         nodes: [
           { id: 'fac_a', kind: 'factor', label: 'A', observed_state: { value: 250 } },
           { id: 'fac_b', kind: 'factor', label: 'B', observed_state: { value: 'high' } },
-          // Top-level value wins when both are present.
           { id: 'fac_c', kind: 'factor', label: 'C', value: 7, observed_state: { value: 99 } },
         ],
       }),
     );
-    expect(out.nodes[0]!.value).toBe(250);
-    expect(out.nodes[1]!.value).toBe('high');
-    expect(out.nodes[2]!.value).toBe(7);
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('value');
+    }
   });
 
   it('reads canonical observed_state.unit when top-level unit is absent', () => {
