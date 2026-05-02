@@ -244,7 +244,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     };
 
     // Apply the mutation to a clone and Zod-parse the result.
-    const result = applyAndValidateMutation(graph, (clone) => {
+    const result = applyAndValidateMutation(rawGraph, (clone) => {
       const node = clone.nodes.find((n) => n.id === targetId);
       if (!node) {
         // Should be impossible — we found it on `graph` and clone is a deep

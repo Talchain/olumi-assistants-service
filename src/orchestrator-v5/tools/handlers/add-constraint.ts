@@ -241,7 +241,7 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
-      const result = applyAndValidateMutation(graph, (clone) => {
+      const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         const next = existing
           ? list.map((c) =>

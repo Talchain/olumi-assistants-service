@@ -219,7 +219,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         effect_direction: newDirection,
       };
 
-      const result = applyAndValidateMutation(graph, (clone) => {
+      const result = applyAndValidateMutation(rawGraph, (clone) => {
         const edge = clone.edges.find(
           (e) => e.from === parsed.from && e.to === parsed.to,
         );
