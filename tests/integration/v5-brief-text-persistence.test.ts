@@ -274,6 +274,37 @@ suite('V5 Phase 1 brief persistence — migration smoke (live Supabase)', () => 
     expect(await readBriefText(client, scenarioId)).toBeNull();
   });
 
+  it('rejects over-length brief_text padded with trailing whitespace (closes the btrim-only bypass)', async () => {
+    // Pins the specific bypass the constraint was tightened to close in
+    // the round-2 follow-up. Pre-fix the CHECK was
+    //   char_length(btrim(brief_text)) BETWEEN 1 AND 8000
+    // which permitted 9000-char strings padded with trailing whitespace
+    // because btrim stripped before counting. The fix added an
+    // additional `char_length(brief_text) BETWEEN 1 AND 8000` clause.
+    // This test asserts the bypass is now closed at the DB layer
+    // (defence-in-depth alongside app-side normaliseBriefText).
+    const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scenarioId = await createScenario(client);
+
+    // 8000 real chars + 1000 trailing spaces → 9000 total length but
+    // 8000 trimmed length. Pre-fix: passes. Post-fix: rejected.
+    const padded = 'a'.repeat(8000) + ' '.repeat(1000);
+
+    const { error } = await callAppend(client, {
+      scenarioId,
+      turnId: `padded-overlength-${randomUUID()}`,
+      briefText: padded,
+    });
+
+    expect(error).not.toBeNull();
+    // Postgres CHECK violation surfaces as code 23514 ("check_violation").
+    expect(error?.code === '23514' || /check.*constraint|scenarios_brief_text_length/i.test(error?.message ?? '')).toBe(true);
+    expect(await readBriefText(client, scenarioId)).toBeNull();
+  });
+
   it('rejects whitespace-only brief_text via the CHECK constraint', async () => {
     const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
       auth: { persistSession: false, autoRefreshToken: false },

@@ -1,11 +1,15 @@
 /**
  * normaliseBriefText: input sanitisation for V5 Phase 1 brief persistence.
  *
- * Defence-in-depth alongside the DB CHECK constraint
- * `char_length(btrim(brief_text)) BETWEEN 1 AND 8000`. The helper must
- * NEVER throw on length and must collapse trimmed-empty inputs to
- * undefined so the RPC layer's WHERE clause does not see whitespace-only
- * values that would also fail the CHECK constraint.
+ * Defence-in-depth alongside the DB CHECK constraint:
+ *   char_length(brief_text) BETWEEN 1 AND 8000
+ *   AND char_length(btrim(brief_text)) >= 1
+ *
+ * The first clause caps stored size (closes a trailing-whitespace
+ * over-length bypass that the prior btrim-only check permitted). The
+ * second clause rejects whitespace-only stores. The helper must NEVER
+ * throw on length and must collapse trimmed-empty inputs to undefined
+ * so the RPC layer never sees a value that would fail either clause.
  */
 
 import { describe, expect, it } from 'vitest';

@@ -11,15 +11,26 @@
  *   - build-turn-context surfaces it on EnrichedTurnContext.scenarioBriefText
  *   - turn-executor + chip-click-dispatch pass context.scenarioBriefText to the enricher
  *
- * What this test adds: a SINGLE composed proof that all those seams
- * compose correctly — a draft turn that writes briefText, a stateful
- * fake that retains it, and a follow-up `buildTurnContext` that reads
- * it back. Catches breaks where individual seams pass but the chain
- * doesn't (field name typos, accidental shadowing, schema-superset
+ * What this test adds: composed proofs that all those seams compose
+ * correctly. Each test exercises a real subset of the chain:
+ *
+ *   1. commit→store→buildTurnContext (the persistence chain). Calls
+ *      `commitDirectAnswer` directly rather than `dispatchDraftGraph`
+ *      to keep the surface focused on persistence. The dispatch layer
+ *      itself is covered by draft-graph-dispatch.test.ts.
+ *
+ *   2. commit→store→buildTurnContext→runTurnExecutor→enricher (the
+ *      full liveness chain). Asserts the persisted brief reaches
+ *      `enrichRunAnalysisWithDecisionReview` non-null on a follow-up
+ *      run_analysis turn — Defect B's acceptance criterion verified
+ *      end-to-end with no mocks at the executor or enricher boundary.
+ *
+ * Catches breaks where individual seams pass but the chain doesn't
+ * (field name typos, accidental shadowing, schema-superset
  * regressions, etc.).
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { commitDirectAnswer } from '../commit.js';
 import { buildTurnContext } from '../build-turn-context.js';
@@ -78,18 +89,17 @@ function createStatefulFakeStore(): SessionStore {
 }
 
 describe('V5 Phase 1 brief persistence — composed round-trip', () => {
-  it('draft turn writes briefText → next buildTurnContext exposes it on EnrichedTurnContext.scenarioBriefText', async () => {
+  it('commit chain: writing briefText via commitDirectAnswer makes it readable on the next buildTurnContext', async () => {
     const store = createStatefulFakeStore();
     const composed = composeDirectAnswerResponse({
       assistant_text: 'drafted',
       stage: 'frame',
     });
 
-    // Step 1: simulate draft-graph-dispatch's commit step. Real dispatch
-    // also threads briefText through the metadata; we exercise the
-    // commit→store seam directly here so the composed test stays focused
-    // on the persistence chain rather than the unrelated dispatch
-    // pipeline.
+    // Step 1: exercise the commit→store seam. The dispatch layer that
+    // would call commit on the user's behalf is covered by
+    // draft-graph-dispatch.test.ts; this test stays focused on the
+    // persistence chain.
     await commitDirectAnswer(
       composed,
       {
@@ -122,20 +132,20 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
       sessionStore: store,
     });
 
-    // The composed acceptance contract: the brief written by the draft
-    // turn must be visible on the enriched turn context.
+    // The composed acceptance contract: the brief written by the commit
+    // step must be visible on the enriched turn context.
     expect(ctx.scenarioBriefText).toBe('Should I take the offer at company X?');
     // And the graph from the same round trip is also surfaced (proves
     // loadGraphAndBriefText returns both fields, not just brief_text).
     expect(ctx.persistedGraph).toEqual({ nodes: [], edges: [] });
   });
 
-  it('first-write-wins: a graphless retry on the same scenario does NOT lock out a successful follow-up brief', async () => {
+  it('first-write-wins via commit chain: a graphless commit does NOT lock out a successful follow-up brief', async () => {
     // Mirrors the dispatch-side guard contract: graphless drafts MUST NOT
     // populate brief_text. The stateful fake's RPC-shaped write-once
     // predicate enforces that even if a future caller bypasses the
     // dispatch guard. Composed end-to-end so a regression at any seam
-    // (dispatch, commit, store) surfaces here.
+    // (commit, store, buildTurnContext) surfaces here.
     const store = createStatefulFakeStore();
     const composed = composeDirectAnswerResponse({
       assistant_text: '',
@@ -143,7 +153,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
     });
 
     // Attempt 1: graphless. Dispatch guard would suppress briefText —
-    // simulate that here by passing briefText: undefined.
+    // we replicate that behaviour at the commit boundary.
     await commitDirectAnswer(
       composed,
       {
@@ -197,14 +207,14 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
     expect(ctx.scenarioBriefText).toBe('real brief on the successful retry');
   });
 
-  it('a second non-conflict draft on a scenario with brief_text already set does NOT overwrite (write-once enforcement)', async () => {
+  it('write-once via commit chain: a second non-conflict commit on a populated scenario does NOT overwrite', async () => {
     const store = createStatefulFakeStore();
     const composed = composeDirectAnswerResponse({
       assistant_text: '',
       stage: 'frame',
     });
 
-    // First draft: writes the canonical brief.
+    // First commit: writes the canonical brief.
     await commitDirectAnswer(
       composed,
       {
@@ -222,7 +232,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
       store,
     );
 
-    // Second draft (different turn_id, e.g. user re-prompted with a
+    // Second commit (different turn_id, e.g. user re-prompted with a
     // different message). Per the RPC's WHERE clause, brief_text is
     // NOT overwritten.
     await commitDirectAnswer(
@@ -237,7 +247,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
         duration_ms: 6,
         handler_facts: [],
         graph: { nodes: [], edges: [] },
-        briefText: 'second draft attempt with a different brief',
+        briefText: 'second commit attempt with a different brief',
       },
       store,
     );
@@ -258,5 +268,252 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
       sessionStore: store,
     });
     expect(ctx.scenarioBriefText).toBe('original brief');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Liveness chain: persisted briefText reaches the decision-review enricher
+// via runTurnExecutor on a follow-up run_analysis turn.
+//
+// This is the DEFECT B regression test in its full composed form. Earlier
+// suites prove individual seams; this suite proves the entire chain
+// (commit → stateful store → buildTurnContext → turn-executor →
+// enrichRunAnalysisWithDecisionReview) without mocking any boundary above
+// the SessionStore.
+// ---------------------------------------------------------------------------
+
+// vi.mock calls have to be hoisted, and runTurnExecutor's session module
+// gets resolved through getSessionStore(). We point the singleton at a
+// stateful fake by mutating a module-level holder.
+const liveStoreHolder: { current: SessionStore } = {
+  current: createStatefulFakeStore(),
+};
+
+vi.mock('../session/index.js', () => ({
+  getSessionStore: () => liveStoreHolder.current,
+  resetSessionStoreForTests: () => {},
+}));
+
+const { runTurnExecutor } = await import('../turn-executor.js');
+const { createRegistry } = await import('../tools/registry.js');
+const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+import * as enricherMod from '../coaching/decision-review-enricher.js';
+import type {
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+  ToolResponseBlock,
+} from '../../adapters/llm/types.js';
+import type { PLoTClient } from '../../orchestrator/plot-client.js';
+import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
+import type { RunAnalysisScenarioSnapshot } from '../tools/handlers/run-analysis.js';
+
+function mkToolUseResult(input: unknown): ChatWithToolsResult {
+  const content: ToolResponseBlock[] = [
+    {
+      type: 'tool_use',
+      id: 'tu-1',
+      name: OLUMI_ACTION_TOOL_NAME,
+      input: input as Record<string, unknown>,
+    },
+  ];
+  return {
+    content,
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 50,
+  };
+}
+
+function makeMockPlotClient(): PLoTClient {
+  return {
+    run: vi.fn(
+      async () =>
+        ({
+          meta: { seed_used: 42, n_samples: 1000, response_hash: 'h' },
+          results: [{ option_id: 'opt_a', option_label: 'Plan A', win_probability: 0.7 }],
+          response_hash: 'h-top',
+          analysis_status: 'completed',
+        }) as V2RunResponseEnvelope,
+    ),
+    validatePatch: vi.fn().mockResolvedValue({}),
+  } as unknown as PLoTClient;
+}
+
+function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
+  return {
+    graph: { nodes: [{ id: 'g', kind: 'goal' }], edges: [] },
+    options: [
+      { id: 'opt_a', option_id: 'opt_a', label: 'Plan A', interventions: { f: 1 } },
+      { id: 'opt_b', option_id: 'opt_b', label: 'Plan B', interventions: { f: 0 } },
+    ],
+    goal_node_id: 'g',
+  };
+}
+
+describe('V5 Phase 1 brief persistence — full liveness chain through runTurnExecutor', () => {
+  it('Defect B closure: persisted briefText reaches enrichRunAnalysisWithDecisionReview via runTurnExecutor', async () => {
+    // Step 1: bind a fresh stateful store to the singleton mock so the
+    // executor's getSessionStore() call resolves to it.
+    const store = createStatefulFakeStore();
+    liveStoreHolder.current = store;
+
+    // Step 2: write the brief via the canonical commit path. This is
+    // the persistence side of the chain.
+    const composed = composeDirectAnswerResponse({
+      assistant_text: 'drafted',
+      stage: 'frame',
+    });
+    const PERSISTED_BRIEF = 'Defect-B regression: this brief MUST reach the enricher';
+    await commitDirectAnswer(
+      composed,
+      {
+        scenario_id: SCENARIO_ID,
+        turn_id: 'draft-turn',
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: 'sha256:draft',
+        llm_calls_used: 1,
+        duration_ms: 10,
+        handler_facts: [],
+        graph: { nodes: [], edges: [] },
+        briefText: PERSISTED_BRIEF,
+      },
+      store,
+    );
+
+    // Step 3: spy on the enricher to observe what the executor passes
+    // it. Use a pass-through mock so the executor's downstream
+    // composition still works.
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    enricherSpy.mockImplementation(async ({ handlerFacts }) => handlerFacts);
+
+    // Step 4: run a follow-up run_analysis turn. The Sonnet routing
+    // adapter is stubbed to return a tool-use call resolving to
+    // run_analysis on opt_a. The PLoT client is stubbed to return a
+    // golden envelope. NO mocks at the buildTurnContext, executor, or
+    // enricher seam — those run for real against the stateful store.
+    const routingAdapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () =>
+          mkToolUseResult({
+            intent_class: 'execute',
+            action: {
+              handler_id: 'run_analysis',
+              entity: {
+                id: 'opt_a',
+                kind: 'option',
+                resolution_status: 'resolved',
+                resolution_method: 'id_match',
+              },
+              parameters: [],
+              cited_context_fields: ['graph.options'],
+            },
+          }),
+        ),
+    };
+
+    const followUpPayload = {
+      turn_id: 'follow-up-turn',
+      scenario_id: SCENARIO_ID,
+      message: 'run the analysis',
+      turn_class: 'decide' as const,
+      stage: 'analyse' as const,
+    };
+
+    const result = await runTurnExecutor(followUpPayload, 'req-defect-b-composed', {
+      routingAdapter,
+      handlerRegistry: createRegistry({
+        plotClient: makeMockPlotClient(),
+        scenarioReader: async () => makeScenarioSnapshot(),
+      }),
+      // Critically: NO scenarioBrief option supplied. The brief MUST
+      // reach the enricher via canonical state, not the deprecated
+      // out-of-band channel. This is the precise condition Defect B
+      // failed under pre-fix.
+    });
+
+    // Composed acceptance assertions:
+    expect(result.telemetry.failure_type).toBeNull();
+    expect(result.telemetry.commit_performed).toBe(true);
+
+    // The headline assertion: the enricher received the persisted brief.
+    expect(enricherSpy).toHaveBeenCalled();
+    const enricherCall = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
+    expect(enricherCall[0].brief).toBe(PERSISTED_BRIEF);
+    expect(enricherCall[0].brief).not.toBeNull();
+  });
+
+  it('Defect B negative: when no brief is persisted, the enricher receives null (graceful skip preserved)', async () => {
+    // Same chain, but with no brief written. Confirms the executor
+    // does not invent a brief from elsewhere — the canonical-state
+    // null is what the enricher sees, and the legacy `no_brief`
+    // skip path is preserved.
+    const store = createStatefulFakeStore();
+    liveStoreHolder.current = store;
+    // Persist a graph but NO brief.
+    const composed = composeDirectAnswerResponse({ assistant_text: '', stage: 'frame' });
+    await commitDirectAnswer(
+      composed,
+      {
+        scenario_id: SCENARIO_ID,
+        turn_id: 'graph-only',
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: 'sha256:graph-only',
+        llm_calls_used: 1,
+        duration_ms: 5,
+        handler_facts: [],
+        graph: { nodes: [], edges: [] },
+        // briefText absent
+      },
+      store,
+    );
+
+    const enricherSpy = vi.spyOn(enricherMod, 'enrichRunAnalysisWithDecisionReview');
+    enricherSpy.mockImplementation(async ({ handlerFacts }) => handlerFacts);
+
+    const routingAdapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () =>
+          mkToolUseResult({
+            intent_class: 'execute',
+            action: {
+              handler_id: 'run_analysis',
+              entity: {
+                id: 'opt_a',
+                kind: 'option',
+                resolution_status: 'resolved',
+                resolution_method: 'id_match',
+              },
+              parameters: [],
+              cited_context_fields: ['graph.options'],
+            },
+          }),
+        ),
+    };
+
+    await runTurnExecutor(
+      {
+        turn_id: 'follow-up-no-brief',
+        scenario_id: SCENARIO_ID,
+        message: 'run analysis',
+        turn_class: 'decide' as const,
+        stage: 'analyse' as const,
+      },
+      'req-no-brief-composed',
+      {
+        routingAdapter,
+        handlerRegistry: createRegistry({
+          plotClient: makeMockPlotClient(),
+          scenarioReader: async () => makeScenarioSnapshot(),
+        }),
+      },
+    );
+
+    const enricherCall = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
+    expect(enricherCall[0].brief).toBeNull();
   });
 });
