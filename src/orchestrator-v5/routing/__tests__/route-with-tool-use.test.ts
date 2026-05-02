@@ -168,6 +168,91 @@ describe('routeWithToolUse — happy paths', () => {
     expect(userContent).toContain('## User turn');
     expect(userContent).toContain('hi');
   });
+
+  // brief brief-display-safe-analysis A2 — outbound payload assertion
+  it('serialised user message contains display-safe analysis only — no raw analysis floats', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('ok')], 'end_turn')),
+    };
+
+    const pack = assembleContextPack({
+      payload: {
+        turn_id: 't-da-01',
+        scenario_id: 'scen-display-safe',
+        message: 'How is option A doing?',
+        turn_class: 'analyse',
+        stage: 'analyse',
+      },
+      priorTurns: [],
+      analysis: {
+        winner: { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.862 },
+        options: [
+          { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.862, outcome_mean: 100 },
+          { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.791, outcome_mean: 80 },
+        ],
+        top_drivers: [
+          { factor_id: 'price', factor_label: 'Price', sensitivity: 1.0, direction: 'positive' },
+          { factor_id: 'demand', factor_label: 'Demand', sensitivity: 0.4, direction: 'negative' },
+        ],
+        robustness_level: 'moderate',
+        fragile_edge_count: 1,
+        top_fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+        margin: 0.071,
+        margin_pp: 7.1,
+        analysis_status: 'complete',
+      },
+    });
+
+    await routeWithToolUse(pack, 'How is option A doing?', { requestId: 'req-display-safe', adapter });
+
+    const args = adapter.chatWithTools.mock.calls[0]![0];
+    const userContent = args.messages[0]!.content as string;
+
+    // Sonnet must see decision-language values.
+    expect(userContent).toContain('"win_probability": "86%"');
+    expect(userContent).toContain('"win_probability": "79%"');
+    expect(userContent).toContain('"margin": "7 percentage points"');
+    expect(userContent).toContain('"influence": "very strong positive influence"');
+    expect(userContent).toContain('"influence": "moderate negative influence"');
+    expect(userContent).toContain('"from_label": "Marketing Spend"');
+
+    // Sonnet must NOT see raw analysis floats or internal coefficients.
+    expect(userContent).not.toContain('0.862');
+    expect(userContent).not.toContain('0.791');
+    expect(userContent).not.toContain('"sensitivity_value"');
+    expect(userContent).not.toContain('"probability":');
+    expect(userContent).not.toContain('"strength"');
+    expect(userContent).not.toContain('"mean":');
+    expect(userContent).not.toContain('mean=');
+    expect(userContent).not.toContain('exists_probability');
+
+    // Targeted invariant: no raw decimal floats anywhere inside the
+    // serialised analysis object. Locate `"analysis":` and walk braces
+    // to find the matching close, then run the brief's regex against
+    // that slice.
+    const analysisKeyStart = userContent.indexOf('"analysis":');
+    expect(analysisKeyStart).toBeGreaterThan(-1);
+    const objectStart = userContent.indexOf('{', analysisKeyStart);
+    expect(objectStart).toBeGreaterThan(analysisKeyStart);
+    let depth = 0;
+    let objectEnd = -1;
+    for (let i = objectStart; i < userContent.length; i++) {
+      const ch = userContent[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          objectEnd = i + 1;
+          break;
+        }
+      }
+    }
+    expect(objectEnd).toBeGreaterThan(objectStart);
+    const analysisSection = userContent.slice(objectStart, objectEnd);
+    expect(analysisSection).not.toMatch(/\b0\.\d{2,}/);
+  });
 });
 
 // -----------------------------------------------------------------------

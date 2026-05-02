@@ -22,6 +22,7 @@
  */
 
 import { formatProbability } from './format-analysis-value.js';
+import { bandFromMagnitude } from './influence-bands.js';
 
 // ---------------------------------------------------------------
 // Numeric prose (raw decimal → percentage)
@@ -274,11 +275,19 @@ const SENSITIVITY_PATTERNS: RegExp[] = [
 ];
 
 function bandLabel(value: number): string {
+  // Thresholds delegated to the shared `bandFromMagnitude` classifier so the
+  // upstream display-safe projection and this post-compose rewriter cannot
+  // drift apart. The phrase shape ("a … sensitivity signal") is rewriter-
+  // specific and stays here; the upstream projection uses "<band> <sign>
+  // influence" instead.
   const abs = Math.abs(value);
-  if (abs >= 0.95) return value < 0 ? 'a very strong negative sensitivity signal' : 'a very strong sensitivity signal';
+  const band = bandFromMagnitude(abs);
+  if (band === 'very strong') {
+    return value < 0 ? 'a very strong negative sensitivity signal' : 'a very strong sensitivity signal';
+  }
   if (value < 0) return 'a negative sensitivity signal';
-  if (abs >= 0.7) return 'a strong sensitivity signal';
-  if (abs >= 0.3) return 'a moderate sensitivity signal';
+  if (band === 'strong') return 'a strong sensitivity signal';
+  if (band === 'moderate') return 'a moderate sensitivity signal';
   return 'a weak sensitivity signal';
 }
 

@@ -35,6 +35,10 @@ import type {
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import { log } from '../../utils/telemetry.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
+import {
+  formatAnalysisForContext,
+  type DisplaySafeAnalysis,
+} from '../format/format-analysis-for-context.js';
 import { detectCompound } from '../routing/compound-detector.js';
 import {
   runExtraction,
@@ -115,7 +119,23 @@ export interface ContextPack {
   readonly version: typeof CONTEXT_PACK_VERSION;
   readonly stage: string;
   readonly graph: ContextPackGraph;
+  /**
+   * Raw, handler-facing analysis projection. Carries float probabilities
+   * and signed sensitivities so coaching signals, chip generation,
+   * projection summaries, and the explain-fallback path can do
+   * deterministic logic. Never serialised to the LLM directly — see
+   * `display_analysis` and `buildUserMessage` for the LLM-facing view.
+   */
   readonly analysis: ContextPackAnalysis | null;
+  /**
+   * LLM-facing analysis projection. Decision-language strings only — no
+   * raw floats, no internal coefficients. Substituted in for `analysis`
+   * by `buildUserMessage` (route-with-tool-use.ts) when serialising the
+   * ContextPack into the routing prompt. Design principle: raw model
+   * values stay in structured state; LLM-facing context uses
+   * decision-language projections only.
+   */
+  readonly display_analysis: DisplaySafeAnalysis | null;
   readonly conversation: ContextPackConversation;
   /**
    * Coaching state assembled from prior turns. draft_coaching is populated
@@ -235,6 +255,14 @@ export function assembleContextPackWithSummary(
     analysis: projectAnalysis(
       input.analysis ?? null,
       input.analysisStalenessReason ?? null,
+    ),
+    // Display-safe analysis projection — what Sonnet actually sees.
+    // Source: the same raw projectAnalysis() output for option/driver
+    // sorting + scale guards, plus the upstream structured fragile-edge
+    // labels (so we never split the legacy "A → B" join).
+    display_analysis: formatAnalysisForContext(
+      projectAnalysis(input.analysis ?? null, input.analysisStalenessReason ?? null),
+      input.analysis?.top_fragile_edges ?? null,
     ),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,

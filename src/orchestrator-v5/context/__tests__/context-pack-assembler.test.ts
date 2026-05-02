@@ -128,6 +128,50 @@ describe('assembleContextPack', () => {
     expect(pack.analysis).toBeNull();
   });
 
+  // brief brief-display-safe-analysis A2 — display_analysis projection
+  it('emits a display-safe analysis projection with no raw floats alongside the raw analysis', () => {
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      analysis: makeAnalysis(),
+    });
+
+    // Raw projection still present for handler-side reads (signals, chips,
+    // explanation fallbacks).
+    expect(pack.analysis?.leading_option).toEqual({ label: 'Expand EU', probability: 0.72 });
+
+    // Display-safe projection — what Sonnet sees after buildUserMessage
+    // strips the raw projection.
+    expect(pack.display_analysis).not.toBeNull();
+    expect(pack.display_analysis?.leading_option).toEqual({
+      label: 'Expand EU',
+      win_probability: '72%',
+    });
+    expect(pack.display_analysis?.runner_up).toEqual({
+      label: 'Stay domestic',
+      win_probability: '28%',
+    });
+    expect(pack.display_analysis?.margin).toBe('44 percentage points');
+    expect(pack.display_analysis?.robustness_band).toBe('moderate');
+    expect(pack.display_analysis?.top_drivers).toEqual([
+      { label: 'Customer Churn', influence: 'moderate negative influence' },
+    ]);
+    expect(pack.display_analysis?.fragile_edges).toEqual([
+      { from_label: 'Marketing Spend', to_label: 'New Leads' },
+    ]);
+
+    // Boundary invariant: serialised display_analysis contains no raw decimal floats.
+    const serialised = JSON.stringify(pack.display_analysis);
+    expect(serialised).not.toMatch(/\b0\.\d{2,}/);
+    expect(serialised).not.toContain('sensitivity_value');
+    expect(serialised).not.toContain('strength');
+  });
+
+  it('display_analysis is null when raw analysis is null', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], analysis: null });
+    expect(pack.display_analysis).toBeNull();
+  });
+
   it('graph counts match the sizes of nodes / edges / options / goals / constraints arrays', () => {
     const nodes = [
       { id: 'n-goal', kind: 'goal', label: 'Maximise NPV' },
