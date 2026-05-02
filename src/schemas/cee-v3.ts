@@ -419,6 +419,14 @@ export const GraphV3 = z.object({
   nodes: z.array(NodeV3),
   /** Graph edges */
   edges: z.array(EdgeV3),
+  /**
+   * Goal constraints attached to the scenario. Optional top-level array
+   * mirroring CEEGraphResponseV3.goal_constraints — keeps the in-memory
+   * GraphV3T as the single canonical persistence surface for V5 D1
+   * `add_constraint` mutations. PLoT already merges this field with
+   * compiled constraint nodes when present.
+   */
+  goal_constraints: z.array(GoalConstraintSchema).optional(),
 });
 export type GraphV3T = z.infer<typeof GraphV3>;
 

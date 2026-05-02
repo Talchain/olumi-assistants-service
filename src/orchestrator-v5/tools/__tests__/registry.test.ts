@@ -96,16 +96,20 @@ describe('createRegistry — V5 0.9.0 handler set', () => {
     validatePatch: () => Promise.reject(new Error('plot client not exercised')),
   } as unknown as PLoTClient;
 
-  it('registers run_analysis plus the three V5 no-op handlers', () => {
+  it('registers run_analysis plus the V5 no-op + D1 mutation handlers', () => {
     const registry = createRegistry({
       scenarioReader: stubScenarioReader,
       plotClient: stubPlotClient,
     });
-    expect(registry.size).toBe(4);
+    expect(registry.size).toBe(7);
     expect(resolveHandler(registry, 'run_analysis')).not.toBeNull();
     expect(resolveHandler(registry, 'explain_from_structure')).not.toBeNull();
     expect(resolveHandler(registry, 'explain_results')).not.toBeNull();
     expect(resolveHandler(registry, 'what_would_flip')).not.toBeNull();
+    // D1 (Brief: D1 deterministic handlers).
+    expect(resolveHandler(registry, 'set_factor_value')).not.toBeNull();
+    expect(resolveHandler(registry, 'add_constraint')).not.toBeNull();
+    expect(resolveHandler(registry, 'adjust_edge_strength')).not.toBeNull();
   });
 
   it('does not register the deprecated explain_result literal', () => {
@@ -121,9 +125,7 @@ describe('createRegistry — V5 0.9.0 handler set', () => {
       scenarioReader: stubScenarioReader,
       plotClient: stubPlotClient,
     });
-    expect(resolveHandler(registry, 'set_factor_value')).toBeNull();
-    expect(resolveHandler(registry, 'add_constraint')).toBeNull();
+    // compare_options is E1 brief scope, not D1.
     expect(resolveHandler(registry, 'compare_options')).toBeNull();
-    expect(resolveHandler(registry, 'adjust_edge_strength')).toBeNull();
   });
 });

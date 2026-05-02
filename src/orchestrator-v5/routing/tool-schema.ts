@@ -79,6 +79,9 @@ export const OLUMI_ACTION_TOOL = {
               'explain_from_structure',
               'explain_results',
               'what_would_flip',
+              'set_factor_value',
+              'add_constraint',
+              'adjust_edge_strength',
             ],
             description:
               'The action to execute. Pick the handler that matches the user intent:\n' +
@@ -122,9 +125,46 @@ export const OLUMI_ACTION_TOOL = {
               'band, and what changes would alter the outcome. Do not use ' +
               'mutation language.\n' +
               '\n' +
+              '• adjust_edge_strength — change the strength of a causal ' +
+              'link between two nodes ("strengthen the link from churn to ' +
+              'revenue", "weaken the budget→revenue effect"). The entity ' +
+              'kind is "edge" and the entity id is the composite ' +
+              '"source→target" (use the Unicode arrow → or the ASCII ' +
+              'fallback ->). Pass `strength` as a number in [-1, 1]; the ' +
+              'handler clamps the result to that range. "Strengthen" ' +
+              'means increase |mean| while preserving sign; "weaken" ' +
+              'means decrease |mean| toward zero. Translate the user\'s ' +
+              'phrasing into the right operator + signed delta yourself ' +
+              'before emitting the proposal. Do NOT include an ' +
+              '`explanation` payload.\n' +
+              '\n' +
+              '• add_constraint — attach a threshold constraint to a factor, ' +
+              'outcome, or goal ("budget can\'t exceed £50k", "keep churn ' +
+              'below 5%", "quality must be at least 80%"). Mutates the ' +
+              'graph deterministically. Pass `constraint_type` (at_least | ' +
+              'at_most), `value` (in user units — e.g. 50000 for "£50k", ' +
+              '5 for "5%"; the handler stores user units, not normalised ' +
+              'model units). Optional `label` and `unit` parameters refine ' +
+              'the persisted constraint. Idempotent on (target, operator): ' +
+              'restating the same threshold updates the existing entry. Do ' +
+              'NOT include an `explanation` payload.\n' +
+              '\n' +
+              '• set_factor_value — change a factor node\'s observed value ' +
+              '("set churn to 5%", "increase budget by £10k", "double the ' +
+              'team size"). Mutates the graph deterministically; the ' +
+              'analysis becomes stale. The entity must be a factor (kind: ' +
+              '"node" with the factor\'s id). Pass the value as a structured ' +
+              'parameter `{ value: <number>, unit: "%" | "£" | …, cap?: ' +
+              '<number> }` so the handler can normalise model units; for ' +
+              'percentage factors capped at 100, "5%" must arrive as ' +
+              '`{ value: 5, unit: "%", cap: 100 }`, NOT `0.05`. Use the ' +
+              '`operator` field for relative changes (set / increase / ' +
+              'decrease / multiply). Do NOT include an `explanation` ' +
+              'payload on this handler.\n' +
+              '\n' +
               'Graph structural changes (draft_graph, edit_graph) are ' +
               'dispatched by the system before routing and never reach this ' +
-              'tool call. Value modifications happen on the canvas UI.',
+              'tool call.',
           },
           entity: {
             type: 'object',

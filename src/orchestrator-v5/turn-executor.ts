@@ -1224,6 +1224,7 @@ export async function runTurnExecutor(
           explanation: explanationInvocationPayload,
           analysisProjection,
           structureProjection,
+          graphForTurn: graphStateForTurn ?? undefined,
         });
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');
@@ -1403,9 +1404,54 @@ export async function runTurnExecutor(
       // would ship `freshness === 'none'` (or the prior verdict) on
       // the same turn that produced the fresh fact. Re-derivation is
       // free — it's a pure function over the in-memory fact arrays.
+      //
+      // V5 D1 (P1-3 follow-up): when a mutation handler emits
+      // `mutated_graph`, the pre-handler hash (computed from
+      // `graphStateForTurn`, the ingress) is stale relative to what
+      // we're about to commit. Compute the post-mutation hash so the
+      // freshness verdict on this same response correctly reads
+      // `'stale'` against any prior run_analysis fact. Falls back to
+      // the pre-handler hash for computation/explanation handlers
+      // that don't mutate.
+      //
+      // Same-turn contract is the freshness verdict only — the rerun
+      // chip itself is gated to next-turn explanation handlers in
+      // chip-generator (`noopExplanationHandlerJustRan != null` +
+      // `analysis_freshness === 'stale'`). The wire signal that the
+      // analysis went stale is the freshness verdict on this
+      // response; the chip surfaces when the user asks an
+      // explanation question on the now-stale state.
+      //
+      // Hash representation: handlers run their candidate post-mutation
+      // graph through GraphV3.parse before emitting `mutated_graph`,
+      // which strips top-level `options` and `goal_node_id` (they're
+      // not declared on GraphV3). Hashing the GraphV3 projection
+      // directly would therefore differ from the prior run_analysis
+      // fact's `graph_hash_at_run` for projection-shape reasons rather
+      // than mutation reasons. Stamp the mutation's structural fields
+      // onto the ingress shape so the comparison is apples-to-apples
+      // with how `graph_hash_at_run` was originally computed.
+      const hashForPostHandlerFreshness = ((): string | null => {
+        if (handlerOutcome.mutated_graph === undefined) {
+          return currentAnalysisGraphHashForTurn;
+        }
+        const mutated = handlerOutcome.mutated_graph as Record<string, unknown>;
+        const ingress = (graphStateForTurn ?? {}) as Record<string, unknown>;
+        const merged: Record<string, unknown> = {
+          ...ingress,
+          nodes: mutated.nodes,
+          edges: mutated.edges,
+          ...(mutated.goal_constraints !== undefined
+            ? { goal_constraints: mutated.goal_constraints }
+            : {}),
+        };
+        return computeAnalysisAffectingGraphHash(
+          merged as GraphStateIngress | null | undefined,
+        );
+      })();
       freshness = deriveAnalysisFreshness(
         [...handlerFactsForCommit, ...context.prior_facts],
-        currentAnalysisGraphHashForTurn,
+        hashForPostHandlerFreshness,
       );
       emitFreshnessTelemetry(
         freshness,
@@ -1680,6 +1726,28 @@ export async function runTurnExecutor(
     // STEP 7 — COMMIT (unchanged contract)
     // ==================================================================
     try {
+      // V5 D1 mutation handlers (set_factor_value, add_constraint,
+      // adjust_edge_strength) emit a post-mutation graph on
+      // HandlerOutcome.mutated_graph. When present it supersedes the
+      // per-turn ingress / persisted graph so append_turn_atomic(p_graph)
+      // persists the mutated state. Handlers MUST have validated this
+      // graph through GraphV3.parse before returning it — invalid graphs
+      // do not reach here.
+      //
+      // Fallback chain when mutated_graph is absent:
+      //   1. options.graphState (request ingress, freshest if UI sent it)
+      //   2. graphStateForTurn (post-fallback per-turn graph — already
+      //      tries options.graphState then context.persistedGraph)
+      // We prefer options.graphState directly (matches pre-D1 behaviour:
+      // commit only echoes the ingress when the UI explicitly sent it,
+      // otherwise leaves scenarios.graph untouched). graphStateForTurn
+      // is used only when a mutation handler emits mutated_graph but the
+      // UI didn't send graph_state — in that case the persisted graph
+      // is the right merge base.
+      const graphForCommit =
+        handlerOutcome?.mutated_graph !== undefined
+          ? handlerOutcome.mutated_graph
+          : options.graphState;
       const committed = await commitDirectAnswer(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
@@ -1689,7 +1757,7 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
-        graph: options.graphState,
+        graph: graphForCommit,
       });
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');

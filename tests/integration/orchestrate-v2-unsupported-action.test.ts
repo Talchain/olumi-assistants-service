@@ -32,7 +32,7 @@ const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 // Mock routing adapter — produces a tool_use with the unsupported action.
 // Each test sets `mockHandlerId` before injecting a request.
-let mockHandlerId = 'set_factor_value';
+let mockHandlerId = 'compare_options';
 const routingMockAdapter = {
   name: 'unsupported-test-mock',
   chat: async () => ({
@@ -95,6 +95,9 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
+    storeDraftGraph: async () => undefined,
+    loadGraph: async () => null,
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
@@ -131,7 +134,7 @@ function buildRequest() {
     kind: 'message' as const,
     turn_id: 'b1111111-1111-4111-8111-111111111111',
     scenario_id: SCENARIO_ID,
-    message: 'please set factor X to 0.5',
+    message: 'what are the tradeoffs here',
     turn_class: 'frame' as const,
     stage: 'frame' as const,
     source: 'composer' as const,
@@ -158,11 +161,11 @@ describe('POST /orchestrate/v2/turn — unsupported-action graceful fallback', (
 
   beforeEach(() => {
     events = [];
-    mockHandlerId = 'set_factor_value';
+    mockHandlerId = 'compare_options';
   });
 
   it('validator miss: unregistered handler_id returns 200 OlumiResponse with coaching (not 500 BoundaryError)', async () => {
-    mockHandlerId = 'set_factor_value';
+    mockHandlerId = 'compare_options';
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -206,14 +209,16 @@ describe('POST /orchestrate/v2/turn — unsupported-action graceful fallback', (
     expect(completed[0]!.data.commit_performed).toBe(true);
   });
 
+  // V5 D1: set_factor_value, add_constraint, and adjust_edge_strength
+  // are now registered. The remaining ids in this list stay
+  // unregistered (add_option / edit_graph dispatch outside the
+  // tool-use seam; explain_result is the deprecated singular alias;
+  // compare_options is E1 brief scope).
   it.each([
     'add_option',
     'edit_graph',
-    'add_constraint',
-    'adjust_edge_strength',
     'explain_result',
     'compare_options',
-    'what_would_flip',
   ])(
     'every unregistered handler_id routes to the 200 coaching fallback: %s',
     async (handlerId) => {

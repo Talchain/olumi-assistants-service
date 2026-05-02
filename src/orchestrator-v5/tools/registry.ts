@@ -102,6 +102,9 @@ import {
 import { createExplainFromStructureHandler } from './handlers/explain-from-structure.js';
 import { createExplainResultsHandler } from './handlers/explain-results.js';
 import { createWhatWouldFlipHandler } from './handlers/what-would-flip.js';
+import { createSetFactorValueHandler } from './handlers/set-factor-value.js';
+import { createAddConstraintHandler } from './handlers/add-constraint.js';
+import { createAdjustEdgeStrengthHandler } from './handlers/adjust-edge-strength.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 
 // Re-exported for the chip-click dispatch path. The handler-ownership
@@ -205,6 +208,15 @@ export interface HandlerInvocation {
    * top causal links, named-factor pathway entries, goal label.
    */
   readonly structureProjection?: StructureProjectionSummary;
+  /**
+   * V5 D1: per-turn graph (post-fallback selection between
+   * `options.graphState` and persisted scenarios.graph). Mutation
+   * handlers (set_factor_value, add_constraint, adjust_edge_strength)
+   * read this and emit a `mutated_graph` on the outcome. Untyped to
+   * avoid a cee-v3 dependency in the registry contract — handlers are
+   * responsible for `GraphV3.parse`.
+   */
+  readonly graphForTurn?: unknown;
 }
 
 /**
@@ -225,6 +237,21 @@ export interface HandlerOutcome {
   readonly handler_facts: readonly HandlerFact[];
   readonly llm_calls_used: number;
   readonly suppress_orientation?: boolean;
+  /**
+   * V5 D1 mutation channel. When present, replaces the per-turn ingress
+   * graph in commit metadata so `append_turn_atomic(p_graph)` persists the
+   * post-mutation state. Mutation handlers (set_factor_value, add_constraint,
+   * adjust_edge_strength) populate it; computation/explanation handlers
+   * leave it undefined and the ingress graph is committed unchanged.
+   *
+   * Typed as `unknown` to avoid a cee-v3 import dependency from the
+   * registry contract. STEP 7 in turn-executor passes it through to
+   * `commitDirectAnswer({ graph })` which is also `unknown`-shaped.
+   * Handlers MUST run their candidate post-mutation graph through the
+   * canonical Zod schema before placing it here — invalid graphs must
+   * throw, not commit.
+   */
+  readonly mutated_graph?: unknown;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;
@@ -287,11 +314,18 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
   const explainResults = createExplainResultsHandler();
   const whatWouldFlip = createWhatWouldFlipHandler();
 
+  const setFactorValue = createSetFactorValueHandler();
+  const addConstraint = createAddConstraintHandler();
+  const adjustEdgeStrength = createAdjustEdgeStrengthHandler();
+
   return new Map<V5ActionType, HandlerFn>([
     ['run_analysis', runAnalysis],
     ['explain_from_structure', explainFromStructure],
     ['explain_results', explainResults],
     ['what_would_flip', whatWouldFlip],
+    ['set_factor_value', setFactorValue],
+    ['add_constraint', addConstraint],
+    ['adjust_edge_strength', adjustEdgeStrength],
   ]);
 }
 
