@@ -332,14 +332,16 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
       expect(edge).not.toHaveProperty('exists_probability');
       expect(edge).not.toHaveProperty('effect_direction');
     }
-    // Canonical observed_state.value survives display projection on the
-    // raw-graph fallback path — the LLM still sees the user-supplied
-    // quantity even when the caller never pre-compacted the graph.
+    // Canonical observed_state.{value, unit} both survive display
+    // projection on the raw-graph fallback path — the LLM still sees
+    // the user-supplied quantity AND its unit (without unit, "100"
+    // vs "100k" change meaning).
     const marketingNode = parsed.graph.nodes.find((n) => n['id'] === 'fac_marketing');
     expect(marketingNode).toBeDefined();
     expect(marketingNode!['value']).toBe(100);
+    expect(marketingNode!['unit']).toBe('k');
     // Raw GraphV3T `observed_state` wrapper itself MUST NOT leak — only
-    // the extracted user value reaches Sonnet.
+    // the extracted user value/unit reach Sonnet.
     expect(marketingNode).not.toHaveProperty('observed_state');
   });
 

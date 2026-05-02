@@ -254,6 +254,25 @@ describe('formatGraphForContext — node transformation', () => {
     expect(out.nodes[1]!.value).toBe('high');
     expect(out.nodes[2]!.value).toBe(7);
   });
+
+  it('reads canonical observed_state.unit when top-level unit is absent', () => {
+    // Symmetric to value: canonical GraphV3T nests both under
+    // observed_state. Without this fallback "100" vs "100k" change
+    // meaning when the raw-graph path doesn't pre-compact.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', observed_state: { value: 100, unit: 'k' } },
+          { id: 'fac_b', kind: 'factor', label: 'B', observed_state: { unit: '%' } },
+          // Top-level unit wins when both are present.
+          { id: 'fac_c', kind: 'factor', label: 'C', unit: 'GBP', observed_state: { unit: 'USD' } },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.unit).toBe('k');
+    expect(out.nodes[1]!.unit).toBe('%');
+    expect(out.nodes[2]!.unit).toBe('GBP');
+  });
 });
 
 describe('formatGraphForContext — canonical & legacy edge shapes', () => {

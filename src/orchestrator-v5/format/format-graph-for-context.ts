@@ -78,15 +78,21 @@ interface RawNodeShape {
 interface RawEdgeShape {
   readonly from?: unknown;
   readonly to?: unknown;
-  /** Compact form: numeric signed mean. */
+  /** Two shapes accepted on this field:
+   *    - compact: numeric signed mean
+   *    - canonical GraphV3T: `{ mean, std }` object (sign carried separately
+   *      via `effect_direction`) */
   readonly strength?: unknown;
-  /** Canonical GraphV3T form: `{ mean, std }` object. */
+  /** Legacy / `editCompactGraph`-like form: a top-level numeric mean.
+   *  Sign carried separately via `effect_direction` when present. */
   readonly strength_mean?: unknown;
-  /** Legacy form: a top-level `strength_mean` numeric field. */
+  /** Optional sign override for the canonical and legacy shapes (their
+   *  numeric magnitudes are non-negative). Ignored when the compact
+   *  numeric `strength` is already signed. */
   readonly effect_direction?: unknown;
   readonly provenance?: unknown;
   /** Idempotency: a second pass through the formatter sees no `strength`
-   *  but should preserve the existing relationship phrase. */
+   *  but should preserve an existing allowlisted relationship phrase. */
   readonly relationship?: unknown;
 }
 
@@ -145,6 +151,23 @@ function extractNodeValue(raw: RawNodeShape): number | string | undefined {
 }
 
 /**
+ * Extract the user-supplied node `unit` symmetrically with value: compact
+ * top-level `unit` first, canonical `observed_state.unit` second. Without
+ * this fallback the raw-graph passthrough path silently drops the unit
+ * label, which can change a value's meaning ("100" vs "100k").
+ */
+function extractNodeUnit(raw: RawNodeShape): string | undefined {
+  const top = asString(raw.unit);
+  if (top !== undefined) return top;
+  const observed = raw.observed_state;
+  if (typeof observed === 'object' && observed !== null && 'unit' in observed) {
+    const inner = (observed as { unit?: unknown }).unit;
+    if (typeof inner === 'string') return inner;
+  }
+  return undefined;
+}
+
+/**
  * Convert a signed edge strength into the user-visible relationship phrase.
  *
  *   0.95  → "very strong positive link"
@@ -178,7 +201,7 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   } = { id, label, kind };
   const category = asString(raw.category);
   if (category !== undefined) node.category = category;
-  const unit = asString(raw.unit);
+  const unit = extractNodeUnit(raw);
   if (unit !== undefined) node.unit = unit;
   const interventionSummary = asString(raw.intervention_summary);
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
@@ -282,7 +305,10 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     extractor reads compact top-level `value` first and canonical
  *     `observed_state.value` second, so the assembler raw-graph
  *     fallback (which passes canonical nodes through unchanged)
- *     preserves user values too.
+ *     preserves user values too. The same compact-then-canonical
+ *     fallback applies to `unit` — without it the raw-graph path
+ *     drops user units, which can change a value's meaning
+ *     (`100` vs `100k`).
  *
  *   - Edge strength resolution accepts every shape that can reach
  *     `ContextPack.graph`: compact (`strength: number`), canonical
