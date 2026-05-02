@@ -82,6 +82,7 @@ import {
   type HandlerRegistry,
 } from './tools/registry.js';
 import { sanitiseNarrateOutput } from './sanitise.js';
+import { sanitiseAssistantTextProse } from './format/numeric-prose-formatter.js';
 import { generateChips } from './compose/chip-generator.js';
 import { generatePostAnalysisCoaching } from './coaching/post-analysis-wrapper.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
@@ -1593,6 +1594,54 @@ export async function runTurnExecutor(
       },
       'V5 TurnExecutor composed response chips',
     );
+
+    // STEP 6.4 — defence-in-depth prose sanitation (Track 2A).
+    //
+    // Strips raw decimals in probability prose, translates raw
+    // sensitivity values into banded language, and removes structural
+    // edge-strength references that survived the LLM despite
+    // prompt-level guidance. Pure, idempotent; fails open.
+    //
+    // Mutation policy: this block mutates ONLY composedOk.assistant_text.
+    // It does NOT touch chips (suggested_actions), blocks, graph_patches,
+    // or any other structured field on the response. Chips don't carry
+    // numeric/structural prose patterns (they are short, label-shaped),
+    // so user-visible chip↔text consistency is not at risk here.
+    // STEP 6.5 below remains the authoritative log-only guard for
+    // chip/text mutation-language consistency. If V5ResponseProseSanitised
+    // ever fires on a chip-bearing turn whose chip text contains the
+    // same probability/structural patterns, that is a regression and
+    // should be escalated.
+    try {
+      const sanitised = sanitiseAssistantTextProse(composedOk.assistant_text ?? '');
+      if (sanitised.text !== (composedOk.assistant_text ?? '')) {
+        composedOk = { ...composedOk, assistant_text: sanitised.text };
+      }
+      const totalCounters =
+        sanitised.probability_rewrites +
+        sanitised.sensitivity_rewrites +
+        sanitised.structural_matches +
+        sanitised.structural_suppressed +
+        sanitised.structural_missed_grammar;
+      if (totalCounters > 0) {
+        emit(TelemetryEvents.V5ResponseProseSanitised, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: handlerIdForCommit ?? null,
+          probability_rewrites: sanitised.probability_rewrites,
+          sensitivity_rewrites: sanitised.sensitivity_rewrites,
+          structural_matches: sanitised.structural_matches,
+          structural_suppressed: sanitised.structural_suppressed,
+          structural_missed_grammar: sanitised.structural_missed_grammar,
+          structural_rule_ids: sanitised.structural_rule_ids,
+        });
+      }
+    } catch (err) {
+      log.warn(
+        { request_id: requestId, err: err instanceof Error ? err.message : String(err) },
+        'V5 prose sanitiser failure — passing through original text',
+      );
+    }
 
     // STEP 6.5 — log-only mutation-language guard (defence-in-depth).
     //
