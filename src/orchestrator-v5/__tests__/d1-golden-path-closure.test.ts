@@ -214,6 +214,52 @@ describe('A3.1 golden-path closure — pre-route dispatches set_factor_value via
     expect(response.assistant_text).not.toContain('0.5');
   });
 
+  it('"Increase budget to £50,000" → operator=set (NOT increase by 50k), raw_value=50000 not 90000 (P0 directional-to fix)', async () => {
+    // Regression pin: CQE returns
+    //   { value: 50000, unit: 'GBP', direction: 'up', operator: 'set' }
+    // for "Increase budget to £50,000". The verb-flavoured `direction:
+    // 'up'` would otherwise pick `operator: 'increase'` and apply
+    // 40000 + 50000 = 90000 — the user asked to SET to £50,000, not
+    // ADD £50k. CQE's `operator: 'set'` is the truth; deriveOperator
+    // must prefer it over direction.
+    const routingAdapter = throwingRoutingAdapter();
+    const ingressGraph = buildBudgetGraph();
+
+    const { telemetry } = await runTurnExecutor(
+      payload('Increase budget to £50,000'),
+      'req-a31-increase-to',
+      { routingAdapter, graphState: ingressGraph },
+    );
+
+    expect(telemetry.turn_class).toBe('handler');
+    const committedGraph = appendCalls[0].graph as GraphV3T;
+    const budget = committedGraph.nodes.find((n) => n.id === 'f-budget');
+    expect(budget?.observed_state?.raw_value).toBe(50000); // SET, not 90000
+    expect(budget?.observed_state?.value).toBe(0.5);
+  });
+
+  it('"Reduce churn to 5%" → operator=set (NOT decrease by 5pp), raw_value=5 not -1 (P0 directional-to fix)', async () => {
+    // Mirror of the above for "down". CQE returns
+    //   { value: 0.05, unit: 'percentage', direction: 'down', operator: 'set' }
+    // Pre-fix the handler applied 4% - 5pp = -1% (and the percentage
+    // double-normalisation worsened it further). Post-fix `operator:
+    // 'set'` wins, percentage user-units recovered, raw_value: 5.
+    const routingAdapter = throwingRoutingAdapter();
+    const ingressGraph = buildChurnGraph();
+
+    const { telemetry } = await runTurnExecutor(
+      payload('Reduce churn to 5%'),
+      'req-a31-reduce-to',
+      { routingAdapter, graphState: ingressGraph },
+    );
+
+    expect(telemetry.turn_class).toBe('handler');
+    const committedGraph = appendCalls[0].graph as GraphV3T;
+    const churn = committedGraph.nodes.find((n) => n.id === 'f-churn');
+    expect(churn?.observed_state?.raw_value).toBe(5); // SET, not -1
+    expect(churn?.observed_state?.value).toBe(0.05);
+  });
+
   it('"Reduce churn by 1 percentage point" → operator=decrease, raw_value=3 / value=0.03', async () => {
     // CQE returns { value: 1, unit: 'percentage_points', direction: null }
     // for "1 percentage point". The pre-route maps unit → '%', value

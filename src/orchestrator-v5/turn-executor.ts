@@ -149,6 +149,7 @@ import {
   type AnalysisStateIngress,
 } from './boundary/request-extensions.js';
 import type { V2RunResponseEnvelope } from '../orchestrator/types.js';
+import type { UsageMetrics } from '../adapters/llm/types.js';
 import {
   compactAnalysis,
   type AnalysisResponseSummary,
@@ -812,7 +813,23 @@ export async function runTurnExecutor(
         ) as { kind?: unknown } | undefined;
         const isFactor =
           typeof nodeKind?.kind === 'string' && nodeKind.kind === 'factor';
-        if (isFactor) {
+        // V5 D1 golden-path closure (A3.1) — registry guard:
+        // Only synthesise the deterministic dispatch when the active
+        // validation AND handler registries can actually execute
+        // `set_factor_value`. Without this guard, a misconfigured
+        // executor (test override that omits the handler, or a future
+        // build that gates handler registration on a flag) would
+        // produce a synthesised handler turn that fails at execute
+        // time with HANDLER_NOT_FOUND. Falling through to clarify is
+        // the safe degradation — the chip click on the next turn
+        // re-enters Sonnet's normal routing.
+        const activeValidationRegistry =
+          options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+        const activeHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
+        const handlerExecutable =
+          activeValidationRegistry.set_factor_value !== undefined &&
+          resolveHandler(activeHandlerRegistry, 'set_factor_value') !== null;
+        if (isFactor && handlerExecutable) {
           const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
             deterministicValueUpdate.quantity,
           );
@@ -839,8 +856,14 @@ export async function runTurnExecutor(
           };
           // Synthesise a RoutingToolCallResult so the existing Step 2-7
           // lifecycle treats this exactly like a Sonnet-emitted tool
-          // call. `rawResult` is the only field downstream code does
-          // not consume on this path; an empty stub is safe here.
+          // call. The `usage` shape is the canonical `UsageMetrics`
+          // interface — zero values are accurate (no LLM tokens
+          // consumed on the deterministic path), and a properly typed
+          // stub avoids an `as unknown as` cast at the boundary.
+          const deterministicUsage: UsageMetrics = {
+            input_tokens: 0,
+            output_tokens: 0,
+          };
           const synthesisedRouting: RoutingToolCallResult = {
             type: 'tool_call',
             proposal: { intent_class: 'execute', action: proposal },
@@ -848,7 +871,7 @@ export async function runTurnExecutor(
             rawResult: {
               content: [],
               stop_reason: 'tool_use',
-              usage: { input_tokens: 0, output_tokens: 0 } as unknown as RoutingToolCallResult['rawResult']['usage'],
+              usage: deterministicUsage,
               model: 'deterministic-value-update',
               latencyMs: 0,
             },
@@ -861,10 +884,13 @@ export async function runTurnExecutor(
           // Skip the routeWithToolUse call below; control falls through
           // to STEP 2 (validate) → STEP 3 (execute) → STEP 7 (commit).
         } else {
-          // Single-substring match on a non-factor (outcome, risk,
-          // decision, action). Fall back to clarify so the user
-          // disambiguates. Re-package as the clarify shape the existing
-          // branch expects.
+          // Either the candidate is non-factor (outcome, risk,
+          // decision, action — the kind gate per brief correction #3),
+          // OR the active registries cannot execute set_factor_value
+          // (registry guard — protects against misconfigured executors
+          // and future flag-gated handler registration). In both cases
+          // fall back to clarify so the user disambiguates / the chip
+          // click on the next turn re-enters Sonnet's normal routing.
           deterministicValueUpdate = {
             matched: true,
             dispatch: 'clarify',

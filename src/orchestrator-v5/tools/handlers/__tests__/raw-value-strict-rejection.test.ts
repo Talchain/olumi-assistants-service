@@ -56,3 +56,79 @@ describe('A3.1 Task 4 — SetFactorValueValueSchema rejects raw_value', () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe('A3.1 — standalone `raw_value` parameter is silently ignored (documented contract)', () => {
+  // The validator's parameter_schemas only validates parameters whose
+  // `name` is declared in the registry. An UNDECLARED parameter (e.g.
+  // a separate `parameters: [..., { name: 'raw_value', value: 0.05 }]`
+  // entry) bypasses Zod entirely and is silently ignored by
+  // parseProposalValue, which only reads the parameter named 'value'.
+  //
+  // This is the correct behaviour — declaring required-parameters
+  // enforcement at the validator level is a broader cross-handler
+  // change (see deferred items in the post-A3 review). Pinning the
+  // current contract here so a future change either preserves the
+  // silent-ignore or comes with the broader validator update.
+  it('a separate parameter named "raw_value" does not influence set_factor_value', async () => {
+    const { createSetFactorValueHandler } = await import('../set-factor-value.js');
+    const { buildD1Fixture } = await import('../d1-shared/__tests__/fixtures.js');
+    const { GraphV3 } = await import('../../../../schemas/cee-v3.js');
+    const handler = createSetFactorValueHandler();
+    const ingress = buildD1Fixture();
+    const outcome = await handler({
+      context: {
+        session_id: 'scn-rv',
+        stage: 'frame',
+        request_id: 'req-rv',
+        prior_turns: [],
+        prior_facts: [],
+        scenarioBriefText: null,
+        persistedGraph: null,
+      } as never,
+      payload: {
+        kind: 'message',
+        scenario_id: 'scn-rv',
+        turn_id: 'turn-rv',
+        stage: 'frame',
+        message: 'mutate',
+      } as never,
+      requestId: 'req-rv',
+      signal: new AbortController().signal,
+      orientationText: '',
+      proposal: {
+        handler_id: 'set_factor_value',
+        entity: {
+          id: 'f-churn',
+          kind: 'node',
+          resolution_status: 'resolved',
+          resolution_method: 'id_match',
+        },
+        parameters: [
+          {
+            name: 'value',
+            value: { value: 5, unit: '%', cap: 100 },
+            operator: 'set',
+            source: 'user_explicit',
+          },
+          // Standalone raw_value parameter — neither declared by the
+          // validator nor read by the handler. Must NOT influence the
+          // mutation outcome.
+          {
+            name: 'raw_value',
+            value: 99.99,
+            source: 'user_explicit',
+          },
+        ],
+        cited_context_fields: [],
+      },
+      graphForTurn: ingress,
+    } as never);
+    const mutated = outcome.mutated_graph as ReturnType<typeof buildD1Fixture>;
+    const churn = mutated.nodes.find((n) => n.id === 'f-churn');
+    // The mutation reflects the `value` parameter (5%, normalised to
+    // 0.05), NOT the rogue raw_value parameter (99.99).
+    expect(churn?.observed_state?.raw_value).toBe(5);
+    expect(churn?.observed_state?.value).toBe(0.05);
+    expect(GraphV3.safeParse(mutated).success).toBe(true);
+  });
+});

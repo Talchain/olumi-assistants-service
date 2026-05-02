@@ -164,6 +164,36 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     expect(preRouteEvent?.data.candidate_count).toBe(2);
   });
 
+  it('"Set Hiring and Staffing Cost to £300k" with handler registry missing set_factor_value → falls back to clarify (registry guard)', async () => {
+    // V5 D1 golden-path closure (A3.1) — registry guard. If the
+    // active handler registry doesn't contain set_factor_value (e.g.
+    // a misconfigured executor or a future flag-gated build), the
+    // pre-route MUST NOT synthesise a handler turn that would fail
+    // at execute-time with HANDLER_NOT_FOUND. Falls through to the
+    // clarify path so the chip click on the next turn re-enters
+    // Sonnet's normal routing.
+    const routingAdapter = throwingRoutingAdapter();
+    const emptyHandlerRegistry = new Map() as unknown as Parameters<
+      typeof runTurnExecutor
+    >[2]['handlerRegistry'];
+    const { response, telemetry } = await runTurnExecutor(
+      payload('Set Hiring and Staffing Cost to £300k'),
+      'req-pre-route-no-handler',
+      {
+        routingAdapter,
+        graphState: graphWithFactor('Hiring and Staffing Cost'),
+        handlerRegistry: emptyHandlerRegistry,
+      },
+    );
+
+    // No LLM call (the throwing adapter would have surfaced one).
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    // The synthesised handler turn was NOT taken — clarify path
+    // committed a direct_answer instead.
+    expect(telemetry?.turn_class).toBe('direct_answer');
+    expect(response.assistant_text).toContain("wasn't sure");
+  });
+
   it('"Set Customer Risk to 5" — single substring match on a non-factor (risk) → falls back to clarify (factor-only dispatch gate)', async () => {
     // Brief correction #3: a single substring match that resolves to a
     // non-factor node MUST NOT dispatch set_factor_value. Risks live

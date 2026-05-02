@@ -1,24 +1,31 @@
 /**
- * Display-safe graph projection for the LLM-facing context pack
- * (brief brief-display-safe-graph A2.1).
+ * Display-safe graph projection for the LLM-facing context pack.
+ *
+ * Originally introduced as brief-display-safe-graph A2.1 (strip raw
+ * edge floats / exists / model-internal node fields; preserve user-
+ * supplied `value`). Tightened by V5 D1 golden-path closure (A3.1
+ * Task 6) to also strip node-level `value`, `raw_value`, and `cap`:
+ * exposing any node numeric encouraged Sonnet to echo it as
+ * structural fact ("the model sets X to 5") and reuse it as a
+ * coefficient in narration. Sonnet now sees the label, kind,
+ * category, and unit (label only) — no node numerics, no edge
+ * `strength` floats, no `exists` probabilities.
  *
  * Design principle: raw model values stay in structured state for
- * handlers, telemetry, freshness hashing, and edit_graph dispatch; the
- * LLM-facing context pack uses decision-language projections only.
- * Sonnet never sees raw edge `strength` floats, raw `exists`
- * probabilities, or model-internal node fields. Without raw floats in
- * the prompt, Sonnet stops echoing internal numerics ("strength of
- * 0.55", "direct link of 0.65") in narration.
+ * handlers, telemetry, freshness hashing, and edit_graph dispatch;
+ * the LLM-facing context pack uses decision-language projections
+ * only.
  *
  * Operates strictly downstream of `compactGraphForContextPack()` and
- * `projectCompactGraph()`. The raw `ContextPack.graph` is preserved for
- * handler-side reads (edit_graph dispatch reads from raw boundary
- * graph state via a wholly separate path; freshness hashing and
- * telemetry continue to read raw `ContextPack.graph`).
+ * `projectCompactGraph()`. The raw `ContextPack.graph` is preserved
+ * for handler-side reads (edit_graph dispatch reads from raw
+ * boundary graph state via a wholly separate path; freshness hashing
+ * and telemetry continue to read raw `ContextPack.graph`).
  *
- * Pure function. No side effects. Idempotent on its own output (re-running
- * produces an equivalent shape — `relationship` strings carry no decimals
- * to re-classify).
+ * Pure function. No side effects. Idempotent on its own output
+ * (re-running produces an equivalent shape — `relationship` strings
+ * carry no decimals to re-classify; nodes have nothing numeric to
+ * re-strip).
  */
 
 import type { CompactProvenance } from '../../orchestrator/context/graph-compact.js';

@@ -67,6 +67,42 @@ function withRiskNode(): GraphV3T {
 }
 
 describe('A3.1 Task 5 — add_constraint accepts risk-node targets', () => {
+  it('rejection metadata: accepted_kinds includes "risk" (post-A3.1) so user-facing recovery matches actual behaviour', async () => {
+    // Drive a rejection (target is an option — not in the allowlist)
+    // and assert the error.details.accepted_kinds list reflects the
+    // post-A3.1 allowlist. Pre-fix the metadata reported
+    // {factor, outcome, goal} even after `risk` joined the gate —
+    // chip generator and telemetry would have misled users about
+    // which kinds are accepted.
+    const ingress = withRiskNode();
+    const proposal: ProposalAction = {
+      handler_id: 'add_constraint',
+      entity: {
+        id: 'o-launch', // option — not in allowlist
+        kind: 'node',
+        resolution_status: 'resolved',
+        resolution_method: 'id_match',
+      },
+      parameters: [
+        { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+        { name: 'value', value: 5, source: 'user_explicit' },
+      ],
+      cited_context_fields: [],
+    };
+    const handler = createAddConstraintHandler();
+    let caught: unknown;
+    try {
+      await handler(buildInvocation(ingress, proposal));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    const details = (caught as { details?: Record<string, unknown> }).details;
+    expect(details?.accepted_kinds).toEqual(
+      expect.arrayContaining(['factor', 'outcome', 'goal', 'risk']),
+    );
+  });
+
   it('"Keep Customer Churn Risk at most 5%" → constraint persists, no ENTITY_KIND_MISMATCH', async () => {
     const ingress = withRiskNode();
     const proposal: ProposalAction = {

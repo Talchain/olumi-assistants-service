@@ -41,11 +41,15 @@ import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
  * validation registry can reference the same schema (single source of
  * truth — the validator and the handler check the same shape).
  *
- * Sonnet's tool schema accepts either a primitive or a structured object
- * for `parameters.value`; we accept both here. When the value arrives as
- * a primitive number we treat it as a bare-number proposal (no unit) and
- * the handler defers to the factor's stored unit/cap; when structured,
- * the proposal carries explicit unit/cap.
+ * Sonnet's tool schema accepts either a primitive or a structured
+ * object `{ value, unit?, cap? }` for `parameters.value`; we accept
+ * both here. When the value arrives as a primitive number we treat
+ * it as a bare-number proposal (no unit) and the handler defers to
+ * the factor's stored unit/cap; when structured, the proposal carries
+ * explicit unit/cap. The structured object is `.strict()`, so unknown
+ * keys (notably `raw_value`, removed in A3.1 Task 4 because it was
+ * dead documentation that risked silent double-normalisation) fail
+ * validation loudly.
  */
 export const SetFactorValueValueSchema = z.union([
   z.number(),

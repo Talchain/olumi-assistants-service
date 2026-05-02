@@ -324,29 +324,35 @@ export function mapCqeQuantityToProposalValue(
 
 /**
  * Derive the V5 routing `parameter_operator` from the CQE quantity's
- * direction/operator hints, falling back to the matched edit verb in
+ * operator/direction hints, falling back to the matched edit verb in
  * the message. The wire enum is `'set' | 'increase' | 'decrease' |
  * 'multiply'`.
  *
  * Precedence:
- *   1. CQE direction (`up` → increase, `down` → decrease, `set` → set)
- *   2. CQE operator (`increment` → increase, `decrement` → decrease,
- *      `multiply` → multiply, `set` → set, `add` → increase)
+ *   1. CQE `operator` — the canonical truth. CQE distinguishes
+ *      "Increase budget TO £50,000" (operator: 'set', direction: 'up')
+ *      from "Increase budget BY £10k" (operator: 'increment',
+ *      direction: 'up'). The verb-flavoured `direction` is auxiliary
+ *      and would otherwise turn every `to`-value phrase into a delta.
+ *      `'set' → set`, `'increment' / 'add' → increase`,
+ *      `'decrement' → decrease`, `'multiply' → multiply`.
+ *   2. CQE `direction` (used only when operator is null):
+ *      `'up' → increase`, `'down' → decrease`, `'set' → set`.
  *   3. Verb-from-message (set/change/update/make → set;
  *      increase/raise → increase; reduce/decrease/lower → decrease;
- *      adjust → set)
+ *      adjust → set).
  */
 export function deriveOperator(
   message: string,
   quantity: QuantityExtractionResult,
 ): 'set' | 'increase' | 'decrease' | 'multiply' {
-  if (quantity.direction === 'up') return 'increase';
-  if (quantity.direction === 'down') return 'decrease';
-  if (quantity.direction === 'set') return 'set';
+  if (quantity.operator === 'set') return 'set';
   if (quantity.operator === 'increment' || quantity.operator === 'add') return 'increase';
   if (quantity.operator === 'decrement') return 'decrease';
   if (quantity.operator === 'multiply') return 'multiply';
-  if (quantity.operator === 'set') return 'set';
+  if (quantity.direction === 'up') return 'increase';
+  if (quantity.direction === 'down') return 'decrease';
+  if (quantity.direction === 'set') return 'set';
 
   const verbMatch = message.match(EDIT_VERB_PATTERN);
   const verb = verbMatch ? verbMatch[0].toLowerCase() : 'set';
