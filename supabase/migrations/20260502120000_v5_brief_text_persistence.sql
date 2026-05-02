@@ -77,8 +77,15 @@ ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS brief_text TEXT;
 --         storage via direct RPC or SQL that bypasses normaliseBriefText —
 --         e.g. a 9000-char string padded with trailing whitespace would
 --         pass a btrim-only check while still bloating the row).
---      b. Trimmed content non-empty (rejects whitespace-only stores
---         that the app-side normaliser already collapses to undefined).
+--      b. Contains at least one non-whitespace character (rejects
+--         whitespace-only stores that the app-side normaliser already
+--         collapses to undefined). Uses a POSIX [^[:space:]] predicate
+--         rather than btrim: btrim() with a single argument trims ASCII
+--         spaces only, so it would WRONGLY accept tab-only or
+--         newline-only values like E'\t\t\t' or E'\n\n'. The POSIX
+--         class [:space:] matches space, tab, newline, carriage return,
+--         vertical tab, and form feed — i.e. all whitespace the app-side
+--         JS String.trim() also strips.
 --    Drop-then-add for migration idempotency.
 ALTER TABLE scenarios DROP CONSTRAINT IF EXISTS scenarios_brief_text_length;
 ALTER TABLE scenarios
@@ -86,7 +93,7 @@ ALTER TABLE scenarios
   CHECK (
     brief_text IS NULL
     OR (char_length(brief_text) BETWEEN 1 AND 8000
-        AND char_length(btrim(brief_text)) >= 1)
+        AND brief_text ~ '[^[:space:]]')
   );
 
 -- 3. Documentation. Operators reading \d scenarios should immediately

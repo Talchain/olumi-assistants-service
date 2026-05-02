@@ -38,6 +38,7 @@ vi.mock('../session/index.js', () => ({
     }),
     storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),
   }),
   resetSessionStoreForTests: () => {},

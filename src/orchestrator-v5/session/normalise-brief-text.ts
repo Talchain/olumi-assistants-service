@@ -2,15 +2,27 @@
  * Normalise the user-supplied free-text brief BEFORE it reaches the
  * append_turn_atomic RPC.
  *
- * Defence-in-depth alongside the DB CHECK constraint
- * `char_length(btrim(brief_text)) BETWEEN 1 AND 8000` (see
- * supabase/migrations/20260502120000_v5_brief_text_persistence.sql).
+ * Defence-in-depth alongside the DB CHECK constraint:
+ *
+ *   CHECK (
+ *     brief_text IS NULL
+ *     OR (char_length(brief_text) BETWEEN 1 AND 8000
+ *         AND brief_text ~ '[^[:space:]]')
+ *   )
+ *
+ * (see supabase/migrations/20260502120000_v5_brief_text_persistence.sql).
  * The DB layer is the last line; this app-side helper avoids the round
- * trip and returns a sanitised value the RPC will accept.
+ * trip and returns a sanitised value the RPC will accept. Note that
+ * JS String.trim() strips ALL Unicode whitespace including tabs and
+ * newlines, matching the POSIX [:space:] character class used by the
+ * DB constraint — so a value that survives normalisation will also
+ * satisfy the constraint.
  *
  * Rules:
  *   - null / undefined        → undefined (RPC param defaults to NULL).
- *   - whitespace-only string  → undefined (the trimmed-empty case).
+ *   - whitespace-only string  → undefined (the trimmed-empty case;
+ *                               covers tabs, newlines, and any other
+ *                               whitespace JS String.trim() strips).
  *   - length ≤ 8000           → trimmed string.
  *   - length > 8000           → truncate at 8000 chars on a word
  *                               boundary if the last space falls in

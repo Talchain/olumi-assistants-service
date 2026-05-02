@@ -324,4 +324,60 @@ suite('V5 Phase 1 brief persistence — migration smoke (live Supabase)', () => 
     // brief_text must remain null after the rejected write.
     expect(await readBriefText(client, scenarioId)).toBeNull();
   });
+
+  it('rejects tab-only brief_text via the POSIX [^[:space:]] predicate', async () => {
+    // Pins the round-5 fix: btrim() with one argument trims only ASCII
+    // spaces, so a tab-only string would pre-fix have satisfied
+    // `char_length(btrim(brief_text)) >= 1`. The POSIX class predicate
+    // closes that gap.
+    const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scenarioId = await createScenario(client);
+    const { error } = await callAppend(client, {
+      scenarioId,
+      turnId: `tab-only-${randomUUID()}`,
+      briefText: '\t\t\t',
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.code === '23514' || /check.*constraint|scenarios_brief_text_length/i.test(error?.message ?? '')).toBe(true);
+    expect(await readBriefText(client, scenarioId)).toBeNull();
+  });
+
+  it('rejects newline-only brief_text via the POSIX [^[:space:]] predicate', async () => {
+    const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scenarioId = await createScenario(client);
+    const { error } = await callAppend(client, {
+      scenarioId,
+      turnId: `newline-only-${randomUUID()}`,
+      briefText: '\n\n\n',
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.code === '23514' || /check.*constraint|scenarios_brief_text_length/i.test(error?.message ?? '')).toBe(true);
+    expect(await readBriefText(client, scenarioId)).toBeNull();
+  });
+
+  it('rejects mixed-whitespace brief_text (spaces + tabs + newlines)', async () => {
+    // Catches naive btrim variants that strip only some classes.
+    const client = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scenarioId = await createScenario(client);
+    const { error } = await callAppend(client, {
+      scenarioId,
+      turnId: `mixed-ws-${randomUUID()}`,
+      briefText: ' \t\n \r\v\f ',
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.code === '23514' || /check.*constraint|scenarios_brief_text_length/i.test(error?.message ?? '')).toBe(true);
+    expect(await readBriefText(client, scenarioId)).toBeNull();
+  });
 });
