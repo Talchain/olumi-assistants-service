@@ -1410,9 +1410,17 @@ export async function runTurnExecutor(
       // `graphStateForTurn`, the ingress) is stale relative to what
       // we're about to commit. Compute the post-mutation hash so the
       // freshness verdict on this same response correctly reads
-      // `'stale'` against any prior run_analysis fact, and the rerun
-      // chip surfaces. Falls back to the pre-handler hash for
-      // computation/explanation handlers that don't mutate.
+      // `'stale'` against any prior run_analysis fact. Falls back to
+      // the pre-handler hash for computation/explanation handlers
+      // that don't mutate.
+      //
+      // Same-turn contract is the freshness verdict only — the rerun
+      // chip itself is gated to next-turn explanation handlers in
+      // chip-generator (`noopExplanationHandlerJustRan != null` +
+      // `analysis_freshness === 'stale'`). The wire signal that the
+      // analysis went stale is the freshness verdict on this
+      // response; the chip surfaces when the user asks an
+      // explanation question on the now-stale state.
       //
       // Hash representation: handlers run their candidate post-mutation
       // graph through GraphV3.parse before emitting `mutated_graph`,

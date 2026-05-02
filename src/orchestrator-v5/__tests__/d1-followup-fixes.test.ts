@@ -585,6 +585,105 @@ describe('P1-3 — post-handler freshness reflects mutated graph', () => {
     expect(postHandlerFreshness!.data.current_graph_hash).toBe(priorGraphHash);
   });
 
+  it('no-op mutation preserves freshness when ingress carries top-level options + goal_node_id (GraphV3-stripping regression pin)', async () => {
+    // Pre-fix the post-handler hash was computed from the GraphV3
+    // projection of mutated_graph, which strips top-level `options`
+    // and `goal_node_id`. With those fields in the ingress, the
+    // pre-fix code would have produced a different hash from the
+    // prior fact's `graph_hash_at_run` (computed from the raw
+    // ingress including those fields), incorrectly flagging the
+    // no-op as stale. This test pins the regression by using an
+    // ingress that includes the stripped fields and asserting
+    // freshness stays 'fresh'.
+    const ingressWithTopLevel = {
+      ...buildD1Fixture(),
+      options: [
+        {
+          id: 'o-launch',
+          status: 'ready',
+          interventions: { 'f-churn': { value: 1 } },
+        },
+      ],
+      goal_node_id: 'g-revenue',
+    };
+    const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+    const priorGraphHash = computeAnalysisAffectingGraphHash(
+      ingressWithTopLevel as unknown as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    );
+    expect(priorGraphHash).not.toBeNull();
+
+    mockState.priorTurns = [
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        scenario_id: TEST_SCENARIO_ID,
+        user_id: null,
+        turn_id: 'prior-turn-2',
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: 'sha256:prior2',
+        response_emitted: true,
+        llm_calls_used: 1,
+        duration_ms: 12,
+        created_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+    ];
+    mockState.priorFacts = [
+      {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: TEST_SCENARIO_ID,
+          leading_option_id: 'o-launch',
+          summary: 'Ran analysis on your current scenario.',
+          enrichment: {},
+          graph_hash_at_run: priorGraphHash!,
+          computed_at: new Date(Date.now() - 60_000).toISOString(),
+        },
+      },
+    ];
+
+    // Same-value mutation (no actual change to f-churn).
+    const noopToolCall = {
+      intent_class: 'execute',
+      action: {
+        handler_id: 'set_factor_value',
+        entity: {
+          id: 'f-churn',
+          kind: 'node',
+          resolution_status: 'resolved',
+          resolution_method: 'id_match',
+        },
+        parameters: [
+          {
+            name: 'value',
+            value: { value: 4, unit: '%', cap: 100 },
+            operator: 'set',
+            source: 'user_explicit',
+            unit: '%',
+          },
+        ],
+        cited_context_fields: ['graph.nodes'],
+      },
+    };
+
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    setTestSink((eventName, data) => events.push({ event: eventName, data }));
+
+    const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(noopToolCall));
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p13-noop-toplevel', {
+      routingAdapter,
+      graphState: ingressWithTopLevel as never,
+    });
+
+    const postHandlerFreshness = events
+      .filter((e) => e.event === 'v5.analysis_freshness.derived')
+      .find((e) => e.data.dispatch_path === 'turn_executor_post_handler');
+    expect(postHandlerFreshness).toBeDefined();
+    expect(postHandlerFreshness!.data.freshness).toBe('fresh');
+    expect(postHandlerFreshness!.data.current_graph_hash).toBe(priorGraphHash);
+  });
+
   it('post-handler hash equals the pre-mutation hash for a no-op handler invocation', async () => {
     // Computation/explanation handlers don't emit mutated_graph; the
     // post-handler hash should equal the pre-handler hash (the ingress).
