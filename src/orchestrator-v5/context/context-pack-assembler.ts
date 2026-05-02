@@ -39,6 +39,10 @@ import {
   formatAnalysisForContext,
   type DisplaySafeAnalysis,
 } from '../format/format-analysis-for-context.js';
+import {
+  formatGraphForContext,
+  type DisplaySafeGraph,
+} from '../format/format-graph-for-context.js';
 import { detectCompound } from '../routing/compound-detector.js';
 import {
   runExtraction,
@@ -148,6 +152,18 @@ export interface ContextPack {
    * decision-language projections only.
    */
   readonly display_analysis: DisplaySafeAnalysis | null;
+  /**
+   * LLM-facing graph projection. Edges carry decision-language `relationship`
+   * phrases ("moderate positive link") instead of raw `strength` floats; raw
+   * `exists` probabilities and `plain_interpretation` strings are stripped;
+   * nodes carry only display-safe fields (id/label/kind plus optional
+   * category/unit/intervention_summary). Substituted in for `graph` by
+   * `buildUserMessage` (route-with-tool-use.ts) when serialising the
+   * ContextPack into the routing prompt. Raw `graph` remains for handlers,
+   * freshness hashing, telemetry; edit_graph dispatch reads from a wholly
+   * separate path (`editCompactGraph()` over raw boundary state).
+   */
+  readonly display_graph: DisplaySafeGraph;
   readonly conversation: ContextPackConversation;
   /**
    * Coaching state assembled from prior turns. draft_coaching is populated
@@ -266,17 +282,24 @@ export function assembleContextPackWithSummary(
     input.analysis ?? null,
     input.analysisStalenessReason ?? null,
   );
+  const projectedGraph: ContextPackGraph = input.compactedGraph
+    ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
+    : projectGraph(input.graph ?? null);
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     stage: input.payload.stage,
-    graph: input.compactedGraph
-      ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
-      : projectGraph(input.graph ?? null),
+    graph: projectedGraph,
     analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.
     // Sources structured fragile-edge labels off the raw projection
     // (no longer needs the upstream summary as a second argument).
     display_analysis: formatAnalysisForContext(rawAnalysis),
+    // Display-safe graph projection — what Sonnet actually sees in
+    // place of the raw graph. Edge `strength` floats become decision-
+    // language `relationship` phrases; `exists` and `plain_interpretation`
+    // are dropped; node numeric fields stripped. Raw `graph` above is
+    // unchanged for handlers, freshness hashing, telemetry.
+    display_graph: formatGraphForContext(projectedGraph),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
