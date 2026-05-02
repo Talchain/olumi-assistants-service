@@ -23,7 +23,7 @@ import { z } from 'zod';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
