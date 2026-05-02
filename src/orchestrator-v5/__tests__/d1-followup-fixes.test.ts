@@ -45,7 +45,7 @@ describe('P1-5 — normaliseFactorValue rejects over-cap when unit supplied', ()
     ).toThrow(D1HandlerError);
   });
 
-  it('error message names both the value and the cap', () => {
+  it('error message names both the value and the cap (percentage formatting)', () => {
     let caught: D1HandlerError | null = null;
     try {
       normaliseFactorValue({
@@ -59,9 +59,33 @@ describe('P1-5 — normaliseFactorValue rejects over-cap when unit supplied', ()
     }
     expect(caught).not.toBeNull();
     expect(caught?.code).toBe('PARAMETER_INVALID');
-    expect(caught?.message).toContain('150');
-    expect(caught?.message).toContain('100');
+    // Percentage formatting: "150%" / "100%", no stray spaces.
+    expect(caught?.message).toContain('150%');
+    expect(caught?.message).toContain('100%');
+    expect(caught?.message).not.toMatch(/\d\s+%/);
     expect(caught?.userGuidance).toContain('exceeds');
+  });
+
+  it('formats currency caps with prefix unit and thousands separators', () => {
+    // Reuses formatValueWithUnit so currency reads as "£150,000" /
+    // "£100,000", not "150000£" suffix. Exercises the polish noted in
+    // the post-D1 review.
+    let caught: D1HandlerError | null = null;
+    try {
+      normaliseFactorValue({
+        rawInput: 150000,
+        unit: '£',
+        proposalCap: 100000,
+        inputHasUnit: true,
+      });
+    } catch (err) {
+      caught = err as D1HandlerError;
+    }
+    expect(caught).not.toBeNull();
+    expect(caught?.message).toContain('£150,000');
+    expect(caught?.message).toContain('£100,000');
+    expect(caught?.userGuidance).toContain('£150,000');
+    expect(caught?.userGuidance).toContain('£100,000');
   });
 
   it('rejects negative raw_value when unit supplied', () => {
@@ -198,6 +222,87 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
     );
     expect(snapshot.goal_constraints).toBeUndefined();
   });
+
+  it('snapshot.goal_constraints reaches the PLoT run payload via the run_analysis handler', async () => {
+    // End-to-end coverage: the snapshot field is meaningless unless the
+    // handler actually forwards it. Mock the PLoT client's `run` to
+    // capture the payload, then assert the forwarded `goal_constraints`
+    // matches what the snapshot carried.
+    const { createRunAnalysisHandler } = await import(
+      '../tools/handlers/run-analysis.js'
+    );
+    const goalConstraints = [
+      {
+        constraint_id: 'gc-test-2',
+        node_id: 'f-churn',
+        operator: '<=' as const,
+        value: 5,
+        unit: '%',
+        label: 'Churn cap',
+        provenance: 'explicit' as const,
+      },
+    ];
+
+    let capturedPayload: Record<string, unknown> | null = null;
+    const fakePlotClient = {
+      run: async (payload: Record<string, unknown>) => {
+        capturedPayload = payload;
+        return {
+          analysis_status: 'completed',
+          results: [{ option_id: 'o-launch', win_probability: 0.6 }],
+        } as unknown as Awaited<
+          ReturnType<
+            Awaited<ReturnType<typeof createRunAnalysisHandler>>
+          > extends infer _R ? unknown : never
+        >;
+      },
+      validatePatch: async () => {
+        throw new Error('not used in this test');
+      },
+    } as unknown as Parameters<typeof createRunAnalysisHandler>[0]['plotClient'];
+
+    const handler = createRunAnalysisHandler({
+      plotClient: fakePlotClient,
+      scenarioReader: async () => ({
+        graph: buildD1Fixture() as unknown as never,
+        options: [
+          { id: 'o-launch', option_id: 'o-launch', label: 'Launch now', interventions: { 'f-churn': 1 } },
+        ],
+        goal_node_id: 'g-revenue',
+        goal_constraints: goalConstraints,
+        rawPersistedGraph: buildD1Fixture(),
+      }),
+    });
+
+    const SCN_UUID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const TURN_UUID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    await handler({
+      context: {
+        session_id: SCN_UUID,
+        stage: 'analyse',
+        request_id: 'req-rg',
+        prior_turns: [],
+        prior_facts: [],
+        scenarioBriefText: null,
+        persistedGraph: null,
+      } as never,
+      payload: {
+        kind: 'message',
+        scenario_id: SCN_UUID,
+        turn_id: TURN_UUID,
+        stage: 'analyse',
+        message: 'run the analysis',
+      } as never,
+      requestId: 'req-rg',
+      signal: new AbortController().signal,
+      orientationText: '',
+    });
+
+    expect(capturedPayload).not.toBeNull();
+    expect((capturedPayload as Record<string, unknown>).goal_constraints).toEqual(
+      goalConstraints,
+    );
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -210,14 +315,26 @@ const appendCalls: Array<{
   handler_facts?: unknown;
 }> = [];
 
+// Module-state-driven mock so tests can inject prior turns/facts before
+// each invocation. The turn-executor pulls prior_facts via
+// build-turn-context's session-store reads, so injecting at this seam
+// surfaces them on context.prior_facts at execute time.
+const mockState: {
+  priorTurns: ReadonlyArray<Record<string, unknown>>;
+  priorFacts: ReadonlyArray<Record<string, unknown>>;
+} = {
+  priorTurns: [],
+  priorFacts: [],
+};
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: { graph?: unknown; handler_id?: unknown; handler_facts?: unknown }) => {
       appendCalls.push(write);
       return { id: 'mock-row-id' };
     },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
+    readRecent: async () => mockState.priorTurns,
+    readFactsFor: async () => mockState.priorFacts,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
@@ -290,6 +407,8 @@ function mockRoutingAdapter(
 describe('P1-3 — post-handler freshness reflects mutated graph', () => {
   beforeEach(() => {
     appendCalls.length = 0;
+    mockState.priorTurns = [];
+    mockState.priorFacts = [];
     setTestSink(() => undefined);
   });
 
@@ -298,11 +417,12 @@ describe('P1-3 — post-handler freshness reflects mutated graph', () => {
   });
 
   it('a value mutation marks a prior fresh run_analysis fact stale on the same response', async () => {
-    // Prime the executor with a prior run_analysis fact whose graph_hash_at_run
-    // matches the INGRESS hash. Pre-fix this would have rendered freshness as
-    // 'fresh' on a mutation turn (because the post-handler hash was the
-    // pre-mutation hash). Post-fix the hash is computed from mutated_graph
-    // and freshness reads 'stale'.
+    // Prime the executor with a prior run_analysis fact whose
+    // graph_hash_at_run matches the post-merge hash that turn-executor
+    // would compute for the INGRESS shape. Pre-fix the post-handler
+    // hash was the same ingress hash, so freshness rendered 'fresh' on
+    // a mutation turn. Post-fix the hash is computed from the merged
+    // {ingress + mutation} shape and freshness reads 'stale'.
     const ingressGraph = buildD1Fixture();
     const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
     const priorGraphHash = computeAnalysisAffectingGraphHash(
@@ -310,57 +430,159 @@ describe('P1-3 — post-handler freshness reflects mutated graph', () => {
     );
     expect(priorGraphHash).not.toBeNull();
 
-    const priorRunAnalysisFact = {
-      fact_type: 'run_analysis' as const,
-      fact_version: 1 as const,
-      noop: false,
-      result: {
+    // Inject a real prior turn + fact so build-turn-context surfaces
+    // them on context.prior_facts, which deriveAnalysisFreshness then
+    // reads.
+    const priorTurnRowId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    mockState.priorTurns = [
+      {
+        id: priorTurnRowId,
         scenario_id: TEST_SCENARIO_ID,
-        leading_option_id: 'o-launch',
-        summary: 'Ran analysis on your current scenario.',
-        enrichment: {} as Record<string, unknown>,
-        graph_hash_at_run: priorGraphHash!,
-        computed_at: new Date().toISOString(),
+        user_id: null,
+        turn_id: 'prior-turn-1',
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: 'sha256:prior',
+        response_emitted: true,
+        llm_calls_used: 1,
+        duration_ms: 12,
+        created_at: new Date(Date.now() - 60_000).toISOString(),
       },
-    };
+    ];
+    mockState.priorFacts = [
+      {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: TEST_SCENARIO_ID,
+          leading_option_id: 'o-launch',
+          summary: 'Ran analysis on your current scenario.',
+          enrichment: {},
+          graph_hash_at_run: priorGraphHash!,
+          computed_at: new Date(Date.now() - 60_000).toISOString(),
+        },
+      },
+    ];
 
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(SET_FACTOR_VALUE_TOOL_CALL),
     );
 
-    // Capture freshness telemetry from the post-handler dispatch path.
     const events: Array<{ event: string; data: Record<string, unknown> }> = [];
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
 
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p13', {
       routingAdapter,
       graphState: ingressGraph,
-      // Inject the prior fact so deriveAnalysisFreshness has something to
-      // compare against. The session store mock returns no readRecent, but
-      // turn-executor pulls prior_facts from EnrichedTurnContext built by
-      // build-turn-context — so we approximate by checking the freshness
-      // telemetry directly. A `stale` outcome on the post-handler dispatch
-      // path proves the hash was recomputed from mutated_graph.
-      handlerRegistry: undefined,
     });
 
     expect(telemetry.failure_type).toBeNull();
-    // Locate the post-handler freshness telemetry record.
+    expect(telemetry.turn_class).toBe('handler');
+
+    // Post-handler freshness telemetry: must be 'stale' because the
+    // mutation changed the graph hash relative to the prior fact's
+    // graph_hash_at_run.
+    //
+    // Note: the rerun chip itself is gated to NEXT-turn explanation
+    // handlers (chip-generator only fires the rerun chip when
+    // `noopExplanationHandlerJustRan != null`). On a mutation turn,
+    // the wire signal is the freshness verdict and the chip surfaces
+    // on the user's follow-up explanation turn — not on the mutation
+    // response. Asserting the freshness flip is therefore the correct
+    // contract for this fix.
     const postHandlerFreshness = events
       .filter((e) => e.event === 'v5.analysis_freshness.derived')
       .find((e) => e.data.dispatch_path === 'turn_executor_post_handler');
     expect(postHandlerFreshness).toBeDefined();
-    // Without a prior fact threaded, the freshness verdict is 'none' rather
-    // than 'stale' — but the hash on the record IS the post-mutation hash,
-    // not the ingress hash. That's what proves the fix.
-    const postHash = postHandlerFreshness!.data.current_graph_hash;
-    expect(postHash).not.toBeNull();
-    expect(postHash).not.toBe(priorGraphHash);
+    expect(postHandlerFreshness!.data.freshness).toBe('stale');
+    expect(postHandlerFreshness!.data.reason).toBe('graph_hash_diverged');
+    expect(postHandlerFreshness!.data.graph_hash_at_run).toBe(priorGraphHash);
+    expect(postHandlerFreshness!.data.current_graph_hash).not.toBe(priorGraphHash);
+  });
 
-    // Reference the prior fact to silence unused-var lint while keeping the
-    // expectation chain readable (the fact would feed deriveAnalysisFreshness
-    // in a wider integration test that threads context.prior_facts).
-    expect(priorRunAnalysisFact.fact_type).toBe('run_analysis');
+  it('a no-op mutation (same value) keeps freshness fresh against the prior fact', async () => {
+    // When the handler mutates but the result is byte-identical to
+    // the ingress (same value, same unit, same cap), the post-merge
+    // hash matches `graph_hash_at_run` and freshness stays 'fresh'.
+    // Proves the fix isn't over-eager: cosmetic re-saves of the same
+    // value don't spuriously stale the analysis.
+    const ingressGraph = buildD1Fixture();
+    const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+    const priorGraphHash = computeAnalysisAffectingGraphHash(
+      ingressGraph as unknown as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    );
+
+    mockState.priorTurns = [
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        scenario_id: TEST_SCENARIO_ID,
+        user_id: null,
+        turn_id: 'prior-turn-1',
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: 'sha256:prior',
+        response_emitted: true,
+        llm_calls_used: 1,
+        duration_ms: 12,
+        created_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+    ];
+    mockState.priorFacts = [
+      {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: TEST_SCENARIO_ID,
+          leading_option_id: 'o-launch',
+          summary: 'Ran analysis on your current scenario.',
+          enrichment: {},
+          graph_hash_at_run: priorGraphHash!,
+          computed_at: new Date(Date.now() - 60_000).toISOString(),
+        },
+      },
+    ];
+
+    // Set the factor to its existing value (4%) — no-op mutation.
+    const noopToolCall = {
+      intent_class: 'execute',
+      action: {
+        handler_id: 'set_factor_value',
+        entity: {
+          id: 'f-churn',
+          kind: 'node',
+          resolution_status: 'resolved',
+          resolution_method: 'id_match',
+        },
+        parameters: [
+          {
+            name: 'value',
+            value: { value: 4, unit: '%', cap: 100 },
+            operator: 'set',
+            source: 'user_explicit',
+            unit: '%',
+          },
+        ],
+        cited_context_fields: ['graph.nodes'],
+      },
+    };
+
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    setTestSink((eventName, data) => events.push({ event: eventName, data }));
+
+    const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(noopToolCall));
+    await runTurnExecutor(BASE_PAYLOAD, 'req-p13-noop-value', {
+      routingAdapter,
+      graphState: ingressGraph,
+    });
+
+    const postHandlerFreshness = events
+      .filter((e) => e.event === 'v5.analysis_freshness.derived')
+      .find((e) => e.data.dispatch_path === 'turn_executor_post_handler');
+    expect(postHandlerFreshness).toBeDefined();
+    expect(postHandlerFreshness!.data.freshness).toBe('fresh');
+    expect(postHandlerFreshness!.data.current_graph_hash).toBe(priorGraphHash);
   });
 
   it('post-handler hash equals the pre-mutation hash for a no-op handler invocation', async () => {

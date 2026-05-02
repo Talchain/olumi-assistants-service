@@ -115,14 +115,18 @@ export interface RunAnalysisScenarioSnapshot {
    * GraphStateIngressSchema.safeParse on a follow-up explain turn.
    *
    * Why surface this alongside the V3-parsed `graph` field: the V3
-   * schema strips top-level `options` / `goal_node_id` /
-   * `goal_constraints` (they're not on GraphV3) AND it transforms the
-   * V3 options shape to the PLoT-projection here in
-   * loadScenarioSnapshotForRunAnalysis. Hashing either of those
-   * projections would produce a hash that differs from what the
-   * turn-executor freshness derivation computes from the same
-   * persisted JSON. The raw persisted graph is the single
-   * representation both sides can hash to a matching value.
+   * schema strips top-level `options` and `goal_node_id` (they're not
+   * declared on GraphV3) AND it transforms the V3 options shape to
+   * the PLoT-projection here in loadScenarioSnapshotForRunAnalysis.
+   * Hashing either of those projections would produce a hash that
+   * differs from what the turn-executor freshness derivation computes
+   * from the same persisted JSON. The raw persisted graph is the
+   * single representation both sides can hash to a matching value.
+   *
+   * Note: `goal_constraints` IS declared on GraphV3 (D1 added it as
+   * an optional top-level field) and therefore survives the parse —
+   * but the rest of the rationale above still applies for `options`
+   * and `goal_node_id`.
    */
   readonly rawPersistedGraph: unknown;
 }

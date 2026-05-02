@@ -17,6 +17,7 @@
  */
 
 import { D1HandlerError } from './errors.js';
+import { formatValueWithUnit } from './format-confirmation.js';
 
 export interface NormaliseInput {
   /** The numeric value as the user states it (post operator application). */
@@ -103,17 +104,22 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
   // — silently storing 1.5 would corrupt analysis assumptions
   // downstream. Negative raw_values on a positive-cap factor are
   // similarly nonsensical.
+  //
+  // Format both the rejected value and the cap through the shared
+  // formatter so currency-prefix units render correctly
+  // (`£150,000 exceeds the £100,000 cap`, not `150000£` suffix).
   if (inputHasUnit && (rawInput < 0 || rawInput > cap)) {
-    const unitSuffix = effectiveUnit ?? '';
+    const formattedInput = formatValueWithUnit(rawInput, effectiveUnit);
+    const formattedCap = formatValueWithUnit(cap, effectiveUnit);
     throw new D1HandlerError(
       'PARAMETER_INVALID',
-      `Value ${rawInput}${unitSuffix} exceeds the factor's cap of ${cap}${unitSuffix}.`,
+      `Value ${formattedInput} exceeds the factor's cap of ${formattedCap}.`,
       {
         details: { rawInput, cap, unit: effectiveUnit ?? null },
         userGuidance:
           rawInput > cap
-            ? `${rawInput}${unitSuffix} exceeds the ${cap}${unitSuffix} cap on this factor — pick a value within range.`
-            : `Negative values aren't allowed on this factor (cap is ${cap}${unitSuffix}).`,
+            ? `${formattedInput} exceeds the ${formattedCap} cap on this factor — pick a value within range.`
+            : `Negative values aren't allowed on this factor (cap is ${formattedCap}).`,
       },
     );
   }

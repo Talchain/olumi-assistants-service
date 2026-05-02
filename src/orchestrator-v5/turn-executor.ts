@@ -1413,12 +1413,34 @@ export async function runTurnExecutor(
       // `'stale'` against any prior run_analysis fact, and the rerun
       // chip surfaces. Falls back to the pre-handler hash for
       // computation/explanation handlers that don't mutate.
-      const hashForPostHandlerFreshness =
-        handlerOutcome.mutated_graph !== undefined
-          ? computeAnalysisAffectingGraphHash(
-              handlerOutcome.mutated_graph as GraphStateIngress | null | undefined,
-            )
-          : currentAnalysisGraphHashForTurn;
+      //
+      // Hash representation: handlers run their candidate post-mutation
+      // graph through GraphV3.parse before emitting `mutated_graph`,
+      // which strips top-level `options` and `goal_node_id` (they're
+      // not declared on GraphV3). Hashing the GraphV3 projection
+      // directly would therefore differ from the prior run_analysis
+      // fact's `graph_hash_at_run` for projection-shape reasons rather
+      // than mutation reasons. Stamp the mutation's structural fields
+      // onto the ingress shape so the comparison is apples-to-apples
+      // with how `graph_hash_at_run` was originally computed.
+      const hashForPostHandlerFreshness = ((): string | null => {
+        if (handlerOutcome.mutated_graph === undefined) {
+          return currentAnalysisGraphHashForTurn;
+        }
+        const mutated = handlerOutcome.mutated_graph as Record<string, unknown>;
+        const ingress = (graphStateForTurn ?? {}) as Record<string, unknown>;
+        const merged: Record<string, unknown> = {
+          ...ingress,
+          nodes: mutated.nodes,
+          edges: mutated.edges,
+          ...(mutated.goal_constraints !== undefined
+            ? { goal_constraints: mutated.goal_constraints }
+            : {}),
+        };
+        return computeAnalysisAffectingGraphHash(
+          merged as GraphStateIngress | null | undefined,
+        );
+      })();
       freshness = deriveAnalysisFreshness(
         [...handlerFactsForCommit, ...context.prior_facts],
         hashForPostHandlerFreshness,
