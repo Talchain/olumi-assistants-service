@@ -278,15 +278,18 @@ describe('routeWithToolUse — happy paths', () => {
     // inside the serialised analysis object.
     expect(analysisSection).not.toMatch(/\b0\.\d{2,}/);
 
-    // Sanity check the test is not trivially satisfied: the graph
-    // section legitimately carries `strength.mean` / `exists_probability`
-    // / raw decimals on edges, and those MUST be present somewhere in
-    // the user content (just not inside the analysis slice). This proves
-    // the brace-walked extraction actually isolates analysis from graph.
-    expect(userContent).toContain('"strength"');
-    expect(userContent).toContain('"mean"');
-    expect(userContent).toContain('exists_probability');
-    expect(userContent).toMatch(/\b0\.\d{2,}/);
+    // Sanity check the test is not trivially satisfied: the brace-walked
+    // extraction must actually be isolating a sub-slice, not the whole
+    // user message. Brief A2.1 stripped raw `strength` / `exists` from
+    // the graph section as well, so the legacy "raw decimals must exist
+    // outside the slice" check no longer applies — the routing prompt
+    // and CQE block are now the only sources of decimal-bearing content.
+    // We assert instead that the analysis slice is strictly smaller than
+    // the user content (proves we extracted, not echoed) and that
+    // surrounding sections (`graph`, `conversation`) survive outside it.
+    expect(analysisSection.length).toBeLessThan(userContent.length);
+    expect(userContent).toContain('"graph":');
+    expect(userContent).toContain('"conversation":');
   });
 });
 
