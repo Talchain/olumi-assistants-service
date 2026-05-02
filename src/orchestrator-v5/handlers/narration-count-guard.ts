@@ -47,17 +47,35 @@ export interface NarrationCountCheckInput {
 
 export interface NarrationCountCheckResult {
   readonly chosenText: string;
+  /**
+   * True when the narration's explicit counts disagreed with the final
+   * graph counts. Strict — does NOT include the matched-but-graph-shaped
+   * suppression case introduced in brief brief-display-safe-analysis A2;
+   * see `wordingSuppressed` for that.
+   */
   readonly mismatchDetected: boolean;
+  /**
+   * True when `chosenText` was replaced with the fallback because the
+   * narration carried any node/edge-count wording (whether matched or
+   * mismatched). Implies `chosenText === fallback`. Use this when the
+   * caller needs to know "was the LLM's text replaced?" rather than
+   * "was there a real count error?".
+   */
+  readonly wordingSuppressed: boolean;
 }
 
 /**
  * Decide which assistant_text to ship. Brief brief-display-safe-analysis A2:
  * users don't think in graph terms, so any node/edge-count wording in the
  * narration — matched OR mismatched — is rejected in favour of the
- * decision-language fallback. The mismatch case continues to fire
- * `DraftNarrationCountMismatch` telemetry; the matched-but-still-graph-shaped
- * case fires the same event with `narration_*_count === final_*_count` so ops
- * can see how often Sonnet falls back to count-shaped framing.
+ * decision-language fallback.
+ *
+ * Telemetry is split so ops dashboards stay clean:
+ *   - `DraftNarrationCountMismatch` fires only when narration counts
+ *     genuinely disagree with the final graph (its original semantic).
+ *   - `DraftNarrationCountSuppressed` fires when the counts match but
+ *     the wording itself is being replaced for being graph-shaped.
+ * No turn fires both events.
  *
  * When the narration carries no count tokens at all, it ships verbatim — the
  * guard does not strip qualitative narration just because it lacks numbers.
@@ -69,7 +87,7 @@ export function checkDraftNarrationCounts(
 ): NarrationCountCheckResult {
   const { narration, finalNodeCount, finalEdgeCount, fallback, requestId } = input;
   if (!narration || narration.length === 0) {
-    return { chosenText: fallback, mismatchDetected: false };
+    return { chosenText: fallback, mismatchDetected: false, wordingSuppressed: false };
   }
 
   const nodeMatch = narration.match(NODE_COUNT_RE);
@@ -78,7 +96,7 @@ export function checkDraftNarrationCounts(
   // Narration carries NEITHER an explicit node count NOR an explicit
   // edge count → no graph-shaped framing to scrub. Accept verbatim.
   if (!nodeMatch && !edgeMatch) {
-    return { chosenText: narration, mismatchDetected: false };
+    return { chosenText: narration, mismatchDetected: false, wordingSuppressed: false };
   }
 
   const narrationNodeCount = nodeMatch ? Number.parseInt(nodeMatch[1], 10) : null;
@@ -88,18 +106,21 @@ export function checkDraftNarrationCounts(
     narrationNodeCount !== null && narrationNodeCount !== finalNodeCount;
   const edgeMismatch =
     narrationEdgeCount !== null && narrationEdgeCount !== finalEdgeCount;
+  const isMismatch = nodeMismatch || edgeMismatch;
 
-  emit(TelemetryEvents.DraftNarrationCountMismatch, {
+  const eventPayload = {
     request_id: requestId,
     final_node_count: finalNodeCount,
     final_edge_count: finalEdgeCount,
     narration_node_count: narrationNodeCount,
     narration_edge_count: narrationEdgeCount,
     narration_length: narration.length,
-  });
+  };
+  if (isMismatch) {
+    emit(TelemetryEvents.DraftNarrationCountMismatch, eventPayload);
+  } else {
+    emit(TelemetryEvents.DraftNarrationCountSuppressed, eventPayload);
+  }
 
-  // mismatchDetected reflects whether the counts disagreed; we still
-  // return the fallback when they agree, because the count-shaped wording
-  // itself is what we're scrubbing.
-  return { chosenText: fallback, mismatchDetected: nodeMismatch || edgeMismatch };
+  return { chosenText: fallback, mismatchDetected: isMismatch, wordingSuppressed: true };
 }

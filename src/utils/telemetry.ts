@@ -678,13 +678,27 @@ export const TelemetryEvents = {
   ProbabilityOutOfRange: "v5.probability_out_of_range",
 
   // V5 Phase 2 workstream B — Sonnet's draft_graph narration explicitly
-  // states a node/edge count that disagrees with the final post-repair
+  // states a node/edge count that DISAGREES with the final post-repair
   // graph. Dispatcher prefers the deterministic fallback in this case
   // and emits this event so ops can chase the upstream prompt drift.
   // Payload: { request_id, final_node_count, final_edge_count,
   //            narration_node_count, narration_edge_count,
   //            narration_length }.
+  // Strict semantic — only real mismatches fire here. The matched-but-
+  // graph-shaped suppression case is a separate event below
+  // (DraftNarrationCountSuppressed) so ops dashboards / alerts that
+  // page on this event keep their original baseline.
   DraftNarrationCountMismatch: "v5.draft_narration.count_mismatch",
+  // brief brief-display-safe-analysis A2 — Sonnet's narration carried
+  // node/edge-count wording that AGREED with the final graph, but the
+  // wording itself is graph-shaped framing the brief forbids. The
+  // dispatcher replaces it with the decision-language fallback. Distinct
+  // from DraftNarrationCountMismatch so ops can track Sonnet's residual
+  // count-shaped narration rate without polluting the mismatch alert.
+  // Payload: { request_id, final_node_count, final_edge_count,
+  //            narration_node_count, narration_edge_count,
+  //            narration_length }.
+  DraftNarrationCountSuppressed: "v5.draft_narration.count_suppressed",
 
   // V5 Phase 2 workstream A — post-analysis coaching wrapper fired.
   // Emitted when an analyse-stage direct_answer with a fresh

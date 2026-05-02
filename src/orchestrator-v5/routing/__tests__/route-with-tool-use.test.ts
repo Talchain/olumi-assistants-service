@@ -177,6 +177,25 @@ describe('routeWithToolUse — happy paths', () => {
         .mockResolvedValueOnce(mkResult([textBlock('ok')], 'end_turn')),
     };
 
+    // Graph fixture deliberately carries edge `strength.mean` and other
+    // raw coefficients on edges, so the scoped-analysis assertions below
+    // are proven robust: a naive un-scoped substring check would fail on
+    // these legitimate graph fields, but the brace-walked analysis slice
+    // must NOT pick them up.
+    const graph = {
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'Maximise revenue' },
+        { id: 'budget', kind: 'factor', label: 'Budget' },
+        { id: 'opt-a', kind: 'option', label: 'Option A' },
+        { id: 'opt-b', kind: 'option', label: 'Option B' },
+      ],
+      edges: [
+        // Real edge with structural coefficients — these MUST appear
+        // in the graph section but MUST NOT appear in the analysis slice.
+        { from: 'budget', to: 'goal', strength: { mean: 0.55, std: 0.12 }, exists_probability: 0.91 },
+        { from: 'opt-a', to: 'budget', strength: { mean: 0.733, std: 0.04 }, exists_probability: 0.99 },
+      ],
+    };
     const pack = assembleContextPack({
       payload: {
         turn_id: 't-da-01',
@@ -186,6 +205,7 @@ describe('routeWithToolUse — happy paths', () => {
         stage: 'analyse',
       },
       priorTurns: [],
+      graph,
       analysis: {
         winner: { option_id: 'opt-a', option_label: 'Option A', win_probability: 0.862 },
         options: [
@@ -257,6 +277,16 @@ describe('routeWithToolUse — happy paths', () => {
     // Targeted invariant from the brief: no raw decimal floats anywhere
     // inside the serialised analysis object.
     expect(analysisSection).not.toMatch(/\b0\.\d{2,}/);
+
+    // Sanity check the test is not trivially satisfied: the graph
+    // section legitimately carries `strength.mean` / `exists_probability`
+    // / raw decimals on edges, and those MUST be present somewhere in
+    // the user content (just not inside the analysis slice). This proves
+    // the brace-walked extraction actually isolates analysis from graph.
+    expect(userContent).toContain('"strength"');
+    expect(userContent).toContain('"mean"');
+    expect(userContent).toContain('exists_probability');
+    expect(userContent).toMatch(/\b0\.\d{2,}/);
   });
 });
 
