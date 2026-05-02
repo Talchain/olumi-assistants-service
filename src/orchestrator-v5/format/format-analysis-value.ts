@@ -130,7 +130,10 @@ export function formatPercentagePoints(
   // surface them as-is rather than rejecting.
   const rounded = Math.round(value);
   if (surface === 'compact') return `${rounded}pp`;
-  return `${rounded} percentage points`;
+  // Singular "1 percentage point" reads correctly; everything else
+  // (including 0 and -1) takes the plural.
+  const noun = Math.abs(rounded) === 1 ? 'percentage point' : 'percentage points';
+  return `${rounded} ${noun}`;
 }
 
 /**

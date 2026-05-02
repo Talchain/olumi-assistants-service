@@ -115,7 +115,9 @@ describe('assembleContextPack', () => {
       // sensitivity 0.41, direction 'negative' → signed sensitivity_value = -0.41
       { factor_label: 'Customer Churn', sensitivity_value: -0.41 },
     ]);
-    expect(pack.analysis?.fragile_edges).toEqual(['Marketing Spend → New Leads']);
+    expect(pack.analysis?.fragile_edges).toEqual([
+      { from_label: 'Marketing Spend', to_label: 'New Leads' },
+    ]);
     // V5 state-trust: staleness_reason removed from the prompt-visible
     // ContextPackAnalysis. The field MUST NOT be present on the
     // projection at all (not "present and null") so Sonnet's context

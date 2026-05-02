@@ -245,7 +245,7 @@ describe('dispatchDraftGraph', () => {
       });
 
       expect(result.response.assistant_text).toBe(
-        'Your decision model for "Maximise revenue" is ready, with 2 options, 2 factors, and 1 risks to consider.',
+        'Your decision model for "Maximise revenue" is ready, with 2 options, 2 factors, and 1 risk to consider.',
       );
       expect(result.response.assistant_text).not.toContain('nodes');
       expect(result.response.assistant_text).not.toContain('edges');
@@ -271,7 +271,7 @@ describe('dispatchDraftGraph', () => {
       });
 
       expect(result.response.assistant_text).toBe(
-        'Your decision model for "Improve uptime" is ready, with 1 options and 1 factors to explore.',
+        'Your decision model for "Improve uptime" is ready, with 1 option and 1 factor to explore.',
       );
       expect(result.response.assistant_text).not.toContain('risks');
     });
@@ -297,10 +297,45 @@ describe('dispatchDraftGraph', () => {
       });
 
       expect(result.response.assistant_text).toBe(
-        'Your decision model is ready with 2 options, 1 factors, and 1 risks to explore.',
+        'Your decision model is ready with 2 options, 1 factor, and 1 risk to explore.',
       );
       expect(result.response.assistant_text).not.toContain('"');
       expect(result.response.assistant_text).not.toContain('nodes');
+    });
+
+    // brief brief-display-safe-analysis A2 — narration guard rejects ANY
+    // node/edge-count wording, even when the counts match. Users don't
+    // think in graph terms; the deterministic fallback always wins on
+    // that surface.
+    it('decision-language fallback replaces narration when counts match but wording is graph-shaped', async () => {
+      const graph = {
+        nodes: [
+          { id: 'g1', kind: 'goal', label: 'Win Q3' },
+          { id: 'o1', kind: 'option', label: 'Plan A' },
+          { id: 'f1', kind: 'factor', label: 'Budget' },
+        ],
+        edges: [{ from: 'o1', to: 'g1' }],
+      };
+      const draftResult = {
+        ...makeDraftResult(graph),
+        // Narration mentions counts and they MATCH the final graph (3
+        // nodes, 1 edge) — previously this would have shipped verbatim.
+        assistantText: 'Drafted a decision graph with 3 nodes and 1 edges.',
+      };
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(draftResult as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.assistant_text).toBe(
+        'Your decision model for "Win Q3" is ready, with 1 option and 1 factor to explore.',
+      );
+      expect(result.response.assistant_text).not.toContain('nodes');
+      expect(result.response.assistant_text).not.toContain('edges');
     });
   });
 

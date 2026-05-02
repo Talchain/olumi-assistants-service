@@ -83,6 +83,11 @@ export interface ContextPackAnalysisDriver {
   readonly sensitivity_value: number;
 }
 
+export interface ContextPackAnalysisFragileEdge {
+  readonly from_label: string;
+  readonly to_label: string;
+}
+
 export interface ContextPackAnalysis {
   readonly status: string;
   readonly leading_option: ContextPackAnalysisOption | null;
@@ -90,7 +95,14 @@ export interface ContextPackAnalysis {
   readonly margin_pp: number | null;
   readonly robustness_band: string | null;
   readonly top_drivers: readonly ContextPackAnalysisDriver[];
-  readonly fragile_edges: readonly string[];
+  /**
+   * Structured fragile-edge labels. Brief brief-display-safe-analysis A2:
+   * carry the upstream `{from_label, to_label}` pair through directly so
+   * the LLM-facing display projection never has to split the legacy
+   * `"A → B"` string. Handler-side consumers also benefit — they get
+   * structured access without parsing.
+   */
+  readonly fragile_edges: readonly ContextPackAnalysisFragileEdge[];
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -246,24 +258,25 @@ export function assembleContextPackWithSummary(
 ): AssembleContextPackResult {
   const compound = detectCompound(input.payload.message);
   const extraction = runExtraction(input.payload.message);
+  // Compute the raw analysis projection ONCE — it is shared between the
+  // handler-facing `analysis` slot and the LLM-facing `display_analysis`
+  // wrapper. Calling projectAnalysis twice would double-emit
+  // analysis_projection_invalid_probability telemetry on bad inputs.
+  const rawAnalysis = projectAnalysis(
+    input.analysis ?? null,
+    input.analysisStalenessReason ?? null,
+  );
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     stage: input.payload.stage,
     graph: input.compactedGraph
       ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
       : projectGraph(input.graph ?? null),
-    analysis: projectAnalysis(
-      input.analysis ?? null,
-      input.analysisStalenessReason ?? null,
-    ),
+    analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.
-    // Source: the same raw projectAnalysis() output for option/driver
-    // sorting + scale guards, plus the upstream structured fragile-edge
-    // labels (so we never split the legacy "A → B" join).
-    display_analysis: formatAnalysisForContext(
-      projectAnalysis(input.analysis ?? null, input.analysisStalenessReason ?? null),
-      input.analysis?.top_fragile_edges ?? null,
-    ),
+    // Sources structured fragile-edge labels off the raw projection
+    // (no longer needs the upstream summary as a second argument).
+    display_analysis: formatAnalysisForContext(rawAnalysis),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
@@ -440,7 +453,10 @@ function projectAnalysis(
     margin_pp: marginPp,
     robustness_band: robustnessBand,
     top_drivers: topDrivers,
-    fragile_edges: (analysis.top_fragile_edges ?? []).map((e) => `${e.from_label} → ${e.to_label}`),
+    fragile_edges: (analysis.top_fragile_edges ?? []).map((e) => ({
+      from_label: e.from_label,
+      to_label: e.to_label,
+    })),
   };
 }
 

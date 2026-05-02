@@ -51,11 +51,16 @@ export interface NarrationCountCheckResult {
 }
 
 /**
- * Decide which assistant_text to ship. Returns the original narration
- * when it does not contain explicit node/edge counts OR when those
- * counts agree with the final graph. On mismatch, returns the
- * deterministic fallback and emits `DraftNarrationCountMismatch`
- * telemetry with the offending values.
+ * Decide which assistant_text to ship. Brief brief-display-safe-analysis A2:
+ * users don't think in graph terms, so any node/edge-count wording in the
+ * narration — matched OR mismatched — is rejected in favour of the
+ * decision-language fallback. The mismatch case continues to fire
+ * `DraftNarrationCountMismatch` telemetry; the matched-but-still-graph-shaped
+ * case fires the same event with `narration_*_count === final_*_count` so ops
+ * can see how often Sonnet falls back to count-shaped framing.
+ *
+ * When the narration carries no count tokens at all, it ships verbatim — the
+ * guard does not strip qualitative narration just because it lacks numbers.
  *
  * Pure function (other than the telemetry emit). Never throws.
  */
@@ -71,9 +76,7 @@ export function checkDraftNarrationCounts(
   const edgeMatch = narration.match(EDGE_COUNT_RE);
 
   // Narration carries NEITHER an explicit node count NOR an explicit
-  // edge count → no quantitative mismatch is detectable. Accept the
-  // narration verbatim. (When only one side is present, we still
-  // compare it against the corresponding final count below.)
+  // edge count → no graph-shaped framing to scrub. Accept verbatim.
   if (!nodeMatch && !edgeMatch) {
     return { chosenText: narration, mismatchDetected: false };
   }
@@ -86,10 +89,6 @@ export function checkDraftNarrationCounts(
   const edgeMismatch =
     narrationEdgeCount !== null && narrationEdgeCount !== finalEdgeCount;
 
-  if (!nodeMismatch && !edgeMismatch) {
-    return { chosenText: narration, mismatchDetected: false };
-  }
-
   emit(TelemetryEvents.DraftNarrationCountMismatch, {
     request_id: requestId,
     final_node_count: finalNodeCount,
@@ -99,5 +98,8 @@ export function checkDraftNarrationCounts(
     narration_length: narration.length,
   });
 
-  return { chosenText: fallback, mismatchDetected: true };
+  // mismatchDetected reflects whether the counts disagreed; we still
+  // return the fallback when they agree, because the count-shaped wording
+  // itself is what we're scrubbing.
+  return { chosenText: fallback, mismatchDetected: nodeMismatch || edgeMismatch };
 }

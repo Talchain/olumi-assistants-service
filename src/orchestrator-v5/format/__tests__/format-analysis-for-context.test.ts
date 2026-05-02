@@ -17,8 +17,8 @@ import { describe, expect, it } from 'vitest';
 import type {
   ContextPackAnalysis,
   ContextPackAnalysisDriver,
+  ContextPackAnalysisFragileEdge,
 } from '../../context/context-pack-assembler.js';
-import type { FragileEdge } from '../../../orchestrator/context/analysis-compact.js';
 import {
   formatAnalysisForContext,
   influencePhrase,
@@ -38,7 +38,7 @@ function rawAnalysis(overrides: Partial<ContextPackAnalysis> = {}): ContextPackA
     margin_pp: 7.1,
     robustness_band: 'moderate',
     top_drivers: [rawDriver('Price', 1.0), rawDriver('Demand', -0.4)],
-    fragile_edges: ['unused → unused'],
+    fragile_edges: [],
     ...overrides,
   };
 }
@@ -69,7 +69,6 @@ function assertNoNumbersAnywhere(value: unknown, path: string = '$'): void {
 describe('formatAnalysisForContext', () => {
   it('returns null when raw analysis is null', () => {
     expect(formatAnalysisForContext(null)).toBeNull();
-    expect(formatAnalysisForContext(null, [])).toBeNull();
   });
 
   it('formats probabilities as integer percent strings', () => {
@@ -91,12 +90,15 @@ describe('formatAnalysisForContext', () => {
     expect(out!).not.toHaveProperty('runner_up');
   });
 
-  it('renders margin_pp as percentage points and omits when zero', () => {
+  it('renders margin_pp via formatPercentagePoints (singular at 1, omits at 0)', () => {
     const seven = formatAnalysisForContext(rawAnalysis({ margin_pp: 7 }));
     expect(seven!.margin).toBe('7 percentage points');
 
     const rounded = formatAnalysisForContext(rawAnalysis({ margin_pp: 7.6 }));
     expect(rounded!.margin).toBe('8 percentage points');
+
+    const one = formatAnalysisForContext(rawAnalysis({ margin_pp: 1 }));
+    expect(one!.margin).toBe('1 percentage point');
 
     const zero = formatAnalysisForContext(rawAnalysis({ margin_pp: 0 }));
     expect(zero!).not.toHaveProperty('margin');
@@ -139,33 +141,28 @@ describe('formatAnalysisForContext', () => {
     expect(out!).not.toHaveProperty('top_drivers');
   });
 
-  it('uses structured fragile_edges from upstream — labels only, no numerics', () => {
-    const fragile: FragileEdge[] = [
+  it('passes structured fragile_edges through — labels only, no numerics', () => {
+    const fragile: ContextPackAnalysisFragileEdge[] = [
       { from_label: 'Marketing Spend', to_label: 'New Leads' },
       { from_label: 'Pricing', to_label: 'Conversion' },
     ];
-    const out = formatAnalysisForContext(rawAnalysis(), fragile);
+    const out = formatAnalysisForContext(rawAnalysis({ fragile_edges: fragile }));
     expect(out!.fragile_edges).toEqual([
       { from_label: 'Marketing Spend', to_label: 'New Leads' },
       { from_label: 'Pricing', to_label: 'Conversion' },
     ]);
   });
 
-  it('omits fragile_edges when source is missing or empty', () => {
-    const noSource = formatAnalysisForContext(rawAnalysis());
-    expect(noSource!).not.toHaveProperty('fragile_edges');
-
-    const emptySource = formatAnalysisForContext(rawAnalysis(), []);
-    expect(emptySource!).not.toHaveProperty('fragile_edges');
-
-    const nullSource = formatAnalysisForContext(rawAnalysis(), null);
-    expect(nullSource!).not.toHaveProperty('fragile_edges');
+  it('omits fragile_edges when the source array is empty', () => {
+    const empty = formatAnalysisForContext(rawAnalysis({ fragile_edges: [] }));
+    expect(empty!).not.toHaveProperty('fragile_edges');
   });
 
   it('full analysis: every field formatted together, no raw floats survive', () => {
     const out = formatAnalysisForContext(
-      rawAnalysis(),
-      [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+      rawAnalysis({
+        fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+      }),
     );
     expect(out).toEqual<DisplaySafeAnalysis>({
       status: 'complete',
@@ -194,8 +191,8 @@ describe('formatAnalysisForContext', () => {
         runner_up: { label: 'B', probability: 0.999 },
         margin_pp: 12.4,
         top_drivers: [rawDriver('F1', -0.55), rawDriver('F2', 0.1234)],
+        fragile_edges: [{ from_label: 'X', to_label: 'Y' }],
       }),
-      [{ from_label: 'X', to_label: 'Y' }],
     );
     const json = JSON.stringify(out);
     expect(json).not.toMatch(/\b0\.\d{2,}/);
@@ -248,8 +245,9 @@ describe('influencePhrase', () => {
 describe('display-safe projection drives Track 2A rewrites to zero', () => {
   it('serialised display-safe analysis is invisible to the Track 2A regex sanitiser', () => {
     const out = formatAnalysisForContext(
-      rawAnalysis(),
-      [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+      rawAnalysis({
+        fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+      }),
     );
     const serialised = JSON.stringify(out, null, 2);
     const result = sanitiseAssistantTextProse(serialised);

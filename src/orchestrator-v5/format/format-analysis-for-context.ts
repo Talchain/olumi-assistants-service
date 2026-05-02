@@ -23,9 +23,9 @@
 import type {
   ContextPackAnalysis,
   ContextPackAnalysisDriver,
+  ContextPackAnalysisFragileEdge,
 } from '../context/context-pack-assembler.js';
-import type { FragileEdge } from '../../orchestrator/context/analysis-compact.js';
-import { formatProbability } from './format-analysis-value.js';
+import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
 
 export interface DisplaySafeAnalysisOption {
@@ -89,17 +89,16 @@ function formatOption(label: string, probability: number): DisplaySafeAnalysisOp
 
 /**
  * Project the raw `ContextPackAnalysis` into the display-safe shape
- * sent to Sonnet. `fragileEdgesSource` is the upstream
- * `AnalysisResponseSummary.top_fragile_edges` array — passing it
- * directly preserves the structured `{from_label, to_label}` pair and
- * avoids string-splitting the legacy `"A → B"` join.
+ * sent to Sonnet. The structured `{from_label, to_label}` fragile-edge
+ * pair lives directly on `ContextPackAnalysis.fragile_edges`, so this
+ * function takes a single argument and there is no foot-gun where a
+ * caller forgets the second source and silently drops fragile edges.
  *
  * Returns null when the raw analysis is null. Omits (does not emit
  * `null`) optional fields whose source is missing/empty.
  */
 export function formatAnalysisForContext(
   raw: ContextPackAnalysis | null,
-  fragileEdgesSource?: readonly FragileEdge[] | null,
 ): DisplaySafeAnalysis | null {
   if (raw === null) return null;
 
@@ -123,13 +122,15 @@ export function formatAnalysisForContext(
   }
 
   // margin_pp arrives upstream pre-scaled to percentage points
-  // (compactAnalysis stores `margin × 1000 / 10`). We round to whole
-  // percentage points for prompt display; 0 is omitted because "0
-  // percentage points" reads as a pseudo-tie.
+  // (compactAnalysis stores `margin × 1000 / 10`). Use the shared
+  // `formatPercentagePoints` formatter for consistency with the rest of
+  // the analysis-display surface (handles singular `1 percentage point`
+  // correctly via the formatter, plus invalid-value telemetry). 0 is
+  // omitted because "0 percentage points" reads as a pseudo-tie.
   if (typeof raw.margin_pp === 'number' && Number.isFinite(raw.margin_pp)) {
     const rounded = Math.round(raw.margin_pp);
     if (rounded !== 0) {
-      out.margin = `${rounded} percentage points`;
+      out.margin = formatPercentagePoints(raw.margin_pp, 'prose', { field_path: 'analysis.margin' });
     }
   }
 
@@ -141,13 +142,13 @@ export function formatAnalysisForContext(
     out.top_drivers = raw.top_drivers.map(formatDriver);
   }
 
-  // Fragile edges: prefer the upstream structured `{from_label, to_label}`
-  // pair. Drop numerics (exists_probability, strength) by construction.
-  if (fragileEdgesSource && fragileEdgesSource.length > 0) {
-    out.fragile_edges = fragileEdgesSource.map((e) => ({
-      from_label: e.from_label,
-      to_label: e.to_label,
-    }));
+  if (raw.fragile_edges.length > 0) {
+    out.fragile_edges = raw.fragile_edges.map(
+      (e: ContextPackAnalysisFragileEdge) => ({
+        from_label: e.from_label,
+        to_label: e.to_label,
+      }),
+    );
   }
 
   return out;

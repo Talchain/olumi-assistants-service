@@ -210,28 +210,11 @@ describe('routeWithToolUse — happy paths', () => {
     const args = adapter.chatWithTools.mock.calls[0]![0];
     const userContent = args.messages[0]!.content as string;
 
-    // Sonnet must see decision-language values.
-    expect(userContent).toContain('"win_probability": "86%"');
-    expect(userContent).toContain('"win_probability": "79%"');
-    expect(userContent).toContain('"margin": "7 percentage points"');
-    expect(userContent).toContain('"influence": "very strong positive influence"');
-    expect(userContent).toContain('"influence": "moderate negative influence"');
-    expect(userContent).toContain('"from_label": "Marketing Spend"');
-
-    // Sonnet must NOT see raw analysis floats or internal coefficients.
-    expect(userContent).not.toContain('0.862');
-    expect(userContent).not.toContain('0.791');
-    expect(userContent).not.toContain('"sensitivity_value"');
-    expect(userContent).not.toContain('"probability":');
-    expect(userContent).not.toContain('"strength"');
-    expect(userContent).not.toContain('"mean":');
-    expect(userContent).not.toContain('mean=');
-    expect(userContent).not.toContain('exists_probability');
-
-    // Targeted invariant: no raw decimal floats anywhere inside the
-    // serialised analysis object. Locate `"analysis":` and walk braces
-    // to find the matching close, then run the brief's regex against
-    // that slice.
+    // Locate the analysis object and walk braces to its matching close,
+    // so subsequent assertions are scoped to the analysis section only.
+    // (The graph section legitimately carries `strength` / `mean` fields
+    // on edges; only the analysis section is the LLM-display boundary
+    // this brief is policing.)
     const analysisKeyStart = userContent.indexOf('"analysis":');
     expect(analysisKeyStart).toBeGreaterThan(-1);
     const objectStart = userContent.indexOf('{', analysisKeyStart);
@@ -251,6 +234,28 @@ describe('routeWithToolUse — happy paths', () => {
     }
     expect(objectEnd).toBeGreaterThan(objectStart);
     const analysisSection = userContent.slice(objectStart, objectEnd);
+
+    // Sonnet must see decision-language values inside the analysis section.
+    expect(analysisSection).toContain('"win_probability": "86%"');
+    expect(analysisSection).toContain('"win_probability": "79%"');
+    expect(analysisSection).toContain('"margin": "7 percentage points"');
+    expect(analysisSection).toContain('"influence": "very strong positive influence"');
+    expect(analysisSection).toContain('"influence": "moderate negative influence"');
+    expect(analysisSection).toContain('"from_label": "Marketing Spend"');
+
+    // Sonnet must NOT see raw analysis floats or internal coefficients
+    // anywhere inside the analysis section.
+    expect(analysisSection).not.toContain('0.862');
+    expect(analysisSection).not.toContain('0.791');
+    expect(analysisSection).not.toContain('"sensitivity_value"');
+    expect(analysisSection).not.toContain('"probability":');
+    expect(analysisSection).not.toContain('"strength"');
+    expect(analysisSection).not.toContain('"mean":');
+    expect(analysisSection).not.toContain('mean=');
+    expect(analysisSection).not.toContain('exists_probability');
+
+    // Targeted invariant from the brief: no raw decimal floats anywhere
+    // inside the serialised analysis object.
     expect(analysisSection).not.toMatch(/\b0\.\d{2,}/);
   });
 });

@@ -116,6 +116,15 @@ export interface DispatchDraftGraphResult {
  *     own narration as a neutral fallback for server-side logging only.
  */
 /**
+ * Pluralise a count noun. `1 option`, `2 options`, `0 options`. Cheap
+ * helper local to this module — no need to drag a generic intl lib in
+ * for three nouns.
+ */
+function pluralise(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/**
  * Decision-language summary of the freshly drafted graph (brief
  * brief-display-safe-analysis A2). Never references nodes/edges — users
  * don't think in graph terms. Tiered template:
@@ -125,8 +134,8 @@ export interface DispatchDraftGraphResult {
  *   - Fallback (no structured data): neutral phrasing.
  *
  * Used both as the successFallback when handler narration is absent and
- * as the safe substitute when the narration's claimed node/edge counts
- * disagree with the final graph (see checkDraftNarrationCounts).
+ * as the safe substitute when the narration carries any node/edge-count
+ * wording (matched OR mismatched — see checkDraftNarrationCounts).
  */
 function buildDraftSuccessFallback(graphOutput: DraftGraphResult['graphOutput']): string {
   if (!graphOutput) return 'Drafted a decision graph.';
@@ -141,9 +150,13 @@ function buildDraftSuccessFallback(graphOutput: DraftGraphResult['graphOutput'])
   const hasCounts = optionCount > 0 || factorCount > 0;
   if (!hasCounts) return 'Your decision model is ready to explore.';
 
+  const optionsPart = pluralise(optionCount, 'option', 'options');
+  const factorsPart = pluralise(factorCount, 'factor', 'factors');
+  const risksPart = pluralise(riskCount, 'risk', 'risks');
+
   const countsClause = riskCount > 0
-    ? `${optionCount} options, ${factorCount} factors, and ${riskCount} risks`
-    : `${optionCount} options and ${factorCount} factors`;
+    ? `${optionsPart}, ${factorsPart}, and ${risksPart}`
+    : `${optionsPart} and ${factorsPart}`;
 
   if (goalLabel.length > 0) {
     const tail = riskCount > 0 ? 'to consider' : 'to explore';
