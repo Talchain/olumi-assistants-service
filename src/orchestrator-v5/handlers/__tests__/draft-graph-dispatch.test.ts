@@ -196,7 +196,7 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.draft_graph?.edges).toHaveLength(2);
     });
 
-    it('assistant_text uses FINAL node/edge counts (post-repair) when handler returns null assistantText', async () => {
+    it('assistant_text falls back to decision-language summary when handler returns null assistantText', async () => {
       const graph = {
         nodes: [
           { id: 'n1', kind: 'decision', label: 'A' },
@@ -214,8 +214,93 @@ describe('dispatchDraftGraph', () => {
         request: STUB_REQUEST,
       });
 
-      // Phase 2 P1: deterministic fallback emits markdown-bolded counts.
-      expect(result.response.assistant_text).toBe('Drafted a decision graph with **2** nodes and **1** edges.');
+      // brief brief-display-safe-analysis A2: never include node/edge counts.
+      // Graph has no option/factor/risk nodes → fallback template.
+      expect(result.response.assistant_text).toBe('Your decision model is ready to explore.');
+      expect(result.response.assistant_text).not.toContain('nodes');
+      expect(result.response.assistant_text).not.toContain('edges');
+    });
+
+    // brief brief-display-safe-analysis A2 — draft narration template tiers.
+    it('decision-language fallback names the goal and lists option/factor/risk counts when all present', async () => {
+      const graph = {
+        nodes: [
+          { id: 'g1', kind: 'goal', label: 'Maximise revenue' },
+          { id: 'o1', kind: 'option', label: 'Launch now' },
+          { id: 'o2', kind: 'option', label: 'Delay' },
+          { id: 'f1', kind: 'factor', label: 'Market size' },
+          { id: 'f2', kind: 'factor', label: 'Cost' },
+          { id: 'r1', kind: 'risk', label: 'Regulatory' },
+        ],
+        edges: [{ from: 'o1', to: 'g1' }],
+      };
+      const draftResult = { ...makeDraftResult(graph), assistantText: null };
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(draftResult as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.assistant_text).toBe(
+        'Your decision model for "Maximise revenue" is ready, with 2 options, 2 factors, and 1 risks to consider.',
+      );
+      expect(result.response.assistant_text).not.toContain('nodes');
+      expect(result.response.assistant_text).not.toContain('edges');
+    });
+
+    it('decision-language fallback omits the risks clause when riskCount is 0', async () => {
+      const graph = {
+        nodes: [
+          { id: 'g1', kind: 'goal', label: 'Improve uptime' },
+          { id: 'o1', kind: 'option', label: 'Migrate' },
+          { id: 'f1', kind: 'factor', label: 'Latency' },
+        ],
+        edges: [{ from: 'o1', to: 'g1' }],
+      };
+      const draftResult = { ...makeDraftResult(graph), assistantText: null };
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(draftResult as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.assistant_text).toBe(
+        'Your decision model for "Improve uptime" is ready, with 1 options and 1 factors to explore.',
+      );
+      expect(result.response.assistant_text).not.toContain('risks');
+    });
+
+    it('decision-language fallback drops the goal clause when no goal node is present', async () => {
+      const graph = {
+        nodes: [
+          { id: 'o1', kind: 'option', label: 'Plan A' },
+          { id: 'o2', kind: 'option', label: 'Plan B' },
+          { id: 'f1', kind: 'factor', label: 'Budget' },
+          { id: 'r1', kind: 'risk', label: 'Schedule slip' },
+        ],
+        edges: [{ from: 'o1', to: 'f1' }],
+      };
+      const draftResult = { ...makeDraftResult(graph), assistantText: null };
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(draftResult as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.assistant_text).toBe(
+        'Your decision model is ready with 2 options, 1 factors, and 1 risks to explore.',
+      );
+      expect(result.response.assistant_text).not.toContain('"');
+      expect(result.response.assistant_text).not.toContain('nodes');
     });
   });
 
