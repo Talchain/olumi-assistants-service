@@ -5,6 +5,7 @@ src/generated
 # Environment variables (never commit secrets!)
 .env
 .env.local
+.env.*.local
 
 # Duplicate files (iCloud/macOS sync conflicts)
 * 2
