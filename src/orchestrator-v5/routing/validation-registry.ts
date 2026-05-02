@@ -20,6 +20,10 @@ import {
   AddConstraintUnitSchema,
   AddConstraintValueSchema,
 } from '../tools/handlers/add-constraint.js';
+import {
+  AdjustEdgeStrengthSchema,
+  AdjustEdgeStrengthStdSchema,
+} from '../tools/handlers/adjust-edge-strength.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -135,6 +139,15 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
       value: AddConstraintValueSchema,
       label: AddConstraintLabelSchema,
       unit: AddConstraintUnitSchema,
+    },
+    confirmation_template: noopHandlerConfirmationTemplate,
+  },
+  adjust_edge_strength: {
+    handler_id: 'adjust_edge_strength',
+    accepted_entity_kinds: ['edge'],
+    parameter_schemas: {
+      strength: AdjustEdgeStrengthSchema,
+      std: AdjustEdgeStrengthStdSchema,
     },
     confirmation_template: noopHandlerConfirmationTemplate,
   },

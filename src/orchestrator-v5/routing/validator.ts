@@ -261,7 +261,12 @@ export function validateToolCall(
   }
 
   // ----- graph-dependent checks (skipped when graph is undefined) -----
-  if (graph) {
+  // V5 D1: edges are keyed by composite `from→to` and have no stable id
+  // in the GraphLookup adapter. The handler does its own (from, to)
+  // resolution at execute-time and surfaces ENTITY_NOT_FOUND through
+  // the typed handler error path. Skip the structural existence + kind
+  // cross-check + Dice check for edge entities.
+  if (graph && proposal.entity.kind !== 'edge') {
     const existing = graph.findEntityById(proposal.entity.id);
     if (!existing) {
       return {

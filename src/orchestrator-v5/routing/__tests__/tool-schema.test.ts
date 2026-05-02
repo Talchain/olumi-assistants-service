@@ -222,10 +222,10 @@ describe('OLUMI_ACTION_TOOL definition', () => {
       'explain_from_structure',
       'explain_results',
       'what_would_flip',
-      // V5 D1 deterministic mutation handlers. adjust_edge_strength
-      // lands in the final D1 commit.
+      // V5 D1 deterministic mutation handlers.
       'set_factor_value',
       'add_constraint',
+      'adjust_edge_strength',
     ]);
   });
 

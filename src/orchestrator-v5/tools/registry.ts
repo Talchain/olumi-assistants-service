@@ -104,6 +104,7 @@ import { createExplainResultsHandler } from './handlers/explain-results.js';
 import { createWhatWouldFlipHandler } from './handlers/what-would-flip.js';
 import { createSetFactorValueHandler } from './handlers/set-factor-value.js';
 import { createAddConstraintHandler } from './handlers/add-constraint.js';
+import { createAdjustEdgeStrengthHandler } from './handlers/adjust-edge-strength.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 
 // Re-exported for the chip-click dispatch path. The handler-ownership
@@ -315,6 +316,7 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
 
   const setFactorValue = createSetFactorValueHandler();
   const addConstraint = createAddConstraintHandler();
+  const adjustEdgeStrength = createAdjustEdgeStrengthHandler();
 
   return new Map<V5ActionType, HandlerFn>([
     ['run_analysis', runAnalysis],
@@ -323,6 +325,7 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
     ['what_would_flip', whatWouldFlip],
     ['set_factor_value', setFactorValue],
     ['add_constraint', addConstraint],
+    ['adjust_edge_strength', adjustEdgeStrength],
   ]);
 }
 

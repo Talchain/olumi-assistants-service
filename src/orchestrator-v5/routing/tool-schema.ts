@@ -81,6 +81,7 @@ export const OLUMI_ACTION_TOOL = {
               'what_would_flip',
               'set_factor_value',
               'add_constraint',
+              'adjust_edge_strength',
             ],
             description:
               'The action to execute. Pick the handler that matches the user intent:\n' +
@@ -123,6 +124,19 @@ export const OLUMI_ACTION_TOOL = {
               'sensitivity explanation: cite margins, top drivers, robustness ' +
               'band, and what changes would alter the outcome. Do not use ' +
               'mutation language.\n' +
+              '\n' +
+              '• adjust_edge_strength — change the strength of a causal ' +
+              'link between two nodes ("strengthen the link from churn to ' +
+              'revenue", "weaken the budget→revenue effect"). The entity ' +
+              'kind is "edge" and the entity id is the composite ' +
+              '"source→target" (use the Unicode arrow → or the ASCII ' +
+              'fallback ->). Pass `strength` as a number in [-1, 1]; the ' +
+              'handler clamps the result to that range. "Strengthen" ' +
+              'means increase |mean| while preserving sign; "weaken" ' +
+              'means decrease |mean| toward zero. Translate the user\'s ' +
+              'phrasing into the right operator + signed delta yourself ' +
+              'before emitting the proposal. Do NOT include an ' +
+              '`explanation` payload.\n' +
               '\n' +
               '• add_constraint — attach a threshold constraint to a factor, ' +
               'outcome, or goal ("budget can\'t exceed £50k", "keep churn ' +
