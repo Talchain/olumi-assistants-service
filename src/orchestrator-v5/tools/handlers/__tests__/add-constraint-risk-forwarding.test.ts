@@ -156,8 +156,13 @@ describe('A3.1 Task 5 — risk-node constraint reaches PLoT payload via run-anal
     const fakePlotClient = {
       run: async (payload: Record<string, unknown>) => {
         capturedPayload = payload;
+        // V5 alpha hardening Phase 2.3 contract: PLoT staging emits
+        // `analysis_status: 'computed'` for healthy runs (the legacy
+        // 'completed' literal still parses but is no longer the
+        // canonical status). Mock against the current contract so
+        // this test doesn't reinforce the legacy vocabulary.
         return {
-          analysis_status: 'completed',
+          analysis_status: 'computed',
           results: [{ option_id: 'o-launch', win_probability: 0.6 }],
         } as unknown as Awaited<
           ReturnType<

@@ -38,6 +38,7 @@ vi.mock('../session/index.js', () => ({
 }));
 
 const { runTurnExecutor } = await import('../turn-executor.js');
+const { EMPTY_HANDLER_REGISTRY } = await import('../tools/registry.js');
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const TURN_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -173,16 +174,16 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     // clarify path so the chip click on the next turn re-enters
     // Sonnet's normal routing.
     const routingAdapter = throwingRoutingAdapter();
-    const emptyHandlerRegistry = new Map() as unknown as Parameters<
-      typeof runTurnExecutor
-    >[2]['handlerRegistry'];
     const { response, telemetry } = await runTurnExecutor(
       payload('Set Hiring and Staffing Cost to £300k'),
       'req-pre-route-no-handler',
       {
         routingAdapter,
         graphState: graphWithFactor('Hiring and Staffing Cost'),
-        handlerRegistry: emptyHandlerRegistry,
+        // Use the canonical EMPTY_HANDLER_REGISTRY fixture rather
+        // than `new Map() as unknown as ...` so this test doesn't
+        // normalise boundary-style type erasure.
+        handlerRegistry: EMPTY_HANDLER_REGISTRY,
       },
     );
 
@@ -192,6 +193,15 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     // committed a direct_answer instead.
     expect(telemetry?.turn_class).toBe('direct_answer');
     expect(response.assistant_text).toContain("wasn't sure");
+
+    // Telemetry surfaces the downgrade reason so observability
+    // reflects the FINAL dispatch, not just the pre-guard candidate.
+    const preRouteEvent = events.find(
+      (e) => e.event === 'v5.deterministic_value_update',
+    );
+    expect(preRouteEvent?.data.dispatch).toBe('clarify');
+    expect(preRouteEvent?.data.original_dispatch).toBe('set_factor_value');
+    expect(preRouteEvent?.data.downgrade_reason).toBe('handler_not_executable');
   });
 
   it('"Set Customer Risk to 5" — single substring match on a non-factor (risk) → falls back to clarify (factor-only dispatch gate)', async () => {
@@ -226,13 +236,12 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     const preRouteEvent = events.find(
       (e) => e.event === 'v5.deterministic_value_update',
     );
-    // Telemetry on the pre-route emit captures the dispatch BEFORE the
-    // kind-check downgrade — the synthesised dispatch is
-    // 'set_factor_value'. The downgrade happens in turn-executor and
-    // doesn't re-emit the event. Assert the pre-route detected the
-    // single-substring case correctly; the response shape proves the
-    // downgrade fired.
-    expect(preRouteEvent?.data.dispatch).toBe('set_factor_value');
+    // Telemetry now reflects the FINAL dispatch (clarify) AND
+    // surfaces the original pre-guard candidate plus the downgrade
+    // reason so observability sees both halves of the decision.
+    expect(preRouteEvent?.data.dispatch).toBe('clarify');
+    expect(preRouteEvent?.data.original_dispatch).toBe('set_factor_value');
+    expect(preRouteEvent?.data.downgrade_reason).toBe('non_factor_kind');
   });
 
   it('"What if I set the budget to £300k?" → falls through to LLM (negative gate)', async () => {

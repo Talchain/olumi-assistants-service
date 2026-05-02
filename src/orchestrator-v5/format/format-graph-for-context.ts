@@ -75,6 +75,18 @@ export interface DisplaySafeGraph {
   readonly counts: ContextPackGraph['counts'];
 }
 
+/**
+ * Shape of a raw input node consulted by `projectNode`. Only the
+ * declared display-safe fields (`id`, `label`, `kind`, `category`,
+ * `unit`, `intervention_summary`) are projected onto `DisplaySafeNode`.
+ *
+ * V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
+ * `raw_value`, and `cap` are stripped from the LLM-facing projection
+ * and therefore are NOT read here even if present on the input.
+ * `observed_state` is inspected only for the `unit` fallback (see
+ * `extractNodeUnit`); its inner `value` / `raw_value` / `cap` are
+ * deliberately ignored.
+ */
 interface RawNodeShape {
   readonly id?: unknown;
   readonly label?: unknown;
@@ -82,9 +94,12 @@ interface RawNodeShape {
   readonly category?: unknown;
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
-  /** Compact / display-safe top-level user value. */
-  readonly value?: unknown;
-  /** Canonical GraphV3T nests user-supplied node value under `observed_state`. */
+  /**
+   * Canonical GraphV3T nests `unit` under `observed_state`. Only that
+   * inner field is consulted (label-only); inner numeric fields
+   * (`value`, `raw_value`, `cap`) are stripped from the display
+   * projection.
+   */
   readonly observed_state?: unknown;
 }
 
@@ -145,10 +160,13 @@ function asAllowedRelationship(value: unknown): string | undefined {
 }
 
 /**
- * Extract the user-supplied node `unit` symmetrically with value: compact
- * top-level `unit` first, canonical `observed_state.unit` second. Without
- * this fallback the raw-graph passthrough path silently drops the unit
- * label, which can change a value's meaning ("100" vs "100k").
+ * Extract the user-supplied node `unit` (label only) from the compact
+ * top-level field first, falling back to the canonical
+ * `observed_state.unit` nesting. The unit string is the only piece of
+ * `observed_state` that survives into the display projection — the
+ * inner numeric fields (`value`, `raw_value`, `cap`) are stripped per
+ * A3.1 Task 6 because exposing them encouraged Sonnet to echo node
+ * numerics as structural fact.
  */
 function extractNodeUnit(raw: RawNodeShape): string | undefined {
   const top = asString(raw.unit);

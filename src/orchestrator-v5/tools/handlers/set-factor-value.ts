@@ -3,17 +3,21 @@
  *
  * Mutates a factor node's `observed_state.{value, raw_value}` deterministically
  * from a validated proposal. Sonnet supplies user-unit components via the
- * structured parameter shape `{ value, raw_value?, unit?, cap? }`; the handler
- * applies the operator and normalises model units.
+ * structured parameter shape `{ value, unit?, cap? }`; the handler
+ * applies the operator and normalises model units. (`raw_value` was an
+ * optional field on the structured shape pre-A3.1 but was never read by
+ * the handler — removed in A3.1 Task 4. Strict Zod rejects it now.)
  *
  * Per F.6: no LLM calls inside the handler. No re-parsing of user text — the
  * proposal parameters are the source of truth (the validator already passed
  * them through the registered Zod schema).
  *
  * Returns:
- *   - `mutated_graph` — post-mutation GraphV3T (validated). Replaces the
- *     ingress graph at commit time so append_turn_atomic persists the new
- *     state.
+ *   - `mutated_graph` — post-mutation graph (validated). Carries the
+ *     full ingress top-level shape with mutated `nodes`/`edges`/
+ *     `goal_constraints` stamped in (A3.1 Task 2). Replaces the
+ *     ingress graph at commit time so append_turn_atomic persists
+ *     the new state.
  *   - `handler_facts` — single SetFactorValueHandlerFact carrying
  *     {target_id, status, before, after}. Compose maps this to the
  *     boundary `graph_patch` block so the UI sees the change.
@@ -94,7 +98,7 @@ function parseProposalValue(raw: unknown): ParsedValue {
   }
   throw new D1HandlerError(
     'PARAMETER_INVALID',
-    'set_factor_value: value must be a number or { value, raw_value?, unit?, cap? }.',
+    'set_factor_value: value must be a number or { value, unit?, cap? }.',
     { details: { received: raw } },
   );
 }

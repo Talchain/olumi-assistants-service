@@ -240,7 +240,19 @@ export function validateToolCall(
   if (decl.parameter_schemas) {
     for (const p of proposal.parameters) {
       const schema = decl.parameter_schemas[p.name];
-      if (!schema) continue; // unknown parameter — silently ignored, handler will cope or reject
+      // DEFERRED (V5 D1 golden-path closure A3.1 follow-up): this loop
+      // only validates parameters whose `name` is declared in
+      // `parameter_schemas`. An undeclared parameter (e.g. a rogue
+      // `{ name: 'raw_value', value: 0.05 }` entry alongside the real
+      // `value`) is silently ignored by the validator and reaches the
+      // handler, which itself only reads the parameters it knows
+      // about. Tightening this to reject unknown parameter names is a
+      // cross-handler change (every handler would need a declared
+      // allowlist) flagged for a future brief alongside
+      // required-parameter enforcement. See
+      // `tools/handlers/__tests__/raw-value-strict-rejection.test.ts`
+      // for the pinned current contract.
+      if (!schema) continue;
       const parsed = schema.safeParse(p.value);
       if (!parsed.success) {
         return {

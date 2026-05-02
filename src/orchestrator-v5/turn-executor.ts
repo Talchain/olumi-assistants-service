@@ -763,32 +763,22 @@ export async function runTurnExecutor(
         contextPack.parsed_quantities,
         graphLookupForValidate,
       );
-      // V5 D1 golden-path closure (A3.1): widen telemetry to handle the
-      // `set_factor_value` dispatch variant which carries a single
-      // `candidate` (not the `candidates[]` array of the clarify shape).
-      const telemetryCandidates = deterministicValueUpdate.matched
-        ? deterministicValueUpdate.dispatch === 'set_factor_value'
-          ? [deterministicValueUpdate.candidate]
-          : deterministicValueUpdate.candidates
-        : [];
-      emit(TelemetryEvents.V5DeterministicValueUpdate, {
-        request_id: requestId,
-        scenario_id: context.session_id,
-        matched: deterministicValueUpdate.matched,
-        dispatch: deterministicValueUpdate.matched
-          ? deterministicValueUpdate.dispatch
-          : null,
-        candidate_count: telemetryCandidates.length,
-        top_score: telemetryCandidates[0]?.score ?? null,
-        // Per-candidate source tags ('substring' | 'dice') so routing
-        // diagnostics can distinguish exact-label hits from fuzzy hits
-        // without inferring from `score`.
-        candidate_sources: telemetryCandidates.map((c) => c.source),
-        skip_reason: deterministicValueUpdate.matched
-          ? null
-          : deterministicValueUpdate.skip_reason,
-        cqe_quantity_count: contextPack.parsed_quantities.length,
-      });
+      // V5 D1 golden-path closure (A3.1): the original (pre-guard)
+      // dispatch is what the pre-route function alone would have
+      // produced. The guards below (kind check + registry executable)
+      // may downgrade `set_factor_value` to clarify, in which case
+      // telemetry needs to record both the original candidate AND the
+      // reason the downgrade fired so dashboards see the final
+      // dispatch path, not just the pre-guard candidate. The single
+      // emit at the end of the block carries `downgrade_reason` when
+      // a downgrade fired.
+      const originalDispatch = deterministicValueUpdate.matched
+        ? deterministicValueUpdate.dispatch
+        : null;
+      let downgradeReason:
+        | 'non_factor_kind'
+        | 'handler_not_executable'
+        | null = null;
       if (
         deterministicValueUpdate.matched &&
         deterministicValueUpdate.dispatch === 'set_factor_value'
@@ -891,6 +881,9 @@ export async function runTurnExecutor(
           // and future flag-gated handler registration). In both cases
           // fall back to clarify so the user disambiguates / the chip
           // click on the next turn re-enters Sonnet's normal routing.
+          // The `downgrade_reason` is recorded for the telemetry emit
+          // below so dashboards see why the dispatch flipped.
+          downgradeReason = !isFactor ? 'non_factor_kind' : 'handler_not_executable';
           deterministicValueUpdate = {
             matched: true,
             dispatch: 'clarify',
@@ -899,6 +892,38 @@ export async function runTurnExecutor(
           };
         }
       }
+
+      // V5 D1 golden-path closure (A3.1): widen telemetry to handle
+      // the `set_factor_value` dispatch variant (single `candidate`,
+      // not `candidates[]`) AND surface the post-guard final
+      // dispatch so dashboards reflect what actually ran rather than
+      // the pre-guard candidate. `original_dispatch` is preserved for
+      // observability when a downgrade fires.
+      const telemetryCandidates = deterministicValueUpdate.matched
+        ? deterministicValueUpdate.dispatch === 'set_factor_value'
+          ? [deterministicValueUpdate.candidate]
+          : deterministicValueUpdate.candidates
+        : [];
+      emit(TelemetryEvents.V5DeterministicValueUpdate, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        matched: deterministicValueUpdate.matched,
+        dispatch: deterministicValueUpdate.matched
+          ? deterministicValueUpdate.dispatch
+          : null,
+        original_dispatch: originalDispatch,
+        downgrade_reason: downgradeReason,
+        candidate_count: telemetryCandidates.length,
+        top_score: telemetryCandidates[0]?.score ?? null,
+        // Per-candidate source tags ('substring' | 'dice') so routing
+        // diagnostics can distinguish exact-label hits from fuzzy hits
+        // without inferring from `score`.
+        candidate_sources: telemetryCandidates.map((c) => c.source),
+        skip_reason: deterministicValueUpdate.matched
+          ? null
+          : deterministicValueUpdate.skip_reason,
+        cqe_quantity_count: contextPack.parsed_quantities.length,
+      });
 
       if (
         deterministicValueUpdate.matched &&
