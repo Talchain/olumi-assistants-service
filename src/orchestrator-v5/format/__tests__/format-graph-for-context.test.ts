@@ -1,6 +1,6 @@
 /**
  * format-graph-for-context — display-safe graph projection tests
- * (brief brief-display-safe-graph A2.1).
+ * (brief A2.1 → A3.1 Task 6 → A2.2).
  *
  * The formatter is the upstream boundary that prevents raw graph
  * `strength` floats and raw `exists` probabilities from reaching
@@ -10,8 +10,14 @@
  *   - label resolution from node lookup (bare ID fallback when missing)
  *   - structural strip of strength / exists / plain_interpretation /
  *     model-internal node fields (raw_value, cap, source, _raw_provenance)
- *   - retention of user-supplied node `value` (compact + canonical
- *     observed_state.value) per brief A2.1
+ *   - A3.1 Task 6 strip of node-level `value` / `raw_value` / `cap`
+ *     (compact-top-level AND canonical `observed_state.*`) — Sonnet
+ *     never sees raw node numerics
+ *   - A2.2 reintroduction of formatted `display_value` only:
+ *     existing handler-stamped value preferred verbatim; otherwise
+ *     synthesised via `synthesiseDisplayValue`; bare-number guard
+ *     rejects unit-less results so the display channel cannot leak
+ *     model-scale floats
  *   - relationship-phrase allowlist: unsafe upstream strings (e.g. legacy
  *     "strength of 0.55") MUST be dropped, not echoed verbatim
  *   - no-raw-floats invariant inside edge data (recursive walk)
@@ -52,10 +58,11 @@ function rawGraph(overrides: Partial<ContextPackGraph> = {}): ContextPackGraph {
 
 /**
  * Recursive walk asserting no `number` values anywhere on edge data.
- * Targets edges only — display-safe nodes intentionally KEEP user-supplied
- * `value` (numeric or string) per brief A2.1, while stripping
- * model-normalised `raw_value`/`cap`. The forbidden-floats check on
- * serialised edges below pins the no-raw-decimals invariant.
+ * Targets edges only — display-safe nodes have no numeric fields
+ * post-A3.1 Task 6 (raw `value` / `raw_value` / `cap` stripped) and
+ * post-A2.2 only carry the formatted `display_value` string. The
+ * forbidden-floats check on serialised edges below pins the
+ * no-raw-decimals invariant for the edge channel.
  */
 function assertNoNumbersInEdges(edges: readonly unknown[]): void {
   function walk(value: unknown, path: string): void {
@@ -548,6 +555,45 @@ describe('formatGraphForContext — display_value (A2.2)', () => {
           { id: 'fac_a', kind: 'factor', label: 'A', value: 0.75 },
           { id: 'fac_b', kind: 'factor', label: 'B', value: 0.05 },
           { id: 'fac_c', kind: 'factor', label: 'C', value: -0.5 },
+        ],
+      }),
+    );
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('display_value');
+    }
+  });
+
+  it('bare-number guard also rejects unit-less integer-valued synthesise output', () => {
+    // `synthesiseDisplayValue` priority-7 emits `String(parseFloat(value
+    // .toFixed(2)))` for unit-less normalised values. Whole numbers
+    // round through to bare integers like "1" / "0" / "5" / "7" — every
+    // bit as much a model-scale leak as "0.75". The /^-?0\.\d+$/
+    // pattern alone wouldn't catch them; the broadened guard does.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_one', kind: 'factor', label: 'One', value: 1 },
+          { id: 'fac_zero', kind: 'factor', label: 'Zero', value: 0 },
+          { id: 'fac_seven', kind: 'factor', label: 'Seven', value: 7 },
+          { id: 'fac_neg', kind: 'factor', label: 'Neg', value: -3 },
+        ],
+      }),
+    );
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('display_value');
+    }
+  });
+
+  it('bare-number guard rejects thousands-separated unit-less raw_value output', () => {
+    // `formatPlainNumber` priority-4 with no unit emits comma-separated
+    // thousands ("1,000" / "50,000"). Without a unit those are bare
+    // model-scale numbers — guard must catch them too, otherwise a
+    // raw_value of 50000 with no unit would leak as "50,000".
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', raw_value: 1000 },
+          { id: 'fac_b', kind: 'factor', label: 'B', raw_value: 50000 },
         ],
       }),
     );

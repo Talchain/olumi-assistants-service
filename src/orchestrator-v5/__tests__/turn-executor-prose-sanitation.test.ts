@@ -5,9 +5,13 @@
  * Drives `runTurnExecutor` end-to-end with a routing adapter that
  * returns a text_only result containing all three classes of leak the
  * sanitiser targets (raw probability decimal, structural edge-strength
- * phrase, raw sensitivity value). Asserts the egress
- * `OlumiResponse.assistant_text` has been rewritten and that
- * `V5ResponseProseSanitised` was emitted with non-zero counters.
+ * phrase, raw sensitivity value). Post-A2.2 Task 2 the sanitiser is
+ * detect-only: `V5ResponseProseSanitised` fires with non-zero counters
+ * as a regression canary, and the egress `OlumiResponse.assistant_text`
+ * passes through UNCHANGED — upstream display-safe projections (A2 /
+ * A2.1 / A2.2) close every known source of leakage at the LLM input,
+ * so post-compose mutation is no longer needed and would mask
+ * upstream regressions.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

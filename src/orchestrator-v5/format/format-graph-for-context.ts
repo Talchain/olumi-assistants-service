@@ -7,9 +7,14 @@
  * Task 6) to also strip node-level `value`, `raw_value`, and `cap`:
  * exposing any node numeric encouraged Sonnet to echo it as
  * structural fact ("the model sets X to 5") and reuse it as a
- * coefficient in narration. Sonnet now sees the label, kind,
- * category, and unit (label only) — no node numerics, no edge
- * `strength` floats, no `exists` probabilities.
+ * coefficient in narration. Reintroduced by A2.2 with a single
+ * formatted field `display_value` ("5%", "£50k", "18 months") so
+ * Sonnet can answer "what is the current churn rate?" without
+ * seeing the underlying floats — the raw `value` / `raw_value` /
+ * `cap` remain stripped. Sonnet now sees label, kind, category,
+ * unit (label only), and `display_value` (formatted string only) —
+ * no raw node numerics, no edge `strength` floats, no `exists`
+ * probabilities.
  *
  * Design principle: raw model values stay in structured state for
  * handlers, telemetry, freshness hashing, and edit_graph dispatch;
@@ -56,9 +61,9 @@ export interface DisplaySafeNode {
    * preferred verbatim. When absent, the projector calls
    * `synthesiseDisplayValue` from `cee/factor-extraction/display-
    * value.ts` against value/raw_value/unit/factor_type/cap. A
-   * raw-decimal guard discards unit-less bare-decimal results
-   * (e.g. "0.05") so the projection cannot leak the model-scale
-   * value through the display channel.
+   * bare-number guard discards unit-less numeric results ("0.05",
+   * "0.75", "1", "50,000") so the projection cannot leak the
+   * model-scale value through the display channel.
    */
   readonly display_value?: string;
 }
@@ -253,20 +258,27 @@ function extractNodeFactorType(raw: RawNodeShape): string | undefined {
 }
 
 /**
- * Bare-decimal guard for the display channel. `synthesiseDisplayValue`
+ * Bare-number guard for the display channel. `synthesiseDisplayValue`
  * is generally safe — it formats with units and bands — but on a
  * factor with no unit / cap / factor_type it can fall through to the
- * raw normalised number as a string ("0.05" / "0.75" / "1.0"). That's
- * exactly the leakage A3.1 Task 6 stripped at the raw-numeric layer.
- * Reject those shapes so the display channel cannot become a
- * back-door for raw model floats.
+ * raw normalised number as a string. That includes bare decimals
+ * ("0.05", "0.75", "-0.5"), bare integers ("0", "1", "7" — emitted
+ * via `parseFloat(n.toFixed(2))` for normalised values that round to
+ * whole numbers), and thousands-separated bare numbers ("1,000",
+ * "50,000" from `formatPlainNumber` priority-4 with no unit). Each
+ * is exactly the model-scale leakage A3.1 Task 6 stripped at the
+ * raw-numeric layer; allowing any of them through would defeat the
+ * point of the display-safe projection.
  *
  * Allow legitimate formats: "5%", "£50,000", "18 months", "4.2/5",
- * "Low (0.15)" — anything that has a unit symbol, currency prefix,
- * suffix word, ratio, or qualitative band.
+ * "Low (0.15)", "Very high (1)" — anything that has a unit symbol,
+ * currency prefix, suffix word, ratio, qualitative band wrapper, or
+ * any non-numeric character. The regex matches strings composed
+ * exclusively of an optional sign, digits, commas (thousands
+ * separators), and an optional fractional part.
  */
 function looksLikeRawDecimal(value: string): boolean {
-  return /^-?0\.\d+$/.test(value) || /^-?1\.0+$/.test(value);
+  return /^-?[\d,]+(?:\.\d+)?$/.test(value);
 }
 
 function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
@@ -300,9 +312,9 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   //   2. Synthesise from value / raw_value / unit / cap /
   //      factor_type via the canonical formatter.
   //
-  // After either source, the raw-decimal guard discards bare
-  // model-scale strings ("0.05", "1.0") so a unit-less factor cannot
-  // leak the underlying float through the display channel.
+  // After either source, the bare-number guard discards unit-less
+  // numeric strings ("0.05", "1", "50,000") so a unit-less factor
+  // cannot leak the underlying float through the display channel.
   //
   // Raw `value` / `raw_value` / `cap` remain stripped from the
   // projection (A3.1 Task 6 contract); only the formatted string
@@ -440,9 +452,9 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     raw input is preferred verbatim (set by `set_factor_value`
  *     post-mutation, A3.1 Task 3); otherwise the projector calls
  *     `synthesiseDisplayValue` against value / raw_value / unit /
- *     factor_type / cap. A bare-decimal guard rejects unit-less
- *     results like "0.05" / "1.0" so the display channel cannot
- *     leak the model-scale value through the front door.
+ *     factor_type / cap. A bare-number guard rejects unit-less
+ *     results ("0.05", "1", "50,000") so the display channel
+ *     cannot leak the model-scale value.
  *
  *   - Edge strength resolution accepts every shape that can reach
  *     `ContextPack.graph`: compact (`strength: number`), canonical
