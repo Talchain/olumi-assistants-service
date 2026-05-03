@@ -1838,28 +1838,24 @@ export async function runTurnExecutor(
       'V5 TurnExecutor composed response chips',
     );
 
-    // STEP 6.4 — defence-in-depth prose sanitation (Track 2A).
+    // STEP 6.4 — Track 2A prose sanitation: detect only.
     //
-    // Strips raw decimals in probability prose, translates raw
-    // sensitivity values into banded language, and removes structural
-    // edge-strength references that survived the LLM despite
-    // prompt-level guidance. Pure, idempotent; fails open.
+    // Upstream display-safe projections (A2 / A2.1 / A2.2) prevent raw
+    // values from reaching Sonnet in the first place — edge strength
+    // floats, exists probabilities, and node value/raw_value/cap are
+    // stripped from the LLM-facing context pack; node `display_value`
+    // carries the formatted user-facing string only. With those gates
+    // in place, the post-compose sanitiser has no remaining work: every
+    // known upstream source of raw-numeric leakage has been closed.
     //
-    // Mutation policy: this block mutates ONLY composedOk.assistant_text.
-    // It does NOT touch chips (suggested_actions), blocks, graph_patches,
-    // or any other structured field on the response. Chips don't carry
-    // numeric/structural prose patterns (they are short, label-shaped),
-    // so user-visible chip↔text consistency is not at risk here.
-    // STEP 6.5 below remains the authoritative log-only guard for
-    // chip/text mutation-language consistency. If V5ResponseProseSanitised
-    // ever fires on a chip-bearing turn whose chip text contains the
-    // same probability/structural patterns, that is a regression and
-    // should be escalated.
+    // The sanitiser remains here as a detect-only canary. Telemetry
+    // surfaces residual leakage so a regression is loud — if counters
+    // trend non-zero in production, investigate the projection gap;
+    // do NOT re-enable rewrite. Mutating composed assistant_text after
+    // the fact masks upstream regressions and divorces what we audit
+    // from what the user reads.
     try {
       const sanitised = sanitiseAssistantTextProse(composedOk.assistant_text ?? '');
-      if (sanitised.text !== (composedOk.assistant_text ?? '')) {
-        composedOk = { ...composedOk, assistant_text: sanitised.text };
-      }
       const totalCounters =
         sanitised.probability_rewrites +
         sanitised.sensitivity_rewrites +
@@ -1867,15 +1863,11 @@ export async function runTurnExecutor(
         sanitised.structural_suppressed +
         sanitised.structural_missed_grammar;
       if (totalCounters > 0) {
-        // Track 2A prose sanitation. Currently rewrite mode. Will flip to
-        // detect_only after staging replay confirms the upstream display-safe
-        // analysis projection drives probability_rewrites and
-        // sensitivity_rewrites to zero (brief brief-display-safe-analysis A2).
         emit(TelemetryEvents.V5ResponseProseSanitised, {
           request_id: requestId,
           scenario_id: context.session_id,
           handler_id: handlerIdForCommit ?? null,
-          mode: 'rewrite' as const,
+          mode: 'detect_only' as const,
           probability_rewrites: sanitised.probability_rewrites,
           sensitivity_rewrites: sanitised.sensitivity_rewrites,
           structural_matches: sanitised.structural_matches,

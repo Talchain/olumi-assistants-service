@@ -112,8 +112,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('TurnExecutor STEP 6.4 — post-compose prose sanitation (Track 2A)', () => {
-  it('rewrites probability decimals, suppresses structural edge phrases, translates sensitivity values, and emits V5ResponseProseSanitised', async () => {
+describe('TurnExecutor STEP 6.4 — post-compose prose sanitation (Track 2A — detect only)', () => {
+  it('emits V5ResponseProseSanitised with non-zero counters AND leaves assistant_text unmodified', async () => {
     const offending =
       'Option A performs best with 0.862 probability and the edge carries a strength of 0.55, with a sensitivity value of 1.0 driving the result.';
     const adapter = textOnlyAdapter(offending);
@@ -125,19 +125,20 @@ describe('TurnExecutor STEP 6.4 — post-compose prose sanitation (Track 2A)', (
 
     const text = result.response.assistant_text ?? '';
 
-    // Probability rewritten.
-    expect(text).toContain('86%');
-    expect(text).not.toContain('0.862');
+    // A2.2 Task 2: detect-only mode. The post-compose sanitiser no
+    // longer mutates assistant_text — Sonnet's output reaches the user
+    // verbatim. Telemetry surfaces residual leakage so a regression is
+    // loud, but we never silently mask it. Every offending substring
+    // from the input is therefore present in the output.
+    expect(text).toContain('0.862');
+    expect(text).toContain('strength of 0.55');
+    expect(text).toContain('sensitivity value of 1.0');
+    // No rewritten phrases were stamped in the output.
+    expect(text).not.toContain('86%');
+    expect(text).not.toContain('very strong sensitivity signal');
 
-    // Structural phrase suppressed.
-    expect(text).not.toContain('strength of 0.55');
-    expect(text).toMatch(/is causally linked|this causal/);
-
-    // Sensitivity value translated.
-    expect(text).toContain('very strong sensitivity signal');
-    expect(text).not.toContain('sensitivity value of 1.0');
-
-    // Telemetry: V5ResponseProseSanitised emitted with non-zero counters.
+    // Telemetry: V5ResponseProseSanitised STILL fires with non-zero
+    // counters — the canary remains. mode is now 'detect_only'.
     const sanitisedEvent = events.find(
       (e) => e.event === 'v5.response.prose_sanitised',
     );
@@ -154,10 +155,12 @@ describe('TurnExecutor STEP 6.4 — post-compose prose sanitation (Track 2A)', (
       Array.isArray(sanitisedEvent!.data.structural_rule_ids) &&
         (sanitisedEvent!.data.structural_rule_ids as string[]).includes('carries_strength'),
     ).toBe(true);
-    // brief brief-display-safe-analysis A2 — mode field present and set to
-    // 'rewrite'. Will flip to 'detect_only' after staging replay confirms
-    // the upstream display-safe analysis projection drives counters to zero.
-    expect(sanitisedEvent!.data.mode).toBe('rewrite');
+    // A2.2 Task 2 — the rewrite-to-detect_only flip just landed.
+    // Upstream display-safe projections (A2 / A2.1 / A2.2) close every
+    // known source of raw-numeric leakage; the sanitiser remains as a
+    // detect-only canary. Final acceptance is post-deploy via staging
+    // replay showing counters trend to zero.
+    expect(sanitisedEvent!.data.mode).toBe('detect_only');
   });
 
   it('clean assistant_text: no rewrites, no V5ResponseProseSanitised event', async () => {
