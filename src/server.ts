@@ -72,6 +72,7 @@ import { adminTurnDebugRoutes } from "./routes/admin.v1.turn-debug.js";
 import { adminRoutingLogRoutes } from "./routes/admin.v1.routing-log.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { adminModelRoutes } from "./routes/admin.models.js";
+import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
 import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
@@ -110,6 +111,11 @@ export const DEFAULT_ALLOWED_HEADERS = [
   "X-Olumi-Client-Build",
   "X-Olumi-Payload-Hash",
   "X-Olumi-Unsafe",
+  // Browser proxy headers — @fastify/cors handles OPTIONS preflight before
+  // route handlers, so these must be declared here for the proxy route.
+  "X-User-Id",
+  "X-Request-Id",
+  "X-Correlation-Id",
 ];
 
 function resolveAllowedOrigins(): string[] {
@@ -296,6 +302,10 @@ export async function build() {
       "x-olumi-response-hash",
       "x-olumi-trace-received",
       "x-olumi-downstream-calls",
+      // Browser proxy diagnostic headers
+      "x-request-id",
+      "x-proxy-source",
+      "x-proxy-duration-ms",
     ],
   });
 
@@ -966,6 +976,71 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     await ceeOrchestratorRouteV2(app);
     app.log.info({}, 'V5 orchestrator scaffold registered (POST /orchestrate/v2/turn)');
   }
+
+  // Browser proxy for V5 turns — bypasses Netlify Edge timeout.
+  // Registered after V5 orchestrator so /orchestrate/v2/turn exists as the internal target.
+  // Route handles its own origin validation; auth bypass is in auth.ts isPublicRoute().
+  if (config.proxy.browserProxyEnabled) {
+    // Log the verified timeout chain so the relationship is visible at startup.
+    // Required invariant: proxyTimeout < ROUTE_TIMEOUT_MS so the proxy can return
+    // structured JSON before Fastify kills the connection.
+    const proxyTimeout = config.proxy.browserProxyTimeoutMs;
+    const proxyChainOk = proxyTimeout < ROUTE_TIMEOUT_MS;
+    const proxyDraftOk = proxyTimeout >= DRAFT_REQUEST_BUDGET_MS;
+    log.info(
+      {
+        event: "proxy.timeout_chain",
+        ui_extended_timeout_ms: 130_000,
+        proxy_timeout_ms: proxyTimeout,
+        route_timeout_ms: ROUTE_TIMEOUT_MS,
+        draft_request_budget_ms: DRAFT_REQUEST_BUDGET_MS,
+        draft_llm_timeout_ms: DRAFT_LLM_TIMEOUT_MS,
+        chain_invariant_proxy_lt_route: proxyChainOk,
+        chain_invariant_proxy_gte_draft_budget: proxyDraftOk,
+      },
+      proxyChainOk && proxyDraftOk
+        ? `[proxy-v5] Timeout chain OK: UI(130s) → proxy(${proxyTimeout}ms) → route(${ROUTE_TIMEOUT_MS}ms)`
+        : `[proxy-v5] Timeout chain WARNING: proxy(${proxyTimeout}ms) vs route(${ROUTE_TIMEOUT_MS}ms) vs draft(${DRAFT_REQUEST_BUDGET_MS}ms)`,
+    );
+    if (!proxyChainOk) {
+      log.warn(
+        {},
+        `[proxy-v5] BROWSER_PROXY_TIMEOUT_MS (${proxyTimeout}ms) >= ROUTE_TIMEOUT_MS (${ROUTE_TIMEOUT_MS}ms) — ` +
+          "proxy cannot return structured JSON before Fastify kills the connection. Reduce BROWSER_PROXY_TIMEOUT_MS.",
+      );
+    }
+    if (!proxyDraftOk) {
+      log.warn(
+        {},
+        `[proxy-v5] BROWSER_PROXY_TIMEOUT_MS (${proxyTimeout}ms) < DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) — ` +
+          "proxy may time out before a normal draft graph completes. Increase BROWSER_PROXY_TIMEOUT_MS.",
+      );
+    }
+
+    // Origin-drift guard: warn if any proxy origin is absent from the global
+    // CORS allowlist. Such an origin would pass POST validation but fail the
+    // OPTIONS preflight (handled by @fastify/cors with exact-match logic),
+    // causing a confusing CORS error for the browser.
+    const globalCorsOrigins = new Set(
+      (env.ALLOWED_ORIGINS ?? "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0),
+    );
+    const proxyOrigins = (config.proxy.browserProxyAllowedOrigins ?? "")
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o.length > 0);
+    const driftOrigins = proxyOrigins.filter((o) => !globalCorsOrigins.has(o));
+    if (driftOrigins.length > 0) {
+      log.warn(
+        { driftOrigins },
+        "[proxy-v5] Origin drift detected: these proxy origins are not in ALLOWED_ORIGINS. " +
+          "OPTIONS preflight will fail for these origins. Add them to ALLOWED_ORIGINS.",
+      );
+    }
+  }
+  await proxyV5TurnRoute(app);
 
   // Public prompt routes (cache warming and status)
   // Registered unconditionally - routes handle health checks internally
