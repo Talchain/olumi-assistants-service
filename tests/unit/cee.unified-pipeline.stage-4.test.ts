@@ -487,6 +487,57 @@ describe("Stage 4: Repair Orchestrator", () => {
 
     (config as any).cee.clarifierEnabled = false;
   });
+
+  it("re-detects edge format when clarifier returns a different shape", async () => {
+    // Pre-clarifier graph is V1_FLAT (the validGraph default). Clarifier
+    // returns a LEGACY-shaped refinedGraph (weight + belief). Enforcement
+    // must re-detect from the live graph; using the captured V1_FLAT format
+    // would cause readEdgeMean to read strength_mean (undefined) and skip
+    // every edge, leaving the budget violation unrepaired.
+    (config as any).cee.clarifierEnabled = true;
+
+    (validateAndRepairGraph as any).mockResolvedValue({
+      graph: { ...validGraph }, repairUsed: false, repairAttempts: 0, warnings: [],
+    });
+
+    const refinedLegacyGraph = {
+      version: "1",
+      default_seed: 17,
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
+      nodes: [
+        { id: "fac_a", kind: "factor", label: "A" },
+        { id: "fac_b", kind: "factor", label: "B" },
+        { id: "out_1", kind: "outcome", label: "Out" },
+        { id: "g1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        // LEGACY shape: weight/belief instead of strength_mean/belief_exists
+        { id: "le_a", from: "fac_a", to: "out_1", weight: 0.8, belief: 0.9 },
+        { id: "le_b", from: "fac_b", to: "out_1", weight: 0.6, belief: 0.9 },
+        { id: "le_g", from: "out_1", to: "g1", weight: 0.7, belief: 0.9 },
+      ],
+    };
+    (integrateClarifier as any).mockResolvedValue({ refinedGraph: refinedLegacyGraph });
+
+    const ctx = makeCtx();
+    // Capture pre-clarifier (V1_FLAT) format on context to simulate the real
+    // pipeline state Stage 4 entry would set.
+    ctx.detectedEdgeFormat = "V1_FLAT";
+
+    await runStageRepair(ctx);
+
+    // Inbound budget on out_1 was 1.4 in LEGACY shape → must be rescaled.
+    const inbound = (ctx.graph.edges as any[]).filter(
+      (e) => e.to === "out_1" && (e.from === "fac_a" || e.from === "fac_b"),
+    );
+    const sum = inbound.reduce((acc, e) => acc + Math.abs(e.weight ?? 0), 0);
+    expect(sum).toBeLessThanOrEqual(0.95 + 1e-6);
+    expect(ctx.repairTrace?.deterministic_enforcement?.nodes_rescaled).toBe(1);
+    // The post-rescale telemetry must report the live LEGACY format, not V1_FLAT.
+    // (Validated indirectly: rescale only succeeds if readEdgeMean used "weight".)
+
+    (config as any).cee.clarifierEnabled = false;
+  });
 });
 
 // ── Substep 1: Orchestrator validation ──────────────────────────────────────

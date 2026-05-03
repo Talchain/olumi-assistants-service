@@ -88,10 +88,14 @@ function makeCtx(graph: any): any {
   };
 }
 
+// Mirrors RESCALABLE_SOURCE_KINDS in production. Update both together if either
+// changes — otherwise tests can silently miss budget violations on excluded
+// source kinds (e.g. option contributions to outcome/risk).
+const RESCALABLE_SOURCE_KINDS_TEST = new Set(["factor", "option", "action"]);
 function sumAbsCausalInbound(edges: any[], nodes: any[], targetId: string): number {
   const kindMap = new Map(nodes.map((n: any) => [n.id, n.kind]));
   return edges
-    .filter((e: any) => e.to === targetId && (kindMap.get(e.from) === "factor" || kindMap.get(e.from) === "action"))
+    .filter((e: any) => e.to === targetId && RESCALABLE_SOURCE_KINDS_TEST.has(kindMap.get(e.from) as string))
     .reduce((sum: number, e: any) => sum + Math.abs(e.strength_mean ?? 0), 0);
 }
 

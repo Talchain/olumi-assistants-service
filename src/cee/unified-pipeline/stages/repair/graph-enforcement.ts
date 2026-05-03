@@ -31,7 +31,7 @@ import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import { Edge } from "../../../../schemas/graph.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
-import { patchEdgeNumeric } from "../../utils/edge-format.js";
+import { detectEdgeFormat, patchEdgeNumeric } from "../../utils/edge-format.js";
 import { config } from "../../../../config/index.js";
 import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
@@ -419,8 +419,24 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
   if (!config.cee.deterministicEnforcementEnabled) return;
 
   const graph = ctx.graph as unknown as GraphT;
-  const format: EdgeFormat = ctx.detectedEdgeFormat ?? "V1_FLAT";
   const requestId = ctx.requestId;
+
+  // Re-detect the edge format from the FINAL graph. The clarifier (substep 9)
+  // can replace ctx.graph with a refinedGraph whose shape differs from the
+  // pre-clarifier graph; using ctx.detectedEdgeFormat (captured at Stage 4
+  // entry) would cause readEdgeMean to read the wrong field and silently
+  // skip every edge as non-finite. Detected value wins; fall back to the
+  // captured format only when detection returns "NONE".
+  const liveFormat = detectEdgeFormat(graph.edges as EdgeT[]);
+  const capturedFormat: EdgeFormat = ctx.detectedEdgeFormat ?? "V1_FLAT";
+  const format: EdgeFormat = liveFormat === "NONE" ? capturedFormat : liveFormat;
+  if (liveFormat !== "NONE" && liveFormat !== capturedFormat) {
+    log.info({
+      request_id: requestId,
+      captured_format: capturedFormat,
+      live_format: liveFormat,
+    }, "Enforcement: edge format changed since Stage 4 entry (likely clarifier refinement); using live format");
+  }
 
   // Order: bridge chain repair first (may add goal edges that affect topology),
   // then budget rescale (rescales causal inbound — bridge edges to goal are
