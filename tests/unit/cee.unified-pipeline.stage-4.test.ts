@@ -37,6 +37,7 @@ vi.mock("../../src/config/index.js", () => ({
       orchestratorValidationEnabled: false,
       enforceSingleGoal: true,
       clarifierEnabled: false,
+      deterministicEnforcementEnabled: true,
     },
     features: { optionShortcutRepair: true },
   },
@@ -56,6 +57,12 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     CeeGraphGoalsMerged: "CeeGraphGoalsMerged",
     CeeGoalInferred: "CeeGoalInferred",
     CeeClarifierFailed: "CeeClarifierFailed",
+    CeeInboundSumRescaled: "cee.draft_graph.inbound_sum_rescaled",
+    CeeBridgeChainRepaired: "cee.draft_graph.bridge_chain_repaired",
+    CeeEnforcementCompleted: "cee.draft_graph.enforcement_completed",
+    CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
+    CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
+    CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
   },
 }));
 
@@ -126,6 +133,10 @@ vi.mock("../../src/cee/transforms/structure-checks.js", () => ({
 
 vi.mock("../../src/cee/transforms/graph-normalisation.js", () => ({
   normaliseCeeGraphVersionAndProvenance: vi.fn().mockImplementation((g: any) => g),
+}));
+
+vi.mock("../../src/validators/graph-validator.js", () => ({
+  validateGraph: vi.fn(() => ({ errors: [], warnings: [] })),
 }));
 
 vi.mock("../../src/cee/quality/index.js", () => ({
@@ -430,6 +441,51 @@ describe("Stage 4: Repair Orchestrator", () => {
 
     await runClarifier(ctx);
     expect(ctx.earlyReturn).toBeUndefined();
+  });
+
+  it("enforcement runs AFTER clarifier replaces ctx.graph (P0 ordering guard)", async () => {
+    // The clarifier can mutate ctx.graph by setting it to a refinedGraph with
+    // over-budget inbound sums. Enforcement must observe and repair the FINAL
+    // graph, not the pre-clarifier graph.
+    (config as any).cee.clarifierEnabled = true;
+
+    // PLoT validation passes through (no-op)
+    (validateAndRepairGraph as any).mockResolvedValue({
+      graph: { ...validGraph }, repairUsed: false, repairAttempts: 0, warnings: [],
+    });
+
+    // The refined graph reintroduces a budget violation: causal inbound sum 1.4
+    const refinedGraph = {
+      version: "1",
+      default_seed: 17,
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
+      nodes: [
+        { id: "fac_a", kind: "factor", label: "A" },
+        { id: "fac_b", kind: "factor", label: "B" },
+        { id: "out_1", kind: "outcome", label: "Out" },
+        { id: "g1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { id: "e_a", from: "fac_a", to: "out_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.9 },
+        { id: "e_b", from: "fac_b", to: "out_1", strength_mean: 0.6, strength_std: 0.1, belief_exists: 0.9 },
+        { id: "e_g", from: "out_1", to: "g1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9 },
+      ],
+    };
+    (integrateClarifier as any).mockResolvedValue({ refinedGraph });
+
+    const ctx = makeCtx();
+    await runStageRepair(ctx);
+
+    // Enforcement (substep 9b) must run AFTER clarifier replaced ctx.graph,
+    // so the inbound sum on out_1 should now be ≤ 0.95 (was 1.4 pre-rescale).
+    const inboundToOut1 = (ctx.graph.edges as any[]).filter(
+      (e) => e.to === "out_1" && (e.from === "fac_a" || e.from === "fac_b"),
+    );
+    const sum = inboundToOut1.reduce((acc, e) => acc + Math.abs(e.strength_mean), 0);
+    expect(sum).toBeLessThanOrEqual(0.95 + 1e-6);
+    expect(ctx.repairTrace?.deterministic_enforcement?.nodes_rescaled).toBe(1);
+
+    (config as any).cee.clarifierEnabled = false;
   });
 });
 

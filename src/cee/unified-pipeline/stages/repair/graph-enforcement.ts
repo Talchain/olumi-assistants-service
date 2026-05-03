@@ -1,32 +1,39 @@
 /**
- * Stage 4 Substep 8b: Deterministic Graph Enforcement
+ * Stage 4 Substep 9b: Deterministic Graph Enforcement
  *
- * Two deterministic repairs applied after all topology changes (connectivity)
- * and before the clarifier:
+ * Two deterministic repairs applied AFTER the clarifier (which can replace
+ * ctx.graph with a refined graph) and before structural-parse:
  *
  *   1. fixBridgeChaining  — removes forbidden outcome↔risk edges, adds goal bridges
  *                            with sign-correct semantics (outcome→goal +, risk→goal −)
- *   2. applyBudgetRescale — scales causal inbound edges (factor→outcome/risk)
- *                            so Σ|mean| ≤ BUDGET_TARGET per node
+ *   2. applyBudgetRescale — scales causal inbound edges (factor→outcome/risk
+ *                            and option→outcome/risk) so Σ|mean| ≤ BUDGET_TARGET
  *
  * After both repairs, runs an authoritative post-enforcement re-validation
  * via graph-validator. The Zod safety net at substep 10 (structural-parse)
  * is downstream of this and validates final shape.
  *
  * Only outcome and risk nodes are budget-enforced. Goal/factor/option/etc
- * are excluded. Only factor→outcome/risk causal edges are rescaled —
- * structural (option→factor), bridge (outcome/risk→goal), bidirected, and
- * scaffolding edges are excluded.
+ * are excluded as targets. Only factor/option/action → outcome/risk causal
+ * edges are rescaled — structural (option→factor), bridge (outcome/risk→goal),
+ * bidirected, and scaffolding edges are excluded.
+ *
+ * Edge format support: V1_FLAT (strength_mean/strength_std) and LEGACY (weight)
+ * are detected at Stage 4 entry and stored in ctx.detectedEdgeFormat. Canonical
+ * nested `strength: { mean, std }` is the validation-pipeline shape and is not
+ * observed at this stage; if it ever appears, detectEdgeFormat returns "NONE"
+ * and edges fall through readEdgeMean as undefined (skipped with telemetry).
  *
  * Gated by CEE_DETERMINISTIC_ENFORCEMENT_ENABLED (default true).
  */
 
 import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
+import { Edge } from "../../../../schemas/graph.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { patchEdgeNumeric } from "../../utils/edge-format.js";
 import { config } from "../../../../config/index.js";
-import { log } from "../../../../utils/telemetry.js";
+import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 
 // ---------------------------------------------------------------------------
@@ -46,16 +53,19 @@ const ENFORCEABLE_KINDS = new Set(["outcome", "risk"]);
 
 /**
  * Source kinds whose edges to outcome/risk are considered causal and rescalable.
- * - "factor" is the standard causal source.
- * - "action" is treated as an option upstream (sweep maps action→option) so it
- *   would not normally appear as inbound to outcome/risk; included defensively.
+ * - "factor" — standard causal source.
+ * - "option"/"action" — option/decision shortcuts. The deterministic sweep tries
+ *   to remove these, but optionShortcutRepair is gated and Step 4d auto-fixes
+ *   only the subset where the outcome already reaches the goal. Surviving
+ *   option→outcome/risk edges are causal and must be budgeted (matches the
+ *   brief: "factor→node, option→node").
  *
  * Excluded by design:
- * - "option"/"decision" — these would be forbidden shortcuts (sweep removes them)
  * - "outcome"/"risk"    — bridge chains (fixBridgeChaining removes them)
  * - "goal"/"constraint" — never causal inbound
+ * - "decision"          — scaffolding, not causal
  */
-const RESCALABLE_SOURCE_KINDS = new Set(["factor", "action"]);
+const RESCALABLE_SOURCE_KINDS = new Set(["factor", "option", "action"]);
 
 /** Multiplier applied to strongest inbound |mean| when creating a bridge-to-goal edge. */
 const BRIDGE_FALLBACK_FACTOR = 0.5;
@@ -175,7 +185,7 @@ export function applyBudgetRescale(
       if (mean === undefined) {
         edgesSkipped++;
         log.info({
-          event: "cee.draft_graph.enforcement_edge_skipped",
+          event: TelemetryEvents.CeeEnforcementEdgeSkipped,
           request_id: requestId,
           edge_from: edge.from,
           edge_to: edge.to,
@@ -215,7 +225,7 @@ export function applyBudgetRescale(
     });
 
     log.info({
-      event: "cee.draft_graph.inbound_sum_rescaled",
+      event: TelemetryEvents.CeeInboundSumRescaled,
       request_id: requestId,
       node_id: targetId,
       node_kind: kind,
@@ -298,18 +308,11 @@ export function fixBridgeChaining(
     if (edge.to === goalNode.id) existingGoalEdges.add(edge.from);
   }
 
-  const inboundByNode = new Map<string, EdgeT[]>();
-  for (const edge of edges) {
-    const group = inboundByNode.get(edge.to);
-    if (group) group.push(edge);
-    else inboundByNode.set(edge.to, [edge]);
-  }
-
-  // Identify forbidden bridge-chain edges deterministically.
-  // Iterate edges in input order so removal indices are stable.
+  // PASS 1: identify forbidden bridge-chain edges first so the inbound map
+  // we build for fallback magnitude excludes them. Otherwise a node whose
+  // only inbound is the forbidden edge being removed would seed its
+  // replacement bridge from the very edge we just judged invalid.
   const toRemove = new Set<number>();
-  const additions: BridgeAddition[] = [];
-
   for (let i = 0; i < edges.length; i++) {
     const edge = edges[i];
     const fromKind = nodeKindMap.get(edge.from);
@@ -322,9 +325,26 @@ export function fixBridgeChaining(
       ENFORCEABLE_KINDS.has(toKind) &&
       edge.to !== goalNode.id;
 
-    if (!isForbiddenChain) continue;
+    if (isForbiddenChain) toRemove.add(i);
+  }
 
-    toRemove.add(i);
+  // PASS 2: build inboundByNode excluding forbidden bridge-chain edges.
+  const inboundByNode = new Map<string, EdgeT[]>();
+  for (let i = 0; i < edges.length; i++) {
+    if (toRemove.has(i)) continue;
+    const edge = edges[i];
+    const group = inboundByNode.get(edge.to);
+    if (group) group.push(edge);
+    else inboundByNode.set(edge.to, [edge]);
+  }
+
+  // PASS 3: emit telemetry and queue goal-bridge additions in stable order.
+  const additions: BridgeAddition[] = [];
+  for (let i = 0; i < edges.length; i++) {
+    if (!toRemove.has(i)) continue;
+    const edge = edges[i];
+    const fromKind = nodeKindMap.get(edge.from)!;
+    const toKind = nodeKindMap.get(edge.to)!;
 
     repairs.push({
       code: "BRIDGE_CHAIN_REPAIRED",
@@ -333,7 +353,7 @@ export function fixBridgeChaining(
     });
 
     log.info({
-      event: "cee.draft_graph.bridge_chain_repaired",
+      event: TelemetryEvents.CeeBridgeChainRepaired,
       request_id: requestId,
       edge_from: edge.from,
       edge_to: edge.to,
@@ -355,18 +375,22 @@ export function fixBridgeChaining(
     const inbound = inboundByNode.get(nodeId) ?? [];
     const { mean, std, existence } = computeBridgeMean(nodeKind, inbound, format);
 
-    const baseEdge = {
+    // Build a schema-validated base edge first so any future shape drift
+    // surfaces as a parse error rather than silent runtime breakage. Numeric
+    // strength fields are then patched in the active edge format (V1_FLAT
+    // or LEGACY) by patchEdgeNumeric.
+    const baseEdge = Edge.parse({
       id: `${nodeId}__${goalNode.id}__enforcement`,
       from: nodeId,
       to: goalNode.id,
       effect_direction: mean < 0 ? "negative" : "positive",
-      origin: "repair" as const,
+      origin: "repair",
       provenance: {
         source: "synthetic",
         quote: "Bridge chain repair (deterministic enforcement)",
       },
-      provenance_source: "synthetic" as const,
-    } as unknown as EdgeT;
+      provenance_source: "synthetic",
+    });
 
     const goalEdge = patchEdgeNumeric(baseEdge, format, { mean, std, existence });
     newEdges.push(goalEdge);
@@ -427,7 +451,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     postValidationErrorCount = revalidation.errors.length;
     if (postValidationErrorCount > 0) {
       log.warn({
-        event: "cee.draft_graph.enforcement_post_validation_errors",
+        event: TelemetryEvents.CeeEnforcementPostValidationErrors,
         request_id: requestId,
         error_count: postValidationErrorCount,
         codes: revalidation.errors.map((e) => e.code),
@@ -435,7 +459,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     }
   } catch (err) {
     log.warn({
-      event: "cee.draft_graph.enforcement_post_validation_failed",
+      event: TelemetryEvents.CeeEnforcementPostValidationFailed,
       request_id: requestId,
       err: (err as Error)?.message,
     }, "Post-enforcement validation threw — non-fatal");
@@ -454,8 +478,13 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     },
   };
 
-  log.info({
-    event: "cee.draft_graph.enforcement_completed",
+  // Brief specifies "Clean graph (no violations) → no-op, no telemetry".
+  // We honour the spirit by suppressing per-repair events when nothing fires
+  // (those have early `continue`s) and demoting the SUMMARY heartbeat to debug
+  // when there were zero repairs. info-level summary only when work happened.
+  const totalRepairs = allRepairs.length;
+  const summaryPayload = {
+    event: TelemetryEvents.CeeEnforcementCompleted,
     request_id: requestId,
     bridge_chains_removed: bridgeResult.removedCount,
     goal_edges_added: bridgeResult.goalEdgesAdded,
@@ -463,5 +492,11 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     edges_skipped: budgetResult.edgesSkipped,
     post_validation_errors: postValidationErrorCount,
     edge_format: format,
-  }, "Deterministic graph enforcement completed");
+    total_repairs: totalRepairs,
+  };
+  if (totalRepairs > 0 || postValidationErrorCount > 0) {
+    log.info(summaryPayload, "Deterministic graph enforcement completed");
+  } else {
+    log.debug(summaryPayload, "Deterministic graph enforcement no-op");
+  }
 }

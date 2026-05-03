@@ -15,7 +15,15 @@ vi.mock("../../src/utils/telemetry.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
   calculateCost: vi.fn().mockReturnValue(0),
-  TelemetryEvents: {},
+  // Mirror the real event names so log assertions can match { event: "..." }.
+  TelemetryEvents: {
+    CeeInboundSumRescaled: "cee.draft_graph.inbound_sum_rescaled",
+    CeeBridgeChainRepaired: "cee.draft_graph.bridge_chain_repaired",
+    CeeEnforcementCompleted: "cee.draft_graph.enforcement_completed",
+    CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
+    CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
+    CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
+  },
 }));
 
 vi.mock("../../src/config/index.js", () => ({
@@ -463,10 +471,11 @@ describe("applyBudgetRescale", () => {
     expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
   });
 
-  it("excludes structural edges (option→factor) from inbound sum to outcome", () => {
-    // Construct outcome with both a factor inbound (causal) and an inappropriate
-    // option inbound (option→outcome would be a forbidden shortcut, but we model
-    // it here to verify the source-kind filter would exclude it from the sum).
+  it("includes option→outcome causal edges in inbound budget (matches brief)", () => {
+    // Brief specifies "factor→node, option→node" as causal inbound. The
+    // deterministic sweep tries to rewrite option→outcome shortcuts but is
+    // gated and incomplete; surviving option→outcome edges are real causal
+    // claims that must be budgeted (otherwise we leave a known escape hatch).
     const graph = makeGraph({
       nodes: [
         { id: "opt_a", kind: "option" }, { id: "fac_1", kind: "factor" },
@@ -480,10 +489,16 @@ describe("applyBudgetRescale", () => {
       ],
     });
 
-    // Causal inbound = 0.6 (only factor counts) → no rescale
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
-    const factorEdge = graph.edges.find((e: any) => e.from === "fac_1" && e.to === "out_1");
-    expect(factorEdge.strength_mean).toBe(0.6);
+    // Combined causal inbound = 1.6 → rescale to 0.95
+    const result = applyBudgetRescale(graph, "V1_FLAT");
+    expect(result.nodesRescaled).toBe(1);
+    const optEdge = graph.edges.find((e: any) => e.from === "opt_a" && e.to === "out_1");
+    const facEdge = graph.edges.find((e: any) => e.from === "fac_1" && e.to === "out_1");
+    const sum = Math.abs(optEdge.strength_mean) + Math.abs(facEdge.strength_mean);
+    expect(sum).toBeCloseTo(0.95, 6);
+    // Bridge edge to goal is not rescaled
+    const bridgeEdge = graph.edges.find((e: any) => e.from === "out_1" && e.to === "goal_1");
+    expect(bridgeEdge.strength_mean).toBe(0.7);
   });
 
   it("excludes outcome→goal bridge edges from rescaling (when goal sum > 1)", () => {
@@ -808,11 +823,10 @@ describe("fixBridgeChaining", () => {
     expect(goalEdgesAdded).toBe(3);
   });
 
-  it("uses default strength when bridge node has no other inbound", () => {
-    // out_1 has no inbound at all → orphan path → ORPHAN_BRIDGE_MEAN.
-    // risk_1's only "inbound" is the edge being removed → derives from
-    //   that edge's strength (the bridge edge IS valid causal data even
-    //   though it points to the wrong target).
+  it("uses orphan defaults when only inbound is the forbidden edge being removed", () => {
+    // The forbidden bridge-chain edge is judged invalid causal data, so its
+    // strength must NOT seed the replacement bridge. Both nodes fall through
+    // to ORPHAN_BRIDGE_MEAN. Sign is determined entirely by node kind.
     const graph = makeGraph({
       nodes: [
         { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
@@ -822,14 +836,14 @@ describe("fixBridgeChaining", () => {
     });
     fixBridgeChaining(graph, "V1_FLAT");
 
-    // out_1 has no inbound → orphan → +ORPHAN_BRIDGE_MEAN (positive, outcome)
+    // out_1: no remaining inbound → orphan → +ORPHAN_BRIDGE_MEAN (positive, outcome)
     const outGoal = graph.edges.find((e: any) => e.from === "out_1" && e.to === "goal_1");
     expect(outGoal.strength_mean).toBe(0.3);
     expect(outGoal.effect_direction).toBe("positive");
 
-    // risk_1 derives from the bridge edge it's losing: |0.3| * 0.5 = 0.15, negative
+    // risk_1: only inbound was the forbidden edge → orphan → -ORPHAN_BRIDGE_MEAN
     const riskGoal = graph.edges.find((e: any) => e.from === "risk_1" && e.to === "goal_1");
-    expect(riskGoal.strength_mean).toBeCloseTo(-0.15, 5);
+    expect(riskGoal.strength_mean).toBe(-0.3);
     expect(riskGoal.effect_direction).toBe("negative");
   });
 
@@ -1053,6 +1067,26 @@ describe("applyDeterministicEnforcement", () => {
     const ctx = makeCtx(graph);
     applyDeterministicEnforcement(ctx);
     expect(ctx.repairTrace.deterministic_enforcement.edges_skipped_non_finite).toBe(1);
+  });
+
+  // ── No-op telemetry suppression ──────────────────────────────────────────
+
+  it("does not emit info-level enforcement_completed when there are zero repairs", () => {
+    const graph = makeGraph(); // clean default
+    const ctx = makeCtx(graph);
+    applyDeterministicEnforcement(ctx);
+
+    const infoCalls = (log.info as ReturnType<typeof vi.fn>).mock.calls;
+    const summaryAtInfo = infoCalls.some(
+      (c) => c[0]?.event === "cee.draft_graph.enforcement_completed",
+    );
+    expect(summaryAtInfo).toBe(false);
+
+    const debugCalls = (log.debug as ReturnType<typeof vi.fn>).mock.calls;
+    const summaryAtDebug = debugCalls.some(
+      (c) => c[0]?.event === "cee.draft_graph.enforcement_completed",
+    );
+    expect(summaryAtDebug).toBe(true);
   });
 
   // ── Internal-language audit ──────────────────────────────────────────────
