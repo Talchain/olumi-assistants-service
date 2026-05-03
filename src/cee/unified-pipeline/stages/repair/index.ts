@@ -15,7 +15,8 @@
  * 6. Late STRP                — Rules 3,5 with goalConstraints context
  * 7. Edge field restoration   — restores V4 fields using stash + nodeRenames
  * 8. Connectivity             — wires orphans to goal, ensures goal exists
- * 9. Clarifier                — last graph-modifying step (needs quality)
+ * 9. Clarifier                — graph refinement (may replace ctx.graph)
+ * 9b. Deterministic enforcement — budget rescale + bridge chain repair (gated)
  * 10. Structural parse        — DraftGraphOutput.parse safety net
  *
  * Key dependencies:
@@ -23,7 +24,11 @@
  * - 4 BEFORE 7: nodeRenames from goal merge needed for stash restoration
  * - 6 BEFORE 7: late STRP may modify edges that restoration must preserve
  * - 7 AFTER all topology changes: restoration is the last edge mutation
- * - 9 BEFORE 10: structural parse validates final graph state
+ * - 8 BEFORE 9: clarifier sees connected graph
+ * - 9 BEFORE 9b: clarifier may replace ctx.graph; enforcement must run on the
+ *   final graph so over-budget sums or forbidden bridge chains reintroduced
+ *   by clarifier are still caught
+ * - 9b BEFORE 10: structural parse validates final graph state
  *
  * EARLY RETURN RULES:
  * Only substeps 1b and 10 set ctx.earlyReturn.
@@ -47,6 +52,7 @@ import { runEdgeRestoration } from "./edge-restoration.js";
 import { runConnectivity } from "./connectivity.js";
 import { runClarifier } from "./clarifier.js";
 import { runStructuralParse } from "./structural-parse.js";
+import { applyDeterministicEnforcement } from "./graph-enforcement.js";
 
 /**
  * Stage 4: Run all repair substeps in order.
@@ -88,8 +94,13 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   // Substep 8: Connectivity + goal repair
   runConnectivity(ctx);
 
-  // Substep 9: Clarifier (last graph-modifying step)
+  // Substep 9: Clarifier (may replace ctx.graph with refinedGraph)
   await runClarifier(ctx);
+
+  // Substep 9b: Deterministic enforcement (budget rescale + bridge chain repair)
+  // Runs AFTER clarifier so any over-budget sums or forbidden bridge chains
+  // reintroduced by clarifier refinement are still enforced before packaging.
+  applyDeterministicEnforcement(ctx);
 
   // Substep 10: Structural parse (Zod safety net)
   runStructuralParse(ctx);
