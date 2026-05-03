@@ -130,16 +130,24 @@ describe("readEdgeMean", () => {
 });
 
 describe("readEdgeStd", () => {
-  it("returns strength_std for V1_FLAT", () => {
+  it("returns strength_std for V1_FLAT with positive value", () => {
     expect(readEdgeStd({ from: "a", to: "b", strength_std: 0.15 } as any, "V1_FLAT")).toBe(0.15);
   });
 
-  it("returns 0 for LEGACY", () => {
-    expect(readEdgeStd({ from: "a", to: "b", strength_std: 0.15 } as any, "LEGACY")).toBe(0);
+  it("returns undefined for LEGACY (no std field)", () => {
+    expect(readEdgeStd({ from: "a", to: "b", strength_std: 0.15 } as any, "LEGACY")).toBeUndefined();
   });
 
-  it("returns 0 for non-finite std", () => {
-    expect(readEdgeStd({ from: "a", to: "b", strength_std: NaN } as any, "V1_FLAT")).toBe(0);
+  it("returns undefined for non-finite std", () => {
+    expect(readEdgeStd({ from: "a", to: "b", strength_std: NaN } as any, "V1_FLAT")).toBeUndefined();
+  });
+
+  it("returns undefined for zero std (z.number().positive() forbids 0)", () => {
+    expect(readEdgeStd({ from: "a", to: "b", strength_std: 0 } as any, "V1_FLAT")).toBeUndefined();
+  });
+
+  it("returns undefined for missing std", () => {
+    expect(readEdgeStd({ from: "a", to: "b" } as any, "V1_FLAT")).toBeUndefined();
   });
 });
 
@@ -407,6 +415,25 @@ describe("applyBudgetRescale", () => {
     expect(a.strength_mean).toBeGreaterThan(0);
     expect(b.strength_mean).toBeLessThan(0);
     expect(Math.abs(a.strength_mean) + Math.abs(b.strength_mean)).toBeCloseTo(0.95, 5);
+  });
+
+  it("does not write strength_std when original was missing (preserves schema validity)", () => {
+    // Edges without strength_std must remain without it after rescale.
+    // Writing 0 would violate z.number().positive().
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: 0.6 }, // no std
+        { from: "fac_b", to: "out_1", strength_mean: 0.6 }, // no std
+      ],
+    });
+    applyBudgetRescale(graph, "V1_FLAT");
+    const a = graph.edges.find((e: any) => e.from === "fac_a" && e.to === "out_1");
+    expect(a.strength_std).toBeUndefined();
   });
 
   it("scales std proportionally with mean", () => {

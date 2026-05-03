@@ -108,12 +108,15 @@ export function readEdgeMean(edge: EdgeT, format: EdgeFormat): number | undefine
 }
 
 /**
- * Read the edge std. Returns 0 for LEGACY (no std equivalent) or missing values.
+ * Read the edge std.
+ * Returns `undefined` for LEGACY (no std equivalent), missing, or non-finite values.
+ * Callers must only write std back when the return is a positive finite number —
+ * writing `0` or `undefined` to `strength_std` violates `z.number().positive()`.
  */
-export function readEdgeStd(edge: EdgeT, format: EdgeFormat): number {
-  if (format === "LEGACY") return 0;
+export function readEdgeStd(edge: EdgeT, format: EdgeFormat): number | undefined {
+  if (format === "LEGACY") return undefined;
   const raw = edge.strength_std;
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined;
   return raw;
 }
 
@@ -205,15 +208,19 @@ export function applyBudgetRescale(
 
     for (const edge of finiteEdges) {
       const oldMean = readEdgeMean(edge, format)!;
-      const oldStd = readEdgeStd(edge, format);
+      const oldStd = readEdgeStd(edge, format); // undefined when missing or LEGACY
       const newMean = oldMean * scale;
-      const newStd = oldStd * scale;
 
       if (format === "LEGACY") {
         (edge as Record<string, unknown>).weight = newMean;
+        // LEGACY has no std field — nothing to update
       } else {
         edge.strength_mean = newMean;
-        edge.strength_std = newStd;
+        // Only write std back if the original was positive-finite. Writing 0
+        // or undefined to strength_std would violate z.number().positive().
+        if (oldStd !== undefined) {
+          edge.strength_std = oldStd * scale;
+        }
       }
     }
 
