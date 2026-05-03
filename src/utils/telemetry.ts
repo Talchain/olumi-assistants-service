@@ -214,6 +214,7 @@ export const TelemetryEvents = {
   CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
   CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
   CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
+  CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
 
   // Connectivity validation (P0 diagnostics)
   CeeConnectivityCheck: "cee.draft_graph.connectivity_check",

@@ -35,6 +35,7 @@ import { detectEdgeFormat, patchEdgeNumeric } from "../../utils/edge-format.js";
 import { config } from "../../../../config/index.js";
 import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -53,19 +54,19 @@ const ENFORCEABLE_KINDS = new Set(["outcome", "risk"]);
 
 /**
  * Source kinds whose edges to outcome/risk are considered causal and rescalable.
- * - "factor" — standard causal source.
- * - "option"/"action" — option/decision shortcuts. The deterministic sweep tries
- *   to remove these, but optionShortcutRepair is gated and Step 4d auto-fixes
- *   only the subset where the outcome already reaches the goal. Surviving
- *   option→outcome/risk edges are causal and must be budgeted (matches the
- *   brief: "factor→node, option→node").
+ * - "factor" — standard causal source (only valid causal inbound at final topology).
+ * - "action" — treated as option upstream; included defensively.
  *
- * Excluded by design:
- * - "outcome"/"risk"    — bridge chains (fixBridgeChaining removes them)
- * - "goal"/"constraint" — never causal inbound
- * - "decision"          — scaffolding, not causal
+ * "option" is explicitly EXCLUDED:
+ *   option→outcome and option→risk are INVALID_EDGE_TYPE violations per the
+ *   allowed-edge matrix (validateTopology in graph-validator.ts). The deterministic
+ *   sweep removes them via fixOptionOutcomeShortcut / fixOptionRiskShortcut but can
+ *   defer survivors to LLM repair. If they still survive to enforcement, rescaling
+ *   them would make invalid topology look numerically safe — masking the defect
+ *   instead of surfacing it. Post-enforcement validation will flag them as
+ *   INVALID_EDGE_TYPE errors and block packaging (see applyDeterministicEnforcement).
  */
-const RESCALABLE_SOURCE_KINDS = new Set(["factor", "option", "action"]);
+const RESCALABLE_SOURCE_KINDS = new Set(["factor", "action"]);
 
 /** Multiplier applied to strongest inbound |mean| when creating a bridge-to-goal edge. */
 const BRIDGE_FALLBACK_FACTOR = 0.5;
@@ -461,10 +462,14 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     ];
   }
 
-  // Authoritative post-enforcement re-validation. Errors here would mean
-  // enforcement created an invalid graph — emit telemetry but do not throw
-  // (Stage 10 structural-parse remains the final Zod safety net).
+  // Authoritative post-enforcement re-validation.
+  // GraphValidationResult.errors contains only severity="error" items ("Blocking errors that
+  // prevent processing" — graph-validator.types.ts). If any survive after enforcement, the
+  // graph has a topology defect that neither the deterministic sweep nor LLM repair resolved
+  // (e.g. option→outcome/risk deferred by the sweep with no controllable factor). Package it
+  // and the user receives an analysis built on an invalid causal graph. We fail closed instead.
   let postValidationErrorCount = 0;
+  let blocked = false;
   try {
     const revalidation = validateGraphDeterministic({
       graph: graph as Parameters<typeof validateGraphDeterministic>[0]["graph"],
@@ -472,20 +477,49 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
       phase: "post_enforcement" as Parameters<typeof validateGraphDeterministic>[0]["phase"],
     });
     postValidationErrorCount = revalidation.errors.length;
+
     if (postValidationErrorCount > 0) {
+      const errorCodes = revalidation.errors.map((e) => e.code);
       log.warn({
         event: TelemetryEvents.CeeEnforcementPostValidationErrors,
         request_id: requestId,
         error_count: postValidationErrorCount,
-        codes: revalidation.errors.map((e) => e.code),
-      }, `Post-enforcement validation surfaced ${postValidationErrorCount} errors`);
+        codes: errorCodes,
+      }, `Post-enforcement validation surfaced ${postValidationErrorCount} blocking errors`);
+
+      // Fail closed: set earlyReturn so the pipeline skips Stage 5 packaging.
+      blocked = true;
+      log.warn({
+        event: TelemetryEvents.CeeEnforcementBlocked,
+        request_id: requestId,
+        error_count: postValidationErrorCount,
+        codes: errorCodes,
+      }, `Enforcement blocked packaging: ${postValidationErrorCount} topology error(s) remain`);
+
+      const errorBody = buildCeeErrorResponse(
+        "CEE_GRAPH_INVALID",
+        `Graph failed post-enforcement validation (${postValidationErrorCount} topology error(s))`,
+        {
+          requestId,
+          details: {
+            validation_errors: revalidation.errors.map((e) => ({
+              code: e.code,
+              message: e.message,
+              path: e.path,
+            })),
+            enforcement_repairs: allRepairs.length,
+            last_phase: "deterministic_enforcement",
+          },
+        },
+      );
+      ctx.earlyReturn = { statusCode: 422, body: errorBody };
     }
   } catch (err) {
     log.warn({
       event: TelemetryEvents.CeeEnforcementPostValidationFailed,
       request_id: requestId,
       err: (err as Error)?.message,
-    }, "Post-enforcement validation threw — non-fatal");
+    }, "Post-enforcement validation threw — non-fatal, continuing");
   }
 
   ctx.repairTrace = {
@@ -498,6 +532,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
       edges_skipped_non_finite: budgetResult.edgesSkipped,
       total_repairs: allRepairs.length,
       post_validation_error_count: postValidationErrorCount,
+      blocked,
     },
   };
 

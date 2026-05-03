@@ -23,6 +23,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
     CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
     CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
+    CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
   },
 }));
 
@@ -34,6 +35,14 @@ vi.mock("../../src/config/index.js", () => ({
 // Mock the graph validator so post-enforcement validation is a no-op in tests.
 vi.mock("../../src/validators/graph-validator.js", () => ({
   validateGraph: vi.fn(() => ({ errors: [], warnings: [] })),
+}));
+
+vi.mock("../../src/cee/validation/pipeline.js", () => ({
+  buildCeeErrorResponse: vi.fn((code: string, msg: string, _meta?: any) => ({
+    error: { code, message: msg },
+  })),
+  integrateClarifier: vi.fn(),
+  isAdminAuthorized: vi.fn(() => false),
 }));
 
 // ── Imports ──────────────────────────────────────────────────────────────────
@@ -48,6 +57,8 @@ import {
 import type { EdgeFormat } from "../../src/cee/unified-pipeline/utils/edge-format.js";
 import { log } from "../../src/utils/telemetry.js";
 import { config } from "../../src/config/index.js";
+import { validateGraph } from "../../src/validators/graph-validator.js";
+import { buildCeeErrorResponse } from "../../src/cee/validation/pipeline.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -90,8 +101,9 @@ function makeCtx(graph: any): any {
 
 // Mirrors RESCALABLE_SOURCE_KINDS in production. Update both together if either
 // changes — otherwise tests can silently miss budget violations on excluded
-// source kinds (e.g. option contributions to outcome/risk).
-const RESCALABLE_SOURCE_KINDS_TEST = new Set(["factor", "option", "action"]);
+// source kinds. "option" is excluded: option→outcome/risk are INVALID_EDGE_TYPE
+// violations and must not be counted as valid causal inbound.
+const RESCALABLE_SOURCE_KINDS_TEST = new Set(["factor", "action"]);
 function sumAbsCausalInbound(edges: any[], nodes: any[], targetId: string): number {
   const kindMap = new Map(nodes.map((n: any) => [n.id, n.kind]));
   return edges
@@ -502,11 +514,11 @@ describe("applyBudgetRescale", () => {
     expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
   });
 
-  it("includes option→outcome causal edges in inbound budget (matches brief)", () => {
-    // Brief specifies "factor→node, option→node" as causal inbound. The
-    // deterministic sweep tries to rewrite option→outcome shortcuts but is
-    // gated and incomplete; surviving option→outcome edges are real causal
-    // claims that must be budgeted (otherwise we leave a known escape hatch).
+  it("excludes option→outcome edges from budget rescale (invalid topology, not causal)", () => {
+    // option→outcome and option→risk are INVALID_EDGE_TYPE violations per the
+    // allowed-edge matrix. Rescaling them would make invalid topology look
+    // numerically safe — masking the defect instead of surfacing it for blocking.
+    // A5 must not treat option as a valid causal source.
     const graph = makeGraph({
       nodes: [
         { id: "opt_a", kind: "option" }, { id: "fac_1", kind: "factor" },
@@ -514,22 +526,42 @@ describe("applyBudgetRescale", () => {
         { id: "goal_1", kind: "goal" },
       ],
       edges: [
-        { from: "opt_a", to: "out_1", strength_mean: 1.0, strength_std: 0.01 },
-        { from: "fac_1", to: "out_1", strength_mean: 0.6, strength_std: 0.1 },
+        { from: "opt_a", to: "out_1", strength_mean: 1.0, strength_std: 0.01 }, // invalid topology
+        { from: "fac_1", to: "out_1", strength_mean: 0.6, strength_std: 0.1 },  // valid causal
         { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1 },
       ],
     });
 
-    // Combined causal inbound = 1.6 → rescale to 0.95
+    // Only fac_1 inbound counts → sum = 0.6 → no rescale
     const result = applyBudgetRescale(graph, "V1_FLAT");
-    expect(result.nodesRescaled).toBe(1);
+    expect(result.nodesRescaled).toBe(0);
+    // The invalid option edge is left untouched (not masked by rescaling)
     const optEdge = graph.edges.find((e: any) => e.from === "opt_a" && e.to === "out_1");
+    expect(optEdge.strength_mean).toBe(1.0);
     const facEdge = graph.edges.find((e: any) => e.from === "fac_1" && e.to === "out_1");
-    const sum = Math.abs(optEdge.strength_mean) + Math.abs(facEdge.strength_mean);
-    expect(sum).toBeCloseTo(0.95, 6);
-    // Bridge edge to goal is not rescaled
-    const bridgeEdge = graph.edges.find((e: any) => e.from === "out_1" && e.to === "goal_1");
-    expect(bridgeEdge.strength_mean).toBe(0.7);
+    expect(facEdge.strength_mean).toBe(0.6);
+  });
+
+  it("excludes option→risk edges from budget rescale (invalid topology, not causal)", () => {
+    // Same rationale as option→outcome: INVALID_EDGE_TYPE violation.
+    const graph = makeGraph({
+      nodes: [
+        { id: "opt_a", kind: "option" }, { id: "fac_1", kind: "factor" },
+        { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "opt_a", to: "risk_1", strength_mean: 0.8, strength_std: 0.01 }, // invalid
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 }, // valid
+        { from: "risk_1", to: "goal_1", strength_mean: -0.5, strength_std: 0.1 },
+      ],
+    });
+
+    // Only fac_1 inbound counts → sum = 0.4 → no rescale
+    const result = applyBudgetRescale(graph, "V1_FLAT");
+    expect(result.nodesRescaled).toBe(0);
+    const optEdge = graph.edges.find((e: any) => e.from === "opt_a" && e.to === "risk_1");
+    expect(optEdge.strength_mean).toBe(0.8); // unchanged
   });
 
   it("excludes outcome→goal bridge edges from rescaling (when goal sum > 1)", () => {
@@ -1118,6 +1150,55 @@ describe("applyDeterministicEnforcement", () => {
       (c) => c[0]?.event === "cee.draft_graph.enforcement_completed",
     );
     expect(summaryAtDebug).toBe(true);
+  });
+
+  // ── Post-enforcement blocking ────────────────────────────────────────────
+
+  it("sets earlyReturn 422 when post-enforcement validation returns errors", () => {
+    // Simulates a residual INVALID_EDGE_TYPE surviving all repair stages.
+    (validateGraph as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      errors: [{ code: "INVALID_EDGE_TYPE", message: "Invalid edge from option to outcome", path: "edges[0]", severity: "error" }],
+      warnings: [],
+    });
+    const graph = makeGraph();
+    const ctx = makeCtx(graph);
+    applyDeterministicEnforcement(ctx);
+
+    expect(ctx.earlyReturn).toBeDefined();
+    expect(ctx.earlyReturn.statusCode).toBe(422);
+    expect(buildCeeErrorResponse).toHaveBeenCalledWith(
+      "CEE_GRAPH_INVALID",
+      expect.stringContaining("1 topology error"),
+      expect.objectContaining({ details: expect.objectContaining({ validation_errors: expect.any(Array) }) }),
+    );
+    expect(ctx.repairTrace.deterministic_enforcement.blocked).toBe(true);
+    expect(ctx.repairTrace.deterministic_enforcement.post_validation_error_count).toBe(1);
+
+    const warnCalls = (log.warn as ReturnType<typeof vi.fn>).mock.calls;
+    expect(warnCalls.some((c) => c[0]?.event === "cee.draft_graph.enforcement_blocked")).toBe(true);
+  });
+
+  it("does not set earlyReturn when post-enforcement validation is clean", () => {
+    (validateGraph as ReturnType<typeof vi.fn>).mockReturnValueOnce({ errors: [], warnings: [] });
+    const ctx = makeCtx(makeGraph());
+    applyDeterministicEnforcement(ctx);
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(ctx.repairTrace.deterministic_enforcement.blocked).toBe(false);
+  });
+
+  it("repairTrace.blocked = false on clean graph with no validation errors", () => {
+    const ctx = makeCtx(makeGraph());
+    applyDeterministicEnforcement(ctx);
+    expect(ctx.repairTrace.deterministic_enforcement.blocked).toBe(false);
+    expect(ctx.repairTrace.deterministic_enforcement.post_validation_error_count).toBe(0);
+  });
+
+  it("does not block on post-validation validator throw (non-fatal)", () => {
+    (validateGraph as ReturnType<typeof vi.fn>).mockImplementationOnce(() => { throw new Error("validator exploded"); });
+    const ctx = makeCtx(makeGraph());
+    applyDeterministicEnforcement(ctx);
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(ctx.repairTrace.deterministic_enforcement.blocked).toBe(false);
   });
 
   // ── Internal-language audit ──────────────────────────────────────────────

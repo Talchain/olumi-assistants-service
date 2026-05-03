@@ -153,6 +153,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
         CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
         CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
+        CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
 
         // CEE v1 Explain Graph events (v1.12.0)
         CeeExplainGraphRequested: "cee.explain_graph.requested",
@@ -902,6 +903,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeEnforcementEdgeSkipped,
         TelemetryEvents.CeeEnforcementPostValidationErrors,
         TelemetryEvents.CeeEnforcementPostValidationFailed,
+        TelemetryEvents.CeeEnforcementBlocked,
         TelemetryEvents.NodeKindNormalized,
         TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
@@ -1158,6 +1160,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.enforcement_edge_skipped",
         "cee.draft_graph.enforcement_post_validation_errors",
         "cee.draft_graph.enforcement_post_validation_failed",
+        "cee.draft_graph.enforcement_blocked",
 
         // CEE v1 Explain Graph events
         "cee.explain_graph.requested",

@@ -63,6 +63,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
     CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
     CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
+    CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
   },
 }));
 
@@ -1181,5 +1182,47 @@ describe("Prereq 0a: nodeRenames in validateAndFixGraph", () => {
     runGoalMerge(ctx);
 
     expect(ctx.nodeRenames.size).toBe(0);
+  });
+
+  it("enforcement earlyReturn guard: runStageRepair skips structural-parse when enforcement blocks", async () => {
+    // The earlyReturn check `if (ctx.earlyReturn) return` after substep 9b must
+    // prevent structural-parse from running when enforcement sets earlyReturn.
+    // We spy on applyDeterministicEnforcement (the actual module export) so we
+    // don't fight with other pipeline stages' calls to validateGraph.
+    const enforcement = await import("../../src/cee/unified-pipeline/stages/repair/graph-enforcement.js");
+    const enforceSpy = vi.spyOn(enforcement, "applyDeterministicEnforcement")
+      .mockImplementationOnce((ctx: any) => {
+        ctx.earlyReturn = {
+          statusCode: 422,
+          body: { error: { code: "CEE_GRAPH_INVALID", message: "topology error" } },
+        };
+      });
+    const parseSpy = vi.spyOn(DraftGraphOutput, "parse");
+
+    const ctx = makeCtx();
+    await runStageRepair(ctx);
+
+    expect(ctx.earlyReturn?.statusCode).toBe(422);
+    expect(ctx.earlyReturn?.body).toMatchObject({ error: { code: "CEE_GRAPH_INVALID" } });
+    expect(parseSpy).not.toHaveBeenCalled();
+
+    enforceSpy.mockRestore();
+    parseSpy.mockRestore();
+  });
+
+  it("enforcement earlyReturn guard: structural-parse runs when enforcement is clean", async () => {
+    const enforcement = await import("../../src/cee/unified-pipeline/stages/repair/graph-enforcement.js");
+    const enforceSpy = vi.spyOn(enforcement, "applyDeterministicEnforcement")
+      .mockImplementationOnce((_ctx: any) => { /* no earlyReturn */ });
+    const parseSpy = vi.spyOn(DraftGraphOutput, "parse").mockReturnValueOnce({} as any);
+
+    const ctx = makeCtx();
+    await runStageRepair(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(parseSpy).toHaveBeenCalled();
+
+    enforceSpy.mockRestore();
+    parseSpy.mockRestore();
   });
 });
