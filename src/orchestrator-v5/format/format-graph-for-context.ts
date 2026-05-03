@@ -28,6 +28,7 @@
  * re-strip).
  */
 
+import { synthesiseDisplayValue } from '../../cee/factor-extraction/display-value.js';
 import type { CompactProvenance } from '../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../context/context-pack-assembler.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
@@ -40,19 +41,26 @@ export interface DisplaySafeNode {
   readonly unit?: string;
   readonly intervention_summary?: string;
   /**
-   * V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
-   * `raw_value`, and `cap` are stripped from the LLM-facing
-   * projection. Brief A2.1 originally preserved `value` (reasoning:
-   * user-supplied quantities are meaningful prose), but the post-A3
-   * review found that exposing any node numeric — even a
-   * "user-meaningful" one — encouraged Sonnet to echo it as structural
-   * fact ("the model sets X to 5") and reuse it as a coefficient in
-   * narration. The display projection now carries no node numerics;
-   * the LLM gets `unit` (label only) and `intervention_summary`. Raw
-   * `ContextPack.graph` retains `value` / `raw_value` / `cap` for
-   * handlers, freshness hashing, and edit_graph dispatch. Sonnet
-   * never sees them.
+   * Pre-formatted user-facing quantity string ("5%", "£50,000",
+   * "18 months"). Reintroduced in A2.2 because A3.1's full
+   * value-strip left Sonnet unable to answer "what is the current
+   * churn rate?" — the LLM had labels but no numeric data at all.
+   * `display_value` carries the formatted string only; the
+   * underlying `value` / `raw_value` / `cap` floats remain stripped
+   * (A3.1 contract preserved). The raw `ContextPack.graph` still
+   * carries the floats for handlers / freshness / edit_graph
+   * dispatch; Sonnet never sees them.
+   *
+   * Source priority: existing `display_value` on the raw input
+   * (set by `set_factor_value` post-mutation, A3.1 Task 3) is
+   * preferred verbatim. When absent, the projector calls
+   * `synthesiseDisplayValue` from `cee/factor-extraction/display-
+   * value.ts` against value/raw_value/unit/factor_type/cap. A
+   * raw-decimal guard discards unit-less bare-decimal results
+   * (e.g. "0.05") so the projection cannot leak the model-scale
+   * value through the display channel.
    */
+  readonly display_value?: string;
 }
 
 export interface DisplaySafeEdge {
@@ -76,16 +84,18 @@ export interface DisplaySafeGraph {
 }
 
 /**
- * Shape of a raw input node consulted by `projectNode`. Only the
- * declared display-safe fields (`id`, `label`, `kind`, `category`,
- * `unit`, `intervention_summary`) are projected onto `DisplaySafeNode`.
+ * Shape of a raw input node consulted by `projectNode`. The
+ * projection emits `id`, `label`, `kind`, `category`, `unit`,
+ * `intervention_summary`, and `display_value` (A2.2). Numeric
+ * fields (`value`, `raw_value`, `cap`) are READ here so
+ * `synthesiseDisplayValue` can format them when an existing
+ * `display_value` is absent — but they are NEVER projected onto
+ * `DisplaySafeNode`. Sonnet sees the formatted string, never the
+ * raw float (A3.1 Task 6 contract).
  *
- * V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
- * `raw_value`, and `cap` are stripped from the LLM-facing projection
- * and therefore are NOT read here even if present on the input.
- * `observed_state` is inspected only for the `unit` fallback (see
- * `extractNodeUnit`); its inner `value` / `raw_value` / `cap` are
- * deliberately ignored.
+ * `observed_state` is the canonical GraphV3T nesting; the
+ * extractors read both compact-top-level and `observed_state.*`
+ * shapes for value / raw_value / unit / cap / factor_type.
  */
 interface RawNodeShape {
   readonly id?: unknown;
@@ -95,10 +105,25 @@ interface RawNodeShape {
   readonly unit?: unknown;
   readonly intervention_summary?: unknown;
   /**
-   * Canonical GraphV3T nests `unit` under `observed_state`. Only that
-   * inner field is consulted (label-only); inner numeric fields
-   * (`value`, `raw_value`, `cap`) are stripped from the display
-   * projection.
+   * A3.1 Task 3 sets this on the raw graph after a
+   * `set_factor_value` mutation via `synthesiseDisplayValue`.
+   * `projectNode` prefers it verbatim when present; otherwise it
+   * synthesises from value/raw_value/unit/cap/factor_type below.
+   */
+  readonly display_value?: unknown;
+  /** Compact top-level user-unit value (numeric or string). */
+  readonly value?: unknown;
+  /** Compact top-level raw user-supplied number (e.g. 50000 for £50k). */
+  readonly raw_value?: unknown;
+  /** Normalisation cap (e.g. 100 for percentage, 100000 for currency). */
+  readonly cap?: unknown;
+  /** Factor type classification consumed by `synthesiseDisplayValue`. */
+  readonly factor_type?: unknown;
+  /**
+   * Canonical GraphV3T nesting. Both `unit` and the numeric
+   * fields (`value`, `raw_value`, `cap`, `factor_type`) may be
+   * inside this wrapper. The extractors read top-level first and
+   * fall back here.
    */
   readonly observed_state?: unknown;
 }
@@ -197,6 +222,53 @@ export function relationshipPhrase(signedStrength: number): string {
   return `${band} ${sign} link`;
 }
 
+/**
+ * Read a compact-top-level OR canonical `observed_state.*` numeric
+ * field. Returns `undefined` when neither shape carries a finite
+ * number. Mirror of `extractNodeUnit`'s two-tier pattern.
+ */
+function extractNodeNumeric(
+  raw: RawNodeShape,
+  field: 'value' | 'raw_value' | 'cap',
+): number | undefined {
+  const top = (raw as Record<string, unknown>)[field];
+  if (typeof top === 'number' && Number.isFinite(top)) return top;
+  const observed = raw.observed_state;
+  if (typeof observed === 'object' && observed !== null && field in observed) {
+    const inner = (observed as Record<string, unknown>)[field];
+    if (typeof inner === 'number' && Number.isFinite(inner)) return inner;
+  }
+  return undefined;
+}
+
+function extractNodeFactorType(raw: RawNodeShape): string | undefined {
+  const top = asString(raw.factor_type);
+  if (top !== undefined) return top;
+  const observed = raw.observed_state;
+  if (typeof observed === 'object' && observed !== null && 'factor_type' in observed) {
+    const inner = (observed as { factor_type?: unknown }).factor_type;
+    if (typeof inner === 'string') return inner;
+  }
+  return undefined;
+}
+
+/**
+ * Bare-decimal guard for the display channel. `synthesiseDisplayValue`
+ * is generally safe — it formats with units and bands — but on a
+ * factor with no unit / cap / factor_type it can fall through to the
+ * raw normalised number as a string ("0.05" / "0.75" / "1.0"). That's
+ * exactly the leakage A3.1 Task 6 stripped at the raw-numeric layer.
+ * Reject those shapes so the display channel cannot become a
+ * back-door for raw model floats.
+ *
+ * Allow legitimate formats: "5%", "£50,000", "18 months", "4.2/5",
+ * "Low (0.15)" — anything that has a unit symbol, currency prefix,
+ * suffix word, ratio, or qualitative band.
+ */
+function looksLikeRawDecimal(value: string): boolean {
+  return /^-?0\.\d+$/.test(value) || /^-?1\.0+$/.test(value);
+}
+
 function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   const id = asString(raw.id);
   const label = asString(raw.label);
@@ -209,6 +281,7 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
     category?: string;
     unit?: string;
     intervention_summary?: string;
+    display_value?: string;
   } = { id, label, kind };
   const category = asString(raw.category);
   if (category !== undefined) node.category = category;
@@ -216,11 +289,47 @@ function projectNode(raw: RawNodeShape): DisplaySafeNode | null {
   if (unit !== undefined) node.unit = unit;
   const interventionSummary = asString(raw.intervention_summary);
   if (interventionSummary !== undefined) node.intervention_summary = interventionSummary;
-  // V5 D1 golden-path closure (A3.1 Task 6): node `value`, `raw_value`,
-  // and `cap` are deliberately omitted from the display projection.
-  // The raw ContextPack.graph still carries them for handler / freshness
-  // / edit_graph reads; the LLM-facing display graph carries label +
-  // unit + intervention_summary only.
+
+  // V5 A2.2 — display_value re-introduction.
+  //
+  // Source priority:
+  //   1. Existing `display_value` on the raw input. Set by
+  //      `set_factor_value` post-mutation (A3.1 Task 3) using the
+  //      same `synthesiseDisplayValue` formatter. Use it verbatim
+  //      so handler-set values survive without recomputation.
+  //   2. Synthesise from value / raw_value / unit / cap /
+  //      factor_type via the canonical formatter.
+  //
+  // After either source, the raw-decimal guard discards bare
+  // model-scale strings ("0.05", "1.0") so a unit-less factor cannot
+  // leak the underlying float through the display channel.
+  //
+  // Raw `value` / `raw_value` / `cap` remain stripped from the
+  // projection (A3.1 Task 6 contract); only the formatted string
+  // reaches Sonnet.
+  const existing = asString(raw.display_value);
+  let displayCandidate: string | undefined;
+  if (existing !== undefined && existing.length > 0) {
+    displayCandidate = existing;
+  } else {
+    const value = extractNodeNumeric(raw, 'value');
+    const rawValue = extractNodeNumeric(raw, 'raw_value');
+    const cap = extractNodeNumeric(raw, 'cap');
+    const factorType = extractNodeFactorType(raw);
+    const synthesised = synthesiseDisplayValue({
+      ...(value !== undefined ? { value } : {}),
+      ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      ...(factorType !== undefined ? { factor_type: factorType } : {}),
+      ...(cap !== undefined ? { cap } : {}),
+    });
+    if (synthesised !== undefined && synthesised.length > 0) {
+      displayCandidate = synthesised;
+    }
+  }
+  if (displayCandidate !== undefined && !looksLikeRawDecimal(displayCandidate)) {
+    node.display_value = displayCandidate;
+  }
   return node;
 }
 
@@ -305,7 +414,8 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     `to_label`. `_raw_provenance` is stripped (diagnostic-only).
  *
  *   - Nodes: `id`, `label`, `kind`, `category?`, `unit?` (label only),
- *     and `intervention_summary?` survive. Per V5 D1 golden-path
+ *     `intervention_summary?`, and `display_value?` (A2.2) survive.
+ *     Per V5 D1 golden-path
  *     closure (A3.1 Task 6), node-level `value`, `raw_value`, and
  *     `cap` are stripped from the LLM-facing projection (including
  *     when nested under canonical `observed_state.{value,raw_value,
@@ -320,6 +430,19 @@ function projectEdge(raw: RawEdgeShape, labelMap: ReadonlyMap<string, string>): 
  *     The `unit` extractor still reads compact top-level `unit`
  *     first and canonical `observed_state.unit` second so the
  *     assembler raw-graph fallback preserves the user-facing label.
+ *
+ *     A2.2 reintroduces `display_value` — the pre-formatted
+ *     user-facing string ("5%", "£50,000", "18 months") — because
+ *     A3.1's full value-strip left Sonnet unable to answer "what
+ *     is the current churn rate?". The display channel carries
+ *     the formatted string only; the underlying floats remain
+ *     stripped. Source priority: existing `display_value` on the
+ *     raw input is preferred verbatim (set by `set_factor_value`
+ *     post-mutation, A3.1 Task 3); otherwise the projector calls
+ *     `synthesiseDisplayValue` against value / raw_value / unit /
+ *     factor_type / cap. A bare-decimal guard rejects unit-less
+ *     results like "0.05" / "1.0" so the display channel cannot
+ *     leak the model-scale value through the front door.
  *
  *   - Edge strength resolution accepts every shape that can reach
  *     `ContextPack.graph`: compact (`strength: number`), canonical

@@ -23,6 +23,8 @@ import { describe, it, expect } from 'vitest';
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import type { ProposalAction } from '../../../routing/types.js';
 
+import { assembleContextPack } from '../../../context/context-pack-assembler.js';
+import type { GraphWithOptions } from '../../../context/context-pack-assembler.js';
 import { createSetFactorValueHandler } from '../set-factor-value.js';
 import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
 import {
@@ -222,5 +224,89 @@ describe('A3.1 Task 3 — adjust_edge_strength stamps edge provenance', () => {
     // Prior reasoning is preserved (only source is overwritten).
     expect(edge?.provenance?.reasoning).toBe('from the brief');
     expect(edge?.provenance_display).toBe('user_set');
+  });
+});
+
+describe('A2.2 set-then-read — handler-stamped display_value reaches the LLM display projection', () => {
+  it('set_factor_value mutates f-churn to 5% → next-turn display_graph node has display_value "5%" with no raw value/raw_value/cap', async () => {
+    // End-to-end round-trip across the two layers:
+    //   1. Handler (commit-side):  `set_factor_value` mutates `f-churn`
+    //      to 5% and stamps `display_value` via `synthesiseDisplayValue`
+    //      (A3.1 Task 3) on the persisted GraphV3T.
+    //   2. Next turn (LLM-facing): the persisted graph is loaded as a
+    //      ContextPack input; `formatGraphForContext` reads the existing
+    //      `display_value` verbatim (A2.2 source priority #1) and emits
+    //      it on the display node — while stripping the underlying
+    //      `value` / `raw_value` / `cap` floats per A3.1 Task 6.
+    // The two layers MUST agree: the handler writes the formatted string
+    // exactly where the formatter expects to read it on the next turn.
+    const ingress = buildD1Fixture();
+    const proposal: ProposalAction = {
+      handler_id: 'set_factor_value',
+      entity: {
+        id: 'f-churn',
+        kind: 'node',
+        resolution_status: 'resolved',
+        resolution_method: 'id_match',
+      },
+      parameters: [
+        {
+          name: 'value',
+          value: { value: 5, unit: '%', cap: 100 },
+          operator: 'set',
+          source: 'user_explicit',
+        },
+      ],
+      cited_context_fields: [],
+    };
+    const handler = createSetFactorValueHandler();
+    const outcome = await handler(buildInvocation(ingress, proposal));
+    const persistedGraph = outcome.mutated_graph as GraphV3T;
+
+    // Handler-side: display_value is stamped on the persisted node.
+    const persistedChurn = persistedGraph.nodes.find((n) => n.id === 'f-churn');
+    expect(persistedChurn?.display_value).toBe('5%');
+
+    // Next-turn ContextPack assembly via the raw-graph fallback path
+    // (caller did not pre-compact the graph). assembleContextPack
+    // produces `display_graph` via `formatGraphForContext`.
+    const pack = assembleContextPack({
+      payload: {
+        kind: 'message',
+        stage: 'analyse',
+        message: 'what is the current churn rate?',
+        scenario_id: 'scn-a22',
+        turn_id: 'turn-a22',
+        created_at: new Date().toISOString(),
+      } as Parameters<typeof assembleContextPack>[0]['payload'],
+      priorTurns: [],
+      graph: persistedGraph as unknown as GraphWithOptions,
+    });
+
+    const displayChurn = pack.display_graph.nodes.find((n) => n.id === 'f-churn');
+    expect(displayChurn).toBeDefined();
+    // Display-channel string surfaces verbatim from the handler write.
+    expect(displayChurn!.display_value).toBe('5%');
+
+    // A3.1 Task 6 contract preserved: no raw `value` / `raw_value` /
+    // `cap` keys reach the LLM-facing display projection, even though
+    // the handler did update the underlying observed_state.
+    expect(displayChurn).not.toHaveProperty('value');
+    expect(displayChurn).not.toHaveProperty('raw_value');
+    expect(displayChurn).not.toHaveProperty('cap');
+    expect(displayChurn).not.toHaveProperty('observed_state');
+    const json = JSON.stringify(pack.display_graph.nodes);
+    expect(json).not.toMatch(/"value":/);
+    expect(json).not.toMatch(/"raw_value":/);
+    expect(json).not.toMatch(/"cap":/);
+
+    // Raw `pack.graph` retains the underlying floats for the
+    // handler / freshness / edit_graph paths — only the display
+    // channel strips them.
+    const rawNodes = pack.graph.nodes as Array<Record<string, unknown>>;
+    const rawChurn = rawNodes.find((n) => n.id === 'f-churn')!;
+    const rawObserved = rawChurn['observed_state'] as Record<string, unknown>;
+    expect(rawObserved['raw_value']).toBe(5);
+    expect(rawObserved['unit']).toBe('%');
   });
 });
