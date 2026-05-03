@@ -49,6 +49,7 @@ function isPublicRoute(path: string, method?: string): boolean {
     "/",
     "/v1/status",
     "/admin", // Admin UI and admin APIs have their own auth via X-Admin-Key
+    "/proxy/v5/turn", // Browser proxy — does its own origin validation and injects auth internally
   ];
 
   // Share GET/DELETE are public (token-based auth)

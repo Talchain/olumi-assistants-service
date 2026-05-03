@@ -620,6 +620,14 @@ const ConfigSchema = z.object({
     activationGuardEnabled: booleanString.default(true), // CEE_PROMPT_ACTIVATION_GUARD_ENABLED — prevents automated processes from setting stagingVersion/activeVersion
     autoMigrateEnabled: booleanString.default(false), // CEE_PROMPT_AUTO_MIGRATE — enables auto-migration of orchestrator prompt from registered default on startup (default: off)
   }),
+
+  // Browser Proxy — browser-safe proxy for V5 turns that bypasses Netlify Edge timeout.
+  // The proxy injects X-Olumi-Assist-Key server-side and validates request origins.
+  proxy: z.object({
+    browserProxyEnabled: booleanString.default(false), // BROWSER_PROXY_ENABLED — master switch
+    browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
+    browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(120_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (must be < ROUTE_TIMEOUT_MS)
+  }).default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -977,6 +985,11 @@ function parseConfig(): Config {
       environment: env.PROMPTS_ENVIRONMENT ?? env.DD_ENV, // PROMPTS_ENVIRONMENT takes precedence over DD_ENV
       activationGuardEnabled: env.CEE_PROMPT_ACTIVATION_GUARD_ENABLED,
       autoMigrateEnabled: env.CEE_PROMPT_AUTO_MIGRATE,
+    },
+    proxy: {
+      browserProxyEnabled: env.BROWSER_PROXY_ENABLED,
+      browserProxyAllowedOrigins: env.BROWSER_PROXY_ALLOWED_ORIGINS,
+      browserProxyTimeoutMs: env.BROWSER_PROXY_TIMEOUT_MS,
     },
   };
 
