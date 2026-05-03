@@ -207,6 +207,11 @@ export const TelemetryEvents = {
   // Goal inference (defence-in-depth for missing goal nodes)
   CeeGoalInferred: "cee.draft_graph.goal_inferred",
 
+  // Deterministic graph enforcement (Stage 4 substep 8b)
+  CeeInboundSumRescaled: "cee.draft_graph.inbound_sum_rescaled",
+  CeeBridgeChainRepaired: "cee.draft_graph.bridge_chain_repaired",
+  CeeEnforcementCompleted: "cee.draft_graph.enforcement_completed",
+
   // Connectivity validation (P0 diagnostics)
   CeeConnectivityCheck: "cee.draft_graph.connectivity_check",
 

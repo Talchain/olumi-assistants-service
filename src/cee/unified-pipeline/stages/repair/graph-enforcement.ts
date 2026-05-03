@@ -4,22 +4,30 @@
  * Two deterministic repairs applied after all topology changes (connectivity)
  * and before the clarifier:
  *
- *   1. fixBridgeChaining  — removes forbidden outcome↔risk edges, adds goal
- *                            bridges with sign-correct semantics (outcome→goal
- *                            positive, risk→goal negative)
+ *   1. fixBridgeChaining  — removes forbidden outcome↔risk edges, adds goal bridges
+ *                            with sign-correct semantics (outcome→goal +, risk→goal −)
  *   2. applyBudgetRescale — scales causal inbound edges (factor→outcome/risk)
  *                            so Σ|mean| ≤ BUDGET_TARGET per node
  *
+ * After both repairs, runs an authoritative post-enforcement re-validation
+ * via graph-validator. The Zod safety net at substep 10 (structural-parse)
+ * is downstream of this and validates final shape.
+ *
  * Only outcome and risk nodes are budget-enforced. Goal/factor/option/etc
- * are excluded. Only factor/action→outcome/risk causal edges are rescaled —
+ * are excluded. Only factor→outcome/risk causal edges are rescaled —
  * structural (option→factor), bridge (outcome/risk→goal), bidirected, and
  * scaffolding edges are excluded.
+ *
+ * Gated by CEE_DETERMINISTIC_ENFORCEMENT_ENABLED (default true).
  */
 
+import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { patchEdgeNumeric } from "../../utils/edge-format.js";
+import { config } from "../../../../config/index.js";
 import { log } from "../../../../utils/telemetry.js";
+import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -44,7 +52,7 @@ const ENFORCEABLE_KINDS = new Set(["outcome", "risk"]);
  *
  * Excluded by design:
  * - "option"/"decision" — these would be forbidden shortcuts (sweep removes them)
- * - "outcome"/"risk"    — bridge chains (handled by fixBridgeChaining in Commit 2)
+ * - "outcome"/"risk"    — bridge chains (fixBridgeChaining removes them)
  * - "goal"/"constraint" — never causal inbound
  */
 const RESCALABLE_SOURCE_KINDS = new Set(["factor", "action"]);
@@ -57,7 +65,7 @@ const ORPHAN_BRIDGE_MEAN = 0.3;
 const ORPHAN_BRIDGE_STD = 0.2;
 const ORPHAN_BRIDGE_EXISTENCE = 0.7;
 
-/** Default std/existence for derived bridge edges. */
+/** Default std for derived bridge edges. */
 const DERIVED_BRIDGE_STD = 0.15;
 const DERIVED_BRIDGE_EXISTENCE = 0.9;
 
@@ -233,8 +241,8 @@ interface BridgeAddition {
 /**
  * Compute the strength for a new bridge-to-goal edge.
  * Sign is determined ENTIRELY by the bridge node kind:
- *   - outcome → goal: positive (outcomes help the goal)
- *   - risk    → goal: negative (risks hurt the goal)
+ *   - outcome → goal: positive
+ *   - risk    → goal: negative
  * The magnitude is half the strongest |inbound| mean of the bridge node,
  * or `ORPHAN_BRIDGE_MEAN` if no usable inbound exists.
  */
@@ -265,7 +273,7 @@ function computeBridgeMean(
     existence = ORPHAN_BRIDGE_EXISTENCE;
   }
 
-  // Sign is fixed by bridge semantics — never derived from inbound strength.
+  // Sign is fixed by bridge semantics.
   const mean = nodeKind === "risk" ? -magnitude : magnitude;
   return { mean, std, existence };
 }
@@ -376,4 +384,84 @@ export function fixBridgeChaining(
     removedCount: toRemove.size,
     goalEdgesAdded: newEdges.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator entry point
+// ---------------------------------------------------------------------------
+
+export function applyDeterministicEnforcement(ctx: StageContext): void {
+  if (!ctx.graph) return;
+  if (!config.cee.deterministicEnforcementEnabled) return;
+
+  const graph = ctx.graph as unknown as GraphT;
+  const format: EdgeFormat = ctx.detectedEdgeFormat ?? "V1_FLAT";
+  const requestId = ctx.requestId;
+
+  // Order: bridge chain repair first (may add goal edges that affect topology),
+  // then budget rescale (rescales causal inbound — bridge edges to goal are
+  // excluded by isRescalableInbound, so order is technically independent for
+  // budget sums — but bridge-first is the contractual order from the brief).
+  const bridgeResult = fixBridgeChaining(graph, format, requestId);
+  const budgetResult = applyBudgetRescale(graph, format, requestId);
+
+  // Append repairs deterministically: bridge before budget (matches call order).
+  const allRepairs = [...bridgeResult.repairs, ...budgetResult.repairs];
+  if (allRepairs.length > 0) {
+    ctx.deterministicRepairs = [
+      ...(ctx.deterministicRepairs ?? []),
+      ...allRepairs,
+    ];
+  }
+
+  // Authoritative post-enforcement re-validation. Errors here would mean
+  // enforcement created an invalid graph — emit telemetry but do not throw
+  // (Stage 10 structural-parse remains the final Zod safety net).
+  let postValidationErrorCount = 0;
+  try {
+    const revalidation = validateGraphDeterministic({
+      graph: graph as Parameters<typeof validateGraphDeterministic>[0]["graph"],
+      requestId,
+      phase: "post_enforcement" as Parameters<typeof validateGraphDeterministic>[0]["phase"],
+    });
+    postValidationErrorCount = revalidation.errors.length;
+    if (postValidationErrorCount > 0) {
+      log.warn({
+        event: "cee.draft_graph.enforcement_post_validation_errors",
+        request_id: requestId,
+        error_count: postValidationErrorCount,
+        codes: revalidation.errors.map((e) => e.code),
+      }, `Post-enforcement validation surfaced ${postValidationErrorCount} errors`);
+    }
+  } catch (err) {
+    log.warn({
+      event: "cee.draft_graph.enforcement_post_validation_failed",
+      request_id: requestId,
+      err: (err as Error)?.message,
+    }, "Post-enforcement validation threw — non-fatal");
+  }
+
+  ctx.repairTrace = {
+    ...(ctx.repairTrace ?? {}),
+    deterministic_enforcement: {
+      ran: true,
+      bridge_chains_removed: bridgeResult.removedCount,
+      bridge_goal_edges_added: bridgeResult.goalEdgesAdded,
+      nodes_rescaled: budgetResult.nodesRescaled,
+      edges_skipped_non_finite: budgetResult.edgesSkipped,
+      total_repairs: allRepairs.length,
+      post_validation_error_count: postValidationErrorCount,
+    },
+  };
+
+  log.info({
+    event: "cee.draft_graph.enforcement_completed",
+    request_id: requestId,
+    bridge_chains_removed: bridgeResult.removedCount,
+    goal_edges_added: bridgeResult.goalEdgesAdded,
+    nodes_rescaled: budgetResult.nodesRescaled,
+    edges_skipped: budgetResult.edgesSkipped,
+    post_validation_errors: postValidationErrorCount,
+    edge_format: format,
+  }, "Deterministic graph enforcement completed");
 }

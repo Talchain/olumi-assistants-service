@@ -409,6 +409,7 @@ const ConfigSchema = z.object({
     // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
     patchPreValidationEnabled: booleanString.default(true), // If true, apply structural validation to edit_graph patches before assembly
     patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
+    deterministicEnforcementEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ENFORCEMENT_ENABLED — budget rescale + bridge chain repair (Stage 4 substep 8b)
     editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
     editInterventionRoutingEnabled: booleanString.default(true), // CEE_EDIT_INTERVENTION_ROUTING_ENABLED — read interventions from data.interventions + slash-keyed entries
     // Session cache (for /ask endpoint)
@@ -794,6 +795,7 @@ function parseConfig(): Config {
       // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
       patchPreValidationEnabled: env.CEE_PATCH_PRE_VALIDATION_ENABLED,
       patchBudgetEnabled: env.CEE_PATCH_BUDGET_ENABLED,
+      deterministicEnforcementEnabled: env.CEE_DETERMINISTIC_ENFORCEMENT_ENABLED,
       editNormalisationEnabled: env.CEE_EDIT_NORMALISATION_ENABLED,
       editInterventionRoutingEnabled: env.CEE_EDIT_INTERVENTION_ROUTING_ENABLED,
       // Session cache TTL

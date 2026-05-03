@@ -15,6 +15,7 @@
  * 6. Late STRP                — Rules 3,5 with goalConstraints context
  * 7. Edge field restoration   — restores V4 fields using stash + nodeRenames
  * 8. Connectivity             — wires orphans to goal, ensures goal exists
+ * 8b. Deterministic enforcement — budget rescale + bridge chain repair (gated)
  * 9. Clarifier                — last graph-modifying step (needs quality)
  * 10. Structural parse        — DraftGraphOutput.parse safety net
  *
@@ -23,6 +24,8 @@
  * - 4 BEFORE 7: nodeRenames from goal merge needed for stash restoration
  * - 6 BEFORE 7: late STRP may modify edges that restoration must preserve
  * - 7 AFTER all topology changes: restoration is the last edge mutation
+ * - 8 BEFORE 8b: enforcement needs final topology (goal, connectivity)
+ * - 8b BEFORE 9: clarifier sees correct budgets
  * - 9 BEFORE 10: structural parse validates final graph state
  *
  * EARLY RETURN RULES:
@@ -47,6 +50,7 @@ import { runEdgeRestoration } from "./edge-restoration.js";
 import { runConnectivity } from "./connectivity.js";
 import { runClarifier } from "./clarifier.js";
 import { runStructuralParse } from "./structural-parse.js";
+import { applyDeterministicEnforcement } from "./graph-enforcement.js";
 
 /**
  * Stage 4: Run all repair substeps in order.
@@ -87,6 +91,9 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
 
   // Substep 8: Connectivity + goal repair
   runConnectivity(ctx);
+
+  // Substep 8b: Deterministic enforcement (budget rescale + bridge chain repair)
+  applyDeterministicEnforcement(ctx);
 
   // Substep 9: Clarifier (last graph-modifying step)
   await runClarifier(ctx);

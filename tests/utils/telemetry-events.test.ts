@@ -146,6 +146,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Goal inference (defence-in-depth for missing goal nodes)
         CeeGoalInferred: "cee.draft_graph.goal_inferred",
 
+        // Deterministic graph enforcement (Stage 4 substep 8b)
+        CeeInboundSumRescaled: "cee.draft_graph.inbound_sum_rescaled",
+        CeeBridgeChainRepaired: "cee.draft_graph.bridge_chain_repaired",
+        CeeEnforcementCompleted: "cee.draft_graph.enforcement_completed",
+
         // CEE v1 Explain Graph events (v1.12.0)
         CeeExplainGraphRequested: "cee.explain_graph.requested",
         CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
@@ -887,6 +892,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.PreflightRejected,
         TelemetryEvents.PreflightCompleted,
         TelemetryEvents.CeeBriefSignals,
+        // Deterministic graph enforcement (Stage 4 substep 8b) — diagnostic, no Datadog
+        TelemetryEvents.CeeInboundSumRescaled,
+        TelemetryEvents.CeeBridgeChainRepaired,
+        TelemetryEvents.CeeEnforcementCompleted,
         TelemetryEvents.NodeKindNormalized,
         TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
@@ -1135,6 +1144,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Goal inference (defence-in-depth for missing goal nodes)
         "cee.draft_graph.goal_inferred",
+
+        // Deterministic graph enforcement (Stage 4 substep 8b)
+        "cee.draft_graph.inbound_sum_rescaled",
+        "cee.draft_graph.bridge_chain_repaired",
+        "cee.draft_graph.enforcement_completed",
 
         // CEE v1 Explain Graph events
         "cee.explain_graph.requested",

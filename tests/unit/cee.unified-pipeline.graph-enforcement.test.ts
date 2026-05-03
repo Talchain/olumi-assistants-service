@@ -1,12 +1,10 @@
 /**
- * Deterministic Graph Enforcement — Unit Tests (Commit 1)
+ * Deterministic Graph Enforcement — Unit Tests
  *
- * Covers: readEdgeMean / readEdgeStd readers, applyBudgetRescale algorithm,
- * all 6 v194c benchmark violation cases, EPSILON tolerance, non-finite
- * handling, sign / ratio preservation, kind / structural / bidirected
- * exclusions, and LEGACY format support.
- *
- * Subsequent commits add fixBridgeChaining and integration tests.
+ * Covers: applyBudgetRescale, fixBridgeChaining, applyDeterministicEnforcement,
+ * edge value readers, all 6 benchmark violation cases, feature flag gating,
+ * sign-correct goal bridges, non-finite handling, EPSILON tolerance,
+ * deterministic ordering, internal-language audit.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -21,8 +19,13 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 }));
 
 vi.mock("../../src/config/index.js", () => ({
-  config: { cee: {}, features: {} },
+  config: { cee: { deterministicEnforcementEnabled: true }, features: {} },
   isProduction: vi.fn().mockReturnValue(true),
+}));
+
+// Mock the graph validator so post-enforcement validation is a no-op in tests.
+vi.mock("../../src/validators/graph-validator.js", () => ({
+  validateGraph: vi.fn(() => ({ errors: [], warnings: [] })),
 }));
 
 // ── Imports ──────────────────────────────────────────────────────────────────
@@ -32,8 +35,11 @@ import {
   readEdgeStd,
   applyBudgetRescale,
   fixBridgeChaining,
+  applyDeterministicEnforcement,
 } from "../../src/cee/unified-pipeline/stages/repair/graph-enforcement.js";
+import type { EdgeFormat } from "../../src/cee/unified-pipeline/utils/edge-format.js";
 import { log } from "../../src/utils/telemetry.js";
+import { config } from "../../src/config/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,21 +49,34 @@ function makeGraph(overrides: { nodes?: any[]; edges?: any[] } = {}): any {
     default_seed: 17,
     meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" },
     nodes: overrides.nodes ?? [
-      { id: "dec_1", kind: "decision" },
-      { id: "opt_a", kind: "option" },
-      { id: "fac_1", kind: "factor" },
-      { id: "fac_2", kind: "factor" },
-      { id: "out_1", kind: "outcome" },
-      { id: "risk_1", kind: "risk" },
-      { id: "goal_1", kind: "goal" },
+      { id: "dec_1", kind: "decision", label: "Decision" },
+      { id: "opt_a", kind: "option", label: "Option A" },
+      { id: "fac_1", kind: "factor", label: "Factor 1" },
+      { id: "fac_2", kind: "factor", label: "Factor 2" },
+      { id: "out_1", kind: "outcome", label: "Outcome 1" },
+      { id: "risk_1", kind: "risk", label: "Risk 1" },
+      { id: "goal_1", kind: "goal", label: "Goal" },
     ],
     edges: overrides.edges ?? [
-      { from: "fac_1", to: "out_1", strength_mean: 0.4, strength_std: 0.1 },
-      { from: "fac_2", to: "out_1", strength_mean: 0.3, strength_std: 0.08 },
-      { from: "fac_1", to: "risk_1", strength_mean: -0.3, strength_std: 0.1 },
-      { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1 },
-      { from: "risk_1", to: "goal_1", strength_mean: -0.5, strength_std: 0.15 },
+      { from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "opt_a", to: "fac_2", strength_mean: 1, strength_std: 0.01, belief_exists: 1, effect_direction: "positive" },
+      { from: "fac_1", to: "out_1", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+      { from: "fac_2", to: "out_1", strength_mean: 0.3, strength_std: 0.08, belief_exists: 0.85, effect_direction: "positive" },
+      { from: "fac_1", to: "risk_1", strength_mean: -0.3, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
+      { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.95, effect_direction: "positive" },
+      { from: "risk_1", to: "goal_1", strength_mean: -0.5, strength_std: 0.15, belief_exists: 0.9, effect_direction: "negative" },
     ],
+  };
+}
+
+function makeCtx(graph: any): any {
+  return {
+    graph,
+    requestId: "test-req-001",
+    detectedEdgeFormat: "V1_FLAT" as EdgeFormat,
+    deterministicRepairs: [],
+    repairTrace: {},
   };
 }
 
@@ -73,15 +92,15 @@ function sumAbsCausalInbound(edges: any[], nodes: any[], targetId: string): numb
 // =============================================================================
 
 describe("readEdgeMean", () => {
-  it("returns strength_mean for V1_FLAT", () => {
+  it("returns strength_mean for V1_FLAT format", () => {
     expect(readEdgeMean({ from: "a", to: "b", strength_mean: 0.6 } as any, "V1_FLAT")).toBe(0.6);
   });
 
-  it("returns weight for LEGACY", () => {
+  it("returns weight for LEGACY format", () => {
     expect(readEdgeMean({ from: "a", to: "b", weight: 0.7 } as any, "LEGACY")).toBe(0.7);
   });
 
-  it("returns undefined when field absent", () => {
+  it("returns undefined when field is absent", () => {
     expect(readEdgeMean({ from: "a", to: "b" } as any, "V1_FLAT")).toBeUndefined();
   });
 
@@ -113,7 +132,7 @@ describe("readEdgeStd", () => {
 });
 
 // =============================================================================
-// applyBudgetRescale — threshold and edge cases
+// applyBudgetRescale
 // =============================================================================
 
 describe("applyBudgetRescale", () => {
@@ -121,46 +140,62 @@ describe("applyBudgetRescale", () => {
     vi.clearAllMocks();
   });
 
+  // ── Threshold and edge cases ─────────────────────────────────────────────
+
   it("does not rescale when sum ≤ 1.0", () => {
-    const graph = makeGraph(); // out_1 sum = 0.7
-    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    const graph = makeGraph(); // out_1 inbound sum = 0.7
+    const { repairs, nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
     expect(nodesRescaled).toBe(0);
+    expect(repairs).toHaveLength(0);
   });
 
-  it("does not rescale when sum exactly 1.0", () => {
+  it("does not rescale when sum is exactly 1.0", () => {
     const graph = makeGraph({
       nodes: [
-        { id: "fac_1", kind: "factor" }, { id: "fac_2", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "fac_1", kind: "factor" },
+        { id: "fac_2", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
         { from: "fac_2", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(0);
   });
 
   it("does not rescale at sum = 1.00000001 (within EPSILON tolerance)", () => {
     const graph = makeGraph({
       nodes: [
-        { id: "fac_1", kind: "factor" }, { id: "fac_2", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "fac_1", kind: "factor" },
+        { id: "fac_2", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
         { from: "fac_2", to: "out_1", strength_mean: 0.50000001, strength_std: 0.1 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(0);
   });
 
   it("rescales at sum = 1.0001 (outside EPSILON)", () => {
     const graph = makeGraph({
-      nodes: [{ id: "fac_1", kind: "factor" }, { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" }],
-      edges: [{ from: "fac_1", to: "out_1", strength_mean: 1.0001, strength_std: 0.1 }],
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 1.0001, strength_std: 0.1 },
+      ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(1);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(1);
   });
 
   // ── 6 benchmark violation cases ──────────────────────────────────────────
@@ -170,7 +205,8 @@ describe("applyBudgetRescale", () => {
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
         { id: "fac_c", kind: "factor" }, { id: "fac_d", kind: "factor" },
-        { id: "out_feature_delivery", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_feature_delivery", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "out_feature_delivery", strength_mean: 0.35, strength_std: 0.08 },
@@ -180,15 +216,22 @@ describe("applyBudgetRescale", () => {
         { from: "out_feature_delivery", to: "goal_1", strength_mean: 0.8, strength_std: 0.1 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT", "hiring").nodesRescaled).toBe(1);
+
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT", "hiring");
+    expect(nodesRescaled).toBe(1);
     expect(sumAbsCausalInbound(graph.edges, graph.nodes, "out_feature_delivery")).toBeCloseTo(0.95, 5);
+
     const inbound = graph.edges.filter((e: any) => e.to === "out_feature_delivery");
     expect(inbound[0].strength_mean / inbound[1].strength_mean).toBeCloseTo(0.35 / 0.30, 5);
+    expect(inbound[1].strength_mean / inbound[2].strength_mean).toBeCloseTo(0.30 / 0.24, 5);
     for (const e of inbound) expect(e.strength_mean).toBeGreaterThan(0);
+
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "cee.draft_graph.inbound_sum_rescaled",
-        node_id: "out_feature_delivery", node_kind: "outcome", scaled_sum: 0.95,
+        node_id: "out_feature_delivery",
+        node_kind: "outcome",
+        scaled_sum: 0.95,
       }),
       expect.any(String),
     );
@@ -199,7 +242,8 @@ describe("applyBudgetRescale", () => {
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
         { id: "fac_c", kind: "factor" }, { id: "fac_d", kind: "factor" },
-        { id: "risk_smb_churn", kind: "risk" }, { id: "goal_1", kind: "goal" },
+        { id: "risk_smb_churn", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "risk_smb_churn", strength_mean: 0.40, strength_std: 0.10 },
@@ -209,7 +253,8 @@ describe("applyBudgetRescale", () => {
         { from: "risk_smb_churn", to: "goal_1", strength_mean: -0.6, strength_std: 0.12 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(1);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(1);
     expect(sumAbsCausalInbound(graph.edges, graph.nodes, "risk_smb_churn")).toBeCloseTo(0.95, 5);
   });
 
@@ -218,7 +263,8 @@ describe("applyBudgetRescale", () => {
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
         { id: "fac_c", kind: "factor" }, { id: "fac_d", kind: "factor" },
-        { id: "out_revenue_growth", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_revenue_growth", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "out_revenue_growth", strength_mean: 0.50, strength_std: 0.12 },
@@ -228,7 +274,8 @@ describe("applyBudgetRescale", () => {
         { from: "out_revenue_growth", to: "goal_1", strength_mean: 0.7, strength_std: 0.1 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(1);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(1);
     expect(sumAbsCausalInbound(graph.edges, graph.nodes, "out_revenue_growth")).toBeCloseTo(0.95, 5);
     const inbound = graph.edges.filter((e: any) => e.to === "out_revenue_growth");
     expect(inbound[0].strength_mean / inbound[1].strength_mean).toBeCloseTo(0.50 / 0.40, 5);
@@ -239,7 +286,8 @@ describe("applyBudgetRescale", () => {
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
         { id: "fac_c", kind: "factor" },
-        { id: "risk_burn_acceleration", kind: "risk" }, { id: "goal_1", kind: "goal" },
+        { id: "risk_burn_acceleration", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "risk_burn_acceleration", strength_mean: 0.55, strength_std: 0.12 },
@@ -248,7 +296,8 @@ describe("applyBudgetRescale", () => {
         { from: "risk_burn_acceleration", to: "goal_1", strength_mean: -0.7, strength_std: 0.1 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(1);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(1);
     expect(sumAbsCausalInbound(graph.edges, graph.nodes, "risk_burn_acceleration")).toBeCloseTo(0.95, 5);
   });
 
@@ -256,7 +305,8 @@ describe("applyBudgetRescale", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
-        { id: "out_error_reduction", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_error_reduction", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "out_error_reduction", strength_mean: 0.70, strength_std: 0.15 },
@@ -264,7 +314,8 @@ describe("applyBudgetRescale", () => {
         { from: "out_error_reduction", to: "goal_1", strength_mean: 0.6, strength_std: 0.1 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(1);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(1);
     expect(sumAbsCausalInbound(graph.edges, graph.nodes, "out_error_reduction")).toBeCloseTo(0.95, 5);
   });
 
@@ -273,7 +324,8 @@ describe("applyBudgetRescale", () => {
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
         { id: "fac_c", kind: "factor" },
-        { id: "risk_margin_erosion", kind: "risk" }, { id: "goal_1", kind: "goal" },
+        { id: "risk_margin_erosion", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "risk_margin_erosion", strength_mean: 0.50, strength_std: 0.10 },
@@ -282,7 +334,8 @@ describe("applyBudgetRescale", () => {
         { from: "risk_margin_erosion", to: "goal_1", strength_mean: -0.5, strength_std: 0.12 },
       ],
     });
-    expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(1);
+    const { nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(nodesRescaled).toBe(1);
     expect(sumAbsCausalInbound(graph.edges, graph.nodes, "risk_margin_erosion")).toBeCloseTo(0.95, 5);
   });
 
@@ -290,27 +343,45 @@ describe("applyBudgetRescale", () => {
 
   it("scales single edge with |mean| > 1.0 via pure proportional scaling", () => {
     const graph = makeGraph({
-      nodes: [{ id: "fac_a", kind: "factor" }, { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" }],
-      edges: [{ from: "fac_a", to: "out_1", strength_mean: 1.5, strength_std: 0.2 }],
+      nodes: [
+        { id: "fac_a", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: 1.5, strength_std: 0.2 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1 },
+      ],
     });
     applyBudgetRescale(graph, "V1_FLAT");
-    expect(graph.edges[0].strength_mean).toBeCloseTo(0.95, 5); // 1.5 * (0.95/1.5)
+    const edge = graph.edges.find((e: any) => e.from === "fac_a" && e.to === "out_1");
+    // 1.5 * (0.95/1.5) = 0.95
+    expect(edge.strength_mean).toBeCloseTo(0.95, 5);
   });
 
   it("preserves sign on single negative edge with |mean| > 1.0", () => {
     const graph = makeGraph({
-      nodes: [{ id: "fac_a", kind: "factor" }, { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" }],
-      edges: [{ from: "fac_a", to: "risk_1", strength_mean: -1.5, strength_std: 0.2 }],
+      nodes: [
+        { id: "fac_a", kind: "factor" },
+        { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "risk_1", strength_mean: -1.5, strength_std: 0.2 },
+        { from: "risk_1", to: "goal_1", strength_mean: -0.5, strength_std: 0.1 },
+      ],
     });
     applyBudgetRescale(graph, "V1_FLAT");
-    expect(graph.edges[0].strength_mean).toBeCloseTo(-0.95, 5);
+    const edge = graph.edges.find((e: any) => e.from === "fac_a" && e.to === "risk_1");
+    expect(edge.strength_mean).toBeCloseTo(-0.95, 5);
   });
 
   it("preserves signs and ratios with mixed positive/negative inbound", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "out_1", strength_mean: 0.7, strength_std: 0.1 },
@@ -330,7 +401,8 @@ describe("applyBudgetRescale", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "out_1", strength_mean: 0.6, strength_std: 0.1 },
@@ -339,16 +411,18 @@ describe("applyBudgetRescale", () => {
     });
     const scale = 0.95 / 1.2;
     applyBudgetRescale(graph, "V1_FLAT");
-    expect(graph.edges[0].strength_std).toBeCloseTo(0.1 * scale, 5);
+    const a = graph.edges.find((e: any) => e.from === "fac_a" && e.to === "out_1");
+    expect(a.strength_std).toBeCloseTo(0.1 * scale, 5);
   });
 
-  // ── Excluded edges / kinds ───────────────────────────────────────────────
+  // ── Excluded edges ───────────────────────────────────────────────────────
 
   it("skips nodes with all zero-strength edges", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "out_1", strength_mean: 0, strength_std: 0 },
@@ -358,7 +432,7 @@ describe("applyBudgetRescale", () => {
     expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
   });
 
-  it("excludes goal nodes from rescaling (goal sum > 1.0 untouched)", () => {
+  it("excludes goal nodes from rescaling", () => {
     const graph = makeGraph({
       nodes: [
         { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
@@ -378,7 +452,8 @@ describe("applyBudgetRescale", () => {
     const graph = makeGraph({
       nodes: [
         { id: "opt_a", kind: "option" }, { id: "opt_b", kind: "option" },
-        { id: "fac_1", kind: "factor" }, { id: "goal_1", kind: "goal" },
+        { id: "fac_1", kind: "factor" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "opt_a", to: "fac_1", strength_mean: 0.6, strength_std: 0.01 },
@@ -388,11 +463,15 @@ describe("applyBudgetRescale", () => {
     expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
   });
 
-  it("excludes non-causal sources (option→outcome) from inbound sum", () => {
+  it("excludes structural edges (option→factor) from inbound sum to outcome", () => {
+    // Construct outcome with both a factor inbound (causal) and an inappropriate
+    // option inbound (option→outcome would be a forbidden shortcut, but we model
+    // it here to verify the source-kind filter would exclude it from the sum).
     const graph = makeGraph({
       nodes: [
         { id: "opt_a", kind: "option" }, { id: "fac_1", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "opt_a", to: "out_1", strength_mean: 1.0, strength_std: 0.01 },
@@ -400,12 +479,15 @@ describe("applyBudgetRescale", () => {
         { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1 },
       ],
     });
-    // Causal inbound sum = 0.6 (only factor counts) → no rescale
+
+    // Causal inbound = 0.6 (only factor counts) → no rescale
     expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
-    expect(graph.edges.find((e: any) => e.from === "fac_1" && e.to === "out_1").strength_mean).toBe(0.6);
+    const factorEdge = graph.edges.find((e: any) => e.from === "fac_1" && e.to === "out_1");
+    expect(factorEdge.strength_mean).toBe(0.6);
   });
 
-  it("excludes outcome→goal bridge edges (goal not budget-enforced)", () => {
+  it("excludes outcome→goal bridge edges from rescaling (when goal sum > 1)", () => {
+    // Confirms goal nodes are not budget-enforced.
     const graph = makeGraph({
       nodes: [
         { id: "out_1", kind: "outcome" }, { id: "out_2", kind: "outcome" },
@@ -423,23 +505,26 @@ describe("applyBudgetRescale", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_1", kind: "factor" }, { id: "fac_2", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "out_1", strength_mean: 0.7, strength_std: 0.1 },
         { from: "fac_2", to: "out_1", strength_mean: 0.7, strength_std: 0.1, edge_type: "bidirected" },
       ],
     });
+    // Only the directed edge counts → sum 0.7, no rescale
     expect(applyBudgetRescale(graph, "V1_FLAT").nodesRescaled).toBe(0);
   });
 
   // ── Non-finite handling ──────────────────────────────────────────────────
 
-  it("skips NaN strength edges and emits telemetry", () => {
+  it("skips edges with NaN strength and emits telemetry", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_a", to: "out_1", strength_mean: NaN, strength_std: 0.1 },
@@ -451,20 +536,28 @@ describe("applyBudgetRescale", () => {
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "cee.draft_graph.enforcement_edge_skipped",
-        edge_from: "fac_a", edge_to: "out_1", reason: "non_finite_strength",
+        edge_from: "fac_a",
+        edge_to: "out_1",
+        reason: "non_finite_strength",
       }),
       expect.any(String),
     );
   });
 
-  it("skips Infinity strength edges", () => {
+  it("skips edges with Infinity strength", () => {
     const graph = makeGraph({
-      nodes: [{ id: "fac_a", kind: "factor" }, { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" }],
-      edges: [{ from: "fac_a", to: "out_1", strength_mean: Infinity, strength_std: 0.1 }],
+      nodes: [
+        { id: "fac_a", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: Infinity, strength_std: 0.1 },
+      ],
     });
-    const result = applyBudgetRescale(graph, "V1_FLAT");
-    expect(result.edgesSkipped).toBe(1);
-    expect(result.nodesRescaled).toBe(0);
+    const { edgesSkipped, nodesRescaled } = applyBudgetRescale(graph, "V1_FLAT");
+    expect(edgesSkipped).toBe(1);
+    expect(nodesRescaled).toBe(0);
   });
 
   // ── LEGACY format ────────────────────────────────────────────────────────
@@ -473,11 +566,12 @@ describe("applyBudgetRescale", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
-        { from: "fac_a", to: "out_1", weight: 0.7 },
-        { from: "fac_b", to: "out_1", weight: 0.5 },
+        { from: "fac_a", to: "out_1", weight: 0.7, belief: 0.9 },
+        { from: "fac_b", to: "out_1", weight: 0.5, belief: 0.8 },
       ],
     });
     applyBudgetRescale(graph, "LEGACY");
@@ -513,6 +607,7 @@ describe("fixBridgeChaining", () => {
     const { removedCount, goalEdgesAdded } = fixBridgeChaining(graph, "V1_FLAT", "test");
     expect(removedCount).toBe(1);
     expect(goalEdgesAdded).toBe(2);
+
     expect(graph.edges.find((e: any) => e.from === "out_1" && e.to === "risk_1")).toBeUndefined();
 
     // outcome→goal: positive
@@ -529,6 +624,8 @@ describe("fixBridgeChaining", () => {
   });
 
   it("risk→goal bridge is negative even when inbound mean is positive", () => {
+    // Edge case: a risk node receives a positive-mean factor inbound
+    // (uncommon but possible). Bridge sign must still be negative.
     const graph = makeGraph({
       nodes: [
         { id: "fac_1", kind: "factor" },
@@ -541,6 +638,7 @@ describe("fixBridgeChaining", () => {
         { from: "risk_1", to: "out_1", strength_mean: 0.3, strength_std: 0.08 },
       ],
     });
+
     fixBridgeChaining(graph, "V1_FLAT");
     const riskGoal = graph.edges.find((e: any) => e.from === "risk_1" && e.to === "goal_1");
     expect(riskGoal.strength_mean).toBeLessThan(0);
@@ -617,7 +715,8 @@ describe("fixBridgeChaining", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_1", kind: "factor" },
-        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
@@ -632,7 +731,8 @@ describe("fixBridgeChaining", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_1", kind: "factor" },
-        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+        { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
@@ -646,7 +746,8 @@ describe("fixBridgeChaining", () => {
     const graph = makeGraph({
       nodes: [
         { id: "fac_1", kind: "factor" },
-        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+        { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
@@ -691,7 +792,8 @@ describe("fixBridgeChaining", () => {
       nodes: [
         { id: "fac_1", kind: "factor" },
         { id: "out_1", kind: "outcome" }, { id: "out_2", kind: "outcome" },
-        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+        { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
@@ -706,10 +808,11 @@ describe("fixBridgeChaining", () => {
     expect(goalEdgesAdded).toBe(3);
   });
 
-  it("derives bridge magnitude from soon-to-be-removed edge when no other inbound exists", () => {
-    // out_1 has no inbound → orphan path. risk_1's only inbound is the bridge
-    // edge being removed → uses that magnitude (the edge IS valid causal data
-    // even though it points to the wrong target).
+  it("uses default strength when bridge node has no other inbound", () => {
+    // out_1 has no inbound at all → orphan path → ORPHAN_BRIDGE_MEAN.
+    // risk_1's only "inbound" is the edge being removed → derives from
+    //   that edge's strength (the bridge edge IS valid causal data even
+    //   though it points to the wrong target).
     const graph = makeGraph({
       nodes: [
         { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
@@ -719,27 +822,40 @@ describe("fixBridgeChaining", () => {
     });
     fixBridgeChaining(graph, "V1_FLAT");
 
+    // out_1 has no inbound → orphan → +ORPHAN_BRIDGE_MEAN (positive, outcome)
     const outGoal = graph.edges.find((e: any) => e.from === "out_1" && e.to === "goal_1");
-    expect(outGoal.strength_mean).toBe(0.3); // ORPHAN_BRIDGE_MEAN, positive (outcome)
+    expect(outGoal.strength_mean).toBe(0.3);
     expect(outGoal.effect_direction).toBe("positive");
 
+    // risk_1 derives from the bridge edge it's losing: |0.3| * 0.5 = 0.15, negative
     const riskGoal = graph.edges.find((e: any) => e.from === "risk_1" && e.to === "goal_1");
-    expect(riskGoal.strength_mean).toBeCloseTo(-0.15, 5); // -|0.3 * 0.5|
+    expect(riskGoal.strength_mean).toBeCloseTo(-0.15, 5);
     expect(riskGoal.effect_direction).toBe("negative");
   });
 
   it("uses orphan defaults when both bridge endpoints are fully orphan", () => {
+    // Two outcome/risk nodes connected only to each other, with another edge
+    // to keep both endpoints reachable in the orphan-mean computation. The
+    // forbidden edge between them is the only edge each node has → after
+    // removal, both fall into the orphan path.
     const graph = makeGraph({
       nodes: [
-        { id: "out_orphan", kind: "outcome" }, { id: "risk_orphan", kind: "risk" },
-        { id: "out_other", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+        { id: "out_orphan", kind: "outcome" },
+        { id: "risk_orphan", kind: "risk" },
+        { id: "out_other", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
+        // forbidden bridge: out_orphan → out_other  (outcome→outcome)
         { from: "out_orphan", to: "out_other", strength_mean: 0.0, strength_std: 0.0 },
+        // forbidden bridge: risk_orphan → out_other  (risk→outcome)
         { from: "risk_orphan", to: "out_other", strength_mean: 0.0, strength_std: 0.0 },
       ],
     });
     fixBridgeChaining(graph, "V1_FLAT");
+
+    // Both source nodes have only zero-strength inbound elsewhere
+    // → strongestAbs = 0 → orphan defaults fire.
     const outGoal = graph.edges.find((e: any) => e.from === "out_orphan" && e.to === "goal_1");
     expect(outGoal.strength_mean).toBe(0.3);
     const riskGoal = graph.edges.find((e: any) => e.from === "risk_orphan" && e.to === "goal_1");
@@ -758,7 +874,9 @@ describe("fixBridgeChaining", () => {
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "cee.draft_graph.bridge_chain_repaired",
-        edge_from: "out_1", edge_to: "risk_1", repair_method: "remove_and_bridge",
+        edge_from: "out_1",
+        edge_to: "risk_1",
+        repair_method: "remove_and_bridge",
       }),
       expect.any(String),
     );
@@ -795,7 +913,8 @@ describe("fixBridgeChaining", () => {
       nodes: [
         { id: "fac_1", kind: "factor" },
         { id: "out_z", kind: "outcome" }, { id: "out_a", kind: "outcome" },
-        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+        { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
       ],
       edges: [
         { from: "fac_1", to: "out_z", strength_mean: 0.5, strength_std: 0.1 },
@@ -809,6 +928,164 @@ describe("fixBridgeChaining", () => {
     const g2 = buildGraph();
     fixBridgeChaining(g1, "V1_FLAT");
     fixBridgeChaining(g2, "V1_FLAT");
+
     expect(JSON.stringify(g1.edges)).toBe(JSON.stringify(g2.edges));
+  });
+});
+
+// =============================================================================
+// applyDeterministicEnforcement (integration)
+// =============================================================================
+
+describe("applyDeterministicEnforcement", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (config as any).cee.deterministicEnforcementEnabled = true;
+  });
+
+  it("skips when feature flag is off", () => {
+    (config as any).cee.deterministicEnforcementEnabled = false;
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_a", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: 0.7, strength_std: 0.1 },
+        { from: "fac_a", to: "risk_1", strength_mean: 0.6, strength_std: 0.1 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+      ],
+    });
+    const ctx = makeCtx(graph);
+    applyDeterministicEnforcement(ctx);
+    expect(graph.edges).toHaveLength(3);
+    expect(ctx.deterministicRepairs).toHaveLength(0);
+    expect(ctx.repairTrace.deterministic_enforcement).toBeUndefined();
+  });
+
+  it("skips when ctx.graph is undefined", () => {
+    applyDeterministicEnforcement(makeCtx(undefined));
+    expect(log.info).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event: "cee.draft_graph.enforcement_completed" }),
+      expect.any(String),
+    );
+  });
+
+  it("repairs both bridge chain and budget violation in correct order", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: 0.7, strength_std: 0.1 },
+        { from: "fac_b", to: "out_1", strength_mean: 0.5, strength_std: 0.08 },
+        { from: "fac_a", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+      ],
+    });
+    const ctx = makeCtx(graph);
+    applyDeterministicEnforcement(ctx);
+
+    expect(graph.edges.find((e: any) => e.from === "out_1" && e.to === "risk_1")).toBeUndefined();
+    expect(sumAbsCausalInbound(graph.edges, graph.nodes, "out_1")).toBeCloseTo(0.95, 5);
+    expect(ctx.repairTrace.deterministic_enforcement).toEqual(expect.objectContaining({
+      ran: true,
+      bridge_chains_removed: 1,
+      nodes_rescaled: 1,
+    }));
+    expect(ctx.deterministicRepairs.length).toBeGreaterThanOrEqual(2);
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "cee.draft_graph.enforcement_completed" }),
+      expect.any(String),
+    );
+  });
+
+  it("is a no-op on clean graph (ran=true, zero repairs)", () => {
+    const graph = makeGraph();
+    const ctx = makeCtx(graph);
+    const edgesBefore = graph.edges.length;
+    applyDeterministicEnforcement(ctx);
+    expect(graph.edges).toHaveLength(edgesBefore);
+    expect(ctx.deterministicRepairs).toHaveLength(0);
+    expect(ctx.repairTrace.deterministic_enforcement).toEqual(expect.objectContaining({
+      ran: true,
+      bridge_chains_removed: 0,
+      nodes_rescaled: 0,
+      total_repairs: 0,
+    }));
+  });
+
+  it("appends to existing deterministicRepairs without overwriting", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: 0.7, strength_std: 0.1 },
+        { from: "fac_b", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1 },
+      ],
+    });
+    const ctx = makeCtx(graph);
+    ctx.deterministicRepairs = [{ code: "EXISTING", path: "test", action: "pre-existing" }];
+    applyDeterministicEnforcement(ctx);
+    expect(ctx.deterministicRepairs[0].code).toBe("EXISTING");
+    expect(ctx.deterministicRepairs.length).toBeGreaterThan(1);
+  });
+
+  it("records edges_skipped in repairTrace for non-finite handling", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_a", kind: "factor" },
+        { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: NaN, strength_std: 0.1 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.8, strength_std: 0.1 },
+      ],
+    });
+    const ctx = makeCtx(graph);
+    applyDeterministicEnforcement(ctx);
+    expect(ctx.repairTrace.deterministic_enforcement.edges_skipped_non_finite).toBe(1);
+  });
+
+  // ── Internal-language audit ──────────────────────────────────────────────
+
+  it("does not write internal enforcement language to user-facing graph fields", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_a", kind: "factor" }, { id: "fac_b", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_a", to: "out_1", strength_mean: 0.7, strength_std: 0.1 },
+        { from: "fac_b", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "fac_a", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+      ],
+    });
+    const ctx = makeCtx(graph);
+    applyDeterministicEnforcement(ctx);
+
+    // User-facing surfaces are node labels/bodies and edge effect_direction —
+    // these should NEVER contain enforcement mechanics terms.
+    const forbidden = ["budget rescale", "inbound sum", "strength sum", "rescale"];
+    for (const node of graph.nodes) {
+      const userText = `${node.label ?? ""} ${node.body ?? ""}`.toLowerCase();
+      for (const term of forbidden) expect(userText).not.toContain(term);
+    }
+    for (const edge of graph.edges) {
+      const ed = (edge as any).effect_direction;
+      if (typeof ed === "string") {
+        for (const term of forbidden) expect(ed.toLowerCase()).not.toContain(term);
+      }
+    }
   });
 });
