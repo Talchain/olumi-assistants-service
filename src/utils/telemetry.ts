@@ -642,16 +642,16 @@ export const TelemetryEvents = {
   // prose sanitiser. Emitted when at least one rewrite/match occurred
   // on the final composed assistant_text — covers raw decimal
   // probabilities, raw sensitivity values, and structural edge-strength
-  // language that survived the LLM despite prompt-level guidance. The
-  // sanitiser MUTATES assistant_text only; chips and other structured
-  // fields are untouched. Payload:
+  // language that survived the LLM despite prompt-level guidance.
+  // Payload:
   // { handler_id, mode, probability_rewrites, sensitivity_rewrites,
   //   structural_matches, structural_suppressed,
   //   structural_missed_grammar, structural_rule_ids }.
-  // `mode`: 'rewrite' (current — text is mutated) | 'detect_only'
-  // (future — text passes through unchanged; counters still emitted so
-  // ops can confirm the upstream display-safe analysis projection
-  // continues to drive rewrites to zero).
+  // `mode`: 'rewrite' (legacy — text was mutated) | 'detect_only'
+  // (current — text passes through unchanged, counters still emitted
+  // as a regression canary). The flip to 'detect_only' landed with
+  // A2.2 Task 2 once upstream display-safe projections (A2 / A2.1 /
+  // A2.2) closed every known source of raw-numeric leakage.
   V5ResponseProseSanitised: "v5.response.prose_sanitised",
   // V5DeterministicValueUpdate — emitted when the pre-LLM value-update
   // pre-route runs. `matched: true` means the turn was dispatched as a

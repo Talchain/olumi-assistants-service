@@ -1,6 +1,6 @@
 /**
  * format-graph-for-context — display-safe graph projection tests
- * (brief brief-display-safe-graph A2.1).
+ * (brief A2.1 → A3.1 Task 6 → A2.2).
  *
  * The formatter is the upstream boundary that prevents raw graph
  * `strength` floats and raw `exists` probabilities from reaching
@@ -10,8 +10,14 @@
  *   - label resolution from node lookup (bare ID fallback when missing)
  *   - structural strip of strength / exists / plain_interpretation /
  *     model-internal node fields (raw_value, cap, source, _raw_provenance)
- *   - retention of user-supplied node `value` (compact + canonical
- *     observed_state.value) per brief A2.1
+ *   - A3.1 Task 6 strip of node-level `value` / `raw_value` / `cap`
+ *     (compact-top-level AND canonical `observed_state.*`) — Sonnet
+ *     never sees raw node numerics
+ *   - A2.2 reintroduction of formatted `display_value` only:
+ *     existing handler-stamped value preferred verbatim; otherwise
+ *     synthesised via `synthesiseDisplayValue`; bare-number guard
+ *     rejects unit-less results so the display channel cannot leak
+ *     model-scale floats
  *   - relationship-phrase allowlist: unsafe upstream strings (e.g. legacy
  *     "strength of 0.55") MUST be dropped, not echoed verbatim
  *   - no-raw-floats invariant inside edge data (recursive walk)
@@ -52,10 +58,11 @@ function rawGraph(overrides: Partial<ContextPackGraph> = {}): ContextPackGraph {
 
 /**
  * Recursive walk asserting no `number` values anywhere on edge data.
- * Targets edges only — display-safe nodes intentionally KEEP user-supplied
- * `value` (numeric or string) per brief A2.1, while stripping
- * model-normalised `raw_value`/`cap`. The forbidden-floats check on
- * serialised edges below pins the no-raw-decimals invariant.
+ * Targets edges only — display-safe nodes have no numeric fields
+ * post-A3.1 Task 6 (raw `value` / `raw_value` / `cap` stripped) and
+ * post-A2.2 only carry the formatted `display_value` string. The
+ * forbidden-floats check on serialised edges below pins the
+ * no-raw-decimals invariant for the edge channel.
  */
 function assertNoNumbersInEdges(edges: readonly unknown[]): void {
   function walk(value: unknown, path: string): void {
@@ -174,18 +181,20 @@ describe('formatGraphForContext — edge transformation', () => {
 });
 
 describe('formatGraphForContext — node transformation', () => {
-  it('keeps id/label/kind plus optional category, unit, intervention_summary (A3.1: no node value)', () => {
+  it('keeps id/label/kind plus optional category, unit, intervention_summary, display_value (A2.2)', () => {
     const out = formatGraphForContext(rawGraph());
     // V5 D1 golden-path closure (A3.1 Task 6): node-level `value`,
-    // `raw_value`, and `cap` are stripped. The display projection
-    // carries label + unit + intervention_summary only; the LLM no
-    // longer sees node numerics.
+    // `raw_value`, and `cap` are stripped. A2.2 reintroduces a
+    // formatted `display_value` string only — the underlying floats
+    // remain stripped. The fixture's marketing node has raw_value=100
+    // + unit='k' → "100 k" via `synthesiseDisplayValue` priority-4.
     expect(out.nodes[0]).toEqual({
       id: 'fac_marketing',
       label: 'Marketing Spend',
       kind: 'factor',
       category: 'spend',
       unit: 'k',
+      display_value: '100 k',
     });
     const optionNode = out.nodes.find((n) => n.id === 'opt_a')!;
     expect(optionNode).toEqual({
@@ -432,5 +441,257 @@ describe('Track 2A — display-safe graph yields zero structural matches', () =>
     const serialised = JSON.stringify(displaySafe, null, 2);
     const result = sanitiseAssistantTextProse(serialised);
     expect(result.structural_matches).toBe(0);
+  });
+});
+
+describe('formatGraphForContext — display_value (A2.2)', () => {
+  it('passes through an existing display_value verbatim (handler-set)', () => {
+    // Source priority #1: when the raw input already carries a non-empty
+    // string `display_value` (e.g. set by `set_factor_value` post-mutation
+    // via A3.1 Task 3), the projector uses it verbatim — including over
+    // any value/raw_value/unit data that might otherwise drive a different
+    // synthesised result.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'fac_churn',
+            kind: 'factor',
+            label: 'Churn Rate',
+            unit: '%',
+            value: 0.99,
+            raw_value: 99,
+            display_value: '5%',
+          },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.display_value).toBe('5%');
+  });
+
+  it('synthesises display_value from raw_value + percentage unit when none is supplied', () => {
+    // Source priority #2: no existing display_value, so the projector
+    // calls `synthesiseDisplayValue` against value/raw_value/unit/cap/
+    // factor_type. raw_value=5 + unit='%' → "5%".
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_churn', kind: 'factor', label: 'Churn Rate', raw_value: 5, unit: '%' },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.display_value).toBe('5%');
+  });
+
+  it('synthesises currency display_value from raw_value + currency unit', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_spend', kind: 'factor', label: 'Marketing Spend', raw_value: 50000, unit: '£' },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.display_value).toBe('£50k');
+  });
+
+  it('synthesises time-unit display_value (e.g. "18 months")', () => {
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_runway', kind: 'factor', label: 'Runway', raw_value: 18, unit: 'months' },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.display_value).toBe('18 months');
+  });
+
+  it('reads canonical observed_state.{value,raw_value,unit,cap,factor_type} when compact-top-level is absent', () => {
+    // Mirror of the existing `extractNodeUnit` two-tier pattern: the
+    // projector falls back to canonical GraphV3T nesting under
+    // observed_state when the compact top-level is absent.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'fac_churn',
+            kind: 'factor',
+            label: 'Churn Rate',
+            observed_state: { raw_value: 5, unit: '%', cap: 100 },
+          },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.display_value).toBe('5%');
+  });
+
+  it('omits display_value when neither display_value nor synthesisable inputs are present', () => {
+    // Source priority neither #1 nor #2 satisfied → field omitted (not
+    // `undefined`/`null`). Belt-and-braces: the in-memory shape lacks the
+    // key AND the serialised JSON has no `"display_value":` token.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A' },
+          { id: 'opt_x', kind: 'option', label: 'Option X' },
+        ],
+      }),
+    );
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('display_value');
+    }
+    expect(JSON.stringify(out.nodes)).not.toMatch(/"display_value":/);
+  });
+
+  it('raw-decimal guard: bare-decimal synthesise output is rejected (no unit/factor_type fallback)', () => {
+    // `synthesiseDisplayValue` falls through to a bare normalised decimal
+    // ("0.75") when only `value` is supplied and there is no unit / cap /
+    // factor_type. That string IS the model-scale float — exactly what
+    // A3.1 Task 6 stripped at the raw-numeric layer. The guard must
+    // discard it so the display channel cannot become a back-door for
+    // raw model floats.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', value: 0.75 },
+          { id: 'fac_b', kind: 'factor', label: 'B', value: 0.05 },
+          { id: 'fac_c', kind: 'factor', label: 'C', value: -0.5 },
+        ],
+      }),
+    );
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('display_value');
+    }
+  });
+
+  it('bare-number guard also rejects unit-less integer-valued synthesise output', () => {
+    // `synthesiseDisplayValue` priority-7 emits `String(parseFloat(value
+    // .toFixed(2)))` for unit-less normalised values. Whole numbers
+    // round through to bare integers like "1" / "0" / "5" / "7" — every
+    // bit as much a model-scale leak as "0.75". The /^-?0\.\d+$/
+    // pattern alone wouldn't catch them; the broadened guard does.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_one', kind: 'factor', label: 'One', value: 1 },
+          { id: 'fac_zero', kind: 'factor', label: 'Zero', value: 0 },
+          { id: 'fac_seven', kind: 'factor', label: 'Seven', value: 7 },
+          { id: 'fac_neg', kind: 'factor', label: 'Neg', value: -3 },
+        ],
+      }),
+    );
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('display_value');
+    }
+  });
+
+  it('bare-number guard rejects thousands-separated unit-less raw_value output', () => {
+    // `formatPlainNumber` priority-4 with no unit emits comma-separated
+    // thousands ("1,000" / "50,000"). Without a unit those are bare
+    // model-scale numbers — guard must catch them too, otherwise a
+    // raw_value of 50000 with no unit would leak as "50,000".
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', raw_value: 1000 },
+          { id: 'fac_b', kind: 'factor', label: 'B', raw_value: 50000 },
+        ],
+      }),
+    );
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('display_value');
+    }
+  });
+
+  it('raw-decimal guard rejects unit-less raw_value with bare-decimal output', () => {
+    // `raw_value: 0.75` with no unit goes through priority-4 of
+    // `synthesiseDisplayValue` and emits the bare decimal "0.75" via
+    // `formatPlainNumber`. The guard catches it just like priority-7
+    // bare-`value` output above.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          { id: 'fac_a', kind: 'factor', label: 'A', raw_value: 0.75 },
+          { id: 'fac_b', kind: 'factor', label: 'B', raw_value: 0.05 },
+        ],
+      }),
+    );
+    for (const node of out.nodes) {
+      expect(node).not.toHaveProperty('display_value');
+    }
+  });
+
+  it('raw-decimal guard does not over-trigger on legitimate formatted strings', () => {
+    // The guard targets ONLY bare decimals like "0.05" / "1.0" / "-0.5".
+    // Anything with a unit / currency / suffix word / qualitative band /
+    // ratio MUST pass through untouched — those carry the user-visible
+    // semantics A2.2 was introduced to preserve.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          // Pre-formatted handler outputs that should survive verbatim.
+          { id: 'n_pct', kind: 'factor', label: 'Pct', display_value: '5%' },
+          { id: 'n_cur', kind: 'factor', label: 'Cur', display_value: '£50,000' },
+          { id: 'n_time', kind: 'factor', label: 'Time', display_value: '18 months' },
+          { id: 'n_rat', kind: 'factor', label: 'Rat', display_value: '4.2/5' },
+          { id: 'n_band', kind: 'factor', label: 'Band', display_value: 'Low (0.15)' },
+          // Synthesised qualitative band — value + factor_type yields
+          // "Low (0.15)" via priority 6 of synthesiseDisplayValue.
+          { id: 'n_qual', kind: 'factor', label: 'Qual', value: 0.15, factor_type: 'controllable_action' },
+        ],
+      }),
+    );
+    expect(out.nodes.find((n) => n.id === 'n_pct')!.display_value).toBe('5%');
+    expect(out.nodes.find((n) => n.id === 'n_cur')!.display_value).toBe('£50,000');
+    expect(out.nodes.find((n) => n.id === 'n_time')!.display_value).toBe('18 months');
+    expect(out.nodes.find((n) => n.id === 'n_rat')!.display_value).toBe('4.2/5');
+    expect(out.nodes.find((n) => n.id === 'n_band')!.display_value).toBe('Low (0.15)');
+    expect(out.nodes.find((n) => n.id === 'n_qual')!.display_value).toBe('Low (0.15)');
+  });
+
+  it('display_value reintroduction does not regress A3.1 strip — value/raw_value/cap stay absent', () => {
+    // A2.2 reintroduces a SINGLE field (display_value, formatted string).
+    // The underlying floats remain stripped per A3.1 Task 6 — Sonnet
+    // sees the formatted prose only, never the model-scale numeric.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'fac_churn',
+            kind: 'factor',
+            label: 'Churn Rate',
+            value: 0.05,
+            raw_value: 5,
+            unit: '%',
+            cap: 100,
+          },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.display_value).toBe('5%');
+    const json = JSON.stringify(out.nodes);
+    expect(json).not.toMatch(/"value":/);
+    expect(json).not.toMatch(/"raw_value":/);
+    expect(json).not.toMatch(/"cap":/);
+  });
+
+  it('treats empty-string display_value as absent and falls back to synthesis', () => {
+    // Edge case: a handler that cleared `display_value` to "" should not
+    // pin an empty string on the projection. The empty-string guard
+    // (`existing.length > 0`) routes to the synthesise fallback.
+    const out = formatGraphForContext(
+      rawGraph({
+        nodes: [
+          {
+            id: 'fac_churn',
+            kind: 'factor',
+            label: 'Churn Rate',
+            display_value: '',
+            raw_value: 5,
+            unit: '%',
+          },
+        ],
+      }),
+    );
+    expect(out.nodes[0]!.display_value).toBe('5%');
   });
 });

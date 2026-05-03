@@ -353,6 +353,104 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
     expect(serialisedNodes).not.toMatch(/"cap":/);
   });
 
+  it('A2.2: outbound graph nodes carry display_value while raw value/raw_value/cap stay stripped', async () => {
+    // A2.2 reintroduces the formatted user-facing string (`display_value`)
+    // on factor nodes so Sonnet can answer "what is the current churn
+    // rate?" without seeing model-scale floats. The underlying numerics
+    // remain stripped per A3.1 Task 6 — Sonnet sees the formatted prose
+    // only. Raw `ContextPack.graph` retains the floats for handlers.
+    const rawPack = assembleContextPack({
+      payload: {
+        kind: 'message',
+        stage: 'analyse',
+        message: 'what is the current churn rate?',
+        scenario_id: 'scen-3',
+        turn_id: 'turn-3',
+        created_at: new Date().toISOString(),
+      } as Parameters<typeof assembleContextPack>[0]['payload'],
+      priorTurns: [],
+      graph: {
+        nodes: [
+          // Canonical GraphV3T-shaped factor with observed_state
+          // carrying raw_value + unit. Drives synthesiseDisplayValue
+          // priority-2: "5%".
+          {
+            id: 'fac_churn',
+            kind: 'factor',
+            label: 'Churn Rate',
+            observed_state: { value: 0.05, raw_value: 5, unit: '%', cap: 100 },
+          },
+          // Currency: drives priority-1: "£50k".
+          {
+            id: 'fac_spend',
+            kind: 'factor',
+            label: 'Marketing Spend',
+            raw_value: 50000,
+            unit: '£',
+          },
+          // Time: drives priority-3: "18 months".
+          {
+            id: 'fac_runway',
+            kind: 'factor',
+            label: 'Runway',
+            raw_value: 18,
+            unit: 'months',
+          },
+          { id: 'goal_growth', kind: 'goal', label: 'Quarterly Growth' },
+        ],
+        edges: [
+          {
+            from: 'fac_churn',
+            to: 'goal_growth',
+            strength: { mean: 0.6, std: 0.1 },
+            effect_direction: 'negative',
+          },
+        ],
+      },
+    });
+
+    const { adapter, calls } = makeAdapter();
+    await routeWithToolUse(rawPack, 'what is the current churn rate?', {
+      requestId: 'req-a22',
+      adapter,
+      systemPromptOverride: ROUTING_SYSTEM_PROMPT,
+    });
+
+    const content = userMessageContent(calls[0]!.args);
+    const parsed = parseContextPackFromUserMessage(content);
+
+    // display_value present on each factor node, with the expected
+    // formatted strings.
+    const churnNode = parsed.graph.nodes.find((n) => n['id'] === 'fac_churn')!;
+    const spendNode = parsed.graph.nodes.find((n) => n['id'] === 'fac_spend')!;
+    const runwayNode = parsed.graph.nodes.find((n) => n['id'] === 'fac_runway')!;
+    expect(churnNode['display_value']).toBe('5%');
+    expect(spendNode['display_value']).toBe('£50k');
+    expect(runwayNode['display_value']).toBe('18 months');
+
+    // Goal node has no numeric data → display_value omitted (not
+    // null/undefined/empty).
+    const goalNode = parsed.graph.nodes.find((n) => n['id'] === 'goal_growth')!;
+    expect(goalNode).not.toHaveProperty('display_value');
+
+    // A3.1 Task 6 contract preserved: NO raw `value` / `raw_value` /
+    // `cap` keys anywhere on the outbound node objects, including the
+    // canonical `observed_state` wrapper.
+    const serialisedNodes = JSON.stringify(parsed.graph.nodes);
+    expect(serialisedNodes).not.toMatch(/"value":/);
+    expect(serialisedNodes).not.toMatch(/"raw_value":/);
+    expect(serialisedNodes).not.toMatch(/"cap":/);
+    expect(serialisedNodes).not.toMatch(/"observed_state":/);
+
+    // Raw `ContextPack.graph` retains the underlying floats for
+    // handler / freshness / edit_graph reads — only the LLM-facing
+    // projection strips them.
+    const rawNodes = rawPack.graph.nodes as Array<Record<string, unknown>>;
+    const rawChurn = rawNodes.find((n) => n['id'] === 'fac_churn');
+    expect(rawChurn).toBeDefined();
+    expect((rawChurn!['observed_state'] as { raw_value?: unknown }).raw_value).toBe(5);
+  });
+
   it('does not mutate the caller\'s ContextPack — raw graph survives intact for handlers', async () => {
     const pack = makePackWithGraph();
     // Snapshot raw graph fields the handlers / freshness path depend on.
