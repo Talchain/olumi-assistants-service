@@ -264,17 +264,25 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       payload: bodyString,
     });
 
-    // Suppress any rejection from injectPromise that arrives after the race
-    // settles on "timeout". Without this, a late rejection (e.g. from
-    // ROUTE_TIMEOUT_MS killing the internal route) becomes an unhandled
-    // rejection. The catch is a no-op — we've already returned 504.
+    // Pre-timeout rejections are handled by the try/catch around Promise.race
+    // below. Post-timeout rejections (after the race settled on "timeout") are
+    // unobserved by the race callback and would surface as an unhandled
+    // rejection. Track whether the timeout fired so this catch only logs the
+    // genuinely-late case — pre-timeout rejections are handled below and the
+    // duplicate observation here would log a misleading "late" message.
+    let timedOut = false;
     injectPromise.catch((err: unknown) => {
-      log.warn({ requestId, err }, "[proxy-v5] Late internal-inject rejection after proxy timeout");
+      if (timedOut) {
+        log.warn({ requestId, err }, "[proxy-v5] Late internal-inject rejection after proxy timeout");
+      }
     });
 
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<"timeout">((resolve) => {
-      timeoutTimer = setTimeout(() => resolve("timeout"), timeoutMs);
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        resolve("timeout");
+      }, timeoutMs);
     });
 
     let result: Awaited<typeof injectPromise> | "timeout";
