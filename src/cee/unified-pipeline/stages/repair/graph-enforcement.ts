@@ -1,16 +1,24 @@
 /**
- * Stage 4 Substep 8b: Deterministic Graph Enforcement (Commit 1)
+ * Stage 4 Substep 8b: Deterministic Graph Enforcement
  *
- * `applyBudgetRescale` — scales causal inbound edges (factor→outcome/risk)
- * proportionally so Σ|mean| ≤ BUDGET_TARGET (0.95) per node. Goal nodes,
- * factor nodes, structural edges, and bidirected edges are excluded.
+ * Two deterministic repairs applied after all topology changes (connectivity)
+ * and before the clarifier:
  *
- * Subsequent commits add `fixBridgeChaining` and the orchestrator that
- * wires both into the repair pipeline.
+ *   1. fixBridgeChaining  — removes forbidden outcome↔risk edges, adds goal
+ *                            bridges with sign-correct semantics (outcome→goal
+ *                            positive, risk→goal negative)
+ *   2. applyBudgetRescale — scales causal inbound edges (factor→outcome/risk)
+ *                            so Σ|mean| ≤ BUDGET_TARGET per node
+ *
+ * Only outcome and risk nodes are budget-enforced. Goal/factor/option/etc
+ * are excluded. Only factor/action→outcome/risk causal edges are rescaled —
+ * structural (option→factor), bridge (outcome/risk→goal), bidirected, and
+ * scaffolding edges are excluded.
  */
 
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
+import { patchEdgeNumeric } from "../../utils/edge-format.js";
 import { log } from "../../../../utils/telemetry.js";
 
 // ---------------------------------------------------------------------------
@@ -40,6 +48,18 @@ const ENFORCEABLE_KINDS = new Set(["outcome", "risk"]);
  * - "goal"/"constraint" — never causal inbound
  */
 const RESCALABLE_SOURCE_KINDS = new Set(["factor", "action"]);
+
+/** Multiplier applied to strongest inbound |mean| when creating a bridge-to-goal edge. */
+const BRIDGE_FALLBACK_FACTOR = 0.5;
+
+/** Default mean for orphan bridge edges (no inbound to derive from). */
+const ORPHAN_BRIDGE_MEAN = 0.3;
+const ORPHAN_BRIDGE_STD = 0.2;
+const ORPHAN_BRIDGE_EXISTENCE = 0.7;
+
+/** Default std/existence for derived bridge edges. */
+const DERIVED_BRIDGE_STD = 0.15;
+const DERIVED_BRIDGE_EXISTENCE = 0.9;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -199,4 +219,161 @@ export function applyBudgetRescale(
   }
 
   return { repairs, nodesRescaled, edgesSkipped };
+}
+
+// ---------------------------------------------------------------------------
+// Bridge chain repair
+// ---------------------------------------------------------------------------
+
+interface BridgeAddition {
+  nodeId: string;
+  nodeKind: string;
+}
+
+/**
+ * Compute the strength for a new bridge-to-goal edge.
+ * Sign is determined ENTIRELY by the bridge node kind:
+ *   - outcome → goal: positive (outcomes help the goal)
+ *   - risk    → goal: negative (risks hurt the goal)
+ * The magnitude is half the strongest |inbound| mean of the bridge node,
+ * or `ORPHAN_BRIDGE_MEAN` if no usable inbound exists.
+ */
+function computeBridgeMean(
+  nodeKind: string,
+  inboundEdges: EdgeT[],
+  format: EdgeFormat,
+): { mean: number; std: number; existence: number } {
+  let strongestAbs = 0;
+  for (const e of inboundEdges) {
+    const m = readEdgeMean(e, format);
+    if (m === undefined) continue;
+    const abs = Math.abs(m);
+    if (abs > strongestAbs) strongestAbs = abs;
+  }
+
+  let magnitude: number;
+  let std: number;
+  let existence: number;
+
+  if (strongestAbs > 0) {
+    magnitude = strongestAbs * BRIDGE_FALLBACK_FACTOR;
+    std = DERIVED_BRIDGE_STD;
+    existence = DERIVED_BRIDGE_EXISTENCE;
+  } else {
+    magnitude = ORPHAN_BRIDGE_MEAN;
+    std = ORPHAN_BRIDGE_STD;
+    existence = ORPHAN_BRIDGE_EXISTENCE;
+  }
+
+  // Sign is fixed by bridge semantics — never derived from inbound strength.
+  const mean = nodeKind === "risk" ? -magnitude : magnitude;
+  return { mean, std, existence };
+}
+
+export function fixBridgeChaining(
+  graph: GraphT,
+  format: EdgeFormat,
+  requestId?: string,
+): { repairs: Repair[]; removedCount: number; goalEdgesAdded: number } {
+  const repairs: Repair[] = [];
+  const nodes = graph.nodes as NodeT[];
+  const edges = graph.edges as EdgeT[];
+
+  const goalNode = nodes.find((n) => n.kind === "goal");
+  if (!goalNode) return { repairs, removedCount: 0, goalEdgesAdded: 0 };
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) nodeKindMap.set(node.id, node.kind);
+
+  const existingGoalEdges = new Set<string>();
+  for (const edge of edges) {
+    if (edge.to === goalNode.id) existingGoalEdges.add(edge.from);
+  }
+
+  const inboundByNode = new Map<string, EdgeT[]>();
+  for (const edge of edges) {
+    const group = inboundByNode.get(edge.to);
+    if (group) group.push(edge);
+    else inboundByNode.set(edge.to, [edge]);
+  }
+
+  // Identify forbidden bridge-chain edges deterministically.
+  // Iterate edges in input order so removal indices are stable.
+  const toRemove = new Set<number>();
+  const additions: BridgeAddition[] = [];
+
+  for (let i = 0; i < edges.length; i++) {
+    const edge = edges[i];
+    const fromKind = nodeKindMap.get(edge.from);
+    const toKind = nodeKindMap.get(edge.to);
+
+    const isForbiddenChain =
+      fromKind !== undefined &&
+      toKind !== undefined &&
+      ENFORCEABLE_KINDS.has(fromKind) &&
+      ENFORCEABLE_KINDS.has(toKind) &&
+      edge.to !== goalNode.id;
+
+    if (!isForbiddenChain) continue;
+
+    toRemove.add(i);
+
+    repairs.push({
+      code: "BRIDGE_CHAIN_REPAIRED",
+      path: `edges[${edge.from}→${edge.to}]`,
+      action: `Removed forbidden ${fromKind}→${toKind} edge; ensured independent goal bridges`,
+    });
+
+    log.info({
+      event: "cee.draft_graph.bridge_chain_repaired",
+      request_id: requestId,
+      edge_from: edge.from,
+      edge_to: edge.to,
+      repair_method: "remove_and_bridge",
+    }, `Bridge chain repair: removed ${fromKind}→${toKind} (${edge.from}→${edge.to})`);
+
+    // Queue goal-bridge additions for both endpoints if missing.
+    for (const nodeId of [edge.from, edge.to]) {
+      if (existingGoalEdges.has(nodeId)) continue;
+      existingGoalEdges.add(nodeId); // dedupe across iterations
+      additions.push({ nodeId, nodeKind: nodeKindMap.get(nodeId)! });
+    }
+  }
+
+  // Build new goal-bridge edges deterministically (sorted by source id).
+  additions.sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+  const newEdges: EdgeT[] = [];
+  for (const { nodeId, nodeKind } of additions) {
+    const inbound = inboundByNode.get(nodeId) ?? [];
+    const { mean, std, existence } = computeBridgeMean(nodeKind, inbound, format);
+
+    const baseEdge = {
+      id: `${nodeId}__${goalNode.id}__enforcement`,
+      from: nodeId,
+      to: goalNode.id,
+      effect_direction: mean < 0 ? "negative" : "positive",
+      origin: "repair" as const,
+      provenance: {
+        source: "synthetic",
+        quote: "Bridge chain repair (deterministic enforcement)",
+      },
+      provenance_source: "synthetic" as const,
+    } as unknown as EdgeT;
+
+    const goalEdge = patchEdgeNumeric(baseEdge, format, { mean, std, existence });
+    newEdges.push(goalEdge);
+  }
+
+  if (toRemove.size > 0 || newEdges.length > 0) {
+    (graph as { edges: EdgeT[] }).edges = [
+      ...edges.filter((_, i) => !toRemove.has(i)),
+      ...newEdges,
+    ];
+  }
+
+  return {
+    repairs,
+    removedCount: toRemove.size,
+    goalEdgesAdded: newEdges.length,
+  };
 }

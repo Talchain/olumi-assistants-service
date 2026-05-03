@@ -31,6 +31,7 @@ import {
   readEdgeMean,
   readEdgeStd,
   applyBudgetRescale,
+  fixBridgeChaining,
 } from "../../src/cee/unified-pipeline/stages/repair/graph-enforcement.js";
 import { log } from "../../src/utils/telemetry.js";
 
@@ -483,5 +484,331 @@ describe("applyBudgetRescale", () => {
     const a = graph.edges.find((e: any) => e.from === "fac_a" && e.to === "out_1");
     const b = graph.edges.find((e: any) => e.from === "fac_b" && e.to === "out_1");
     expect(Math.abs(a.weight) + Math.abs(b.weight)).toBeCloseTo(0.95, 5);
+  });
+});
+
+// =============================================================================
+// fixBridgeChaining
+// =============================================================================
+
+describe("fixBridgeChaining", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("removes outcome→risk edge and adds positive outcome→goal, negative risk→goal bridges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 0.6, strength_std: 0.1 },
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+      ],
+    });
+
+    const { removedCount, goalEdgesAdded } = fixBridgeChaining(graph, "V1_FLAT", "test");
+    expect(removedCount).toBe(1);
+    expect(goalEdgesAdded).toBe(2);
+    expect(graph.edges.find((e: any) => e.from === "out_1" && e.to === "risk_1")).toBeUndefined();
+
+    // outcome→goal: positive
+    const outGoal = graph.edges.find((e: any) => e.from === "out_1" && e.to === "goal_1");
+    expect(outGoal.strength_mean).toBeCloseTo(0.3, 5); // 0.6 * 0.5
+    expect(outGoal.strength_mean).toBeGreaterThan(0);
+    expect(outGoal.effect_direction).toBe("positive");
+
+    // risk→goal: negative (sign forced by kind, NOT inbound mean)
+    const riskGoal = graph.edges.find((e: any) => e.from === "risk_1" && e.to === "goal_1");
+    expect(riskGoal.strength_mean).toBeCloseTo(-0.2, 5); // -|−0.4 * 0.5|
+    expect(riskGoal.strength_mean).toBeLessThan(0);
+    expect(riskGoal.effect_direction).toBe("negative");
+  });
+
+  it("risk→goal bridge is negative even when inbound mean is positive", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "risk_1", kind: "risk" }, { id: "out_1", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "risk_1", strength_mean: 0.6, strength_std: 0.1 }, // positive!
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "risk_1", to: "out_1", strength_mean: 0.3, strength_std: 0.08 },
+      ],
+    });
+    fixBridgeChaining(graph, "V1_FLAT");
+    const riskGoal = graph.edges.find((e: any) => e.from === "risk_1" && e.to === "goal_1");
+    expect(riskGoal.strength_mean).toBeLessThan(0);
+    expect(riskGoal.effect_direction).toBe("negative");
+  });
+
+  it("outcome→goal bridge is positive even when inbound mean is negative", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: -0.6, strength_std: 0.1 }, // negative
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+      ],
+    });
+    fixBridgeChaining(graph, "V1_FLAT");
+    const outGoal = graph.edges.find((e: any) => e.from === "out_1" && e.to === "goal_1");
+    expect(outGoal.strength_mean).toBeGreaterThan(0);
+    expect(outGoal.effect_direction).toBe("positive");
+  });
+
+  it("removes risk→outcome edge", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "risk_1", to: "out_1", strength_mean: -0.3, strength_std: 0.08 },
+      ],
+    });
+    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(1);
+    expect(graph.edges.find((e: any) => e.from === "risk_1" && e.to === "out_1")).toBeUndefined();
+  });
+
+  it("removes outcome→outcome (belt-and-suspenders)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "out_2", kind: "outcome" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "out_1", to: "out_2", strength_mean: 0.4, strength_std: 0.08 },
+      ],
+    });
+    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(1);
+  });
+
+  it("removes risk→risk (belt-and-suspenders)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "risk_1", kind: "risk" }, { id: "risk_2", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "risk_1", to: "risk_2", strength_mean: -0.3, strength_std: 0.08 },
+      ],
+    });
+    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(1);
+  });
+
+  it("preserves outcome→goal edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1 },
+      ],
+    });
+    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(0);
+    expect(graph.edges).toHaveLength(2);
+  });
+
+  it("preserves risk→goal edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "risk_1", to: "goal_1", strength_mean: -0.5, strength_std: 0.15 },
+      ],
+    });
+    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(0);
+  });
+
+  it("preserves factor→risk edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "risk_1", to: "goal_1", strength_mean: -0.5, strength_std: 0.15 },
+      ],
+    });
+    expect(fixBridgeChaining(graph, "V1_FLAT").removedCount).toBe(0);
+  });
+
+  it("does not duplicate goal edge when source already has one", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 0.6, strength_std: 0.1 },
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+        { from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1 },
+      ],
+    });
+    const { goalEdgesAdded } = fixBridgeChaining(graph, "V1_FLAT");
+    expect(goalEdgesAdded).toBe(1); // only risk_1 needs one
+    const goalEdges = graph.edges.filter((e: any) => e.to === "goal_1");
+    expect(goalEdges).toHaveLength(2);
+  });
+
+  it("handles missing goal node gracefully", () => {
+    const graph = makeGraph({
+      nodes: [{ id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" }],
+      edges: [{ from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 }],
+    });
+    const { removedCount, goalEdgesAdded } = fixBridgeChaining(graph, "V1_FLAT");
+    expect(removedCount).toBe(0);
+    expect(goalEdgesAdded).toBe(0);
+  });
+
+  it("handles multiple forbidden edges", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "out_2", kind: "outcome" },
+        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "fac_1", to: "out_2", strength_mean: 0.4, strength_std: 0.1 },
+        { from: "fac_1", to: "risk_1", strength_mean: -0.3, strength_std: 0.08 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+        { from: "out_2", to: "risk_1", strength_mean: 0.2, strength_std: 0.06 },
+      ],
+    });
+    const { removedCount, goalEdgesAdded } = fixBridgeChaining(graph, "V1_FLAT");
+    expect(removedCount).toBe(2);
+    expect(goalEdgesAdded).toBe(3);
+  });
+
+  it("derives bridge magnitude from soon-to-be-removed edge when no other inbound exists", () => {
+    // out_1 has no inbound → orphan path. risk_1's only inbound is the bridge
+    // edge being removed → uses that magnitude (the edge IS valid causal data
+    // even though it points to the wrong target).
+    const graph = makeGraph({
+      nodes: [
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [{ from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 }],
+    });
+    fixBridgeChaining(graph, "V1_FLAT");
+
+    const outGoal = graph.edges.find((e: any) => e.from === "out_1" && e.to === "goal_1");
+    expect(outGoal.strength_mean).toBe(0.3); // ORPHAN_BRIDGE_MEAN, positive (outcome)
+    expect(outGoal.effect_direction).toBe("positive");
+
+    const riskGoal = graph.edges.find((e: any) => e.from === "risk_1" && e.to === "goal_1");
+    expect(riskGoal.strength_mean).toBeCloseTo(-0.15, 5); // -|0.3 * 0.5|
+    expect(riskGoal.effect_direction).toBe("negative");
+  });
+
+  it("uses orphan defaults when both bridge endpoints are fully orphan", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "out_orphan", kind: "outcome" }, { id: "risk_orphan", kind: "risk" },
+        { id: "out_other", kind: "outcome" }, { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "out_orphan", to: "out_other", strength_mean: 0.0, strength_std: 0.0 },
+        { from: "risk_orphan", to: "out_other", strength_mean: 0.0, strength_std: 0.0 },
+      ],
+    });
+    fixBridgeChaining(graph, "V1_FLAT");
+    const outGoal = graph.edges.find((e: any) => e.from === "out_orphan" && e.to === "goal_1");
+    expect(outGoal.strength_mean).toBe(0.3);
+    const riskGoal = graph.edges.find((e: any) => e.from === "risk_orphan" && e.to === "goal_1");
+    expect(riskGoal.strength_mean).toBe(-0.3);
+  });
+
+  it("emits telemetry with edge_from, edge_to, repair_method", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "out_1", kind: "outcome" }, { id: "risk_1", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [{ from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 }],
+    });
+    fixBridgeChaining(graph, "V1_FLAT", "tele-test");
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "cee.draft_graph.bridge_chain_repaired",
+        edge_from: "out_1", edge_to: "risk_1", repair_method: "remove_and_bridge",
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("leaves no forbidden bridge chains after repair (full sweep)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_1", kind: "outcome" }, { id: "out_2", kind: "outcome" },
+        { id: "risk_1", kind: "risk" }, { id: "risk_2", kind: "risk" },
+        { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_1", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "fac_1", to: "risk_1", strength_mean: -0.4, strength_std: 0.1 },
+        { from: "out_1", to: "risk_1", strength_mean: 0.3, strength_std: 0.08 },
+        { from: "risk_2", to: "out_2", strength_mean: -0.2, strength_std: 0.06 },
+        { from: "out_2", to: "out_1", strength_mean: 0.1, strength_std: 0.05 },
+        { from: "risk_1", to: "risk_2", strength_mean: -0.1, strength_std: 0.05 },
+      ],
+    });
+    fixBridgeChaining(graph, "V1_FLAT");
+    const kindOf = (id: string) => graph.nodes.find((n: any) => n.id === id)?.kind;
+    const remaining = graph.edges.filter((e: any) => {
+      const fk = kindOf(e.from), tk = kindOf(e.to);
+      return ["outcome", "risk"].includes(fk) && ["outcome", "risk"].includes(tk) && e.to !== "goal_1";
+    });
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("produces deterministic output across runs (sorted bridge additions)", () => {
+    const buildGraph = () => makeGraph({
+      nodes: [
+        { id: "fac_1", kind: "factor" },
+        { id: "out_z", kind: "outcome" }, { id: "out_a", kind: "outcome" },
+        { id: "risk_1", kind: "risk" }, { id: "goal_1", kind: "goal" },
+      ],
+      edges: [
+        { from: "fac_1", to: "out_z", strength_mean: 0.5, strength_std: 0.1 },
+        { from: "fac_1", to: "out_a", strength_mean: 0.4, strength_std: 0.1 },
+        { from: "fac_1", to: "risk_1", strength_mean: -0.3, strength_std: 0.08 },
+        { from: "out_z", to: "out_a", strength_mean: 0.2, strength_std: 0.05 },
+      ],
+    });
+
+    const g1 = buildGraph();
+    const g2 = buildGraph();
+    fixBridgeChaining(g1, "V1_FLAT");
+    fixBridgeChaining(g2, "V1_FLAT");
+    expect(JSON.stringify(g1.edges)).toBe(JSON.stringify(g2.edges));
   });
 });
