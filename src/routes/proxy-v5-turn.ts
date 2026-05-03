@@ -26,7 +26,7 @@
  * Environment variables:
  * - BROWSER_PROXY_ENABLED — master switch (default: false)
  * - BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
- * - BROWSER_PROXY_TIMEOUT_MS — timeout for the internal inject call (default: 120 000 ms)
+ * - BROWSER_PROXY_TIMEOUT_MS — timeout for the internal inject call (default: 125 000 ms)
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
@@ -55,14 +55,13 @@ const SAFE_RESPONSE_HEADERS = [
   "content-type",
   "x-olumi-service",
   "x-olumi-service-build",
-  "x-olumi-response-hash",
+  // x-olumi-response-hash intentionally excluded: the proxy parses and
+  // reserializes the response body, so the original hash may not match
+  // the downstream bytes. Forwarding a stale hash would mislead callers.
   "x-request-id",
   "x-olumi-trace-received",
   "x-olumi-downstream-calls",
 ] as const;
-
-// Netlify preview deploy pattern (e.g. deploy-preview-42--olumi.netlify.app)
-const NETLIFY_PREVIEW_PATTERN = /^https:\/\/[a-z0-9-]+--olumi\.netlify\.app$/;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,8 +79,14 @@ function parseAllowedOrigins(): Set<string> {
 }
 
 function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
-  if (allowedOrigins.has(origin)) return true;
-  return NETLIFY_PREVIEW_PATTERN.test(origin);
+  // Exact-match only. Netlify preview patterns are NOT matched by regex here
+  // because the global @fastify/cors plugin (which handles OPTIONS preflight)
+  // only knows about ALLOWED_ORIGINS — it has no regex support. A preview
+  // origin allowed by proxy regex but not by global CORS would pass POST
+  // validation but fail OPTIONS preflight, causing a confusing CORS error.
+  // List preview/branch origins explicitly in BROWSER_PROXY_ALLOWED_ORIGINS
+  // AND in ALLOWED_ORIGINS if CORS preflight is needed.
+  return allowedOrigins.has(origin);
 }
 
 function buildCorsHeaders(origin: string): Record<string, string> {
@@ -223,7 +228,8 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // However, it does not support AbortSignal — we use Promise.race to
     // enforce the proxy timeout. If the timeout fires, the internal request
     // continues until ROUTE_TIMEOUT_MS kills it; this is acceptable because
-    // CEE's own budgets (DRAFT_GRAPH_TURN_BUDGET_MS) terminate the LLM call.
+    // CEE's own budgets (V5 DRAFT_REQUEST_BUDGET_MS / LLM timeouts) terminate
+    // the LLM call independently.
     const bodyString =
       typeof request.body === "string"
         ? request.body
@@ -234,6 +240,14 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       url: INTERNAL_TARGET,
       headers: internalHeaders,
       payload: bodyString,
+    });
+
+    // Suppress any rejection from injectPromise that arrives after the race
+    // settles on "timeout". Without this, a late rejection (e.g. from
+    // ROUTE_TIMEOUT_MS killing the internal route) becomes an unhandled
+    // rejection. The catch is a no-op — we've already returned 504.
+    injectPromise.catch((err: unknown) => {
+      log.warn({ requestId, err }, "[proxy-v5] Late internal-inject rejection after proxy timeout");
     });
 
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -301,9 +315,24 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     try {
       responseBody = JSON.parse(injectResponse.body);
     } catch {
-      // Non-JSON internal response — shouldn't happen, but handle defensively
-      reply.header("content-type", "text/plain");
-      return reply.code(injectResponse.statusCode).send(injectResponse.body);
+      // Non-JSON internal response — should not happen in normal operation.
+      // Return a structured JSON 502 so the browser always gets parseable JSON.
+      const truncated = injectResponse.body.length > 200
+        ? injectResponse.body.slice(0, 200) + "..."
+        : injectResponse.body;
+      log.error(
+        { requestId, status: injectResponse.statusCode, body: truncated },
+        "[proxy-v5] Internal route returned non-JSON body",
+      );
+      return reply.code(502).send({
+        error: {
+          code: "PROXY_INTERNAL_NON_JSON",
+          message: "Internal service returned a non-JSON response.",
+          source: "proxy",
+          request_id: requestId,
+          upstream_status: injectResponse.statusCode,
+        },
+      });
     }
 
     return reply.code(injectResponse.statusCode).send(responseBody);

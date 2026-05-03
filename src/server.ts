@@ -980,6 +980,43 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // Browser proxy for V5 turns — bypasses Netlify Edge timeout.
   // Registered after V5 orchestrator so /orchestrate/v2/turn exists as the internal target.
   // Route handles its own origin validation; auth bypass is in auth.ts isPublicRoute().
+  if (config.proxy.browserProxyEnabled) {
+    // Log the verified timeout chain so the relationship is visible at startup.
+    // Required invariant: proxyTimeout < ROUTE_TIMEOUT_MS so the proxy can return
+    // structured JSON before Fastify kills the connection.
+    const proxyTimeout = config.proxy.browserProxyTimeoutMs;
+    const proxyChainOk = proxyTimeout < ROUTE_TIMEOUT_MS;
+    const proxyDraftOk = proxyTimeout >= DRAFT_REQUEST_BUDGET_MS;
+    log.info(
+      {
+        event: "proxy.timeout_chain",
+        ui_extended_timeout_ms: 120_000,
+        proxy_timeout_ms: proxyTimeout,
+        route_timeout_ms: ROUTE_TIMEOUT_MS,
+        draft_request_budget_ms: DRAFT_REQUEST_BUDGET_MS,
+        draft_llm_timeout_ms: DRAFT_LLM_TIMEOUT_MS,
+        chain_invariant_proxy_lt_route: proxyChainOk,
+        chain_invariant_proxy_gte_draft_budget: proxyDraftOk,
+      },
+      proxyChainOk && proxyDraftOk
+        ? `[proxy-v5] Timeout chain OK: UI(120s) → proxy(${proxyTimeout}ms) → route(${ROUTE_TIMEOUT_MS}ms)`
+        : `[proxy-v5] Timeout chain WARNING: proxy(${proxyTimeout}ms) vs route(${ROUTE_TIMEOUT_MS}ms) vs draft(${DRAFT_REQUEST_BUDGET_MS}ms)`,
+    );
+    if (!proxyChainOk) {
+      log.warn(
+        {},
+        `[proxy-v5] BROWSER_PROXY_TIMEOUT_MS (${proxyTimeout}ms) >= ROUTE_TIMEOUT_MS (${ROUTE_TIMEOUT_MS}ms) — ` +
+          "proxy cannot return structured JSON before Fastify kills the connection. Reduce BROWSER_PROXY_TIMEOUT_MS.",
+      );
+    }
+    if (!proxyDraftOk) {
+      log.warn(
+        {},
+        `[proxy-v5] BROWSER_PROXY_TIMEOUT_MS (${proxyTimeout}ms) < DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) — ` +
+          "proxy may time out before a normal draft graph completes. Increase BROWSER_PROXY_TIMEOUT_MS.",
+      );
+    }
+  }
   await proxyV5TurnRoute(app);
 
   // Public prompt routes (cache warming and status)

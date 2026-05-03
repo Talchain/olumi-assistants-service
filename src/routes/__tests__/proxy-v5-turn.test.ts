@@ -138,7 +138,10 @@ describe("POST /proxy/v5/turn", () => {
       expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
     });
 
-    it("Netlify preview origin matches pattern", async () => {
+    it("unlisted Netlify preview origin → 403 (must be in explicit allowlist)", async () => {
+      // Preview origins are no longer matched by regex. They must be listed
+      // explicitly in BROWSER_PROXY_ALLOWED_ORIGINS so that global @fastify/cors
+      // CORS preflight (ALLOWED_ORIGINS) and proxy validation stay in sync.
       const res = await app.inject({
         method: "POST",
         url: "/proxy/v5/turn",
@@ -148,8 +151,35 @@ describe("POST /proxy/v5/turn", () => {
         },
         payload: SAMPLE_PAYLOAD,
       });
+      expect(res.statusCode).toBe(403);
+      const body = JSON.parse(res.body);
+      expect(body.error.code).toBe("PROXY_ORIGIN_REJECTED");
+    });
+
+    it("explicitly listed preview origin → 200", async () => {
+      // When a preview origin is added to BROWSER_PROXY_ALLOWED_ORIGINS
+      // (and ALLOWED_ORIGINS), it passes validation.
+      const savedOrigins = mockConfig.proxy.browserProxyAllowedOrigins;
+      mockConfig.proxy.browserProxyAllowedOrigins = `${savedOrigins},${PREVIEW_ORIGIN}`;
+
+      const previewApp = Fastify({ logger: false });
+      previewApp.post("/orchestrate/v2/turn", async (req, reply) =>
+        reply.code(200).send({ blocks: [] }),
+      );
+      await previewApp.register(proxyV5TurnRoute);
+      await previewApp.ready();
+
+      const res = await previewApp.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: { origin: PREVIEW_ORIGIN, "content-type": "application/json" },
+        payload: SAMPLE_PAYLOAD,
+      });
       expect(res.statusCode).toBe(200);
       expect(res.headers["access-control-allow-origin"]).toBe(PREVIEW_ORIGIN);
+
+      mockConfig.proxy.browserProxyAllowedOrigins = savedOrigins;
+      await previewApp.close();
     });
 
     it("disallowed origin → 403", async () => {
@@ -379,7 +409,9 @@ describe("POST /proxy/v5/turn", () => {
 
       expect(res.headers["x-olumi-service"]).toBe("cee");
       expect(res.headers["x-olumi-service-build"]).toBe("test-build-123");
-      expect(res.headers["x-olumi-response-hash"]).toBe("abc123");
+      // x-olumi-response-hash is intentionally NOT forwarded: the proxy
+      // parses and reserializes the body, making the original hash stale.
+      expect(res.headers["x-olumi-response-hash"]).toBeUndefined();
       expect(res.headers["x-proxy-source"]).toBe("cee-browser-proxy");
       expect(res.headers["x-proxy-duration-ms"]).toBeDefined();
     });
