@@ -122,12 +122,20 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
 
   const allowedOrigins = parseAllowedOrigins();
   const timeoutMs = config.proxy.browserProxyTimeoutMs;
-  const assistKey = config.auth.assistApiKey;
+
+  // Resolve the service key: prefer the single-key config, fall back to the
+  // first entry in the multi-key array. This mirrors how auth.ts builds its
+  // valid-key set from both ASSIST_API_KEY and ASSIST_API_KEYS.
+  const assistKey =
+    config.auth.assistApiKey ??
+    (config.auth.assistApiKeys && config.auth.assistApiKeys.length > 0
+      ? config.auth.assistApiKeys[0]
+      : undefined);
 
   if (!assistKey) {
     log.warn(
       {},
-      "[proxy-v5] ASSIST_API_KEY not set — internal requests will fail auth. " +
+      "[proxy-v5] Neither ASSIST_API_KEY nor ASSIST_API_KEYS is set — internal requests will fail auth. " +
         "Route registered but will return 502 until a key is configured.",
     );
   }
@@ -149,18 +157,11 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     "[proxy-v5] Browser proxy registered: POST /proxy/v5/turn",
   );
 
-  // ---- OPTIONS (CORS preflight) ----
-  app.options("/proxy/v5/turn", async (request: FastifyRequest, reply: FastifyReply) => {
-    const origin = request.headers.origin;
-    if (!origin || !isOriginAllowed(origin, allowedOrigins)) {
-      return reply.code(403).send({ error: "Origin not allowed" });
-    }
-    const cors = buildCorsHeaders(origin);
-    for (const [k, v] of Object.entries(cors)) {
-      reply.header(k, v);
-    }
-    return reply.code(204).send();
-  });
+  // NOTE: OPTIONS preflight is handled by @fastify/cors (registered in server.ts
+  // with preflightContinue: false). That plugin intercepts OPTIONS before route
+  // handlers, so a manual app.options() here would be dead code. The CORS
+  // allowed-headers and exposed-headers are declared in server.ts's
+  // DEFAULT_ALLOWED_HEADERS and the cors registration's exposedHeaders.
 
   // ---- POST (proxy) ----
   app.post("/proxy/v5/turn", async (request: FastifyRequest, reply: FastifyReply) => {
@@ -182,9 +183,14 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // 2. Content-type guard
+    // 2. Content-type guard (origin already validated — include CORS headers
+    //    so the browser can read the error body instead of seeing a CORS failure)
     const ct = request.headers["content-type"];
     if (!ct || !ct.includes("application/json")) {
+      const cors = buildCorsHeaders(origin as string);
+      for (const [k, v] of Object.entries(cors)) {
+        reply.header(k, v);
+      }
       return reply.code(415).send({
         error: {
           code: "PROXY_UNSUPPORTED_MEDIA_TYPE",

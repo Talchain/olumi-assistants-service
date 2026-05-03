@@ -626,7 +626,7 @@ const ConfigSchema = z.object({
   proxy: z.object({
     browserProxyEnabled: booleanString.default(false), // BROWSER_PROXY_ENABLED — master switch
     browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
-    browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(120_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (must be < ROUTE_TIMEOUT_MS)
+    browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
   }).default({}),
 });
 

@@ -111,6 +111,11 @@ export const DEFAULT_ALLOWED_HEADERS = [
   "X-Olumi-Client-Build",
   "X-Olumi-Payload-Hash",
   "X-Olumi-Unsafe",
+  // Browser proxy headers — @fastify/cors handles OPTIONS preflight before
+  // route handlers, so these must be declared here for the proxy route.
+  "X-User-Id",
+  "X-Request-Id",
+  "X-Correlation-Id",
 ];
 
 function resolveAllowedOrigins(): string[] {
@@ -297,6 +302,10 @@ export async function build() {
       "x-olumi-response-hash",
       "x-olumi-trace-received",
       "x-olumi-downstream-calls",
+      // Browser proxy diagnostic headers
+      "x-request-id",
+      "x-proxy-source",
+      "x-proxy-duration-ms",
     ],
   });
 

@@ -179,34 +179,10 @@ describe("POST /proxy/v5/turn", () => {
     });
   });
 
-  // ---- CORS preflight ----
-
-  describe("OPTIONS preflight", () => {
-    beforeEach(async () => {
-      app = buildApp();
-      await app.ready();
-    });
-
-    it("returns 204 with CORS headers for allowed origin", async () => {
-      const res = await app.inject({
-        method: "OPTIONS",
-        url: "/proxy/v5/turn",
-        headers: { origin: STAGING_ORIGIN },
-      });
-      expect(res.statusCode).toBe(204);
-      expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
-      expect(res.headers["access-control-allow-methods"]).toContain("POST");
-    });
-
-    it("returns 403 for disallowed origin", async () => {
-      const res = await app.inject({
-        method: "OPTIONS",
-        url: "/proxy/v5/turn",
-        headers: { origin: DISALLOWED_ORIGIN },
-      });
-      expect(res.statusCode).toBe(403);
-    });
-  });
+  // NOTE: OPTIONS preflight is handled by @fastify/cors in production (registered
+  // in server.ts with preflightContinue: false). The CORS plugin intercepts OPTIONS
+  // before route handlers run, so the proxy does NOT register its own OPTIONS handler.
+  // Preflight is implicitly tested via server-level integration tests, not here.
 
   // ---- Content-Type guard ----
 
@@ -229,6 +205,20 @@ describe("POST /proxy/v5/turn", () => {
       expect(res.statusCode).toBe(415);
       const body = JSON.parse(res.body);
       expect(body.error.code).toBe("PROXY_UNSUPPORTED_MEDIA_TYPE");
+    });
+
+    it("includes CORS headers on 415 rejection", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "text/plain",
+        },
+        payload: "some text",
+      });
+      expect(res.statusCode).toBe(415);
+      expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
     });
   });
 
@@ -282,6 +272,60 @@ describe("POST /proxy/v5/turn", () => {
       });
 
       expect(res.headers["x-olumi-assist-key"]).toBeUndefined();
+    });
+
+    it("falls back to assistApiKeys[0] when assistApiKey is not set", async () => {
+      // Temporarily patch the mock config to simulate multi-key-only deployment
+      const originalKey = mockConfig.auth.assistApiKey;
+      const MULTI_KEY = "multi-key-first";
+      delete (mockConfig.auth as any).assistApiKey;
+      (mockConfig.auth as any).assistApiKeys = [MULTI_KEY, "multi-key-second"];
+
+      let capturedHeaders: Record<string, string | string[] | undefined> = {};
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedHeaders = req.headers;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+
+      // Re-import to pick up new config. We can't easily re-import, so
+      // instead we just verify the proxy reads from the config at registration
+      // time. Since the mock config is a reference, the module closure sees the
+      // updated value. We need to re-register.
+      const freshApp = Fastify({ logger: false });
+      freshApp.post("/orchestrate/v2/turn", async (req, reply) => {
+        capturedHeaders = req.headers;
+        return reply.code(200).send({ blocks: [] });
+      });
+      // Re-import to pick up fresh config
+      vi.resetModules();
+      vi.mock("../../config/index.js", () => ({ config: mockConfig }));
+      vi.mock("../../utils/telemetry.js", () => ({
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        emit: vi.fn(),
+      }));
+      const { proxyV5TurnRoute: freshRoute } = await import("../proxy-v5-turn.js");
+      await freshRoute(freshApp);
+      await freshApp.ready();
+
+      await freshApp.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+        },
+        payload: SAMPLE_PAYLOAD,
+      });
+
+      expect(capturedHeaders["x-olumi-assist-key"]).toBe(MULTI_KEY);
+
+      // Restore
+      (mockConfig.auth as any).assistApiKey = originalKey;
+      delete (mockConfig.auth as any).assistApiKeys;
+      await freshApp.close();
     });
   });
 
