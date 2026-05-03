@@ -28,7 +28,7 @@ services:
       - key: PORT
         value: "3101"
       - key: ALLOWED_ORIGINS
-        value: "https://olumi.app,https://app.olumi.app,https://staging--olumi.netlify.app,http://localhost:5173,http://localhost:5174,http://localhost:3000"
+        value: "https://olumi.app,https://app.olumi.app,https://staging--olumi.netlify.app,http://localhost:5173,http://localhost:5174,http://localhost:4173,http://localhost:3000"
       - key: RATE_LIMIT_MAX
         value: "120"
       - key: RATE_LIMIT_WINDOW_MS
@@ -40,6 +40,6 @@ services:
       - key: BROWSER_PROXY_ENABLED
         value: "false"
       - key: BROWSER_PROXY_ALLOWED_ORIGINS
-        value: "https://staging--olumi.netlify.app,https://olumi.app,https://app.olumi.app,http://localhost:5173,http://localhost:4173"
+        value: "https://staging--olumi.netlify.app,http://localhost:5173,http://localhost:4173"
       - key: BROWSER_PROXY_TIMEOUT_MS
         value: "125000"

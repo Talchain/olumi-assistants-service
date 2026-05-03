@@ -19,18 +19,27 @@ safely above the observed p95.
 
 ## Verified timeout chain (defaults)
 
-| Layer | Value | Env var |
+| Layer | Value | Env var / note |
 |---|---|---|
-| UI extended timeout | 120 s | `getTimeoutMs()` constant — not configurable |
+| UI extended timeout | **130 s** | `EXTENDED_TIMEOUT_MS` in `src/v5/getTimeoutMs.ts` |
 | Browser proxy | **125 s** | `BROWSER_PROXY_TIMEOUT_MS` |
-| Render/gateway | ≥150 s | Platform — see Render dashboard |
+| Render/gateway | configured to ≥150 s | Render dashboard → service → Settings → Request Timeout |
 | CEE route (Fastify) | 135 s | `ROUTE_TIMEOUT_MS` |
 | CEE draft budget | 120 s | `DRAFT_REQUEST_BUDGET_MS` |
 | CEE LLM timeout | 105 s | `DRAFT_LLM_TIMEOUT_MS` (derived) |
 
-**Required invariant:** proxy timeout (125 s) < Fastify route timeout (135 s)
-so the proxy returns structured JSON before Fastify kills the connection.
-CEE validates this at startup via `[proxy-v5] Timeout chain OK/WARNING` log.
+**Required invariants (CEE validates at startup):**
+1. `BROWSER_PROXY_TIMEOUT_MS` (125 s) < `ROUTE_TIMEOUT_MS` (135 s) — proxy returns structured
+   JSON before Fastify kills the request.
+2. `BROWSER_PROXY_TIMEOUT_MS` (125 s) ≥ `DRAFT_REQUEST_BUDGET_MS` (120 s) — proxy waits long
+   enough for a draft to complete normally.
+3. UI extended timeout (130 s) > proxy timeout (125 s) — the browser stays alive long enough
+   to receive the structured proxy error if the proxy itself times out.
+
+> **Render timeout:** The default request timeout for Render Starter plan web services has
+> been assumed at ≥150 s based on the CEE timeout-chain comment in `config/timeouts.ts`.
+> Verify the actual value in the Render dashboard (service → Settings → Timeout) before
+> enabling the proxy on a new service or plan, and set `ROUTE_TIMEOUT_MS` accordingly.
 
 ---
 
@@ -75,24 +84,33 @@ rollback fallback.
 
 ### 3. Smoke test after enabling
 
-Run the hiring-prompt smoke test to confirm end-to-end success:
+Run the hiring-prompt smoke test to confirm end-to-end success.
+
+> **Payload notes:**
+> - `turn_id` and `scenario_id` are plain strings (not UUID-constrained by the schema).
+>   Use realistic values so accidental duplicate IDs across smoke runs are avoided.
+> - `conversation_history` is **not** part of the V5 `OrchestratorTurnPayload` schema
+>   (which is `.strict()`). Sending it causes a 422 — do not include it.
+> - `graph_state: null` is a recognised extension field (stripped before B1 validation)
+>   and signals "no existing graph" → CEE dispatches `draft_graph`.
 
 ```bash
+TURN_ID="smoke-$(date +%s)"
+SCENARIO_ID="smoke-scen-$(date +%s)"
 curl -s -o /dev/null -w "%{http_code} %{time_total}s\n" \
   -X POST https://cee-staging.onrender.com/proxy/v5/turn \
   -H "Content-Type: application/json" \
   -H "Origin: https://staging--olumi.netlify.app" \
-  -d '{
-    "kind": "message",
-    "turn_id": "smoke-001",
-    "scenario_id": "smoke-scen-001",
-    "message": "Should I hire a Tech lead or two developers to increase productivity?",
-    "stage": "frame",
-    "turn_class": "frame",
-    "source": "composer",
-    "conversation_history": [],
-    "graph_state": null
-  }'
+  -d "{
+    \"kind\": \"message\",
+    \"turn_id\": \"${TURN_ID}\",
+    \"scenario_id\": \"${SCENARIO_ID}\",
+    \"message\": \"Should I hire a Tech lead or two developers to increase productivity?\",
+    \"stage\": \"frame\",
+    \"turn_class\": \"frame\",
+    \"source\": \"composer\",
+    \"graph_state\": null
+  }"
 ```
 
 Expected: `200` and response time > 10 s (confirming the proxy doesn't short-circuit).
@@ -100,11 +118,13 @@ Expected: `200` and response time > 10 s (confirming the proxy doesn't short-cir
 Full response check:
 
 ```bash
+TURN_ID="smoke-$(date +%s)"
+SCENARIO_ID="smoke-scen-$(date +%s)"
 curl -s \
   -X POST https://cee-staging.onrender.com/proxy/v5/turn \
   -H "Content-Type: application/json" \
   -H "Origin: https://staging--olumi.netlify.app" \
-  -d '{"kind":"message","turn_id":"smoke-001","scenario_id":"smoke-scen-001","message":"Should I hire a Tech lead or two developers to increase productivity?","stage":"frame","turn_class":"frame","source":"composer","conversation_history":[],"graph_state":null}' \
+  -d "{\"kind\":\"message\",\"turn_id\":\"${TURN_ID}\",\"scenario_id\":\"${SCENARIO_ID}\",\"message\":\"Should I hire a Tech lead or two developers to increase productivity?\",\"stage\":\"frame\",\"turn_class\":\"frame\",\"source\":\"composer\",\"graph_state\":null}" \
   | jq '{has_draft_graph: (.draft_graph != null), analysis_status: .analysis_ready.status}'
 ```
 

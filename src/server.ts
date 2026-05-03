@@ -990,7 +990,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     log.info(
       {
         event: "proxy.timeout_chain",
-        ui_extended_timeout_ms: 120_000,
+        ui_extended_timeout_ms: 130_000,
         proxy_timeout_ms: proxyTimeout,
         route_timeout_ms: ROUTE_TIMEOUT_MS,
         draft_request_budget_ms: DRAFT_REQUEST_BUDGET_MS,
@@ -999,7 +999,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
         chain_invariant_proxy_gte_draft_budget: proxyDraftOk,
       },
       proxyChainOk && proxyDraftOk
-        ? `[proxy-v5] Timeout chain OK: UI(120s) → proxy(${proxyTimeout}ms) → route(${ROUTE_TIMEOUT_MS}ms)`
+        ? `[proxy-v5] Timeout chain OK: UI(130s) → proxy(${proxyTimeout}ms) → route(${ROUTE_TIMEOUT_MS}ms)`
         : `[proxy-v5] Timeout chain WARNING: proxy(${proxyTimeout}ms) vs route(${ROUTE_TIMEOUT_MS}ms) vs draft(${DRAFT_REQUEST_BUDGET_MS}ms)`,
     );
     if (!proxyChainOk) {
@@ -1014,6 +1014,29 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
         {},
         `[proxy-v5] BROWSER_PROXY_TIMEOUT_MS (${proxyTimeout}ms) < DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) — ` +
           "proxy may time out before a normal draft graph completes. Increase BROWSER_PROXY_TIMEOUT_MS.",
+      );
+    }
+
+    // Origin-drift guard: warn if any proxy origin is absent from the global
+    // CORS allowlist. Such an origin would pass POST validation but fail the
+    // OPTIONS preflight (handled by @fastify/cors with exact-match logic),
+    // causing a confusing CORS error for the browser.
+    const globalCorsOrigins = new Set(
+      (env.ALLOWED_ORIGINS ?? "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0),
+    );
+    const proxyOrigins = (config.proxy.browserProxyAllowedOrigins ?? "")
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o.length > 0);
+    const driftOrigins = proxyOrigins.filter((o) => !globalCorsOrigins.has(o));
+    if (driftOrigins.length > 0) {
+      log.warn(
+        { driftOrigins },
+        "[proxy-v5] Origin drift detected: these proxy origins are not in ALLOWED_ORIGINS. " +
+          "OPTIONS preflight will fail for these origins. Add them to ALLOWED_ORIGINS.",
       );
     }
   }

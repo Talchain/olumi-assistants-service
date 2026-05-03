@@ -32,6 +32,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config } from "../config/index.js";
 import { log } from "../utils/telemetry.js";
+import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -145,6 +146,27 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     );
   }
 
+  // Safety invariant: proxy timeout must be < ROUTE_TIMEOUT_MS so the proxy
+  // can return structured JSON before Fastify kills the connection.
+  // If violated, the proxy cannot fulfill its contract — refuse registration.
+  if (timeoutMs >= ROUTE_TIMEOUT_MS) {
+    log.error(
+      { timeoutMs, routeTimeoutMs: ROUTE_TIMEOUT_MS },
+      "[proxy-v5] BROWSER_PROXY_TIMEOUT_MS >= ROUTE_TIMEOUT_MS — proxy cannot return " +
+        "structured JSON before Fastify kills the connection. Route NOT registered. " +
+        "Reduce BROWSER_PROXY_TIMEOUT_MS below ROUTE_TIMEOUT_MS and restart.",
+    );
+    return;
+  }
+
+  if (timeoutMs < DRAFT_REQUEST_BUDGET_MS) {
+    log.warn(
+      { timeoutMs, draftBudgetMs: DRAFT_REQUEST_BUDGET_MS },
+      "[proxy-v5] BROWSER_PROXY_TIMEOUT_MS < DRAFT_REQUEST_BUDGET_MS — proxy may time out " +
+        "before a normal draft graph completes. Consider increasing BROWSER_PROXY_TIMEOUT_MS.",
+    );
+  }
+
   if (allowedOrigins.size === 0) {
     log.warn(
       {},
@@ -255,7 +277,28 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       timeoutTimer = setTimeout(() => resolve("timeout"), timeoutMs);
     });
 
-    const result = await Promise.race([injectPromise, timeoutPromise]);
+    let result: Awaited<typeof injectPromise> | "timeout";
+    try {
+      result = await Promise.race([injectPromise, timeoutPromise]);
+    } catch (injectErr) {
+      if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
+      const duration = Date.now() - startTime;
+      log.error(
+        { requestId, duration, err: injectErr },
+        "[proxy-v5] Internal inject rejected before timeout",
+      );
+      const cors = buildCorsHeaders(origin as string);
+      for (const [k, v] of Object.entries(cors)) reply.header(k, v);
+      return reply.code(502).send({
+        error: {
+          code: "PROXY_INTERNAL_ERROR",
+          message: "Internal service error.",
+          source: "proxy",
+          request_id: requestId,
+          upstream_duration_ms: duration,
+        },
+      });
+    }
 
     // Clear the timeout timer to avoid leaking timers when inject finishes first
     if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
@@ -317,11 +360,9 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     } catch {
       // Non-JSON internal response — should not happen in normal operation.
       // Return a structured JSON 502 so the browser always gets parseable JSON.
-      const truncated = injectResponse.body.length > 200
-        ? injectResponse.body.slice(0, 200) + "..."
-        : injectResponse.body;
+      // Do not log the raw body — it may contain user content. Log length only.
       log.error(
-        { requestId, status: injectResponse.statusCode, body: truncated },
+        { requestId, status: injectResponse.statusCode, bodyLength: injectResponse.body.length },
         "[proxy-v5] Internal route returned non-JSON body",
       );
       return reply.code(502).send({
