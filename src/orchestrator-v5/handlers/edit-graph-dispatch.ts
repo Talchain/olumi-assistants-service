@@ -243,6 +243,18 @@ function buildBoundarySuggestedActions(
  * with `operations: PatchOperation[]` does not fit the narrow boundary
  * `graph_patch` operation enum, and the applied graph reaches the UI via
  * `analysis_ready` + the persisted scenarios.graph row.
+ *
+ * COMPATIBILITY NOTE on `error_code: 'INTERNAL_ERROR'` (P0 fix, 2026-05):
+ * `BoundaryErrorCode` is a closed enum (olumi-schemas/src/boundary/
+ * error-codes.ts; "extend additively, do not rename") with no recoverable-
+ * rejection member, so we ship `INTERNAL_ERROR` + `severity: 'warn'` as a
+ * documented short-term combination. The severity-aware UI router treats
+ * the warn-level block as advisory and renders the friendly assistant_text
+ * + chips. Operators read `details.rejection_code` for the specific cause.
+ *
+ * TODO(schemas): additive bump to introduce `RECOVERABLE_EDIT_REJECTION`
+ * (or equivalent) so the wire signal is self-describing without relying
+ * on severity-aware parsing. Tracked separately; coordinate with UI.
  */
 function buildBoundaryBlocks(result: EditGraphResult): OlumiResponse['blocks'] {
   if (!result.wasRejected) return [];
