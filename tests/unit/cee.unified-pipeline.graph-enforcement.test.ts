@@ -22,6 +22,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
     CeeEnforcementCompleted: "cee.draft_graph.enforcement_completed",
     CeeEnforcementEdgeSkipped: "cee.draft_graph.enforcement_edge_skipped",
     CeeEnforcementPostValidationErrors: "cee.draft_graph.enforcement_post_validation_errors",
+    CeeEnforcementPostValidationWarnings: "cee.draft_graph.enforcement_post_validation_warnings",
     CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
     CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
   },
@@ -1213,6 +1214,10 @@ describe("applyDeterministicEnforcement", () => {
     expect(ctx.repairTrace.deterministic_enforcement.blocked).toBe(false);
     expect(ctx.repairTrace.deterministic_enforcement.post_validation_warning_count).toBe(1);
     expect(ctx.repairTrace.deterministic_enforcement.post_validation_error_count).toBe(0);
+    // Warning must use the dedicated event, not the error event.
+    const infoCalls = (log.info as ReturnType<typeof vi.fn>).mock.calls;
+    expect(infoCalls.some((c) => c[0]?.event === "cee.draft_graph.enforcement_post_validation_warnings")).toBe(true);
+    expect(infoCalls.some((c) => c[0]?.event === "cee.draft_graph.enforcement_post_validation_errors")).toBe(false);
   });
 
   // ── Real-validator integration: option→outcome produces INVALID_EDGE_TYPE ──

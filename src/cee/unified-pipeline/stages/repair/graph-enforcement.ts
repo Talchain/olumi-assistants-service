@@ -131,10 +131,10 @@ export function readEdgeStd(edge: EdgeT, format: EdgeFormat): number | undefined
 // ---------------------------------------------------------------------------
 
 /**
- * True iff the edge is a causal inbound edge to a budget-enforced node
- * (factor→outcome, factor→risk, action→outcome, action→risk).
- *
- * Bidirected edges are excluded — they are not directed causal edges.
+ * True iff the edge is a causal inbound edge eligible for budget rescaling.
+ * Valid: factor→outcome, factor→risk, action→outcome, action→risk.
+ * Excluded: option→outcome/risk (INVALID_EDGE_TYPE — see RESCALABLE_SOURCE_KINDS),
+ *           bidirected edges, bridge edges (outcome/risk→goal), scaffolding.
  */
 function isRescalableInbound(
   edge: EdgeT,
@@ -478,22 +478,21 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
   let blocked = false;
   try {
     const revalidation = validateGraphDeterministic({
-      graph: graph as Parameters<typeof validateGraphDeterministic>[0]["graph"],
+      graph,
       requestId,
       phase: "post_enforcement" satisfies ValidatorPhase,
     });
     postValidationErrorCount = revalidation.errors.length;
     postValidationWarningCount = revalidation.warnings.length;
 
-    // Log non-blocking warnings independently so they are observable without
-    // being conflated with blocking errors.
+    // Log non-blocking warnings independently so they are observable in dashboards
+    // without being conflated with blocking errors.
     if (postValidationWarningCount > 0) {
       log.info({
-        event: TelemetryEvents.CeeEnforcementPostValidationErrors, // reuse — warnings end up in the same field for now
+        event: TelemetryEvents.CeeEnforcementPostValidationWarnings,
         request_id: requestId,
         warning_count: postValidationWarningCount,
         warning_codes: revalidation.warnings.map((w) => w.code),
-        severity: "warning",
       }, `Post-enforcement validation: ${postValidationWarningCount} non-blocking warning(s)`);
     }
 
