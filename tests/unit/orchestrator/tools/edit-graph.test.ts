@@ -35,6 +35,7 @@ import { handleEditGraph, mapOpsForPlot, type EditGraphResult } from "../../../.
 import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
 import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
+import { BANNED_INTERNAL_TOKENS, assertNoBannedInternalTokens } from "../../../helpers/banned-internal-tokens.js";
 
 // ============================================================================
 // Helpers
@@ -450,7 +451,197 @@ describe("handleEditGraph", () => {
     expect(chatMock).toHaveBeenCalledTimes(2);
   });
 
-  it("surfaces repairs_applied in block data when PLoT returns them", async () => {
+  // ────────────────────────────────────────────────────────────────────
+  // Internal-vocabulary leak guards (P0 fix 2026-05).
+  //
+  // The previous narration block at edit-graph.ts:2337 rendered
+  // "PLoT applied N repair(s) to ensure semantic consistency:\n
+  //  - [CODE] reason" verbatim, where `reason` came from
+  // graph-enforcement.ts:237 / applyBudgetRescale / fixBridgeChaining
+  // and contained operator-language like `|mean|`, `inbound`,
+  // `sum=X.XXX to Y.Y`, `bridge`, `BUDGET_TARGET`, etc.
+  //
+  // The denylist is canonicalised in tests/helpers/banned-internal-tokens.ts
+  // so success-path and rejection-path leak tests share the same list.
+  // ────────────────────────────────────────────────────────────────────
+
+  for (const repairFixture of [
+    { code: "INBOUND_BUDGET_RESCALED", message: "Rescaled 4 causal inbound edges from sum=1.247 to 1.0" },
+    { code: "BRIDGE_CHAIN_REMOVED", message: "Removed forbidden outcome→risk edge; ceiling Σ|mean| ≤ 1.0" },
+    { code: "STRENGTH_CLAMPED", message: "Clamped strength to [-1,1]; |mean|>1 not permitted" },
+    { code: "ORPHAN_BRIDGE_ADDED", message: "Added bridge to goal with mean=-0.3 std=0.15 to satisfy BUDGET_TARGET" },
+  ]) {
+    it(`success path: assistant_text has no internal vocabulary when repair "${repairFixture.code}" is applied`, async () => {
+      const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+      const plotClient = makePlotClient({
+        verdict: "accepted",
+        repairs_applied: [repairFixture],
+      });
+
+      const result = await handleEditGraph(
+        makeContext(),
+        "Add factor",
+        adapter,
+        "req-1",
+        "turn-1",
+        { plotClient },
+      );
+
+      const text = result.assistantText ?? "";
+      // Verify no banned token appears (canonical denylist via shared helper).
+      assertNoBannedInternalTokens(text, (t, re) =>
+        expect(t, `assistant_text leaked internal token ${re}: "${t}"`).not.toMatch(re),
+      );
+      // Repair detail still flows on the wire via the GraphPatchBlock.
+      const data = result.blocks[0].data as GraphPatchBlockData;
+      expect(data.repairs_applied).toBeDefined();
+      expect(data.repairs_applied!.some((r) => r.code === repairFixture.code)).toBe(true);
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Rejection-path leak guards (P1 fix 2026-05). The rejection composer
+  // (buildRejectionResult) puts the raw `reason` text on
+  // GraphPatchBlock.data.rejection.reason for diagnostics, but produces
+  // assistant_text via the canned `buildEditRejectionResponse(...)` map
+  // — so a rejection reason containing internal vocabulary must NOT
+  // leak into the chat surface even when the raw reason is itself
+  // operator-grade.
+  // ────────────────────────────────────────────────────────────────────
+  it("LLM coaching.summary containing repair vocabulary is scrubbed before reaching the user (P1 fix 2026-05)", async () => {
+    // Defence-in-depth: even if Sonnet emits a coaching.summary that
+    // echoes prompt vocabulary like "I balanced inbound edges to keep
+    // sum=1.0", the final scrubber must replace those tokens before
+    // they reach assistant_text. The legacy `scrubFragment` only catches
+    // entity-ID prefixes; this test exercises the new
+    // `enforceRepairVocabularyDenylist` final pass.
+    const v2Response = {
+      operations: [VALID_ADD_NODE_OP],
+      removed_edges: [],
+      warnings: [],
+      coaching: {
+        summary:
+          'I balanced inbound edges to keep sum=1.0; the resulting bridge respects BUDGET_TARGET and Σ|mean|≤1.0.',
+      },
+    };
+    const adapter = makeAdapter(v2Response);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const text = result.assistantText ?? "";
+    // The friendly verb "balanced" survives; banned operator vocabulary
+    // is replaced with [REDACTED].
+    assertNoBannedInternalTokens(text, (t, re) =>
+      expect(t, `assistant_text leaked ${re}: "${t}"`).not.toMatch(re),
+    );
+    expect(text).toContain('[REDACTED]'); // proves the scrubber fired
+    expect(text).toContain('I balanced'); // proves it didn't drop the whole text
+  });
+
+  it("LLM warnings array containing repair vocabulary is scrubbed before reaching the user (P1 fix 2026-05)", async () => {
+    const v2Response = {
+      operations: [VALID_ADD_NODE_OP],
+      removed_edges: [],
+      warnings: [
+        'rescaled inbound edges; |mean| now within bounds',
+        'BUDGET_TARGET respected',
+      ],
+      coaching: { summary: 'Done.' },
+    };
+    const adapter = makeAdapter(v2Response);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const text = result.assistantText ?? "";
+    assertNoBannedInternalTokens(text, (t, re) =>
+      expect(t, `assistant_text leaked ${re}: "${t}"`).not.toMatch(re),
+    );
+  });
+
+  it("MAX_OPERATIONS rejection: assistant_text has no internal terms", async () => {
+    const ops = Array.from({ length: 20 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapter = makeAdapter(ops);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      adapter,
+      "req-1",
+      "turn-1",
+      { maxRetries: 0 },
+    );
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.code).toBe("MAX_OPERATIONS_EXCEEDED");
+    // Raw reason CAN contain "20 operations (max 15)" — that's diagnostic-only.
+    // Assistant text MUST be friendly with no banned vocabulary.
+    const text = result.assistantText ?? "";
+    assertNoBannedInternalTokens(text, (t, re) =>
+      expect(t, `assistant_text leaked ${re}: "${t}"`).not.toMatch(re),
+    );
+  });
+
+  it("PLOT verdict-rejected with operator-vocab reason: assistant_text has no internal terms", async () => {
+    // Simulate PLOT returning a `verdict: 'rejected'` envelope where the
+    // `reason` string is full of internal mechanics — the kind of text
+    // that leaked into chat before the 2337 fix.
+    const adapter = makeAdapter([VALID_ADD_NODE_OP]);
+    const plotClient = makePlotClient({
+      verdict: "rejected",
+      reason:
+        "Strength_mean exceeds bridge bound; Σ|mean| > BUDGET_TARGET on inbound edges; rescale required",
+      code: "BRIDGE_BUDGET_VIOLATION",
+    });
+    const result = await handleEditGraph(
+      makeContext(),
+      "Add factor",
+      adapter,
+      "req-1",
+      "turn-1",
+      { plotClient, maxRetries: 0 },
+    );
+
+    expect(result.wasRejected).toBe(true);
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    // The raw operator-vocabulary reason IS preserved on the
+    // diagnostic surface so operators can still debug — assert this so
+    // a regression that strips it from the wire is also caught.
+    expect(data.rejection?.reason ?? "").toMatch(/\|mean\|/);
+
+    // But the user-facing assistant text MUST be free of every banned
+    // internal token.
+    const text = result.assistantText ?? "";
+    assertNoBannedInternalTokens(text, (t, re) =>
+      expect(t, `assistant_text leaked ${re}: "${t}"`).not.toMatch(re),
+    );
+    // It MUST be a friendly recovery message.
+    expect(text).toMatch(/wasn't able|describe|simpler/i);
+  });
+
+  it("surfaces repairs_applied on block data but NOT in assistant_text (P0 fix 2026-05)", async () => {
+    // Repairs reach the wire via the V4 GraphPatchBlock for operator
+    // tooling, but MUST NOT appear in user-facing assistant_text. The
+    // previous behaviour rendered "PLoT applied N repair(s) to ensure
+    // semantic consistency:\n- [CODE] reason" verbatim, leaking internal
+    // terminology like `|mean|`, `inbound`, `sum=`, `bridge`,
+    // `[INBOUND_BUDGET_RESCALED]` etc. into the chat surface. Operators
+    // continue to see repair detail via PLoT telemetry events,
+    // x-cee-failure-cause headers, and the GraphPatchBlock `repairs_applied`
+    // field — but the user does not.
     const adapter = makeAdapter([VALID_ADD_NODE_OP]);
     const plotClient = makePlotClient({
       verdict: "accepted",
@@ -471,8 +662,10 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.repairs_applied).toHaveLength(1);
     expect(data.repairs_applied![0].code).toBe("STRENGTH_CLAMPED");
-    // Should narrate repairs in assistant text
-    expect(result.assistantText).toContain("PLoT applied 1 repair");
+    // Repair narration MUST NOT leak into assistant_text.
+    expect(result.assistantText ?? '').not.toContain("PLoT applied");
+    expect(result.assistantText ?? '').not.toContain("STRENGTH_CLAMPED");
+    expect(result.assistantText ?? '').not.toContain("Clamped strength");
   });
 
   it("skips validation with warning when PLoT returns FEATURE_DISABLED (501)", async () => {

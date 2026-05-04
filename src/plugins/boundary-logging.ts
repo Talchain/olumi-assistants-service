@@ -21,6 +21,7 @@ import { getRequestId } from "../utils/request-id.js";
 import { emit, TelemetryEvents } from "../utils/telemetry.js";
 import { getTimingSummary, getTiming, type DownstreamCallTiming } from "../utils/request-timing.js";
 import { GIT_COMMIT_SHORT } from "../version.js";
+import { readResponseHashMarkers } from "./response-hash.js";
 
 /** Metadata attached to each request for boundary tracing */
 interface BoundaryMeta {
@@ -189,9 +190,10 @@ async function boundaryLoggingPluginImpl(fastify: FastifyInstance) {
     const startTime = ((request as unknown as Record<string, unknown>).startTime as number | undefined) || Date.now();
     const elapsedMs = Date.now() - startTime;
 
-    // Get response hash (set by response-hash plugin)
-    const responseHash = (reply as unknown as Record<string, unknown>).responseHash as string | undefined;
-    const responseHashSkipped = (reply as unknown as Record<string, unknown>).responseHashSkipped as boolean | undefined;
+    // Get response hash markers (set by response-hash plugin via the
+    // typed accessors in plugins/response-hash.ts).
+    const { hash: responseHash, skipped: responseHashSkipped } =
+      readResponseHashMarkers(reply);
 
     // Get timing summary (set by request-timing utility)
     const timingSummary = getTimingSummary(request);
