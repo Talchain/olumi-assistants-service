@@ -20,8 +20,15 @@ import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
+import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
+import {
+  buildAddRiskOperations,
+  buildAddRiskConfirmation,
+  TemplateBuildError,
+} from './edit-templates/add-risk-template.js';
+import { applyTemplateOperations } from './edit-templates/apply-template.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
@@ -354,16 +361,49 @@ function editResultToOlumiResponse(
  * Callers of this module MUST NOT apply `as unknown as GraphV3T` themselves
  * — see the banner comment in src/orchestrator-v5/boundary/request-extensions.ts.
  */
+/**
+ * V5 A4 Commit 6 — strict parse signal for the deterministic template
+ * gate. Callers that need to know whether the returned graph is the
+ * canonical strict-parsed form vs the structural fallback (with inert
+ * default edge fields) can use `graphStateToGraphV3WithParseResult`.
+ * The deterministic add_risk template MUST NOT run against fallback
+ * graphs because committing template ops on top of inert defaults
+ * persists non-canonical edge state.
+ *
+ * Implementation note (Commit 7): both `graphStateToGraphV3WithParseResult`
+ * and `graphStateToGraphV3` now share a single `safeParse` call by
+ * threading the parse result through `buildStructuralFallback`. Avoids
+ * the prior double-parse cost on non-canonical ingress.
+ */
+function graphStateToGraphV3WithParseResult(
+  graphState: GraphStateIngress,
+  requestId: string,
+): { graph: GraphV3T; strict: boolean } {
+  const parsed = GraphV3.safeParse(graphState);
+  if (parsed.success) {
+    return { graph: parsed.data, strict: true };
+  }
+  return { graph: buildStructuralFallback(graphState, requestId, parsed.error), strict: false };
+}
+
 function graphStateToGraphV3(graphState: GraphStateIngress, requestId: string): GraphV3T {
   const parsed = GraphV3.safeParse(graphState);
   if (parsed.success) {
     return parsed.data;
   }
+  return buildStructuralFallback(graphState, requestId, parsed.error);
+}
+
+function buildStructuralFallback(
+  graphState: GraphStateIngress,
+  requestId: string,
+  error: import('zod').ZodError,
+): GraphV3T {
   log.warn(
     {
       request_id: requestId,
-      issue_count: parsed.error.issues.length,
-      first_issue_path: parsed.error.issues[0]?.path.join('.') ?? null,
+      issue_count: error.issues.length,
+      first_issue_path: error.issues[0]?.path.join('.') ?? null,
     },
     'V5 edit_graph dispatch — graph ingress did not pass strict GraphV3 parse; using structural fallback',
   );
@@ -431,8 +471,10 @@ export async function dispatchEditGraph(
   const { payload, requestId, graphState, analysisState } = params;
   const startedAt = Date.now();
 
+  const { graph: parsedGraph, strict: graphStrictlyCanonical } =
+    graphStateToGraphV3WithParseResult(graphState, requestId);
   const context: ConversationContext = {
-    graph: graphStateToGraphV3(graphState, requestId),
+    graph: parsedGraph,
     analysis_response: analysisState ? analysisIngressToV2Envelope(analysisState) : null,
     framing: { stage: mapStageToDecisionStage(payload.stage) },
     messages: [{ role: 'user', content: payload.message }],
@@ -442,14 +484,86 @@ export async function dispatchEditGraph(
   const adapter = getAdapter('edit_graph');
 
   let editResult: EditGraphResult;
+  // V5 A4 Commit 6 — track template invocation independently of outcome
+  // so a template path that classifier-fired but template-rejected still
+  // records llm_calls_used: 0 (no adapter call was made).
+  let templateAttempted = false;
   try {
-    editResult = await handleEditGraph(
-      context,
-      payload.message,
-      adapter,
-      requestId,
-      payload.turn_id,
-    );
+    // V5 A4 — deterministic template intercept. Pre-LLM classifier catches
+    // high-confidence "add X as a risk" patterns and applies a fixed
+    // 3-operation patch (risk node + decision->risk bridge + risk->goal
+    // negative bridge) through the SAME validate -> apply -> topology
+    // pipeline that LLM operations use. Template builder throws
+    // TemplateBuildError if the graph lacks a goal or decision node; in
+    // that case we fall through to the LLM path.
+    // The deterministic template MUST NOT run against a structural
+    // fallback graph: committing template ops on top of inert default
+    // edge fields persists non-canonical state. When the ingress did
+    // not pass strict GraphV3 parse, fall through to the LLM path
+    // unconditionally (handleEditGraph re-casts internally and is the
+    // pre-existing behaviour for non-canonical ingress).
+    const classified =
+      context.graph && graphStrictlyCanonical
+        ? classifyAddRiskIntent(payload.message, context.graph)
+        : ({ intent: 'llm_required' } as const);
+
+    if (classified.intent === 'add_risk') {
+      templateAttempted = true;
+      try {
+        const { operations } = buildAddRiskOperations(classified.label, context.graph!);
+        editResult = await applyTemplateOperations({
+          operations,
+          context,
+          requestId,
+          turnId: payload.turn_id,
+          templateName: 'add_risk',
+          confirmationText: buildAddRiskConfirmation(classified.label),
+        });
+        if (editResult.wasRejected) {
+          emit(TelemetryEvents.V5EditGraphTemplateRejected, {
+            template: 'add_risk',
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: Date.now() - startedAt,
+          });
+        } else {
+          emit(TelemetryEvents.V5EditGraphTemplateApplied, {
+            template: 'add_risk',
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: Date.now() - startedAt,
+          });
+        }
+      } catch (err) {
+        if (err instanceof TemplateBuildError) {
+          // Graph lacked goal/decision: fall through to the LLM path.
+          // Reset templateAttempted so llm_calls_used reflects that the
+          // adapter was actually invoked.
+          templateAttempted = false;
+          log.info(
+            { request_id: requestId, scenario_id: payload.scenario_id, code: err.code },
+            'V5 edit_graph add_risk template — graph precondition unmet, falling through to LLM path',
+          );
+          editResult = await handleEditGraph(
+            context,
+            payload.message,
+            adapter,
+            requestId,
+            payload.turn_id,
+          );
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      editResult = await handleEditGraph(
+        context,
+        payload.message,
+        adapter,
+        requestId,
+        payload.turn_id,
+      );
+    }
   } catch (err) {
     log.error(
       {
@@ -566,7 +680,12 @@ export async function dispatchEditGraph(
       turn_class: 'direct_answer',
       handler_id: null,
       request_hash: computeRequestHash(payload),
-      llm_calls_used: 1,
+      // Deterministic template path makes zero LLM calls regardless of
+      // outcome (success or template-rejection both stay no-adapter); LLM
+      // path makes at least one (handleEditGraph drives the
+      // classification + repair loop). Distinguish so dashboards can
+      // attribute cost honestly.
+      llm_calls_used: templateAttempted ? 0 : 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
       graph: editResult.appliedGraph ?? undefined,

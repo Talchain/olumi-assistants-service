@@ -583,6 +583,12 @@ export const TelemetryEvents = {
   V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
   V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
 
+  // V5 A4 — deterministic edit template applied (e.g. add_risk). Payload:
+  // { template, request_id, scenario_id, latency_ms }. Distinct from the
+  // LLM edit path so dashboards can attribute zero-LLM-call success rate.
+  V5EditGraphTemplateApplied: "v5.edit_graph.template_applied",
+  V5EditGraphTemplateRejected: "v5.edit_graph.template_rejected",
+
   // V5 recovery chips — fired when the egress safety layer
   // (failure-response.ts) attaches one or more recovery chips to a failure
   // response. Distinct from V5DecisionReviewFailed: this event is about the

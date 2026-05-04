@@ -164,6 +164,41 @@ describe("Configurable MAX_PATCH_OPERATIONS (C.2)", () => {
     expect(data2.operations).toHaveLength(20);
   });
 
+  it("V5 A4 — user-facing rejection text is friendly with recovery chip (no raw counts/Zod)", async () => {
+    mockMaxPatchOperations = 15;
+    const ops = Array.from({ length: 16 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      adapter,
+      "req-friendly",
+      "turn-friendly",
+      { maxRetries: 0 },
+    );
+
+    // Block-level rejection.reason still carries the raw text for diagnostics.
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.rejection?.code).toBe("MAX_OPERATIONS_EXCEEDED");
+
+    // User-facing assistantText is the centralised friendly copy.
+    expect(result.assistantText).toBeTruthy();
+    expect(result.assistantText).not.toMatch(/\boperation(s)?\b/i);
+    expect(result.assistantText).not.toMatch(/\bpatch\b/i);
+    expect(result.assistantText).not.toMatch(/\bmax(?:imum)?\s+(?:of\s+)?\d+/i);
+    expect(result.assistantText).not.toMatch(/\b\d+\s+(?:operation|edge|node)/i);
+    expect(result.assistantText).toMatch(/smaller steps/i);
+
+    // At least one recovery chip.
+    expect(result.suggestedActions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(result.suggestedActions?.[0].label).toBeTruthy();
+  });
+
   it("existing edit_graph tests unaffected (default 15 still rejects at 16)", async () => {
     mockMaxPatchOperations = 15;
     const ops = Array.from({ length: 15 }, (_, i) => ({

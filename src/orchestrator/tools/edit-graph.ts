@@ -68,6 +68,10 @@ import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-saf
 import { TOKEN_OVERLAP_STOPWORDS, hasTokenOverlap } from "./token-overlap.js";
 import { STRUCTURAL_EDGE_DEFAULTS } from "../context/constants.js";
 import { enforceProposalLanguage } from "../deterministic/proposal-language-guard.js";
+import {
+  buildEditRejectionResponse,
+  type EditRejectionReason,
+} from "../../orchestrator-v5/handlers/edit-rejection-text.js";
 
 // ============================================================================
 // Types
@@ -2430,28 +2434,38 @@ function buildRejectionResult(
   );
 
   // Never surface raw structural violation text to the user.
-  // The raw reason is preserved in the block's rejection.reason for debugging;
-  // the assistant text always gives a safe, actionable recovery message.
-  const isStructuralRejection =
-    code === 'STRUCTURAL_VALIDATION_FAILED' || code === 'PLOT_SEMANTIC_REJECTED';
-  const userFacingText = isStructuralRejection
-    ? "I wasn't able to make that change safely — it was too complex for a single edit. You could try breaking it into smaller steps, or I can rebuild the model from an updated brief."
-    : `I wasn't able to apply that change. ${reason}`;
+  // The raw reason is preserved in the block's rejection.reason for
+  // debugging; the assistant text always gives a safe, actionable recovery
+  // message via the centralised builder. Mapping (V5 A4 Commit 3):
+  //   MAX_OPERATIONS_EXCEEDED       -> too_many_operations
+  //   STRUCTURAL_VALIDATION_FAILED  -> structural_validation
+  //   PLOT_SEMANTIC_REJECTED        -> structural_validation
+  //   PLOT_UNAVAILABLE              -> structural_validation
+  //   anything else                 -> structural_validation (safe default)
+  const friendly = buildEditRejectionResponse(mapCodeToRejectionReason(code));
 
   return {
     blocks: [block],
-    assistantText: userFacingText,
+    assistantText: friendly.assistantText,
     latencyMs,
     appliedGraph: null,
     wasRejected: true,
-    suggestedActions: isStructuralRejection
-      ? [
-          { role: 'facilitator', label: 'Try a simpler change', prompt: 'Try a simpler version of this change.' },
-          { role: 'facilitator', label: 'Start fresh', prompt: 'Let\'s rebuild the model from the updated brief.' },
-        ]
-      : undefined,
+    suggestedActions: friendly.suggestedActions.length > 0 ? friendly.suggestedActions : undefined,
     diagnostics,
   };
+}
+
+function mapCodeToRejectionReason(code?: string): EditRejectionReason {
+  switch (code) {
+    case 'MAX_OPERATIONS_EXCEEDED':
+      return 'too_many_operations';
+    case 'STRUCTURAL_VALIDATION_FAILED':
+    case 'PLOT_SEMANTIC_REJECTED':
+    case 'PLOT_UNAVAILABLE':
+      return 'structural_validation';
+    default:
+      return 'structural_validation';
+  }
 }
 
 // ============================================================================
