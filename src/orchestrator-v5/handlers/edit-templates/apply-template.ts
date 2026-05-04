@@ -19,7 +19,7 @@
  * produce an invalid graph; this is a safety net.
  */
 
-import { enforceStructuralEdgeDefaults } from "../../../orchestrator/tools/edit-graph.js";
+import { buildAppliedChanges, enforceStructuralEdgeDefaults } from "../../../orchestrator/tools/edit-graph.js";
 import { validatePatchOperations } from "../../../orchestrator/patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../../../orchestrator/patch-applier.js";
 import {
@@ -109,13 +109,37 @@ export async function applyTemplateOperations(params: ApplyTemplateParams): Prom
     return rejection('structural_validation', startTime, 'TEMPLATE_TOPOLOGY_INVALID', requestId, turnId, templateName);
   }
 
+  // V5 A4 Commit 5 — UX parity with the LLM success path:
+  //   * appliedChanges receipt is built deterministically from the actual
+  //     operations + post-edit graph (label resolution falls back to op.value
+  //     for newly added nodes, which buildAppliedChanges handles).
+  //   * "Re-run analysis" chip is appended ONLY when prior analysis exists
+  //     (rerun_recommended === true). Without prior analysis, no chip — the
+  //     graph hasn't been analysed yet, so re-running is meaningless.
+  const hasExistingAnalysis = !!context.analysis_response;
+  const appliedChanges = buildAppliedChanges(
+    validation.operations as unknown as PatchOperation[],
+    candidateGraph,
+    hasExistingAnalysis,
+  );
+
+  const suggestedActions: EditGraphResult['suggestedActions'] = [];
+  if (appliedChanges.rerun_recommended) {
+    suggestedActions.push({
+      label: 'Re-run analysis',
+      prompt: 'run the analysis again',
+      role: 'facilitator',
+    });
+  }
+
   return {
     blocks: [],
     assistantText: confirmationText,
     latencyMs: Date.now() - startTime,
     appliedGraph: candidateGraph,
     wasRejected: false,
-    suggestedActions: [],
+    appliedChanges,
+    ...(suggestedActions.length > 0 && { suggestedActions }),
   };
 }
 

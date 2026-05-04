@@ -70,6 +70,51 @@ describe('applyTemplateOperations', () => {
     expect(Date.now() - start).toBeLessThan(100);
   });
 
+  it('UX parity: emits appliedChanges receipt + rerun chip when prior analysis exists', async () => {
+    const graph = baseGraph();
+    const { operations } = buildAddRiskOperations('cyber attacks', graph);
+    const ctxWithAnalysis: ConversationContext = {
+      ...buildContext(graph),
+      // Minimal stub: existence is what triggers rerun_recommended.
+      analysis_response: { meta: { seed_used: 0, n_samples: 0, response_hash: '' }, results: [] } as unknown as ConversationContext['analysis_response'],
+    };
+
+    const result = await applyTemplateOperations({
+      operations,
+      context: ctxWithAnalysis,
+      requestId: 'req_rerun',
+      turnId: 'turn_rerun',
+      templateName: 'add_risk',
+      confirmationText: buildAddRiskConfirmation('cyber attacks'),
+    });
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedChanges).toBeDefined();
+    expect(result.appliedChanges!.rerun_recommended).toBe(true);
+    expect(result.appliedChanges!.changes.length).toBe(operations.length);
+    const rerunChip = (result.suggestedActions ?? []).find((c) => /re-?run/i.test(c.label));
+    expect(rerunChip).toBeDefined();
+  });
+
+  it('UX parity: NO rerun chip when prior analysis does NOT exist', async () => {
+    const graph = baseGraph();
+    const { operations } = buildAddRiskOperations('regulatory risk', graph);
+    const result = await applyTemplateOperations({
+      operations,
+      context: buildContext(graph), // analysis_response: null
+      requestId: 'req_norerun',
+      turnId: 'turn_norerun',
+      templateName: 'add_risk',
+      confirmationText: buildAddRiskConfirmation('regulatory risk'),
+    });
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedChanges).toBeDefined();
+    expect(result.appliedChanges!.rerun_recommended).toBe(false);
+    const rerunChip = (result.suggestedActions ?? []).find((c) => /re-?run/i.test(c.label));
+    expect(rerunChip).toBeUndefined();
+  });
+
   it('returns rejected EditGraphResult with friendly text + chip when validation fails', async () => {
     // Inject a malformed operation to force Zod failure.
     const badOps = [
