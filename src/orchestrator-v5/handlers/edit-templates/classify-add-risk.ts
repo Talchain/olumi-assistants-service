@@ -31,12 +31,21 @@ export type AddRiskIntent =
 // churn" do NOT match — they fall through to the LLM path which can handle
 // the second clause. A naïve non-anchored match would silently drop the
 // trailing instruction.
+//
+// All accepted patterns also START with an explicit verb anchor (`add`,
+// `include`, `please add`, `we should add`). The earlier draft included a
+// fourth pattern of the form `(.+?) is a risk` with no leading verb anchor.
+// That form was retired because the non-greedy capture combined with the
+// mandatory end anchor accepted arbitrary preamble — `"I think team
+// dynamics is a risk"` captured label `"I think team dynamics"` which is
+// not the user's intended risk label. Statements of the form `"X is a
+// risk"` now fall through to the LLM path, which has the full context to
+// disambiguate. Tests in classify-add-risk.test.ts pin this behaviour.
 const TRAILING_PUNCT = `\\s*[.!?]?\\s*$`;
 const PATTERNS: ReadonlyArray<RegExp> = [
   new RegExp(`^\\s*(?:please\\s+)?add\\s+(.+?)\\s+as\\s+a\\s+risk${TRAILING_PUNCT}`, 'i'),
   new RegExp(`^\\s*(?:please\\s+)?include\\s+(.+?)\\s+as\\s+a\\s+risk${TRAILING_PUNCT}`, 'i'),
   new RegExp(`^\\s*(?:we should\\s+)?add\\s+(.+?)\\s+risk${TRAILING_PUNCT}`, 'i'),
-  new RegExp(`^\\s*(.+?)\\s+is\\s+a\\s+risk(?:\\s+we should consider)?${TRAILING_PUNCT}`, 'i'),
 ];
 
 const PRONOUN_DEMONSTRATIVE_RE =

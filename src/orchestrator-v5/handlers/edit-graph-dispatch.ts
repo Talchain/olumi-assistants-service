@@ -23,12 +23,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
-import {
-  buildAddRiskOperations,
-  buildAddRiskConfirmation,
-  TemplateBuildError,
-} from './edit-templates/add-risk-template.js';
-import { applyTemplateOperations } from './edit-templates/apply-template.js';
+import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
@@ -90,8 +85,8 @@ export interface DispatchEditGraphResult {
    * V5 finaliser contract: pre-computed structural readiness from the
    * post-edit `appliedGraph`. Surfaced so the response-finaliser in
    * route-v2.ts can stamp `analysis_ready` after composition. Undefined
-   * for rejected edits (no `appliedGraph`) — the canvas is unchanged so
-   * the UI's prior `ceeAnalysisReady` remains correct.
+   * when there is no `appliedGraph` — the canvas is unchanged so the UI's
+   * prior `ceeAnalysisReady` remains correct.
    */
   readonly analysisReady?: AnalysisReadyPayload;
   /**
@@ -105,8 +100,8 @@ export interface DispatchEditGraphResult {
   readonly freshness?: import('../context/freshness.js').FreshnessDerivation;
   /**
    * Post-edit graph used for label resolution by the central egress
-   * sanitiser (sanitiseOlumiResponseForEgress). Null when the edit was
-   * rejected — sanitiser falls back to prefix-aware generic wording.
+   * sanitiser (sanitiseOlumiResponseForEgress). Null when no graph was
+   * applied — sanitiser falls back to prefix-aware generic wording.
    */
   readonly graph: GraphV3T | null;
 }
@@ -362,18 +357,12 @@ function editResultToOlumiResponse(
  * — see the banner comment in src/orchestrator-v5/boundary/request-extensions.ts.
  */
 /**
- * V5 A4 Commit 6 — strict parse signal for the deterministic template
+ * V5 A4 Commit 6 — strict parse signal for the deterministic classifier
  * gate. Callers that need to know whether the returned graph is the
  * canonical strict-parsed form vs the structural fallback (with inert
  * default edge fields) can use `graphStateToGraphV3WithParseResult`.
- * The deterministic add_risk template MUST NOT run against fallback
- * graphs because committing template ops on top of inert defaults
- * persists non-canonical edge state.
- *
- * Implementation note (Commit 7): both `graphStateToGraphV3WithParseResult`
- * and `graphStateToGraphV3` now share a single `safeParse` call by
- * threading the parse result through `buildStructuralFallback`. Avoids
- * the prior double-parse cost on non-canonical ingress.
+ * The deterministic add_risk clarification path runs only against strictly
+ * parsed graphs so non-canonical ingress keeps the pre-existing LLM path.
  */
 function graphStateToGraphV3WithParseResult(
   graphState: GraphStateIngress,
@@ -385,15 +374,6 @@ function graphStateToGraphV3WithParseResult(
   }
   return { graph: buildStructuralFallback(graphState, requestId, parsed.error), strict: false };
 }
-
-function graphStateToGraphV3(graphState: GraphStateIngress, requestId: string): GraphV3T {
-  const parsed = GraphV3.safeParse(graphState);
-  if (parsed.success) {
-    return parsed.data;
-  }
-  return buildStructuralFallback(graphState, requestId, parsed.error);
-}
-
 function buildStructuralFallback(
   graphState: GraphStateIngress,
   requestId: string,
@@ -484,77 +464,46 @@ export async function dispatchEditGraph(
   const adapter = getAdapter('edit_graph');
 
   let editResult: EditGraphResult;
-  // V5 A4 Commit 6 — track template invocation independently of outcome
-  // so a template path that classifier-fired but template-rejected still
-  // records llm_calls_used: 0 (no adapter call was made).
-  let templateAttempted = false;
+  // Track the deterministic clarification path independently so
+  // llm_calls_used records 0 when no adapter call was made.
+  let deterministicAddRiskAttempted = false;
   try {
-    // V5 A4 — deterministic template intercept. Pre-LLM classifier catches
-    // high-confidence "add X as a risk" patterns and applies a fixed
-    // 3-operation patch (risk node + decision->risk bridge + risk->goal
-    // negative bridge) through the SAME validate -> apply -> topology
-    // pipeline that LLM operations use. Template builder throws
-    // TemplateBuildError if the graph lacks a goal or decision node; in
-    // that case we fall through to the LLM path.
-    // The deterministic template MUST NOT run against a structural
-    // fallback graph: committing template ops on top of inert default
-    // edge fields persists non-canonical state. When the ingress did
-    // not pass strict GraphV3 parse, fall through to the LLM path
-    // unconditionally (handleEditGraph re-casts internally and is the
-    // pre-existing behaviour for non-canonical ingress).
-    const classified =
-      context.graph && graphStrictlyCanonical
-        ? classifyAddRiskIntent(payload.message, context.graph)
-        : ({ intent: 'llm_required' } as const);
+    // V5 A4 — deterministic clarification intercept. Pre-LLM classifier
+    // catches high-confidence bare "add X as a risk" patterns, but the
+    // request does not state what drives the risk. Creating a risk node
+    // would require inventing graph structure, so this path asks for the
+    // missing driver and intentionally leaves the graph unchanged.
+    // The deterministic classifier MUST NOT run against a structural
+    // fallback graph. When the ingress did not pass strict GraphV3 parse,
+    // fall through to the LLM path unconditionally (handleEditGraph re-casts
+    // internally and is the pre-existing behaviour for non-canonical ingress).
+    const classified = graphStrictlyCanonical
+      ? classifyAddRiskIntent(payload.message, parsedGraph)
+      : ({ intent: 'llm_required' } as const);
 
     if (classified.intent === 'add_risk') {
-      templateAttempted = true;
-      try {
-        const { operations } = buildAddRiskOperations(classified.label, context.graph!);
-        editResult = await applyTemplateOperations({
-          operations,
-          context,
-          requestId,
-          turnId: payload.turn_id,
-          templateName: 'add_risk',
-          confirmationText: buildAddRiskConfirmation(classified.label),
-        });
-        if (editResult.wasRejected) {
-          emit(TelemetryEvents.V5EditGraphTemplateRejected, {
-            template: 'add_risk',
-            request_id: requestId,
-            scenario_id: payload.scenario_id,
-            latency_ms: Date.now() - startedAt,
-          });
-        } else {
-          emit(TelemetryEvents.V5EditGraphTemplateApplied, {
-            template: 'add_risk',
-            request_id: requestId,
-            scenario_id: payload.scenario_id,
-            latency_ms: Date.now() - startedAt,
-          });
-        }
-      } catch (err) {
-        if (err instanceof TemplateBuildError) {
-          // Graph lacked goal/decision: fall through to the LLM path.
-          // Reset templateAttempted so llm_calls_used reflects that the
-          // adapter was actually invoked.
-          templateAttempted = false;
-          log.info(
-            { request_id: requestId, scenario_id: payload.scenario_id, code: err.code },
-            'V5 edit_graph add_risk template — graph precondition unmet, falling through to LLM path',
-          );
-          editResult = await handleEditGraph(
-            context,
-            payload.message,
-            adapter,
-            requestId,
-            payload.turn_id,
-          );
-        } else {
-          throw err;
-        }
-      }
+      deterministicAddRiskAttempted = true;
+      editResult = {
+        blocks: [],
+        assistantText: buildAddRiskClarification(classified.label),
+        latencyMs: Date.now() - startedAt,
+        appliedGraph: null,
+        wasRejected: false,
+      };
+      log.info(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          latency_ms: editResult.latencyMs,
+        },
+        'V5 edit_graph add_risk clarification returned without graph mutation',
+      );
+      emit(TelemetryEvents.V5EditGraphAddRiskClarified, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        latency_ms: editResult.latencyMs,
+        label_length: classified.label.length,
+      });
     } else {
       editResult = await handleEditGraph(
         context,
@@ -582,8 +531,8 @@ export async function dispatchEditGraph(
   // graph here so route-v2.ts can stamp it onto the wire envelope.
   // computeStructuralReadiness is intervention-shape-tolerant
   // (mergeInterventionSources handles the V3 shape that the UI legacy
-  // fallback could not read). Undefined for rejected edits — the canvas is
-  // unchanged so the UI's prior store value remains correct.
+  // fallback could not read). Undefined when no graph was applied — the
+  // canvas is unchanged so the UI's prior store value remains correct.
   const analysisReady: AnalysisReadyPayload | undefined = editResult.appliedGraph
     ? computeStructuralReadiness(editResult.appliedGraph)
     : undefined;
@@ -680,12 +629,10 @@ export async function dispatchEditGraph(
       turn_class: 'direct_answer',
       handler_id: null,
       request_hash: computeRequestHash(payload),
-      // Deterministic template path makes zero LLM calls regardless of
-      // outcome (success or template-rejection both stay no-adapter); LLM
-      // path makes at least one (handleEditGraph drives the
-      // classification + repair loop). Distinguish so dashboards can
-      // attribute cost honestly.
-      llm_calls_used: templateAttempted ? 0 : 1,
+      // Deterministic clarification path makes zero LLM calls; LLM path
+      // makes at least one (handleEditGraph drives the classification +
+      // repair loop). Distinguish so dashboards can attribute cost honestly.
+      llm_calls_used: deterministicAddRiskAttempted ? 0 : 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
       graph: editResult.appliedGraph ?? undefined,
