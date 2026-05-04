@@ -20,8 +20,15 @@ import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
+import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
+import {
+  buildAddRiskOperations,
+  buildAddRiskConfirmation,
+  TemplateBuildError,
+} from './edit-templates/add-risk-template.js';
+import { applyTemplateOperations } from './edit-templates/apply-template.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
@@ -443,13 +450,69 @@ export async function dispatchEditGraph(
 
   let editResult: EditGraphResult;
   try {
-    editResult = await handleEditGraph(
-      context,
-      payload.message,
-      adapter,
-      requestId,
-      payload.turn_id,
-    );
+    // V5 A4 — deterministic template intercept. Pre-LLM classifier catches
+    // high-confidence "add X as a risk" patterns and applies a fixed
+    // 3-operation patch (risk node + decision->risk bridge + risk->goal
+    // negative bridge) through the SAME validate -> apply -> topology
+    // pipeline that LLM operations use. Template builder throws
+    // TemplateBuildError if the graph lacks a goal or decision node; in
+    // that case we fall through to the LLM path.
+    const classified = context.graph
+      ? classifyAddRiskIntent(payload.message, context.graph)
+      : ({ intent: 'llm_required' } as const);
+
+    if (classified.intent === 'add_risk') {
+      try {
+        const { operations } = buildAddRiskOperations(classified.label, context.graph!);
+        editResult = await applyTemplateOperations({
+          operations,
+          context,
+          requestId,
+          turnId: payload.turn_id,
+          templateName: 'add_risk',
+          confirmationText: buildAddRiskConfirmation(classified.label),
+        });
+        if (editResult.wasRejected) {
+          emit(TelemetryEvents.V5EditGraphTemplateRejected, {
+            template: 'add_risk',
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: Date.now() - startedAt,
+          });
+        } else {
+          emit(TelemetryEvents.V5EditGraphTemplateApplied, {
+            template: 'add_risk',
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: Date.now() - startedAt,
+          });
+        }
+      } catch (err) {
+        if (err instanceof TemplateBuildError) {
+          log.info(
+            { request_id: requestId, scenario_id: payload.scenario_id, code: err.code },
+            'V5 edit_graph add_risk template — graph precondition unmet, falling through to LLM path',
+          );
+          editResult = await handleEditGraph(
+            context,
+            payload.message,
+            adapter,
+            requestId,
+            payload.turn_id,
+          );
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      editResult = await handleEditGraph(
+        context,
+        payload.message,
+        adapter,
+        requestId,
+        payload.turn_id,
+      );
+    }
   } catch (err) {
     log.error(
       {
