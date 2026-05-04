@@ -72,6 +72,7 @@ import {
   buildEditRejectionResponse,
   type EditRejectionReason,
 } from "../../orchestrator-v5/handlers/edit-rejection-text.js";
+import { enforceRepairVocabularyDenylist } from "../shared/repair-vocabulary-denylist.js";
 
 // ============================================================================
 // Types
@@ -2334,18 +2335,64 @@ export async function handleEditGraph(
     if (llmResult.coaching?.summary) {
       textParts.push(scrubFragment(llmResult.coaching.summary));
     }
-    if (repairsApplied && repairsApplied.length > 0) {
-      const repairSummary = repairsApplied
-        .map((r) => `- ${'code' in r && r.code ? `[${r.code}] ` : ''}${scrubFragment(r.reason)}`)
-        .join('\n');
-      textParts.push(`PLoT applied ${repairsApplied.length} repair(s) to ensure semantic consistency:\n${repairSummary}`);
-    }
+    // P0 fix (2026-05): NEVER render PLoT repair / A5 enforcement reasons
+    // into user-facing assistant_text. Repair `action` strings come from
+    // operator-grade telemetry sources — e.g. graph-enforcement.ts:237
+    // emits "Rescaled N causal inbound edges from sum=X.XXX to 1.0",
+    // applyBudgetRescale / fixBridgeChaining / PLoT validators all emit
+    // strings containing internal terminology like `|mean|`, `inbound`,
+    // `sum=`, `bridge`, `BUDGET_TARGET`, `[INBOUND_BUDGET_RESCALED]`.
+    // These leaked into the chat surface and the existing entity-ID
+    // scrubFragment did NOT catch them (it only matches node/edge ID
+    // prefixes, not internal vocabulary).
+    //
+    // Operators retain full repair signal via:
+    //   - PLoT structured logs (CeeEnforcementApplied telemetry events).
+    //   - The `repairs_applied` field on the V4 GraphPatchBlock if the
+    //     boundary block is emitted (success path).
+    //   - The `x-cee-failure-cause` response header on rejections.
+    //   - V5 EditGraphResult.diagnostics stays unchanged.
+    //
+    // The previous narration block:
+    //   `PLoT applied ${N} repair(s) to ensure semantic consistency:\n
+    //    - [CODE] reason\n - ...`
+    // is dropped. If repairs are applied, the user sees coaching.summary
+    // (LLM-generated, scrubbed) plus optional warnings (also scrubbed).
+    // No user-facing surface needs the operator-language detail.
     if (llmResult.warnings.length > 0) {
       textParts.push(`Note: ${scrubFragment(llmResult.warnings.join(' '))}`);
     }
 
     if (textParts.length > 0) {
       assistantText = textParts.join('\n\n');
+    }
+
+    // P1 fix (2026-05): final defence-in-depth pass against repair /
+    // enforcement vocabulary leaking into user-facing prose. Sources
+    // already targeted upstream (the removed PLoT-narration block at
+    // 2337, scrubFragment for entity IDs) — this catches anything that
+    // slipped through, including LLM-generated coaching.summary or
+    // warnings that echo prompt vocabulary like `inbound`, `sum=`,
+    // `bridge`, `BUDGET_TARGET`, `[INBOUND_*]`, `Σ`. Replacements are
+    // counted and logged so dashboards observe the rate; a non-zero
+    // rate signals upstream prompt drift.
+    if (assistantText) {
+      const denylistResult = enforceRepairVocabularyDenylist(assistantText);
+      if (denylistResult.replacements > 0) {
+        log.warn(
+          {
+            event: 'edit_graph.assistant_text_repair_vocabulary_redacted',
+            request_id: requestId,
+            replacement_count: denylistResult.replacements,
+            // Length only — never log the raw text (which may still
+            // contain the banned tokens before scrubbing).
+            text_length_before: assistantText.length,
+            text_length_after: denylistResult.text.length,
+          },
+          'edit_graph: repair vocabulary scrubbed from assistant_text',
+        );
+        assistantText = denylistResult.text;
+      }
     }
 
     // T5: proposal-language guard. edit_graph emits patches with
