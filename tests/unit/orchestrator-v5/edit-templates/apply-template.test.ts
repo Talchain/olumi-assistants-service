@@ -94,6 +94,28 @@ describe('applyTemplateOperations', () => {
     }
   });
 
+  it('appliedChanges.summary contains no raw internal IDs (multi-change receipt)', async () => {
+    const graph = baseGraph();
+    const { operations } = buildAddRiskOperations('regulatory risk', graph);
+    expect(operations.length).toBeGreaterThan(1); // 3-op receipt → multi-change summary
+    const result = await applyTemplateOperations({
+      operations,
+      context: buildContext(graph),
+      requestId: 'req_summary',
+      turnId: 'turn_summary',
+      templateName: 'add_risk',
+      confirmationText: buildAddRiskConfirmation('regulatory risk'),
+    });
+    expect(result.appliedChanges).toBeDefined();
+    const RAW_ID_PATTERNS = [/risk_[a-z0-9_]+/, /\bdec_[a-z0-9_]+/, /\bgoal_[a-z0-9_]+/, /\bopt_[a-z0-9_]+/, /\bfac_[a-z0-9_]+/, /::/];
+    for (const re of RAW_ID_PATTERNS) {
+      expect(
+        result.appliedChanges!.summary,
+        `summary leaked raw ID: ${result.appliedChanges!.summary}`,
+      ).not.toMatch(re);
+    }
+  });
+
   it('UX parity: emits appliedChanges receipt + rerun chip when prior analysis exists', async () => {
     const graph = baseGraph();
     const { operations } = buildAddRiskOperations('cyber attacks', graph);

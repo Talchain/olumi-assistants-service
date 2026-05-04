@@ -160,6 +160,16 @@ export async function applyTemplateOperations(params: ApplyTemplateParams): Prom
  * `value.from` / `value.to`. element_ref retains the raw path so
  * downstream code can map back to the operation; only the user-visible
  * `label` field is rewritten.
+ *
+ * The receipt's `summary` field is also rebuilt from the post-sanitised
+ * label list when there are 2+ changes — `buildAppliedChanges` builds
+ * the multi-change summary as
+ *   `${count} model parameters updated: ${labels.join(', ')}`
+ * which would otherwise carry the pre-sanitised raw edge paths even
+ * after the per-change labels have been cleaned. For single-change
+ * receipts the summary is the change description (already clean per
+ * buildOperationDescription's endpoint-label resolution), so it's
+ * passed through.
  */
 function sanitiseReceiptLabels(
   receipt: AppliedChanges,
@@ -193,7 +203,17 @@ function sanitiseReceiptLabels(
     const toLabel = labelById.get(toId) ?? toId;
     return { ...change, label: `${fromLabel} -> ${toLabel}` };
   });
-  return { ...receipt, changes: sanitisedChanges };
+
+  // Rebuild summary when it was the multi-change "N model parameters
+  // updated: <labels>" form. Single-change receipts' summary is the
+  // operation's description (e.g. "Added team dynamics") which doesn't
+  // carry raw edge paths.
+  let summary = receipt.summary;
+  if (sanitisedChanges.length > 1) {
+    const labels = sanitisedChanges.map((c) => c.label).join(', ');
+    summary = `${sanitisedChanges.length} model parameters updated: ${labels}`;
+  }
+  return { ...receipt, summary, changes: sanitisedChanges };
 }
 
 function rejection(

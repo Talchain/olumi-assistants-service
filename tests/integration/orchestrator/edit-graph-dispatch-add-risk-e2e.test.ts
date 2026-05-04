@@ -320,27 +320,46 @@ describe('dispatchEditGraph e2e — add_risk template happy path', () => {
     expect(llmChatMock).toHaveBeenCalled();
   });
 
-  it('graph with no decision node → template falls through to LLM', async () => {
+  it('canonical graph with no decision node → classifier fires, TemplateBuildError → LLM path', async () => {
+    // Canonical edges so the strict-parse gate does NOT short-circuit
+    // the classifier. The graph lacks a decision node, so
+    // buildAddRiskOperations throws TemplateBuildError('no_decision')
+    // and the dispatcher falls through to handleEditGraph.
     llmChatMock.mockResolvedValue({
       content: JSON.stringify({ operations: [], removed_edges: [], warnings: [], coaching: { summary: 'No-op.' } }),
     });
 
-    const noDecision: GraphStateIngress = {
+    const noDecisionCanonical: GraphStateIngress = {
       nodes: [
         { id: 'goal_growth', kind: 'goal', label: 'Reach 1000 customers' },
         { id: 'fac_price', kind: 'factor', label: 'Price' },
       ],
-      edges: [{ from: 'fac_price', to: 'goal_growth' }],
-    };
+      edges: [
+        {
+          from: 'fac_price',
+          to: 'goal_growth',
+          strength: { mean: 0.5, std: 0.1 },
+          exists_probability: 0.8,
+          effect_direction: 'positive' as const,
+        },
+      ],
+    } as unknown as GraphStateIngress;
 
     await dispatchEditGraph({
-      payload: makePayload(),
+      payload: makePayload({ turn_id: '99999999-9999-4999-8999-999999999999' }),
       requestId: 'req-add-risk-no-decision',
       request: STUB_REQUEST,
-      graphState: noDecision,
+      graphState: noDecisionCanonical,
       analysisState: null,
     });
 
     expect(llmChatMock).toHaveBeenCalled();
+
+    // commit metadata records llm_calls_used: 1 — the LLM path was taken
+    // after TemplateBuildError reset templateAttempted (proves the reset
+    // path is wired correctly, not just the success/rejection paths).
+    const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
+    const [, metadata] = calls[calls.length - 1]!;
+    expect(metadata.llm_calls_used).toBe(1);
   });
 });

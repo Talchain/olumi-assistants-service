@@ -369,6 +369,11 @@ function editResultToOlumiResponse(
  * The deterministic add_risk template MUST NOT run against fallback
  * graphs because committing template ops on top of inert defaults
  * persists non-canonical edge state.
+ *
+ * Implementation note (Commit 7): both `graphStateToGraphV3WithParseResult`
+ * and `graphStateToGraphV3` now share a single `safeParse` call by
+ * threading the parse result through `buildStructuralFallback`. Avoids
+ * the prior double-parse cost on non-canonical ingress.
  */
 function graphStateToGraphV3WithParseResult(
   graphState: GraphStateIngress,
@@ -378,7 +383,7 @@ function graphStateToGraphV3WithParseResult(
   if (parsed.success) {
     return { graph: parsed.data, strict: true };
   }
-  return { graph: graphStateToGraphV3(graphState, requestId), strict: false };
+  return { graph: buildStructuralFallback(graphState, requestId, parsed.error), strict: false };
 }
 
 function graphStateToGraphV3(graphState: GraphStateIngress, requestId: string): GraphV3T {
@@ -386,11 +391,19 @@ function graphStateToGraphV3(graphState: GraphStateIngress, requestId: string): 
   if (parsed.success) {
     return parsed.data;
   }
+  return buildStructuralFallback(graphState, requestId, parsed.error);
+}
+
+function buildStructuralFallback(
+  graphState: GraphStateIngress,
+  requestId: string,
+  error: import('zod').ZodError,
+): GraphV3T {
   log.warn(
     {
       request_id: requestId,
-      issue_count: parsed.error.issues.length,
-      first_issue_path: parsed.error.issues[0]?.path.join('.') ?? null,
+      issue_count: error.issues.length,
+      first_issue_path: error.issues[0]?.path.join('.') ?? null,
     },
     'V5 edit_graph dispatch — graph ingress did not pass strict GraphV3 parse; using structural fallback',
   );
