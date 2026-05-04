@@ -93,6 +93,57 @@ describe('classifyAddRiskIntent', () => {
     expect(classifyAddRiskIntent('Make the link stronger', emptyGraph())).toEqual({ intent: 'llm_required' });
   });
 
+  // ---- Compound / trailing-clause guards (Commit 4) ----
+
+  it('falls through on compound: "Add X as a risk and connect it to Y"', () => {
+    expect(
+      classifyAddRiskIntent('Add team dynamics as a risk and connect it to churn', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('falls through on compound: "Add X as a risk, then link it to Y"', () => {
+    expect(
+      classifyAddRiskIntent('Add team dynamics as a risk, then link it to churn', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('falls through on compound: "Add X as a risk with a stronger link"', () => {
+    expect(
+      classifyAddRiskIntent('Add team dynamics as a risk with a stronger link', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('falls through on compound: "Include X as a risk and adjust the bridge"', () => {
+    expect(
+      classifyAddRiskIntent('Include market competition as a risk and adjust the bridge', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('still accepts trailing period / exclamation / question mark', () => {
+    expect(classifyAddRiskIntent('Add team dynamics as a risk.', emptyGraph()).intent).toBe('add_risk');
+    expect(classifyAddRiskIntent('Add team dynamics as a risk!', emptyGraph()).intent).toBe('add_risk');
+  });
+
+  // ---- Sanitisation guards (Commit 4) ----
+
+  it('rejects label with control characters', () => {
+    expect(
+      classifyAddRiskIntent('add teamdynamics as a risk', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('rejects label with zero-width / BiDi characters', () => {
+    expect(
+      classifyAddRiskIntent('add team​dynamics as a risk', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('rejects label with excessive punctuation density', () => {
+    expect(
+      classifyAddRiskIntent('add !!!!!!!!! as a risk', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
   it('runs in under 5ms for typical inputs', () => {
     const graph = emptyGraph();
     const start = process.hrtime.bigint();

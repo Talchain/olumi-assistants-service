@@ -5,7 +5,10 @@
  *
  * Returns `add_risk` only on high-confidence matches:
  *   - Anchored, case-insensitive patterns capturing a label group
- *   - Label is not a pronoun / demonstrative / too short / too long
+ *   - Patterns are END-anchored (with optional trailing punctuation only)
+ *     so compound requests fall through to the LLM path
+ *   - Label is not a pronoun / demonstrative / too short / too long /
+ *     punctuation-heavy / control-char-bearing
  *   - The slugified risk node ID does not already exist in the graph
  *
  * Anything else returns `llm_required` so the caller falls through to the
@@ -23,15 +26,33 @@ export type AddRiskIntent =
   | { intent: 'add_risk'; label: string; confidence: 'high' }
   | { intent: 'llm_required' };
 
+// All patterns are END-ANCHORED (with optional trailing punctuation only) so
+// compound requests like "Add team dynamics as a risk and connect it to
+// churn" do NOT match — they fall through to the LLM path which can handle
+// the second clause. A naïve non-anchored match would silently drop the
+// trailing instruction.
+const TRAILING_PUNCT = `\\s*[.!?]?\\s*$`;
 const PATTERNS: ReadonlyArray<RegExp> = [
-  /^\s*(?:please\s+)?add\s+(.+?)\s+as\s+a\s+risk\b/i,
-  /^\s*(?:please\s+)?include\s+(.+?)\s+as\s+a\s+risk\b/i,
-  /^\s*(?:we should\s+)?add\s+(.+?)\s+risk\b/i,
-  /^\s*(.+?)\s+is\s+a\s+risk(?:\s+we should consider)?\b/i,
+  new RegExp(`^\\s*(?:please\\s+)?add\\s+(.+?)\\s+as\\s+a\\s+risk${TRAILING_PUNCT}`, 'i'),
+  new RegExp(`^\\s*(?:please\\s+)?include\\s+(.+?)\\s+as\\s+a\\s+risk${TRAILING_PUNCT}`, 'i'),
+  new RegExp(`^\\s*(?:we should\\s+)?add\\s+(.+?)\\s+risk${TRAILING_PUNCT}`, 'i'),
+  new RegExp(`^\\s*(.+?)\\s+is\\s+a\\s+risk(?:\\s+we should consider)?${TRAILING_PUNCT}`, 'i'),
 ];
 
 const PRONOUN_DEMONSTRATIVE_RE =
   /^(this|that|it|its|it's|these|those|they|them|one|ones|something|anything|everything|nothing)$/i;
+
+// Reject labels whose punctuation density exceeds this fraction — a heuristic
+// guard against "team dynamics, !!!" or smuggled JSON / markdown fragments
+// being baked into a node ID and the user-facing assistant text.
+const MAX_PUNCT_DENSITY = 0.4;
+const PUNCT_RE = /[!"#$%&'()*+,./:;<=>?@\[\\\]^`{|}~]/g;
+
+// ASCII control chars (0x00-0x1F, 0x7F) plus zero-width / BiDi formatting
+// chars. These should never appear in a label fed into a deterministic ID +
+// UI string.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_RE = /[\x00-\x1F\x7F​-‏‪-‮⁠-⁤]/;
 
 const MIN_LABEL_LEN = 3;
 const MAX_LABEL_LEN = 80;
@@ -61,6 +82,12 @@ function isAcceptableLabel(label: string): boolean {
   if (PRONOUN_DEMONSTRATIVE_RE.test(label)) return false;
   // Reject all-whitespace / all-punctuation.
   if (!/[a-z0-9]/i.test(label)) return false;
+  // Reject control / zero-width / BiDi formatting characters.
+  if (CONTROL_CHAR_RE.test(label)) return false;
+  // Reject high punctuation density (smuggled syntax / spam).
+  const punctMatches = label.match(PUNCT_RE);
+  const punctCount = punctMatches ? punctMatches.length : 0;
+  if (punctCount / label.length > MAX_PUNCT_DENSITY) return false;
   return true;
 }
 

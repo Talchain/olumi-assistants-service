@@ -449,6 +449,7 @@ export async function dispatchEditGraph(
   const adapter = getAdapter('edit_graph');
 
   let editResult: EditGraphResult;
+  let templateApplied = false;
   try {
     // V5 A4 — deterministic template intercept. Pre-LLM classifier catches
     // high-confidence "add X as a risk" patterns and applies a fixed
@@ -472,6 +473,7 @@ export async function dispatchEditGraph(
           templateName: 'add_risk',
           confirmationText: buildAddRiskConfirmation(classified.label),
         });
+templateApplied = !editResult.wasRejected;
         if (editResult.wasRejected) {
           emit(TelemetryEvents.V5EditGraphTemplateRejected, {
             template: 'add_risk',
@@ -629,7 +631,10 @@ export async function dispatchEditGraph(
       turn_class: 'direct_answer',
       handler_id: null,
       request_hash: computeRequestHash(payload),
-      llm_calls_used: 1,
+      // Deterministic template path makes zero LLM calls; LLM path makes
+      // at least one (handleEditGraph drives the classification + repair
+      // loop). Distinguish so dashboards can attribute cost honestly.
+      llm_calls_used: templateApplied ? 0 : 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
       graph: editResult.appliedGraph ?? undefined,
