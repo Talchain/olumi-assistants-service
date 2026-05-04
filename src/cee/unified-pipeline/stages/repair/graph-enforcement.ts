@@ -6,17 +6,21 @@
  *
  *   1. fixBridgeChaining  — removes forbidden outcome↔risk edges, adds goal bridges
  *                            with sign-correct semantics (outcome→goal +, risk→goal −)
- *   2. applyBudgetRescale — scales causal inbound edges (factor→outcome/risk
- *                            and option→outcome/risk) so Σ|mean| ≤ BUDGET_TARGET
+ *   2. applyBudgetRescale — scales causal inbound edges (factor/action→outcome/risk)
+ *                            so Σ|mean| ≤ BUDGET_TARGET
  *
  * After both repairs, runs an authoritative post-enforcement re-validation
- * via graph-validator. The Zod safety net at substep 10 (structural-parse)
- * is downstream of this and validates final shape.
+ * via graph-validator. If any severity="error" items are returned, enforcement
+ * sets ctx.earlyReturn (422 CEE_GRAPH_INVALID) before Stage 5 Package.
+ * Validator throws are non-fatal (logged, pipeline continues) — this is
+ * consistent with the codebase convention that system-level validator failures
+ * never block valid graphs.
  *
  * Only outcome and risk nodes are budget-enforced. Goal/factor/option/etc
- * are excluded as targets. Only factor/option/action → outcome/risk causal
- * edges are rescaled — structural (option→factor), bridge (outcome/risk→goal),
- * bidirected, and scaffolding edges are excluded.
+ * are excluded as targets. Only factor/action → outcome/risk causal edges are
+ * rescaled — option→outcome/risk are INVALID_EDGE_TYPE violations and must not
+ * be rescaled (masking the defect). Structural, bridge, and bidirected edges
+ * are also excluded.
  *
  * Edge format support: V1_FLAT (strength_mean/strength_std) and LEGACY (weight)
  * are detected at Stage 4 entry and stored in ctx.detectedEdgeFormat. Canonical
@@ -34,6 +38,7 @@ import type { EdgeFormat } from "../../utils/edge-format.js";
 import { detectEdgeFormat, patchEdgeNumeric } from "../../utils/edge-format.js";
 import { config } from "../../../../config/index.js";
 import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
+import type { ValidatorPhase } from "../../../../validators/graph-validator.types.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 
@@ -469,14 +474,28 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
   // (e.g. option→outcome/risk deferred by the sweep with no controllable factor). Package it
   // and the user receives an analysis built on an invalid causal graph. We fail closed instead.
   let postValidationErrorCount = 0;
+  let postValidationWarningCount = 0;
   let blocked = false;
   try {
     const revalidation = validateGraphDeterministic({
       graph: graph as Parameters<typeof validateGraphDeterministic>[0]["graph"],
       requestId,
-      phase: "post_enforcement" as Parameters<typeof validateGraphDeterministic>[0]["phase"],
+      phase: "post_enforcement" satisfies ValidatorPhase,
     });
     postValidationErrorCount = revalidation.errors.length;
+    postValidationWarningCount = revalidation.warnings.length;
+
+    // Log non-blocking warnings independently so they are observable without
+    // being conflated with blocking errors.
+    if (postValidationWarningCount > 0) {
+      log.info({
+        event: TelemetryEvents.CeeEnforcementPostValidationErrors, // reuse — warnings end up in the same field for now
+        request_id: requestId,
+        warning_count: postValidationWarningCount,
+        warning_codes: revalidation.warnings.map((w) => w.code),
+        severity: "warning",
+      }, `Post-enforcement validation: ${postValidationWarningCount} non-blocking warning(s)`);
+    }
 
     if (postValidationErrorCount > 0) {
       const errorCodes = revalidation.errors.map((e) => e.code);
@@ -515,6 +534,11 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
       ctx.earlyReturn = { statusCode: 422, body: errorBody };
     }
   } catch (err) {
+    // Validator throws are non-fatal by codebase convention — a system-level
+    // failure in the validator itself should never block a valid graph.
+    // The graph has already passed all earlier repair stages; continuing
+    // without this gate is safer than failing valid requests due to a
+    // validator bug. The throw is logged and surfaces in post_validation_error_count=0.
     log.warn({
       event: TelemetryEvents.CeeEnforcementPostValidationFailed,
       request_id: requestId,
@@ -532,6 +556,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
       edges_skipped_non_finite: budgetResult.edgesSkipped,
       total_repairs: allRepairs.length,
       post_validation_error_count: postValidationErrorCount,
+      post_validation_warning_count: postValidationWarningCount,
       blocked,
     },
   };
@@ -549,10 +574,11 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     nodes_rescaled: budgetResult.nodesRescaled,
     edges_skipped: budgetResult.edgesSkipped,
     post_validation_errors: postValidationErrorCount,
+    post_validation_warnings: postValidationWarningCount,
     edge_format: format,
     total_repairs: totalRepairs,
   };
-  if (totalRepairs > 0 || postValidationErrorCount > 0) {
+  if (totalRepairs > 0 || postValidationErrorCount > 0 || postValidationWarningCount > 0) {
     log.info(summaryPayload, "Deterministic graph enforcement completed");
   } else {
     log.debug(summaryPayload, "Deterministic graph enforcement no-op");

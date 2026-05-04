@@ -36,8 +36,8 @@
  * Substep 8 writes validationSummary (never early-returns).
  * Substeps 1, 3-7 and 9 are deterministic transforms that must not fail.
  * The earlyReturn guards after substeps 1b and 2 are defensive only.
- * 9b sets earlyReturn (422 CEE_ENFORCEMENT_BLOCKED) when post-enforcement
- * validation finds blocking topology errors that survived all repair stages.
+ * 9b sets earlyReturn (422 CEE_GRAPH_INVALID) when post-enforcement validation
+ * finds blocking topology errors (severity="error") that survived all repair stages.
  */
 
 import type { StageContext } from "../../types.js";

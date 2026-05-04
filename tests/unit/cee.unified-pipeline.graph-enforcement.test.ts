@@ -1201,6 +1201,61 @@ describe("applyDeterministicEnforcement", () => {
     expect(ctx.repairTrace.deterministic_enforcement.blocked).toBe(false);
   });
 
+  it("does not block when validator returns only warnings (no errors)", () => {
+    // Warnings are non-blocking — only severity="error" items trigger earlyReturn.
+    (validateGraph as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      errors: [],
+      warnings: [{ code: "LOW_EDGE_CONFIDENCE", message: "edge confidence below threshold", path: "edges[0]", severity: "warn" }],
+    });
+    const ctx = makeCtx(makeGraph());
+    applyDeterministicEnforcement(ctx);
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(ctx.repairTrace.deterministic_enforcement.blocked).toBe(false);
+    expect(ctx.repairTrace.deterministic_enforcement.post_validation_warning_count).toBe(1);
+    expect(ctx.repairTrace.deterministic_enforcement.post_validation_error_count).toBe(0);
+  });
+
+  // ── Real-validator integration: option→outcome produces INVALID_EDGE_TYPE ──
+
+  it("real validator: option→outcome edge produces INVALID_EDGE_TYPE (closing the mock gap)", async () => {
+    // Mock-based blocking tests prove earlyReturn wiring but not that the real
+    // validator returns INVALID_EDGE_TYPE for option→outcome. This test uses
+    // vi.importActual to bypass the vi.mock at the top of this file and run the
+    // real validateGraph against a graph with a residual option→outcome shortcut.
+    // Together with the mock-based tests, this proves the full chain:
+    //   option→outcome edge → real validator → INVALID_EDGE_TYPE → earlyReturn 422.
+    const { validateGraph: realValidateGraph } = await vi.importActual<
+      typeof import("../../src/validators/graph-validator.js")
+    >("../../src/validators/graph-validator.js");
+
+    const graphWithOptionShortcut = {
+      version: "1",
+      default_seed: 17,
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" as const },
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "Option A" },
+        { id: "fac_1", kind: "factor", label: "Factor" },
+        { id: "out_1", kind: "outcome", label: "Outcome" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { id: "e1", from: "dec_1", to: "opt_a", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { id: "e2", from: "opt_a", to: "fac_1", strength_mean: 1, strength_std: 0.01, belief_exists: 1 },
+        { id: "e3", from: "fac_1", to: "out_1", strength_mean: 0.6, strength_std: 0.1, belief_exists: 0.9 },
+        { id: "e4", from: "out_1", to: "goal_1", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9 },
+        // Forbidden option→outcome shortcut — simulates a sweep-deferred survivor
+        { id: "e_bad", from: "opt_a", to: "out_1", strength_mean: 0.8, strength_std: 0.1, belief_exists: 0.9 },
+      ],
+    };
+
+    const result = realValidateGraph({ graph: graphWithOptionShortcut as any, requestId: "test-real" });
+    const invalidEdgeErrors = result.errors.filter((e) => e.code === "INVALID_EDGE_TYPE");
+    expect(invalidEdgeErrors.length).toBeGreaterThan(0);
+    // This INVALID_EDGE_TYPE would be returned by post-enforcement validation
+    // and trigger earlyReturn 422 via the mock-wired path tested above.
+  });
+
   // ── Internal-language audit ──────────────────────────────────────────────
 
   it("does not write internal enforcement language to user-facing graph fields", () => {

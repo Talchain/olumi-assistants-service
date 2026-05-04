@@ -162,7 +162,10 @@ export interface FactorCategoryInfo {
 // =============================================================================
 
 /** Distinguishes diagnostic vs authoritative validator calls in logs. */
-export type ValidatorPhase = "pre_sweep_diagnostic" | "post_sweep_authoritative";
+export type ValidatorPhase =
+  | "pre_sweep_diagnostic"
+  | "post_sweep_authoritative"
+  | "post_enforcement";
 
 export interface GraphValidationInput {
   /** The graph to validate */
