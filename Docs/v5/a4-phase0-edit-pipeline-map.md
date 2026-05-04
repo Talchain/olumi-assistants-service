@@ -50,6 +50,14 @@ Concrete consequences today:
 
 Per the brief's halt-condition flow, the user opted to proceed with the `add_risk` template only. Routing is not modified in this brief. **A separate P0 brief should add a deterministic value-update pre-intercept in `route-v2.ts` before the edit_graph branch (or extend `EDIT_GRAPH_NEGATIVE_REGEX`).**
 
+## Receipt surfacing — note (Commit 5 / 6 clarification)
+
+`buildAppliedChanges` produces an `AppliedChanges` receipt that is attached to `EditGraphResult.appliedChanges` on both the LLM path and the template path. As of A4 Commit 6, neither path surfaces the receipt onto the wire `OlumiResponse` — `editResultToOlumiResponse` consumes it only to drive the deterministic `rerun_recommended` chip. The receipt is populated correctly (and the template path now sanitises edge labels so `change.label` never carries raw `from::to` paths — see `sanitiseReceiptLabels` in [apply-template.ts](../../src/orchestrator-v5/handlers/edit-templates/apply-template.ts)) but is not yet a user-visible surface. Surfacing the receipt on the wire is a contract change that should land in a separate brief and apply to both paths together.
+
+## Strict-parse gate (Commit 6)
+
+The deterministic template MUST run only against a strictly canonical `GraphV3` ingress. `dispatchEditGraph` now uses `graphStateToGraphV3WithParseResult` to obtain a `{ graph, strict }` pair. When `strict === false` (ingress edges missing `strength`/`exists_probability`/`effect_direction`), the classifier is bypassed unconditionally and the LLM path runs — preserving current behaviour for non-canonical ingress without committing template ops on top of the structural fallback's inert default edges.
+
 ## Out of scope
 
 - D1 pre-intercept in `route-v2.ts` (separate P0 follow-up).

@@ -29,7 +29,7 @@ import {
 import { buildEditRejectionResponse } from "../edit-rejection-text.js";
 import { log } from "../../../utils/telemetry.js";
 import type { EditGraphResult } from "../../../orchestrator/tools/edit-graph.js";
-import type { ConversationContext, PatchOperation } from "../../../orchestrator/types.js";
+import type { AppliedChanges, ConversationContext, PatchOperation } from "../../../orchestrator/types.js";
 import type { GraphV3T } from "../../../schemas/cee-v3.js";
 
 export interface ApplyTemplateParams {
@@ -117,10 +117,14 @@ export async function applyTemplateOperations(params: ApplyTemplateParams): Prom
   //     (rerun_recommended === true). Without prior analysis, no chip — the
   //     graph hasn't been analysed yet, so re-running is meaningless.
   const hasExistingAnalysis = !!context.analysis_response;
-  const appliedChanges = buildAppliedChanges(
+  const appliedChanges = sanitiseReceiptLabels(
+    buildAppliedChanges(
+      validation.operations as unknown as PatchOperation[],
+      candidateGraph,
+      hasExistingAnalysis,
+    ),
     validation.operations as unknown as PatchOperation[],
     candidateGraph,
-    hasExistingAnalysis,
   );
 
   const suggestedActions: EditGraphResult['suggestedActions'] = [];
@@ -141,6 +145,55 @@ export async function applyTemplateOperations(params: ApplyTemplateParams): Prom
     appliedChanges,
     ...(suggestedActions.length > 0 && { suggestedActions }),
   };
+}
+
+/**
+ * V5 A4 Commit 6 — receipt label sanitisation.
+ *
+ * `buildAppliedChanges`'s label resolver walks `graph.nodes` looking for a
+ * node whose `id === op.path`. Edge ops have `op.path` like
+ * `from::to` which never matches a node, so the label falls back to the
+ * raw path — leaking internal IDs into a user-facing field.
+ *
+ * For each edge op, replace `change.label` with the human-readable
+ * "<fromLabel> -> <toLabel>" form derived from the operation's
+ * `value.from` / `value.to`. element_ref retains the raw path so
+ * downstream code can map back to the operation; only the user-visible
+ * `label` field is rewritten.
+ */
+function sanitiseReceiptLabels(
+  receipt: AppliedChanges,
+  operations: PatchOperation[],
+  graph: GraphV3T,
+): AppliedChanges {
+  const labelById = new Map<string, string>();
+  for (const node of graph.nodes) {
+    labelById.set(node.id, node.label ?? node.id);
+  }
+  const sanitisedChanges = receipt.changes.map((change, idx) => {
+    const op = operations[idx];
+    if (!op) return change;
+    if (op.op !== 'add_edge' && op.op !== 'remove_edge' && op.op !== 'update_edge') {
+      return change;
+    }
+    let fromId: string | undefined;
+    let toId: string | undefined;
+    if (op.value && typeof op.value === 'object') {
+      const v = op.value as { from?: unknown; to?: unknown };
+      if (typeof v.from === 'string') fromId = v.from;
+      if (typeof v.to === 'string') toId = v.to;
+    }
+    if (!fromId || !toId) {
+      const parts = op.path.split('::');
+      fromId = fromId ?? parts[0];
+      toId = toId ?? parts[1];
+    }
+    if (!fromId || !toId) return change;
+    const fromLabel = labelById.get(fromId) ?? fromId;
+    const toLabel = labelById.get(toId) ?? toId;
+    return { ...change, label: `${fromLabel} -> ${toLabel}` };
+  });
+  return { ...receipt, changes: sanitisedChanges };
 }
 
 function rejection(

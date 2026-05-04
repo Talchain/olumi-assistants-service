@@ -44,6 +44,28 @@ vi.mock('../../../src/orchestrator-v5/commit.js', () => ({
   computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
 }));
 
+// V5 A4 Commit 6 — buildTurnContext is mocked so freshness derivation can
+// be exercised against a controlled prior-fact chain. Tests override
+// `priorFactsOverride` per case to inject a synthetic run_analysis fact.
+const { priorFactsOverrideRef } = vi.hoisted(() => ({
+  priorFactsOverrideRef: { current: null as unknown[] | null },
+}));
+vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
+  buildTurnContext: vi.fn(async () => ({
+    goal_node_id: 'goal_growth',
+    prior_facts: priorFactsOverrideRef.current ?? [],
+    framing: { stage: 'analyse' },
+    analysis_inputs: null,
+    handler_row_ids: [],
+    request_id: 'req-stub',
+    scenario_id: 'sc-stub',
+    turn_id: 'turn-stub',
+    user_id: null,
+    handler_id: null,
+    received_at: new Date().toISOString(),
+  })),
+}));
+
 // ────────────────────────────────────────────────────────────────────
 // Imports after mocks
 // ────────────────────────────────────────────────────────────────────
@@ -61,6 +83,11 @@ const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const TURN_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const STUB_REQUEST = {} as FastifyRequest;
 
+// Canonical GraphV3-shaped fixture: every edge carries the strict
+// {strength: {mean, std}, exists_probability, effect_direction} fields
+// required by GraphV3.safeParse. Without these, dispatchEditGraph would
+// fall back to the structural-only graph shape and the V5 A4 Commit 6
+// strict-parse gate would refuse to fire the template.
 const PRICING_GRAPH: GraphStateIngress = {
   nodes: [
     { id: 'goal_growth', kind: 'goal', label: 'Reach 1000 customers' },
@@ -70,13 +97,13 @@ const PRICING_GRAPH: GraphStateIngress = {
     { id: 'fac_price', kind: 'factor', label: 'Price' },
   ],
   edges: [
-    { from: 'dec_pricing', to: 'opt_subscription' },
-    { from: 'dec_pricing', to: 'opt_oneoff' },
-    { from: 'opt_subscription', to: 'fac_price' },
-    { from: 'opt_oneoff', to: 'fac_price' },
-    { from: 'fac_price', to: 'goal_growth' },
+    { from: 'dec_pricing', to: 'opt_subscription', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'dec_pricing', to: 'opt_oneoff', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_subscription', to: 'fac_price', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
+    { from: 'opt_oneoff', to: 'fac_price', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
+    { from: 'fac_price', to: 'goal_growth', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
   ],
-};
+} as unknown as GraphStateIngress;
 
 function makePayload(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -160,6 +187,118 @@ describe('dispatchEditGraph e2e — add_risk template happy path', () => {
 
     // (8) Boundary contract holds.
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
+
+    // (9) Persisted graph passes strict GraphV3 validation — no fallback
+    // edges with inert defaults that would corrupt downstream state.
+    const { GraphV3 } = await import('../../../src/schemas/cee-v3.js');
+    const strictParse = GraphV3.safeParse(persistedGraph);
+    expect(strictParse.success, strictParse.success ? '' : JSON.stringify(strictParse.error.issues)).toBe(true);
+  });
+
+  it('with prior analysis fact → freshness becomes "stale" (post-edit graph hash diverges)', async () => {
+    // Inject a synthetic run_analysis fact via the buildTurnContext mock.
+    // graph_hash_at_run differs from the post-edit graph hash → derivation
+    // returns 'stale' (graph_hash_diverged).
+    priorFactsOverrideRef.current = [
+      {
+        fact_type: 'run_analysis',
+        noop: false,
+        result: {
+          graph_hash_at_run: 'sha256:DIFFERENT_FROM_POST_EDIT',
+          computed_at: '2025-01-01T00:00:00.000Z',
+          enrichment: { analysis_status: 'computed' },
+        },
+      },
+    ];
+
+    try {
+      const result = await dispatchEditGraph({
+        payload: makePayload({ turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }),
+        requestId: 'req-add-risk-stale',
+        request: STUB_REQUEST,
+        graphState: PRICING_GRAPH,
+        analysisState: null,
+      });
+
+      expect(llmChatMock).not.toHaveBeenCalled();
+      expect(result.freshness).toBeDefined();
+      expect(result.freshness!.freshness).toBe('stale');
+    } finally {
+      priorFactsOverrideRef.current = null;
+    }
+  });
+
+  it('classifier fires + template safety-net rejection → still 0 LLM calls, llm_calls_used=0', async () => {
+    // Force the template's post-mutation topology check to fail by feeding
+    // a graph already at the structural-violation edge limit so adding 2
+    // edges trips EDGE_LIMIT_EXCEEDED. The classifier still fires, the
+    // template still attempts, but applyTemplateOperations returns a
+    // rejected EditGraphResult.
+    const overEdgeLimit: GraphStateIngress = {
+      nodes: [
+        { id: 'goal_g', kind: 'goal', label: 'G' },
+        { id: 'dec_d', kind: 'decision', label: 'D' },
+        { id: 'opt_a', kind: 'option', label: 'A' },
+        { id: 'opt_b', kind: 'option', label: 'B' },
+        ...Array.from({ length: 16 }, (_, i) => ({ id: `fac_${i}`, kind: 'factor' as const, label: `F${i}` })),
+      ],
+      edges: [
+        { from: 'dec_d', to: 'opt_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+        { from: 'dec_d', to: 'opt_b', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+        ...Array.from({ length: 16 }, (_, i) => ({ from: 'opt_a', to: `fac_${i}`, strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' as const })),
+        ...Array.from({ length: 16 }, (_, i) => ({ from: 'opt_b', to: `fac_${i}`, strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' as const })),
+        ...Array.from({ length: 16 }, (_, i) => ({ from: `fac_${i}`, to: 'goal_g', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' as const })),
+      ],
+    } as unknown as GraphStateIngress;
+
+    await dispatchEditGraph({
+      payload: makePayload({ turn_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', message: 'Add team dynamics as a risk' }),
+      requestId: 'req-add-risk-safety-reject',
+      request: STUB_REQUEST,
+      graphState: overEdgeLimit,
+      analysisState: null,
+    });
+
+    // Critically: no LLM call regardless of template outcome.
+    expect(llmChatMock).not.toHaveBeenCalled();
+
+    // commit recorded llm_calls_used: 0 (template path was attempted).
+    const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
+    const [, metadata] = calls[calls.length - 1]!;
+    expect(metadata.llm_calls_used).toBe(0);
+  });
+
+  it('non-canonical ingress edges → template does NOT fire (strict-parse gate)', async () => {
+    // Edges missing strength / exists_probability / effect_direction →
+    // GraphV3.safeParse fails → graphStrictlyCanonical=false → classifier
+    // is bypassed → LLM path runs.
+    llmChatMock.mockResolvedValue({
+      content: JSON.stringify({ operations: [], removed_edges: [], warnings: [], coaching: { summary: 'No-op.' } }),
+    });
+
+    const nonCanonical: GraphStateIngress = {
+      nodes: [
+        { id: 'goal_growth', kind: 'goal', label: 'G' },
+        { id: 'dec_pricing', kind: 'decision', label: 'D' },
+        { id: 'opt_a', kind: 'option', label: 'A' },
+        { id: 'opt_b', kind: 'option', label: 'B' },
+      ],
+      // Missing the canonical edge fields — will trip safeParse fallback.
+      edges: [
+        { from: 'dec_pricing', to: 'opt_a' },
+        { from: 'dec_pricing', to: 'opt_b' },
+      ],
+    } as unknown as GraphStateIngress;
+
+    await dispatchEditGraph({
+      payload: makePayload({ turn_id: '11111111-2222-4333-8444-555555555555' }),
+      requestId: 'req-add-risk-non-canonical',
+      request: STUB_REQUEST,
+      graphState: nonCanonical,
+      analysisState: null,
+    });
+
+    expect(llmChatMock).toHaveBeenCalled();
   });
 
   it('compound request "Add team dynamics as a risk and connect it to churn" → falls through to LLM (template did not fire)', async () => {

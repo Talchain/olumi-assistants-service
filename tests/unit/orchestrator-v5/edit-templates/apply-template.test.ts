@@ -70,6 +70,30 @@ describe('applyTemplateOperations', () => {
     expect(Date.now() - start).toBeLessThan(100);
   });
 
+  it('appliedChanges.changes contain no raw internal IDs in label / description', async () => {
+    const graph = baseGraph();
+    const { operations } = buildAddRiskOperations('regulatory risk', graph);
+    const result = await applyTemplateOperations({
+      operations,
+      context: buildContext(graph),
+      requestId: 'req_labels',
+      turnId: 'turn_labels',
+      templateName: 'add_risk',
+      confirmationText: buildAddRiskConfirmation('regulatory risk'),
+    });
+
+    expect(result.appliedChanges).toBeDefined();
+    const RAW_ID_PATTERNS = [/risk_[a-z0-9_]+/, /\bdec_[a-z0-9_]+/, /\bgoal_[a-z0-9_]+/, /\bopt_[a-z0-9_]+/, /\bfac_[a-z0-9_]+/, /::/];
+    for (const change of result.appliedChanges!.changes) {
+      for (const re of RAW_ID_PATTERNS) {
+        expect(change.label, `label leaked raw ID: ${change.label}`).not.toMatch(re);
+        expect(change.description, `description leaked raw ID: ${change.description}`).not.toMatch(re);
+      }
+      // element_ref is internal-only, not user-facing — leaks allowed there.
+      expect(typeof change.element_ref).toBe('string');
+    }
+  });
+
   it('UX parity: emits appliedChanges receipt + rerun chip when prior analysis exists', async () => {
     const graph = baseGraph();
     const { operations } = buildAddRiskOperations('cyber attacks', graph);

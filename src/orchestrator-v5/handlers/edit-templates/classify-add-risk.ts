@@ -48,11 +48,30 @@ const PRONOUN_DEMONSTRATIVE_RE =
 const MAX_PUNCT_DENSITY = 0.4;
 const PUNCT_RE = /[!"#$%&'()*+,./:;<=>?@\[\\\]^`{|}~]/g;
 
-// ASCII control chars (0x00-0x1F, 0x7F) plus zero-width / BiDi formatting
-// chars. These should never appear in a label fed into a deterministic ID +
-// UI string.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHAR_RE = /[\x00-\x1F\x7F​-‏‪-‮⁠-⁤]/;
+// Invisible / control codepoints rejected from labels. Codepoint ranges are
+// written numerically and the regex is built at module load time so the
+// source is fully reviewable without relying on monospace rendering of
+// invisible glyphs:
+//   U+0000 .. U+001F  ASCII control characters
+//   U+007F            DEL
+//   U+200B .. U+200F  ZWSP / ZWJ / ZWNJ / LRM / RLM
+//   U+202A .. U+202E  LRE / RLE / PDF / LRO / RLO (BiDi override controls)
+//   U+2060 .. U+2064  word joiner, function-application invisibles, etc.
+const INVISIBLE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x0000, 0x001f],
+  [0x007f, 0x007f],
+  [0x200b, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x2064],
+];
+function buildInvisibleRe(): RegExp {
+  const hex = (n: number): string => `\\u${n.toString(16).padStart(4, '0')}`;
+  const charClass = INVISIBLE_RANGES.map(([lo, hi]) =>
+    lo === hi ? hex(lo) : `${hex(lo)}-${hex(hi)}`,
+  ).join('');
+  return new RegExp('[' + charClass + ']');
+}
+const CONTROL_CHAR_RE = buildInvisibleRe();
 
 const MIN_LABEL_LEN = 3;
 const MAX_LABEL_LEN = 80;
