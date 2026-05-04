@@ -26,9 +26,21 @@ describe('classifyAddRiskIntent', () => {
     expect(result).toEqual({ intent: 'add_risk', label: 'cyber attacks', confidence: 'high' });
   });
 
-  it('matches "Team dynamics is a risk we should consider"', () => {
-    const result = classifyAddRiskIntent('Team dynamics is a risk we should consider', emptyGraph());
-    expect(result).toEqual({ intent: 'add_risk', label: 'Team dynamics', confidence: 'high' });
+  // Statements of the form "X is a risk" intentionally fall through to the
+  // LLM path. The earlier draft accepted this form via a leading-anchor-less
+  // pattern that captured arbitrary preamble — e.g. "I think team dynamics
+  // is a risk" produced label "I think team dynamics". Retired in favour of
+  // the explicit verb-anchored forms below.
+  it('falls through on "Team dynamics is a risk" (no leading verb anchor)', () => {
+    expect(
+      classifyAddRiskIntent('Team dynamics is a risk', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('falls through on "Team dynamics is a risk we should consider"', () => {
+    expect(
+      classifyAddRiskIntent('Team dynamics is a risk we should consider', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
   });
 
   it('matches "We should add supply chain risk"', () => {
@@ -40,20 +52,36 @@ describe('classifyAddRiskIntent', () => {
     expect(classifyAddRiskIntent('add this as a risk', emptyGraph())).toEqual({ intent: 'llm_required' });
   });
 
-  it('rejects pronoun labels: "that"', () => {
-    expect(classifyAddRiskIntent('that is a risk', emptyGraph())).toEqual({ intent: 'llm_required' });
-  });
-
   it('rejects pronoun labels: "it"', () => {
-    expect(classifyAddRiskIntent("It is a risk", emptyGraph())).toEqual({ intent: 'llm_required' });
+    expect(classifyAddRiskIntent('add it as a risk', emptyGraph())).toEqual({ intent: 'llm_required' });
   });
 
   it('rejects pronoun labels: "these"', () => {
-    expect(classifyAddRiskIntent('These is a risk', emptyGraph())).toEqual({ intent: 'llm_required' });
+    expect(classifyAddRiskIntent('add these as a risk', emptyGraph())).toEqual({ intent: 'llm_required' });
   });
 
   it('rejects pronoun labels: "those"', () => {
-    expect(classifyAddRiskIntent('Those is a risk', emptyGraph())).toEqual({ intent: 'llm_required' });
+    expect(classifyAddRiskIntent('add those as a risk', emptyGraph())).toEqual({ intent: 'llm_required' });
+  });
+
+  // Regression: filler-preamble variants of the retired "X is a risk" form
+  // must NOT match any verb-anchored pattern. Locks in the pattern-4 retirement.
+  it('falls through on "I think X is a risk" (no longer captures preamble)', () => {
+    expect(
+      classifyAddRiskIntent('I think team dynamics is a risk', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('falls through on "But really X is a risk"', () => {
+    expect(
+      classifyAddRiskIntent('But really team dynamics is a risk', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
+  });
+
+  it('falls through on "I worry that X is a risk"', () => {
+    expect(
+      classifyAddRiskIntent('I worry that team dynamics is a risk', emptyGraph()),
+    ).toEqual({ intent: 'llm_required' });
   });
 
   it('rejects short labels (< 3 chars)', () => {
