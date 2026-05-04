@@ -106,6 +106,7 @@ import {
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import { loadPersistedGraphStrict } from '../orchestrator-v5/build-turn-context.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
+import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
 
 // ───────────────────────────────────────────────────────────────────
 // Commit-failure BoundaryError helper
@@ -368,6 +369,12 @@ const EDIT_GRAPH_POSITIVE_REGEX =
  */
 const EDIT_GRAPH_NEGATIVE_REGEX =
   /\b(?:explain|compare|what would|flip|why|how does|tell me|show me|describe|set up|set aside|add (?:some |any |more )?(?:context|information|detail|details|background)|remove (?:any |the )?(?:doubt|confusion|uncertainty|ambiguity)|change (?:my |our |their )?mind|reduce (?:complexity|scope|noise|clutter)|delete (?:this |the )?(?:thread|conversation|chat|message)|update (?:my |our |their |the )?(?:approach|thinking|understanding|view|perspective)|modify (?:my |our |their )?(?:view|mind|thinking|approach))\b/i;
+
+// Value-update negative gate (P0 fix, 2026-05) lives in
+// `src/orchestrator/routing/value-update-gate.ts` as a dedicated module
+// with named subpatterns and table-driven keyword arrays. It is
+// table-driven so future edits are localised, and is wired here via
+// `isValueUpdatePhrasing` below.
 
 /**
  * V5 status-keyed Reply contract — the type-system half of the response
@@ -727,7 +734,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // validation across the boundary).
     const editIntentDetected =
       EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message) &&
-      !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
+      !EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message) &&
+      // P0 fix (2026-05): suppress dispatch when the message is a clear
+      // value/factor update (`set X to Y`, `increase X by N`, etc.). These
+      // belong on the deterministic D1 / Sonnet tool-use path, not the
+      // fragile edit_graph LLM JSON path. The narrow gate is documented at
+      // src/orchestrator/routing/value-update-gate.ts (preserves
+      // structural edits like "update the model to include market
+      // dynamics", kind changes like "set goal to be a factor", and A4
+      // requests like "Add team dynamics as a risk").
+      !isValueUpdatePhrasing(ingress.message);
     let resolvedGraphState: GraphStateIngress | null = null;
     if (editIntentDetected) {
       if (extensions.graphState != null) {
