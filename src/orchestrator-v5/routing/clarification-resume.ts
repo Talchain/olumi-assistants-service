@@ -33,6 +33,7 @@
  */
 
 import type { GraphLookup } from './validator.js';
+import { bigramDice } from './validator.js';
 import type { PendingAction } from '../session/pending-action.js';
 
 /**
@@ -53,7 +54,10 @@ export type ClarificationResumeSkipReason =
   | 'no_pending_clarification'
   | 'no_graph'
   | 'no_label_match'
-  | 'multiple_label_matches';
+  | 'multiple_label_matches'
+  | 'all_expired'
+  | 'all_targets_missing'
+  | 'graph_hash_changed';
 
 export type ClarificationResumeDispatch =
   | { readonly matched: false; readonly skip_reason: ClarificationResumeSkipReason }
@@ -62,12 +66,52 @@ export type ClarificationResumeDispatch =
       readonly dispatch: 'set_factor_value';
       readonly pending: PendingAction;
       readonly factorLabel: string;
+      readonly matchKind: 'exact' | 'substring' | 'fuzzy';
     };
 
 export interface TryClarificationResumeInput {
   readonly message: string;
   readonly pendingActions: readonly PendingAction[];
   readonly graphLookup: GraphLookup | undefined;
+  /**
+   * `Date.now()` at dispatch time. Plumbed in for testability so unit
+   * tests freeze the clock without monkey-patching `Date`.
+   */
+  readonly nowMs: number;
+  /**
+   * Hash of the analysis-affecting graph state at resume time. When a
+   * pending action was persisted with `preconditions.graph_hash` and
+   * the live hash differs, the persisted operator/value may no longer
+   * be safe to apply (the target could have moved, structure could
+   * have changed). Pass undefined when no graph hash is computable.
+   */
+  readonly currentGraphHash?: string;
+}
+
+const FUZZY_DICE_FLOOR = 0.5;
+
+function isExpired(pa: PendingAction, nowMs: number): boolean {
+  // Mirrors the wall-clock and turn-count checks in
+  // `tryShortConfirmResume.isExpired`. Keep the rules in sync — both
+  // resumers must agree on what "expired" means.
+  const expiresMs = Date.parse(pa.expires_at_iso);
+  if (!Number.isFinite(expiresMs)) return true;
+  if (nowMs > expiresMs) return true;
+  if (pa.expires_at_turn_count <= 0) return true;
+  return false;
+}
+
+function graphHashConflicts(
+  pa: PendingAction,
+  currentGraphHash: string | undefined,
+): boolean {
+  // If the persisted action carries no hash precondition, no conflict
+  // possible — any current hash is acceptable. If it does carry one
+  // and the current hash is unknown OR differs, treat as conflict.
+  const persisted = pa.preconditions?.graph_hash;
+  if (!persisted) return false;
+  if (currentGraphHash === undefined) return true;
+  return persisted !== currentGraphHash;
 }
 
 export function tryClarificationResume(
@@ -91,6 +135,19 @@ export function tryClarificationResume(
     return { matched: false, skip_reason: 'no_pending_clarification' };
   }
 
+  // Apply expiry + graph-hash invalidation BEFORE label matching.
+  // The remaining candidates are the only ones safe to apply.
+  const live = setFactorPendings.filter((pa) => !isExpired(pa, input.nowMs));
+  if (live.length === 0) {
+    return { matched: false, skip_reason: 'all_expired' };
+  }
+  const hashSafe = live.filter(
+    (pa) => !graphHashConflicts(pa, input.currentGraphHash),
+  );
+  if (hashSafe.length === 0) {
+    return { matched: false, skip_reason: 'graph_hash_changed' };
+  }
+
   if (input.graphLookup === undefined) {
     // No graph means we cannot resolve factor labels for matching.
     // The persisted pending action's factor_id would be unmatched
@@ -103,39 +160,73 @@ export function tryClarificationResume(
     return { matched: false, skip_reason: 'no_label_match' };
   }
 
-  const candidates: Array<{ pending: PendingAction; label: string }> = [];
-  for (const pending of setFactorPendings) {
+  // Build a working set of candidates whose target factor still
+  // exists in the live graph. Persisted pending actions whose
+  // factor_id has been deleted since are dropped here with a
+  // distinct invalidation reason from "no label match".
+  type Candidate = {
+    pending: PendingAction;
+    label: string;
+    score: number;
+    matchKind: 'exact' | 'substring' | 'fuzzy';
+  };
+  const targetsResolved: Array<{ pending: PendingAction; label: string }> = [];
+  for (const pending of hashSafe) {
     const action = pending.action;
     if (action.kind !== 'set_factor_value') continue;
     const node = input.graphLookup.findEntityById(action.factor_id);
     if (!node?.label) continue;
-    const normLabel = node.label.trim().toLowerCase();
+    targetsResolved.push({ pending, label: node.label });
+  }
+  if (targetsResolved.length === 0) {
+    return { matched: false, skip_reason: 'all_targets_missing' };
+  }
+
+  // Pass 1: exact + substring match (deterministic, high-confidence).
+  const directMatches: Candidate[] = [];
+  for (const t of targetsResolved) {
+    const normLabel = t.label.trim().toLowerCase();
     if (normLabel.length === 0) continue;
-    // Match if the user's message is the label exactly, or contains
-    // the label as a substring. A user who types "Engineering Time
-    // Commitment" matches the candidate exactly; a user who types
-    // "the Engineering Time Commitment one" still matches via
-    // substring. Word-boundary or fuzzy matching is over-engineered
-    // here — the candidate set is at most 4 (MAX_CANDIDATES from
-    // the value-update detector), and false positives in this set
-    // are unlikely because the candidates were already
-    // discriminated by label-match in the prior turn.
-    if (normMessage === normLabel || normMessage.includes(normLabel)) {
-      candidates.push({ pending, label: node.label });
+    if (normMessage === normLabel) {
+      directMatches.push({ pending: t.pending, label: t.label, score: 1, matchKind: 'exact' });
+    } else if (normMessage.includes(normLabel)) {
+      directMatches.push({ pending: t.pending, label: t.label, score: 1, matchKind: 'substring' });
     }
   }
 
-  if (candidates.length === 0) {
+  // Pass 2: fuzzy bigram-Dice fallback. Only runs when no direct
+  // matches were found. The candidate set in this pre-route is small
+  // (at most 4, all label-similar to the prior turn's user message),
+  // so a 0.5 threshold is conservative — typos like "Engneering Time
+  // Comitmnt" still cluster well above 0.5 against "Engineering Time
+  // Commitment", but unrelated factors do not. Above-threshold
+  // matches sort by score; ambiguity goes to multiple_label_matches.
+  let pickFrom: Candidate[] = directMatches;
+  if (directMatches.length === 0) {
+    const fuzzy: Candidate[] = [];
+    for (const t of targetsResolved) {
+      const normLabel = t.label.trim().toLowerCase();
+      if (normLabel.length === 0) continue;
+      const score = bigramDice(normMessage, normLabel);
+      if (score >= FUZZY_DICE_FLOOR) {
+        fuzzy.push({ pending: t.pending, label: t.label, score, matchKind: 'fuzzy' });
+      }
+    }
+    pickFrom = fuzzy;
+  }
+
+  if (pickFrom.length === 0) {
     return { matched: false, skip_reason: 'no_label_match' };
   }
-  if (candidates.length > 1) {
+  if (pickFrom.length > 1) {
     return { matched: false, skip_reason: 'multiple_label_matches' };
   }
 
   return {
     matched: true,
     dispatch: 'set_factor_value',
-    pending: candidates[0]!.pending,
-    factorLabel: candidates[0]!.label,
+    pending: pickFrom[0]!.pending,
+    factorLabel: pickFrom[0]!.label,
+    matchKind: pickFrom[0]!.matchKind,
   };
 }

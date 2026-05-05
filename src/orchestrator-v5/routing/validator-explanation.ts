@@ -101,23 +101,44 @@ export type ExplanationAnswerErrorReason =
 
 /**
  * Raw-decimal egress guard. The brief lists "long raw decimals" and "raw
- * sensitivity coefficients" as forbidden user-facing output. Wave 4 fixed
- * the deterministic fallback formatter, but Sonnet's `answer_text` could
- * still pass through containing strings like `-0.7346938775510203`.
+ * sensitivity coefficients" as forbidden user-facing output.
  *
- * The pattern matches a decimal with 3+ fractional digits NOT followed
- * by a unit marker. Legitimate user-facing decimals (probabilities,
- * percentage points) are typically 0–2 decimal places — a sensitivity
- * coefficient surfaced raw is the only common case that produces a
- * 3+-digit fractional. The unit-marker negative lookahead lets through
- * pathological cases like "62.345%" if Sonnet ever emits one.
+ * Two-rule guard, calibrated for sensible precision:
+ *
+ *  1. ANY decimal with 3+ fractional digits (e.g. `0.7346938775510203`,
+ *     `-0.123` followed by anything) is rejected, regardless of unit
+ *     marker. Probabilities and percentage points have known sensible
+ *     precision (0–1 dp); 3+ fractional digits is false precision even
+ *     with a "%" suffix.
+ *
+ *  2. Decimals with EXACTLY 2 fractional digits AND a unit marker are
+ *     also rejected (e.g. `62.34%`, `5.67 percentage points`). Margins
+ *     and probabilities should round to integer or 1 dp; 2-dp is
+ *     misleading false precision in this domain.
+ *
+ *  3. Decimals with 1 fractional digit + unit marker pass (e.g.
+ *     `62.3%` is acceptable rounding precision).
+ *
+ *  4. Plain integers + unit markers pass.
  *
  * Tested directly against the brief's evidence value
- * "-0.7346938775510203" plus the negative cases (probabilities and
- * percentage points stay valid).
+ * `-0.7346938775510203`, the previously-permissive case `62.345%`,
+ * the unit-bolted case `0.7346938775510203 percent`, and positive
+ * cases (1-dp percentages, integer percentages, percentage points).
  */
-const RAW_DECIMAL_COEFFICIENT_PATTERN =
-  /-?\d+\.\d{3,}(?!\s*(?:%|pp\b|percent|percentage))/i;
+const UNIT_MARKER = '\\s*(?:%|pp\\b|percent|percentage)';
+// Rule 1: 3+ fractional digits, regardless of unit marker.
+const RAW_DECIMAL_LONG_FRACTIONAL = /-?\d+\.\d{3,}/i;
+// Rule 2: exactly 2 fractional digits followed by a unit marker (false precision).
+const RAW_DECIMAL_TWO_DP_WITH_UNIT = new RegExp(
+  `-?\\d+\\.\\d{2}(?!\\d)${UNIT_MARKER}`,
+  'i',
+);
+function answerHasRawDecimal(answerText: string): boolean {
+  if (RAW_DECIMAL_LONG_FRACTIONAL.test(answerText)) return true;
+  if (RAW_DECIMAL_TWO_DP_WITH_UNIT.test(answerText)) return true;
+  return false;
+}
 
 export interface ExplanationAnswerVerdict {
   /**
@@ -209,11 +230,9 @@ export function validateExplanationAnswer(
     return invalid(answerText, explanation, 'forbidden_internal_term');
   }
 
-  // Rule 6: raw decimal coefficient. Matches sensitivity values and
-  // similar long fractional decimals that legitimate user-facing prose
-  // would render as bucketed magnitude phrasing. See pattern docstring
-  // for the unit-marker exemption.
-  if (RAW_DECIMAL_COEFFICIENT_PATTERN.test(answerText)) {
+  // Rule 6: raw decimal coefficient + false-precision percentage.
+  // See `answerHasRawDecimal` docstring for the two-rule guard.
+  if (answerHasRawDecimal(answerText)) {
     return invalid(answerText, explanation, 'raw_decimal_coefficient');
   }
 

@@ -14,6 +14,7 @@ import type { PendingAction } from '../../session/pending-action.js';
 import type { GraphLookup } from '../validator.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const NOW_MS = Date.parse('2026-05-06T12:00:00.000Z');
 
 function setFactorValuePending(overrides: Partial<PendingAction> = {}): PendingAction {
   return {
@@ -57,6 +58,7 @@ describe('tryClarificationResume — negative gates', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r).toEqual({
       matched: false,
@@ -71,6 +73,7 @@ describe('tryClarificationResume — negative gates', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r).toEqual({
       matched: false,
@@ -85,6 +88,7 @@ describe('tryClarificationResume — negative gates', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r).toEqual({ matched: false, skip_reason: 'no_pending_clarification' });
   });
@@ -108,6 +112,7 @@ describe('tryClarificationResume — match cases', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r.matched).toBe(true);
     if (r.matched) {
@@ -125,6 +130,7 @@ describe('tryClarificationResume — match cases', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r.matched).toBe(true);
   });
@@ -137,6 +143,7 @@ describe('tryClarificationResume — match cases', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r.matched).toBe(true);
   });
@@ -148,6 +155,7 @@ describe('tryClarificationResume — match cases', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r).toEqual({ matched: false, skip_reason: 'no_label_match' });
   });
@@ -168,6 +176,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng', label: 'Engineering' },
         { id: 'f_owner', label: 'Owner' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r).toEqual({
       matched: false,
@@ -175,15 +184,160 @@ describe('tryClarificationResume — match cases', () => {
     });
   });
 
-  it('skips set_factor_value pendings whose factor is no longer in the graph', () => {
+  it('returns all_targets_missing when persisted factor is gone from the live graph', () => {
     const pending = setFactorValuePending();
     const r = tryClarificationResume({
       message: 'Engineering Time Commitment',
       pendingActions: [pending],
       // Empty graph — the factor_id from the prior pending action is gone.
       graphLookup: makeGraphLookup([]),
+      nowMs: NOW_MS,
     });
-    expect(r).toEqual({ matched: false, skip_reason: 'no_label_match' });
+    expect(r).toEqual({ matched: false, skip_reason: 'all_targets_missing' });
+  });
+
+  it('Wave 5F: returns all_expired when pending action wall-clock expiry has passed', () => {
+    const expired = setFactorValuePending({
+      expires_at_iso: '2026-01-01T00:00:00.000Z', // before NOW_MS
+    });
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [expired],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'all_expired' });
+  });
+
+  it('Wave 5F: returns all_expired for malformed expires_at_iso (defence-in-depth)', () => {
+    const malformed = setFactorValuePending({
+      expires_at_iso: 'not-a-date',
+    });
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [malformed],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'all_expired' });
+  });
+
+  it('Wave 5F: returns graph_hash_changed when persisted hash diverges from live hash', () => {
+    const pending = setFactorValuePending({
+      preconditions: { graph_hash: 'sha256:before' },
+    });
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [pending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+      currentGraphHash: 'sha256:after',
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'graph_hash_changed' });
+  });
+
+  it('Wave 5F: returns graph_hash_changed when persisted hash exists but live hash is unknown', () => {
+    const pending = setFactorValuePending({
+      preconditions: { graph_hash: 'sha256:before' },
+    });
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [pending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+      // currentGraphHash omitted — defence-in-depth treats as conflict
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'graph_hash_changed' });
+  });
+
+  it('Wave 5F: passes when both persisted and current graph hashes match', () => {
+    const pending = setFactorValuePending({
+      preconditions: { graph_hash: 'sha256:abc' },
+    });
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [pending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+      currentGraphHash: 'sha256:abc',
+    });
+    expect(r.matched).toBe(true);
+  });
+
+  it('Wave 5F: fuzzy match catches typos with bigram-Dice ≥ 0.5', () => {
+    const pending = setFactorValuePending();
+    const r = tryClarificationResume({
+      // Typo: missing 'i' in "Engineering" and missing 'm' in "Commitment"
+      message: 'Engneering Time Comitment',
+      pendingActions: [pending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+    });
+    expect(r.matched).toBe(true);
+    if (r.matched) {
+      expect(r.matchKind).toBe('fuzzy');
+    }
+  });
+
+  it('Wave 5F: fuzzy match returns multiple_label_matches when more than one candidate clusters above threshold', () => {
+    const pending1 = setFactorValuePending({
+      id: 'pa-1',
+      action: { kind: 'set_factor_value', factor_id: 'f_a', value: 0.3, operator: 'set' },
+    });
+    const pending2 = setFactorValuePending({
+      id: 'pa-2',
+      action: { kind: 'set_factor_value', factor_id: 'f_b', value: 0.3, operator: 'set' },
+    });
+    const r = tryClarificationResume({
+      // Typed message that is fuzzy-similar to BOTH labels.
+      message: 'time commitment',
+      pendingActions: [pending1, pending2],
+      graphLookup: makeGraphLookup([
+        { id: 'f_a', label: 'Engineering Time Commitment' },
+        { id: 'f_b', label: 'Owner Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+    });
+    // Both labels share "Time Commitment" — substring match fires for
+    // BOTH, producing multiple_label_matches.
+    expect(r).toEqual({ matched: false, skip_reason: 'multiple_label_matches' });
+  });
+
+  it('Wave 5F: matchKind is "exact" for exact-equal label, "substring" for substring, "fuzzy" otherwise', () => {
+    const pending = setFactorValuePending();
+    const exact = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [pending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+    });
+    expect(exact.matched).toBe(true);
+    if (exact.matched) expect(exact.matchKind).toBe('exact');
+
+    const substring = tryClarificationResume({
+      message: 'the Engineering Time Commitment one',
+      pendingActions: [pending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+    });
+    expect(substring.matched).toBe(true);
+    if (substring.matched) expect(substring.matchKind).toBe('substring');
   });
 
   it('ignores pending actions of other kinds', () => {
@@ -203,6 +357,7 @@ describe('tryClarificationResume — match cases', () => {
       graphLookup: makeGraphLookup([
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
+      nowMs: NOW_MS,
     });
     expect(r).toEqual({ matched: false, skip_reason: 'no_pending_clarification' });
   });

@@ -849,19 +849,32 @@ export async function runTurnExecutor(
             pending_action_id: 'chip_click_no_pending',
             kind: 'what_would_flip',
           });
+          // Run-analysis is offered as an executable chip ONLY when
+          // the model is structurally ready. On a model that's
+          // missing options or a goal, clicking the chip would just
+          // surface PRECONDITION_UNMET — moving the failure rather
+          // than recovering from it. Mirror Wave 5C's expired-
+          // recovery readiness gate.
+          const noPendingModelReady = analysisReadyForTurn?.status === 'ready';
+          const noPendingAssistantText = noPendingModelReady
+            ? "The offer to explore what would change this result is no longer available. " +
+              'Run the analysis again first, then I can show you what would change it.'
+            : "The offer to explore what would change this result is no longer available, " +
+              'and the model is not yet ready to analyse. Tell me what to set up next.';
+          const noPendingChips: SuggestedAction[] = noPendingModelReady
+            ? [
+                {
+                  id: 'chip_action_run_analysis_after_chip_no_pending',
+                  label: 'Run analysis',
+                  message: 'Run the analysis.',
+                  action_type: 'run_analysis',
+                },
+              ]
+            : [];
           const recoveryResponse = composeDirectAnswerResponse({
-            assistant_text:
-              "The offer to explore what would change this result is no longer available. " +
-              'Run the analysis again first, then I can show you what would change it.',
+            assistant_text: noPendingAssistantText,
             stage: context.stage,
-            suggested_actions: [
-              {
-                id: 'chip_action_run_analysis_after_chip_no_pending',
-                label: 'Run analysis',
-                message: 'Run the analysis.',
-                action_type: 'run_analysis',
-              },
-            ],
+            suggested_actions: noPendingChips,
           });
           sonnetTextForLog = recoveryResponse.assistant_text;
           resolvedTurnClass = 'direct_answer';
@@ -1230,6 +1243,16 @@ export async function runTurnExecutor(
         message: payload.message,
         pendingActions: context.most_recent_pending_actions ?? [],
         graphLookup: graphLookupForValidate,
+        nowMs: Date.now(),
+        // Live graph hash (derived from the post-edit graph elsewhere
+        // in this turn). When undefined and the persisted action
+        // carried a hash precondition, the resumer treats this as a
+        // hash conflict and falls through — the brief's "never
+        // apply across scenarios / never apply on diverged graph"
+        // contract.
+        ...(freshness?.current_graph_hash != null
+          ? { currentGraphHash: freshness.current_graph_hash }
+          : {}),
       });
       if (clarificationDispatch.matched) {
         const pending = clarificationDispatch.pending;

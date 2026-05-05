@@ -127,16 +127,15 @@ describe('validateExplanationAnswer', () => {
     }
   });
 
-  it('Wave 5d: passes legitimate decimals followed by unit markers (%, percentage points, pp)', () => {
+  it('Wave 5d: passes legitimate decimals (integer + unit, 1-dp + unit, percentage points)', () => {
     const padding =
       ' Engineering Capacity is the strongest driver and the result is meaningful.';
     const baselinePriorFacts = [RUN_ANALYSIS_FACT];
     const cases: Array<{ snippet: string }> = [
       { snippet: 'The leading option performs best with a probability of 62%' },
       { snippet: 'The lead is 14 percentage points' },
-      { snippet: 'Margin is 14.5%' },
+      { snippet: 'Margin is 14.5%' }, // 1 dp + unit, sensible precision
       { snippet: 'A 5 pp lead is meaningful' },
-      { snippet: 'Probability 0.62 is shown as 62.345%' }, // 0.62 only 2 dp; 62.345% has unit marker
     ];
     for (const { snippet } of cases) {
       const verdict = validateExplanationAnswer(
@@ -145,6 +144,53 @@ describe('validateExplanationAnswer', () => {
         baselinePriorFacts,
       );
       expect(verdict.payload?.answer_validation_error).not.toBe('raw_decimal_coefficient');
+    }
+  });
+
+  it('Wave 5f: rejects long-fractional decimals even when followed by a unit marker', () => {
+    // Previously the unit-marker negative lookahead allowed
+    // `0.7346938775510203 percent` and `62.345%` through. Wave 5f
+    // tightens the rule: 3+ fractional digits are rejected
+    // regardless of unit marker.
+    const padding =
+      ' Engineering Capacity is the strongest driver and the result is meaningful.';
+    const baselinePriorFacts = [RUN_ANALYSIS_FACT];
+    const cases: Array<{ snippet: string }> = [
+      { snippet: 'The sensitivity is 0.7346938775510203 percent' },
+      { snippet: 'Margin is 14.567%' },
+      { snippet: 'Lead is 5.123 percentage points' },
+      { snippet: 'Coefficient is 1.234 pp' },
+    ];
+    for (const { snippet } of cases) {
+      const verdict = validateExplanationAnswer(
+        'explain_results',
+        { answer_text: snippet + padding },
+        baselinePriorFacts,
+      );
+      expect(verdict.payload?.answer_text_valid).toBe(false);
+      expect(verdict.payload?.answer_validation_error).toBe('raw_decimal_coefficient');
+    }
+  });
+
+  it('Wave 5f: rejects 2-dp decimals followed by unit markers (false precision)', () => {
+    // 62.34% / 5.67 percentage points are misleading precision in
+    // this domain — round to 0 or 1 dp.
+    const padding =
+      ' Engineering Capacity is the strongest driver and the result is meaningful.';
+    const baselinePriorFacts = [RUN_ANALYSIS_FACT];
+    const cases: Array<{ snippet: string }> = [
+      { snippet: 'The lead is 14.56 percentage points' },
+      { snippet: 'Probability is 62.34%' },
+      { snippet: 'Margin is 5.67 pp' },
+    ];
+    for (const { snippet } of cases) {
+      const verdict = validateExplanationAnswer(
+        'explain_results',
+        { answer_text: snippet + padding },
+        baselinePriorFacts,
+      );
+      expect(verdict.payload?.answer_text_valid).toBe(false);
+      expect(verdict.payload?.answer_validation_error).toBe('raw_decimal_coefficient');
     }
   });
 
