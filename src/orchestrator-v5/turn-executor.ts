@@ -75,7 +75,13 @@ import {
   deriveOperator,
 } from './routing/deterministic-value-update.js';
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
-import type { PendingAction } from './session/pending-action.js';
+import { tryClarificationResume } from './routing/clarification-resume.js';
+import {
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+  type PendingAction,
+} from './session/pending-action.js';
+import { randomUUID } from 'node:crypto';
 import type { ProposalAction } from './routing/types.js';
 import {
   HandlerInvocationFailedError,
@@ -1208,6 +1214,84 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
+      // V5 Wave 5E — clarification-resume pre-route. Closes the
+      // brief evidence #3 gap: a user who types just a factor label
+      // after a value-update clarify ("Engineering Time Commitment")
+      // would otherwise lose the parsed quantity from the prior turn
+      // and fall through to the LLM. The resumer reads the most-
+      // recent prior turn's pending actions and reconstructs the
+      // proposal `tryDeterministicValueUpdate` would have produced.
+      //
+      // Negative gates inside the module ensure messages with edit
+      // verbs / quantities (handled by tryDeterministicValueUpdate)
+      // and short-confirmations (handled by tryShortConfirmResume)
+      // fall through unchanged.
+      const clarificationDispatch = tryClarificationResume({
+        message: payload.message,
+        pendingActions: context.most_recent_pending_actions ?? [],
+        graphLookup: graphLookupForValidate,
+      });
+      if (clarificationDispatch.matched) {
+        const pending = clarificationDispatch.pending;
+        const action = pending.action;
+        if (action.kind === 'set_factor_value') {
+          emit(TelemetryEvents.PendingActionMatched, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: pending.id,
+            kind: action.kind,
+            chip_id: pending.chip_id,
+            candidate_count: 1,
+          });
+          const liveTarget = graphLookupForValidate?.findEntityById(
+            action.factor_id,
+          );
+          const proposal: ProposalAction = {
+            handler_id: 'set_factor_value',
+            entity: {
+              id: action.factor_id,
+              kind: 'node',
+              ...(liveTarget?.label != null
+                ? { label: liveTarget.label }
+                : {}),
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [
+              {
+                name: 'value',
+                value:
+                  action.unit !== undefined
+                    ? { value: action.value, unit: action.unit }
+                    : action.value,
+                operator: action.operator,
+                source: 'user_explicit',
+                ...(action.unit !== undefined ? { unit: action.unit } : {}),
+              },
+            ],
+            cited_context_fields: ['graph.nodes'],
+          };
+          const synthesisedRouting: RoutingResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: proposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: { input_tokens: 0, output_tokens: 0 },
+              model: 'deterministic-clarification-resume',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+          };
+          routingResult = synthesisedRouting;
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          consumedPendingAction = pending;
+        }
+      }
+
       // V5 explain-stabilisation Task 4 + V5 D1 golden-path closure
       // (A3.1 Task 1) — deterministic value-update pre-route. Catches
       // explicit "Set X to N" / "Increase Y to N" phrasings before
@@ -1557,6 +1641,38 @@ export async function runTurnExecutor(
             ),
           }),
         );
+        // Wave 5E — persist set_factor_value pending actions (one per
+        // candidate) carrying the parsed quantity + operator from this
+        // turn. The clarification-resume pre-route on the next turn
+        // matches a typed factor label against these pendings to
+        // reconstruct the proposal `tryDeterministicValueUpdate` would
+        // have produced.
+        const clarifyEmittedAtIso = new Date().toISOString();
+        const clarifyExpiresAtIso = new Date(
+          Date.parse(clarifyEmittedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+        ).toISOString();
+        const { value: userUnitValue, unit } = mapCqeQuantityToProposalValue(
+          deterministicValueUpdate.quantity,
+        );
+        const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
+        const clarifyPendingActions = deterministicValueUpdate.candidates.map(
+          (cand, idx): PendingAction => ({
+            id: randomUUID(),
+            scenario_id: context.session_id,
+            chip_id: `chip_clarify_factor_${idx}`,
+            action: {
+              kind: 'set_factor_value',
+              factor_id: cand.id,
+              value: userUnitValue,
+              ...(unit !== undefined ? { unit } : {}),
+              operator,
+            },
+            preconditions: { target_entity_ids: [cand.id] },
+            expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+            expires_at_iso: clarifyExpiresAtIso,
+            emitted_at_iso: clarifyEmittedAtIso,
+          }),
+        );
         const clarifyResponse = composeDirectAnswerResponse({
           assistant_text: buildClarifyAssistantText(deterministicValueUpdate.candidates),
           stage: context.stage,
@@ -1580,6 +1696,7 @@ export async function runTurnExecutor(
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
+            pending_actions: clarifyPendingActions,
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
