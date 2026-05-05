@@ -39,7 +39,8 @@ const MIGRATION_PATH = resolve(
 const MIGRATION_VERSION = '20260505120000';
 const MIGRATION_NAME = 'v5_pending_actions';
 
-const env = loadEnv('/Users/paulslee/Documents/GitHub/olumi-assistants-service/.env.staging.local');
+const ENV_PATH = process.env.STAGING_ENV_FILE ?? '.env.staging.local';
+const env = loadEnv(ENV_PATH);
 if (!env.SUPABASE_URL || !env.SUPABASE_DB_PASSWORD) {
   console.error('FATAL: missing SUPABASE_URL or SUPABASE_DB_PASSWORD in .env.staging.local');
   process.exit(1);

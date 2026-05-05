@@ -198,8 +198,12 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     input.analysis != null && input.analysis.robustness_band === 'fragile';
 
   // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
-  // require a new handler. Explain + sensitivity are the two most common
-  // asks; both are conversational (no handler required).
+  // require a new handler. "Explain the result" stays a conversational
+  // prompt chip (the explain_results handler dispatch is reached via
+  // Sonnet routing on the next turn). "What could change the outcome?"
+  // emits a what_would_flip action chip so the chip-click path resolves
+  // deterministically AND a pending action lands so a typed "yes" on
+  // the next turn can resume via the short-confirm pre-route.
   if (handlerJustRan === 'run_analysis') {
     return cap([
       promptChip(
@@ -207,11 +211,32 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         'Explain the result',
         'Please explain the analysis result in plain language.',
       ),
-      promptChip(
-        'what_could_flip',
-        'What could change the outcome?',
-        'What could change the outcome of this analysis?',
-      ),
+      {
+        id: 'chip_action_what_would_flip',
+        label: 'What could change the outcome?',
+        message: 'What could change the outcome of this analysis?',
+        action_type: 'what_would_flip',
+      },
+    ]);
+  }
+
+  // Rule: after a successful explain_results turn (the handler ran and
+  // emitted a real fact, not a precondition-fail noop), surface a
+  // what_would_flip action chip. Mirrors the offer that the
+  // explain_results deterministic fallback prose makes
+  // ("Would you like to explore what would change this result?")
+  // and lets a typed "yes" resume via the short-confirm pre-route.
+  if (
+    handlerJustRan === 'explain_results' &&
+    noopExplanationHandlerJustRan === null
+  ) {
+    return cap([
+      {
+        id: 'chip_action_what_would_flip',
+        label: 'Explore what would change this',
+        message: 'Explore what would change the result.',
+        action_type: 'what_would_flip',
+      },
     ]);
   }
 

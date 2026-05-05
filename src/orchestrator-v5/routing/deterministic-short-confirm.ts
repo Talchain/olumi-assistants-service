@@ -38,13 +38,16 @@ import {
 
 /**
  * Short-confirmation regex. Anchored start-to-end so ANY substantive
- * content disqualifies the match (e.g. "yes please run it now and …"
- * is treated as a free-text turn, not a confirmation, because the
- * trailing free text could carry edit verbs the LLM should reason
- * over). Trailing punctuation, whitespace, and emojis are tolerated.
+ * trailing content (edit verbs, quantities, etc.) disqualifies the
+ * match. Trailing punctuation, whitespace, and emojis are tolerated.
+ *
+ * The brief lists at minimum: "yes", "yes please", "do that",
+ * "apply it", "go ahead", and chip-click equivalents. The pattern
+ * extends those bases with common politeness suffixes ("please",
+ * "now", "thanks") and natural variants ("yes do", "yeah ok").
  */
 export const SHORT_CONFIRM_PATTERN =
-  /^\s*(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+it)?|confirm(?:ed)?|please\s+do)[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+it)?|confirm(?:ed)?|please\s+do|yeah\s+ok|yes\s+do(?:\s+it)?)(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * Negative gate. If any of these appear in the message, the user is
@@ -61,11 +64,35 @@ export type ShortConfirmSkipReason =
   | 'kind_not_yet_resumable'
   | 'multiple_ambiguous';
 
+/**
+ * Coarse summary of analysis state at resume time. Drives the
+ * `what_would_flip` freshness precondition: a stale or missing analysis
+ * means resuming what_would_flip would surface a misleading answer, so
+ * the resumer downgrades to a `rerun_analysis_required` recovery
+ * dispatch with safe assistant text and a `run_analysis` resumer-chip.
+ */
+export type AnalysisFreshnessAtResume = 'fresh' | 'stale' | 'unknown' | 'none';
+
 export type ShortConfirmDispatch =
   | { readonly matched: false; readonly skip_reason: ShortConfirmSkipReason }
   | {
       readonly matched: true;
       readonly dispatch: 'pending_action';
+      readonly pending: PendingAction;
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'recovery_expired';
+      readonly expired_count: number;
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'recovery_ambiguous';
+      readonly candidates: readonly PendingAction[];
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'rerun_analysis_required';
       readonly pending: PendingAction;
     };
 
@@ -84,15 +111,26 @@ export interface TryShortConfirmResumeInput {
    * unit tests freeze the clock without monkey-patching `Date`.
    */
   readonly nowMs: number;
+  /**
+   * Coarse freshness verdict for the live analysis at resume time. If
+   * absent, defaults to `'unknown'` — the freshness-sensitive resume
+   * paths (`what_would_flip`) treat that as not-fresh and downgrade
+   * to a rerun-analysis recovery rather than running a stale answer.
+   */
+  readonly analysisFreshness?: AnalysisFreshnessAtResume;
 }
 
 /**
- * Wave 2: only `run_analysis` has a resume synthesis path in
- * TurnExecutor today. Future kinds will join this set as their emit
- * sites and synthesis paths land in later waves.
+ * Pending-action kinds that have a synthesis path in TurnExecutor.
+ * `run_analysis` and `what_would_flip` carry an explicit dispatch; the
+ * remaining kinds (`set_factor_value`, `apply_proposed_change`,
+ * `edit_graph_add_risk`) are persisted but resume requires
+ * additional state (target-id, parsed value, label) that is not
+ * carried by a bare confirmation. Those kinds resolve via different
+ * paths (chip click, clarification reply) rather than short-confirm.
  */
-const WAVE2_RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> =
-  new Set(['run_analysis']);
+const RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> =
+  new Set(['run_analysis', 'what_would_flip']);
 
 function isExpired(pa: PendingAction, nowMs: number, currentTurnIndex: number): boolean {
   // Wall-clock TTL: emitted_at_iso + expires_at_iso are both written
@@ -131,29 +169,49 @@ export function tryShortConfirmResume(
     return { matched: false, skip_reason: 'no_pending' };
   }
 
-  // Filter to non-expired.
+  // Split into expired and live so we can surface focused recovery copy
+  // when the only thing the user could have been saying yes to is gone.
+  const expired = input.pendingActions.filter((pa) =>
+    isExpired(pa, input.nowMs, input.currentTurnIndex),
+  );
   const live = input.pendingActions.filter(
     (pa) => !isExpired(pa, input.nowMs, input.currentTurnIndex),
   );
   if (live.length === 0) {
-    return { matched: false, skip_reason: 'all_expired' };
+    // The user said "yes" but every offer they could have meant has
+    // expired. Surface a focused recovery rather than falling through
+    // to the LLM, where a generic direct_answer would lose context.
+    return { matched: true, dispatch: 'recovery_expired', expired_count: expired.length };
   }
 
-  // Filter to kinds Wave 2 can resume.
-  const resumable = live.filter((pa) => WAVE2_RESUMABLE_KINDS.has(pa.action.kind));
+  // Filter to kinds with a synthesis path.
+  const resumable = live.filter((pa) => RESUMABLE_KINDS.has(pa.action.kind));
   if (resumable.length === 0) {
     // Pending action is live but its kind is not yet wired in
     // TurnExecutor. Fall through to the LLM rather than misfire.
     return { matched: false, skip_reason: 'kind_not_yet_resumable' };
   }
   if (resumable.length > 1) {
-    // Multiple resumable pending actions of distinct kinds — Wave 2
-    // doesn't disambiguate. Fall through to the LLM. Wave 3 adds a
-    // focused clarify path with one chip per candidate.
-    return { matched: false, skip_reason: 'multiple_ambiguous' };
+    // Multiple resumable pending actions — ask a focused clarification
+    // rather than guessing or letting the LLM see a bare "yes".
+    return { matched: true, dispatch: 'recovery_ambiguous', candidates: resumable };
   }
 
-  return { matched: true, dispatch: 'pending_action', pending: resumable[0]! };
+  const pending = resumable[0]!;
+
+  // Freshness precondition for what_would_flip: if analysis is missing
+  // or stale, do not resume. The whole point of "what would flip" is
+  // about the live analysis result — running it against stale or
+  // absent data would surface a misleading answer. Downgrade to a
+  // rerun_analysis_required recovery so the user can refresh first.
+  if (
+    pending.action.kind === 'what_would_flip' &&
+    (input.analysisFreshness ?? 'unknown') !== 'fresh'
+  ) {
+    return { matched: true, dispatch: 'rerun_analysis_required', pending };
+  }
+
+  return { matched: true, dispatch: 'pending_action', pending };
 }
 
 /**

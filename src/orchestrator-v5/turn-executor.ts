@@ -75,6 +75,7 @@ import {
   deriveOperator,
 } from './routing/deterministic-value-update.js';
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
+import type { PendingAction } from './session/pending-action.js';
 import type { ProposalAction } from './routing/types.js';
 import {
   HandlerInvocationFailedError,
@@ -544,6 +545,10 @@ export async function runTurnExecutor(
     // synthesise this before the routeWithToolUse call. Wider type so the
     // guard below the pre-route block can compare against undefined.
     let routingResult: RoutingResult | undefined;
+    // Resumed pending action, if the short-confirm pre-route synthesised
+    // a tool_call. Cleared after the commit-success consumed-telemetry
+    // emit. Null on every other path.
+    let consumedPendingAction: PendingAction | null = null;
     // Phase 1.5: compile analysis summary once per turn. compactAnalysis is
     // the existing V4 utility that projects V2RunResponseEnvelope →
     // AnalysisResponseSummary. AnalysisStateIngress is a structural subset
@@ -773,27 +778,32 @@ export async function runTurnExecutor(
         },
       });
 
-      // V5 Wave 2 — deterministic short-confirmation pre-route. Runs
-      // BEFORE the value-update pre-route. When the user replies with
-      // a bare confirmation ("yes", "ok", "do it") and the previous
-      // assistant turn persisted exactly one resumable pending action
-      // (Wave 2: only `run_analysis` kind has a synthesis path here),
-      // we synthesise a RoutingToolCallResult so the existing Step 2-7
-      // lifecycle (validate → execute → confirm → coach → compose →
-      // commit) runs unchanged. No LLM call.
+      // Deterministic short-confirmation pre-route. When the user
+      // replies with a bare confirmation ("yes", "yes please", "do
+      // that" …) and the previous assistant turn persisted a resumable
+      // pending action, dispatch the matching handler without an LLM
+      // round-trip. Recovery dispatches (expired, ambiguous,
+      // rerun-analysis-required) emit safe assistant text + executable
+      // chips and short-circuit to commit.
       //
-      // Mutual exclusion with the value-update pre-route is enforced
-      // by regex content: short-confirm requires the message to be
-      // bare "yes"-style with no edit verbs or numeric quantities;
-      // value-update requires an edit verb plus a CQE quantity. The
-      // two cannot match the same message.
+      // Mutual exclusion with the value-update pre-route below is
+      // enforced by regex content: short-confirm requires the message
+      // to be bare "yes"-style; value-update requires an edit verb
+      // plus a CQE quantity. The two cannot match the same message.
       const shortConfirmDispatch = tryShortConfirmResume({
         message: payload.message,
         pendingActions: context.most_recent_pending_actions ?? [],
         currentTurnIndex: context.prior_turns.length,
         nowMs: Date.now(),
+        analysisFreshness: freshness?.freshness,
       });
-      if (shortConfirmDispatch.matched) {
+      if (!shortConfirmDispatch.matched) {
+        emit(TelemetryEvents.PendingActionSkipped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          reason: shortConfirmDispatch.skip_reason,
+        });
+      } else if (shortConfirmDispatch.dispatch === 'pending_action') {
         const pending = shortConfirmDispatch.pending;
         emit(TelemetryEvents.PendingActionMatched, {
           request_id: requestId,
@@ -803,58 +813,257 @@ export async function runTurnExecutor(
           chip_id: pending.chip_id,
           candidate_count: 1,
         });
-        // Synthesise the proposal for the matched kind. Wave 2 only
-        // wires run_analysis; the TryShortConfirmResume filter
-        // already excluded other kinds via WAVE2_RESUMABLE_KINDS so
-        // this switch is exhaustive in practice.
-        if (pending.action.kind === 'run_analysis') {
-          const proposal: ProposalAction = {
-            handler_id: 'run_analysis',
-            entity: {
-              id: context.session_id,
-              kind: 'option',
-              resolution_status: 'resolved',
-              resolution_method: 'id_match',
-            },
-            parameters: [],
-            cited_context_fields: ['graph.options'],
-          };
-          const synthesisedRouting: RoutingResult = {
-            type: 'tool_call',
-            proposal: { intent_class: 'execute', action: proposal },
-            orientationText: '',
-            rawResult: {
-              content: [],
-              stop_reason: 'tool_use',
-              usage: { input_tokens: 0, output_tokens: 0 },
-              model: 'deterministic-short-confirm',
-              latencyMs: 0,
-            },
-            llmCallCount: 0,
-          };
-          routingResult = synthesisedRouting;
-          llmCallsUsed = 0;
-          sonnetTextForLog = '';
-          stagesCompleted.push('orient');
-          emit(TelemetryEvents.PendingActionConsumed, {
-            request_id: requestId,
-            scenario_id: context.session_id,
-            pending_action_id: pending.id,
-            kind: pending.action.kind,
-            llm_calls_used: 0,
-          });
-        }
-      } else {
-        // Telemetry: emit the skip reason so dashboards can see why
-        // the resumer chose not to short-circuit. Most production
-        // skips are 'no_short_confirm' (user typed a real message);
-        // 'no_pending' / 'all_expired' / 'kind_not_yet_resumable' /
-        // 'multiple_ambiguous' are diagnostic for the resumer.
-        emit(TelemetryEvents.PendingActionSkipped, {
+        const proposal: ProposalAction =
+          pending.action.kind === 'run_analysis'
+            ? {
+                handler_id: 'run_analysis',
+                entity: {
+                  id: context.session_id,
+                  kind: 'option',
+                  resolution_status: 'resolved',
+                  resolution_method: 'id_match',
+                },
+                parameters: [],
+                cited_context_fields: ['graph.options'],
+              }
+            : {
+                // what_would_flip — the handler reads the live analysis
+                // projection from context; no parameters or entity
+                // resolution are needed beyond the scenario context.
+                handler_id: 'what_would_flip',
+                entity: {
+                  id: context.session_id,
+                  kind: 'option',
+                  resolution_status: 'resolved',
+                  resolution_method: 'id_match',
+                },
+                parameters: [],
+                cited_context_fields: ['analysis.leading_option'],
+              };
+        const synthesisedRouting: RoutingResult = {
+          type: 'tool_call',
+          proposal: { intent_class: 'execute', action: proposal },
+          orientationText: '',
+          rawResult: {
+            content: [],
+            stop_reason: 'tool_use',
+            usage: { input_tokens: 0, output_tokens: 0 },
+            model: 'deterministic-short-confirm',
+            latencyMs: 0,
+          },
+          llmCallCount: 0,
+        };
+        routingResult = synthesisedRouting;
+        llmCallsUsed = 0;
+        sonnetTextForLog = '';
+        stagesCompleted.push('orient');
+        // Track for the post-commit consumed telemetry — fire only
+        // after the commit succeeds, never on validation/handler
+        // failure.
+        consumedPendingAction = pending;
+      } else if (shortConfirmDispatch.dispatch === 'rerun_analysis_required') {
+        // Freshness precondition failed: the user said "yes" to an
+        // explore-result offer, but the analysis is no longer fresh.
+        // Surface a focused recovery and offer to rerun analysis,
+        // rather than running what_would_flip on stale data.
+        const pending = shortConfirmDispatch.pending;
+        emit(TelemetryEvents.PendingActionRerunAnalysisRequired, {
           request_id: requestId,
           scenario_id: context.session_id,
-          reason: shortConfirmDispatch.skip_reason,
+          pending_action_id: pending.id,
+          kind: pending.action.kind,
         });
+        const recoveryResponse = composeDirectAnswerResponse({
+          assistant_text:
+            "The analysis is no longer fresh, so the answer to 'what would change this' " +
+            'might be misleading. Run analysis again first?',
+          stage: context.stage,
+          suggested_actions: [
+            {
+              id: 'chip_action_rerun_analysis',
+              label: 'Rerun analysis',
+              message: 'Rerun the analysis.',
+              action_type: 'run_analysis',
+            },
+          ],
+        });
+        sonnetTextForLog = recoveryResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitDirectAnswer(recoveryResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'short_confirm_rerun_analysis_required',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on rerun-analysis-required recovery',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      } else if (shortConfirmDispatch.dispatch === 'recovery_expired') {
+        emit(TelemetryEvents.PendingActionRecoveryExpired, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          expired_count: shortConfirmDispatch.expired_count,
+        });
+        emit(TelemetryEvents.PendingActionExpired, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          expired_count: shortConfirmDispatch.expired_count,
+        });
+        const recoveryResponse = composeDirectAnswerResponse({
+          assistant_text:
+            "I'm not sure what you'd like me to do here — the offer I had open has lapsed. " +
+            'Tell me what you want to explore next.',
+          stage: context.stage,
+          suggested_actions: [],
+        });
+        sonnetTextForLog = recoveryResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitDirectAnswer(recoveryResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'short_confirm_recovery_expired',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on expired-recovery',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      } else if (shortConfirmDispatch.dispatch === 'recovery_ambiguous') {
+        emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          candidate_count: shortConfirmDispatch.candidates.length,
+          kinds: shortConfirmDispatch.candidates.map((c) => c.action.kind),
+        });
+        // Build one chip per candidate so the user can pick the
+        // intended action. Chip messages are kind-specific so the
+        // server can route them deterministically on the follow-up
+        // turn (the chip's action_type carries the intent through
+        // the chip_metadata channel the UI already round-trips).
+        const ambiguousChips: SuggestedAction[] = shortConfirmDispatch.candidates.map(
+          (cand, idx) => {
+            if (cand.action.kind === 'run_analysis') {
+              return {
+                id: `chip_clarify_pending_${idx}`,
+                label: 'Run analysis',
+                message: 'Run the analysis.',
+                action_type: 'run_analysis',
+              };
+            }
+            // what_would_flip
+            return {
+              id: `chip_clarify_pending_${idx}`,
+              label: 'Explore what would change this',
+              message: 'Explore what would change the result.',
+              action_type: 'what_would_flip',
+            };
+          },
+        );
+        const ambiguousResponse = composeDirectAnswerResponse({
+          assistant_text: 'I had more than one offer open — which would you like?',
+          stage: context.stage,
+          suggested_actions: ambiguousChips,
+        });
+        sonnetTextForLog = ambiguousResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitDirectAnswer(ambiguousResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'short_confirm_recovery_ambiguous',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on ambiguous-recovery',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
       }
 
       // V5 explain-stabilisation Task 4 + V5 D1 golden-path closure
@@ -2184,6 +2393,22 @@ export async function runTurnExecutor(
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
       response = committed.response;
+      // Pending-action consumed telemetry fires only after the commit
+      // succeeds — never for a pending action whose handler failed,
+      // whose validation rejected the dispatch, or whose commit
+      // rolled back. Pairs with PendingActionMatched at the
+      // synthesis site.
+      if (consumedPendingAction !== null) {
+        emit(TelemetryEvents.PendingActionConsumed, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          pending_action_id: consumedPendingAction.id,
+          kind: consumedPendingAction.action.kind,
+          chip_id: consumedPendingAction.chip_id,
+          llm_calls_used: 0,
+          duration_ms: Date.now() - startedAt,
+        });
+      }
       return finalizeRun();
     } catch (error) {
       log.error(

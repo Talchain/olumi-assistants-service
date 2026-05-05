@@ -502,6 +502,10 @@ export const TelemetryEvents = {
   PendingActionSkipped: "v5.pending_action.skipped",
   PendingActionExpired: "v5.pending_action.expired",
   PendingActionInvalidated: "v5.pending_action.invalidated",
+  PendingActionRecoveryExpired: "v5.pending_action.recovery_expired",
+  PendingActionRecoveryAmbiguous: "v5.pending_action.recovery_ambiguous",
+  PendingActionRerunAnalysisRequired: "v5.pending_action.rerun_analysis_required",
+  PendingActionsReadDegraded: "v5.pending_actions.read_degraded",
 
   // V5 state-trust freshness derivation. Emitted once per projection
   // build (every turn). Single event is sufficient to reconstruct the

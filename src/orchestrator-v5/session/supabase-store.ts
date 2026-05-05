@@ -43,6 +43,7 @@ import {
   type SessionTurnWrite,
 } from './store.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
 const V5_CONVERSATION_TURN_COLUMNS =
   'id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at';
@@ -353,14 +354,60 @@ export class SupabaseSessionStore implements SessionStore {
     const rows = (data ?? []) as Array<{ id: string; pending_actions: unknown }>;
     if (rows.length === 0) return [];
     const raw = rows[0]!.pending_actions;
-    if (!Array.isArray(raw)) return [];
+    if (!Array.isArray(raw)) {
+      // Column shape unexpectedly non-array — corrupted persistence.
+      // Surface a degradation event so dashboards can distinguish
+      // "no pending actions" from "data drift".
+      emit(TelemetryEvents.PendingActionsReadDegraded, {
+        scenario_id: scenarioId,
+        turn_row_id: rows[0]!.id,
+        reason: 'jsonb_not_array',
+      });
+      return [];
+    }
     const out: PendingAction[] = [];
+    let parseFailures = 0;
+    let scenarioMismatches = 0;
     for (const item of raw) {
       const parsed = parsePendingAction(item);
-      if (parsed !== null) out.push(parsed);
-      // Unparsable entries silently dropped — defence against future
-      // shape drift. The resumer falls through to the non-resume path
-      // when the array is empty after parsing.
+      if (parsed === null) {
+        parseFailures += 1;
+        continue;
+      }
+      // Contract: pending actions never apply across scenarios. The
+      // outer query already filters by scenario_id, but the persisted
+      // JSONB is untrusted input — defence-in-depth against any
+      // future writer that fails to set the field correctly.
+      if (parsed.scenario_id !== scenarioId) {
+        scenarioMismatches += 1;
+        continue;
+      }
+      out.push(parsed);
+    }
+    if (parseFailures > 0 || scenarioMismatches > 0) {
+      emit(TelemetryEvents.PendingActionsReadDegraded, {
+        scenario_id: scenarioId,
+        turn_row_id: rows[0]!.id,
+        reason:
+          parseFailures > 0 && scenarioMismatches > 0
+            ? 'parse_and_scenario_mismatch'
+            : parseFailures > 0
+              ? 'parse_failed'
+              : 'scenario_mismatch',
+        parse_failure_count: parseFailures,
+        scenario_mismatch_count: scenarioMismatches,
+        kept_count: out.length,
+      });
+      log.warn(
+        {
+          scenario_id: scenarioId,
+          turn_row_id: rows[0]!.id,
+          parse_failures: parseFailures,
+          scenario_mismatches: scenarioMismatches,
+          kept: out.length,
+        },
+        'V5 readMostRecentPendingActions — partial read; degraded entries dropped',
+      );
     }
     return out;
   }

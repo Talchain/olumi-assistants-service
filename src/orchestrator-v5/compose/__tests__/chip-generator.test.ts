@@ -59,7 +59,7 @@ describe('generateChips', () => {
     expect(chips).toEqual([]);
   });
 
-  it('after run_analysis → emits explain + flip prompts (both conversational)', () => {
+  it('after run_analysis → emits explain prompt + what_would_flip action chip', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [runAnalysisFact()],
@@ -68,11 +68,14 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(2);
     expect(chips[0].label).toBe('Explain the result');
+    expect(chips[0].action_type).toBeUndefined();
+    // The "What could change the outcome?" chip carries
+    // action_type='what_would_flip' so a chip click invokes the
+    // handler deterministically AND a pending action lands so a
+    // typed "yes" on the next turn can resume via the short-confirm
+    // pre-route.
     expect(chips[1].label).toBe('What could change the outcome?');
-    // Both are prompts (no action_type).
-    for (const c of chips) {
-      expect(c.action_type).toBeUndefined();
-    }
+    expect(chips[1].action_type).toBe('what_would_flip');
   });
 
   it('analyse stage with analysisReady=ready → executable run_analysis chip', () => {

@@ -36,7 +36,8 @@ function loadEnv(path) {
   return env;
 }
 
-const env = loadEnv('/Users/paulslee/Documents/GitHub/olumi-assistants-service/.env.staging.local');
+const ENV_PATH = process.env.STAGING_ENV_FILE ?? '.env.staging.local';
+const env = loadEnv(ENV_PATH);
 const url = env.SUPABASE_URL;
 const key = env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) {

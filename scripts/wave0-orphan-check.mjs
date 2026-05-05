@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 
 const env = {};
-for (const line of readFileSync('/Users/paulslee/Documents/GitHub/olumi-assistants-service/.env.staging.local', 'utf8').split('\n')) {
+const ENV_PATH = process.env.STAGING_ENV_FILE ?? '.env.staging.local';
+for (const line of readFileSync(ENV_PATH, 'utf8').split('\n')) {
   const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
   if (m) env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
 }

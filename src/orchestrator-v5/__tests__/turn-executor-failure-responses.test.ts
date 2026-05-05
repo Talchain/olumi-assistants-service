@@ -368,17 +368,24 @@ describe('TurnExecutor — success path is unchanged', () => {
       }),
     });
 
-    // V5 Task 2.1: successful run_analysis now emits conversational follow-up
-    // chips ("Explain the result", "What could change the outcome?").
-    // All chips are prompts (no action_type) — the user's next turn routes
-    // through Sonnet with the chip message as user text.
+    // After a successful run_analysis the chip-generator emits an
+    // "Explain the result" prompt chip plus a "What could change the
+    // outcome?" action chip with action_type='what_would_flip'. The
+    // action chip means a chip click invokes the handler
+    // deterministically and a pending action is persisted so a typed
+    // "yes" on the next turn resumes via the short-confirm pre-route.
     expect(result.response.suggested_actions.length).toBeGreaterThan(0);
-    expect(result.response.suggested_actions.map((c) => c.label)).toContain(
-      'Explain the result',
+    const labels = result.response.suggested_actions.map((c) => c.label);
+    expect(labels).toContain('Explain the result');
+    expect(labels).toContain('What could change the outcome?');
+    const explain = result.response.suggested_actions.find(
+      (c) => c.label === 'Explain the result',
     );
-    for (const chip of result.response.suggested_actions) {
-      expect(chip.action_type).toBeUndefined();
-    }
+    const whatFlip = result.response.suggested_actions.find(
+      (c) => c.label === 'What could change the outcome?',
+    );
+    expect(explain?.action_type).toBeUndefined();
+    expect(whatFlip?.action_type).toBe('what_would_flip');
 
     // V5 Group 1 Task B: successful run_analysis now emits an analysis_result
     // block carrying the PLoT enrichment (and, when the auto-fire completed,
