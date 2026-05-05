@@ -29,6 +29,31 @@ export const FORBIDDEN_STRINGS: readonly string[] = [
   'PARAMETER_INVALID',
   'PRECONDITION_UNMET',
   'HANDLER_NOT_FOUND',
+  // P0 V5 golden-path repair (Wave 6) — extend the wordlist with the
+  // terms the brief explicitly forbids in user-facing text. Each
+  // term either names internal mechanics (Zod, normalised, fact_type)
+  // or names a specific handler / function (set_factor_value,
+  // explain_results, selectRunAnalysisFact, analysisProjection)
+  // that must never reach the wire as user copy.
+  'BUDGET_TARGET',
+  'Zod',
+  'noop',
+  'fact_type',
+  'analysis_status',
+  'graph_hash',
+  'set_factor_value',
+  'explain_results',
+  'what_would_flip',
+  'run_analysis',
+  'edit_graph',
+  'selectRunAnalysisFact',
+  'analysisProjection',
+  'analysisFreshness',
+  'normalised',
+  'normalized',
+  // Patch language — surfaces in pre-repair drafts; user-facing copy
+  // must speak in plain product terms.
+  'patch_id',
 ];
 
 // Raw internal ID patterns (`opt_1`, `goal_1`, `fac_churn`, `risk_1`, `out_2`).
