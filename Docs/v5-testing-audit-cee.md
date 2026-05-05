@@ -15,6 +15,7 @@ Scope: read-only audit plus minimal P0 additions. No prompt changes, no PLoT/ISL
 | `pnpm test:sse:core` / `:chaos` | SSE parity, redis chaos | redis | 1/2 | optional |
 | `pnpm test:cee:telemetry` / `:calibration` | hero-journey telemetry, calibration workflow | none | 2 | optional |
 | `pnpm test:staging` | `RUN_STAGING_SMOKE=1` + `CEE_BASE_URL` + `CEE_API_KEY` | yes, network | 3 | manual |
+| `pnpm test:staging:v5` | `RUN_STAGING_SMOKE=1` + `CEE_PROXY_BASE_URL` + `CEE_PROXY_ALLOWED_ORIGIN` (proxy-only smoke; self-skips otherwise) | yes, network | 3 | manual |
 | `pnpm benchmark:stability` | edge stability benchmarks | none | 4 | nightly |
 | Pre-commit hooks | none detected | — | — | — |
 | CI (`.github/workflows/ci.yml`) | `unit-tests` (lint/typecheck/test/coverage), `security` (npm audit), optional `live-tests` if secret set | partial | 2 | yes |
@@ -121,9 +122,9 @@ Headline: the V5 weakness is not test volume but the absence of (a) deployed-tra
 | --- | --- | --- | --- |
 | 1 | proxy non-JSON / internal-handler timeout / OPTIONS empty-body | deferred to Wave 2 (design captured below) | OPTIONS 500 regression; non-JSON upstream rendered as opaque; service-key echo |
 | 2 | goal_constraints forwarding (multi-turn) | deferred to P1 | silent loss of constraints between turns |
-| 3 | explain_results joint precondition | covered by P0 branch — reference only | confident explanation without valid current analysis |
-| 4 | prose-surface display-safe | covered by golden-path-acceptance — reference only | internal ID / repair-vocabulary leakage in prose |
-| 5 | `/proxy/v5/turn` hiring-prompt staging smoke (OPTIONS preflight + POST) | ✅ added in this branch | OPTIONS 500 regression (c73d1469); CEE proxy host outages; proxy-path response-shape regressions; service-key echo. Does **not** prove "browser used the proxy and not Edge" — that needs a real-browser journey smoke from the UI repo (P1). |
+| 3 | explain_results joint precondition | 🟡 on unmerged branch (`claude/p0-v5-golden-path-integration`, commit 9d3136ac) — staging gap remains until that branch lands | confident explanation without valid current analysis |
+| 4 | prose-surface display-safe | 🟡 on unmerged branch (same P0 branch, commit c2075068, plus `tools/v5-journey-replay/forbidden-terms.ts`) — staging gap remains until that branch lands | internal ID / repair-vocabulary leakage in prose |
+| 5 | `/proxy/v5/turn` hiring-prompt staging smoke (OPTIONS preflight + POST) | ✅ added in this branch | OPTIONS 500 regression (c73d1469); CEE proxy host outages; proxy-path response-shape regressions; service-key echo; CORS Allow-Headers drift; x-request-id rewrite by intermediate middleware. Does **not** prove "browser used the proxy and not Edge" — that needs a real-browser journey smoke from the UI repo (P1). |
 
 ### Item 1 design (for the next branch that owns it)
 

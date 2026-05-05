@@ -91,6 +91,22 @@ interface PreflightResult {
   elapsed_ms: number;
 }
 
+/** Case-insensitive contains-all check on a comma-separated header list. */
+function headerListContainsAll(
+  raw: string | null,
+  required: ReadonlyArray<string>,
+): { ok: true } | { ok: false; missing: string[] } {
+  if (!raw) return { ok: false, missing: [...required] };
+  const present = new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const missing = required.filter((h) => !present.has(h.toLowerCase()));
+  return missing.length === 0 ? { ok: true } : { ok: false, missing };
+}
+
 async function preflight(): Promise<PreflightResult> {
   const url = proxyUrl();
   const t0 = Date.now();
@@ -204,6 +220,20 @@ describe.skipIf(SKIP_REASON !== null)("staging proxy v5 hiring-prompt smoke", ()
       expect(result.allowOrigin, "no Access-Control-Allow-Origin returned").not.toBeNull();
       expect(result.allowOrigin).toBe(CEE_PROXY_ALLOWED_ORIGIN!);
       expect((result.allowMethods ?? "").toUpperCase()).toContain("POST");
+      // Real browsers will block the POST if these headers are missing
+      // from the preflight response. Asserting them surfaces CORS drift
+      // that would otherwise only manifest as a "CORS error" in users'
+      // browsers without a clear signal in tests.
+      const allowHeadersCheck = headerListContainsAll(result.allowHeaders, [
+        "content-type",
+        "x-request-id",
+      ]);
+      expect(
+        allowHeadersCheck.ok,
+        `Access-Control-Allow-Headers missing required entries: ${
+          allowHeadersCheck.ok ? "" : allowHeadersCheck.missing.join(", ")
+        } (got: ${result.allowHeaders ?? "none"})`,
+      ).toBe(true);
     },
   );
 
@@ -238,9 +268,14 @@ describe.skipIf(SKIP_REASON !== null)("staging proxy v5 hiring-prompt smoke", ()
       ).toBe("cee");
       expect(result.serviceBuildHeader, "missing x-olumi-service-build").not.toBeNull();
       // Request-id round-trip: the proxy forwards x-request-id from the
-      // internal handler. A missing or mismatched value means the response
-      // pipeline lost or rewrote it.
+      // internal handler. Strict equality proves the id we sent survived
+      // the proxy path verbatim — a mismatch would indicate a middleware
+      // is rewriting the id, which would defeat correlation in production.
       expect(result.requestIdHeader, "missing x-request-id echo").not.toBeNull();
+      expect(
+        result.requestIdHeader,
+        `x-request-id was rewritten: sent=${result.echoedRequestId} got=${result.requestIdHeader}`,
+      ).toBe(result.echoedRequestId);
 
       const envelope = result.body as Record<string, unknown>;
       expect(envelope, "envelope is an object").toBeTypeOf("object");
