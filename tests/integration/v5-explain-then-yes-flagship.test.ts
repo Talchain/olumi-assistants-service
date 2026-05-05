@@ -29,11 +29,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { commitDirectAnswer } from '../../src/orchestrator-v5/commit.js';
 import { SupabaseSessionStore } from '../../src/orchestrator-v5/session/supabase-store.js';
 import { SessionLRUCache } from '../../src/orchestrator-v5/session/cache.js';
 import { tryShortConfirmResume } from '../../src/orchestrator-v5/routing/deterministic-short-confirm.js';
+import { createExplainResultsHandler } from '../../src/orchestrator-v5/tools/handlers/explain-results.js';
+import type { HandlerInvocation } from '../../src/orchestrator-v5/tools/registry.js';
+import { generateChips } from '../../src/orchestrator-v5/compose/chip-generator.js';
+import { HANDLER_VALIDATION_REGISTRY } from '../../src/orchestrator-v5/routing/validation-registry.js';
+import type { AnalysisProjectionSummary } from '../../src/orchestrator-v5/context/projection-summaries.js';
 
 const SHOULD_RUN =
   process.env.RUN_WAVE0_STAGING === '1' &&
@@ -86,21 +92,113 @@ describe.runIf(SHOULD_RUN)('Wave 5 flagship: explain_results → yes resume seam
     await client.from('scenarios').delete().eq('id', SCENARIO_ID);
   });
 
-  it('explain_results response with the post-explain chip emits a what_would_flip pending action; "yes" on the next turn matches it', async () => {
-    // Turn N: simulate the post-explain composition by directly
-    // constructing the response chip-generator would emit after a
-    // successful explain_results turn (label + action_type as pinned
-    // in explain-results-flip-chip.test.ts).
-    const explainResponse = {
-      text: 'The leading option performs best by 14 points. Would you like to explore what would change this result?',
-      suggested_actions: [
-        {
-          id: 'chip_action_what_would_flip',
-          label: 'Explore what would change this',
-          message: 'Explore what would change the result.',
-          action_type: 'what_would_flip',
-        },
+  it('production compose path: explain_results handler → generateChips → commit emits a what_would_flip pending action; "yes" matches it on the next turn', async () => {
+    // This test runs the actual production compose sequence end to
+    // end against the live DB:
+    //   (1) createExplainResultsHandler invocation with a successful
+    //       analysis projection (precondition_unmet=false fact)
+    //   (2) generateChips against the handler-emitted facts → action
+    //       chip with action_type=what_would_flip
+    //   (3) build OlumiResponse with the handler's assistant_text +
+    //       generated chips
+    //   (4) commitDirectAnswer persists the pending action via Wave 1's
+    //       derive-pending-actions
+    //
+    // Earlier flagship attempts hand-built the chip; that fixture
+    // could not catch a desync between handler fact shape (e.g.
+    // Wave 5a's noop=true / precondition_unmet discriminator), the
+    // chip-generator predicate, and the persistence layer.
+    const ANALYSIS_PROJECTION: AnalysisProjectionSummary = {
+      status: 'complete',
+      leading_option: { label: 'Hire Senior Engineer', probability: 0.62 },
+      runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
+      margin_pp: 35,
+      robustness_band: 'stable',
+      top_drivers: [
+        { factor_label: 'Engineering Capacity', sensitivity_value: 0.65 },
+        { factor_label: 'Hiring Cost', sensitivity_value: -0.42 },
       ],
+      staleness_reason: null,
+    };
+    // Prior fact: a successful run_analysis. The explain_results
+    // handler bails on precondition_unmet when no successful
+    // run_analysis fact exists in priorFacts.
+    const priorRunAnalysisFact: HandlerFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Stub.',
+        win_probabilities: { opt_a: 0.62, opt_b: 0.27 },
+      },
+    } as HandlerFact;
+    const invocation: HandlerInvocation = {
+      context: {
+        stage: 'analyse',
+        entity_registry: { option_ids: [], goal_id: 'goal_g' },
+        capabilities: {},
+        messages: [{ role: 'user', content: 'why is this close?' }],
+        session_id: SCENARIO_ID,
+        request_id: 'req-flagship-explain',
+        budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
+        prior_turns: [],
+        prior_facts: [priorRunAnalysisFact],
+        scenarioBriefText: null,
+        persistedGraph: null,
+      } as unknown as HandlerInvocation['context'],
+      payload: {
+        turn_id: 't-flagship',
+        scenario_id: SCENARIO_ID,
+        message: 'why is this close?',
+        turn_class: 'analyse',
+        stage: 'analyse',
+      } as unknown as HandlerInvocation['payload'],
+      requestId: 'req-flagship-explain',
+      signal: new AbortController().signal,
+      orientationText: '',
+      analysisReady: {
+        status: 'ready',
+        options: [
+          { option_id: 'opt_a', label: 'Hire Senior Engineer', status: 'ready', interventions: { f: 1 } },
+          { option_id: 'opt_b', label: 'Hire Two Mid-Level', status: 'ready', interventions: { f: 0 } },
+        ],
+        goal_node_id: 'goal_g',
+        status_summary: { ready: 2, partial: 0, missing: 0 },
+      } as never,
+      explanation: undefined, // handler renders deterministic fallback
+      analysisProjection: ANALYSIS_PROJECTION,
+      analysisFreshness: 'fresh',
+    };
+
+    // (1) Invoke the actual production handler.
+    const handler = createExplainResultsHandler();
+    const handlerOutcome = await handler(invocation);
+    expect(handlerOutcome.assistant_text.length).toBeGreaterThan(80);
+    expect(handlerOutcome.handler_facts).toHaveLength(1);
+    const fact = handlerOutcome.handler_facts[0]!;
+    expect(fact.fact_type).toBe('explain_results');
+    // Production fact shape: noop=true, precondition_unmet=false on
+    // success — the discriminator the Wave 5a chip predicate gates on.
+    expect(fact.noop).toBe(true);
+    expect((fact as { result?: { precondition_unmet?: unknown } }).result?.precondition_unmet).toBe(false);
+
+    // (2) Run chip-generator over the produced facts.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: handlerOutcome.handler_facts,
+      analysis: null,
+      validationRegistry: HANDLER_VALIDATION_REGISTRY,
+    });
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.action_type).toBe('what_would_flip');
+
+    // (3) Build the response chip-generator's caller would emit.
+    const explainResponse = {
+      text: handlerOutcome.assistant_text,
+      assistant_text: handlerOutcome.assistant_text,
+      suggested_actions: chips,
       blocks: [],
     } as unknown as OlumiResponse;
     await commitDirectAnswer(
