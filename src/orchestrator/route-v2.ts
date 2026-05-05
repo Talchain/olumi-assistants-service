@@ -604,6 +604,34 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // Chip-click parity for `what_would_flip`
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // Brief contract: clicking the "Explore what would change this" chip
+    // must produce the same outcome as typing "yes" in the same context.
+    // Wave 1's derive-pending-actions persists a what_would_flip pending
+    // action whenever the chip is emitted, so the most-recent-pending-
+    // actions read on this turn already contains the resumable record.
+    // Rewriting the chip's message to "yes" makes TurnExecutor's
+    // deterministic short-confirm pre-route pick it up via the SAME
+    // synthesis path the typed-yes flow uses — same freshness gate,
+    // same entity-pick from graph, same telemetry.
+    //
+    // No new dispatcher: the run_analysis chip-click takes a separate
+    // shortcut because that handler is heavyweight (PLoT call, scenario
+    // snapshot load); what_would_flip is a no-op explanation handler
+    // and TurnExecutor's existing short-confirm path is sufficient.
+    // Out-of-scope action_type values fall through unchanged to
+    // TurnExecutor with their original chip.message intact.
+    if (
+      ingress.kind === 'message' &&
+      ingress.source === 'chip_click' &&
+      ingress.chip?.action_type === 'what_would_flip'
+    ) {
+      (ingress as { message: string }).message = 'yes';
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Draft_graph pre-Sonnet dispatch (v5-handler-surface brief Task 2)
     // ────────────────────────────────────────────────────────────────────
     //

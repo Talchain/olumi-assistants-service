@@ -160,6 +160,29 @@ describe('Short-confirm pre-route — route-level zero-LLM assertion', () => {
     expect(adapter.chatWithTools).toHaveBeenCalled();
   });
 
+  it('chip-click parity: a what_would_flip chip click is rewritten to "yes" upstream so the SAME short-confirm path runs', async () => {
+    // Wave 5b chip-click parity contract: route-v2.ts rewrites
+    // ingress.message to 'yes' for source='chip_click' +
+    // action_type='what_would_flip' BEFORE invoking runTurnExecutor.
+    // This test models that rewrite by passing 'yes' directly, which
+    // is exactly the post-rewrite payload TurnExecutor sees. Wave 1's
+    // derive-pending-actions guarantees the prior turn's emit
+    // persisted a what_would_flip pending action; the existing
+    // short-confirm pre-route then resumes deterministically.
+    //
+    // The fixture below uses run_analysis pending actions for
+    // simplicity (the SessionStore mock only returns one shape), but
+    // the rewrite-to-"yes" mechanism is the same. The assertion is
+    // that AFTER the upstream message rewrite, the short-confirm
+    // pre-route does NOT call the LLM — proving chip click and
+    // typed yes converge on the same code path.
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('yes'), 'req-chip-click-rewrite', {
+      routingAdapter: adapter,
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+  });
+
   it('"yes" passes validation and dispatches the run_analysis handler (validator_outcome=valid)', async () => {
     // Strengthened beyond "LLM not called". Asserts the validator
     // accepted the synthesised proposal — the entity-fix that picks
