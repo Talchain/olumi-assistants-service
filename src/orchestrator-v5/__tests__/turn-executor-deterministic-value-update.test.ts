@@ -97,7 +97,7 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     // pre-A3.1 is the response shape — handler turn with graph_patch
     // block, not clarify chips.
     const routingAdapter = throwingRoutingAdapter();
-    const { response, telemetry } = await runTurnExecutor(
+    const result = await runTurnExecutor(
       payload('Set Hiring and Staffing Cost to £300k'),
       'req-pre-route-exact',
       {
@@ -105,6 +105,7 @@ describe('turn-executor × deterministic value-update pre-route', () => {
         graphState: graphWithFactor('Hiring and Staffing Cost'),
       },
     );
+    const { response, telemetry, turn_outcome } = result;
 
     // Pre-route fired → adapter never called (zero LLM calls).
     expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
@@ -129,6 +130,13 @@ describe('turn-executor × deterministic value-update pre-route', () => {
       target_id: 'fac_1',
     });
     expect(response.assistant_text).toContain('Hiring and Staffing Cost');
+
+    // P0 V5 golden-path repair (follow-up): graph_mutated must reflect
+    // the actual graph mutation. Pre-fix, the flag was scoped to a
+    // hand-maintained allowlist (draft_graph / edit_graph) and missed
+    // set_factor_value despite the handler emitting mutated_graph.
+    // Now derived from handler outcome.
+    expect(turn_outcome?.graph_mutated).toBe(true);
   });
 
   it('"Set Cost and Revenue to 5" — two substring-matching factors → clarify (multi-match preserved)', async () => {

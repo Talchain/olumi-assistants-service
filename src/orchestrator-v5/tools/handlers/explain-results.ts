@@ -65,83 +65,26 @@ import type {
 } from '../registry.js';
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import {
-  buildAnalysisAbsentTemplate,
-  buildAnalysisDegradedTemplate,
-  buildAnalysisStaleTemplate,
+  buildPreconditionAssistantText,
+  decideExplanationPrecondition,
   resolveOptionCount,
 } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
-import {
-  isSuccessfulRunAnalysisFact,
-  selectDegradedRunAnalysisFact,
-} from '../../context/freshness.js';
-
-type PreconditionVerdict = 'missing' | 'degraded' | 'stale' | 'execute';
-
-/**
- * Derive the user-visible precondition verdict for `explain_results`.
- *
- * The decision tree:
- *   1. No successful run_analysis fact in prior_facts:
- *       - If a degraded fact exists → 'degraded'.
- *       - Otherwise → 'missing'.
- *   2. Successful fact exists, freshness === 'stale' → 'stale'.
- *   3. Successful fact exists, freshness ∈ {'fresh','unknown'} → 'execute'.
- *      ('unknown' covers legacy facts and the
- *      current_graph_hash_unavailable path; either way a successful
- *      projection is the best the system has.)
- *   4. Successful fact exists but `analysisProjection` is null/undefined
- *      → treat as 'missing' (defensive — the projection is what the
- *      handler answers from).
- */
-function decidePrecondition(invocation: HandlerInvocation): PreconditionVerdict {
-  const priorFacts = invocation.context.prior_facts;
-  const hasSuccessfulFact = priorFacts.some(isSuccessfulRunAnalysisFact);
-
-  if (!hasSuccessfulFact) {
-    return selectDegradedRunAnalysisFact(priorFacts) !== null ? 'degraded' : 'missing';
-  }
-
-  if (invocation.analysisProjection == null) {
-    // Defensive: we found a successful fact but the projection assembler
-    // produced nothing usable. Route through 'missing' so the chip-
-    // generator emits "Run analysis" rather than letting the composer
-    // hit its own generic-line fallback (which has no recovery chip).
-    return 'missing';
-  }
-
-  if (invocation.analysisFreshness?.freshness === 'stale') {
-    return 'stale';
-  }
-
-  return 'execute';
-}
-
-function buildPreconditionAssistantText(
-  verdict: Exclude<PreconditionVerdict, 'execute'>,
-  invocation: HandlerInvocation,
-  optionCount: number,
-): string {
-  switch (verdict) {
-    case 'missing':
-      return buildAnalysisAbsentTemplate(optionCount, invocation.analysisReady?.status);
-    case 'stale':
-      return buildAnalysisStaleTemplate();
-    case 'degraded':
-      return buildAnalysisDegradedTemplate();
-  }
-}
 
 export function createExplainResultsHandler(): HandlerFn {
   return async function explainResultsHandler(
     invocation: HandlerInvocation,
   ): Promise<HandlerOutcome> {
     const optionCount = resolveOptionCount(invocation);
-    const verdict = decidePrecondition(invocation);
+    const verdict = decideExplanationPrecondition(invocation);
 
     if (verdict !== 'execute') {
-      const assistantText = buildPreconditionAssistantText(verdict, invocation, optionCount);
+      const assistantText = buildPreconditionAssistantText(
+        verdict,
+        optionCount,
+        invocation.analysisReady?.status,
+      );
       const fact: ExplainResultsHandlerFact = {
         fact_type: 'explain_results',
         fact_version: 1,

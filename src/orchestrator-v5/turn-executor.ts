@@ -385,6 +385,12 @@ export async function runTurnExecutor(
   let freshness: FreshnessDerivation | null = null;
   let proposedHandlerIdForOutcome: string | null = null;
   let currentAnalysisGraphHashForTurn: string | null = null;
+  // P0 V5 golden-path repair (follow-up): hoisted into the function
+  // scope so `buildTurnOutcome` (nested below) can read it. Set when a
+  // handler outcome carries a non-null `mutated_graph`. Closes the
+  // gap where set_factor_value / add_constraint / adjust_edge_strength
+  // mutated the graph but turn_outcome.graph_mutated stayed false.
+  let handlerEmittedMutatedGraph = false;
 
   // Routing log fields — closured so the finally block can emit one record
   // per turn regardless of which terminal path fires (success / typed
@@ -1559,6 +1565,16 @@ export async function runTurnExecutor(
         stagesCompleted.push('execute');
         handlerIdForCommit = proposedHandlerId;
         handlerFactsForCommit = handlerOutcome.handler_facts;
+        // P0 V5 golden-path repair (follow-up): record graph-mutation
+        // observation for turn_outcome.graph_mutated. Any non-null
+        // `mutated_graph` on the handler outcome counts — handler-id
+        // strings are not load-bearing here.
+        if (
+          handlerOutcome.mutated_graph !== undefined &&
+          handlerOutcome.mutated_graph !== null
+        ) {
+          handlerEmittedMutatedGraph = true;
+        }
         // V5 alpha hardening Phase 2.5: primary lifecycle event on
         // successful handler invocation. Fact count + LLM-call count
         // are queryable alongside the obs field set.
@@ -2209,10 +2225,24 @@ export async function runTurnExecutor(
    */
   function buildTurnOutcome(): TurnOutcome | undefined {
     if (!freshness) return undefined;
+    // P0 V5 golden-path repair (follow-up): derive graph_mutated from
+    // the actual handler output, not from a hand-maintained allowlist
+    // of handler ids. The original allowlist (draft_graph / edit_graph)
+    // missed `set_factor_value`, `add_constraint`, and
+    // `adjust_edge_strength` — all D1 mutation handlers that emit
+    // `mutated_graph` on their outcome. Future graph-mutating handlers
+    // are picked up automatically.
+    //
+    // `proposedHandlerIdForOutcome === 'draft_graph'` is preserved
+    // explicitly because draft_graph is a system-layer dispatch that
+    // doesn't go through this executor's handler invocation path
+    // (handlerEmittedMutatedGraph stays false for it), but the
+    // proposed-handler id IS set.
+    const isDraftOrEditGraph =
+      proposedHandlerIdForOutcome === 'draft_graph' ||
+      proposedHandlerIdForOutcome === 'edit_graph';
     return {
-      graph_mutated:
-        proposedHandlerIdForOutcome === 'draft_graph' ||
-        proposedHandlerIdForOutcome === 'edit_graph',
+      graph_mutated: handlerEmittedMutatedGraph || isDraftOrEditGraph,
       analysis_run:
         proposedHandlerIdForOutcome === 'run_analysis' && commitPerformed,
       analysis_selected_fact_index: freshness.selected_fact_index,

@@ -17,11 +17,15 @@ import type { AnalysisFreshness, FreshnessReason } from './context/freshness.js'
 /**
  * Per-turn outcome contract.
  *
- * `graph_mutated` is true when a graph-mutating handler dispatched on
- * this turn (draft_graph / edit_graph), regardless of whether the
- * proposed mutation was accepted by the user. The actual graph-state
- * change becomes observable on the NEXT turn via the freshness
- * derivation comparing hashes — that's where invalidation lives.
+ * `graph_mutated` is true when this turn produced a graph mutation —
+ * either because a D1 mutation handler (set_factor_value,
+ * add_constraint, adjust_edge_strength, plus any future addition)
+ * emitted `mutated_graph` on its outcome, OR because the system-layer
+ * draft_graph / edit_graph path was dispatched (those go through a
+ * different invocation path that doesn't surface a HandlerOutcome).
+ * The actual graph-state change becomes observable on the NEXT turn
+ * via the freshness derivation comparing hashes — that's where
+ * invalidation lives.
  *
  * `analysis_run` is true only when run_analysis dispatched and produced
  * a non-noop fact (i.e. a fresh analysis was just computed).

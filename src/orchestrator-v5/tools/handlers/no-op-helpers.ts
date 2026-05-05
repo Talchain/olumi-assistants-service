@@ -7,7 +7,13 @@
  * handler contract is readable in one place.
  */
 
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
 import type { HandlerInvocation } from '../registry.js';
+import {
+  isSuccessfulRunAnalysisFact,
+  selectDegradedRunAnalysisFact,
+} from '../../context/freshness.js';
 
 /**
  * Source-of-truth for `option_count` in the no-op handlers' result body
@@ -73,6 +79,79 @@ export function buildAnalysisAbsentTemplate(
     `The graph has ${optionCount} ${optionsLabel} configured ` +
     tail
   );
+}
+
+/**
+ * Combined success+currentness precondition verdict for the V5
+ * explanation handlers (`explain_results`, `what_would_flip`).
+ *
+ * Both handlers consume the same four-state decision tree pre-Wave-1;
+ * the duplication was originally inlined per-handler with a comment
+ * justifying it. The follow-up review correctly noted that future
+ * predicate changes could drift again — extracted here so there is a
+ * single source of truth.
+ */
+export type ExplanationPreconditionVerdict =
+  | 'missing'
+  | 'degraded'
+  | 'stale'
+  | 'execute';
+
+/**
+ * Decide the precondition verdict from the handler invocation.
+ *
+ * Decision tree:
+ *   1. No successful run_analysis fact in prior_facts:
+ *      - Degraded fact present → 'degraded'.
+ *      - Otherwise → 'missing'.
+ *   2. Successful fact exists but `analysisProjection` is null/undefined
+ *      → 'missing' (defensive — composer would otherwise hit its
+ *      generic-line fallback without a recovery chip).
+ *   3. Freshness === 'stale' → 'stale'.
+ *   4. Otherwise → 'execute'.
+ */
+export function decideExplanationPrecondition(
+  invocation: {
+    readonly context: { readonly prior_facts: readonly HandlerFact[] }
+    readonly analysisProjection?: unknown
+    readonly analysisFreshness?: { readonly freshness: string }
+  },
+): ExplanationPreconditionVerdict {
+  const priorFacts = invocation.context.prior_facts
+  const hasSuccessfulFact = priorFacts.some(isSuccessfulRunAnalysisFact)
+
+  if (!hasSuccessfulFact) {
+    return selectDegradedRunAnalysisFact(priorFacts) !== null ? 'degraded' : 'missing'
+  }
+
+  if (invocation.analysisProjection == null) {
+    return 'missing'
+  }
+
+  if (invocation.analysisFreshness?.freshness === 'stale') {
+    return 'stale'
+  }
+
+  return 'execute'
+}
+
+/**
+ * Render the precondition-fail assistant_text for a non-execute verdict.
+ * Pure function over the verdict + invocation context.
+ */
+export function buildPreconditionAssistantText(
+  verdict: Exclude<ExplanationPreconditionVerdict, 'execute'>,
+  optionCount: number,
+  readinessStatus: string | undefined,
+): string {
+  switch (verdict) {
+    case 'missing':
+      return buildAnalysisAbsentTemplate(optionCount, readinessStatus)
+    case 'stale':
+      return buildAnalysisStaleTemplate()
+    case 'degraded':
+      return buildAnalysisDegradedTemplate()
+  }
 }
 
 /**

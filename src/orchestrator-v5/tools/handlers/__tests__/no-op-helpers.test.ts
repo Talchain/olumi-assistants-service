@@ -9,9 +9,13 @@
 
 import { describe, it, expect } from 'vitest';
 
+import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+
 import type { HandlerInvocation } from '../../registry.js';
 import {
   buildAnalysisAbsentTemplate,
+  buildPreconditionAssistantText,
+  decideExplanationPrecondition,
   resolveOptionCount,
 } from '../no-op-helpers.js';
 
@@ -144,5 +148,126 @@ describe('buildAnalysisAbsentTemplate', () => {
   it('falls back to "ready to analyse" wording for unknown readiness literals', () => {
     const text = buildAnalysisAbsentTemplate(2, 'some_future_status');
     expect(text).toContain('ready to analyse');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0 V5 golden-path repair (follow-up): shared explanation-precondition
+// helper. The same predicate is consumed by explain_results and
+// what_would_flip; this test pins it so future predicate changes apply
+// to both handlers in lockstep without re-introducing the drift the
+// original Wave 1 work fixed.
+// ---------------------------------------------------------------------------
+
+function makeRunAnalysisFactWithStatus(status: string | null): RunAnalysisHandlerFact {
+  const enrichment: Record<string, unknown> = {};
+  if (status !== null) enrichment.analysis_status = status;
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: '00000000-0000-4000-8000-000000000001',
+      leading_option_id: 'opt_1',
+      summary: 'prior',
+      enrichment,
+    },
+  };
+}
+
+function makePreconditionInvocation(
+  overrides: {
+    priorFacts?: readonly HandlerFact[];
+    analysisProjection?: unknown;
+    freshness?: 'fresh' | 'stale' | 'unknown' | 'none';
+  },
+) {
+  return {
+    context: { prior_facts: overrides.priorFacts ?? [] },
+    analysisProjection: overrides.analysisProjection,
+    analysisFreshness: overrides.freshness
+      ? { freshness: overrides.freshness }
+      : undefined,
+  };
+}
+
+describe('decideExplanationPrecondition', () => {
+  it('no run_analysis fact at all → missing', () => {
+    expect(decideExplanationPrecondition(makePreconditionInvocation({}))).toBe('missing');
+  });
+
+  it('only a degraded fact (status=partial) → degraded', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({ priorFacts: [makeRunAnalysisFactWithStatus('partial')] }),
+      ),
+    ).toBe('degraded');
+  });
+
+  it('successful fact + null projection → missing (defensive)', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: undefined,
+        }),
+      ),
+    ).toBe('missing');
+  });
+
+  it('successful fact + projection + freshness=stale → stale', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: { status: 'complete' },
+          freshness: 'stale',
+        }),
+      ),
+    ).toBe('stale');
+  });
+
+  it('successful fact + projection + freshness=fresh → execute', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: { status: 'complete' },
+          freshness: 'fresh',
+        }),
+      ),
+    ).toBe('execute');
+  });
+
+  it('legacy fact (status=null) + projection → execute', () => {
+    expect(
+      decideExplanationPrecondition(
+        makePreconditionInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus(null)],
+          analysisProjection: { status: 'complete' },
+          freshness: 'unknown',
+        }),
+      ),
+    ).toBe('execute');
+  });
+});
+
+describe('buildPreconditionAssistantText', () => {
+  it('missing → absent template', () => {
+    expect(buildPreconditionAssistantText('missing', 2, 'ready')).toMatch(
+      /No analysis has been run/,
+    );
+  });
+
+  it('stale → stale template', () => {
+    expect(buildPreconditionAssistantText('stale', 2, 'ready')).toMatch(
+      /model has changed since the last analysis/,
+    );
+  });
+
+  it('degraded → degraded template', () => {
+    expect(buildPreconditionAssistantText('degraded', 2, 'ready')).toMatch(
+      /didn't produce a usable result/,
+    );
   });
 });

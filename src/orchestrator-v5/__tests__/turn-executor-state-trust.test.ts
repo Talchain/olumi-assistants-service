@@ -384,4 +384,44 @@ describe('TurnExecutor — V5 state-trust freshness threading', () => {
     expect(result.turn_outcome!.graph_mutated).toBe(false);
     expect(result.turn_outcome!.analysis_run).toBe(false);
   });
+
+  // P0 V5 golden-path repair (follow-up): graph_mutated derives from
+  // handler output, not a handler-id allowlist. The end-to-end positive
+  // case is asserted in turn-executor-deterministic-value-update.test.ts
+  // ("graph_mutated=true on a real set_factor_value dispatch") which
+  // exercises the full validator + handler path. The negative case
+  // here is the lockstep sanity for that contract.
+  it('graph_mutated=false when a non-mutation handler runs (explain_results)', async () => {
+    // Sanity check the inverse: the contract is "mutated_graph emitted
+    // → flag true", and a handler that emits no mutated_graph keeps
+    // the flag false.
+    mockedPriorFacts = [];
+    const adapter = mockAdapter(buildExplainResultsToolInput());
+
+    const explainFact: HandlerFact = {
+      fact_type: 'explain_results',
+      fact_version: 1,
+      noop: true,
+      result: {
+        precondition_unmet: false,
+        option_count: 2,
+        answer_source: 'sonnet',
+        fallback_reason: null,
+        answer_text_length: 50,
+        staleness_prefixed: false,
+      },
+    } as HandlerFact;
+
+    const result = await runTurnExecutor(
+      BASE_PAYLOAD,
+      'req-state-trust-no-mutation',
+      {
+        routingAdapter: adapter,
+        graphState: baseGraph,
+        handlerRegistry: stubRegistry('explain_results', [explainFact]),
+      },
+    );
+
+    expect(result.turn_outcome!.graph_mutated).toBe(false);
+  });
 });
