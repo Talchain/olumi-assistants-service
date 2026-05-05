@@ -30,6 +30,13 @@ About 51 files contain `.skip` or `.todo`. Coverage gates pass; skipped suites a
 
 ## 3. V5 coverage matrix
 
+Coverage state legend used throughout this report:
+
+- ✅ **merged on staging** — protection in place on the branch this audit lands on
+- 🟡 **on an unmerged branch** — protection drafted but not yet on staging; gap remains until that branch lands
+- ❌ **absent everywhere** — gap; needs a follow-up branch
+
+
 | Area | Files | Asserts | Gap | Would have caught a recent failure? |
 | --- | --- | --- | --- | --- |
 | draft_graph | `cee.draft-graph*.test.ts` (14), `draft-graph*.test.ts` (5) | empty graph, coefficients, coaching, causal claims, fail-closed | live LLM regression beyond fixtures | partial — fixture-only |
@@ -69,11 +76,11 @@ CEE branches inspected (read-only `git log` and `git diff --name-only` against s
 
 ### Disposition for each P0 in the plan
 
-1. **Proxy non-JSON / timeout / OPTIONS empty-body** — not covered. **Implement.** Item carried as `tests/integration/proxy-v5-non-json-and-timeout.test.ts` design captured in §6 below; deferred from this turn's commit because it requires coordinated work on the response-finaliser module and is not safe under the local-commits-only budget remaining. Tracked as P0/Wave-2.
-2. **Goal-constraint forwarding (multi-turn)** — not covered. The existing two-turn replay path is `turn-executor-state-trust.test.ts` (stale-after-mutation), which doesn't carry `goal_constraints`. **Deferred to P1** — implementing requires either an extension to that harness or a new replay scaffold; not safe to bolt onto the harness without duplicating its assumptions in this turn.
-3. **explain_results joint precondition (`success && current`)** — **already covered** on `claude/p0-v5-golden-path-integration` (commit 9d3136ac). No duplication here; reference only.
-4. **Egress display-safe (prose-scoped)** — **already covered** by `tests/contract/v5-golden-path-acceptance.test.ts` plus `tools/v5-journey-replay/forbidden-terms.ts` on the same P0 branch (commit c2075068). Reference only. Forbidden-terms wordlist is the single source — keep co-located.
-5. **Hiring-prompt staging smoke through `/proxy/v5/turn`** — not covered. The existing `tests/staging/golden-path-staging.test.ts` calls `CEE_BASE_URL` directly with `X-Olumi-Assist-Key`, which does **not** exercise the browser proxy bypass that production uses. **Implement** as `tests/staging/proxy-v5-hiring-prompt.smoke.test.ts`.
+1. **Proxy non-JSON / timeout / OPTIONS empty-body** — ❌ absent everywhere for the non-JSON and timeout scenarios; OPTIONS empty-body is now covered by the new staging smoke (item 5 below) at the deployed level only. Unit-level coverage via `app.inject()` against the real proxy implementation remains a P0 deferred to its own branch. Design captured in §6.
+2. **Goal-constraint forwarding (multi-turn)** — ❌ absent everywhere. The existing two-turn replay path is `turn-executor-state-trust.test.ts` (stale-after-mutation), which does not carry `goal_constraints`. **Deferred to P1** — implementing requires either an extension to that harness or a new replay scaffold; not safe to bolt onto the harness without duplicating its assumptions in this turn.
+3. **explain_results joint precondition (`success && current`)** — 🟡 on an unmerged branch (`claude/p0-v5-golden-path-integration`, commit 9d3136ac). Until that branch merges, the staging gap remains open. No duplication here; reference only.
+4. **Egress display-safe (prose-scoped)** — 🟡 on an unmerged branch via `tests/contract/v5-golden-path-acceptance.test.ts` plus `tools/v5-journey-replay/forbidden-terms.ts` on the same P0 branch (commit c2075068). Reference only. Forbidden-terms wordlist is the single source — keep co-located.
+5. **Hiring-prompt staging smoke through `/proxy/v5/turn`** — ❌ → ✅ added in this branch as `tests/staging/proxy-v5-hiring-prompt.smoke.test.ts`. Two cases: an OPTIONS empty-body preflight check (catches the c73d1469 regression on the deployed proxy) and a POST that asserts a non-empty draft graph plus `analysis_ready === ready` plus `x-olumi-service: cee` (proves the response came from the CEE Fastify process, the closest available header-level evidence that the proxy path was used).
 
 Net new files this branch lands: **one test plus this audit report**.
 
@@ -102,7 +109,8 @@ Headline: the V5 weakness is not test volume but the absence of (a) deployed-tra
 | --- | --- | --- | --- | --- |
 | 1 Local focused | every change | `pnpm exec tsc -p tsconfig.build.json --noEmit` + `pnpm vitest run <touched>` + lint touched | dev-only | < 60 s |
 | 2 Pre-merge | local before push | `pnpm preflight` (lint + typecheck + test + openapi:check) | yes | < 8 min |
-| 3 Deployed-path smoke | post-staging-deploy or explicit | `RUN_STAGING_SMOKE=1 CEE_PROXY_BASE_URL=… CEE_PROXY_ORIGIN=… pnpm test:staging` (covers both existing direct test and the new proxy smoke; both self-skip without env) | manual | < 3 min |
+| 3 Deployed-path smoke (full) | post-staging-deploy or explicit | `RUN_STAGING_SMOKE=1 CEE_BASE_URL=… CEE_API_KEY=… CEE_PROXY_BASE_URL=… CEE_PROXY_ALLOWED_ORIGIN=… pnpm test:staging` (covers existing direct CEE test and the new proxy smoke; both self-skip without env) | manual | < 5 min |
+| 3 Deployed-path smoke (proxy only) | quick post-deploy gate | `RUN_STAGING_SMOKE=1 CEE_PROXY_BASE_URL=… CEE_PROXY_ALLOWED_ORIGIN=… pnpm test:staging:v5` | manual | < 2 min |
 | 4 Prompt/graph benchmark | prompt or model change / nightly | `pnpm benchmark:stability`; consider extending with leakage and repair-count regression in a follow-up | informational | nightly |
 
 ## 7. Phase 3 — recommendations
@@ -115,11 +123,11 @@ Headline: the V5 weakness is not test volume but the absence of (a) deployed-tra
 | 2 | goal_constraints forwarding (multi-turn) | deferred to P1 | silent loss of constraints between turns |
 | 3 | explain_results joint precondition | covered by P0 branch — reference only | confident explanation without valid current analysis |
 | 4 | prose-surface display-safe | covered by golden-path-acceptance — reference only | internal ID / repair-vocabulary leakage in prose |
-| 5 | `/proxy/v5/turn` hiring-prompt staging smoke | **added in this branch** | Netlify Edge timeout regressions; route-resolution regressions; secret-leak on the real deployed proxy path |
+| 5 | `/proxy/v5/turn` hiring-prompt staging smoke (OPTIONS preflight + POST) | ✅ added in this branch | OPTIONS 500 regression (c73d1469); CEE proxy host outages; proxy-path response-shape regressions; service-key echo. Does **not** prove "browser used the proxy and not Edge" — that needs a real-browser journey smoke from the UI repo (P1). |
 
 ### Item 1 design (for the next branch that owns it)
 
-`tests/integration/proxy-v5-non-json-and-timeout.test.ts`. Build a Fastify test app, register `proxyV5TurnRoute`, and stub the internal `/orchestrate/v2/turn` to: (a) reply with `text/plain` body; (b) exceed `BROWSER_PROXY_TIMEOUT_MS` (set to a short value in test); (c) be invoked via `OPTIONS` with empty body. Assert: proxy classifies source, returns structured 502/504, captures bounded raw body (≤ 4 KiB), service-key never appears in external response, response-finaliser tolerates empty OPTIONS body. Reuse the mock pattern in `src/routes/__tests__/proxy-v5-turn.test.ts` to stay aligned with `app.inject()`.
+`tests/integration/proxy-v5-non-json-and-timeout.test.ts`. Build a Fastify test app, register `proxyV5TurnRoute`, and stub the internal `/orchestrate/v2/turn` to: (a) reply with `text/plain` body; (b) exceed `BROWSER_PROXY_TIMEOUT_MS` (set to a short value in test); (c) be invoked via `OPTIONS` with empty body. Assert: proxy classifies source, returns structured 502/504, captures bounded raw body (≤ 4 KiB), service-key never appears in external response, response-finaliser tolerates empty OPTIONS body, no double JSON encoding. Reuse the mock pattern in `src/routes/__tests__/proxy-v5-turn.test.ts` to stay aligned with `app.inject()`. The new staging smoke covers OPTIONS empty-body at the deployed level; this unit-level test is what closes the gap before deploy.
 
 ### P1
 
@@ -167,4 +175,4 @@ Headline: the V5 weakness is not test volume but the absence of (a) deployed-tra
 
 ## 10. Confirmation
 
-This audit is read-only review plus one new test (`tests/staging/proxy-v5-hiring-prompt.smoke.test.ts`). Items 3–4 are referenced rather than re-implemented because they exist on `claude/p0-v5-golden-path-integration`. Items 1–2 are explicitly deferred and tracked here as Wave 2 / P1.
+This audit is read-only review plus one new test (`tests/staging/proxy-v5-hiring-prompt.smoke.test.ts`) and one new package-script (`test:staging:v5`). Items 3–4 are 🟡 on `claude/p0-v5-golden-path-integration` and remain a staging-coverage gap until that branch lands. Items 1–2 are ❌ absent everywhere; tracked as the next CEE testing branches.
