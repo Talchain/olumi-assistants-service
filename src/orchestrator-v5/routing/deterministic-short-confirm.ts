@@ -122,15 +122,26 @@ export interface TryShortConfirmResumeInput {
 
 /**
  * Pending-action kinds that have a synthesis path in TurnExecutor.
- * `run_analysis` and `what_would_flip` carry an explicit dispatch; the
- * remaining kinds (`set_factor_value`, `apply_proposed_change`,
- * `edit_graph_add_risk`) are persisted but resume requires
- * additional state (target-id, parsed value, label) that is not
- * carried by a bare confirmation. Those kinds resolve via different
- * paths (chip click, clarification reply) rather than short-confirm.
+ *
+ * Each kind here carries enough state on the `PendingAction.action`
+ * payload that a bare confirmation ("yes", "do it") can resume it
+ * without further user input:
+ *   - `run_analysis`           — no params; the handler reads scenario state
+ *   - `what_would_flip`        — no params; reads the live analysis projection
+ *
+ * The remaining kinds (`set_factor_value`, `apply_proposed_change`,
+ * `edit_graph_add_risk`) are persisted but resume requires either a
+ * follow-up driver/parameter or a label-match pre-route that
+ * disambiguates between candidates of the same kind (e.g. user types
+ * "Engineering Budget" alone after a multi-candidate clarify). That
+ * pre-route is the bounded follow-up for full clarification
+ * continuity; until it lands those kinds are deliberately excluded
+ * from the bare-confirm resumer.
  */
-const RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> =
-  new Set(['run_analysis', 'what_would_flip']);
+const RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
+  'run_analysis',
+  'what_would_flip',
+]);
 
 function isExpired(pa: PendingAction, nowMs: number, currentTurnIndex: number): boolean {
   // Wall-clock TTL: emitted_at_iso + expires_at_iso are both written
