@@ -124,18 +124,14 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
 
     expect(handleEditGraph as MockedFunction<typeof handleEditGraph>).not.toHaveBeenCalled();
     expect(result.response.assistant_text).toContain("can't add another risk");
-    expect(result.response.assistant_text).toContain('rebuild it from your updated brief');
-    // The chip set is honest prompt-replay chips. There is no
-    // deterministic rebuild or remove-then-add flow in this tranche
-    // so the chip labels describe what clicking actually does (re-
-    // submit the prompt for Sonnet to handle). The chip set does NOT
-    // promise a deterministic flow that doesn't exist.
-    const labels = (result.response.suggested_actions ?? []).map((a) => a.label);
-    expect(labels).toContain('Tell me how to simplify this');
-    expect(labels.some((l) => l.startsWith('Tell me which risk to replace'))).toBe(true);
-    expect(labels).not.toContain('Simplify the model');
-    expect(labels).not.toContain('Add as evidence');
-    expect(labels).not.toContain('Rebuild from updated brief');
+    // Recovery suggestions are surfaced inline in assistant_text,
+    // not as chips. The brief's "every chip must be actionable" rule
+    // means we do not emit prompt-replay chips that promise flows
+    // (deterministic rebuild, remove-then-add) that do not exist in
+    // this tranche.
+    expect(result.response.assistant_text).toContain('simplify the model');
+    expect(result.response.assistant_text).toContain('replace');
+    expect((result.response.suggested_actions ?? []).length).toBe(0);
   });
 
   it('at edge-limit, "add X as a risk" returns a preflight rejection without calling handleEditGraph', async () => {

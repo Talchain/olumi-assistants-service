@@ -966,23 +966,31 @@ export async function runTurnExecutor(
           expired_count: shortConfirmDispatch.expired_count,
         });
         // The offer has lapsed. Recovery copy uses British English,
-        // sentence case, no em dash. Always offer "Run analysis" as
-        // the safe executable next step — it's the most useful action
-        // when the user has lost context regardless of what the
-        // expired offer was about.
+        // sentence case, no em dash. Run-analysis is offered as an
+        // executable chip ONLY when the model is structurally ready
+        // — surfacing it on a model that's missing options or goals
+        // would just produce a PRECONDITION_UNMET on the next turn,
+        // moving the failure rather than recovering from it.
+        const modelReady = analysisReadyForTurn?.status === 'ready';
+        const expiredAssistantText = modelReady
+          ? "The offer I had open has lapsed, so I'm not sure what you want me to do. " +
+            'You can run the analysis again, or tell me what to explore next.'
+          : "The offer I had open has lapsed, so I'm not sure what you want me to do. " +
+            'Tell me what to explore next.';
+        const expiredChips: SuggestedAction[] = modelReady
+          ? [
+              {
+                id: 'chip_action_run_analysis_after_expiry',
+                label: 'Run analysis',
+                message: 'Run the analysis.',
+                action_type: 'run_analysis',
+              },
+            ]
+          : [];
         const recoveryResponse = composeDirectAnswerResponse({
-          assistant_text:
-            "The offer I had open has lapsed, so I'm not sure what you want me to do. " +
-            'You can run the analysis again, or tell me what to explore next.',
+          assistant_text: expiredAssistantText,
           stage: context.stage,
-          suggested_actions: [
-            {
-              id: 'chip_action_run_analysis_after_expiry',
-              label: 'Run analysis',
-              message: 'Run the analysis.',
-              action_type: 'run_analysis',
-            },
-          ],
+          suggested_actions: expiredChips,
         });
         sonnetTextForLog = recoveryResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';

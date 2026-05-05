@@ -517,11 +517,20 @@ export async function dispatchEditGraph(
           edge_limit: preflight.edge_limit,
           label_length: classified.label.length,
         });
+        // Recovery surface: assistant text describes the next steps
+        // inline. We do NOT emit prompt-replay chips here — they
+        // would have been dishonest about what clicking does (no
+        // deterministic rebuild or replace flow exists in this
+        // tranche). The brief contract is "every chip must be
+        // actionable"; rather than rename or fake actionability we
+        // omit chips entirely from this rejection path. The user
+        // types their next intent in their own words.
         editResult = {
           blocks: [],
           assistantText:
             "I can't add another risk without making the model too complex to analyse reliably. " +
-            'I can rebuild it from your updated brief, or you can tell me which existing risk this should replace.',
+            "Tell me how to simplify the model so we can fit this in, or which existing risk to replace with " +
+            `'${classified.label}'.`,
           latencyMs: Date.now() - startedAt,
           appliedGraph: null,
           wasRejected: true,
@@ -550,27 +559,10 @@ export async function dispatchEditGraph(
               ? `Adding the risk would project ${preflight.projected_edges} edges (limit ${preflight.edge_limit}).`
               : `Adding the risk would project ${preflight.projected_nodes} nodes (limit ${preflight.node_limit}).`,
           },
-          // Prompt-replay chips. These are NOT deterministic action
-          // dispatches: clicking them re-submits the chip's prompt
-          // text on the next turn so Sonnet routes the request with
-          // full context. Renamed from "Rebuild from updated brief"
-          // and "Replace an existing risk" to honest prompts that
-          // match what clicking actually does — there is no
-          // deterministic rebuild or remove-then-add flow in this
-          // tranche, and offering one would be a false promise.
-          suggestedActions: [
-            {
-              label: 'Tell me how to simplify this',
-              prompt:
-                "Tell me how I should simplify this model so we can add the new risk.",
-              role: 'facilitator' as const,
-            },
-            {
-              label: `Tell me which risk to replace with '${classified.label}'`,
-              prompt: `Which existing risk should I replace with '${classified.label}'?`,
-              role: 'facilitator' as const,
-            },
-          ],
+          // No chips on this rejection path — the suggestions are
+          // surfaced inline in assistant_text. See the assistantText
+          // construction above for the rationale.
+          suggestedActions: [],
         };
         log.info(
           {
