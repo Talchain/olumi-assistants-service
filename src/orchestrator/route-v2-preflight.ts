@@ -45,7 +45,17 @@ import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.j
 //
 // `user_id` was added 2026-04-21 for upsert-on-append pre-flight (see
 // supabase/migrations/…_v5_ensure_scenario_exists.sql).
-const V5_EXTENSION_FIELDS = ['graph_state', 'analysis_state', 'user_id'] as const;
+//
+// `selected_elements` was added with Wave 2 of the P0 V5 golden-path
+// repair (deterministic value-update with selection narrowing /
+// selected-deictic). Same strip-then-parse pattern: B1 strict() would
+// otherwise reject the key as unknown.
+const V5_EXTENSION_FIELDS = [
+  'graph_state',
+  'analysis_state',
+  'user_id',
+  'selected_elements',
+] as const;
 
 function stripExtensionFields(body: unknown): unknown {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
