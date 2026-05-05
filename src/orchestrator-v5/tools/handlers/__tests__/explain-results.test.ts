@@ -84,6 +84,7 @@ function makeInvocation(
     optionCount?: number;
     explanation?: HandlerInvocation['explanation'];
     analysisProjection?: AnalysisProjectionSummary;
+    analysisFreshness?: HandlerInvocation['analysisFreshness'];
   },
 ): HandlerInvocation {
   const optionCount = overrides?.optionCount ?? 2;
@@ -114,6 +115,7 @@ function makeInvocation(
     analysisReady: makeAnalysisReady(optionCount),
     explanation: overrides?.explanation,
     analysisProjection: overrides?.analysisProjection,
+    analysisFreshness: overrides?.analysisFreshness,
   };
 }
 
@@ -387,6 +389,197 @@ describe('explain_results — diagnostic fields', () => {
       expect(fact.result.answer_source).toBe('precondition_template');
       expect(fact.result.fallback_reason).toBeNull();
       expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0 V5 golden-path repair — combined success+currentness precondition.
+// The handler must distinguish missing vs degraded vs stale so the right
+// recovery copy + chip surfaces. Earlier predicate accepted any non-noop
+// run_analysis fact regardless of analysis_status, letting failed/partial
+// facts produce a confident-looking explanation.
+// ---------------------------------------------------------------------------
+
+function makeRunAnalysisFactWithStatus(status: string | null): RunAnalysisHandlerFact {
+  const enrichment: Record<string, unknown> = {};
+  if (status !== null) enrichment.analysis_status = status;
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_1',
+      summary: 'Analysis completed.',
+      enrichment,
+    },
+  };
+}
+
+function makeFreshness(
+  freshness: 'fresh' | 'stale' | 'unknown' | 'none',
+  reason: string,
+): HandlerInvocation['analysisFreshness'] {
+  return {
+    freshness,
+    reason: reason as never,
+    selected_fact_index: 0,
+    graph_hash_at_run: 'hash-prior',
+    current_graph_hash: freshness === 'fresh' ? 'hash-prior' : 'hash-current',
+    computed_at: '2026-05-05T00:00:00.000Z',
+  };
+}
+
+describe('explain_results — P0 combined precondition (missing / degraded / stale)', () => {
+  it('missing: no run_analysis fact → absent template (existing behaviour preserved)', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(makeInvocation({ priorFacts: [], optionCount: 2 }));
+    expect(outcome.assistant_text).toMatch(/No analysis has been run on your model yet/);
+    expect(outcome.suppress_orientation).toBe(true);
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.precondition_unmet).toBe(true);
+      expect(fact.result.answer_source).toBe('precondition_template');
+    }
+  });
+
+  it('degraded: latest fact has status="partial" → degraded template, never a confident explanation', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('partial')],
+        explanation: {
+          // Sonnet produced a "valid" answer that we MUST NOT use because
+          // the underlying analysis is degraded.
+          answer_text: VALID_ANSWER_TEXT,
+          answer_text_valid: true,
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
+    expect(outcome.assistant_text).not.toContain('Hire Senior Engineer');
+    expect(outcome.suppress_orientation).toBe(true);
+    const fact = outcome.handler_facts[0];
+    if (fact.fact_type === 'explain_results') {
+      expect(fact.result.precondition_unmet).toBe(true);
+    }
+  });
+
+  it('degraded: status="failed" → degraded template', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('failed')],
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
+  });
+
+  it('degraded: status="blocked" → degraded template', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('blocked')],
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
+  });
+
+  it('stale: successful fact + freshness=stale → stale template, never the projection answer', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+        explanation: {
+          answer_text: VALID_ANSWER_TEXT,
+          answer_text_valid: true,
+        },
+        analysisProjection: ANALYSIS_PROJECTION,
+        analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/model has changed since the last analysis/);
+    expect(outcome.assistant_text).not.toContain('Hire Senior Engineer');
+    expect(outcome.suppress_orientation).toBe(true);
+  });
+
+  it('defensive: successful fact + null projection → absent template (no degraded explanation)', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('completed')],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: undefined,
+        analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/No analysis has been run on your model yet/);
+  });
+
+  it('legacy: status=null + non-null projection + unknown freshness → executes', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus(null)],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+        analysisFreshness: {
+          freshness: 'unknown',
+          reason: 'legacy_fact_missing_hash' as never,
+          selected_fact_index: 0,
+          graph_hash_at_run: null,
+          current_graph_hash: 'hash-current',
+          computed_at: null,
+        },
+      }),
+    );
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+  });
+
+  it('fresh: successful fact + freshness=fresh → executes normally', async () => {
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+        explanation: { answer_text: VALID_ANSWER_TEXT, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+        analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
+      }),
+    );
+    expect(outcome.assistant_text).toBe(VALID_ANSWER_TEXT);
+  });
+
+  it('redaction: missing/degraded/stale recovery copy contains no internal terms', async () => {
+    const handler = createExplainResultsHandler();
+    const forbidden = [
+      /\bnoop\b/i,
+      /\bfact_type\b/i,
+      /\bzod\b/i,
+      /\bgraph_hash/i,
+      /\banalysis_status\b/i,
+      /\bpartial\b/i,
+      /\bfailed\b/i,
+      /\bblocked\b/i,
+      /\bopt_/i,
+      /\bfac_/i,
+    ];
+    const outcomes = await Promise.all([
+      handler(makeInvocation({ priorFacts: [] })),
+      handler(makeInvocation({ priorFacts: [makeRunAnalysisFactWithStatus('partial')] })),
+      handler(
+        makeInvocation({
+          priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+          analysisProjection: ANALYSIS_PROJECTION,
+          analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
+        }),
+      ),
+    ]);
+    for (const outcome of outcomes) {
+      for (const pat of forbidden) {
+        expect(outcome.assistant_text, outcome.assistant_text).not.toMatch(pat);
+      }
     }
   });
 });

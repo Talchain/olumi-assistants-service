@@ -86,6 +86,7 @@ import type {
   AnalysisProjectionSummary,
   StructureProjectionSummary,
 } from '../context/projection-summaries.js';
+import type { FreshnessDerivation } from '../context/freshness.js';
 
 // Mirrors the alias in compose/chip-generator.ts. Defined here so the
 // HandlerInvocation contract has a stable name without forcing handlers
@@ -217,6 +218,24 @@ export interface HandlerInvocation {
    * responsible for `GraphV3.parse`.
    */
   readonly graphForTurn?: unknown;
+  /**
+   * Pre-dispatch freshness verdict for this turn. Threaded from the
+   * turn-executor so the V5 explanation handlers
+   * (explain_results / what_would_flip) can combine "successful prior
+   * analysis exists" with "current graph still matches that analysis"
+   * in a single source-of-truth check, instead of duplicating the
+   * logic inside the handler.
+   *
+   * The verdict here is the routing/pre-dispatch view. For
+   * explanation handlers (which never produce a new run_analysis fact
+   * on their own turn) this matches the wire-bound view; the
+   * post-dispatch re-derivation only differs for `run_analysis` turns
+   * (where it picks up the fact the handler just produced).
+   *
+   * Optional so chip-click and test fixtures can omit it; handlers
+   * that read it must fall back gracefully on undefined.
+   */
+  readonly analysisFreshness?: FreshnessDerivation;
 }
 
 /**

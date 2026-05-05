@@ -40,25 +40,70 @@ import type {
   HandlerOutcome,
 } from '../registry.js';
 import { HandlerResultInvalidError } from '../handler-errors.js';
-import { buildAnalysisAbsentTemplate, resolveOptionCount } from './no-op-helpers.js';
+import {
+  buildAnalysisAbsentTemplate,
+  buildAnalysisDegradedTemplate,
+  buildAnalysisStaleTemplate,
+  resolveOptionCount,
+} from './no-op-helpers.js';
 import { composeWhatWouldFlipFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
+import {
+  isSuccessfulRunAnalysisFact,
+  selectDegradedRunAnalysisFact,
+} from '../../context/freshness.js';
+
+type PreconditionVerdict = 'missing' | 'degraded' | 'stale' | 'execute';
+
+/**
+ * Same combined-precondition decision as `explain_results`. Pulled out
+ * here too rather than shared because the resulting copy is identical
+ * across the two handlers but the fact_type emitted differs; sharing
+ * would force an awkward generic helper for a five-line tree.
+ */
+function decidePrecondition(invocation: HandlerInvocation): PreconditionVerdict {
+  const priorFacts = invocation.context.prior_facts;
+  const hasSuccessfulFact = priorFacts.some(isSuccessfulRunAnalysisFact);
+
+  if (!hasSuccessfulFact) {
+    return selectDegradedRunAnalysisFact(priorFacts) !== null ? 'degraded' : 'missing';
+  }
+
+  if (invocation.analysisProjection == null) {
+    return 'missing';
+  }
+
+  if (invocation.analysisFreshness?.freshness === 'stale') {
+    return 'stale';
+  }
+
+  return 'execute';
+}
+
+function buildPreconditionAssistantText(
+  verdict: Exclude<PreconditionVerdict, 'execute'>,
+  invocation: HandlerInvocation,
+  optionCount: number,
+): string {
+  switch (verdict) {
+    case 'missing':
+      return buildAnalysisAbsentTemplate(optionCount, invocation.analysisReady?.status);
+    case 'stale':
+      return buildAnalysisStaleTemplate();
+    case 'degraded':
+      return buildAnalysisDegradedTemplate();
+  }
+}
 
 export function createWhatWouldFlipHandler(): HandlerFn {
   return async function whatWouldFlipHandler(
     invocation: HandlerInvocation,
   ): Promise<HandlerOutcome> {
     const optionCount = resolveOptionCount(invocation);
+    const verdict = decidePrecondition(invocation);
 
-    const hasAnalysisFact = invocation.context.prior_facts.some(
-      (f) => f.fact_type === 'run_analysis' && !f.noop,
-    );
-
-    if (!hasAnalysisFact) {
-      const assistantText = buildAnalysisAbsentTemplate(
-        optionCount,
-        invocation.analysisReady?.status,
-      );
+    if (verdict !== 'execute') {
+      const assistantText = buildPreconditionAssistantText(verdict, invocation, optionCount);
       const fact: WhatWouldFlipHandlerFact = {
         fact_type: 'what_would_flip',
         fact_version: 1,

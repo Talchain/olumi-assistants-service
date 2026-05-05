@@ -12,12 +12,26 @@
  * pre-tool-call orientation never reaches the user; the handler also sets
  * the flag on its outcome as defence-in-depth.
  *
- * Precondition (D2): `explain_results` requires a non-noop `run_analysis`
- * fact in the conversation's `prior_facts`. When absent (the user has not
- * yet run analysis), the handler returns a deterministic template explaining
- * that no analysis has been run, with the option count interpolated. The
- * composer surfaces a "Run analysis" chip via the chip-generator's
- * `facts_absent` rule.
+ * Precondition (P0 V5 golden-path repair): the handler combines
+ * "successful prior analysis exists" AND "current graph still matches
+ * that analysis" into one verdict. Three non-execute states each map to
+ * dedicated recovery copy:
+ *
+ *   - missing  → no run_analysis fact at all → "Run analysis" template.
+ *   - degraded → latest fact arrived non-success (partial / failed /
+ *                blocked / etc.) → "didn't produce a usable result" + Re-run.
+ *   - stale    → successful fact exists but graph hash diverged → "model
+ *                has changed since the last analysis" + Re-run.
+ *   - usable_legacy → legacy fact (pre-0.10.0, no graph_hash_at_run) with a
+ *                non-null projection → execute (status missing means legacy
+ *                success per `selectRunAnalysisFact` eligibility).
+ *   - fresh    → successful fact AND graph hashes match → execute.
+ *
+ * The verdict reuses `analysisFreshness` from `HandlerInvocation` (the
+ * pre-dispatch derivation) plus `selectDegradedRunAnalysisFact` so the
+ * "missing vs degraded" distinction is explicit. This keeps the routing
+ * layer, freshness derivation, chip-generator and handler precondition
+ * all reading from the same predicate (`isSuccessfulRunAnalysisFact`).
  *
  * Why the precondition lives in the handler, not the validator (D2):
  *   The validator's PRECONDITION_UNMET path produces a typed rejection
@@ -25,15 +39,14 @@
  *   different UX than the brief specifies. Returning a normal
  *   `HandlerOutcome` with the templated `assistant_text` and a noop fact
  *   gives the chip-generator the same handler-just-ran signal it uses
- *   elsewhere, so the "Run analysis" chip surfaces through the existing
+ *   elsewhere, so the recovery chip surfaces through the existing
  *   compose path.
  *
- * Non-noop filter on the precondition check:
- *   The check is `f.fact_type === 'run_analysis' && !f.noop`. A future noop
- *   `run_analysis` fact (none exist today, but the discriminated union
- *   permits one) must NOT satisfy the precondition — only a real PLoT-
- *   backed analysis run produces the projection data the answer references.
- *   See `chip-generator.ts:findHandlerJustRan` for the parallel filter.
+ * Defensive null-projection guard: even on the fresh path, if
+ * `analysisProjection` is null/undefined, fall through to the absent
+ * template. The composer's own defensive branch returns a generic line in
+ * that case, but routing through the precondition path produces the
+ * correct chip ("Run analysis") rather than a degraded explanation.
  *
  * F.6 invariant: no PLoT, no ISL, no LLM call, no math, no graph mutation.
  * The fallback formats raw values from the projection; it does not derive
@@ -51,25 +64,84 @@ import type {
   HandlerOutcome,
 } from '../registry.js';
 import { HandlerResultInvalidError } from '../handler-errors.js';
-import { buildAnalysisAbsentTemplate, resolveOptionCount } from './no-op-helpers.js';
+import {
+  buildAnalysisAbsentTemplate,
+  buildAnalysisDegradedTemplate,
+  buildAnalysisStaleTemplate,
+  resolveOptionCount,
+} from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
+import {
+  isSuccessfulRunAnalysisFact,
+  selectDegradedRunAnalysisFact,
+} from '../../context/freshness.js';
+
+type PreconditionVerdict = 'missing' | 'degraded' | 'stale' | 'execute';
+
+/**
+ * Derive the user-visible precondition verdict for `explain_results`.
+ *
+ * The decision tree:
+ *   1. No successful run_analysis fact in prior_facts:
+ *       - If a degraded fact exists → 'degraded'.
+ *       - Otherwise → 'missing'.
+ *   2. Successful fact exists, freshness === 'stale' → 'stale'.
+ *   3. Successful fact exists, freshness ∈ {'fresh','unknown'} → 'execute'.
+ *      ('unknown' covers legacy facts and the
+ *      current_graph_hash_unavailable path; either way a successful
+ *      projection is the best the system has.)
+ *   4. Successful fact exists but `analysisProjection` is null/undefined
+ *      → treat as 'missing' (defensive — the projection is what the
+ *      handler answers from).
+ */
+function decidePrecondition(invocation: HandlerInvocation): PreconditionVerdict {
+  const priorFacts = invocation.context.prior_facts;
+  const hasSuccessfulFact = priorFacts.some(isSuccessfulRunAnalysisFact);
+
+  if (!hasSuccessfulFact) {
+    return selectDegradedRunAnalysisFact(priorFacts) !== null ? 'degraded' : 'missing';
+  }
+
+  if (invocation.analysisProjection == null) {
+    // Defensive: we found a successful fact but the projection assembler
+    // produced nothing usable. Route through 'missing' so the chip-
+    // generator emits "Run analysis" rather than letting the composer
+    // hit its own generic-line fallback (which has no recovery chip).
+    return 'missing';
+  }
+
+  if (invocation.analysisFreshness?.freshness === 'stale') {
+    return 'stale';
+  }
+
+  return 'execute';
+}
+
+function buildPreconditionAssistantText(
+  verdict: Exclude<PreconditionVerdict, 'execute'>,
+  invocation: HandlerInvocation,
+  optionCount: number,
+): string {
+  switch (verdict) {
+    case 'missing':
+      return buildAnalysisAbsentTemplate(optionCount, invocation.analysisReady?.status);
+    case 'stale':
+      return buildAnalysisStaleTemplate();
+    case 'degraded':
+      return buildAnalysisDegradedTemplate();
+  }
+}
 
 export function createExplainResultsHandler(): HandlerFn {
   return async function explainResultsHandler(
     invocation: HandlerInvocation,
   ): Promise<HandlerOutcome> {
     const optionCount = resolveOptionCount(invocation);
+    const verdict = decidePrecondition(invocation);
 
-    const hasAnalysisFact = invocation.context.prior_facts.some(
-      (f) => f.fact_type === 'run_analysis' && !f.noop,
-    );
-
-    if (!hasAnalysisFact) {
-      const assistantText = buildAnalysisAbsentTemplate(
-        optionCount,
-        invocation.analysisReady?.status,
-      );
+    if (verdict !== 'execute') {
+      const assistantText = buildPreconditionAssistantText(verdict, invocation, optionCount);
       const fact: ExplainResultsHandlerFact = {
         fact_type: 'explain_results',
         fact_version: 1,

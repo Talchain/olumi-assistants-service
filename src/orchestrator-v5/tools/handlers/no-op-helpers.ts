@@ -74,3 +74,35 @@ export function buildAnalysisAbsentTemplate(
     tail
   );
 }
+
+/**
+ * Stale-analysis template. Used by the V5 explanation handlers when a
+ * successful prior analysis exists but the current graph hash differs
+ * from the hash at the time of that run. Tells the user the model has
+ * changed and offers a re-run, without leaking internal terms (no graph
+ * hash, no fact_type, no analysis_status). The chip-generator pairs this
+ * with a "Re-run analysis" suggested action.
+ */
+export function buildAnalysisStaleTemplate(): string {
+  return (
+    `The model has changed since the last analysis, so I can't be sure ` +
+    `the previous result still applies. Would you like to re-run analysis ` +
+    `to see how your changes affect the recommendation?`
+  );
+}
+
+/**
+ * Degraded-analysis template. Used by the V5 explanation handlers when
+ * the most recent run_analysis fact arrived in a non-success state
+ * (partial / blocked / failed / future non-canonical statuses). Frames
+ * the situation in user terms — the analysis didn't produce usable
+ * results — and offers a recovery path. Never echoes the internal
+ * status string. The chip-generator pairs this with a "Re-run analysis"
+ * suggested action.
+ */
+export function buildAnalysisDegradedTemplate(): string {
+  return (
+    `The last analysis didn't produce a usable result, so I can't ` +
+    `summarise it for you. Would you like to re-run analysis?`
+  );
+}

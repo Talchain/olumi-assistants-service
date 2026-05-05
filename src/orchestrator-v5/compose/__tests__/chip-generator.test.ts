@@ -558,6 +558,70 @@ describe('deriveProjectionStatus', () => {
     expect(deriveProjectionStatus([], analysisAt('stable'))).toBe('facts_absent');
     expect(deriveProjectionStatus([], analysisAt('stable'), [])).toBe('facts_absent');
   });
+
+  // P0 V5 golden-path repair — predicate parity with isSuccessfulRunAnalysisFact.
+  // A run_analysis fact whose status doesn't normalise to a canonical success
+  // must NOT count as "analysis exists" here, mirroring the handler-side
+  // precondition. Earlier behaviour accepted any non-noop fact.
+  it('returns "facts_absent" when only a partial-status run_analysis fact is present (predicate parity)', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    const partial: HandlerFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: null,
+        summary: 'Partial result',
+        enrichment: { analysis_status: 'partial' },
+      },
+    };
+    expect(deriveProjectionStatus([partial], null)).toBe('facts_absent');
+    expect(deriveProjectionStatus([], null, [partial])).toBe('facts_absent');
+  });
+
+  it('returns "facts_absent" when only a failed-status run_analysis fact is present', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    const failed: HandlerFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: null,
+        summary: 'Failed',
+        enrichment: { analysis_status: 'failed' },
+      },
+    };
+    expect(deriveProjectionStatus([failed], null)).toBe('facts_absent');
+  });
+
+  it('still treats canonical-success status (computed/completed/ready) as evidence', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    const computed: HandlerFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        summary: 'OK',
+        enrichment: { analysis_status: 'computed' },
+      },
+    };
+    expect(deriveProjectionStatus([computed], analysisAt('stable'))).toBe(
+      'projection_populated',
+    );
+  });
+
+  it('treats legacy fact (no analysis_status) as success — pre-0.10.0 compat', async () => {
+    const { deriveProjectionStatus } = await import('../chip-generator.js');
+    // runAnalysisFact() has no enrichment.analysis_status; this is the
+    // legacy-fact path that selectRunAnalysisFact also accepts.
+    expect(deriveProjectionStatus([runAnalysisFact()], analysisAt('stable'))).toBe(
+      'projection_populated',
+    );
+  });
 });
 
 // V5 spec §7 every-failure-path-includes-a-chip — explicit precondition rule.

@@ -1419,6 +1419,7 @@ export async function runTurnExecutor(
           analysisProjection,
           structureProjection,
           graphForTurn: graphStateForTurn ?? undefined,
+          analysisFreshness: routingFreshness ?? undefined,
         });
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');

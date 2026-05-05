@@ -27,6 +27,7 @@ import { createExplainResultsHandler } from '../explain-results.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { generateChips } from '../../../compose/chip-generator.js';
 import type { ContextPackAnalysis } from '../../../context/context-pack-assembler.js';
+import type { AnalysisProjectionSummary } from '../../../context/projection-summaries.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 
 const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -60,9 +61,28 @@ function populatedAnalysis(): ContextPackAnalysis {
   };
 }
 
+function populatedProjection(): AnalysisProjectionSummary {
+  return {
+    status: 'complete',
+    leading_option: { label: 'Option 1', probability: 0.62 },
+    runner_up: { label: 'Option 2', probability: 0.38 },
+    margin_pp: 24,
+    robustness_band: 'stable',
+    top_drivers: [],
+    staleness_reason: null,
+  };
+}
+
 function makePostAnalysisInvocation(
   priorFacts: readonly HandlerFact[],
+  options?: { withProjection?: boolean },
 ): HandlerInvocation {
+  // P0 V5 golden-path repair: post-analysis explain turns have a non-null
+  // analysisProjection in production (the turn-executor builds it for
+  // explanation handlers). The handler's defensive guard treats a null
+  // projection as missing analysis, so test fixtures simulating a real
+  // post-analysis turn must include it. Default to producing one.
+  const withProjection = options?.withProjection ?? true;
   return {
     context: {
       stage: 'analyse',
@@ -95,6 +115,7 @@ function makePostAnalysisInvocation(
       goal_node_id: GOAL_ID,
       status: 'ready',
     },
+    analysisProjection: withProjection ? populatedProjection() : undefined,
   };
 }
 

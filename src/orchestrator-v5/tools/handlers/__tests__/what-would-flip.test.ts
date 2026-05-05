@@ -80,6 +80,7 @@ function makeInvocation(
     optionCount?: number;
     explanation?: HandlerInvocation['explanation'];
     analysisProjection?: AnalysisProjectionSummary;
+    analysisFreshness?: HandlerInvocation['analysisFreshness'];
   },
 ): HandlerInvocation {
   const optionCount = overrides?.optionCount ?? 2;
@@ -110,6 +111,7 @@ function makeInvocation(
     analysisReady: makeAnalysisReady(optionCount),
     explanation: overrides?.explanation,
     analysisProjection: overrides?.analysisProjection,
+    analysisFreshness: overrides?.analysisFreshness,
   };
 }
 
@@ -334,5 +336,99 @@ describe('what_would_flip — diagnostic fields', () => {
       expect(fact.result.fallback_reason).toBeNull();
       expect(fact.result.answer_text_length).toBe(outcome.assistant_text.length);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0 V5 golden-path repair — combined success+currentness precondition
+// (mirrors explain-results coverage to keep the two handlers in lockstep).
+// ---------------------------------------------------------------------------
+
+function makeRunAnalysisFactWithStatus(status: string | null): RunAnalysisHandlerFact {
+  const enrichment: Record<string, unknown> = {};
+  if (status !== null) enrichment.analysis_status = status;
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_1',
+      summary: 'Analysis completed.',
+      enrichment,
+    },
+  };
+}
+
+function makeFreshness(
+  freshness: 'fresh' | 'stale' | 'unknown' | 'none',
+  reason: string,
+): HandlerInvocation['analysisFreshness'] {
+  return {
+    freshness,
+    reason: reason as never,
+    selected_fact_index: 0,
+    graph_hash_at_run: 'hash-prior',
+    current_graph_hash: freshness === 'fresh' ? 'hash-prior' : 'hash-current',
+    computed_at: '2026-05-05T00:00:00.000Z',
+  };
+}
+
+const VALID_WWF_ANSWER =
+  'A swing of around eight percentage points in Engineering Capacity would flip the leading option, given the current robustness band.';
+
+describe('what_would_flip — P0 combined precondition (missing / degraded / stale)', () => {
+  it('degraded: status="partial" → degraded template, never a confident flip explanation', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('partial')],
+        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/didn't produce a usable result/);
+    expect(outcome.assistant_text).not.toContain('Engineering Capacity');
+    expect(outcome.suppress_orientation).toBe(true);
+  });
+
+  it('stale: successful fact + freshness=stale → stale template, never the projection answer', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+        analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/model has changed since the last analysis/);
+    expect(outcome.assistant_text).not.toContain('Engineering Capacity');
+  });
+
+  it('defensive: successful fact + null projection → absent template', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('completed')],
+        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
+        analysisProjection: undefined,
+        analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
+      }),
+    );
+    expect(outcome.assistant_text).toMatch(/No analysis has been run on your model yet/);
+  });
+
+  it('fresh: successful fact + freshness=fresh → executes normally', async () => {
+    const handler = createWhatWouldFlipHandler();
+    const outcome = await handler(
+      makeInvocation({
+        priorFacts: [makeRunAnalysisFactWithStatus('computed')],
+        explanation: { answer_text: VALID_WWF_ANSWER, answer_text_valid: true },
+        analysisProjection: ANALYSIS_PROJECTION,
+        analysisFreshness: makeFreshness('fresh', 'graph_hash_match'),
+      }),
+    );
+    expect(outcome.assistant_text).toBe(VALID_WWF_ANSWER);
   });
 });

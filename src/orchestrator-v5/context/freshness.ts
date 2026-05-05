@@ -190,6 +190,81 @@ function viewRunAnalysisFact(
 }
 
 /**
+ * Single-source-of-truth predicate for "is this a successful run_analysis
+ * fact?". Used by `selectRunAnalysisFact` (newest-first picker), the
+ * compose-layer chip-generator (`findHandlerJustRan`,
+ * `deriveProjectionStatus`), and any handler precondition that wants to
+ * agree with the freshness derivation on what "successful" means.
+ *
+ * Eligibility:
+ *   - Must be a `run_analysis` fact with `noop === false`.
+ *   - Status must be missing entirely (legacy pre-0.10.0 fact) OR
+ *     normalise to a canonical success (`computed | completed | ready`,
+ *     plus the historical aliases handled by `normaliseAnalysisStatus`).
+ *
+ * Anything else — partial / blocked / failed / degraded / future
+ * non-canonical PLoT statuses — returns false. This keeps "this turn has
+ * a usable prior analysis" coherent across the routing, dispatch, and
+ * compose layers.
+ */
+export function isSuccessfulRunAnalysisFact(fact: HandlerFact): boolean {
+  if (!isRunAnalysisFact(fact)) return false;
+  if (fact.noop !== false) return false;
+  const status = readAnalysisStatus(fact.result.enrichment);
+  if (status === null) return true; // legacy fact
+  return normaliseAnalysisStatus(status) !== null;
+}
+
+/**
+ * "Did the most recent run_analysis fact arrive in a non-success state?"
+ * Returns the latest non-noop run_analysis fact whose status is present
+ * and does NOT normalise to a canonical success. Used to distinguish the
+ * "missing analysis" case (no run_analysis fact at all) from the
+ * "degraded analysis" case (analysis ran but partial / blocked / failed)
+ * so the explanation handlers can offer the right recovery copy.
+ *
+ * Sorted by computed_at desc, same convention as `selectRunAnalysisFact`.
+ * Returns null when no degraded fact exists.
+ */
+export function selectDegradedRunAnalysisFact(
+  priorFacts: readonly HandlerFact[],
+): { readonly fact: HandlerFact; readonly status: string } | null {
+  const candidates: Array<{
+    readonly fact: HandlerFact;
+    readonly status: string;
+    readonly computed_at: string | null;
+  }> = [];
+  for (const fact of priorFacts) {
+    if (!isRunAnalysisFact(fact)) continue;
+    if (fact.noop !== false) continue;
+    const status = readAnalysisStatus(fact.result.enrichment);
+    if (status === null) continue;
+    if (normaliseAnalysisStatus(status) !== null) continue;
+    candidates.push({
+      fact,
+      status,
+      computed_at:
+        typeof fact.result.computed_at === 'string'
+          ? fact.result.computed_at
+          : null,
+    });
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => {
+    if (a.computed_at !== null && b.computed_at !== null) {
+      if (a.computed_at < b.computed_at) return 1;
+      if (a.computed_at > b.computed_at) return -1;
+      return 0;
+    }
+    if (a.computed_at !== null) return -1;
+    if (b.computed_at !== null) return 1;
+    return 0;
+  });
+  const top = candidates[0]!;
+  return { fact: top.fact, status: top.status };
+}
+
+/**
  * Select the most recent successful run_analysis fact. "Successful" =
  * known-success status (computed / completed / ready) OR status missing
  * entirely (legacy fact). Sorted by computed_at desc; ties + missing

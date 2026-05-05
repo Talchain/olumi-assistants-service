@@ -51,6 +51,7 @@ import type { HandlerValidationRegistry } from '../routing/validator.js';
 import { curatedHandlerChips } from './helpers.js';
 import type { ContextPackAnalysis } from '../context/context-pack-assembler.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -431,7 +432,14 @@ function findHandlerJustRan(
 ): V5ActionType | null {
   if (!facts || facts.length === 0) return null;
   for (const f of facts) {
-    if (f.fact_type === 'run_analysis' && !f.noop) return 'run_analysis';
+    // Single source of truth (P0 V5 golden-path repair): a run_analysis
+    // fact only counts as "this handler just ran successfully" when it
+    // also passes the freshness eligibility — i.e. status normalises to a
+    // canonical success or is missing entirely (legacy fact). Partial /
+    // failed / blocked facts are not "successful runs" and must not gate
+    // explanation chips. Mirrors the precondition in explain_results /
+    // what_would_flip and the selector in context/freshness.ts.
+    if (isSuccessfulRunAnalysisFact(f)) return 'run_analysis';
   }
   return null;
 }
@@ -523,12 +531,15 @@ export function deriveProjectionStatus(
   analysis: ContextPackAnalysis | null | undefined,
   priorFacts?: readonly HandlerFact[] | undefined,
 ): 'facts_absent' | 'projection_empty' | 'projection_populated' {
-  const hasCurrentRunAnalysisFact = (handlerFacts ?? []).some(
-    (f) => f.fact_type === 'run_analysis' && !f.noop,
-  );
-  const hasPriorRunAnalysisFact = (priorFacts ?? []).some(
-    (f) => f.fact_type === 'run_analysis' && !f.noop,
-  );
+  // Single source of truth (P0 V5 golden-path repair): a run_analysis
+  // fact only counts as evidence of real analysis when it also passes
+  // the freshness eligibility — i.e. canonical-success or legacy-fact.
+  // Partial / failed / blocked facts must not be treated as "facts
+  // present" because they carry no usable projection data; the
+  // explanation handlers route them through the degraded template
+  // instead, and the chip-generator should match.
+  const hasCurrentRunAnalysisFact = (handlerFacts ?? []).some(isSuccessfulRunAnalysisFact);
+  const hasPriorRunAnalysisFact = (priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
   const hasAnalysisRecord = hasCurrentRunAnalysisFact || hasPriorRunAnalysisFact;
 
   if (!hasAnalysisRecord) return 'facts_absent';
