@@ -506,6 +506,11 @@ export const TelemetryEvents = {
   PendingActionRecoveryAmbiguous: "v5.pending_action.recovery_ambiguous",
   PendingActionRerunAnalysisRequired: "v5.pending_action.rerun_analysis_required",
   PendingActionsReadDegraded: "v5.pending_actions.read_degraded",
+  // Preflight skipped the LLM call because the requested edit would
+  // exceed structural limits. Reason names match the post-validator
+  // codes so dashboards can correlate (edge_limit ↔
+  // EDGE_LIMIT_EXCEEDED, node_limit ↔ NODE_LIMIT_EXCEEDED).
+  EditGraphPreflightSkippedLlm: "v5.edit_graph.preflight_skipped_llm",
 
   // V5 state-trust freshness derivation. Emitted once per projection
   // build (every turn). Single event is sufficient to reconstruct the

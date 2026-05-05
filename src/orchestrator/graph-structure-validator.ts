@@ -86,6 +86,52 @@ export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
  * All checks run exhaustively — no short-circuit.
  * Returns all violations found.
  */
+/**
+ * Pre-LLM preflight for add-risk: would adding one risk node plus the
+ * minimal connecting edges push the graph past MAX_NODES / MAX_EDGES?
+ *
+ * Conservative edge projection: the deterministic add-risk path creates
+ * one risk node plus typically TWO edges (factor → risk inbound; risk
+ * → option outbound). The LLM-driven path may create more. We project
+ * +2 edges as the floor — matches what the deterministic path actually
+ * emits and avoids false positives that would block valid adds.
+ *
+ * Pure synchronous arithmetic over the same MAX_NODES / MAX_EDGES
+ * constants the post-mutation validator uses, so a positive preflight
+ * here implies the post-mutation validator would also reject. Used by
+ * `edit-graph-dispatch.ts` to skip the 16–18s LLM call when the request
+ * is guaranteed to fail at validation time.
+ */
+export interface AddRiskPreflight {
+  readonly over_node_limit: boolean;
+  readonly over_edge_limit: boolean;
+  readonly current_nodes: number;
+  readonly projected_nodes: number;
+  readonly current_edges: number;
+  readonly projected_edges: number;
+  readonly node_limit: number;
+  readonly edge_limit: number;
+}
+
+const PROJECTED_EDGES_FOR_ADD_RISK = 2;
+
+export function wouldExceedAddRiskLimits(graph: GraphV3T): AddRiskPreflight {
+  const current_nodes = graph.nodes.length;
+  const current_edges = graph.edges.length;
+  const projected_nodes = current_nodes + 1;
+  const projected_edges = current_edges + PROJECTED_EDGES_FOR_ADD_RISK;
+  return {
+    over_node_limit: projected_nodes > MAX_NODES,
+    over_edge_limit: projected_edges > MAX_EDGES,
+    current_nodes,
+    projected_nodes,
+    current_edges,
+    projected_edges,
+    node_limit: MAX_NODES,
+    edge_limit: MAX_EDGES,
+  };
+}
+
 export function validateGraphStructure(graph: GraphV3T): StructuralValidationResult {
   const violations: StructuralViolation[] = [];
 

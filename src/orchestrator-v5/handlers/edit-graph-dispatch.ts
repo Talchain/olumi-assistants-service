@@ -24,6 +24,7 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
+import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
@@ -495,27 +496,111 @@ export async function dispatchEditGraph(
 
     if (classified.intent === 'add_risk') {
       deterministicAddRiskAttempted = true;
-      editResult = {
-        blocks: [],
-        assistantText: buildAddRiskClarification(classified.label),
-        latencyMs: Date.now() - startedAt,
-        appliedGraph: null,
-        wasRejected: false,
-      };
-      log.info(
-        {
+      // Pre-LLM preflight: would adding this risk push the model past
+      // its analysis limits? If so, return a structured rejection now
+      // and skip the LLM. The LLM call would otherwise spend 16–18s
+      // before the post-mutation validator rejected with the same
+      // limit code. Specific recovery copy + executable chips give the
+      // user a real next step instead of generic failure copy.
+      const preflight = wouldExceedAddRiskLimits(parsedGraph);
+      if (preflight.over_node_limit || preflight.over_edge_limit) {
+        const rejectionCode = preflight.over_edge_limit
+          ? 'EDGE_LIMIT_EXCEEDED_PREFLIGHT'
+          : 'NODE_LIMIT_EXCEEDED_PREFLIGHT';
+        emit(TelemetryEvents.EditGraphPreflightSkippedLlm, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          reason: preflight.over_edge_limit ? 'edge_limit' : 'node_limit',
+          projected_nodes: preflight.projected_nodes,
+          projected_edges: preflight.projected_edges,
+          node_limit: preflight.node_limit,
+          edge_limit: preflight.edge_limit,
+          label_length: classified.label.length,
+        });
+        editResult = {
+          blocks: [],
+          assistantText:
+            "I can't add another risk without making the model too complex to analyse reliably. " +
+            'I can rebuild it from your updated brief, or you can tell me which existing risk this should replace.',
+          latencyMs: Date.now() - startedAt,
+          appliedGraph: null,
+          wasRejected: true,
+          diagnostics: {
+            classified_intent: 'structural',
+            instruction_mode_applied: 'structural_default',
+            edit_instruction_preview: classified.label.slice(0, 80),
+            graph_context_node_count: preflight.current_nodes,
+            graph_context_edge_count: preflight.current_edges,
+            operations_proposed_count: 0,
+            operations_proposed_types: [],
+            validation_outcome: 'preflight_rejected',
+            validation_violation_codes: [
+              preflight.over_edge_limit ? 'EDGE_LIMIT_EXCEEDED' : 'NODE_LIMIT_EXCEEDED',
+            ],
+            recovery_path_chosen: 'preflight_rejection',
+            conversational_state_summary: null,
+            target_resolution: null,
+            resolution_mode: null,
+            proposal_returned: false,
+            branch_taken: 'rejection',
+            branch_reason: 'add_risk_preflight_limit_exceeded',
+            failure_branch: 'preflight',
+            failure_code: rejectionCode,
+            failure_message: preflight.over_edge_limit
+              ? `Adding the risk would project ${preflight.projected_edges} edges (limit ${preflight.edge_limit}).`
+              : `Adding the risk would project ${preflight.projected_nodes} nodes (limit ${preflight.node_limit}).`,
+          },
+          // Executable chips only. "Rebuild from updated brief" routes
+          // through the existing draft-graph path. The replace-risk
+          // option opens a focused clarification the LLM can resolve
+          // on the next turn.
+          suggestedActions: [
+            {
+              label: 'Rebuild from updated brief',
+              prompt: 'I want to rewrite the brief and rebuild the model from scratch.',
+              role: 'facilitator' as const,
+            },
+            {
+              label: 'Replace an existing risk',
+              prompt: `Which existing risk should I replace with '${classified.label}'?`,
+              role: 'facilitator' as const,
+            },
+          ],
+        };
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: editResult.latencyMs,
+            reason: rejectionCode,
+            projected_nodes: preflight.projected_nodes,
+            projected_edges: preflight.projected_edges,
+          },
+          'V5 edit_graph add_risk preflight blocked LLM call (limit would be exceeded)',
+        );
+      } else {
+        editResult = {
+          blocks: [],
+          assistantText: buildAddRiskClarification(classified.label),
+          latencyMs: Date.now() - startedAt,
+          appliedGraph: null,
+          wasRejected: false,
+        };
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            latency_ms: editResult.latencyMs,
+          },
+          'V5 edit_graph add_risk clarification returned without graph mutation',
+        );
+        emit(TelemetryEvents.V5EditGraphAddRiskClarified, {
           request_id: requestId,
           scenario_id: payload.scenario_id,
           latency_ms: editResult.latencyMs,
-        },
-        'V5 edit_graph add_risk clarification returned without graph mutation',
-      );
-      emit(TelemetryEvents.V5EditGraphAddRiskClarified, {
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        latency_ms: editResult.latencyMs,
-        label_length: classified.label.length,
-      });
+          label_length: classified.label.length,
+        });
+      }
     } else {
       editResult = await handleEditGraph(
         context,
