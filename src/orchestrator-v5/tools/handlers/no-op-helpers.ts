@@ -76,7 +76,7 @@ export function buildAnalysisAbsentTemplate(
     : `and is ready to analyse. Would you like me to run the analysis?`;
   return (
     `No analysis has been run on your model yet. ` +
-    `The graph has ${optionCount} ${optionsLabel} configured ` +
+    `Your model has ${optionCount} ${optionsLabel} set up ` +
     tail
   );
 }

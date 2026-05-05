@@ -182,7 +182,7 @@ describe('what_would_flip — precondition (analysis fact)', () => {
     const outcome = await handler(makeInvocation({ priorFacts: [], optionCount: 2 }));
     expect(outcome.assistant_text).toBe(
       'No analysis has been run on your model yet. ' +
-        'The graph has 2 options configured ' +
+        'Your model has 2 options set up ' +
         'and is ready to analyse. Would you like me to run the analysis?',
     );
     expect(outcome.suppress_orientation).toBe(true);

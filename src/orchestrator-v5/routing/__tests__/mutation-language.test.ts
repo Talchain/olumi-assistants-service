@@ -42,7 +42,7 @@ describe('containsMutationLanguage', () => {
       'The leading option performs best because of the combined effect of three factors.',
       'Looking at the model structure, the strongest direct link is from Capacity to Throughput.',
       'Probability sits at 62 per cent with a stable robustness band; the runner-up trails by twelve points.',
-      'No analysis has been run on your model yet. The graph has 4 options configured and is ready to analyse.',
+      'No analysis has been run on your model yet. Your model has 4 options set up and is ready to analyse.',
     ];
     for (const text of benign) {
       expect(containsMutationLanguage(text)).toBe(false);

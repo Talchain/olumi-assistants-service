@@ -2,7 +2,7 @@
 
 **Branch (both repos)**: `claude/p0-v5-golden-path-integration` from `staging`
 **Status**: Local commits only. No push, no merge, no deploy.
-**Rounds completed**: 5 (initial brief + 4 review rounds; this is the final close-out).
+**Rounds completed**: 5 (initial brief + 4 review rounds) plus a final pre-merge hardening pass: source-only diff guard expanded across all unsafe categories, user-facing copy normalised on "model" rather than "graph", final-report acceptance language audited.
 
 ## 0. Process retrospective
 
@@ -114,7 +114,7 @@ Hook input adapter normalises node-kind reads (`n.kind` → `n.type` → `n.data
 | `ba8a4fb4` | 4th: rename + split + telemetry assertion |
 | `2ececf41` | 4th: report (process retro + Wave 5 scope + merge handoff) |
 | `86eefc72` | 5th: obsolete describe removed + fixture metadata + applied_graph + source-only diff guard |
-| (this commit) | 5th: close-out report |
+| (this commit) | 5th close-out + hardening pass: guard denylist expanded, recovery copy "graph"→"model", report acceptance language audited |
 
 ### UI (`DecisionGuideAI`) — 8 commits ahead of `staging`
 
@@ -166,7 +166,7 @@ Pre-existing dirtiness:
    ```bash
    bash scripts/check-source-only-diff.sh --against staging
    ```
-   Exit 0 → safe to push. Exit 1 → node_modules paths in diff; review the printed list and remediate before pushing.
+   Exit 0 → safe to push. Exit 1 → unsafe paths in diff; review the printed (category-grouped) list and remediate before pushing. The guard's denylist covers: `node_modules/`, lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`), env files (`.env`, `.env.*`, `*.env`, `.npmrc`), prompt files (`data/prompts.json`, `data/prompts/`, `data/prompts.json.backup.*`, prompt copies, `Prompts/`, `prompts/`, `assembled-prompt*`, `olumi_orchestrator_system_prompt*`), build / coverage / test artefacts (`dist/`, `build/`, `coverage/`, `.turbo/`, `.next/`, `playwright-report/`, `test-results/`, `*.tsbuildinfo`), generated source (`src/generated/`, `generated/`), OS metadata (`.DS_Store`), backup / autosave files (`*.backup.*`, `*.bak`, `*~`), and sqlite snapshots. Modes: default (staged), `--against <ref>`, `--commit <ref>`. Bash-3 compatible.
 2. **Verify branch diff**:
    ```bash
    git diff --stat staging..HEAD -- 'src/**' 'tests/**' 'tools/**' 'Docs/**' 'scripts/**'
@@ -187,8 +187,7 @@ The source-only diff guard provides mechanical defence; the steps above are the 
 - **Wave 3** pre-analysis panel + DiagnosticsOverlay UI surfaces — NOT wired.
 - **Wave 4** separate fallback/coaching panel — NOT shipped beyond HeroQualifier.
 - **Tracked node_modules corruption** — pre-existing repo hygiene issue requiring user authorisation to fix (`git rm --cached -r node_modules` + force-push of staging).
-- **Live `tools/v5-journey-replay/` extension** covering real `run_analysis → mutation → explain` through HTTP — needs `CEE_API_KEY` against staging.
-- **Browser-level Playwright** — not part of local Tier-1 gate per CLAUDE.md.
+- **Live deployed staging journey** — end-to-end proof against a deployed CEE on staging (real `run_analysis → mutation → explain → re-run`) is NOT part of this branch's evidence. The HTTP-boundary tests in this branch run in-process against a local server fixture; they pin contract behaviour but do not exercise deployed infrastructure. Before declaring the golden path live, run `tools/v5-journey-replay/` against staging with `CEE_API_KEY` set and confirm 9/9 steps green plus latency under 30s per step. Browser-level Playwright is similarly out of scope (not part of Tier-1 gate per `Docs/CLAUDE.md`).
 - **Categorical factor-state updates** — schema change required.
 - **UI-SEM fabrications** — display floors retained.
 
