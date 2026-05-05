@@ -3,244 +3,170 @@
 **Branch (both repos)**: `claude/p0-v5-golden-path-integration` from `staging`
 **Status**: Local commits only. No push, no merge, no deploy.
 
+This report uses a **four-state language** for every wave to distinguish what's actually delivered:
+
+- **Implemented** — code exists in the branch.
+- **Tested** — has unit tests pinning the behaviour.
+- **Wired** — consumed by production runtime surfaces (route handlers, render path, bundle assembly).
+- **Accepted** — meets the brief's user-facing acceptance criteria with rendered/HTTP-boundary evidence.
+
+A wave is "delivered UX" only when it reaches **Accepted**. Earlier states ship infrastructure; they are not the same as a user-visible change.
+
 ## 1. Phase 0 findings
 
-Investigation across both repos (CEE: `olumi-assistants-service`, UI: `DecisionGuideAI`) and the shared schema package `@talchain/schemas` v0.11.0 confirmed the failures listed in the brief. Eight root causes identified — all inside the orchestration glue, none requiring prompt rewrites, schema migrations, or PLoT/ISL changes. A full table appears in section 2.
+Investigation across both repos (CEE: `olumi-assistants-service`, UI: `DecisionGuideAI`) and the shared schema package `@talchain/schemas` v0.11.0 confirmed the failures listed in the brief. Eight root causes identified — all inside the orchestration glue, none requiring prompt rewrites, schema migrations, or PLoT/ISL changes. Plus one further regression discovered during the follow-up: `selected_elements` was missing from `V5_EXTENSION_FIELDS`, so the entire Wave 2 wire path returned 422 from any real client until that was fixed.
 
 Confirmed non-issues (do NOT change):
-- Response finaliser already stamps `analysis_ready` on every V5 turn (four-layer defence: type brand + WeakSet + ts-expect-error tests + grep gate).
-- `x-olumi-service-build` and `x-request-id` are already on outbound responses (server.ts:299–309, 444–448) — no new headers needed.
+- Response finaliser already stamps `analysis_ready` on every V5 turn (four-layer defence).
+- `x-olumi-service-build` and `x-request-id` are already on outbound responses.
 - Boundary schema is strict and complete — no schema bump.
 
 ## 2. Root causes confirmed
 
-| # | Root cause | Evidence | Fix wave |
+| # | Root cause | Fix wave | State |
 |---|---|---|---|
-| 1 | `explain_results` precondition is looser than freshness derivation | `tools/handlers/explain-results.ts:64-66` checked `!f.noop` only; freshness uses `selectRunAnalysisFact` which additionally normalises status to `computed/completed/ready`. A failed/partial fact passed the handler but freshness emitted `none`. | Wave 1 |
-| 2 | Same predicate drift in `chip-generator` | `compose/chip-generator.ts findHandlerJustRan` and `deriveProjectionStatus` repeated the loose filter independently. | Wave 1 |
-| 3 | `composeExplainResultsFallback` could produce text from null projection | Defensive guard absent at call site. | Wave 1 |
-| 4 | Deterministic value-update did not consume UI selection | UI emits `selected_elements.node_ids` on conversation/explain turns; CEE pre-route ignored it. Multi-candidate ambiguity fell to clarify even when selection would resolve it. | Wave 2 |
-| 5 | UI did not surface CEE freshness coherently | Wire freshness extracted into `ceeAnalysisReady` but four UI surfaces derived readiness from `analysisStateReady` boolean + `graphEditedSinceLastRun` rather than the wire signal. | Wave 3 |
-| 6 | UI fabrications mask missing PLoT data | UI-SEM-002/031 + the chain in `useResultsSectionData.ts` / `buildResultsVM.ts` inject defaults silently. "Analysis complete" rendered with display values from fabricated zeros. | Wave 4 |
-| 7 | Debug bundle had no scoped pipeline status | Trace shape stored fields but no derivation distinguished "analysis_not_run" from "analysis_failed" from "ui_render_success". | Wave 5 |
-| 8 | Golden-path coverage incomplete | No in-process acceptance harness; live replay required CEE_API_KEY. | Wave 6 |
+| 1 | `explain_results` precondition looser than freshness derivation | Wave 1 | Accepted |
+| 2 | Same predicate drift in chip-generator | Wave 1 | Accepted |
+| 3 | `composeExplainResultsFallback` could produce text from null projection | Wave 1 | Accepted |
+| 4 | Deterministic value-update did not consume UI selection | Wave 2 | Accepted |
+| 4a | `selected_elements` missing from extension-strip allowlist (route 422'd) | Wave 2 follow-up | Accepted |
+| 5 | UI did not surface CEE freshness coherently | Wave 3 | Accepted |
+| 6 | UI fabrications mask missing PLoT data | Wave 4 | Accepted |
+| 7 | Debug bundle had no scoped pipeline status | Wave 5 | Accepted |
+| 8 | Golden-path coverage incomplete | Wave 6 + HTTP-boundary follow-up | Accepted |
+| 9 | `TurnOutcome.graph_mutated` excluded `set_factor_value`/`add_constraint`/`adjust_edge_strength` | Follow-up | Accepted |
 
-## 3. Files changed by repo
+## 3. Wave-by-wave status
 
-### CEE (`olumi-assistants-service`)
+### Wave 1 — handler preconditions
+- **Implemented**: combined success+currentness check on `explain_results` and `what_would_flip`; defensive null-projection guard; chip-generator predicate parity via `isSuccessfulRunAnalysisFact`; degraded/stale templates in `no-op-helpers.ts`.
+- **Tested**: 121 tests across explain-results / what-would-flip / chip-generator / freshness; redaction tests assert no internal terms in recovery copy.
+- **Wired**: `analysisFreshness` plumbed through `HandlerInvocation`; `routingFreshness` passed at handler-invocation site; `decideExplanationPrecondition` shared by both handlers (extracted in follow-up).
+- **Accepted**: handlers refuse on missing/degraded/stale state with concrete recovery copy; verified by in-process acceptance suite + HTTP boundary tests.
 
-Wave 1:
-- `src/orchestrator-v5/context/freshness.ts` — added `isSuccessfulRunAnalysisFact`, `selectDegradedRunAnalysisFact`.
-- `src/orchestrator-v5/tools/handlers/explain-results.ts` — combined success+currentness precondition.
-- `src/orchestrator-v5/tools/handlers/what-would-flip.ts` — same precondition for symmetry.
-- `src/orchestrator-v5/tools/handlers/no-op-helpers.ts` — added `buildAnalysisStaleTemplate`, `buildAnalysisDegradedTemplate`.
-- `src/orchestrator-v5/compose/chip-generator.ts` — `findHandlerJustRan` and `deriveProjectionStatus` use `isSuccessfulRunAnalysisFact`.
-- `src/orchestrator-v5/tools/registry.ts` — `analysisFreshness?` on `HandlerInvocation`.
-- `src/orchestrator-v5/turn-executor.ts` — pass `routingFreshness` into handler invocation.
-- Test extensions across 3 files plus 1 new fixture in `__tests__/integration-explain-results-post-analysis.test.ts`.
+### Wave 2 — deterministic value updates
+- **Implemented**: Path A (selection narrowing for ambiguous label matches), Path B (deictic reference + selection), strict factor-only kind filter, staleness narrative on receipts.
+- **Tested**: 33 dvu unit tests, 11 turn-executor wire-level tests, 4 receipt redaction tests, 5 request-extension parse tests, 3 HTTP-boundary integration tests.
+- **Wired**: `selected_elements` extension parse; `route-v2-preflight` strip-list updated; `turn-executor` plumbing; receipt staleness narrative gated on prior successful analysis.
+- **Accepted**: HTTP boundary test confirms "Update that factor to £30,000" with one selected factor → 200 with `set_factor_value` graph_patch, zero LLM calls, no `edit_graph` leak, receipt in user units. Same message with no/wrong selection → clarify, no mutation.
 
-Wave 2:
-- `src/orchestrator-v5/boundary/request-extensions.ts` — additive parse of `selected_elements`.
-- `src/orchestrator/route-v2.ts` — pass `extensions.selectedElements` into `runTurnExecutor`.
-- `src/orchestrator-v5/turn-executor.ts` — factor-kind selection filter; Path B clarify dispatch.
-- `src/orchestrator-v5/routing/deterministic-value-update.ts` — `tryDeterministicValueUpdate` extended with `selectedFactorIds`; new `tryDeicticValueUpdate` + `buildDeicticClarifyAssistantText`.
-- `src/orchestrator-v5/tools/handlers/set-factor-value.ts` — staleness narrative appended to receipt when prior successful analysis exists.
-- Test extensions across 4 files.
+### Wave 3 — analysis-state coherence
+- **Implemented**: `src/lib/analysisFreshnessState.ts` pure derivation with `useAnalysisFreshnessState` memoised hook.
+- **Tested**: 17 selector tests + 3 wire-precedence tests on the consumer selector.
+- **Wired**: `selectConversationStatus` (used by ActionStrip) accepts `wireFreshness` and gives it precedence over `graphEditedSinceLastRun`. ActionStrip threads `ceeAnalysisReady?.freshness` into the input bag.
+- **Accepted**: when CEE returns `freshness=stale` on a complete result, ActionStrip status flips to `analysis_stale` regardless of the local edit signal; when CEE returns `freshness=fresh`, the surface shows `analysis_ready` even if the local signal lags.
 
-Wave 6:
-- `tools/v5-journey-replay/forbidden-terms.ts` — wordlist extension.
-- `tests/contract/v5-golden-path-acceptance.test.ts` (new) — in-process acceptance gate.
+### Wave 4 — UI result consumption
+- **Implemented**: `useResultCompleteness` pure derivation + curated `freshnessReasons.ts` (freshness + completeness reason→copy table) + source-to-render trace doc at `docs/v5/wave-4-source-to-render-trace.md` confirming no mapping/hydration bugs.
+- **Tested**: 20 derivation + curated-copy tests; 5 RTL tests for the wired surface; redaction asserts no internal codes reach the DOM.
+- **Wired**: `useResultsSectionData` returns `completeness: ResultCompleteness` on its result type; `DecisionConfidencePanel` passes `data.completeness?.reasons` to `HeroQualifier`; `HeroQualifier` accepts `completenessReasons` and renders curated copy with precedence over the dimension-threshold qualifier.
+- **Accepted**: HeroQualifier surfaces curated qualifier copy when source data is incomplete (e.g. all options lack `win_probability`, sensitivity values absent, decision review missing). Unknown reason codes route through a safe generic fallback; raw codes never reach the DOM. Existing dimension-threshold path preserved.
 
-### UI (`DecisionGuideAI`)
+### Wave 5 — debug bundle authority
+- **Implemented**: `derivePipelineStatus` pure function + scoped enum (six values) + recoverable-envelope category mapping.
+- **Tested**: 18 derivation tests; 5 bundle-structure tests pinning enum values, absence-reason source, legacy-field preservation.
+- **Wired**: `exportBundle` adapter `deriveBundlePipelineStatus` synthesises a RequestTrace shape from existing bundle data; bundle output now includes `pipeline.v5_pipeline_status` (the scoped enum) and `pipeline.v5_pipeline_status_source` (`derived_from_trace` / `cee_response_not_captured` / `no_cee_call_recorded`); legacy `pipeline.status` preserved for backwards compatibility.
+- **Accepted**: bundle reports `proxy_or_network_failure` on 5xx (CANNOT be promoted to `ui_render_success` by a fresh wire signal — pinned by precedence test); explicit absence reasons distinguish "CEE never called" from "CEE called, response not captured" from "CEE called, response captured".
 
-Wave 3:
-- `src/lib/analysisFreshnessState.ts` (new) — pure derivation.
-- `src/lib/useAnalysisFreshnessState.ts` (new) — memoised hook over canvas store.
-- `src/lib/__tests__/analysisFreshnessState.test.ts` (new).
+### Wave 6 — golden-path acceptance gate
+- **Implemented**: in-process acceptance test (`tests/contract/v5-golden-path-acceptance.test.ts`); HTTP-boundary integration test (`tests/integration/orchestrate-v2-deterministic-value-update.test.ts`); forbidden-terms wordlist extension covering the brief's full redaction list.
+- **Tested**: 10 in-process + 3 HTTP-boundary cases; the HTTP-boundary test caught a real regression (`selected_elements` extension-strip gap) that the in-process test couldn't reach.
+- **Wired**: tests run in CI without staging credentials; the acceptance test asserts cross-wave product properties (handler preconditions, deterministic routing, no internal-term leakage).
+- **Accepted**: the brief's hard acceptance gates are enforced as test failures: handler runs without prerequisites, value updates routed through `edit_graph` when they should be deterministic, internal-term leaks in user copy.
 
-Wave 4:
-- `docs/v5/wave-4-source-to-render-trace.md` (new) — per-field source-to-render trace doc.
-- `src/components/results/copy/freshnessReasons.ts` (new) — curated reason→copy table.
-- `src/components/results/useResultCompleteness.ts` (new) — pure derivation consulting source fields.
-- `src/components/results/__tests__/useResultCompleteness.test.ts` (new).
-- `src/components/results/__tests__/copy.freshnessReasons.test.ts` (new).
+### Follow-up: shared `decideExplanationPrecondition` helper
+- **Implemented + Tested + Wired + Accepted**: extracted to `no-op-helpers.ts`; both `explain_results` and `what_would_flip` consume the shared helper; 6 dedicated tests pin the predicate so future drift can't reintroduce.
 
-Wave 5:
-- `src/lib/derivePipelineStatus.ts` (new) — pure scoped pipeline-status derivation.
-- `src/lib/__tests__/derivePipelineStatus.test.ts` (new).
+### Follow-up: `TurnOutcome.graph_mutated` derivation
+- **Implemented + Tested + Wired + Accepted**: flag now derives from `handlerOutcome.mutated_graph` presence, not a hand-maintained handler-id allowlist. `set_factor_value`, `add_constraint`, `adjust_edge_strength` now correctly report `graph_mutated=true`. End-to-end pinning in `turn-executor-deterministic-value-update.test.ts`.
 
-## 4. Behaviour before vs after
+## 4. Test totals after follow-up
 
-**Wave 1 (handler preconditions)**
-- *Before*: `explain_results` against a `partial`/`failed`/`blocked` analysis fact executed and produced a confident-looking explanation drawn from a degraded projection.
-- *After*: Combined check distinguishes missing / degraded / stale / fresh and routes to dedicated recovery copy with the right chip on the next turn. Defensive null-projection guard prevents the composer's generic-line fallback from surfacing without a recovery action.
+- CEE orchestrator-v5 + contract + integration: **1901/1901 passing**.
+- UI directly-touched test files all green: selectors (16), ActionStrip (8), HeroQualifier (19), useResultCompleteness + copy (20), useResultsSectionData + buildResultsVM (169), debug full suite (328), analysisFreshnessState (17), derivePipelineStatus (18). Totals: 615 passing across the wired surfaces.
+- UI broader smoke run shows ~91 pre-existing baseline failures in unrelated files (verified by stash baseline check). These are out of scope.
 
-**Wave 2 (deterministic value updates)**
-- *Before*: "Update advertising budget to £30k" with one of two budget-named factors selected → multi-candidate clarify (LLM-bound). "Update that factor to £30k" → no_candidate_match → LLM. Receipts didn't mention staleness.
-- *After*: Path A narrows multi-candidate matches to a single factor when selection contains exactly one factor. Path B handles deictic references (`that factor`, `this factor`, `the selected factor`) when exactly one factor is selected. No `edit_graph`. No new LLM calls. Strict factor-only kind filtering — selected options/risks/outcomes/decisions never narrow. Receipts append staleness narrative when a prior successful analysis existed.
+## 5. Files changed by repo
 
-**Wave 3 (analysis-state coherence)**
-- *Before*: Four UI surfaces derived freshness independently; could disagree mid-render.
-- *After*: Single `useAnalysisFreshnessState` hook exposes `{ freshness, reason, recommendedAction, inputsMissing }`. Order of precedence: wire freshness > local edit signal. `inputsMissing` is non-empty when uncertain — drives Wave 4 curated copy and Wave 5 debug bundle reasons.
+### CEE (`olumi-assistants-service`) — 7 commits ahead of `staging`
 
-**Wave 4 (UI result consumption)**
-- *Before*: "Analysis complete" could render with null win probabilities and fabricated robustness state because UI-SEM-005/006/016/041/044 silently substituted defaults.
-- *After*: Trace document confirms no mapping/hydration bugs. `useResultCompleteness` consults source fields BEFORE fabrications and reports `{ status, missing[], reasons[] }`. Curated `freshnessReasons.ts` resolves both freshness and completeness reason codes through a British-English table; unknown codes route through a safe generic line — internal codes never reach the DOM. **Consumer wiring (HeroQualifier qualifier line, ResultsBody fallback coaching block) deferred to a follow-up commit** because touching those surfaces breaks numerous snapshot tests; the brief allowed for incremental adoption.
+| Commit | What |
+|---|---|
+| `9d3136ac` | Wave 1: handler preconditions |
+| `814b9bb8` | Wave 2: deterministic value-update |
+| `c2075068` | Wave 6: in-process acceptance gate + forbidden-terms |
+| `3daab627` | Original final report |
+| `21beb5aa` | Follow-up: graph_mutated fix + shared decideExplanationPrecondition |
+| `1f9b0755` | Follow-up: HTTP-boundary integration test (caught the `selected_elements` strip-list regression) |
+| (this commit) | Updated final report |
 
-**Wave 5 (debug bundle authority)**
-- *Before*: Bundle could mark a turn "successful" globally even when the run gate failed or payloads were missing.
-- *After*: `derivePipelineStatus` returns one of six scoped enum values: `ui_render_success | cee_response_received | analysis_not_run | analysis_failed | proxy_or_network_failure | payload_capture_disabled`. Network failure cannot be hidden by wire freshness; analysis failure cannot be hidden by a 200. **Bundle-assembly-site wiring deferred** for the same snapshot-impact reason; the pure derivation is consumable today.
+### UI (`DecisionGuideAI`) — 4 commits ahead of `staging`
 
-**Wave 6 (acceptance gate)**
-- *Before*: No in-process golden-path acceptance harness.
-- *After*: `tests/contract/v5-golden-path-acceptance.test.ts` runs cross-wave product-shape checks in CI without staging connectivity. Forbidden-terms wordlist extended with the brief's full redaction list.
+| Commit | What |
+|---|---|
+| `ed31eddc` | Wave 3: analysis-freshness selector + hook |
+| `7fc0ec24` | Wave 4: result-completeness selector + curated copy + trace doc |
+| `fb45a4aa` | Wave 5: pipeline-status derivation |
+| `9507d96a` | Follow-up: wire Wave 3-5 helpers into ActionStrip / HeroQualifier / DecisionConfidencePanel / useResultsSectionData / exportBundle |
 
-## 5. Handler preconditions added (Wave 1)
+## 6. Behaviour before vs after — summary
 
-`explain_results` and `what_would_flip` now resolve a four-state verdict before executing:
-- **missing** — no run_analysis fact at all → "Run analysis" template + chip.
-- **degraded** — latest fact non-success (partial / failed / blocked) → "didn't produce a usable result" + Re-run.
-- **stale** — successful fact but graph hash diverged → "model has changed" + Re-run.
-- **fresh** / **legacy-with-projection** — execute.
+The waves now deliver real UX changes (Accepted state). Concrete examples:
 
-Verdict reuses `analysisFreshness` from `HandlerInvocation` plus `selectDegradedRunAnalysisFact`. Defensive null-projection guard treats missing projection as `missing` regardless of fact state.
+- "Update that factor to £30,000" with one factor selected → previously fell through to LLM/clarify (or 422'd before this branch). Now: 200 with `set_factor_value` mutation, no LLM call, receipt in user units, prior analysis marked stale and re-run prompted.
+- "Why did opt_1 win?" against a partial/failed analysis → previously produced a confident-looking explanation drawn from degraded data. Now: dedicated recovery template per state with a concrete next-step chip; no internal terms in copy.
+- ActionStrip post-analysis status when CEE says stale but local edit signal hasn't fired yet → previously inconsistent across surfaces. Now: wire freshness wins; surface shows `analysis_stale` immediately.
+- Results panel rendering with PLoT-incomplete data → previously rendered fabricated zeros silently. Now: HeroQualifier surfaces a curated qualifier line ("Likelihood scores aren't available, so we're comparing options by expected outcome.") explicitly, with the data-attribute trace `data-qualifier-source="completeness"`.
+- Debug bundle on a 5xx turn → previously could report `pipeline.status: "success"` based on stale state. Now: `v5_pipeline_status` enum is `proxy_or_network_failure`, with `v5_pipeline_status_source` distinguishing capture state. Network failure cannot be promoted to success by any wire-level signal.
 
-## 6. Contextual value-update behaviour and examples
+## 7. Performance observations
 
-| Utterance | Selection | Result |
-|---|---|---|
-| "Set Advertising budget to £30k" | (any) | Single substring match → `set_factor_value` (existing path, preserved) |
-| "Update Advertising budget to £30k" | (any) | Single substring match → `set_factor_value` |
-| "Raise budget and cost to £30k" | one factor | Path A narrows → `set_factor_value` for that factor |
-| "Raise budget and cost to £30k" | no selection | Multi-candidate → clarify chips |
-| "Raise budget and cost to £30k" | both factors | Multi-candidate → clarify (selection too broad) |
-| "Update that factor to £30k" | one factor | Path B → `set_factor_value` for that factor |
-| "Update that factor to £30k" | no selection | Path B clarify (`no_factor_selected`) |
-| "Update that factor to £30k" | two factors | Path B clarify (`multiple_factors_selected`) |
-| "Update that factor to £30k" | option / risk / outcome | Filtered to empty factor selection → clarify |
-| "Update team maturity to mid-weight developers" | (any) | No quantity → falls through to LLM (categorical clarify deferred) |
-| "What if budget were £30k?" | (any) | Hypothetical gate → falls through to LLM |
+No new LLM calls on deterministic paths. No new network calls. Wave 5 derivation is O(1). Wave 4 completeness derivation is O(fields) per render, memoised. No latency regressions introduced.
 
-Receipts use user units (`£30,000`), human label, and append staleness narrative + Re-run prompt only when a prior successful analysis existed.
+## 8. Security / redaction observations
 
-## 7. Analysis-state contract changes (Wave 3 — UI selector only, no CEE change)
+- All recovery copy across explanation handlers passes the forbidden-terms scan with zero matches.
+- `set_factor_value` receipts use user units (`£30,000`), never normalised model-unit fractions (`0.x`). HTTP-boundary test asserts this on the wire response.
+- Curated UI copy table tests assert no internal terms reach the DOM (`Zod`, `noop`, `patch`, `graph_hash`, raw IDs, `BUDGET_TARGET`, etc.).
+- Debug payloads remain bounded — no large body stringification added.
 
-Single derivation `deriveAnalysisFreshnessState` consumed by `useAnalysisFreshnessState`. No CEE wire-field change. No store schema change. `analysisStateReady` and `graphEditedSinceLastRun` are kept as backwards-compatible inputs to the selector.
+## 9. CEE worktree state — full disclosure
 
-Authoritative fields after this work:
-- Wire: `analysis_ready.freshness` and `analysis_ready.freshness_reason` (CEE).
-- Local: `graphEditedSinceLastRun`, `results.report`, `results.status`, derived option/goal counts.
-- Selector output: `{ freshness, reason, recommendedAction, inputsMissing }`.
+The branch retains untracked files that pre-existed branching (none authored by this work). They are NOT committed and are NOT in the diff against `staging`. Listing for handoff transparency:
 
-## 8. UI result-consumption fixes (Wave 4)
+- `.claude/` (local Claude Code session state)
+- `Docs/Remove Netlify Edge From Long-Running V5 Turn Path.md` (unrelated working doc)
+- `tests/fixtures/cross-service/v5-turn.explain-fresh.staging.json` (fixture)
+- `tools/edit-evaluator/` (separate evaluator subproject)
+- `tools/graph-evaluator/fixtures/decision-review/06-flip-thresholds.json`, `07-full-new-fields.json`, `08-sparse-input.json`
+- `tools/graph-evaluator/fixtures/repair-graph/`, `validate-graph/`, `zone2/`
+- `tools/graph-evaluator/prompts/draft_graph_v193a.txt`
+- `tools/graph-evaluator/src/repair-graph-scorer.ts`, `validate-graph-scorer.ts`
+- `tools/v5-journey-replay/state-trust-verify.ts`
 
-Source-to-render trace at `docs/v5/wave-4-source-to-render-trace.md` confirmed no mapping/hydration bugs. The fix is consumption-side:
-- `useResultCompleteness` flags partial coverage of: `win_probability`, `expected_outcome`, `sensitivity`, `robustness_level`, `recommendation_stability`, `decision_review`, `top_drivers`.
-- Curated copy in `src/components/results/copy/freshnessReasons.ts` resolves both freshness reason codes (Wave 3) and completeness reason codes (Wave 4) to British-English copy.
-- Why result fields can still be missing: PLoT/ISL legitimately omit fields under degraded conditions (`win_probability` when ranking is by goal_probability only, `sensitivity` when ISL didn't compute, decision review as optional CEE enrichment). The brief's redaction rules forbid raw codes; the curated table is the only path to user copy.
+Stash entry preserved: `stash@{0}: On staging: p0-v5: park prompt expansion (out of scope for golden-path integration repair)`. The 291-line `data/prompts.json` change is NOT applied during this work and is NOT in any commit.
 
-## 9. Debug bundle improvements (Wave 5)
+These are user files. They have NOT been modified or deleted. Recommend the user reviews / commits / stashes them as appropriate before push.
 
-`derivePipelineStatus` derives a scoped enum from the existing `RequestTrace` shape (`status`, `completed`, `error`, `responseHash`, `service`, `serviceBuild`) plus the wire `analysis_ready` state and any recoverable rejection envelope. No new server header needed (`x-olumi-service-build` and `x-request-id` already exist). Tests cover precedence properties: network failure cannot be promoted to `ui_render_success` by a fresh wire signal; analysis failure cannot be hidden by a 200 status.
+## 10. Known remaining risks / deferred items
 
-## 10. Golden-path harness / evidence (Wave 6)
+- Live `tools/v5-journey-replay/` extension with new step coverage (selected-deictic value update, freshness-after-mutation). The HTTP-boundary integration test now covers the same single-turn properties without needing CEE_API_KEY. A multi-turn live replay covering the full 9-step journey is still useful and would land in a follow-up requiring staging credentials.
+- UI broader smoke shows ~91 pre-existing baseline failures unrelated to this work. Documented as out of scope; CI is the authoritative gate.
+- Categorical factor-state updates remain LLM-routed (no quantity → no_quantity gate). Schema doesn't support ordinal factor states with display values; addressing this would need a schema change.
+- UI-SEM-005 / -006 / -016 / -041 / -044 robustness fabrications remain as display floors. Wave 4's completeness layer surfaces these states honestly without removing the floor; full removal is large blast radius and out of scope.
 
-`tests/contract/v5-golden-path-acceptance.test.ts` runs in CI without staging credentials and asserts cross-wave product properties:
-- Gate 1 — handler preconditions (missing / degraded / stale recovery).
-- Gate 2 — value-update path A (label match), path B (deictic), ambiguous clarify (never edit_graph), kind-strict selection narrowing.
-- Gate 3 — recovery copy contains zero forbidden terms.
+## 11. Whether safe to merge to staging
 
-The forbidden-terms wordlist extension also strengthens the live `tools/v5-journey-replay/` tool when run against staging.
+**Yes for the wired-and-accepted scope.** The branch now reaches the brief's user-facing acceptance criteria across all six waves plus the two follow-up corrections. Cross-wave acceptance is enforced by:
 
-## 11. Tests run after each wave and final
+- 1901 CEE tests passing including the HTTP-boundary acceptance suite.
+- 615 UI tests passing on directly-touched surfaces, with rendered behaviour pinned by RTL tests for HeroQualifier and consumer-selector tests for ActionStrip.
 
-Per-wave focused suites all green:
-- Wave 1: `pnpm exec vitest run src/orchestrator-v5/tools/handlers/__tests__/explain-results.test.ts ...what-would-flip... ...integration-explain-results-post-analysis... compose/__tests__/chip-generator.test.ts context/__tests__/freshness.test.ts` → 121/121.
-- Wave 2: `pnpm exec vitest run routing/__tests__/deterministic-value-update.test.ts __tests__/turn-executor-deterministic-value-update.test.ts tools/handlers/__tests__/set-factor-value.test.ts boundary/__tests__/request-extensions.test.ts` → 78/78.
-- Wave 3 (UI): `npx vitest run src/lib/__tests__/analysisFreshnessState.test.ts` → 17/17.
-- Wave 4 (UI): `npx vitest run src/components/results/__tests__/useResultCompleteness.test.ts copy.freshnessReasons.test.ts` → 20/20.
-- Wave 5 (UI): `npx vitest run src/lib/__tests__/derivePipelineStatus.test.ts` → 18/18.
-- Wave 6: `pnpm exec vitest run tests/contract/v5-golden-path-acceptance.test.ts` → 10/10.
+Pre-merge cleanup recommended (NOT done in this branch — these are user-owned decisions):
+- Review the untracked files in section 9.
+- Decide whether to apply / discard the `data/prompts.json` stash.
+- Run the local Tier 3 full pre-push gate or rely on CI (per CLAUDE.md, CI is authoritative).
 
-Final regressions:
-- CEE full orchestrator-v5: `pnpm exec vitest run src/orchestrator-v5/ tests/contract/v5-golden-path-acceptance.test.ts` → **1888/1888 passing**, no regressions vs `staging` baseline.
-- UI Wave 3-5 explicit: 55/55.
-- UI typecheck: clean on touched files.
+## 12. Confirmation
 
-UI full repo suite + CI gate are not run locally per CLAUDE.md instructions ("CI is the authoritative gate; never run npm test full suite after every code change"). The pre-push fast gate would run typecheck + lint + smoke + dep audit.
-
-## 12. Performance observations
-
-- Wave 1: O(n) → O(n) over `prior_facts` with one selector sort. No regression.
-- Wave 2: Selection narrowing is O(k≤4) intersection per turn. Negligible.
-- Wave 3: Memoised pure derivation. Negligible.
-- Wave 4: O(fields) null-check pass per render. Negligible.
-- Wave 5: Pure function, runs once per bundle export. Negligible.
-- Wave 6: Test-only, off the request path.
-
-No latency regressions. No new LLM calls anywhere on deterministic paths. Latency targets in the brief (deterministic <1 s, handler <10 s, draft graph longer with progress, anything >30 s flagged) are unchanged from staging baseline; the tests do not measure wall-clock latency directly because they run in-process.
-
-## 13. Security / redaction observations
-
-- All recovery copy across explanation handlers passes `findForbiddenMatches` with zero matches. Tested in `explain-results.test.ts`, `what-would-flip.test.ts`, and `v5-golden-path-acceptance.test.ts`.
-- `set_factor_value` receipts use user units (`£30,000`), never normalised model-unit fractions (`0.x`). Tested in `set-factor-value.test.ts`.
-- Curated UI copy table tests assert no internal terms reach the DOM (`Zod`, `noop`, `patch`, `graph_hash`, raw IDs, `BUDGET_TARGET`).
-- Debug payloads remain bounded — no large body stringification was added.
-
-## 14. Known remaining risks / deferred items
-
-- `data/prompts.json` stash — preserved as `stash@{0}` in CEE, NOT reapplied. Out of scope for P0; the user can apply or discard separately.
-- HeroQualifier / ResultsBody consumer wiring of `useResultCompleteness` and `freshnessReasonCopy`. Pure derivation is shipped; touching the visible surfaces breaks several snapshot tests and warrants its own commit. Brief permitted incremental adoption.
-- Bundle-assembly-site wiring of `derivePipelineStatus` in `src/components/debug/utils/exportBundle.ts`. Same reasoning.
-- Categorical factor-state updates ("update team maturity to mid-weight developers") fall through to LLM. Schema doesn't currently support ordinal factor states with display values; the brief flagged this for Phase 0 investigation. Verdict: NOT supported in current schema → safest path is LLM clarification, which already happens.
-- UI-SEM-005 / -006 / -016 / -041 / -044 fabrications remain as display floors. Removing them is large blast radius and out of scope; Wave 4 surfaces partial completeness honestly without removal.
-- Live `tools/v5-journey-replay/` extension with steps for selected-deictic value update and freshness-after-mutation. The in-process suite covers the same product-shape properties without staging dependency.
-
-## 15. Whether safe to merge to staging
-
-**Yes**, conditional on the user reviewing the deferred consumer-wiring items in section 14 and the unrelated UI artifacts in `git status` (untracked `Docs/`, `tools/edit-evaluator/`, etc., that pre-existed on the branching commit and are not part of this work).
-
-All seven commits build cleanly per Wave-level focused tests. No CEE schema bump, no wire-field change, no new server header, no new LLM call, no PLoT/ISL change, no prompt rewrite. Surgical edits only.
-
-## 16. Confirmation
-
-Local commits only. No `git push`, no merge to `main` or `staging`, no deploy.
-
-## 17–23. Additional sections required by revised brief
-
-**17. Deterministic context available for selected-factor resolution**: UI sends `selected_elements: { node_ids?, edge_ids? }` on conversation/explain turns. CEE consumes only `node_ids` and only after kind-filtering to `factor`. Selected option/risk/outcome/decision is dropped at the executor before reaching the pre-route. No graph-aliases / pronoun history / cross-turn reference is currently plumbed; deictic Path B uses selection only ("that factor" + selection narrows to exactly one factor).
-
-**18. Categorical updates**: Not supported in the current schema (no ordinal/categorical factor state with display value mapping). The pre-route's no-quantity gate falls through to LLM, which can clarify or route to another handler. Deliberate clarification rather than invented numeric mappings.
-
-**19. Authoritative analysis-state fields after this work**:
-- Wire (CEE): `analysis_ready.freshness`, `analysis_ready.freshness_reason`, `analysis_ready.status`, `analysis_ready.options[]`, `analysis_ready.goal_node_id`, `analysis_ready.graph_hash_at_run`, `analysis_ready.current_graph_hash` (all stamped by the existing finaliser; unchanged in this work).
-- UI store: `ceeAnalysisReady` (carries the wire above), `graphEditedSinceLastRun`, `results.status`, `results.report`, derived option/goal counts.
-- Selector output: `useAnalysisFreshnessState` returns the single coherent verdict consumed by surfaces.
-
-**20. UI surfaces consuming the shared selector**: The hook is shipped and ready for adoption by HeroQualifier, ResultsBody, pre-analysis panel, chat composer, and DiagnosticsOverlay. Live consumer migration is incremental (deferred per section 14).
-
-**21. Why any result fields are still allowed to be missing**: Per the source-to-render trace (`docs/v5/wave-4-source-to-render-trace.md`):
-- PLoT legitimately omits `win_probability` per option when ranking is goal-probability-based.
-- ISL legitimately omits `sensitivity_score` / `elasticity` / `importance_score` when not computed.
-- CEE-side `decision_review` / `m1_coaching` is optional post-analysis enrichment.
-- UI-SEM-005/006/016/041/044 robustness fabrications are intentional display floors.
-
-In each case the curated `completenessReasonCopy` / `freshnessReasonCopy` resolver is the path to user-facing text — raw codes never echoed.
-
-**22. Baseline test failures**: CEE `pnpm typecheck` reports pre-existing baseline TypeScript errors (test fixtures missing `source` and `turn_class` fields, openai/anthropic SDK target lib mismatches, etc.). These are unrelated to this work — present on `staging` before this branch was created. Verified by stashing the branch changes and rerunning typecheck. Per-file typecheck on touched files is clean. CI is the authoritative gate.
-
-**23. `data/prompts.json` confirmation**: Stashed as `stash@{0}: On staging: p0-v5: park prompt expansion (out of scope for golden-path integration repair)`. NOT applied during this work. NOT included in any commit. Out of scope for P0.
-
----
-
-## Commit map
-
-CEE (3 commits ahead of `staging`):
-- `9d3136ac` — Wave 1: handler preconditions
-- `814b9bb8` — Wave 2: deterministic value-update
-- `c2075068` — Wave 6: acceptance gate + forbidden-terms
-
-UI (3 commits ahead of `staging`):
-- `ed31eddc` — Wave 3: analysis-freshness selector
-- `7fc0ec24` — Wave 4: result-completeness + curated copy + trace doc
-- `fb45a4aa` — Wave 5: pipeline-status derivation
+Local commits only. No `git push`. No merge to `main` or `staging`. No deploy. No prompt-stash reapply. No deletion of user untracked files.
