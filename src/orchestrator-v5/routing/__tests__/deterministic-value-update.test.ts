@@ -15,8 +15,10 @@ import type { QuantityExtractionResult } from '../../context/cqe/schema-types.js
 import type { GraphLookup } from '../validator.js';
 import {
   tryDeterministicValueUpdate,
+  tryDeicticValueUpdate,
   buildClarifyAssistantText,
   buildClarifyChipMessage,
+  buildDeicticClarifyAssistantText,
 } from '../deterministic-value-update.js';
 
 function makeGraph(
@@ -314,5 +316,231 @@ describe('buildClarifyAssistantText / buildClarifyChipMessage', () => {
       quantity(300000, '£300k'),
     );
     expect(msg).toBe('Increase Hiring and Staffing Cost to £300k.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0 V5 golden-path repair (Wave 2) — Path A selection narrowing
+// ---------------------------------------------------------------------------
+
+// Two factors whose labels both appear as substrings in the message.
+// Substring matching requires the label to be a substring of the message
+// (case-insensitive), so the labels here are short standalone tokens.
+const TWO_FACTORS_BOTH_NAMED = makeGraph([
+  { id: 'fac_a', label: 'budget' },
+  { id: 'fac_b', label: 'cost' },
+]);
+const PARSED_30K: QuantityExtractionResult[] = [quantity(30000, '£30k')];
+
+describe('tryDeterministicValueUpdate — Path A: selection narrows multi-candidate', () => {
+  it('two substring matches + selection picks one factor → set_factor_value on that factor', () => {
+    const result = tryDeterministicValueUpdate(
+      'Raise budget and cost to £30k',
+      PARSED_30K,
+      TWO_FACTORS_BOTH_NAMED,
+      ['fac_a'],
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.dispatch).toBe('set_factor_value');
+      if (result.dispatch === 'set_factor_value') {
+        expect(result.candidate.id).toBe('fac_a');
+      }
+    }
+  });
+
+  it('two substring matches + selection contains zero of the candidates → clarify', () => {
+    const result = tryDeterministicValueUpdate(
+      'Raise budget and cost to £30k',
+      PARSED_30K,
+      TWO_FACTORS_BOTH_NAMED,
+      ['fac_unrelated'],
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) expect(result.dispatch).toBe('clarify');
+  });
+
+  it('two substring matches + selection contains both candidates → clarify (selection too broad)', () => {
+    const result = tryDeterministicValueUpdate(
+      'Raise budget and cost to £30k',
+      PARSED_30K,
+      TWO_FACTORS_BOTH_NAMED,
+      ['fac_a', 'fac_b'],
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) expect(result.dispatch).toBe('clarify');
+  });
+
+  it('single substring match + no selection → unchanged behaviour (existing test parity)', () => {
+    const single = makeGraph([
+      { id: 'fac_ad_budget', label: 'Advertising budget' },
+      { id: 'fac_other', label: 'Headcount' },
+    ]);
+    const result = tryDeterministicValueUpdate(
+      'Set Advertising budget to £30k',
+      PARSED_30K,
+      single,
+      [],
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.dispatch).toBe('set_factor_value');
+      if (result.dispatch === 'set_factor_value') {
+        expect(result.candidate.id).toBe('fac_ad_budget');
+      }
+    }
+  });
+
+  it('single substring match + selection on a different factor → label match still wins', () => {
+    // Selection should narrow only when label evidence is ambiguous.
+    // Otherwise the explicit label is more authoritative than selection.
+    const single = makeGraph([
+      { id: 'fac_ad_budget', label: 'Advertising budget' },
+      { id: 'fac_other', label: 'Headcount' },
+    ]);
+    const result = tryDeterministicValueUpdate(
+      'Set Advertising budget to £30k',
+      PARSED_30K,
+      single,
+      ['fac_other'],
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.dispatch).toBe('set_factor_value');
+      if (result.dispatch === 'set_factor_value') {
+        expect(result.candidate.id).toBe('fac_ad_budget');
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0 V5 golden-path repair (Wave 2) — Path B selected-deictic
+// ---------------------------------------------------------------------------
+
+describe('tryDeicticValueUpdate — Path B: deictic + selection', () => {
+  const FACTORS = makeGraph([
+    { id: 'fac_ad_budget', label: 'Advertising budget' },
+    { id: 'fac_other', label: 'Headcount' },
+  ]);
+  const RESOLVE = (id: string) =>
+    id === 'fac_ad_budget' ? 'Advertising budget' : id === 'fac_other' ? 'Headcount' : null;
+
+  it('"Update that factor to £30k" + exactly one factor selected → set_factor_value', () => {
+    const result = tryDeicticValueUpdate(
+      'Update that factor to £30,000',
+      PARSED_30K,
+      FACTORS,
+      ['fac_ad_budget'],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.dispatch).toBe('set_factor_value');
+      if (result.dispatch === 'set_factor_value') {
+        expect(result.candidate.id).toBe('fac_ad_budget');
+        expect(result.candidate.label).toBe('Advertising budget');
+      }
+    }
+  });
+
+  it('"Update this factor to £30k" works the same way', () => {
+    const result = tryDeicticValueUpdate(
+      'Update this factor to £30k',
+      PARSED_30K,
+      FACTORS,
+      ['fac_ad_budget'],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) expect(result.dispatch).toBe('set_factor_value');
+  });
+
+  it('"Set the selected factor to £30k" works the same way', () => {
+    const result = tryDeicticValueUpdate(
+      'Set the selected factor to £30k',
+      PARSED_30K,
+      FACTORS,
+      ['fac_ad_budget'],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) expect(result.dispatch).toBe('set_factor_value');
+  });
+
+  it('deictic + no selection → clarify (no_factor_selected)', () => {
+    const result = tryDeicticValueUpdate(
+      'Update that factor to £30k',
+      PARSED_30K,
+      FACTORS,
+      [],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched && result.dispatch === 'clarify_deictic') {
+      expect(result.reason).toBe('no_factor_selected');
+    }
+  });
+
+  it('deictic + multiple factors selected → clarify (multiple_factors_selected)', () => {
+    const result = tryDeicticValueUpdate(
+      'Update that factor to £30k',
+      PARSED_30K,
+      FACTORS,
+      ['fac_ad_budget', 'fac_other'],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched && result.dispatch === 'clarify_deictic') {
+      expect(result.reason).toBe('multiple_factors_selected');
+    }
+  });
+
+  it('deictic with no quantity → no_quantity skip (falls through to LLM)', () => {
+    const result = tryDeicticValueUpdate(
+      'Update that factor',
+      [],
+      FACTORS,
+      ['fac_ad_budget'],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.skip_reason).toBe('no_quantity');
+  });
+
+  it('non-deictic message → no_deictic skip (Path A handles it)', () => {
+    const result = tryDeicticValueUpdate(
+      'Update Advertising budget to £30k',
+      PARSED_30K,
+      FACTORS,
+      ['fac_ad_budget'],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.skip_reason).toBe('no_deictic');
+  });
+
+  it('hypothetical-gated deictic ("what if I set that factor to £30k") → hypothetical_gate', () => {
+    const result = tryDeicticValueUpdate(
+      'What if I set that factor to £30k',
+      PARSED_30K,
+      FACTORS,
+      ['fac_ad_budget'],
+      RESOLVE,
+    );
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.skip_reason).toBe('hypothetical_gate');
+  });
+
+  it('clarify copy contains no internal terms', () => {
+    const noFactor = buildDeicticClarifyAssistantText('no_factor_selected');
+    const tooMany = buildDeicticClarifyAssistantText('multiple_factors_selected');
+    for (const text of [noFactor, tooMany]) {
+      expect(text).not.toMatch(/\bfac_/);
+      expect(text).not.toMatch(/\bnoop\b/i);
+      expect(text).not.toMatch(/\bzod\b/i);
+      expect(text).not.toMatch(/\bedit_graph\b/i);
+      expect(text).not.toMatch(/\bnormalised\b/i);
+    }
   });
 });

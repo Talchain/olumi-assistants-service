@@ -48,6 +48,26 @@ import { bigramDice } from './validator.js';
 const EDIT_VERB_PATTERN =
   /\b(increase|decrease|reduce|raise|lower|set|change|update|make|adjust)\b/i;
 
+/**
+ * P0 V5 golden-path repair (Wave 2, Path B) — deictic reference patterns.
+ *
+ * Targets value-update phrasings that don't carry a label but DO carry a
+ * pointer ("that factor", "this factor", "the selected factor", "the
+ * highlighted one"). When the user clicked a factor on the canvas and
+ * then typed a deictic value-update, we can resolve deterministically
+ * without an LLM call — provided exactly one selected factor exists.
+ *
+ * Bare "it" is intentionally OUT of this list. Pronoun resolution
+ * across turns needs LLM coreference and is out of scope; a misfire on
+ * "set it to £30k" silently mutating the wrong factor is worse than
+ * falling through to clarify.
+ *
+ * Patterns are word-bounded so phrases like "do that" or "this morning"
+ * never match.
+ */
+const DEICTIC_REFERENCE_PATTERN =
+  /\b(?:(?:that|this) (?:factor|node|one)|(?:the (?:selected|highlighted|chosen)) (?:factor|node|one))\b/i;
+
 // Case-insensitive substring matches; some are anchored on word boundary
 // so "fastest" doesn't trigger `\btest\b` and "iframe" doesn't trigger
 // `imagine`. Multi-word phrases are unambiguous as substring matches.
@@ -123,10 +143,23 @@ export type SkipReason =
   | 'hypothetical_gate'
   | 'no_candidate_match';
 
+/**
+ * P0 V5 golden-path repair (Wave 2): UI-side selection context, narrowed
+ * to factor-kind ids by the caller. The pre-route uses this as a strict
+ * tie-breaker only — never as the sole basis for a dispatch when the
+ * label evidence already resolves to one factor.
+ *
+ * Caller is responsible for the kind-filter (factor only). Selected
+ * options/risks/outcomes/decisions must be filtered out upstream so a
+ * non-factor selection can't silently update a factor.
+ */
+export type SelectedFactorIds = readonly string[];
+
 export function tryDeterministicValueUpdate(
   message: string,
   parsedQuantities: readonly QuantityExtractionResult[],
   graphLookup: GraphLookup | undefined,
+  selectedFactorIds: SelectedFactorIds = [],
 ): ValueUpdateDispatch {
   if (!EDIT_VERB_PATTERN.test(message)) {
     return { matched: false, skip_reason: 'no_edit_verb' };
@@ -224,12 +257,170 @@ export function tryDeterministicValueUpdate(
     };
   }
 
+  // P0 V5 golden-path repair (Wave 2, Path A — selection narrowing):
+  // when label evidence yields multiple candidates AND the UI selection
+  // intersects them at exactly one factor, treat the selection as a
+  // strict tie-breaker. Non-factor selections never appear here because
+  // the caller pre-filters to factor-kind ids. If the intersection is
+  // zero or > 1, fall through to clarify — never silently update a
+  // factor because some unrelated node was selected.
+  if (matched.length > 1 && selectedFactorIds.length > 0) {
+    const selectionSet = new Set(selectedFactorIds);
+    const narrowed = matched.filter((c) => selectionSet.has(c.id));
+    if (narrowed.length === 1) {
+      return {
+        matched: true,
+        dispatch: 'set_factor_value',
+        candidate: narrowed[0]!,
+        quantity,
+      };
+    }
+  }
+
   return {
     matched: true,
     dispatch: 'clarify',
     candidates: matched,
     quantity,
   };
+}
+
+/**
+ * P0 V5 golden-path repair (Wave 2, Path B — selected-deictic).
+ *
+ * Detect deterministic value-update intent expressed via deictic
+ * reference + UI selection: "Update that factor to £30,000" with
+ * exactly one factor selected. Returns:
+ *   - `null` when the message has no deictic reference (caller should
+ *     fall through to label-based path A or LLM).
+ *   - A clarify dispatch when the deictic IS present but the selection
+ *     doesn't yield exactly one factor — never silently update a
+ *     non-factor and never guess.
+ *   - A set_factor_value dispatch when exactly one factor is selected
+ *     AND a quantity is parsed.
+ *
+ * Pronoun resolution across turns is intentionally not handled here.
+ * "Set it to £30k" without a selection still falls through to the LLM.
+ *
+ * Categorical / state updates ("update team maturity to mid-weight
+ * developers") are NOT supported by this path — there is no quantity,
+ * so the no_quantity gate triggers below and the message reaches the
+ * LLM. The handler set_factor_value rejects categorical proposals
+ * upstream; until the schema supports ordinal states, the LLM is the
+ * right fallback (it can clarify or route to another handler).
+ */
+export type DeicticDispatch =
+  | { readonly matched: false; readonly skip_reason: 'no_deictic' }
+  | { readonly matched: false; readonly skip_reason: 'no_edit_verb' }
+  | { readonly matched: false; readonly skip_reason: 'no_quantity' }
+  | { readonly matched: false; readonly skip_reason: 'no_graph' }
+  | { readonly matched: false; readonly skip_reason: 'hypothetical_gate' }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'clarify_deictic';
+      readonly reason:
+        | 'no_factor_selected'
+        | 'multiple_factors_selected';
+      readonly quantity: QuantityExtractionResult;
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'set_factor_value';
+      readonly candidate: ValueUpdateCandidate;
+      readonly quantity: QuantityExtractionResult;
+    };
+
+/**
+ * Resolve a deictic value-update against UI selection. Caller passes
+ * factor-kinded selection (already filtered upstream) plus a label
+ * lookup function for the resolved id, so this function can produce a
+ * `ValueUpdateCandidate` with the human label for the receipt copy.
+ *
+ * The label lookup is supplied by the caller (rather than reading
+ * graphLookup here) because graphLookup buckets factor under the broader
+ * 'node' EntityKind and exposes labels indirectly; the caller already
+ * walks the graph for the factor-kind filter, so it has the labels in
+ * hand.
+ */
+export function tryDeicticValueUpdate(
+  message: string,
+  parsedQuantities: readonly QuantityExtractionResult[],
+  graphLookup: GraphLookup | undefined,
+  selectedFactorIds: SelectedFactorIds,
+  resolveFactorLabel: (id: string) => string | null,
+): DeicticDispatch {
+  if (!DEICTIC_REFERENCE_PATTERN.test(message)) {
+    return { matched: false, skip_reason: 'no_deictic' };
+  }
+  if (!EDIT_VERB_PATTERN.test(message)) {
+    return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+  for (const pat of HYPOTHETICAL_PATTERNS) {
+    if (pat.test(message)) {
+      return { matched: false, skip_reason: 'hypothetical_gate' };
+    }
+  }
+  const quantity = parsedQuantities.find((q) => q.value !== null);
+  if (!quantity) {
+    return { matched: false, skip_reason: 'no_quantity' };
+  }
+  if (graphLookup === undefined) {
+    return { matched: false, skip_reason: 'no_graph' };
+  }
+  if (selectedFactorIds.length === 0) {
+    return {
+      matched: true,
+      dispatch: 'clarify_deictic',
+      reason: 'no_factor_selected',
+      quantity,
+    };
+  }
+  if (selectedFactorIds.length > 1) {
+    return {
+      matched: true,
+      dispatch: 'clarify_deictic',
+      reason: 'multiple_factors_selected',
+      quantity,
+    };
+  }
+  const id = selectedFactorIds[0]!;
+  const label = resolveFactorLabel(id);
+  if (label === null || label.trim().length === 0) {
+    // Defensive: factor exists in selection but lacks a label. Falling
+    // back to clarify rather than dispatching with a blank receipt.
+    return {
+      matched: true,
+      dispatch: 'clarify_deictic',
+      reason: 'no_factor_selected',
+      quantity,
+    };
+  }
+  return {
+    matched: true,
+    dispatch: 'set_factor_value',
+    candidate: { id, label, score: 1, source: 'substring' },
+    quantity,
+  };
+}
+
+/**
+ * User-facing clarification copy for the deictic-but-ambiguous path.
+ * British English, no internal terms.
+ */
+export function buildDeicticClarifyAssistantText(
+  reason: 'no_factor_selected' | 'multiple_factors_selected',
+): string {
+  if (reason === 'no_factor_selected') {
+    return (
+      `I wasn't sure which factor you meant. Please click the factor on ` +
+      `the canvas and try again, or tell me the factor's name.`
+    );
+  }
+  return (
+    `You have more than one factor selected, so I'm not sure which one to ` +
+    `update. Please select just the factor you want to change, or tell me ` +
+    `its name.`
+  );
 }
 
 /**

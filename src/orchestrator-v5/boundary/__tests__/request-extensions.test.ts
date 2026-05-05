@@ -196,4 +196,65 @@ describe('parseRequestExtensions', () => {
       expect(edge?.strength?.mean).toBe(0.5);
     }
   });
+
+  // P0 V5 golden-path repair (Wave 2): selected_elements ingress.
+  it('returns selectedElements: null when selected_elements is absent', () => {
+    const result = parseRequestExtensions({}, REQUEST_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.selectedElements).toBeNull();
+  });
+
+  it('parses object-shape selected_elements and normalises arrays', () => {
+    const result = parseRequestExtensions(
+      { selected_elements: { node_ids: ['n1', 'n2'], edge_ids: ['e1'] } },
+      REQUEST_ID,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.selectedElements).toEqual({
+        node_ids: ['n1', 'n2'],
+        edge_ids: ['e1'],
+      });
+    }
+  });
+
+  it('parses object-shape with only node_ids', () => {
+    const result = parseRequestExtensions(
+      { selected_elements: { node_ids: ['n1'] } },
+      REQUEST_ID,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.selectedElements).toEqual({
+        node_ids: ['n1'],
+        edge_ids: [],
+      });
+    }
+  });
+
+  it('accepts legacy bare-array shape and treats as node_ids', () => {
+    const result = parseRequestExtensions(
+      { selected_elements: ['n1', 'n2'] },
+      REQUEST_ID,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.selectedElements).toEqual({
+        node_ids: ['n1', 'n2'],
+        edge_ids: [],
+      });
+    }
+  });
+
+  it('drops structurally invalid selected_elements silently (best-effort context)', () => {
+    // A bad selected_elements value MUST NOT abort the turn. The pre-route
+    // falls back to label-only matching, identical to a turn that didn't
+    // carry selection at all.
+    const result = parseRequestExtensions(
+      { selected_elements: { node_ids: 'not-an-array' } },
+      REQUEST_ID,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.selectedElements).toBeNull();
+  });
 });

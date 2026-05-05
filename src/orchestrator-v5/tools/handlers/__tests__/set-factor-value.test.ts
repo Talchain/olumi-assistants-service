@@ -241,3 +241,127 @@ describe('set_factor_value handler', () => {
     expect(outcome.assistant_text).not.toContain('0.05');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P0 V5 golden-path repair (Wave 2) — receipt staleness narrative + redaction.
+// ---------------------------------------------------------------------------
+
+import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+
+function buildInvocationWithPriorAnalysis(
+  graph: GraphV3T,
+  proposal: ProposalAction,
+  options: { successful: boolean },
+): HandlerInvocation {
+  const successFact: RunAnalysisHandlerFact = {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: 'scn-1',
+      leading_option_id: 'opt_1',
+      summary: 'Prior analysis.',
+      enrichment: options.successful ? { analysis_status: 'computed' } : { analysis_status: 'partial' },
+    },
+  };
+  const inv = buildInvocation(graph, proposal);
+  return {
+    ...inv,
+    context: {
+      ...inv.context,
+      prior_facts: [successFact],
+    } as HandlerInvocation['context'],
+  };
+}
+
+describe('set_factor_value — Wave 2 receipt: staleness narrative + redaction', () => {
+  it('non-noop apply WITHOUT prior successful analysis → no staleness narrative (pre-analysis edits are not stale)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({
+          entityId: 'f-churn',
+          value: { value: 5, unit: '%', cap: 100 },
+          operator: 'set',
+        }),
+      ),
+    );
+    expect(outcome.assistant_text).toMatch(/Updated/);
+    expect(outcome.assistant_text).not.toMatch(/stale/i);
+    expect(outcome.assistant_text).not.toMatch(/re-run/i);
+  });
+
+  it('non-noop apply WITH prior successful analysis → appends staleness + re-run prompt', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    const outcome = await handler(
+      buildInvocationWithPriorAnalysis(
+        graph,
+        makeProposal({
+          entityId: 'f-churn',
+          value: { value: 5, unit: '%', cap: 100 },
+          operator: 'set',
+        }),
+        { successful: true },
+      ),
+    );
+    expect(outcome.assistant_text).toMatch(/Updated/);
+    expect(outcome.assistant_text).toMatch(/previous analysis is now stale|previous analysis stale|This makes the previous analysis stale/);
+    expect(outcome.assistant_text).toMatch(/Re-run analysis/);
+  });
+
+  it('non-noop apply WITH prior DEGRADED analysis (status partial) → no staleness narrative (no successful prior)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    const outcome = await handler(
+      buildInvocationWithPriorAnalysis(
+        graph,
+        makeProposal({
+          entityId: 'f-churn',
+          value: { value: 5, unit: '%', cap: 100 },
+          operator: 'set',
+        }),
+        { successful: false },
+      ),
+    );
+    expect(outcome.assistant_text).toMatch(/Updated/);
+    expect(outcome.assistant_text).not.toMatch(/stale/i);
+  });
+
+  it('redaction: receipt copy contains no internal terms (raw IDs, schema language, normalised values)', async () => {
+    const handler = createSetFactorValueHandler();
+    const graph = buildD1Fixture();
+    const outcome = await handler(
+      buildInvocationWithPriorAnalysis(
+        graph,
+        makeProposal({
+          entityId: 'f-churn',
+          value: { value: 30000, unit: '£', cap: 1000000 },
+          operator: 'set',
+        }),
+        { successful: true },
+      ),
+    );
+    const text = outcome.assistant_text;
+    // User unit verbatim; no normalised model-unit fraction.
+    expect(text).toMatch(/£30,000/);
+    expect(text).not.toMatch(/0\.\d{2,}/); // no 0.03 or similar
+    // Forbidden internal vocabulary.
+    for (const pat of [
+      /\bf-churn\b/,
+      /\bnoop\b/i,
+      /\bzod\b/i,
+      /\bnormalised\b/i,
+      /\bnormalized\b/i,
+      /\bpatch\b/i,
+      /\bhandler\b/i,
+      /\bfact_type\b/i,
+      /\bBUDGET_TARGET\b/i,
+      /\bedit_graph\b/i,
+    ]) {
+      expect(text, text).not.toMatch(pat);
+    }
+  });
+});

@@ -67,8 +67,10 @@ import { composeHandlerFailure } from './compose/handler-failure-responses.js';
 import type { ComposeContext, SuggestedAction } from './compose/types.js';
 import {
   tryDeterministicValueUpdate,
+  tryDeicticValueUpdate,
   buildClarifyAssistantText,
   buildClarifyChipMessage,
+  buildDeicticClarifyAssistantText,
   mapCqeQuantityToProposalValue,
   deriveOperator,
 } from './routing/deterministic-value-update.js';
@@ -234,6 +236,18 @@ export interface RunTurnExecutorOptions {
    * compactAnalysis(). Absent / null on pre-analysis decisions.
    */
   readonly analysisState?: AnalysisStateIngress | null;
+  /**
+   * P0 V5 golden-path repair (Wave 2): UI-side selection context. The
+   * client emits `selected_elements: { node_ids?, edge_ids? }` on
+   * conversation/explain turns. CEE consumes `node_ids` ONLY in the
+   * deterministic value-update pre-route as a strict tie-breaker
+   * (factor-kind, exactly-one-factor narrowing). Other dispatch paths
+   * ignore it. Absent / null when the turn carried no selection.
+   */
+  readonly selectedElements?: {
+    readonly node_ids: readonly string[];
+    readonly edge_ids: readonly string[];
+  } | null;
   /**
    * Optional graph lookup override — tests pass a mock to exercise validator
    * paths without threading a full GraphV3T. Production derives this from
@@ -783,13 +797,62 @@ export async function runTurnExecutor(
       //      quantity / no graph also short-circuits. Falls through
       //      to the LLM via routeWithToolUse.
       //
+      // P0 V5 golden-path repair (Wave 2): compute factor-only selection
+      // ids once for both the label-based (Path A — multi-candidate
+      // narrowing) and deictic (Path B — "that factor") branches.
+      // Filter strictly: only nodes whose graph kind is 'factor' qualify.
+      // Selected option/risk/outcome/decision must NEVER be accepted as
+      // a value-update target — the brief is explicit. We also capture
+      // a label resolver for Path B receipts.
+      const factorNodes = (graphStateForTurn?.nodes ?? []).filter(
+        (n) => (n as { kind?: unknown }).kind === 'factor',
+      ) as ReadonlyArray<{ id: string; label?: unknown; kind: string }>;
+      const factorIdSet = new Set(factorNodes.map((n) => n.id));
+      const factorLabelById = new Map(
+        factorNodes
+          .filter((n) => typeof n.label === 'string' && (n.label as string).trim().length > 0)
+          .map((n) => [n.id, n.label as string]),
+      );
+      const selectedFactorIds: readonly string[] = (options.selectedElements?.node_ids ?? []).filter(
+        (id) => factorIdSet.has(id),
+      );
+
       // Pure detection function; the guards + dispatch live in this
       // executor.
       let deterministicValueUpdate = tryDeterministicValueUpdate(
         payload.message,
         contextPack.parsed_quantities,
         graphLookupForValidate,
+        selectedFactorIds,
       );
+
+      // P0 V5 golden-path repair (Wave 2, Path B — selected-deictic):
+      // when the user wrote "Update that factor to £30k" or similar
+      // with no label evidence, use UI selection to resolve the target.
+      // Runs only when label-based detection did NOT match — otherwise
+      // the existing single-substring or selection-narrowed dispatch
+      // wins (selection is also a tie-breaker for label-based ambiguous
+      // cases, handled inside `tryDeterministicValueUpdate`).
+      const deicticDispatch = !deterministicValueUpdate.matched
+        ? tryDeicticValueUpdate(
+            payload.message,
+            contextPack.parsed_quantities,
+            graphLookupForValidate,
+            selectedFactorIds,
+            (id) => factorLabelById.get(id) ?? null,
+          )
+        : { matched: false as const, skip_reason: 'no_deictic' as const };
+      if (deicticDispatch.matched && deicticDispatch.dispatch === 'set_factor_value') {
+        // Promote to the Path A shape so the rest of the lifecycle
+        // (registry guard, synthesised RoutingToolCallResult, etc.)
+        // reuses the existing branch with no duplication.
+        deterministicValueUpdate = {
+          matched: true,
+          dispatch: 'set_factor_value',
+          candidate: deicticDispatch.candidate,
+          quantity: deicticDispatch.quantity,
+        };
+      }
       // V5 D1 golden-path closure (A3.1): the original (pre-guard)
       // dispatch is what the pre-route function alone would have
       // produced. The guards below (kind check + registry executable)
@@ -962,6 +1025,77 @@ export async function runTurnExecutor(
           : deterministicValueUpdate.skip_reason,
         cqe_quantity_count: contextPack.parsed_quantities.length,
       });
+
+      // P0 V5 golden-path repair (Wave 2, Path B clarify) — deictic
+      // reference matched but selection didn't yield exactly one factor.
+      // Dispatch a no-chip clarify so the user provides a clearer
+      // target. We do NOT route through `edit_graph` for any of this.
+      if (
+        deicticDispatch.matched &&
+        deicticDispatch.dispatch === 'clarify_deictic'
+      ) {
+        const clarifyResponse = composeDirectAnswerResponse({
+          assistant_text: buildDeicticClarifyAssistantText(deicticDispatch.reason),
+          stage: context.stage,
+          suggested_actions: [],
+        });
+        sonnetTextForLog = clarifyResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        emit(TelemetryEvents.V5DeterministicValueUpdate, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: true,
+          dispatch: 'clarify_deictic',
+          original_dispatch: 'clarify_deictic',
+          downgrade_reason: null,
+          candidate_count: 0,
+          top_score: null,
+          candidate_sources: [],
+          skip_reason: null,
+          deictic_reason: deicticDispatch.reason,
+          selected_factor_count: selectedFactorIds.length,
+          cqe_quantity_count: contextPack.parsed_quantities.length,
+        });
+        try {
+          const committed = await commitDirectAnswer(clarifyResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'deictic_value_update_clarify',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on deictic-clarify pre-route',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      }
 
       if (
         deterministicValueUpdate.matched &&

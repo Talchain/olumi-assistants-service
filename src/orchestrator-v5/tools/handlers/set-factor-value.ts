@@ -39,6 +39,24 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import { formatFactorChange } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
+import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
+
+/**
+ * P0 V5 golden-path repair (Wave 2): staleness narrative appended to a
+ * successful set_factor_value receipt when a prior successful
+ * run_analysis fact existed. Closes the UX loop required by the brief:
+ * (1) what changed, (2) what does it affect, (3) is analysis fresh or
+ * stale, (4) what should the user do next. The chip-generator's
+ * stale-rerun rule emits the matching "Re-run analysis" chip when the
+ * post-dispatch freshness re-derivation flips the verdict.
+ *
+ * British English, no internal terms (no graph hash, no fact_type, no
+ * patch language). Suppressed on noop applies (raw_value unchanged) and
+ * when no prior analysis existed (the model is being built; nothing to
+ * stale yet).
+ */
+const STALENESS_NARRATIVE =
+  ' This makes the previous analysis stale. Re-run analysis to see how this affects the recommendation.';
 
 /**
  * Parameter Zod schema registered with the validator. Exported so the
@@ -331,7 +349,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     }
 
     const label = targetNode.label;
-    const assistantText = formatFactorChange({
+    const baseText = formatFactorChange({
       label,
       before: {
         raw_value: before.raw_value ?? before.value ?? 0,
@@ -342,6 +360,18 @@ export function createSetFactorValueHandler(): HandlerFn {
         ...(after.unit !== undefined ? { unit: after.unit } : {}),
       },
     });
+
+    // P0 V5 golden-path repair (Wave 2): when a prior successful analysis
+    // exists and this turn actually mutated the factor (non-noop), append
+    // the staleness narrative so the assistant_text answers all four
+    // user-facing questions (what changed, what it affects, is analysis
+    // stale, what to do next). Suppressed on noop and pre-analysis
+    // mutations.
+    const hasPriorSuccessfulAnalysis = invocation.context.prior_facts.some(
+      isSuccessfulRunAnalysisFact,
+    );
+    const assistantText =
+      !noop && hasPriorSuccessfulAnalysis ? `${baseText}${STALENESS_NARRATIVE}` : baseText;
 
     return {
       assistant_text: assistantText,

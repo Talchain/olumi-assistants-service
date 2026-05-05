@@ -111,10 +111,51 @@ export type AnalysisStateIngress = z.infer<typeof AnalysisStateIngressSchema>;
  */
 export const UserIdIngressSchema = z.string().uuid();
 
+/**
+ * UI-side selection context. The DecisionGuideAI client emits
+ * `selected_elements: { node_ids?: string[]; edge_ids?: string[] }` on
+ * conversation/explain/chip turns (see UI services/turn-request-builder.ts).
+ * The V5 deterministic value-update pre-route consumes `node_ids` as a
+ * tie-breaker when label evidence is ambiguous AND the user used a deictic
+ * reference like "that factor" — strictly factor-kind narrowing only.
+ *
+ * Permissive parse: arrays of strings; both `node_ids` and `edge_ids` are
+ * optional. Older clients send a bare string array (legacy V4 shape) — we
+ * accept that too and treat it as `node_ids` so the V5 path doesn't reject
+ * traffic from clients that haven't migrated. Empty arrays pass through.
+ */
+export const SelectedElementsIngressSchema = z.union([
+  z
+    .object({
+      node_ids: z.array(z.string()).optional(),
+      edge_ids: z.array(z.string()).optional(),
+    })
+    .passthrough(),
+  z.array(z.string()),
+]);
+
+export type SelectedElementsIngress = {
+  readonly node_ids: readonly string[];
+  readonly edge_ids: readonly string[];
+};
+
+function normaliseSelectedElements(
+  parsed: z.infer<typeof SelectedElementsIngressSchema>,
+): SelectedElementsIngress {
+  if (Array.isArray(parsed)) {
+    return { node_ids: parsed, edge_ids: [] };
+  }
+  return {
+    node_ids: parsed.node_ids ?? [],
+    edge_ids: parsed.edge_ids ?? [],
+  };
+}
+
 export type ParsedRequestExtensions = {
   graphState: GraphStateIngress | null;
   analysisState: AnalysisStateIngress | null;
   userId: string | null;
+  selectedElements: SelectedElementsIngress | null;
 };
 
 export type ParseExtensionsResult =
@@ -150,13 +191,19 @@ export function parseRequestExtensions(
     // Shouldn't happen after B1 ingress validation passed, but guard anyway.
     return {
       ok: true,
-      value: { graphState: null, analysisState: null, userId: null },
+      value: {
+        graphState: null,
+        analysisState: null,
+        userId: null,
+        selectedElements: null,
+      },
     };
   }
 
   const rawGraph = body.graph_state;
   const rawAnalysis = body.analysis_state;
   const rawUserId = body.user_id;
+  const rawSelectedElements = body.selected_elements;
 
   let graphState: GraphStateIngress | null = null;
   if (rawGraph !== undefined && rawGraph !== null) {
@@ -254,11 +301,38 @@ export function parseRequestExtensions(
     userId = parsed.data;
   }
 
+  let selectedElements: SelectedElementsIngress | null = null;
+  if (rawSelectedElements !== undefined && rawSelectedElements !== null) {
+    const parsed = SelectedElementsIngressSchema.safeParse(rawSelectedElements);
+    if (!parsed.success) {
+      // Selection is best-effort context; a structurally invalid value
+      // does not abort the turn. Drop it silently with telemetry — the
+      // pre-route falls back to label-only matching, identical to a
+      // turn that didn't carry selection at all.
+      emit(TelemetryEvents.BoundaryValidation, {
+        boundary: 'B1',
+        direction: 'ingress',
+        validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+        contract_version: '1.5.0',
+        pass: false,
+        request_id: requestId,
+        field: 'selected_elements',
+      });
+    } else {
+      selectedElements = normaliseSelectedElements(parsed.data);
+    }
+  }
+
   // Emit a success event only when at least one extension field was actually
   // validated. This keeps the telemetry trace aligned with what happened:
   // a body with no extension fields has nothing for this validator to check,
   // so we don't inflate boundary.validation counts.
-  if (graphState !== null || analysisState !== null || userId !== null) {
+  if (
+    graphState !== null ||
+    analysisState !== null ||
+    userId !== null ||
+    selectedElements !== null
+  ) {
     emit(TelemetryEvents.BoundaryValidation, {
       boundary: 'B1',
       direction: 'ingress',
@@ -269,8 +343,12 @@ export function parseRequestExtensions(
       graph_present: graphState !== null,
       analysis_present: analysisState !== null,
       user_id_present: userId !== null,
+      selected_elements_present: selectedElements !== null,
     });
   }
 
-  return { ok: true, value: { graphState, analysisState, userId } };
+  return {
+    ok: true,
+    value: { graphState, analysisState, userId, selectedElements },
+  };
 }

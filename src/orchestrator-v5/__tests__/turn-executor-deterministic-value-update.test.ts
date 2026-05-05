@@ -279,3 +279,150 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     expect(preRouteEvent?.data.skip_reason).toBe('hypothetical_gate');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P0 V5 golden-path repair (Wave 2) — Path A (selection narrowing) and
+// Path B (selected-deictic) end-to-end through the turn-executor.
+// ---------------------------------------------------------------------------
+
+function graphWithTwoFactors(labels: readonly string[]) {
+  return {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Profit' },
+      ...labels.map((label, i) => ({ id: `fac_${i + 1}`, kind: 'factor' as const, label })),
+      { id: 'opt_a', kind: 'option', label: 'Opt A' },
+      { id: 'opt_b', kind: 'option', label: 'Opt B' },
+    ],
+    edges: [],
+  };
+}
+
+describe('turn-executor × Path A — selection narrows multi-candidate', () => {
+  it('two-substring message + selection picks one factor → set_factor_value, no LLM call', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+    const { response, telemetry } = await runTurnExecutor(
+      payload('Raise budget and cost to £30k'),
+      'req-path-a',
+      {
+        routingAdapter,
+        graphState: graphWithTwoFactors(['budget', 'cost']),
+        selectedElements: { node_ids: ['fac_1'], edge_ids: [] },
+      },
+    );
+
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry?.llm_calls_used ?? 0).toBe(0);
+
+    const preRouteEvent = events.find((e) => e.event === 'v5.deterministic_value_update');
+    expect(preRouteEvent?.data.dispatch).toBe('set_factor_value');
+    expect(telemetry?.turn_class).toBe('handler');
+
+    const patchBlock = response.blocks.find((b) => b.type === 'graph_patch');
+    expect(patchBlock).toMatchObject({
+      operation: 'set_factor_value',
+      target_id: 'fac_1',
+    });
+  });
+
+  it('two-substring message + zero factors selected → clarify (existing behaviour preserved)', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+    const { response, telemetry } = await runTurnExecutor(
+      payload('Raise budget and cost to £30k'),
+      'req-path-a-no-selection',
+      {
+        routingAdapter,
+        graphState: graphWithTwoFactors(['budget', 'cost']),
+      },
+    );
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry?.turn_class).toBe('direct_answer');
+    expect(response.blocks).toEqual([]);
+  });
+
+  it('non-factor selection (option id) ignored — clarify, never updates a factor', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+    const { telemetry } = await runTurnExecutor(
+      payload('Raise budget and cost to £30k'),
+      'req-path-a-option-selected',
+      {
+        routingAdapter,
+        graphState: graphWithTwoFactors(['budget', 'cost']),
+        // The option id is in selection but it isn't a factor — must NOT
+        // narrow.
+        selectedElements: { node_ids: ['opt_a'], edge_ids: [] },
+      },
+    );
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry?.turn_class).toBe('direct_answer'); // clarify
+  });
+});
+
+describe('turn-executor × Path B — selected-deictic', () => {
+  it('"Update that factor to £30k" + one factor selected → set_factor_value, no LLM call, no edit_graph', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+    const { response, telemetry } = await runTurnExecutor(
+      payload('Update that factor to £30,000'),
+      'req-path-b',
+      {
+        routingAdapter,
+        graphState: graphWithTwoFactors(['Advertising budget', 'Headcount']),
+        selectedElements: { node_ids: ['fac_1'], edge_ids: [] },
+      },
+    );
+
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry?.llm_calls_used ?? 0).toBe(0);
+    expect(telemetry?.turn_class).toBe('handler');
+
+    // Dispatched to set_factor_value, NOT edit_graph.
+    const patchBlock = response.blocks.find((b) => b.type === 'graph_patch');
+    expect(patchBlock).toMatchObject({
+      operation: 'set_factor_value',
+      target_id: 'fac_1',
+    });
+    // No edit_graph block surfaces.
+    const editGraphBlock = response.blocks.find((b) => (b as { type?: string }).type === 'edit_graph');
+    expect(editGraphBlock).toBeUndefined();
+
+    // Receipt copy uses the human label and user-units value, not raw IDs
+    // or normalised model-unit fractions.
+    expect(response.assistant_text).toContain('Advertising budget');
+    expect(response.assistant_text).toMatch(/£30,000|£30000/);
+    expect(response.assistant_text).not.toMatch(/\bfac_1\b/);
+    expect(response.assistant_text).not.toMatch(/0\.\d+/); // no normalised 0.x fractions
+  });
+
+  it('"Update that factor to £30k" + no selection → clarify, never edit_graph', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+    const { response, telemetry } = await runTurnExecutor(
+      payload('Update that factor to £30k'),
+      'req-path-b-no-selection',
+      {
+        routingAdapter,
+        graphState: graphWithTwoFactors(['Advertising budget', 'Headcount']),
+      },
+    );
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry?.turn_class).toBe('direct_answer');
+    expect(response.blocks).toEqual([]);
+    // Curated clarification copy, no internal terms.
+    expect(response.assistant_text).toContain('factor');
+    expect(response.assistant_text).not.toMatch(/\bedit_graph\b/);
+    expect(response.assistant_text).not.toMatch(/\bnoop\b/);
+  });
+
+  it('"Update that factor to £30k" + selected option (non-factor) → clarify', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+    const { telemetry } = await runTurnExecutor(
+      payload('Update that factor to £30k'),
+      'req-path-b-option-selected',
+      {
+        routingAdapter,
+        graphState: graphWithTwoFactors(['Advertising budget', 'Headcount']),
+        selectedElements: { node_ids: ['opt_a'], edge_ids: [] },
+      },
+    );
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    expect(telemetry?.turn_class).toBe('direct_answer');
+  });
+});

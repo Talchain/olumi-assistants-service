@@ -864,6 +864,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const run = await runTurnExecutor(ingress, requestId, {
       graphState: extensions.graphState,
       analysisState: extensions.analysisState,
+      selectedElements: extensions.selectedElements,
     });
 
     // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
