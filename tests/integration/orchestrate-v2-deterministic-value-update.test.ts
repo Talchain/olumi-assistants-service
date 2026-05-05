@@ -1,32 +1,37 @@
 /**
- * V5 P0 golden-path repair (follow-up) — end-to-end HTTP boundary test
- * for the deterministic value-update path.
+ * V5 P0 golden-path repair — end-to-end HTTP boundary test for the
+ * deterministic value-update path AND for stale-after-mutation
+ * freshness via the post-handler re-derivation.
  *
- * Wave 6 of the original brief shipped an in-process acceptance suite.
- * Review feedback correctly noted that this didn't exercise the full
- * route → handler → commit → finalised response path. This test fills
- * that gap: a real Fastify route + B1 ingress validation + extension
- * parsing + turn executor + handler registry + response finaliser.
+ * Coverage in this file:
  *
- * The properties asserted are the brief's hard acceptance gates for
- * Wave 2:
+ * 1. Single-turn deterministic value-update properties (Wave 2):
+ *    - UI sends `selected_elements` on the wire; CEE consumes it.
+ *    - "Update that factor to £30,000" + selection → set_factor_value
+ *      deterministic dispatch, no LLM call, no edit_graph leak.
+ *    - Receipt uses human label + user units (£30,000), no raw IDs
+ *      or normalised model-unit fractions.
+ *    - Selected non-factor (option) does not narrow.
  *
- *   1. UI sends `selected_elements` on the wire and CEE consumes it
- *      (Wave 0 confirmed plumbing; this test confirms the wire-to-
- *      handler path actually fires).
- *   2. "Update that factor to £30k" with one factor selected dispatches
- *      `set_factor_value` deterministically — no LLM call, no
- *      edit_graph dispatch.
- *   3. The wire response carries a `graph_patch` block with
- *      `operation: set_factor_value` and the correct target.
- *   4. The receipt copy uses the human label and user units (£30,000),
- *      not raw IDs or normalised model-unit fractions.
+ * 2. Live-hash prior fact + mutation replay (Wave 2 + Wave 3 coherence):
+ *    - prior fresh fact: live-hash prior + non-mutating turn → fresh.
+ *    - mutation flips stale on same response: prior fresh +
+ *      set_factor_value → stale (post-handler re-derivation, asserted
+ *      via telemetry event).
+ *    - subsequent turn against post-mutation graph remains stale.
  *
- * This test does NOT exercise the freshness-after-mutation property
- * end-to-end (that requires a multi-turn replay; it is covered by
- * tools/v5-journey-replay/ which needs CEE_API_KEY). The single-turn
- * properties above are the ones that previously had no HTTP-boundary
- * coverage.
+ * What this file does NOT prove (acknowledged):
+ *    - run_analysis writing a fact through the real handler path.
+ *    - A real explain turn consuming post-mutation freshness via
+ *      LLM-routed handler dispatch.
+ *
+ * Live multi-turn coverage of those flows lives in
+ * tools/v5-journey-replay/ (requires CEE_API_KEY against staging).
+ *
+ * The mocked session store accepts a prior handler turn when
+ * mockedPriorFacts is non-empty, so the build-turn-context loader
+ * exercises readFactsFor and feeds the prior fact into freshness
+ * derivation.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -520,25 +525,32 @@ describe('POST /orchestrate/v2/turn — stale-after-mutation freshness (multi-tu
 });
 
 // ---------------------------------------------------------------------------
-// Third-round review (P0.1 + IMP.3): real multi-turn replay through the
-// HTTP boundary. Pre-fix the "stale-after-mutation" test seeded a fact
-// with an intentionally-divergent hash and sent ONE request — proving
-// only that a hand-rolled stale state surfaces. The real claim was
-// that `set_factor_value` ITSELF causes the next freshness verdict to
-// flip stale.
+// Fourth-round review (P0 #3 + IMP #3 + IMP #4): RENAMED. Previously
+// claimed "real 3-turn replay (run_analysis → set_factor_value →
+// freshness)"; review correctly noted this seeded a synthetic prior
+// fact rather than running run_analysis through HTTP. Renamed to
+// "live-hash prior fact + mutation replay" to reflect what the test
+// actually proves: with a synthetic prior fact at the live graph hash,
+// (a) a non-mutating turn reports freshness=fresh, (b) a value-update
+// mutation flips freshness=stale on the SAME response via post-handler
+// re-derivation, and (c) a subsequent non-mutating turn against the
+// post-mutation graph still reports freshness=stale.
 //
-// This test exercises the actual sequence:
-//   Turn 1: seed a successful run_analysis fact whose graph_hash_at_run
-//           matches the LIVE hash of the request's graph_state →
-//           freshness reads 'fresh'.
-//   Turn 2: send the same graph_state + a deterministic value-update
-//           ("Update that factor to £30,000" + selection). The
-//           handler emits `mutated_graph`; the post-dispatch freshness
-//           derivation recomputes the hash from the mutated graph and
-//           must report 'stale' against the prior fact.
+// What this DOES prove (HTTP-boundary):
+//   - Mutation drives post-handler freshness flip.
+//   - The freshness verdict persists across non-mutating turns.
+//   - Zero-LLM deterministic dispatch on the value-update path.
+//
+// What this does NOT prove (acknowledged honestly):
+//   - run_analysis writing the fact through the real handler path
+//     (mocked PLoT not present in this harness).
+//   - A real explain turn consuming the post-mutation freshness via
+//     the LLM-routed handler.
+// Live multi-turn coverage of those properties stays in
+// tools/v5-journey-replay/ which needs CEE_API_KEY against staging.
 // ---------------------------------------------------------------------------
 
-describe('POST /orchestrate/v2/turn — real 3-turn replay (run_analysis → set_factor_value → freshness)', () => {
+describe('POST /orchestrate/v2/turn — live-hash prior fact + mutation replay', () => {
   let app: FastifyInstance;
   const originalEnv = { ...process.env };
 
@@ -561,14 +573,11 @@ describe('POST /orchestrate/v2/turn — real 3-turn replay (run_analysis → set
     process.env = { ...originalEnv };
   });
 
-  it('turn 1 (synthetic prior analysis at live hash): freshness=fresh', async () => {
+  it('prior fresh fact: live-hash prior + non-mutating turn → freshness=fresh', async () => {
     const { computeAnalysisAffectingGraphHash } = await import(
       '../../src/orchestrator-v5/context/graph-hash.js'
     );
-    // Path B clarify (no selection) — non-mutating turn_executor path,
-    // no LLM, analysis_ready stamped on response.
     const liveHash = computeAnalysisAffectingGraphHash(buildGraphState() as never)!;
-
     mockedPriorFacts = [
       {
         ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR,
@@ -587,27 +596,15 @@ describe('POST /orchestrate/v2/turn — real 3-turn replay (run_analysis → set
     expect(res.statusCode).toBe(200);
     expect(llmCallTracker.count).toBe(0);
     const body = JSON.parse(res.body);
-    const ar =
-      (body as { analysis_ready?: { freshness?: string } }).analysis_ready ??
-      (body.blocks?.find(
-        (b: { type?: string; data?: { analysis_ready?: { freshness?: string } } }) =>
-          b?.data?.analysis_ready != null,
-      )?.data?.analysis_ready as { freshness?: string } | undefined);
+    const ar = readAnalysisReadyFromResponseBody(body);
     expect(ar?.freshness).toBe('fresh');
   });
 
-  it('turn 2 (set_factor_value mutation): freshness flips to stale BECAUSE OF the mutation', async () => {
+  it('mutation flips stale on same response: prior fresh + set_factor_value → freshness=stale (post-handler re-derivation)', async () => {
     const { computeAnalysisAffectingGraphHash } = await import(
       '../../src/orchestrator-v5/context/graph-hash.js'
     );
     const liveHash = computeAnalysisAffectingGraphHash(buildGraphState() as never)!;
-
-    // Seed a prior fact whose graph_hash_at_run matches the request
-    // graph_state EXACTLY. If freshness derivation didn't account for
-    // the mutation, it would read 'fresh' — same hash both sides.
-    // The post-dispatch re-derivation MUST recompute the hash from
-    // the MUTATED graph and produce 'stale'. This is the actual
-    // proof that set_factor_value drives staleness.
     mockedPriorFacts = [
       {
         ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR,
@@ -633,18 +630,98 @@ describe('POST /orchestrate/v2/turn — real 3-turn replay (run_analysis → set
     expect(patchBlock).toBeDefined();
     expect((patchBlock as { operation?: string }).operation).toBe('set_factor_value');
 
-    // The post-dispatch freshness verdict on this same response MUST
-    // be 'stale' — the mutation changed the graph hash relative to
-    // graph_hash_at_run on the prior fact.
-    const ar =
-      (body as { analysis_ready?: { freshness?: string } }).analysis_ready ??
-      (body.blocks?.find(
-        (b: { type?: string; data?: { analysis_ready?: { freshness?: string } } }) =>
-          b?.data?.analysis_ready != null,
-      )?.data?.analysis_ready as { freshness?: string } | undefined);
+    // Post-handler freshness re-derivation flips to stale.
+    const ar = readAnalysisReadyFromResponseBody(body);
     expect(ar?.freshness).toBe('stale');
-
-    // Telemetry: confirm zero LLM calls (deterministic dispatch).
     expect(llmCallTracker.count).toBe(0);
+
+    // Fourth-round review (P1 #2): the report cited telemetry as
+    // evidence ("dispatch_path: turn_executor_post_handler ... reason:
+    // graph_hash_diverged"). Pin the assertion in the test so the
+    // claim is provable, not anecdotal from a debug log.
+    const postHandlerEvent = events.find(
+      (e) =>
+        e.event === 'v5.analysis_freshness.derived' &&
+        e.data.dispatch_path === 'turn_executor_post_handler',
+    );
+    expect(postHandlerEvent, 'expected post-handler freshness derivation event').toBeDefined();
+    expect(postHandlerEvent?.data.freshness).toBe('stale');
+    expect(postHandlerEvent?.data.reason).toBe('graph_hash_diverged');
+  });
+
+  it('subsequent turn against post-mutation graph remains stale (freshness verdict persists)', async () => {
+    // After the mutation in the previous test, the canvas reflects
+    // the post-mutation graph. A subsequent non-mutating turn against
+    // that graph (different hash from the prior fact's
+    // graph_hash_at_run) must continue to report stale until a new
+    // run_analysis writes a matching fact. This pins the persistence
+    // property — the verdict is not a transient post-handler quirk.
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../src/orchestrator-v5/context/graph-hash.js'
+    );
+    // Build the post-mutation graph by hand: same shape but with the
+    // factor's observed_state shifted to the mutation target.
+    const postMutationGraph = JSON.parse(JSON.stringify(buildGraphState())) as ReturnType<
+      typeof buildGraphState
+    >;
+    const target = postMutationGraph.nodes.find((n) => n.id === 'fac_advertising')!;
+    (target as { observed_state?: { raw_value?: number; value?: number } }).observed_state = {
+      raw_value: 30000,
+      value: 0.3,
+    };
+    const postMutationHash = computeAnalysisAffectingGraphHash(postMutationGraph as never)!;
+
+    // Seed the prior fact at the PRE-mutation hash (different from
+    // the post-mutation graph the request will carry).
+    const preMutationHash = computeAnalysisAffectingGraphHash(buildGraphState() as never)!;
+    expect(postMutationHash).not.toBe(preMutationHash);
+    mockedPriorFacts = [
+      {
+        ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR,
+        result: {
+          ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR.result,
+          graph_hash_at_run: preMutationHash,
+        },
+      },
+    ];
+
+    // Non-mutating turn carrying the post-mutation graph.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message' as const,
+        turn_id: TURN_ID,
+        scenario_id: SCENARIO_ID,
+        message: 'Update that factor to £30,000',
+        turn_class: 'decide' as const,
+        stage: 'analyse' as const,
+        source: 'composer' as const,
+        graph_state: postMutationGraph,
+        selected_elements: { node_ids: [], edge_ids: [] }, // no selection → clarify
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
+    const body = JSON.parse(res.body);
+    const ar = readAnalysisReadyFromResponseBody(body);
+    expect(ar?.freshness).toBe('stale');
   });
 });
+
+/**
+ * Shared helper to extract analysis_ready from a wire response body.
+ * CEE may stamp it on the envelope root or inside a graph_patch
+ * block's `data`. The UI extraction matches this; tests must too.
+ */
+function readAnalysisReadyFromResponseBody(
+  body: unknown,
+): { freshness?: string; freshness_reason?: string } | undefined {
+  const envelope = body as { analysis_ready?: { freshness?: string }; blocks?: unknown[] };
+  if (envelope?.analysis_ready) return envelope.analysis_ready;
+  const block = envelope.blocks?.find(
+    (b) => (b as { data?: { analysis_ready?: unknown } } | null)?.data?.analysis_ready != null,
+  );
+  return (block as { data?: { analysis_ready?: { freshness?: string } } } | undefined)?.data
+    ?.analysis_ready;
+}
