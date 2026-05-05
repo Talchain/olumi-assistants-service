@@ -91,7 +91,7 @@ Test classification (product / contract / component / staging / benchmark) for t
 
 | File | Classification | Note |
 | --- | --- | --- |
-| `tests/contract/v5-golden-path-acceptance.test.ts` | contract + product | the strongest current product gate; protect via wordlist co-location |
+| `tests/contract/v5-golden-path-acceptance.test.ts` | contract + product (🟡 not yet on staging) | the strongest planned product gate, pending merge of `claude/p0-v5-golden-path-integration`; protect via wordlist co-location |
 | `src/routes/__tests__/proxy-v5-turn.test.ts` | contract | route registration, origin, headers; gap: non-JSON / timeout / OPTIONS empty-body |
 | `tests/integration/proxy-v5-preflight.test.ts` | contract | OPTIONS preflight; OPTIONS-empty-body + hashing untested |
 | `tests/integration/orchestrate-v2-*.test.ts` | contract | broad activation surface |
@@ -102,7 +102,7 @@ Test classification (product / contract / component / staging / benchmark) for t
 | `cee.draft-graph*.test.ts` | component (fixture-bounded) | light product coverage; depends on benchmarks for live regressions |
 | `prompt-sensitivity.unit.test.ts`, `cqe.bench.ts` | benchmark | informational only |
 
-Headline: the V5 weakness is not test volume but the absence of (a) deployed-transport product gates and (b) cross-turn state-shape contract tests for goal_constraints. Once `claude/p0-v5-golden-path-integration` lands, prose-surface display-safe and explain_results-precondition are well covered; transport and multi-turn goal-constraint coverage remain the priority.
+Headline: the V5 weakness is not test volume but the absence of (a) deployed-transport contract gates plus a real-browser product-confidence journey gate, and (b) cross-turn state-shape contract tests for goal_constraints. The new staging smoke added in this branch is contract + transport — it proves the proxy is reachable and well-formed, not that any browser uses it correctly. Once `claude/p0-v5-golden-path-integration` lands, prose-surface display-safe and explain_results-precondition are well covered; the deployed-path browser journey, transport non-JSON/timeout unit coverage, and multi-turn goal-constraint coverage remain the priority gaps.
 
 ## 6. Phase 2 — target tier model
 

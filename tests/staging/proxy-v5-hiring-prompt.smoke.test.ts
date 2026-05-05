@@ -115,8 +115,10 @@ async function preflight(): Promise<PreflightResult> {
     headers: {
       Origin: CEE_PROXY_ALLOWED_ORIGIN!,
       "Access-Control-Request-Method": "POST",
-      "Access-Control-Request-Headers":
-        "content-type,accept,x-correlation-id,x-request-id",
+      // Only the headers the POST below actually sends. Asking for headers
+      // the POST does not use would create unrealistic preflight shape and
+      // an inconsistency between request and assertion.
+      "Access-Control-Request-Headers": "content-type,accept,x-request-id",
     },
     // No body — the original OPTIONS 500 was caused by response hashing
     // crashing on empty bodies; replicate that exact shape here.
@@ -208,7 +210,8 @@ describe.skipIf(SKIP_REASON !== null)("staging proxy v5 hiring-prompt smoke", ()
         `[proxy-v5-hiring-prompt] OPTIONS host=${hostFor(url)} ` +
           `status=${result.status} elapsed_ms=${result.elapsed_ms} ` +
           `allow_origin=${result.allowOrigin ?? "none"} ` +
-          `allow_methods=${result.allowMethods ?? "none"}`,
+          `allow_methods=${result.allowMethods ?? "none"} ` +
+          `allow_headers=${result.allowHeaders ?? "none"}`,
       );
 
       // Catches the OPTIONS 500 regression directly (CEE c73d1469).
@@ -224,8 +227,12 @@ describe.skipIf(SKIP_REASON !== null)("staging proxy v5 hiring-prompt smoke", ()
       // from the preflight response. Asserting them surfaces CORS drift
       // that would otherwise only manifest as a "CORS error" in users'
       // browsers without a clear signal in tests.
+      // Asserts every header the POST below actually sends is allowed by
+      // the preflight response. Real browsers will block the POST if any
+      // requested header is missing from this list.
       const allowHeadersCheck = headerListContainsAll(result.allowHeaders, [
         "content-type",
+        "accept",
         "x-request-id",
       ]);
       expect(
