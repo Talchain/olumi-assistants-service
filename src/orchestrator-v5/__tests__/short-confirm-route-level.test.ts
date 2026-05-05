@@ -81,24 +81,53 @@ function throwingRoutingAdapter() {
 /**
  * Stubbed handler registry. The production `run_analysis` handler reads
  * scenario state from PLoT and is not unit-testable; the stub returns
- * a deterministic non-noop fact so validation/execute/commit complete.
+ * a canonical-shape HandlerOutcome (assistant_text + handler_facts +
+ * llm_calls_used) so validation/execute/commit complete and downstream
+ * route-level assertions can prove the full lifecycle.
  */
 function stubbedHandlerRegistry(): HandlerRegistry {
   const runAnalysisStub = async () => ({
-    kind: 'success' as const,
-    fact: {
-      fact_type: 'run_analysis' as const,
-      fact_version: 1,
-      noop: false,
-      result: {
-        scenario_id: SCENARIO_ID,
-        leading_option_id: 'opt-a',
-        summary: 'Stub run_analysis result.',
-        win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
+    assistant_text: 'Stub run_analysis assistant text — analysis ran.',
+    handler_facts: [
+      {
+        fact_type: 'run_analysis' as const,
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: SCENARIO_ID,
+          leading_option_id: 'opt-a',
+          summary: 'Stub run_analysis result.',
+          win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
+        },
       },
-    },
+    ],
+    llm_calls_used: 0,
   });
-  return new Map([['run_analysis', runAnalysisStub]]) as unknown as HandlerRegistry;
+  const whatWouldFlipStub = async () => ({
+    assistant_text:
+      'Stub what_would_flip assistant text — exploring what would change the result.',
+    handler_facts: [
+      {
+        fact_type: 'what_would_flip' as const,
+        fact_version: 1,
+        noop: true,
+        result: {
+          precondition_unmet: false,
+          option_count: 2,
+          answer_source: 'deterministic_fallback' as const,
+          fallback_reason: null,
+          answer_text_length: 80,
+          staleness_prefixed: false,
+        },
+      },
+    ],
+    llm_calls_used: 0,
+    suppress_orientation: true,
+  });
+  return new Map([
+    ['run_analysis', runAnalysisStub],
+    ['what_would_flip', whatWouldFlipStub],
+  ]) as unknown as HandlerRegistry;
 }
 
 function callingRoutingAdapter() {
@@ -232,19 +261,59 @@ describe('Short-confirm pre-route — route-level zero-LLM assertion', () => {
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
     // The synthesised proposal reached the validator AND was accepted.
-    // The pre-fix entity (scenario_id with kind='option') would have
-    // failed ENTITY_NOT_FOUND on any non-empty graph; the post-fix
-    // entity picks the first option/goal from the graph or falls
-    // back when no graph is present, so validation passes here.
     expect(result.telemetry.validation_error_code).toBeNull();
     expect(result.telemetry.stages_completed).toContain('validate');
-    // Internal failure copy must never leak — even when execution
-    // can't complete in a unit-test sandbox, recovery copy must be
-    // user-friendly, not "ENTITY_NOT_FOUND" / internal jargon.
     expect(result.response.assistant_text).not.toMatch(/not found in graph/i);
     expect(result.response.assistant_text).not.toMatch(/no pending action/i);
-    // NOTE: full lifecycle (handler execute + commit) is exercised
-    // by the staging integration tests; the production run_analysis
-    // handler reads scenario state from PLoT and is not unit-testable.
+  });
+
+  it('Wave 5F-2 route-level lifecycle proof: "yes" → validate → execute → commit; PendingActionConsumed telemetry fires', async () => {
+    // The proper-stub HandlerOutcome lets us assert the FULL
+    // lifecycle reached commit. Asserts that:
+    //   - validation passed
+    //   - execute fired (handler stub was invoked)
+    //   - commit_performed=true (turn row was persisted)
+    //   - assistant_text reflects the stub's output (not internal copy)
+    //   - the committed metadata carries the right handler_id
+    //   - llm_calls_used = 0 (the synthesised resume bypasses Sonnet)
+    //
+    // Earlier route-level tests stopped at "validation_error_code is
+    // null" because the stub HandlerOutcome shape was wrong. With the
+    // canonical shape the lifecycle now completes, and this test
+    // catches regressions to any of validate / execute / confirm /
+    // coach / compose / commit.
+    const adapter = throwingRoutingAdapter();
+    appendCalls.length = 0;
+    const result = await runTurnExecutor(payload('yes'), 'req-yes-lifecycle', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedHandlerRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.telemetry.stages_completed).toContain('validate');
+    expect(result.telemetry.stages_completed).toContain('execute');
+    expect(result.telemetry.stages_completed).toContain('commit');
+    // The committed turn carried the run_analysis handler id and a
+    // single non-noop run_analysis fact — proving the synthesised
+    // proposal reached and was applied by the canonical handler
+    // registry, not an LLM detour or recovery fallback.
+    expect(appendCalls.length).toBeGreaterThan(0);
+    const committed = appendCalls[0]!;
+    expect(committed.handler_id).toBe('run_analysis');
+    const facts = committed.handler_facts as Array<{ fact_type: string; noop: boolean }>;
+    expect(facts).toHaveLength(1);
+    expect(facts[0]!.fact_type).toBe('run_analysis');
+    expect(facts[0]!.noop).toBe(false);
+    // Wire response carries the canonical post-handler confirmation
+    // template (validation-registry's `confirmation_template: 'Ran
+    // analysis on your current scenario.'` + coaching). The handler
+    // stub's assistant_text is intentionally not the wire-final
+    // string — that's normal V5 behaviour and proves the post-
+    // execute compose pipeline ran. Crucially: NO internal failure
+    // copy leaks.
+    expect(result.response.assistant_text).toMatch(/analysis/i);
+    expect(result.response.assistant_text).not.toMatch(/no pending action/i);
+    expect(result.response.assistant_text).not.toMatch(/internal error/i);
   });
 });
