@@ -96,7 +96,28 @@ export type ExplanationAnswerErrorReason =
   | 'too_short'
   | 'forbidden_internal_term'
   | 'mutation_language_detected'
-  | 'analysis_language_without_analysis_fact';
+  | 'analysis_language_without_analysis_fact'
+  | 'raw_decimal_coefficient';
+
+/**
+ * Raw-decimal egress guard. The brief lists "long raw decimals" and "raw
+ * sensitivity coefficients" as forbidden user-facing output. Wave 4 fixed
+ * the deterministic fallback formatter, but Sonnet's `answer_text` could
+ * still pass through containing strings like `-0.7346938775510203`.
+ *
+ * The pattern matches a decimal with 3+ fractional digits NOT followed
+ * by a unit marker. Legitimate user-facing decimals (probabilities,
+ * percentage points) are typically 0–2 decimal places — a sensitivity
+ * coefficient surfaced raw is the only common case that produces a
+ * 3+-digit fractional. The unit-marker negative lookahead lets through
+ * pathological cases like "62.345%" if Sonnet ever emits one.
+ *
+ * Tested directly against the brief's evidence value
+ * "-0.7346938775510203" plus the negative cases (probabilities and
+ * percentage points stay valid).
+ */
+const RAW_DECIMAL_COEFFICIENT_PATTERN =
+  /-?\d+\.\d{3,}(?!\s*(?:%|pp\b|percent|percentage))/i;
 
 export interface ExplanationAnswerVerdict {
   /**
@@ -186,6 +207,14 @@ export function validateExplanationAnswer(
   // does not falsely match "fact").
   if (FORBIDDEN_INTERNAL_TERM_PATTERNS.some((pat) => pat.test(answerText))) {
     return invalid(answerText, explanation, 'forbidden_internal_term');
+  }
+
+  // Rule 6: raw decimal coefficient. Matches sensitivity values and
+  // similar long fractional decimals that legitimate user-facing prose
+  // would render as bucketed magnitude phrasing. See pattern docstring
+  // for the unit-marker exemption.
+  if (RAW_DECIMAL_COEFFICIENT_PATTERN.test(answerText)) {
+    return invalid(answerText, explanation, 'raw_decimal_coefficient');
   }
 
   // Rule 5: analysis language without an analysis fact (only meaningful for

@@ -102,6 +102,52 @@ describe('validateExplanationAnswer', () => {
     }
   });
 
+  it('Wave 5d: marks invalid for raw decimal coefficients (3+ fractional digits without a unit marker)', () => {
+    // The brief's evidence #4 value: an LLM-generated answer containing
+    // "-0.7346938775510203" must be rejected. Wave 4 fixed the
+    // deterministic fallback formatter; Wave 5d closes the egress hole
+    // for Sonnet-generated answer_text.
+    const padding =
+      ' Engineering Capacity carries the largest influence in the model and the leading option performs best by 14 percentage points.';
+    const baselinePriorFacts = [RUN_ANALYSIS_FACT];
+    const cases: Array<{ snippet: string }> = [
+      { snippet: 'The sensitivity is -0.7346938775510203' },
+      { snippet: 'Strength of the link is 0.6789' },
+      { snippet: 'Coefficient: 1.234' },
+      { snippet: 'Driver carries 0.5678' },
+    ];
+    for (const { snippet } of cases) {
+      const verdict = validateExplanationAnswer(
+        'explain_results',
+        { answer_text: snippet + padding },
+        baselinePriorFacts,
+      );
+      expect(verdict.payload?.answer_text_valid).toBe(false);
+      expect(verdict.payload?.answer_validation_error).toBe('raw_decimal_coefficient');
+    }
+  });
+
+  it('Wave 5d: passes legitimate decimals followed by unit markers (%, percentage points, pp)', () => {
+    const padding =
+      ' Engineering Capacity is the strongest driver and the result is meaningful.';
+    const baselinePriorFacts = [RUN_ANALYSIS_FACT];
+    const cases: Array<{ snippet: string }> = [
+      { snippet: 'The leading option performs best with a probability of 62%' },
+      { snippet: 'The lead is 14 percentage points' },
+      { snippet: 'Margin is 14.5%' },
+      { snippet: 'A 5 pp lead is meaningful' },
+      { snippet: 'Probability 0.62 is shown as 62.345%' }, // 0.62 only 2 dp; 62.345% has unit marker
+    ];
+    for (const { snippet } of cases) {
+      const verdict = validateExplanationAnswer(
+        'explain_results',
+        { answer_text: snippet + padding },
+        baselinePriorFacts,
+      );
+      expect(verdict.payload?.answer_validation_error).not.toBe('raw_decimal_coefficient');
+    }
+  });
+
   it('Wave 5: marks invalid for identifier-style internal terms (noop / fact_type / BUDGET_TARGET / graph_hash / Zod)', () => {
     // Each of these must be blocked at the validator BEFORE reaching
     // user-facing assistant_text. Padding ensures every answer is well

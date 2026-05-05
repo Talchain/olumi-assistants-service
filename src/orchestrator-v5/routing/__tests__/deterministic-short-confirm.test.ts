@@ -264,6 +264,23 @@ describe('tryShortConfirmResume — dispatch', () => {
     }
   });
 
+  it('returns no_pending skip_reason when pendingActions is empty (chip-click no-pending recovery prerequisite)', () => {
+    // Wave 5d safety net: TurnExecutor's no-pending recovery for
+    // chip-click ingresses depends on tryShortConfirmResume returning
+    // skip_reason='no_pending' when the most-recent pending list is
+    // empty. The recovery synthesises a focused rerun-analysis chip
+    // instead of letting "yes" reach the LLM. Pin the contract here
+    // so a future change to the resumer cannot silently flip the
+    // skip_reason and break the no-pending branch.
+    const r = tryShortConfirmResume({
+      message: 'yes',
+      pendingActions: [],
+      currentTurnIndex: 1,
+      nowMs: NOW_MS,
+    });
+    expect(r).toEqual({ matched: false, skip_reason: 'no_pending' });
+  });
+
   it('what_would_flip with unknown analysis freshness also downgrades (defence-in-depth)', () => {
     const wwf = makeRunAnalysisPending({
       id: 'pa-wwf',

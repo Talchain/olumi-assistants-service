@@ -610,25 +610,31 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // Brief contract: clicking the "Explore what would change this" chip
     // must produce the same outcome as typing "yes" in the same context.
     // Wave 1's derive-pending-actions persists a what_would_flip pending
-    // action whenever the chip is emitted, so the most-recent-pending-
-    // actions read on this turn already contains the resumable record.
-    // Rewriting the chip's message to "yes" makes TurnExecutor's
-    // deterministic short-confirm pre-route pick it up via the SAME
-    // synthesis path the typed-yes flow uses — same freshness gate,
-    // same entity-pick from graph, same telemetry.
+    // action whenever the chip is emitted; the deterministic short-
+    // confirm pre-route inside TurnExecutor reads the most-recent-
+    // pending-actions and resumes deterministically.
+    //
+    // We thread the chip-click intent into TurnExecutor as a typed
+    // option (`chipClickResumeIntent`) rather than rewriting the user-
+    // visible message. A bare message rewrite to "yes" loses the
+    // chip's semantic label: if the pending action is missing or
+    // expired, the resumer would fall through to the LLM with a bare
+    // "yes" and the LLM has no idea what the user meant. The typed
+    // flag lets TurnExecutor route a no-pending chip click to the
+    // rerun-analysis-required recovery instead of bare-yes-LLM-
+    // passthrough.
     //
     // No new dispatcher: the run_analysis chip-click takes a separate
-    // shortcut because that handler is heavyweight (PLoT call, scenario
-    // snapshot load); what_would_flip is a no-op explanation handler
-    // and TurnExecutor's existing short-confirm path is sufficient.
-    // Out-of-scope action_type values fall through unchanged to
-    // TurnExecutor with their original chip.message intact.
+    // shortcut because that handler is heavyweight (PLoT call,
+    // scenario snapshot load). what_would_flip is a no-op explanation
+    // handler so TurnExecutor's existing short-confirm path covers it.
+    let chipClickResumeIntent: 'what_would_flip' | undefined;
     if (
       ingress.kind === 'message' &&
       ingress.source === 'chip_click' &&
       ingress.chip?.action_type === 'what_would_flip'
     ) {
-      (ingress as { message: string }).message = 'yes';
+      chipClickResumeIntent = 'what_would_flip';
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -893,6 +899,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       graphState: extensions.graphState,
       analysisState: extensions.analysisState,
       selectedElements: extensions.selectedElements,
+      ...(chipClickResumeIntent
+        ? { chipClickResumeIntent }
+        : {}),
     });
 
     // Group 3 Task B — fail-closed invariant: `commit_performed: false` must

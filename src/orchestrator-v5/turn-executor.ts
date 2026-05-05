@@ -251,6 +251,18 @@ export interface RunTurnExecutorOptions {
     readonly edge_ids: readonly string[];
   } | null;
   /**
+   * Set by route-v2 when an ingress arrives with `source='chip_click'`
+   * and `chip.action_type === 'what_would_flip'`. The short-confirm
+   * pre-route reads this and synthesises the resume just as it does
+   * for a typed "yes" — same freshness gate, same entity-pick from
+   * graph, same telemetry, byte-equivalent proposal. When the most-
+   * recent pending action is missing or expired, the pre-route
+   * dispatches a focused recovery referring to the chip's intent
+   * rather than falling through to the LLM with bare-message-LLM-
+   * passthrough that loses the chip's semantic label.
+   */
+  readonly chipClickResumeIntent?: 'what_would_flip';
+  /**
    * Optional graph lookup override — tests pass a mock to exercise validator
    * paths without threading a full GraphV3T. Production derives this from
    * `graphState` via buildGraphLookup(); when both are present, the explicit
@@ -790,8 +802,20 @@ export async function runTurnExecutor(
       // enforced by regex content: short-confirm requires the message
       // to be bare "yes"-style; value-update requires an edit verb
       // plus a CQE quantity. The two cannot match the same message.
+      // Chip-click parity for what_would_flip: route-v2 sets
+      // `chipClickResumeIntent` so the resumer treats the click as a
+      // confirmation regardless of the chip's natural-language
+      // message (the brief contract is "chip click produces the same
+      // outcome as typing yes"). The synthetic message "yes" is fed
+      // into the resumer; below we add a no-pending recovery branch
+      // so a chip click that arrives without a matching pending
+      // action does not fall through to LLM with a bare-yes
+      // passthrough.
+      const resumerMessage = options.chipClickResumeIntent
+        ? 'yes'
+        : payload.message;
       const shortConfirmDispatch = tryShortConfirmResume({
-        message: payload.message,
+        message: resumerMessage,
         pendingActions: context.most_recent_pending_actions ?? [],
         currentTurnIndex: context.prior_turns.length,
         nowMs: Date.now(),
@@ -803,6 +827,78 @@ export async function runTurnExecutor(
           scenario_id: context.session_id,
           reason: shortConfirmDispatch.skip_reason,
         });
+        // No-pending recovery for chip-click: the user clicked a
+        // what_would_flip chip but no matching pending action exists
+        // (expired, never persisted, or read-degraded). Surface a
+        // focused recovery referring to the chip's intent rather
+        // than letting "yes" reach the LLM as a bare confirmation.
+        if (
+          options.chipClickResumeIntent === 'what_would_flip' &&
+          (shortConfirmDispatch.skip_reason === 'no_pending' ||
+            shortConfirmDispatch.skip_reason === 'kind_not_yet_resumable')
+        ) {
+          emit(TelemetryEvents.PendingActionRerunAnalysisRequired, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: 'chip_click_no_pending',
+            kind: 'what_would_flip',
+          });
+          const recoveryResponse = composeDirectAnswerResponse({
+            assistant_text:
+              "The offer to explore what would change this result is no longer available. " +
+              'Run the analysis again first, then I can show you what would change it.',
+            stage: context.stage,
+            suggested_actions: [
+              {
+                id: 'chip_action_run_analysis_after_chip_no_pending',
+                label: 'Run analysis',
+                message: 'Run the analysis.',
+                action_type: 'run_analysis',
+              },
+            ],
+          });
+          sonnetTextForLog = recoveryResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitDirectAnswer(recoveryResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'chip_click_what_would_flip_no_pending',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on chip-click no-pending recovery',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
       } else if (shortConfirmDispatch.dispatch === 'pending_action') {
         const pending = shortConfirmDispatch.pending;
         emit(TelemetryEvents.PendingActionMatched, {
