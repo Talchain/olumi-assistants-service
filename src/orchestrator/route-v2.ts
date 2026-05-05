@@ -109,6 +109,33 @@ import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
 
 // ───────────────────────────────────────────────────────────────────
+// Chip-click resume-intent detector
+// ───────────────────────────────────────────────────────────────────
+//
+// Wave 5b/5d-1 chip-click parity for `what_would_flip`. Exported pure
+// function so the route-boundary contract can be unit-tested directly
+// without spinning up Fastify. The route handler invokes this once
+// per ingress and threads the result into runTurnExecutor's
+// `chipClickResumeIntent` option — see runTurnExecutor invocation
+// below. A null return means the chip-click ingress is NOT one we
+// special-case; TurnExecutor handles the message normally.
+//
+// Currently only `what_would_flip` is mapped here. The
+// `run_analysis` chip-click takes its own dispatcher upstream
+// (`dispatchChipClickRunAnalysis`) and never reaches this point.
+// New action_types added here in the future must also gain a
+// short-confirm resumer dispatch path AND a TurnExecutor synthesis
+// branch — the typed flag is a no-op without those.
+export function detectChipClickResumeIntent(
+  ingress: OrchestratorTurnPayload,
+): 'what_would_flip' | undefined {
+  if (ingress.kind !== 'message') return undefined;
+  if (ingress.source !== 'chip_click') return undefined;
+  if (ingress.chip?.action_type !== 'what_would_flip') return undefined;
+  return 'what_would_flip';
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Commit-failure BoundaryError helper
 // ───────────────────────────────────────────────────────────────────
 //
@@ -628,14 +655,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // shortcut because that handler is heavyweight (PLoT call,
     // scenario snapshot load). what_would_flip is a no-op explanation
     // handler so TurnExecutor's existing short-confirm path covers it.
-    let chipClickResumeIntent: 'what_would_flip' | undefined;
-    if (
-      ingress.kind === 'message' &&
-      ingress.source === 'chip_click' &&
-      ingress.chip?.action_type === 'what_would_flip'
-    ) {
-      chipClickResumeIntent = 'what_would_flip';
-    }
+    const chipClickResumeIntent = detectChipClickResumeIntent(ingress);
 
     // ────────────────────────────────────────────────────────────────────
     // Draft_graph pre-Sonnet dispatch (v5-handler-surface brief Task 2)
