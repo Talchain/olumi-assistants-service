@@ -74,6 +74,7 @@ import {
   mapCqeQuantityToProposalValue,
   deriveOperator,
 } from './routing/deterministic-value-update.js';
+import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
 import type { ProposalAction } from './routing/types.js';
 import {
   HandlerInvocationFailedError,
@@ -771,6 +772,90 @@ export async function runTurnExecutor(
           word_range_missed: cqeSummary.word_range_missed,
         },
       });
+
+      // V5 Wave 2 — deterministic short-confirmation pre-route. Runs
+      // BEFORE the value-update pre-route. When the user replies with
+      // a bare confirmation ("yes", "ok", "do it") and the previous
+      // assistant turn persisted exactly one resumable pending action
+      // (Wave 2: only `run_analysis` kind has a synthesis path here),
+      // we synthesise a RoutingToolCallResult so the existing Step 2-7
+      // lifecycle (validate → execute → confirm → coach → compose →
+      // commit) runs unchanged. No LLM call.
+      //
+      // Mutual exclusion with the value-update pre-route is enforced
+      // by regex content: short-confirm requires the message to be
+      // bare "yes"-style with no edit verbs or numeric quantities;
+      // value-update requires an edit verb plus a CQE quantity. The
+      // two cannot match the same message.
+      const shortConfirmDispatch = tryShortConfirmResume({
+        message: payload.message,
+        pendingActions: context.most_recent_pending_actions ?? [],
+        currentTurnIndex: context.prior_turns.length,
+        nowMs: Date.now(),
+      });
+      if (shortConfirmDispatch.matched) {
+        const pending = shortConfirmDispatch.pending;
+        emit(TelemetryEvents.PendingActionMatched, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          pending_action_id: pending.id,
+          kind: pending.action.kind,
+          chip_id: pending.chip_id,
+          candidate_count: 1,
+        });
+        // Synthesise the proposal for the matched kind. Wave 2 only
+        // wires run_analysis; the TryShortConfirmResume filter
+        // already excluded other kinds via WAVE2_RESUMABLE_KINDS so
+        // this switch is exhaustive in practice.
+        if (pending.action.kind === 'run_analysis') {
+          const proposal: ProposalAction = {
+            handler_id: 'run_analysis',
+            entity: {
+              id: context.session_id,
+              kind: 'option',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [],
+            cited_context_fields: ['graph.options'],
+          };
+          const synthesisedRouting: RoutingResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: proposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: { input_tokens: 0, output_tokens: 0 },
+              model: 'deterministic-short-confirm',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+          };
+          routingResult = synthesisedRouting;
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          emit(TelemetryEvents.PendingActionConsumed, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: pending.id,
+            kind: pending.action.kind,
+            llm_calls_used: 0,
+          });
+        }
+      } else {
+        // Telemetry: emit the skip reason so dashboards can see why
+        // the resumer chose not to short-circuit. Most production
+        // skips are 'no_short_confirm' (user typed a real message);
+        // 'no_pending' / 'all_expired' / 'kind_not_yet_resumable' /
+        // 'multiple_ambiguous' are diagnostic for the resumer.
+        emit(TelemetryEvents.PendingActionSkipped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          reason: shortConfirmDispatch.skip_reason,
+        });
+      }
 
       // V5 explain-stabilisation Task 4 + V5 D1 golden-path closure
       // (A3.1 Task 1) — deterministic value-update pre-route. Catches

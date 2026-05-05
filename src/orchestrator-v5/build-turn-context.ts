@@ -31,6 +31,7 @@ import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready
 import { getTurnExecutorBudgets } from './budgets.js';
 import { SessionReadError, type SessionStore } from './session/store.js';
 import { getSessionStore } from './session/index.js';
+import type { PendingAction } from './session/pending-action.js';
 
 export interface EnrichedTurnContext extends TurnContext {
   /**
@@ -79,6 +80,20 @@ export interface EnrichedTurnContext extends TurnContext {
    * scenarioBriefText behaviour).
    */
   readonly persistedGraph: unknown | null;
+  /**
+   * V5 Wave 2: pending actions emitted by the most recent prior turn.
+   * Populated from `SessionStore.readMostRecentPendingActions`. Empty
+   * array means either "no prior turn carried pending actions" or
+   * "persistence read degraded" (in the latter case
+   * `session.pending_actions.read_degraded` telemetry is emitted, mirroring
+   * the prior_turns degradation path). Read-side narrowing is enforced
+   * upstream — only the LAST prior turn's pending_actions appear here.
+   *
+   * Optional on the type so existing tests that hand-construct
+   * `EnrichedTurnContext` with `prior_turns: []` keep working without
+   * a fixture update. TurnExecutor reads via `?? []`.
+   */
+  readonly most_recent_pending_actions?: readonly PendingAction[];
 }
 
 export interface BuildTurnContextOptions {
@@ -177,13 +192,44 @@ export async function buildTurnContext(
     store,
   );
 
+  // V5 Wave 2: read pending actions from the most recent prior turn.
+  // Read failures are non-fatal — empty array on degradation, mirrors
+  // the prior_turns degradation path.
+  const mostRecentPendingActions = await fetchMostRecentPendingActions(
+    payload.scenario_id,
+    requestId,
+    store,
+  );
+
   return {
     ...baseContext,
     prior_turns: priorTurns,
     prior_facts: priorFacts,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
+    most_recent_pending_actions: mostRecentPendingActions,
   };
+}
+
+async function fetchMostRecentPendingActions(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<readonly PendingAction[]> {
+  if (!store) return [];
+  try {
+    return await store.readMostRecentPendingActions(scenarioId);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — readMostRecentPendingActions failed; degrading to empty list',
+    );
+    return [];
+  }
 }
 
 async function fetchPersistedScenarioState(

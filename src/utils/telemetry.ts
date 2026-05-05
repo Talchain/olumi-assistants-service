@@ -483,14 +483,25 @@ export const TelemetryEvents = {
   HandlerInvocation: "v5.handler_invocation",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
-  // V5 pending-action lifecycle (Wave 1: created only; Waves 2+ add
-  // matched / consumed / expired / invalidated / skipped). Fired
-  // AFTER the persistence write succeeds — never log a "created"
-  // event for a pending action that was rolled back by RPC failure.
-  // Payload fields: scenario_id, turn_row_id, pending_action_id, kind,
-  //                 chip_id, expires_at_turn_count, expires_at_iso.
-  // No raw graph or analysis values; only ids and bounded enums.
+  // V5 pending-action lifecycle. Fired at the appropriate point in the
+  // resume cycle. No raw graph / analysis / target-label values in
+  // payloads; only ids and bounded enums.
+  //
+  //   created     — write succeeded (Wave 1)
+  //   matched     — short-confirm pre-route found a resumable pending action
+  //   consumed    — handler successfully dispatched via the resumer
+  //   skipped     — short-confirm pre-route declined to resume; carries reason
+  //   expired     — pending action TTL exceeded (placeholder; resumer rolls
+  //                 wall+turn TTL into 'all_expired' skip reason today)
+  //   invalidated — preconditions failed (graph hash, target missing, etc.;
+  //                 Wave 3 will start emitting this as set_factor_value /
+  //                 edit_graph_add_risk pending actions land)
   PendingActionCreated: "v5.pending_action.created",
+  PendingActionMatched: "v5.pending_action.matched",
+  PendingActionConsumed: "v5.pending_action.consumed",
+  PendingActionSkipped: "v5.pending_action.skipped",
+  PendingActionExpired: "v5.pending_action.expired",
+  PendingActionInvalidated: "v5.pending_action.invalidated",
 
   // V5 state-trust freshness derivation. Emitted once per projection
   // build (every turn). Single event is sufficient to reconstruct the
