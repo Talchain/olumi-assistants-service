@@ -265,9 +265,11 @@ describe('explain_results — answer-carrying contract', () => {
     // Phase 2 workstream C: probability rendered as percentage (0.62 → "62%").
     expect(outcome.assistant_text).toContain('62%');
     expect(outcome.assistant_text).toContain('Engineering Capacity');
-    // Driver sensitivity value surfaced raw — sensitivity is not a probability
-    // and converting it to a percentage would misrepresent the magnitude.
-    expect(outcome.assistant_text).toContain('0.65');
+    // Wave 4: driver sensitivity rendered as bucketed direction prose,
+    // not a raw decimal. 0.65 magnitude → "very strongly", positive
+    // sign → "strengthens the lead".
+    expect(outcome.assistant_text).toContain('strengthens the lead');
+    expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
   });
 
   it('persists a fact that round-trips through the schema on the happy path', async () => {

@@ -346,9 +346,11 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     // Strongest causal links present (factor labels and goal label)
     expect(outcome.assistant_text).toContain('Code quality');
     expect(outcome.assistant_text).toContain('Hire the best candidate');
-    // Strength formatting present
-    expect(outcome.assistant_text).toMatch(/strength\s+-?0\.\d{2}/);
-    // Length well above the 39-char SAFE_FALLBACK stub
+    // Wave 4: edge strength rendered as bucketed magnitude word
+    // ("weak"/"moderate"/"strong"/"very strong" link), not a raw
+    // decimal.
+    expect(outcome.assistant_text).toMatch(/(weak|moderate|strong|very strong) (direct )?link/);
+    expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
     expect(outcome.assistant_text).not.toBe('Here is what the model structure shows.');
   });
@@ -388,11 +390,11 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     expect(outcome.assistant_text).toContain('Senior developer');
     // Phase 2 workstream C: probability rendered as percentage (0.71 → "71%").
     expect(outcome.assistant_text).toContain('71%');
-    // A top driver factor label is present, with sensitivity value.
+    // A top driver factor label is present.
     expect(outcome.assistant_text).toContain('Code quality');
-    // Sensitivity stays raw — it is not a probability.
-    expect(outcome.assistant_text).toContain('0.62');
-    // Length well above the 32-char SAFE_FALLBACK stub
+    // Wave 4: sensitivity rendered as bucketed direction prose.
+    expect(outcome.assistant_text).toMatch(/(strengthens|weakens) the lead/);
+    expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
     expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');
   });

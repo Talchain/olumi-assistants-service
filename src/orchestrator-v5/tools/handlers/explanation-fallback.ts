@@ -32,18 +32,60 @@ import {
   formatProbability,
 } from '../../format/format-analysis-value.js';
 
-function formatRawNumber(value: number): string {
-  // Sensitivity / edge-strength passthrough. These are not probabilities
-  // and not on the percentage-points scale — they are unitless signed
-  // magnitudes whose presentation is owned by the upstream model. The
-  // integer guard avoids "35.0" if a caller hands us a float-typed
-  // integer; otherwise String() preserves the value verbatim.
-  if (Number.isInteger(value)) return String(value);
-  return String(value);
+/**
+ * Convert a raw sensitivity coefficient into calm, readable prose.
+ *
+ * The previous `formatRawNumber` passthrough surfaced values like
+ * `-0.7346938775510203` directly to the user, which the brief lists as
+ * forbidden output. Sensitivity coefficients are unitless signed
+ * magnitudes; the natural user-facing rendering is bucketed magnitude
+ * plus a plain-English direction.
+ *
+ * Buckets (calm business language):
+ *   |v| < 0.02         → "has little effect on the result"
+ *   0.02 ≤ |v| < 0.1   → "slightly {strengthens|weakens} the lead"
+ *   0.1  ≤ |v| < 0.3   → "moderately ..."
+ *   0.3  ≤ |v| < 0.6   → "strongly ..."
+ *   |v| ≥ 0.6          → "very strongly ..."
+ *
+ * Direction maps to the leading-option framing the rest of the prose
+ * already uses: positive sensitivity strengthens the lead, negative
+ * weakens it. We do not say "up/down" because the underlying value
+ * is not on a probability scale and a direction word without a frame
+ * of reference is misleading.
+ *
+ * Telemetry (where it exists for sensitivity values) retains the raw
+ * number; this helper only governs USER-FACING prose.
+ */
+export function formatSensitivityDirection(value: number): string {
+  const absV = Math.abs(value);
+  if (absV < 0.02) return 'has little effect on the result';
+  let magnitude: string;
+  if (absV < 0.1) magnitude = 'slightly';
+  else if (absV < 0.3) magnitude = 'moderately';
+  else if (absV < 0.6) magnitude = 'strongly';
+  else magnitude = 'very strongly';
+  return value > 0
+    ? `${magnitude} strengthens the lead`
+    : `${magnitude} weakens the lead`;
 }
 
 function formatDriver(d: AnalysisProjectionDriver): string {
-  return `${d.factor_label} (sensitivity ${formatRawNumber(d.sensitivity_value)})`;
+  return d.factor_label;
+}
+
+/**
+ * Bucketed magnitude for edge strengths in structural explanations.
+ * Same calm business vocabulary as `formatSensitivityDirection`,
+ * minus the direction (edge strengths are connection magnitudes,
+ * not effect-on-leading-option signed quantities).
+ */
+export function formatEdgeStrengthMagnitude(value: number): string {
+  const absV = Math.abs(value);
+  if (absV < 0.1) return 'weak';
+  if (absV < 0.3) return 'moderate';
+  if (absV < 0.6) return 'strong';
+  return 'very strong';
 }
 
 /**
@@ -90,12 +132,15 @@ export function composeExplainResultsFallback(
   if (projection.top_drivers.length > 0) {
     const drivers = projection.top_drivers.slice(0, 2);
     if (drivers.length === 1) {
+      const d = drivers[0]!;
       sentences.push(
-        `The result is driven mainly by ${formatDriver(drivers[0])}, which carries the largest sensitivity in the model.`,
+        `The result is driven mainly by ${formatDriver(d)}, which ${formatSensitivityDirection(d.sensitivity_value)}.`,
       );
     } else {
+      const a = drivers[0]!;
+      const b = drivers[1]!;
       sentences.push(
-        `The result is driven mainly by ${formatDriver(drivers[0])} and ${formatDriver(drivers[1])}, which together carry the largest sensitivity in the model.`,
+        `The result is driven mainly by ${formatDriver(a)}, which ${formatSensitivityDirection(a.sensitivity_value)}, and ${formatDriver(b)}, which ${formatSensitivityDirection(b.sensitivity_value)}.`,
       );
     }
   }
@@ -150,12 +195,15 @@ export function composeWhatWouldFlipFallback(
   if (projection.top_drivers.length > 0) {
     const drivers = projection.top_drivers.slice(0, 2);
     if (drivers.length === 1) {
+      const d = drivers[0]!;
       sentences.push(
-        `Movement on ${formatDriver(drivers[0])} would shift this result the most, since it carries the largest sensitivity.`,
+        `Movement on ${formatDriver(d)} would shift this result the most. Today it ${formatSensitivityDirection(d.sensitivity_value)}.`,
       );
     } else {
+      const a = drivers[0]!;
+      const b = drivers[1]!;
       sentences.push(
-        `Movement on ${formatDriver(drivers[0])} or ${formatDriver(drivers[1])} would shift this result the most, since they carry the largest sensitivity.`,
+        `Movement on ${formatDriver(a)} or ${formatDriver(b)} would shift this result the most. ${formatDriver(a)} ${formatSensitivityDirection(a.sensitivity_value)}; ${formatDriver(b)} ${formatSensitivityDirection(b.sensitivity_value)}.`,
       );
     }
   }
@@ -246,11 +294,11 @@ export function composeExplainFromStructureFallback(
     );
     if (reachesGoal && projection.goal_label) {
       sentences.push(
-        `Its strongest direct influence runs to ${projection.goal_label} at strength ${formatRawNumber(top.strength)}, meaning movement here would have the most structural effect on your goal.`,
+        `Its strongest direct influence runs to ${projection.goal_label} as a ${formatEdgeStrengthMagnitude(top.strength)} link, meaning movement here would have the most structural effect on your goal.`,
       );
     } else {
       sentences.push(
-        `Its strongest direct connection is to ${otherEnd} at strength ${formatRawNumber(top.strength)}, so changes there would propagate first.`,
+        `Its strongest direct connection is to ${otherEnd} as a ${formatEdgeStrengthMagnitude(top.strength)} link, so changes there would propagate first.`,
       );
     }
     if (pathways.length > 1) {
@@ -258,7 +306,7 @@ export function composeExplainFromStructureFallback(
       const secondOther =
         second.label_from === factor ? second.label_to : second.label_from;
       sentences.push(
-        `A second pathway runs to ${secondOther} at strength ${formatRawNumber(second.strength)}, giving you a secondary lever if the first proves hard to move.`,
+        `A second pathway runs to ${secondOther} as a ${formatEdgeStrengthMagnitude(second.strength)} link, giving you a secondary lever if the first proves hard to move.`,
       );
     }
   } else if (projection.top_causal_links.length > 0) {
@@ -269,12 +317,12 @@ export function composeExplainFromStructureFallback(
     sentences.push(goalIntro);
     const first = top[0];
     sentences.push(
-      `${first.label_from} has the strongest visible direct influence on ${first.label_to} at strength ${formatRawNumber(first.strength)}, meaning changes here would have the most structural effect.`,
+      `${first.label_from} has the strongest visible direct influence on ${first.label_to} via a ${formatEdgeStrengthMagnitude(first.strength)} link, meaning changes here would have the most structural effect.`,
     );
     if (top.length > 1) {
       const second = top[1];
       sentences.push(
-        `${second.label_from} also contributes meaningfully through its direct link to ${second.label_to} at strength ${formatRawNumber(second.strength)}, so it is worth keeping in view as a secondary lever.`,
+        `${second.label_from} also contributes meaningfully through a ${formatEdgeStrengthMagnitude(second.strength)} direct link to ${second.label_to}, so it is worth keeping in view as a secondary lever.`,
       );
     }
   } else if (projection.goal_label) {

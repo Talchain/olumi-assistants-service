@@ -68,4 +68,44 @@ describe('sanitiseNarrateOutput', () => {
     expect(output).toBe(input); // text preserved verbatim
     expect(contamination_detected).toBe(true);
   });
+
+  // Wave 4 — extended internal-vocabulary denylist. Identifier-style
+  // tokens are word-boundary matched. Common English words are
+  // matched only in code-path contexts so legitimate prose is not
+  // flagged.
+  describe('Wave 4 internal-vocabulary denylist', () => {
+    it.each([
+      ['Internal note: noop = true.'],
+      ['fact_type was missing.'],
+      ['BUDGET_TARGET exceeded.'],
+      ['graph_hash mismatch.'],
+      ['Zod failed to parse.'],
+    ])('flags identifier-style token: %j', (input) => {
+      const { contamination_detected } = sanitiseNarrateOutput(input);
+      expect(contamination_detected).toBe(true);
+    });
+
+    it.each([
+      ['mean: 0.5 std: 0.1'],
+      ['normalised=true'],
+      ['MEAN value present'],
+      ['STD computed'],
+    ])('flags ambiguous tokens in label/all-caps context: %j', (input) => {
+      const { contamination_detected } = sanitiseNarrateOutput(input);
+      expect(contamination_detected).toBe(true);
+    });
+
+    // Plain English use of `mean`/`std`/`normalised` must not be
+    // flagged. (`patch` as a verb is a separate matter — the V4
+    // BANNED_TERMS regex flags it across all contexts; that's
+    // pre-existing behaviour, not a Wave 4 concern.)
+    it.each([
+      ['The mean response time was good last quarter.'],
+      ['The budget std could be reduced by hiring early.'],
+      ['Cost is normalised across the team.'],
+    ])('does NOT flag plain English use of mean/std/normalised: %j', (input) => {
+      const { contamination_detected } = sanitiseNarrateOutput(input);
+      expect(contamination_detected).toBe(false);
+    });
+  });
 });

@@ -27,6 +27,31 @@ const BANNED_TERMS = /\b(interventions|graph_patch|patch|operation)\b/i;
 // graph-modelling qualifier that makes it legitimate. Mirrors V4 precedent.
 const NODE_TERM = /(?<!\bfactor |option |goal |decision |risk )(\bnode\b)/i;
 
+/**
+ * Internal vocabulary that should never reach user-facing prose.
+ * Identifier-style tokens are word-boundary matched. Common English
+ * words (`mean`, `std`, `normalised`, `patches`) are matched only in
+ * code-path contexts (label-style colon/equals usage, ALL_CAPS or
+ * mixed-case variants) so legitimate prose like "the mean response
+ * time" or "we'll patch the bug" is not flagged.
+ *
+ * Telemetry/debug fields can still carry these tokens — this scan
+ * runs only against narrate output that reaches the user.
+ */
+const INTERNAL_IDENTIFIER_TERMS =
+  /\b(noop|fact_type|BUDGET_TARGET|graph_hash|Zod)\b/;
+
+/**
+ * Context-aware match for ambiguous tokens. Only fires when the token
+ * appears in a label/keyed context (`mean: 0.5`, `std=0.1`,
+ * `normalised:`) or as ALL-CAPS. Plain English use ("the mean response
+ * time was good", "we'll patch the bug") passes through untouched.
+ */
+const AMBIGUOUS_LABEL_CONTEXT =
+  /(?:^|[\s(])(mean|std|normalised|normalized|patches)\s*[:=]/i;
+
+const AMBIGUOUS_ALLCAPS = /\b(MEAN|STD|NORMALISED|NORMALIZED|PATCHES)\b/;
+
 const EM_DASH = '\u2014'; // —
 const EN_DASH = '\u2013'; // –
 
@@ -47,7 +72,13 @@ export function sanitiseNarrateOutput(input: string): SanitiseResult {
 
   // 2. Flag banned terms (V4 parity — no rewrite). Test on the already-stripped
   //    text so XML tag names like <patch> don't double-count.
-  if (BANNED_TERMS.test(output) || NODE_TERM.test(output)) {
+  if (
+    BANNED_TERMS.test(output) ||
+    NODE_TERM.test(output) ||
+    INTERNAL_IDENTIFIER_TERMS.test(output) ||
+    AMBIGUOUS_LABEL_CONTEXT.test(output) ||
+    AMBIGUOUS_ALLCAPS.test(output)
+  ) {
     contamination = true;
   }
 

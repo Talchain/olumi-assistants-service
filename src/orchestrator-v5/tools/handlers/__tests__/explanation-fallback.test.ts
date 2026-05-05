@@ -80,12 +80,16 @@ describe('composeExplainResultsFallback', () => {
     // Runner-up label and margin in "N percentage points" prose form
     expect(text).toContain('Hire Two Mid-Level');
     expect(text).toContain('35 percentage points');
-    // Driver labels AND sensitivity values both surfaced (sensitivity stays raw —
-    // it is not a probability and converting would misrepresent the magnitude)
+    // Driver labels surfaced; sensitivity values rendered as bucketed
+    // direction prose (Wave 4 — formatSensitivityDirection) instead of
+    // raw decimals like 0.65 / -0.42 which the brief lists as forbidden
+    // user-facing output.
     expect(text).toContain('Engineering Capacity');
-    expect(text).toContain('0.65');
     expect(text).toContain('Hiring Cost');
-    expect(text).toContain('-0.42');
+    expect(text).toContain('strengthens the lead'); // 0.65 sign → strengthens
+    expect(text).toContain('weakens the lead'); // -0.42 sign → weakens
+    // No raw decimals in user-facing prose.
+    expect(text).not.toMatch(/-?\d+\.\d/);
     expect(text).toContain('robustness');
   });
 
@@ -132,10 +136,12 @@ describe('composeWhatWouldFlipFallback', () => {
     expect(text).toContain('Hire Two Mid-Level');
     // Margin rendered as full "N percentage points" prose
     expect(text).toContain('35 percentage points');
-    // Driver labels AND sensitivity values (sensitivity stays raw)
+    // Driver labels surfaced; sensitivities as bucketed direction prose
+    // (Wave 4). No raw decimals.
     expect(text).toContain('Engineering Capacity');
-    expect(text).toContain('0.65');
-    expect(text).toContain('-0.42');
+    expect(text).toContain('strengthens the lead');
+    expect(text).toContain('weakens the lead');
+    expect(text).not.toMatch(/-?\d+\.\d/);
     expect(text).not.toMatch(/\bproposing to\b/i);
     expect(text).not.toMatch(/\bI'll\s+\b/i);
   });
@@ -173,7 +179,11 @@ describe('composeExplainFromStructureFallback', () => {
     expect(text).toContain('Q3 Throughput');
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('Hiring Cost');
-    expect(text).toContain('strength');
+    // Edge strength now rendered as a bucketed magnitude word
+    // ("weak"/"moderate"/"strong"/"very strong" link) — Wave 4. No
+    // raw decimals reach user-facing prose.
+    expect(text).toMatch(/(weak|moderate|strong|very strong) (direct )?link/);
+    expect(text).not.toMatch(/-?\d+\.\d/);
     // Olumi-style explanatory tone, not a system report.
     expect(text).toContain('shaped by several causal mechanisms');
   });

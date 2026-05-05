@@ -393,7 +393,10 @@ describe('explain_from_structure — Test A calibration (validator-rejection fai
       structureProjection: STRUCTURE_PROJECTION,
     });
     expect(outcome.assistant_text).toContain('Engineering Capacity');
-    expect(outcome.assistant_text).toContain('0.65');
+    // Wave 4: edge strength rendered as bucketed magnitude word, not
+    // a raw decimal. 0.65 → "very strong link".
+    expect(outcome.assistant_text).toMatch(/(weak|moderate|strong|very strong) (direct )?link/);
+    expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
   });
 
@@ -443,7 +446,9 @@ describe('explain_from_structure — Test A calibration (validator-rejection fai
     });
     expect(outcome.assistant_text).toContain('Engineering Capacity');
     expect(outcome.assistant_text).toContain('Q3 Throughput');
-    expect(outcome.assistant_text).toContain('0.65');
+    // Wave 4: edge strength rendered as bucketed magnitude word.
+    expect(outcome.assistant_text).toMatch(/(weak|moderate|strong|very strong) (direct )?link/);
+    expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
   });
 });
