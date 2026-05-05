@@ -550,18 +550,23 @@ export async function dispatchEditGraph(
               ? `Adding the risk would project ${preflight.projected_edges} edges (limit ${preflight.edge_limit}).`
               : `Adding the risk would project ${preflight.projected_nodes} nodes (limit ${preflight.node_limit}).`,
           },
-          // Executable chips only. "Rebuild from updated brief" routes
-          // through the existing draft-graph path. The replace-risk
-          // option opens a focused clarification the LLM can resolve
-          // on the next turn.
+          // Prompt-replay chips. These are NOT deterministic action
+          // dispatches: clicking them re-submits the chip's prompt
+          // text on the next turn so Sonnet routes the request with
+          // full context. Renamed from "Rebuild from updated brief"
+          // and "Replace an existing risk" to honest prompts that
+          // match what clicking actually does — there is no
+          // deterministic rebuild or remove-then-add flow in this
+          // tranche, and offering one would be a false promise.
           suggestedActions: [
             {
-              label: 'Rebuild from updated brief',
-              prompt: 'I want to rewrite the brief and rebuild the model from scratch.',
+              label: 'Tell me how to simplify this',
+              prompt:
+                "Tell me how I should simplify this model so we can add the new risk.",
               role: 'facilitator' as const,
             },
             {
-              label: 'Replace an existing risk',
+              label: `Tell me which risk to replace with '${classified.label}'`,
               prompt: `Which existing risk should I replace with '${classified.label}'?`,
               role: 'facilitator' as const,
             },

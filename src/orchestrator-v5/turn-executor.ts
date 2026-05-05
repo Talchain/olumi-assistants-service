@@ -813,13 +813,41 @@ export async function runTurnExecutor(
           chip_id: pending.chip_id,
           candidate_count: 1,
         });
+        // Synthesise a proposal entity that will pass the validator's
+        // graph-existence check (line 281 of validator.ts). For
+        // run_analysis and what_would_flip the validator accepts
+        // ['option', 'goal']; pick the first available option, then
+        // goal, from the graph. When no graph is present the
+        // graph-dependent check is skipped — fall back to the scenario
+        // id so the proposal is still well-formed.
+        const pickEntity = (): {
+          id: string;
+          kind: 'option' | 'goal';
+          label: string | null;
+        } => {
+          if (graphLookupForValidate) {
+            const opts = graphLookupForValidate.listEntitiesByKind('option');
+            if (opts.length > 0) {
+              return { id: opts[0]!.id, kind: 'option', label: opts[0]!.label };
+            }
+            const goals = graphLookupForValidate.listEntitiesByKind('goal');
+            if (goals.length > 0) {
+              return { id: goals[0]!.id, kind: 'goal', label: goals[0]!.label };
+            }
+          }
+          // No graph or no option/goal nodes: validator's graph-dependent
+          // check is skipped, so any well-formed entity passes.
+          return { id: context.session_id, kind: 'option', label: null };
+        };
+        const ent = pickEntity();
         const proposal: ProposalAction =
           pending.action.kind === 'run_analysis'
             ? {
                 handler_id: 'run_analysis',
                 entity: {
-                  id: context.session_id,
-                  kind: 'option',
+                  id: ent.id,
+                  kind: ent.kind,
+                  ...(ent.label !== null ? { label: ent.label } : {}),
                   resolution_status: 'resolved',
                   resolution_method: 'id_match',
                 },
@@ -827,13 +855,11 @@ export async function runTurnExecutor(
                 cited_context_fields: ['graph.options'],
               }
             : {
-                // what_would_flip — the handler reads the live analysis
-                // projection from context; no parameters or entity
-                // resolution are needed beyond the scenario context.
                 handler_id: 'what_would_flip',
                 entity: {
-                  id: context.session_id,
-                  kind: 'option',
+                  id: ent.id,
+                  kind: ent.kind,
+                  ...(ent.label !== null ? { label: ent.label } : {}),
                   resolution_status: 'resolved',
                   resolution_method: 'id_match',
                 },
@@ -939,12 +965,24 @@ export async function runTurnExecutor(
           scenario_id: context.session_id,
           expired_count: shortConfirmDispatch.expired_count,
         });
+        // The offer has lapsed. Recovery copy uses British English,
+        // sentence case, no em dash. Always offer "Run analysis" as
+        // the safe executable next step — it's the most useful action
+        // when the user has lost context regardless of what the
+        // expired offer was about.
         const recoveryResponse = composeDirectAnswerResponse({
           assistant_text:
-            "I'm not sure what you'd like me to do here — the offer I had open has lapsed. " +
-            'Tell me what you want to explore next.',
+            "The offer I had open has lapsed, so I'm not sure what you want me to do. " +
+            'You can run the analysis again, or tell me what to explore next.',
           stage: context.stage,
-          suggested_actions: [],
+          suggested_actions: [
+            {
+              id: 'chip_action_run_analysis_after_expiry',
+              label: 'Run analysis',
+              message: 'Run the analysis.',
+              action_type: 'run_analysis',
+            },
+          ],
         });
         sonnetTextForLog = recoveryResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';

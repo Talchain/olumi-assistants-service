@@ -125,12 +125,17 @@ describe('dispatchEditGraph — pre-LLM add-risk preflight', () => {
     expect(handleEditGraph as MockedFunction<typeof handleEditGraph>).not.toHaveBeenCalled();
     expect(result.response.assistant_text).toContain("can't add another risk");
     expect(result.response.assistant_text).toContain('rebuild it from your updated brief');
-    // Wave 3 chip set is the Wave 0-confirmed-real options only.
+    // The chip set is honest prompt-replay chips. There is no
+    // deterministic rebuild or remove-then-add flow in this tranche
+    // so the chip labels describe what clicking actually does (re-
+    // submit the prompt for Sonnet to handle). The chip set does NOT
+    // promise a deterministic flow that doesn't exist.
     const labels = (result.response.suggested_actions ?? []).map((a) => a.label);
-    expect(labels).toContain('Rebuild from updated brief');
-    expect(labels).toContain('Replace an existing risk');
+    expect(labels).toContain('Tell me how to simplify this');
+    expect(labels.some((l) => l.startsWith('Tell me which risk to replace'))).toBe(true);
     expect(labels).not.toContain('Simplify the model');
     expect(labels).not.toContain('Add as evidence');
+    expect(labels).not.toContain('Rebuild from updated brief');
   });
 
   it('at edge-limit, "add X as a risk" returns a preflight rejection without calling handleEditGraph', async () => {

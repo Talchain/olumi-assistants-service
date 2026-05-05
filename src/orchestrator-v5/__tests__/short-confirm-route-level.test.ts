@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
+import type { HandlerRegistry } from '../tools/registry.js';
 
 const SCENARIO_ID = randomUUID();
 
@@ -75,6 +76,29 @@ function throwingRoutingAdapter() {
         throw new Error('routing adapter must NOT be called when short-confirm matches');
       }),
   };
+}
+
+/**
+ * Stubbed handler registry. The production `run_analysis` handler reads
+ * scenario state from PLoT and is not unit-testable; the stub returns
+ * a deterministic non-noop fact so validation/execute/commit complete.
+ */
+function stubbedHandlerRegistry(): HandlerRegistry {
+  const runAnalysisStub = async () => ({
+    kind: 'success' as const,
+    fact: {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt-a',
+        summary: 'Stub run_analysis result.',
+        win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
+      },
+    },
+  });
+  return new Map([['run_analysis', runAnalysisStub]]) as unknown as HandlerRegistry;
 }
 
 function callingRoutingAdapter() {
@@ -134,5 +158,34 @@ describe('Short-confirm pre-route — route-level zero-LLM assertion', () => {
       { routingAdapter: adapter },
     );
     expect(adapter.chatWithTools).toHaveBeenCalled();
+  });
+
+  it('"yes" passes validation and dispatches the run_analysis handler (validator_outcome=valid)', async () => {
+    // Strengthened beyond "LLM not called". Asserts the validator
+    // accepted the synthesised proposal — the entity-fix that picks
+    // a real graph node prevents the ENTITY_NOT_FOUND failure mode
+    // the bare scenario_id entity would have produced. Validator
+    // success is captured on the run-completion telemetry.
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('yes'), 'req-yes-validator', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedHandlerRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    // The synthesised proposal reached the validator AND was accepted.
+    // The pre-fix entity (scenario_id with kind='option') would have
+    // failed ENTITY_NOT_FOUND on any non-empty graph; the post-fix
+    // entity picks the first option/goal from the graph or falls
+    // back when no graph is present, so validation passes here.
+    expect(result.telemetry.validation_error_code).toBeNull();
+    expect(result.telemetry.stages_completed).toContain('validate');
+    // Internal failure copy must never leak — even when execution
+    // can't complete in a unit-test sandbox, recovery copy must be
+    // user-friendly, not "ENTITY_NOT_FOUND" / internal jargon.
+    expect(result.response.assistant_text).not.toMatch(/not found in graph/i);
+    expect(result.response.assistant_text).not.toMatch(/no pending action/i);
+    // NOTE: full lifecycle (handler execute + commit) is exercised
+    // by the staging integration tests; the production run_analysis
+    // handler reads scenario state from PLoT and is not unit-testable.
   });
 });

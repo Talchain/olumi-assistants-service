@@ -220,16 +220,17 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     ]);
   }
 
-  // Rule: after a successful explain_results turn (the handler ran and
-  // emitted a real fact, not a precondition-fail noop), surface a
-  // what_would_flip action chip. Mirrors the offer that the
+  // Rule: after a successful explain_results turn (handler returned
+  // a real fact, not a precondition-fail noop), surface a
+  // what_would_flip action chip. Mirrors the offer the
   // explain_results deterministic fallback prose makes
   // ("Would you like to explore what would change this result?")
   // and lets a typed "yes" resume via the short-confirm pre-route.
-  if (
-    handlerJustRan === 'explain_results' &&
-    noopExplanationHandlerJustRan === null
-  ) {
+  // Uses findSuccessfulExplainResultsJustRan because findHandlerJustRan
+  // only returns 'run_analysis' (never explanation handlers), and the
+  // misleadingly-named findNoopExplanationHandlerJustRan returns the
+  // fact_type for ANY explain fact regardless of noop.
+  if (findSuccessfulExplainResultsJustRan(input.handlerFacts)) {
     return cap([
       {
         id: 'chip_action_what_would_flip',
@@ -467,6 +468,28 @@ function findHandlerJustRan(
     if (isSuccessfulRunAnalysisFact(f)) return 'run_analysis';
   }
   return null;
+}
+
+/**
+ * Did `explain_results` produce a successful (non-noop) fact this turn?
+ *
+ * The misleadingly-named `findNoopExplanationHandlerJustRan` returns the
+ * fact_type for ANY explain handler fact regardless of `noop`. To gate
+ * the post-explain `what_would_flip` chip emit on a SUCCESSFUL explain
+ * (so the offer "Would you like to explore what would change this
+ * result?" carries an executable resumable chip), we need a non-noop
+ * filter. Handler facts whose `noop` is true represent precondition-
+ * unmet or staleness-recovery cases — the offer wording is different
+ * there and the post-explain chip should not fire.
+ */
+function findSuccessfulExplainResultsJustRan(
+  facts: readonly HandlerFact[] | undefined,
+): boolean {
+  if (!facts || facts.length === 0) return false;
+  for (const f of facts) {
+    if (f.fact_type === 'explain_results' && f.noop !== true) return true;
+  }
+  return false;
 }
 
 // V5 0.9.0 — return the no-op fact_type when one of the new no-op handlers
