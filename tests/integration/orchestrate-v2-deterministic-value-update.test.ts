@@ -399,11 +399,13 @@ describe('POST /orchestrate/v2/turn — deterministic value-update HTTP boundary
 });
 
 // ---------------------------------------------------------------------------
-// Follow-up review (P0.3): stateful multi-turn freshness behaviour at
-// the HTTP boundary. The single-turn tests above prove the value-update
-// dispatch; these prove the brief's "graph mutation does not update
-// freshness" gate by exercising the post-dispatch re-derivation against
-// a prior run_analysis fact + a divergent current graph hash.
+// SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR — shared synthetic prior fact used
+// by the live-hash + mutation replay below. The describe block formerly
+// at this position ("stale-after-mutation freshness (multi-turn)") was
+// removed in fifth-round review (P1 #2 + IMP #3): it used a synthetic
+// divergent hash and overlapped with the live-hash replay's narrative
+// for the same property. The replay is the canonical coverage; nothing
+// else seeds a divergent hash.
 // ---------------------------------------------------------------------------
 
 const SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR = {
@@ -415,114 +417,14 @@ const SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR = {
     leading_option_id: 'opt_a',
     summary: 'Prior analysis run.',
     enrichment: { analysis_status: 'computed' },
-    // Deliberately mismatches the hash that the test request graph
-    // will produce — proves stale-after-mutation derivation fires.
-    graph_hash_at_run: 'old_hash________',
+    // graph_hash_at_run is OVERRIDDEN per-test with the live hash of
+    // the test's graph_state (or, for the post-mutation persistence
+    // test, the pre-mutation live hash). Tests do not consume this
+    // default value directly.
+    graph_hash_at_run: 'live-hash-overridden-per-test',
     computed_at: '2026-04-30T00:00:00.000Z',
   },
 };
-
-describe('POST /orchestrate/v2/turn — stale-after-mutation freshness (multi-turn)', () => {
-  let app: FastifyInstance;
-  const originalEnv = { ...process.env };
-
-  beforeAll(async () => {
-    v5Enabled = true;
-    app = Fastify();
-    await ceeOrchestratorRouteV2(app);
-    await app.ready();
-    setTestSink((eventName, data) => events.push({ event: eventName, data }));
-  });
-  afterAll(async () => {
-    setTestSink(null);
-    await app.close();
-  });
-  beforeEach(() => {
-    events = [];
-    appendCalls.length = 0;
-    mockedPriorFacts = [];
-    llmCallTracker.count = 0;
-    process.env = { ...originalEnv };
-  });
-
-  it('prior successful analysis + current graph hash diverged → response.analysis_ready.freshness="stale"', async () => {
-    // Simulate a multi-turn sequence: turn N ran analysis (recorded in
-    // mockedPriorFacts), turn N+1 sends a different graph_state
-    // (ingress hash != graph_hash_at_run on the prior fact). The
-    // freshness derivation must mark the response stale.
-    mockedPriorFacts = [SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR];
-
-    // Send a benign value-update turn so the route does its full
-    // pre-flight + freshness derivation. The deterministic pre-route
-    // dispatches set_factor_value (verified above); we focus here on
-    // the freshness verdict on the response.
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: buildRequest('Update that factor to £30,000', ['fac_advertising']),
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-
-    // Find analysis_ready on the wire response. CEE may stamp it on
-    // the envelope root or inside a graph_patch block's `data`. Check
-    // both locations (matches the UI's extraction logic).
-    const envelopeAR = (body as { analysis_ready?: { freshness?: string } }).analysis_ready;
-    const blockAR = body.blocks?.find((b: { type?: string; data?: { analysis_ready?: unknown } }) => {
-      const data = b?.data as { analysis_ready?: unknown } | undefined;
-      return data?.analysis_ready != null;
-    })?.data?.analysis_ready as { freshness?: string } | undefined;
-    const ar = envelopeAR ?? blockAR;
-
-    expect(ar, JSON.stringify(body, null, 2)).toBeDefined();
-    expect(ar?.freshness).toBe('stale');
-  });
-
-  // -------------------------------------------------------------------------
-  // Third-round review (P1.3): the original "negative-case sanity"
-  // used no prior facts and got 'none' back, which doesn't actually
-  // prove the fresh case. Computing the live hash and seeding a fact
-  // with the SAME hash is the right way to assert real fresh.
-  // -------------------------------------------------------------------------
-  it('prior successful analysis + IDENTICAL graph hash on next turn → freshness="fresh" (real negative case)', async () => {
-    const { computeAnalysisAffectingGraphHash } = await import(
-      '../../src/orchestrator-v5/context/graph-hash.js'
-    );
-    // Use the Path B clarify request — non-mutating path through
-    // turn_executor (analysis_ready stamped on response) without
-    // reaching the LLM (no factor selection → clarify_deictic).
-    const liveHash = computeAnalysisAffectingGraphHash(buildGraphState() as never);
-    expect(liveHash).toBeTruthy();
-
-    mockedPriorFacts = [
-      {
-        ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR,
-        result: {
-          ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR.result,
-          graph_hash_at_run: liveHash!,
-        },
-      },
-    ];
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: buildDeicticClarifyRequest(),
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(llmCallTracker.count).toBe(0);
-    const body = JSON.parse(res.body);
-    const envelopeAR = (body as { analysis_ready?: { freshness?: string } }).analysis_ready;
-    const blockAR = body.blocks?.find((b: { type?: string; data?: { analysis_ready?: unknown } }) => {
-      const data = b?.data as { analysis_ready?: unknown } | undefined;
-      return data?.analysis_ready != null;
-    })?.data?.analysis_ready as { freshness?: string } | undefined;
-    const ar = envelopeAR ?? blockAR;
-    expect(ar?.freshness).toBe('fresh');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Fourth-round review (P0 #3 + IMP #3 + IMP #4): RENAMED. Previously
@@ -661,11 +563,21 @@ describe('POST /orchestrate/v2/turn — live-hash prior fact + mutation replay',
     );
     // Build the post-mutation graph by hand: same shape but with the
     // factor's observed_state shifted to the mutation target.
+    //
+    // Fifth-round review (P1 #3): preserve ALL existing observed_state
+    // fields (unit, cap, etc.) — only update value/raw_value. Pre-fix
+    // the test overwrote the entire observed_state object, dropping
+    // unit and cap, which polluted the hash divergence proof. With
+    // metadata preserved, the hash differs purely because of the
+    // value/raw_value change.
     const postMutationGraph = JSON.parse(JSON.stringify(buildGraphState())) as ReturnType<
       typeof buildGraphState
     >;
     const target = postMutationGraph.nodes.find((n) => n.id === 'fac_advertising')!;
-    (target as { observed_state?: { raw_value?: number; value?: number } }).observed_state = {
+    const previousObservedState = (target as { observed_state?: Record<string, unknown> })
+      .observed_state ?? {};
+    (target as { observed_state?: Record<string, unknown> }).observed_state = {
+      ...previousObservedState,
       raw_value: 30000,
       value: 0.3,
     };
@@ -711,17 +623,35 @@ describe('POST /orchestrate/v2/turn — live-hash prior fact + mutation replay',
 
 /**
  * Shared helper to extract analysis_ready from a wire response body.
- * CEE may stamp it on the envelope root or inside a graph_patch
- * block's `data`. The UI extraction matches this; tests must too.
+ *
+ * Fifth-round review (P1 #4 + IMP #2): matches the UI's extraction
+ * semantics in `src/components/debug/utils/exportBundle.ts`
+ * `extractAnalysisReadyFromBlocks` — root, then block.data,
+ * then block.data.applied_graph (draft_graph emits analysis_ready
+ * nested inside applied_graph). Without the applied_graph branch,
+ * tests would falsely read undefined for any draft-style response.
  */
 function readAnalysisReadyFromResponseBody(
   body: unknown,
 ): { freshness?: string; freshness_reason?: string } | undefined {
-  const envelope = body as { analysis_ready?: { freshness?: string }; blocks?: unknown[] };
-  if (envelope?.analysis_ready) return envelope.analysis_ready;
-  const block = envelope.blocks?.find(
-    (b) => (b as { data?: { analysis_ready?: unknown } } | null)?.data?.analysis_ready != null,
-  );
-  return (block as { data?: { analysis_ready?: { freshness?: string } } } | undefined)?.data
-    ?.analysis_ready;
+  const envelope = body as {
+    analysis_ready?: { freshness?: string }
+    blocks?: Array<{
+      data?: {
+        analysis_ready?: { freshness?: string }
+        applied_graph?: { analysis_ready?: { freshness?: string } }
+      }
+    } | null>
+  }
+  // 1. Envelope root.
+  if (envelope?.analysis_ready) return envelope.analysis_ready
+  // 2. Any block carrying data.analysis_ready.
+  for (const b of envelope.blocks ?? []) {
+    if (b?.data?.analysis_ready) return b.data.analysis_ready
+    // 3. Draft-graph nesting: data.applied_graph.analysis_ready.
+    if (b?.data?.applied_graph?.analysis_ready) {
+      return b.data.applied_graph.analysis_ready
+    }
+  }
+  return undefined
 }
