@@ -98,7 +98,12 @@ export interface PendingActionPreconditions {
 export interface PendingAction {
   readonly id: PendingActionId;
   readonly scenario_id: string;
-  readonly emitted_in_turn_row_id: string;
+  /**
+   * The id of the chip this pending action was offered alongside. The
+   * resumer uses this for telemetry correlation and to match against
+   * `chip_metadata` in chip-click flows. No DB foreign-key relation
+   * (chips are ephemeral; the chip id is just a string).
+   */
   readonly chip_id: string;
   readonly action: PendingActionAction;
   readonly preconditions: PendingActionPreconditions;
@@ -140,3 +145,39 @@ export const PENDING_ACTION_DEFAULT_WALL_TTL_MS = 10 * 60 * 1000;
  * derive site and the DB CHECK constraint.
  */
 export const PENDING_ACTIONS_PER_TURN_CAP = 3;
+
+/**
+ * Hand-rolled validator for a single pending action read from the JSONB
+ * column. We keep this in-house (not Zod) because the shape is small and
+ * `pending-action.ts` is a leaf module that should not pull additional
+ * dependencies. Returns `null` on any validation failure; callers
+ * (read path) silently drop unparsable entries and log
+ * `session.pending_action.parse_failed` telemetry.
+ */
+export function parsePendingAction(input: unknown): PendingAction | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+  if (typeof o.id !== 'string' || o.id.length === 0) return null;
+  if (typeof o.scenario_id !== 'string' || o.scenario_id.length === 0) return null;
+  if (typeof o.chip_id !== 'string' || o.chip_id.length === 0) return null;
+  if (typeof o.expires_at_turn_count !== 'number' || !Number.isFinite(o.expires_at_turn_count)) return null;
+  if (typeof o.expires_at_iso !== 'string') return null;
+  if (typeof o.emitted_at_iso !== 'string') return null;
+  const action = o.action;
+  if (!action || typeof action !== 'object' || Array.isArray(action)) return null;
+  const a = action as Record<string, unknown>;
+  if (typeof a.kind !== 'string') return null;
+  if (!RESUMABLE_ACTION_TYPES.has(a.kind as PendingActionKind)) return null;
+  if (a.kind === 'set_factor_value') {
+    if (typeof a.factor_id !== 'string') return null;
+    if (typeof a.value !== 'number') return null;
+    if (typeof a.operator !== 'string') return null;
+    if (!['set', 'increase', 'decrease', 'multiply'].includes(a.operator)) return null;
+  }
+  if (a.kind === 'edit_graph_add_risk') {
+    if (typeof a.label !== 'string' || a.label.length === 0) return null;
+  }
+  const preconditions = o.preconditions;
+  if (!preconditions || typeof preconditions !== 'object' || Array.isArray(preconditions)) return null;
+  return input as PendingAction;
+}

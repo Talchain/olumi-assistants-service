@@ -32,6 +32,10 @@ import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain
 
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
+import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
+import type { PendingAction } from './session/pending-action.js';
+import type { SuggestedAction } from './compose/types.js';
+import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -61,6 +65,32 @@ export interface CommitMetadata {
    * overwrite. Omit for turns that should not influence brief_text.
    */
   readonly briefText?: string;
+  /**
+   * Pre-computed pending actions for this turn. When provided, these are
+   * passed straight to `append_turn_atomic(p_pending_actions)` and the
+   * chip-derivation step is skipped entirely. Used by handlers that
+   * generate pending actions from non-chip state (Wave 3:
+   * `add-risk-template` carries the original risk label across the
+   * clarify turn; the value-update clarify path carries the parsed
+   * quantity).
+   *
+   * When omitted, `commitDirectAnswer` derives pending actions from
+   * `response.suggested_actions` via `derivePendingActionsFromChips`.
+   * That covers the chip-side path (currently only `run_analysis`
+   * chips). The atomic-emit contract enforces: every chip with a
+   * resumable `action_type` produces exactly one matching pending
+   * action — see `derive-pending-actions.test.ts`.
+   */
+  readonly pending_actions?: readonly PendingAction[];
+  /**
+   * Optional graph hash threaded into chip-derived pending actions'
+   * `preconditions.graph_hash`. The resumer compares the live graph
+   * hash on the next turn and invalidates set_factor_value /
+   * edit_graph_add_risk pending actions if it has changed. Pass
+   * undefined when the turn does not have a meaningful graph
+   * (frame stage, no draft yet).
+   */
+  readonly graph_hash?: string;
 }
 
 export interface CommitResult {
@@ -108,6 +138,25 @@ export async function commitDirectAnswer(
 
   const store = sessionStore ?? getSessionStore();
 
+  // Atomic-emit contract: every chip whose action_type is in the
+  // resumable set produces exactly one matching pending action, written
+  // in the same `append_turn_atomic` call. If a caller pre-supplied
+  // pending actions (e.g. add-risk clarification — Wave 3), we trust
+  // that list and skip chip-derivation. Otherwise we derive from the
+  // response's chip set so neither chip-only nor pending-only state
+  // is reachable.
+  const chipDerivedPending =
+    metadata.pending_actions === undefined
+      ? derivePendingActionsFromChips(
+          (response.suggested_actions ?? []) as readonly SuggestedAction[],
+          {
+            scenario_id: metadata.scenario_id,
+            emitted_at_iso: new Date().toISOString(),
+            graph_hash: metadata.graph_hash,
+          },
+        )
+      : metadata.pending_actions;
+
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
@@ -120,7 +169,33 @@ export async function commitDirectAnswer(
     handler_facts: metadata.handler_facts,
     graph: metadata.graph,
     briefText: metadata.briefText,
+    pending_actions: chipDerivedPending,
   });
+
+  // Telemetry fires AFTER write succeeds — never log a "created" event
+  // for a pending action that was rolled back by an RPC failure.
+  for (const pa of chipDerivedPending) {
+    emit(TelemetryEvents.PendingActionCreated, {
+      scenario_id: pa.scenario_id,
+      turn_row_id: persistedRowId,
+      pending_action_id: pa.id,
+      kind: pa.action.kind,
+      chip_id: pa.chip_id,
+      expires_at_turn_count: pa.expires_at_turn_count,
+      expires_at_iso: pa.expires_at_iso,
+    });
+  }
+  if (chipDerivedPending.length > 0) {
+    log.debug(
+      {
+        scenario_id: metadata.scenario_id,
+        turn_row_id: persistedRowId,
+        pending_action_count: chipDerivedPending.length,
+        kinds: chipDerivedPending.map((pa) => pa.action.kind),
+      },
+      'V5 commit — pending actions persisted with turn',
+    );
+  }
 
   const graphPersisted = metadata.graph !== undefined;
   return { response, performed: true, persisted_row_id: persistedRowId, graphPersisted };

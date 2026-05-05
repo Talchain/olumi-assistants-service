@@ -40,6 +40,7 @@ import type {
   InvalidationScope,
 } from '../invalidation.js';
 import type { SessionStore, SessionTurnWrite } from '../store.js';
+import type { PendingAction } from '../pending-action.js';
 
 export interface NoopSessionStoreOptions {
   readonly appendId?: string;
@@ -61,6 +62,12 @@ export interface NoopSessionStoreOptions {
    */
   readonly scenarioOwnerUserId?: string;
   readonly throwOnEnsureScenarioExists?: Error;
+  /**
+   * V5 Wave 1 pending-action persistence: pending actions returned by
+   * `readMostRecentPendingActions`. Defaults to empty (no offer
+   * available to resume).
+   */
+  readonly mostRecentPendingActions?: readonly PendingAction[];
 }
 
 export function createNoopSessionStore(
@@ -121,6 +128,9 @@ export function createNoopSessionStore(
         graph: opts.loadGraphResult ?? null,
         briefText: opts.loadBriefTextResult ?? null,
       };
+    },
+    async readMostRecentPendingActions(_scenarioId: string) {
+      return opts.mostRecentPendingActions ?? [];
     },
   } satisfies SessionStore;
 }

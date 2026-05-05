@@ -42,6 +42,7 @@ import {
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
+import { parsePendingAction, type PendingAction } from './pending-action.js';
 
 const V5_CONVERSATION_TURN_COLUMNS =
   'id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at';
@@ -93,6 +94,10 @@ export class SupabaseSessionStore implements SessionStore {
     // brief_text writes via its `WHERE brief_text IS NULL OR brief_text = ''`
     // predicate. Future briefText updates after the initial draft turn
     // will not persist. Regenerate semantics are out of scope for Phase 1.
+    // PostgREST overload disambiguation continues post-Wave-0: always pass
+    // all 12 named args. p_pending_actions defaults to an empty array on
+    // omit, both at the wire (here) and the RPC body. The DB column is
+    // NOT NULL with the same default — old rows backfill implicitly.
     const { data, error } = await this.client.rpc('append_turn_atomic', {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
@@ -105,6 +110,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_handler_facts: serialiseHandlerFacts(write.handler_facts),
       p_graph: write.graph ?? null,
       p_brief_text: write.briefText ?? null,
+      p_pending_actions: write.pending_actions ?? [],
     });
 
     if (error) {
@@ -326,6 +332,37 @@ export class SupabaseSessionStore implements SessionStore {
       graph: (data as { graph?: unknown }).graph ?? null,
       briefText,
     };
+  }
+
+  async readMostRecentPendingActions(scenarioId: string): Promise<readonly PendingAction[]> {
+    // Narrow read: only the most recent prior turn. Older orphan pending
+    // actions are ignored by design — "yes" resolves against the last
+    // assistant turn's explicit offer only. See store.ts JSDoc.
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id, pending_actions')
+      .eq('scenario_id', scenarioId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) {
+      throw new SessionReadError(
+        `readMostRecentPendingActions(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    const rows = (data ?? []) as Array<{ id: string; pending_actions: unknown }>;
+    if (rows.length === 0) return [];
+    const raw = rows[0]!.pending_actions;
+    if (!Array.isArray(raw)) return [];
+    const out: PendingAction[] = [];
+    for (const item of raw) {
+      const parsed = parsePendingAction(item);
+      if (parsed !== null) out.push(parsed);
+      // Unparsable entries silently dropped — defence against future
+      // shape drift. The resumer falls through to the non-resume path
+      // when the array is empty after parsing.
+    }
+    return out;
   }
 
   async ensureScenarioExists(

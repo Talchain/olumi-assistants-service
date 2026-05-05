@@ -483,6 +483,15 @@ export const TelemetryEvents = {
   HandlerInvocation: "v5.handler_invocation",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
+  // V5 pending-action lifecycle (Wave 1: created only; Waves 2+ add
+  // matched / consumed / expired / invalidated / skipped). Fired
+  // AFTER the persistence write succeeds — never log a "created"
+  // event for a pending action that was rolled back by RPC failure.
+  // Payload fields: scenario_id, turn_row_id, pending_action_id, kind,
+  //                 chip_id, expires_at_turn_count, expires_at_iso.
+  // No raw graph or analysis values; only ids and bounded enums.
+  PendingActionCreated: "v5.pending_action.created",
+
   // V5 state-trust freshness derivation. Emitted once per projection
   // build (every turn). Single event is sufficient to reconstruct the
   // freshness state for any turn. Fields:

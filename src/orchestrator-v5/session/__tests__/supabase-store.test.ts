@@ -131,10 +131,13 @@ describe('SupabaseSessionStore.append', () => {
     expect(args.p_handler_facts).toEqual([]);
     // p_graph and p_brief_text must be sent as `null` (not omitted) when
     // the write has neither. This keeps PostgREST overload resolution
-    // deterministic — see the always-11-args invariant test below and
-    // the comment in supabase-store.ts:append.
+    // deterministic — see the always-12-args invariant test below and
+    // the comment in supabase-store.ts:append. p_pending_actions
+    // defaults to the empty array so a turn that offers no resumable
+    // actions still produces a deterministic 12-arg shape.
     expect(args.p_graph).toBeNull();
     expect(args.p_brief_text).toBeNull();
+    expect(args.p_pending_actions).toEqual([]);
   });
 
   it('passes p_graph when write.graph is provided (atomic graph commit)', async () => {
@@ -235,7 +238,7 @@ const RUN_ANALYSIS_FACT: HandlerFact = {
 };
 
 describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overload disambiguation)', () => {
-  it('always passes all 11 named args to append_turn_atomic, p_graph & p_brief_text=null when absent', async () => {
+  it('always passes all 12 named args to append_turn_atomic, p_graph & p_brief_text=null + p_pending_actions=[] when absent', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -248,8 +251,8 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     const args = rpcCalls[0].args as Record<string, unknown>;
     const keys = Object.keys(args).sort();
 
-    // The 11-arg invariant (V5 Phase 1 brief persistence,
-    // 20260502120000_v5_brief_text_persistence). Drift here = PostgREST
+    // The 12-arg invariant (V5 Wave 1 pending-action persistence,
+    // 20260505120000_v5_pending_actions). Drift here = PostgREST
     // overload ambiguity can re-emerge if a future migration ever adds
     // another overload.
     expect(keys).toEqual([
@@ -259,6 +262,7 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
       'p_handler_facts',
       'p_handler_id',
       'p_llm_calls_used',
+      'p_pending_actions',
       'p_request_hash',
       'p_response_emitted',
       'p_scenario_id',
@@ -267,9 +271,10 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     ]);
     expect(args.p_graph).toBeNull();
     expect(args.p_brief_text).toBeNull();
+    expect(args.p_pending_actions).toEqual([]);
   });
 
-  it('always passes all 11 named args even when write.graph IS provided', async () => {
+  it('always passes all 12 named args even when write.graph IS provided', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -280,9 +285,10 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, graph });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(11);
+    expect(Object.keys(args)).toHaveLength(12);
     expect(args.p_graph).toEqual(graph);
     expect(args.p_brief_text).toBeNull();
+    expect(args.p_pending_actions).toEqual([]);
   });
 
   it('threads write.briefText to the RPC as p_brief_text (V5 Phase 1)', async () => {
@@ -296,7 +302,7 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, briefText });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(11);
+    expect(Object.keys(args)).toHaveLength(12);
     expect(args.p_brief_text).toBe(briefText);
   });
 

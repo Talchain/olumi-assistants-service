@@ -19,6 +19,7 @@ import type {
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
+import type { PendingAction } from './pending-action.js';
 
 export interface SessionTurnWrite {
   readonly scenario_id: string;
@@ -56,6 +57,24 @@ export interface SessionTurnWrite {
    * forbids whitespace-only values.
    */
   readonly briefText?: string;
+  /**
+   * Pending actions emitted alongside this turn's suggested-action chips.
+   * Persisted atomically with the turn insert via
+   * `append_turn_atomic(p_pending_actions)`. Capped at
+   * `PENDING_ACTIONS_PER_TURN_CAP` (3); the DB CHECK enforces the same
+   * cap. The next turn's deterministic short-confirm pre-route reads
+   * these via `readMostRecentPendingActions` to resume offered actions
+   * without an LLM round-trip. Omit (or pass `[]`) when the turn
+   * offers no resumable actions.
+   *
+   * Pending actions live entirely server-side. They are NOT echoed
+   * onto chips because the boundary `ActionSchema` is `.strict()` and
+   * does not carry a `parameters` field. The link between a chip and
+   * a pending action is the `PendingAction.chip_id` reference; the
+   * resumer matches by short-confirm regex or by
+   * `chip_metadata.action_type` (which the UI already round-trips).
+   */
+  readonly pending_actions?: readonly PendingAction[];
 }
 
 export interface SessionStore {
@@ -146,6 +165,23 @@ export interface SessionStore {
    * See supabase/migrations/…_v5_ensure_scenario_exists.sql header.
    */
   ensureScenarioExists(scenarioId: string, userId: string | null): Promise<{ user_id: string | null }>;
+  /**
+   * Load the pending actions emitted by the most recent prior turn for a
+   * scenario. Returns `[]` when no prior turn exists, when the most
+   * recent turn carried no pending actions, or when a row's
+   * `pending_actions` JSONB fails the read-side schema parse.
+   *
+   * Read scope is intentionally narrow: only the latest prior turn.
+   * Older orphan pending actions are ignored — "yes" resolves only
+   * against the last assistant turn's explicit actionable offer
+   * (Wave 2 resumer enforces this). Filtered by `scenarioId` such
+   * that cross-scenario resume is impossible.
+   *
+   * Read failures throw `SessionReadError`; callers should log
+   * `session.read_degraded` telemetry and fall through to the
+   * non-resume path rather than failing the turn.
+   */
+  readMostRecentPendingActions(scenarioId: string): Promise<readonly PendingAction[]>;
 }
 
 /**
