@@ -187,6 +187,86 @@ function buildGraphState() {
   };
 }
 
+/**
+ * Multi-candidate graph used by tests that need a NON-MUTATING
+ * deterministic path through turn_executor. "Raise budget and cost to
+ * £30k" against this graph substring-matches both factors → multi-
+ * candidate clarify (no LLM call, no mutation). The clarify path goes
+ * through turn_executor's freshness derivation, so analysis_ready is
+ * stamped on the response — what the freshness assertions rely on.
+ */
+function buildMultiCandidateGraph() {
+  return {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Profit', successThreshold: 100 },
+      {
+        id: 'fac_a',
+        kind: 'factor',
+        label: 'budget',
+        observed_state: { value: 0.2, raw_value: 20000, unit: '£', cap: 100000 },
+      },
+      {
+        id: 'fac_b',
+        kind: 'factor',
+        label: 'cost',
+        observed_state: { value: 0.5, raw_value: 50000, unit: '£', cap: 200000 },
+      },
+      { id: 'opt_a', kind: 'option', label: 'Plan A' },
+      { id: 'opt_b', kind: 'option', label: 'Plan B' },
+    ],
+    edges: [
+      {
+        from: 'fac_a',
+        to: 'goal_1',
+        strength: { mean: 0.6, std: 0.1 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+    ],
+    options: [
+      { id: 'opt_a', status: 'ready', interventions: { fac_a: { value: 30000 } } },
+      { id: 'opt_b', status: 'ready', interventions: { fac_a: { value: 20000 } } },
+    ],
+    goal_node_id: 'goal_1',
+  };
+}
+
+function buildMultiCandidateRequest() {
+  return {
+    kind: 'message' as const,
+    turn_id: TURN_ID,
+    scenario_id: SCENARIO_ID,
+    message: 'Raise budget and cost to £30k',
+    turn_class: 'decide' as const,
+    stage: 'analyse' as const,
+    source: 'composer' as const,
+    graph_state: buildMultiCandidateGraph(),
+    selected_elements: { node_ids: [], edge_ids: [] },
+  };
+}
+
+/**
+ * Path B clarify request — "Update that factor to £30,000" with no
+ * selection. Routes through Path B deictic clarify INSIDE
+ * turn_executor (so analysis_ready is stamped), no LLM call (the
+ * throwing adapter never fires), no graph mutation (so the prior-fact
+ * hash still matches the request's graph_state hash → freshness reads
+ * 'fresh' for negative-case sanity tests).
+ */
+function buildDeicticClarifyRequest() {
+  return {
+    kind: 'message' as const,
+    turn_id: TURN_ID,
+    scenario_id: SCENARIO_ID,
+    message: 'Update that factor to £30,000',
+    turn_class: 'decide' as const,
+    stage: 'analyse' as const,
+    source: 'composer' as const,
+    graph_state: buildGraphState(),
+    selected_elements: { node_ids: [], edge_ids: [] },
+  };
+}
+
 function buildRequest(message: string, selectedNodeIds: string[]) {
   return {
     kind: 'message' as const,
@@ -394,20 +474,40 @@ describe('POST /orchestrate/v2/turn — stale-after-mutation freshness (multi-tu
     expect(ar?.freshness).toBe('stale');
   });
 
-  it('prior successful analysis + same graph hash → freshness="fresh" (negative-case sanity)', async () => {
-    // To test the fresh-case symmetrically without computing the live
-    // hash we'd have to thread it from the test fixture. Instead use a
-    // smoke check: when no prior facts exist, freshness is 'none'
-    // (proves the test harness isn't always producing 'stale').
-    mockedPriorFacts = [];
+  // -------------------------------------------------------------------------
+  // Third-round review (P1.3): the original "negative-case sanity"
+  // used no prior facts and got 'none' back, which doesn't actually
+  // prove the fresh case. Computing the live hash and seeding a fact
+  // with the SAME hash is the right way to assert real fresh.
+  // -------------------------------------------------------------------------
+  it('prior successful analysis + IDENTICAL graph hash on next turn → freshness="fresh" (real negative case)', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../src/orchestrator-v5/context/graph-hash.js'
+    );
+    // Use the Path B clarify request — non-mutating path through
+    // turn_executor (analysis_ready stamped on response) without
+    // reaching the LLM (no factor selection → clarify_deictic).
+    const liveHash = computeAnalysisAffectingGraphHash(buildGraphState() as never);
+    expect(liveHash).toBeTruthy();
+
+    mockedPriorFacts = [
+      {
+        ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR,
+        result: {
+          ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR.result,
+          graph_hash_at_run: liveHash!,
+        },
+      },
+    ];
 
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: buildRequest('Update that factor to £30,000', ['fac_advertising']),
+      payload: buildDeicticClarifyRequest(),
     });
 
     expect(res.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
     const body = JSON.parse(res.body);
     const envelopeAR = (body as { analysis_ready?: { freshness?: string } }).analysis_ready;
     const blockAR = body.blocks?.find((b: { type?: string; data?: { analysis_ready?: unknown } }) => {
@@ -415,10 +515,136 @@ describe('POST /orchestrate/v2/turn — stale-after-mutation freshness (multi-tu
       return data?.analysis_ready != null;
     })?.data?.analysis_ready as { freshness?: string } | undefined;
     const ar = envelopeAR ?? blockAR;
+    expect(ar?.freshness).toBe('fresh');
+  });
+});
 
-    if (ar?.freshness !== undefined) {
-      expect(ar.freshness).not.toBe('stale');
-      expect(ar.freshness).toBe('none');
-    }
+// ---------------------------------------------------------------------------
+// Third-round review (P0.1 + IMP.3): real multi-turn replay through the
+// HTTP boundary. Pre-fix the "stale-after-mutation" test seeded a fact
+// with an intentionally-divergent hash and sent ONE request — proving
+// only that a hand-rolled stale state surfaces. The real claim was
+// that `set_factor_value` ITSELF causes the next freshness verdict to
+// flip stale.
+//
+// This test exercises the actual sequence:
+//   Turn 1: seed a successful run_analysis fact whose graph_hash_at_run
+//           matches the LIVE hash of the request's graph_state →
+//           freshness reads 'fresh'.
+//   Turn 2: send the same graph_state + a deterministic value-update
+//           ("Update that factor to £30,000" + selection). The
+//           handler emits `mutated_graph`; the post-dispatch freshness
+//           derivation recomputes the hash from the mutated graph and
+//           must report 'stale' against the prior fact.
+// ---------------------------------------------------------------------------
+
+describe('POST /orchestrate/v2/turn — real 3-turn replay (run_analysis → set_factor_value → freshness)', () => {
+  let app: FastifyInstance;
+  const originalEnv = { ...process.env };
+
+  beforeAll(async () => {
+    v5Enabled = true;
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+    setTestSink((eventName, data) => events.push({ event: eventName, data }));
+  });
+  afterAll(async () => {
+    setTestSink(null);
+    await app.close();
+  });
+  beforeEach(() => {
+    events = [];
+    appendCalls.length = 0;
+    mockedPriorFacts = [];
+    llmCallTracker.count = 0;
+    process.env = { ...originalEnv };
+  });
+
+  it('turn 1 (synthetic prior analysis at live hash): freshness=fresh', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../src/orchestrator-v5/context/graph-hash.js'
+    );
+    // Path B clarify (no selection) — non-mutating turn_executor path,
+    // no LLM, analysis_ready stamped on response.
+    const liveHash = computeAnalysisAffectingGraphHash(buildGraphState() as never)!;
+
+    mockedPriorFacts = [
+      {
+        ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR,
+        result: {
+          ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR.result,
+          graph_hash_at_run: liveHash,
+        },
+      },
+    ];
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildDeicticClarifyRequest(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
+    const body = JSON.parse(res.body);
+    const ar =
+      (body as { analysis_ready?: { freshness?: string } }).analysis_ready ??
+      (body.blocks?.find(
+        (b: { type?: string; data?: { analysis_ready?: { freshness?: string } } }) =>
+          b?.data?.analysis_ready != null,
+      )?.data?.analysis_ready as { freshness?: string } | undefined);
+    expect(ar?.freshness).toBe('fresh');
+  });
+
+  it('turn 2 (set_factor_value mutation): freshness flips to stale BECAUSE OF the mutation', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../src/orchestrator-v5/context/graph-hash.js'
+    );
+    const liveHash = computeAnalysisAffectingGraphHash(buildGraphState() as never)!;
+
+    // Seed a prior fact whose graph_hash_at_run matches the request
+    // graph_state EXACTLY. If freshness derivation didn't account for
+    // the mutation, it would read 'fresh' — same hash both sides.
+    // The post-dispatch re-derivation MUST recompute the hash from
+    // the MUTATED graph and produce 'stale'. This is the actual
+    // proof that set_factor_value drives staleness.
+    mockedPriorFacts = [
+      {
+        ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR,
+        result: {
+          ...SUCCESSFUL_RUN_ANALYSIS_FACT_PRIOR.result,
+          graph_hash_at_run: liveHash,
+        },
+      },
+    ];
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest('Update that factor to £30,000', ['fac_advertising']),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    // Confirm mutation happened: graph_patch with set_factor_value.
+    const patchBlock = body.blocks?.find(
+      (b: { type?: string; operation?: string }) => b?.type === 'graph_patch',
+    );
+    expect(patchBlock).toBeDefined();
+    expect((patchBlock as { operation?: string }).operation).toBe('set_factor_value');
+
+    // The post-dispatch freshness verdict on this same response MUST
+    // be 'stale' — the mutation changed the graph hash relative to
+    // graph_hash_at_run on the prior fact.
+    const ar =
+      (body as { analysis_ready?: { freshness?: string } }).analysis_ready ??
+      (body.blocks?.find(
+        (b: { type?: string; data?: { analysis_ready?: { freshness?: string } } }) =>
+          b?.data?.analysis_ready != null,
+      )?.data?.analysis_ready as { freshness?: string } | undefined);
+    expect(ar?.freshness).toBe('stale');
+
+    // Telemetry: confirm zero LLM calls (deterministic dispatch).
+    expect(llmCallTracker.count).toBe(0);
   });
 });
