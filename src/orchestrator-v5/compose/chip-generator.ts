@@ -220,27 +220,6 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     ]);
   }
 
-  // Rule: after a successful explain_results turn (handler returned
-  // a real fact, not a precondition-fail noop), surface a
-  // what_would_flip action chip. Mirrors the offer the
-  // explain_results deterministic fallback prose makes
-  // ("Would you like to explore what would change this result?")
-  // and lets a typed "yes" resume via the short-confirm pre-route.
-  // Uses findSuccessfulExplainResultsJustRan because findHandlerJustRan
-  // only returns 'run_analysis' (never explanation handlers), and the
-  // misleadingly-named findNoopExplanationHandlerJustRan returns the
-  // fact_type for ANY explain fact regardless of noop.
-  if (findSuccessfulExplainResultsJustRan(input.handlerFacts)) {
-    return cap([
-      {
-        id: 'chip_action_what_would_flip',
-        label: 'Explore what would change this',
-        message: 'Explore what would change the result.',
-        action_type: 'what_would_flip',
-      },
-    ]);
-  }
-
   // V5 state-trust — stale-analysis recovery chip.
   //
   // When the freshness derivation reports `analysis_freshness === 'stale'`
@@ -273,6 +252,32 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         },
       ]);
     }
+  }
+
+  // Rule: after a successful (precondition-met) explain_results turn,
+  // surface a what_would_flip action chip. Mirrors the offer the
+  // deterministic fallback prose makes ("Would you like to explore
+  // what would change this result?") and lets a typed "yes" resume
+  // via the short-confirm pre-route.
+  //
+  // Production explain_results facts always carry noop=true; the
+  // success/failure discriminator is result.precondition_unmet.
+  // findSuccessfulExplainResultsJustRan filters on
+  // precondition_unmet === false. findHandlerJustRan returns only
+  // 'run_analysis' so we cannot rely on it for explanation handlers.
+  //
+  // Placed AFTER the stale-rerun rule so a stale-analysis explain
+  // turn surfaces "Rerun analysis" rather than offering to explore
+  // a stale result.
+  if (findSuccessfulExplainResultsJustRan(input.handlerFacts)) {
+    return cap([
+      {
+        id: 'chip_action_what_would_flip',
+        label: 'Explore what would change this',
+        message: 'Explore what would change the result.',
+        action_type: 'what_would_flip',
+      },
+    ]);
   }
 
   // V5 spec §7 every-failure-path-includes-a-chip — explicit precondition rule.
@@ -471,23 +476,33 @@ function findHandlerJustRan(
 }
 
 /**
- * Did `explain_results` produce a successful (non-noop) fact this turn?
+ * Did `explain_results` produce a successful (precondition-met) fact
+ * this turn?
  *
- * The misleadingly-named `findNoopExplanationHandlerJustRan` returns the
- * fact_type for ANY explain handler fact regardless of `noop`. To gate
- * the post-explain `what_would_flip` chip emit on a SUCCESSFUL explain
- * (so the offer "Would you like to explore what would change this
- * result?" carries an executable resumable chip), we need a non-noop
- * filter. Handler facts whose `noop` is true represent precondition-
- * unmet or staleness-recovery cases — the offer wording is different
- * there and the post-explain chip should not fire.
+ * Production `explain_results` facts ALWAYS carry `noop: true` —
+ * regardless of whether the handler successfully composed an answer
+ * or short-circuited on a precondition failure. The real success/
+ * failure discriminator is `result.precondition_unmet`:
+ *   - true  → handler bailed before composing an answer
+ *   - false → handler emitted prose ending with the explore offer
+ *
+ * Gating on `noop !== true` (an earlier mistake) was dead code: no
+ * production fact would ever match. The correct predicate is
+ * `precondition_unmet === false`. The misleadingly-named
+ * `findNoopExplanationHandlerJustRan` is kept for the precondition-
+ * unmet rule below.
  */
 function findSuccessfulExplainResultsJustRan(
   facts: readonly HandlerFact[] | undefined,
 ): boolean {
   if (!facts || facts.length === 0) return false;
   for (const f of facts) {
-    if (f.fact_type === 'explain_results' && f.noop !== true) return true;
+    if (f.fact_type !== 'explain_results') continue;
+    const result = (f as { result?: unknown }).result;
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+      const r = result as { precondition_unmet?: unknown };
+      if (r.precondition_unmet === false) return true;
+    }
   }
   return false;
 }

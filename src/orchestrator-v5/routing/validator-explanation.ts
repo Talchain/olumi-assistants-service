@@ -45,6 +45,15 @@ const MIN_ANSWER_TEXT_LENGTH = 80;
 // must match "node" but NOT "noted". The brief's intent is that user-facing
 // answer text not leak internal machinery vocabulary; ordinary English words
 // that contain these letters as substrings are fine.
+//
+// Identifier-style terms (snake_case, ALLCAPS, capitalised library names) are
+// matched case-sensitively where their plain English use is rare to
+// non-existent — `noop`, `fact_type`, `BUDGET_TARGET`, `graph_hash`, `Zod`.
+// Egress-blocking these here means an LLM-generated answer containing them
+// is marked invalid and downgraded to deterministic fallback BEFORE reaching
+// the user. The narrate-output sanitiser remains as defence-in-depth on
+// upstream orientation text, but this validator is the canonical user-facing
+// egress guard.
 const FORBIDDEN_INTERNAL_TERM_PATTERNS: readonly RegExp[] = [
   /\bhandlers?\b/i,
   /\bvalidators?\b/i,
@@ -54,6 +63,11 @@ const FORBIDDEN_INTERNAL_TERM_PATTERNS: readonly RegExp[] = [
   /\bprojections?\b/i,
   /\banalysis_ready\b/i,
   /\bcontext pack\b/i,
+  /\bnoop\b/i,
+  /\bfact_type\b/i,
+  /\bBUDGET_TARGET\b/,
+  /\bgraph_hash\b/i,
+  /\bZod\b/,
 ];
 
 const ANALYSIS_LANGUAGE_TERMS: readonly string[] = [

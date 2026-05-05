@@ -102,6 +102,32 @@ describe('validateExplanationAnswer', () => {
     }
   });
 
+  it('Wave 5: marks invalid for identifier-style internal terms (noop / fact_type / BUDGET_TARGET / graph_hash / Zod)', () => {
+    // Each of these must be blocked at the validator BEFORE reaching
+    // user-facing assistant_text. Padding ensures every answer is well
+    // over the 80-char minimum so the only failure path is the
+    // forbidden-term gate.
+    const padding =
+      ' Engineering Capacity carries the largest influence in the model with a probability of 62%.';
+    const baselinePriorFacts = [RUN_ANALYSIS_FACT];
+    const cases: Array<{ snippet: string }> = [
+      { snippet: 'noop branch fired' },
+      { snippet: 'the fact_type was unexpected' },
+      { snippet: 'BUDGET_TARGET was exceeded' },
+      { snippet: 'graph_hash mismatch detected' },
+      { snippet: 'Zod parsing failed' },
+    ];
+    for (const { snippet } of cases) {
+      const verdict = validateExplanationAnswer(
+        'explain_results',
+        { answer_text: snippet + padding },
+        baselinePriorFacts,
+      );
+      expect(verdict.payload?.answer_text_valid).toBe(false);
+      expect(verdict.payload?.answer_validation_error).toBe('forbidden_internal_term');
+    }
+  });
+
   it('marks invalid (mutation_language_detected) when answer_text reads as an edit', () => {
     const verdict = validateExplanationAnswer(
       'explain_from_structure',

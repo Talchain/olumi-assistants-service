@@ -19,32 +19,44 @@ import { generateChips } from '../chip-generator.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 
+// Production `explain_results` facts ALWAYS set `noop: true`. The
+// success/failure discriminator is `result.precondition_unmet`. Earlier
+// fixture variants set `noop: false` on the success case — that doesn't
+// match production shape and made the chip-emit predicate appear to
+// work in tests while it was dead code in production.
 function successfulExplainResultsFact(): HandlerFact {
   return {
     fact_type: 'explain_results',
     fact_version: 1,
-    noop: false,
+    noop: true,
     result: {
-      scenario_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      assistant_text: 'The leading option performs best by 14 points.',
+      precondition_unmet: false,
+      option_count: 2,
       answer_source: 'sonnet',
+      fallback_reason: null,
+      answer_text_length: 120,
+      staleness_prefixed: false,
     } as never,
   } as HandlerFact;
 }
 
-function noopExplainResultsFact(): HandlerFact {
+function preconditionUnmetExplainResultsFact(): HandlerFact {
   return {
     fact_type: 'explain_results',
     fact_version: 1,
     noop: true,
     result: {
       precondition_unmet: true,
+      option_count: 0,
+      answer_source: 'precondition_template',
+      fallback_reason: null,
+      answer_text_length: 80,
     } as never,
   } as HandlerFact;
 }
 
 describe('chip-generator — what_would_flip chip after successful explain_results', () => {
-  it('emits an action chip with action_type=what_would_flip after a successful (non-noop) explain_results', () => {
+  it('emits a what_would_flip action chip after a successful explain_results (production fact shape: noop=true, precondition_unmet=false)', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [successfulExplainResultsFact()],
@@ -53,18 +65,17 @@ describe('chip-generator — what_would_flip chip after successful explain_resul
     });
     expect(chips).toHaveLength(1);
     expect(chips[0]?.label).toBe('Explore what would change this');
-    // The crucial assertion — without action_type the chip is a
-    // prompt-only chip and Wave 1's derive-pending-actions does not
-    // persist a pending action for it. With it, a typed "yes" on the
-    // next turn resumes via the deterministic short-confirm
-    // pre-route.
+    // Without action_type the chip is a prompt-only chip and Wave 1's
+    // derive-pending-actions does not persist a pending action for it.
+    // With it, a typed "yes" on the next turn resumes via the
+    // deterministic short-confirm pre-route.
     expect(chips[0]?.action_type).toBe('what_would_flip');
   });
 
-  it('does NOT emit the chip after a noop (precondition-unmet) explain_results — the precondition rule fires instead', () => {
+  it('does NOT emit the chip after a precondition-unmet explain_results — the precondition rule fires instead', () => {
     const chips = generateChips({
       stage: 'analyse',
-      handlerFacts: [noopExplainResultsFact()],
+      handlerFacts: [preconditionUnmetExplainResultsFact()],
       analysis: null,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
       analysisReady: { status: 'ready' } as never,
