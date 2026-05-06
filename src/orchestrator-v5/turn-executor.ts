@@ -1180,7 +1180,7 @@ export async function runTurnExecutor(
           },
         );
         const ambiguousResponse = composeDirectAnswerResponse({
-          assistant_text: 'I had more than one offer open — which would you like?',
+          assistant_text: 'I had more than one offer open. Which would you like?',
           stage: context.stage,
           suggested_actions: ambiguousChips,
         });

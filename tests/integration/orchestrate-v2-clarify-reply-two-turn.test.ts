@@ -86,14 +86,18 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: Record<string, unknown>) => {
       appendCalls.push(write);
-      // Persist any pending_actions from this write so the next turn's
-      // `readMostRecentPendingActions` returns them — mirrors what
-      // production Supabase storage does atomically.
+      // Mirror production semantics by ALWAYS overwriting
+      // `mostRecentPendingActions` with the new write's value
+      // (defaulting to []). A turn that writes empty pendings
+      // CLEARS the prior list — production reads from the most
+      // recent turn row, so a stale prior list would never be
+      // visible there. The earlier "only update on non-empty"
+      // logic could mask future regressions where a recovery turn
+      // fails to re-persist pendings (the next turn would still
+      // see the previous list and the test would silently pass).
       const pending = (write as { pending_actions?: ReadonlyArray<unknown> })
         .pending_actions;
-      if (pending && pending.length > 0) {
-        mostRecentPendingActions = pending;
-      }
+      mostRecentPendingActions = pending ?? [];
       return { id: `row-${appendCalls.length}` };
     },
     readRecent: async () => [],
