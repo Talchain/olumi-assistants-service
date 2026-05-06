@@ -543,10 +543,17 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
 
 /**
  * V5 product-state continuity (foamy-bee tranche) — true when at least
- * one of the supplied facts is a successful (non-noop) mutation. The
- * post-mutation chip rule shares this predicate across the
- * "this turn mutated" (handlerFacts) and "a prior turn mutated"
- * (priorFacts) surfaces.
+ * one of the supplied facts is a successful (non-noop) mutation.
+ *
+ * **Single caller by design (DO NOT REGRESS):** the post-mutation chip
+ * rule above invokes this against `input.handlerFacts` only — i.e. the
+ * mutation that ran on the CURRENT turn. Reusing this helper against
+ * `priorFacts` here would re-introduce the stale-chip regression
+ * (a "Run analysis" chip on every subsequent converse turn until
+ * analysis is rerun). The state-query continuity surface owns the
+ * priorFacts-aware chip via `composeStateQueryChip` in
+ * `routing/state-query-guard.ts`; do NOT route that responsibility
+ * back through this helper.
  */
 function hasSuccessfulMutationFact(
   facts: readonly HandlerFact[] | undefined,
