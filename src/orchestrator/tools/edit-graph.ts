@@ -213,7 +213,17 @@ function getMaxPatchOperations(): number {
   return config.cee.maxPatchOperations;
 }
 
-const PROPOSE_AND_CONFIRM_ASSISTANT_TEXT = 'Here’s the change I’d propose. If you want, I can apply it next.';
+// Wave 5H — softened from 'Here's the change I'd propose. If you want, I can
+// apply it next.' to remove the "I can apply it next" promise. The V5
+// dispatcher does not persist `pendingProposal` across turns and does not
+// render accept/cancel chips (see edit-graph-dispatch.ts), so a typed "yes"
+// or chip click on the prior copy had no executable path back into the
+// proposed change. The new copy commits only to what is actually wired:
+// the user can re-describe the change with more specifics and the
+// deterministic value-update or edit-graph routes will pick it up. When
+// `apply_proposed_change` becomes a real resumable kind the copy can swap
+// back to a confirmation prompt paired with a persisted PendingAction.
+const PROPOSE_AND_CONFIRM_ASSISTANT_TEXT = 'I’m not yet certain which factor and value you want changed. Could you describe the change again with the specific factor and the value you’d like?';
 
 export function classifyEditIntent(editDescription: string): EditIntentCategory {
   const message = editDescription.toLowerCase();

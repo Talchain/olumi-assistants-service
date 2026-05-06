@@ -15,12 +15,18 @@
  *   - `run_analysis`            — covers both initial run and re-runs
  *                                 (no separate `rerun_analysis` exists)
  *   - `what_would_flip`         — explanation handler precondition gated
- *   - `apply_proposed_change`   — backs the legacy "Here's the change I'd
- *                                 propose. If you want, I can apply it
- *                                 next." copy at edit-graph.ts:216 and
- *                                 the deterministic value-update propose
- *                                 path at deterministic/actions/
- *                                 set-factor-value.ts:285
+ *   - `apply_proposed_change`   — reserved for the V4 propose-and-confirm
+ *                                 path. NOT EMITTED today: Wave 5H softened
+ *                                 the V4 copy at edit-graph.ts:216 to
+ *                                 remove the "I can apply it next"
+ *                                 promise because the V5 dispatcher does
+ *                                 not persist `pendingProposal` and does
+ *                                 not render accept/cancel chips. The kind
+ *                                 stays in the union so the persistence
+ *                                 layer can carry it once the
+ *                                 deterministic-replay plumbing for
+ *                                 `pendingProposal` is wired (separate
+ *                                 follow-up).
  *   - `edit_graph_add_risk`     — preserves the original risk label
  *                                 across the A4 missing-driver clarify
  *                                 turn so the deterministic add path can

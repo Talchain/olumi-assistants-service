@@ -281,7 +281,11 @@ describe("assembleV2Envelope", () => {
         }],
       }),
       toolResult: makeToolResult({
-        assistant_text: "Here’s the change I’d propose. If you want, I can apply it next.",
+        // Wave 5H softened the V4 propose-and-confirm copy to remove the
+        // "I can apply it next" promise (the V5 dispatcher does not
+        // persist `pendingProposal` or render accept chips). This text
+        // matches the new constant in src/orchestrator/tools/edit-graph.ts.
+        assistant_text: "I’m not yet certain which factor and value you want changed. Could you describe the change again with the specific factor and the value you’d like?",
         pending_proposal: {
           tool: "edit_graph",
           original_edit_request: "Update all three options",
