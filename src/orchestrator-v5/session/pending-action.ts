@@ -63,10 +63,15 @@ export type PendingActionAction =
 export type PendingActionKind = PendingActionAction['kind'];
 
 /**
- * The set of `action_type` strings that map onto a resumable
- * pending-action kind. Used by `derivePendingActionsFromChips` to decide
- * which chips materialise as pending actions and which round-trip as
- * natural-language messages only.
+ * The full set of pending-action kinds that the resumer can claim
+ * a turn for. Used by `tryClarificationResume` and the classification
+ * regression. NOT the right set for chip-derivation — a chip whose
+ * `action_type` is in this set may be a server-only kind without a
+ * chip-derived constructor (`set_factor_value`, `apply_proposed_change`,
+ * `edit_graph_add_risk` — these are emitted via explicit
+ * `CommitMetadata.pending_actions`, not derived from chips).
+ *
+ * For chip-derivation use `CHIP_DERIVABLE_ACTION_TYPES` instead.
  */
 export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   'set_factor_value',
@@ -74,6 +79,28 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   'what_would_flip',
   'apply_proposed_change',
   'edit_graph_add_risk',
+]);
+
+/**
+ * The strict subset of pending-action kinds that have a chip-derived
+ * constructor in `derivePendingActionsFromChips`. A chip on the wire
+ * whose `action_type` is in this set materialises as a pending action;
+ * a chip whose `action_type` is in `RESUMABLE_ACTION_TYPES` but NOT
+ * here round-trips as a natural-language message and does NOT crash
+ * the commit path.
+ *
+ * MAINTENANCE CONTRACT: every kind in this set MUST have a `case`
+ * in `buildChipAction`. The drift guard there throws if a kind
+ * reaches it without a constructor — that's still useful as a
+ * fail-loud check, but the guard now only fires for kinds inside
+ * this set, not the broader `RESUMABLE_ACTION_TYPES`. The companion
+ * regression test in `derive-pending-actions.test.ts` exercises a
+ * `set_factor_value` chip to prove server-only kinds in
+ * `RESUMABLE_ACTION_TYPES` do NOT crash chip-derivation.
+ */
+export const CHIP_DERIVABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
+  'run_analysis',
+  'what_would_flip',
 ]);
 
 export interface PendingActionPreconditions {

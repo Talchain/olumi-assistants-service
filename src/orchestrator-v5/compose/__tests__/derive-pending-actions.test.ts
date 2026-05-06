@@ -134,4 +134,50 @@ describe('derivePendingActionsFromChips — atomic-emit contract', () => {
   it('empty chip list yields empty output', () => {
     expect(derivePendingActionsFromChips([], ctx())).toEqual([]);
   });
+
+  it('chip with action_type=set_factor_value is silently skipped (server-only kind, no commit failure)', () => {
+    // Regression cordon for the chip-derivable / resumable split.
+    // `set_factor_value` is in `RESUMABLE_ACTION_TYPES` (the resumer
+    // reads it) but NOT in `CHIP_DERIVABLE_ACTION_TYPES` — the boundary
+    // chip enum permits the value, so a future or adapter-emitted
+    // chip with this action_type must NOT crash chip-derivation into
+    // STATE_COMMIT_FAILED. Pending actions for `set_factor_value` are
+    // emitted via explicit `CommitMetadata.pending_actions` at their
+    // dedicated emit sites (turn-executor's value-update clarify path
+    // and recovery_label_ambiguous re-persist branch).
+    const chips: SuggestedAction[] = [
+      chip({
+        id: 'c1',
+        label: 'Set X',
+        message: 'Set X to 5',
+        action_type: 'set_factor_value',
+      }),
+    ];
+    expect(() =>
+      derivePendingActionsFromChips(chips, ctx()),
+    ).not.toThrow();
+    const out = derivePendingActionsFromChips(chips, ctx());
+    expect(out).toEqual([]);
+  });
+
+  it('chip-derivable + server-only chips together — only the derivable one materialises', () => {
+    const chips: SuggestedAction[] = [
+      chip({
+        id: 'c1',
+        label: 'Run',
+        message: 'Run',
+        action_type: 'run_analysis',
+      }),
+      chip({
+        id: 'c2',
+        label: 'Set X',
+        message: 'Set X to 5',
+        action_type: 'set_factor_value',
+      }),
+    ];
+    const out = derivePendingActionsFromChips(chips, ctx());
+    expect(out).toHaveLength(1);
+    expect(out[0]?.action.kind).toBe('run_analysis');
+    expect(out[0]?.chip_id).toBe('c1');
+  });
 });

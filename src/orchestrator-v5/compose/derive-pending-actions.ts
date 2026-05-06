@@ -1,35 +1,39 @@
 /**
- * V5 Wave 1 — derive pending actions from a turn's suggested-action chips.
+ * Derive pending actions from a turn's suggested-action chips.
  *
- * Atomic-emit contract: for every `SuggestedAction` whose `action_type` is
- * in the resumable set, this function produces exactly one matching
- * `PendingAction`. Both flow through `commitDirectAnswer` into the same
- * `append_turn_atomic` call, so the chip and its pending action commit
- * or roll back together. The contract is asserted by
- * `derive-pending-actions.test.ts`.
+ * Atomic-emit contract: for every `SuggestedAction` whose `action_type`
+ * is in `CHIP_DERIVABLE_ACTION_TYPES`, this function produces exactly
+ * one matching `PendingAction`. Both flow through `commitDirectAnswer`
+ * into the same `append_turn_atomic` call, so the chip and its pending
+ * action commit or roll back together.
  *
- * Mapping today (Wave 1 covers run_analysis only — every chip CEE
- * currently emits with a structured `action_type` falls in this kind):
+ * Chips whose `action_type` is in `RESUMABLE_ACTION_TYPES` but NOT in
+ * `CHIP_DERIVABLE_ACTION_TYPES` (the server-only kinds —
+ * `set_factor_value`, `apply_proposed_change`, `edit_graph_add_risk`)
+ * round-trip as natural-language messages here and DO NOT crash the
+ * commit path. Pending actions for those kinds are emitted via
+ * explicit `CommitMetadata.pending_actions` at their dedicated emit
+ * sites.
  *
- *   action_type='run_analysis'  →  PendingActionAction { kind: 'run_analysis' }
+ * Today the mapping is:
+ *   action_type='run_analysis'    → PendingActionAction { kind: 'run_analysis' }
+ *   action_type='what_would_flip' → PendingActionAction { kind: 'what_would_flip' }
  *
- * Wave 2 wires the deterministic short-confirm pre-route that consumes
- * these. Wave 3 adds emit sites for `set_factor_value`,
- * `apply_proposed_change`, and `edit_graph_add_risk` (these last two
- * are server-side-only kinds — they never appear as chip
- * `action_type` values because the boundary `ActionSchema` enum does
- * not include them. They are derived from clarification / proposal
- * state at the emit site rather than from chips).
+ * Drift guard: if a chip's action_type is in
+ * `CHIP_DERIVABLE_ACTION_TYPES` but `buildChipAction` has no case for
+ * it, the function throws — that fires only for genuine drift inside
+ * the chip-derivable subset, not for any chip whose action_type just
+ * happens to be in the broader resumable set.
  */
 
 import { randomUUID } from 'node:crypto';
 
 import type { SuggestedAction } from './types.js';
 import {
+  CHIP_DERIVABLE_ACTION_TYPES,
   PENDING_ACTIONS_PER_TURN_CAP,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
-  RESUMABLE_ACTION_TYPES,
   type PendingAction,
   type PendingActionAction,
   type PendingActionKind,
@@ -57,23 +61,22 @@ export interface DerivePendingActionsContext {
 }
 
 /**
- * Project chip → pending-action kind. Returns `null` for chips that
- * carry an `action_type` outside the resumable set (defence-in-depth;
- * `chip-generator.ts` only emits `run_analysis` today, but the boundary
- * enum permits other values that we do not yet support).
+ * Project chip → pending-action kind. Returns `null` for chips whose
+ * `action_type` is outside `CHIP_DERIVABLE_ACTION_TYPES` (no
+ * chip-derived constructor, including server-only kinds that round-trip
+ * as natural-language messages).
  */
 function mapChipKind(action_type: string | undefined): PendingActionKind | null {
   if (!action_type) return null;
-  if (!RESUMABLE_ACTION_TYPES.has(action_type as PendingActionKind)) return null;
+  if (!CHIP_DERIVABLE_ACTION_TYPES.has(action_type as PendingActionKind)) return null;
   return action_type as PendingActionKind;
 }
 
 /**
  * Build the kind-specific `action` payload for a chip-derived pending
- * action. Wave 1 only handles `run_analysis` (no params). Other kinds
- * never reach this function because their `action_type` strings are
- * not in `RESUMABLE_ACTION_TYPES` AND/OR they are not emitted as
- * boundary chips.
+ * action. The switch must have a case for every kind in
+ * `CHIP_DERIVABLE_ACTION_TYPES`; the drift guard in the caller throws
+ * if one is missing.
  */
 function buildChipAction(kind: PendingActionKind): PendingActionAction | null {
   switch (kind) {
@@ -81,13 +84,6 @@ function buildChipAction(kind: PendingActionKind): PendingActionAction | null {
       return { kind: 'run_analysis' };
     case 'what_would_flip':
       return { kind: 'what_would_flip' };
-    // The other kinds (`set_factor_value`, `apply_proposed_change`,
-    // `edit_graph_add_risk`) are server-side-only and are not emitted
-    // as chips by the chip-generator — they are constructed at their
-    // specific emit sites in later waves and passed in via
-    // CommitMetadata.pending_actions directly. Here we conservatively
-    // return null so we never silently invent a chip-derived
-    // pending action with empty params.
     default:
       return null;
   }
@@ -114,9 +110,12 @@ function defaultPreconditions(
  * also enforces the cap as defence-in-depth.
  *
  * Throws if the input contains a chip whose `action_type` is in
- * `RESUMABLE_ACTION_TYPES` but `buildChipAction` returns null —
- * indicates a future-kind drift that should fail loudly rather than
- * silently miss the offer/persistence pairing.
+ * `CHIP_DERIVABLE_ACTION_TYPES` but `buildChipAction` returns null —
+ * indicates drift WITHIN the chip-derivable subset (a kind was added
+ * to the set but its `case` was forgotten in `buildChipAction`).
+ * Non-chip-derivable resumable kinds (server-only `set_factor_value`,
+ * `apply_proposed_change`, `edit_graph_add_risk`) round-trip silently
+ * via the `mapChipKind` filter and never reach the throw path.
  */
 export function derivePendingActionsFromChips(
   chips: readonly SuggestedAction[],
@@ -131,13 +130,14 @@ export function derivePendingActionsFromChips(
     if (kind === null) continue;
     const action = buildChipAction(kind);
     if (action === null) {
-      // Drift guard: action_type is resumable but we don't have a
-      // chip-derived constructor for it. Throw rather than silently
-      // miss the offer/persistence pairing — atomic-emit contract.
+      // Drift guard: action_type is in CHIP_DERIVABLE_ACTION_TYPES
+      // but buildChipAction has no case for it. Adding a kind to
+      // the set without updating the switch is a real bug — fail
+      // loudly so the test layer catches it.
       throw new Error(
         `derivePendingActionsFromChips: action_type='${chip.action_type}' is in ` +
-          `RESUMABLE_ACTION_TYPES but buildChipAction returned null. ` +
-          `This indicates an emit site is missing a chip-derived constructor.`,
+          `CHIP_DERIVABLE_ACTION_TYPES but buildChipAction returned null. ` +
+          `Add a case for this kind to buildChipAction.`,
       );
     }
     out.push({
