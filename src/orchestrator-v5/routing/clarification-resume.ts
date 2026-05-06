@@ -147,48 +147,63 @@ function isExpired(pa: PendingAction, nowMs: number): boolean {
 }
 
 /**
- * Mutating pending kinds where applying the persisted operator/value
- * could change the graph. Resuming any of these against a graph that
- * has diverged since the pending was emitted is unsafe — the target
- * could have moved, structure could have changed, or another mutation
- * could have invalidated the original intent.
+ * Per-kind safety classification. Resuming a "mutating" kind against
+ * a graph that has diverged since the pending was emitted is unsafe
+ * — the target could have moved, structure could have changed, or
+ * another mutation could have invalidated the original intent.
  *
- * MAINTENANCE CONTRACT: this set must be kept in sync with the
- * `PendingAction.action.kind` union by hand. TypeScript does NOT
- * enforce exhaustiveness — a kind added to the union but omitted from
- * this set would silently be treated as non-mutating and bypass the
- * fail-closed divergence guard. The companion test
- * `clarification-resume.test.ts` ("kind classification regression")
- * iterates every kind in the union and asserts each is explicitly
- * classified, so an unclassified addition trips that test rather than
- * shipping silently.
+ * `apply_proposed_change` and `edit_graph_add_risk` are both
+ * graph-mutating kinds (their docstring in `pending-action.ts` notes
+ * they depend on `graph_hash`). They are reserved-but-not-emitted
+ * today; classifying them as `mutating` now means the day they wire
+ * up they fail closed by default rather than slipping through the
+ * non-mutating branch and bypassing the divergence guard.
+ *
+ * Type design: `Record<PendingActionKind, ...>` is exhaustive at
+ * compile time — adding a kind to the `PendingAction.action.kind`
+ * union without classifying it here is a TypeScript error. The
+ * regression test in `clarification-resume.test.ts` iterates this
+ * record at runtime and pins each kind to its expected value, so a
+ * future RECLASSIFICATION (e.g. moving set_factor_value out of
+ * `mutating` by mistake) trips the test even though the type still
+ * compiles.
  */
-const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
-  'set_factor_value',
-]);
+type SafetyClass = 'mutating' | 'non_mutating';
+
+export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
+  PendingAction['action']['kind'],
+  SafetyClass
+> = {
+  // Graph-mutating: applying the persisted operator/value changes
+  // the graph. Hash divergence between emit and resume is unsafe.
+  set_factor_value: 'mutating',
+  // Reserved-but-not-emitted graph-mutating kinds. Classified as
+  // mutating now so they fail closed by default when wired.
+  apply_proposed_change: 'mutating',
+  edit_graph_add_risk: 'mutating',
+  // Non-mutating: resuming reads from analysis state but does not
+  // change the graph; hash divergence is not a safety concern.
+  run_analysis: 'non_mutating',
+  what_would_flip: 'non_mutating',
+};
+
+const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(
+  (
+    Object.entries(PENDING_ACTION_KIND_SAFETY_CLASSIFICATION) as Array<
+      [PendingAction['action']['kind'], SafetyClass]
+    >
+  )
+    .filter(([, safety]) => safety === 'mutating')
+    .map(([kind]) => kind),
+);
 
 /**
- * The non-mutating mirror of `MUTATING_KINDS`. Kept as a separate set
- * (rather than computed by complement) so the kind-classification
- * regression test can assert union membership equals the disjoint
- * union of these two sets — adding a new kind without updating EITHER
- * set fails the test.
- */
-const NON_MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
-  'run_analysis',
-  'what_would_flip',
-  'apply_proposed_change',
-  'edit_graph_add_risk',
-]);
-
-/**
- * Exposed for the kind-classification regression test (and
- * defence-in-depth for any external caller that needs to know the
- * resumer's safety classification). Not used in the resumer itself.
+ * Convenience export for the regression test and any external caller
+ * that needs to read the classification without re-deriving it.
  */
 export const PENDING_ACTION_KIND_SAFETY = {
   mutating: MUTATING_KINDS,
-  nonMutating: NON_MUTATING_KINDS,
+  byKind: PENDING_ACTION_KIND_SAFETY_CLASSIFICATION,
 } as const;
 
 function graphHashConflicts(

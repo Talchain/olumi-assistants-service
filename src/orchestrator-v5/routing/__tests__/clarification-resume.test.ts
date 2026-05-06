@@ -461,40 +461,76 @@ describe('tryClarificationResume — match cases', () => {
 });
 
 describe('tryClarificationResume — kind classification regression', () => {
-  // The resumer's fail-closed divergence guard reads from
-  // `PENDING_ACTION_KIND_SAFETY` (which wraps `MUTATING_KINDS` and
-  // `NON_MUTATING_KINDS`). TypeScript does NOT enforce that every
-  // kind in the `PendingAction.action.kind` union appears in exactly
-  // one of those sets — a kind added to the union but omitted from
-  // both sets would silently be treated as non-mutating and bypass
-  // the safety gate.
+  // The resumer's fail-closed divergence guard branches on
+  // `PENDING_ACTION_KIND_SAFETY_CLASSIFICATION`, a `Record<PendingActionKind,
+  // 'mutating' | 'non_mutating'>`. TypeScript enforces exhaustiveness at
+  // compile time — adding a kind to the union without classifying it is
+  // a type error.
   //
-  // This test enumerates every kind via `RESUMABLE_ACTION_TYPES`
-  // (which is exported from the same module that defines the union)
-  // and asserts each is classified exactly once. Adding a new kind
-  // without updating the safety classification fails this test.
+  // What TypeScript does NOT enforce is the SEMANTIC correctness of the
+  // classification. A future refactor could move `set_factor_value` out
+  // of `mutating` by mistake, or classify a graph-mutating kind as
+  // `non_mutating`, and the type would still compile.
+  //
+  // This regression pins the EXPECTED classification per kind. The
+  // `EXPECTED_CLASSIFICATION` table below uses `Record<PendingActionKind, ...>`
+  // so adding a kind to the union without updating the table is a
+  // compile error, AND moving an existing kind's classification flips
+  // the runtime assertion. Both halves of the contract are guarded.
 
-  it('every PendingAction kind is classified as either mutating or non-mutating, exclusively', () => {
-    const allKinds = [...RESUMABLE_ACTION_TYPES];
-    expect(allKinds.length).toBeGreaterThan(0);
-    for (const kind of allKinds) {
-      const inMutating = PENDING_ACTION_KIND_SAFETY.mutating.has(kind);
-      const inNonMutating = PENDING_ACTION_KIND_SAFETY.nonMutating.has(kind);
+  const EXPECTED_CLASSIFICATION: Record<
+    PendingAction['action']['kind'],
+    'mutating' | 'non_mutating'
+  > = {
+    // Graph-mutating today.
+    set_factor_value: 'mutating',
+    // Reserved graph-mutating kinds (depend on graph_hash per the
+    // PendingAction docstring). Classifying as `mutating` now means
+    // they fail closed when wired, rather than slipping through the
+    // non-mutating branch.
+    apply_proposed_change: 'mutating',
+    edit_graph_add_risk: 'mutating',
+    // Non-mutating: resuming reads from analysis state, does not
+    // change the graph.
+    run_analysis: 'non_mutating',
+    what_would_flip: 'non_mutating',
+  };
+
+  it('every PendingAction kind has the expected safety classification (semantic regression)', () => {
+    const expectedEntries = Object.entries(EXPECTED_CLASSIFICATION) as Array<
+      [PendingAction['action']['kind'], 'mutating' | 'non_mutating']
+    >;
+    for (const [kind, expected] of expectedEntries) {
+      const actual = PENDING_ACTION_KIND_SAFETY.byKind[kind];
       expect(
-        inMutating !== inNonMutating,
-        `kind '${kind}' must appear in exactly ONE of PENDING_ACTION_KIND_SAFETY.{mutating, nonMutating}; ` +
-          `currently mutating=${inMutating} nonMutating=${inNonMutating}`,
-      ).toBe(true);
+        actual,
+        `kind '${kind}' should be classified as '${expected}', but the production ` +
+          `module classifies it as '${actual}'. If this change is intentional, ` +
+          `update EXPECTED_CLASSIFICATION in this test AND verify the resumer's ` +
+          `divergence guard semantics are still correct.`,
+      ).toBe(expected);
     }
   });
 
-  it('the classification sets contain only known kinds (no orphan entries)', () => {
-    const allKinds = new Set<string>(RESUMABLE_ACTION_TYPES);
-    for (const kind of PENDING_ACTION_KIND_SAFETY.mutating) {
-      expect(allKinds.has(kind)).toBe(true);
-    }
-    for (const kind of PENDING_ACTION_KIND_SAFETY.nonMutating) {
-      expect(allKinds.has(kind)).toBe(true);
-    }
+  it('every kind in RESUMABLE_ACTION_TYPES is also classified (no orphans either way)', () => {
+    const expectedKeys = new Set<string>(Object.keys(EXPECTED_CLASSIFICATION));
+    const resumableKinds = new Set<string>(RESUMABLE_ACTION_TYPES);
+    // EXPECTED_CLASSIFICATION covers everything in the union (TypeScript
+    // enforces this). RESUMABLE_ACTION_TYPES should also cover the
+    // union; this asserts the two stay in sync.
+    expect([...expectedKeys].sort()).toEqual([...resumableKinds].sort());
+  });
+
+  it('PENDING_ACTION_KIND_SAFETY.mutating is derived correctly from the classification table', () => {
+    const expectedMutating = (
+      Object.entries(EXPECTED_CLASSIFICATION) as Array<
+        [PendingAction['action']['kind'], 'mutating' | 'non_mutating']
+      >
+    )
+      .filter(([, c]) => c === 'mutating')
+      .map(([k]) => k)
+      .sort();
+    const actualMutating = [...PENDING_ACTION_KIND_SAFETY.mutating].sort();
+    expect(actualMutating).toEqual(expectedMutating);
   });
 });
