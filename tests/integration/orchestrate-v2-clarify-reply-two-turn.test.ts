@@ -482,6 +482,153 @@ describe('POST /orchestrate/v2/turn — two-turn clarify→reply HTTP boundary',
     expect(t2Body.assistant_text).not.toMatch(/internal error/i);
   });
 
+  it('SEEDED two-turn HTTP proof — chip_click ingress variant — chip click on the recovery chip applies the original quantity, no LLM call', async () => {
+    // Wave 5L-3: companion to the SEEDED two-turn HTTP proof above.
+    // The earlier test posts Turn 2 as `source: composer` with the
+    // factor label as the message — proving the resumer matches a
+    // typed reply. This variant posts Turn 2 as `source: chip_click`
+    // (the actual UI ingress shape when the user clicks the recovery
+    // chip), so the proof now covers the real chip-click boundary
+    // and not just the typed-equivalent path.
+    //
+    // The recovery chips emitted by the recovery_label_ambiguous
+    // dispatch carry NO `action_type` — they are prompt-replay chips
+    // whose `message` field is the candidate factor label. So the
+    // chip object on the wire has no `action_type` either; the chip
+    // schema permits `chip: undefined` since both fields are optional.
+    // This test omits `chip` entirely, mirroring what a UI-side click
+    // on a label-only chip would send.
+    //
+    // Setup is identical to the typed-equivalent SEEDED test above.
+
+    const ambiguousTimeGraph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Profit', successThreshold: 100 },
+        {
+          id: 'fac_eng_time',
+          kind: 'factor',
+          label: 'Engineering Time Commitment',
+          observed_state: { value: 0.4, raw_value: 40, unit: '%', cap: 100 },
+        },
+        {
+          id: 'fac_owner_time',
+          kind: 'factor',
+          label: 'Owner Time Commitment',
+          observed_state: { value: 0.5, raw_value: 50, unit: '%', cap: 100 },
+        },
+        { id: 'opt_a', kind: 'option', label: 'Plan A' },
+        { id: 'opt_b', kind: 'option', label: 'Plan B' },
+      ],
+      edges: [],
+      options: [
+        { id: 'opt_a', status: 'ready', interventions: {} },
+        { id: 'opt_b', status: 'ready', interventions: {} },
+      ],
+      goal_node_id: 'goal_1',
+    };
+    function composerPayload(message: string) {
+      return {
+        kind: 'message' as const,
+        turn_id: randomUUID(),
+        scenario_id: SCENARIO_ID,
+        message,
+        turn_class: 'decide' as const,
+        stage: 'analyse' as const,
+        source: 'composer' as const,
+        graph_state: ambiguousTimeGraph,
+        selected_elements: { node_ids: [], edge_ids: [] },
+      };
+    }
+    function chipClickPayload(message: string) {
+      return {
+        ...composerPayload(message),
+        source: 'chip_click' as const,
+      };
+    }
+    const seededGraphHash = computeAnalysisAffectingGraphHash(
+      ambiguousTimeGraph as never,
+    );
+    expect(seededGraphHash).not.toBeNull();
+    mostRecentPendingActions = [
+      {
+        id: `pa-eng-${randomUUID()}`,
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip_clarify_factor_0',
+        action: {
+          kind: 'set_factor_value',
+          factor_id: 'fac_eng_time',
+          value: 5,
+          unit: '%',
+          operator: 'set',
+        },
+        preconditions: {
+          target_entity_ids: ['fac_eng_time'],
+          ...(seededGraphHash != null
+            ? { graph_hash: seededGraphHash }
+            : {}),
+        },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-05-06T00:00:00.000Z',
+      },
+      {
+        id: `pa-owner-${randomUUID()}`,
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip_clarify_factor_1',
+        action: {
+          kind: 'set_factor_value',
+          factor_id: 'fac_owner_time',
+          value: 5,
+          unit: '%',
+          operator: 'set',
+        },
+        preconditions: {
+          target_entity_ids: ['fac_owner_time'],
+          ...(seededGraphHash != null
+            ? { graph_hash: seededGraphHash }
+            : {}),
+        },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-05-06T00:00:00.000Z',
+      },
+    ];
+
+    // Turn 1 — ambiguous reply via composer to land on the recovery
+    // branch and re-persist pendings.
+    const turn1 = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: composerPayload('Time Commitment'),
+    });
+    expect(turn1.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
+    expect(mostRecentPendingActions.length).toBe(2);
+
+    // Turn 2 — CHIP CLICK on the recovery chip (the user clicks the
+    // "Engineering Time Commitment" chip rather than typing the label).
+    const turn2 = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: chipClickPayload('Engineering Time Commitment'),
+    });
+    expect(turn2.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
+    const t2Body = OlumiResponseSchema.parse(JSON.parse(turn2.body));
+    // The chip-click ingress dispatches the same set_factor_value
+    // mutation as the typed-equivalent reply.
+    const t2Patch = t2Body.blocks.find((b) => b.type === 'graph_patch');
+    expect(t2Patch).toBeDefined();
+    expect((t2Patch as { operation?: string }).operation).toBe('set_factor_value');
+    expect((t2Patch as { target_id?: string }).target_id).toBe('fac_eng_time');
+    // Original quantity (5) survives through chip-click ingress.
+    expect(t2Body.assistant_text).toContain('Engineering Time Commitment');
+    expect(t2Body.assistant_text).toMatch(/\b5\b/);
+    expect(t2Body.assistant_text).not.toMatch(/\bfac_eng_time\b/);
+    expect(t2Body.assistant_text).not.toMatch(/internal error/i);
+    expect(t2Body.assistant_text).not.toMatch(/no pending action/i);
+  });
+
   it('Turn 2 typed message matching neither candidate falls through to LLM (negative gate)', async () => {
     // Turn 1 — same multi-candidate clarify as above.
     await app.inject({
