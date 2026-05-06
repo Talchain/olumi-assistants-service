@@ -178,13 +178,22 @@ describe('tryClarificationResume — match cases', () => {
       ]),
       nowMs: NOW_MS,
     });
-    expect(r).toEqual({
-      matched: false,
-      skip_reason: 'multiple_label_matches',
-    });
+    // Wave 5I-2 — multi-candidate match becomes a focused
+    // recovery_label_ambiguous dispatch (caller emits one chip per
+    // candidate). Previously fell through to LLM with skip_reason.
+    expect(r.matched).toBe(true);
+    if (r.matched) {
+      expect(r.dispatch).toBe('recovery_label_ambiguous');
+      if (r.dispatch === 'recovery_label_ambiguous') {
+        expect(r.candidates.map((c) => c.factorLabel).sort()).toEqual([
+          'Engineering',
+          'Owner',
+        ]);
+      }
+    }
   });
 
-  it('returns all_targets_missing when persisted factor is gone from the live graph', () => {
+  it('returns recovery_targets_missing when persisted factor is gone from the live graph', () => {
     const pending = setFactorValuePending();
     const r = tryClarificationResume({
       message: 'Engineering Time Commitment',
@@ -193,10 +202,10 @@ describe('tryClarificationResume — match cases', () => {
       graphLookup: makeGraphLookup([]),
       nowMs: NOW_MS,
     });
-    expect(r).toEqual({ matched: false, skip_reason: 'all_targets_missing' });
+    expect(r).toEqual({ matched: true, dispatch: 'recovery_targets_missing' });
   });
 
-  it('Wave 5F: returns all_expired when pending action wall-clock expiry has passed', () => {
+  it('returns recovery_expired when pending action wall-clock expiry has passed', () => {
     const expired = setFactorValuePending({
       expires_at_iso: '2026-01-01T00:00:00.000Z', // before NOW_MS
     });
@@ -208,10 +217,14 @@ describe('tryClarificationResume — match cases', () => {
       ]),
       nowMs: NOW_MS,
     });
-    expect(r).toEqual({ matched: false, skip_reason: 'all_expired' });
+    expect(r).toEqual({
+      matched: true,
+      dispatch: 'recovery_expired',
+      expired_count: 1,
+    });
   });
 
-  it('Wave 5F: returns all_expired for malformed expires_at_iso (defence-in-depth)', () => {
+  it('returns recovery_expired for malformed expires_at_iso (defence-in-depth)', () => {
     const malformed = setFactorValuePending({
       expires_at_iso: 'not-a-date',
     });
@@ -223,10 +236,14 @@ describe('tryClarificationResume — match cases', () => {
       ]),
       nowMs: NOW_MS,
     });
-    expect(r).toEqual({ matched: false, skip_reason: 'all_expired' });
+    expect(r).toEqual({
+      matched: true,
+      dispatch: 'recovery_expired',
+      expired_count: 1,
+    });
   });
 
-  it('Wave 5F: returns graph_hash_changed when persisted hash diverges from live hash', () => {
+  it('returns recovery_graph_changed when persisted hash diverges from live hash', () => {
     const pending = setFactorValuePending({
       preconditions: { graph_hash: 'sha256:before' },
     });
@@ -239,10 +256,10 @@ describe('tryClarificationResume — match cases', () => {
       nowMs: NOW_MS,
       currentGraphHash: 'sha256:after',
     });
-    expect(r).toEqual({ matched: false, skip_reason: 'graph_hash_changed' });
+    expect(r).toEqual({ matched: true, dispatch: 'recovery_graph_changed' });
   });
 
-  it('Wave 5F: returns graph_hash_changed when persisted hash exists but live hash is unknown', () => {
+  it('returns recovery_graph_changed when persisted hash exists but live hash is unknown', () => {
     const pending = setFactorValuePending({
       preconditions: { graph_hash: 'sha256:before' },
     });
@@ -255,7 +272,7 @@ describe('tryClarificationResume — match cases', () => {
       nowMs: NOW_MS,
       // currentGraphHash omitted — defence-in-depth treats as conflict
     });
-    expect(r).toEqual({ matched: false, skip_reason: 'graph_hash_changed' });
+    expect(r).toEqual({ matched: true, dispatch: 'recovery_graph_changed' });
   });
 
   it('Wave 5F: passes when both persisted and current graph hashes match', () => {
@@ -311,8 +328,18 @@ describe('tryClarificationResume — match cases', () => {
       nowMs: NOW_MS,
     });
     // Both labels share "Time Commitment" — substring match fires for
-    // BOTH, producing multiple_label_matches.
-    expect(r).toEqual({ matched: false, skip_reason: 'multiple_label_matches' });
+    // BOTH, producing a recovery_label_ambiguous dispatch with both
+    // candidates surfaced for a focused re-clarify (no LLM call).
+    expect(r.matched).toBe(true);
+    if (r.matched && r.dispatch === 'recovery_label_ambiguous') {
+      expect(r.candidates).toHaveLength(2);
+      expect(r.candidates.map((c) => c.factorLabel).sort()).toEqual([
+        'Engineering Time Commitment',
+        'Owner Time Commitment',
+      ]);
+    } else {
+      throw new Error(`expected recovery_label_ambiguous, got ${JSON.stringify(r)}`);
+    }
   });
 
   it('Wave 5F: matchKind is "exact" for exact-equal label, "substring" for substring, "fuzzy" otherwise', () => {

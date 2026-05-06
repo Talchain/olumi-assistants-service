@@ -48,17 +48,36 @@ const EDIT_VERB_OR_QUANTITY_PATTERN =
 const SHORT_CONFIRM_LIKELIHOOD =
   /^\s*(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+it)?|confirm(?:ed)?|please\s+do)\b/i;
 
+/**
+ * Skip reasons where the resumer correctly defers to the LLM. The
+ * caller routes the message normally — these are not actionable
+ * clarifications and should not produce focused recovery copy.
+ */
 export type ClarificationResumeSkipReason =
   | 'message_likely_value_update'
   | 'message_likely_short_confirm'
   | 'no_pending_clarification'
   | 'no_graph'
-  | 'no_label_match'
-  | 'multiple_label_matches'
-  | 'all_expired'
-  | 'all_targets_missing'
-  | 'graph_hash_changed';
+  | 'no_label_match';
 
+/**
+ * The resumer claimed the turn for a deterministic dispatch. Each
+ * dispatch maps to a distinct response shape the caller produces:
+ *   - `set_factor_value`        — synthesise a handler proposal and run
+ *                                 the V5 lifecycle.
+ *   - `recovery_expired`        — curated copy: the offer expired.
+ *   - `recovery_graph_changed`  — curated copy: the model changed since
+ *                                 the clarification was emitted, so the
+ *                                 persisted operator/value would be
+ *                                 unsafe to apply.
+ *   - `recovery_targets_missing` — curated copy: the candidate factors
+ *                                 the clarification was about have all
+ *                                 been removed from the graph.
+ *   - `recovery_label_ambiguous` — focused re-clarification: the user's
+ *                                 reply matched multiple candidates.
+ *                                 The caller emits one chip per
+ *                                 candidate and never calls the LLM.
+ */
 export type ClarificationResumeDispatch =
   | { readonly matched: false; readonly skip_reason: ClarificationResumeSkipReason }
   | {
@@ -67,6 +86,27 @@ export type ClarificationResumeDispatch =
       readonly pending: PendingAction;
       readonly factorLabel: string;
       readonly matchKind: 'exact' | 'substring' | 'fuzzy';
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'recovery_expired';
+      readonly expired_count: number;
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'recovery_graph_changed';
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'recovery_targets_missing';
+    }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'recovery_label_ambiguous';
+      readonly candidates: ReadonlyArray<{
+        readonly pending: PendingAction;
+        readonly factorLabel: string;
+      }>;
     };
 
 export interface TryClarificationResumeInput {
@@ -137,15 +177,24 @@ export function tryClarificationResume(
 
   // Apply expiry + graph-hash invalidation BEFORE label matching.
   // The remaining candidates are the only ones safe to apply.
+  // Dispatch a focused recovery (rather than falling through to the
+  // LLM) when the user's message would otherwise reach Sonnet with no
+  // clarification context — the LLM can only guess, and the brief's
+  // "every promise has an executable path" rule says the system should
+  // surface the lapse and offer a real next step instead.
   const live = setFactorPendings.filter((pa) => !isExpired(pa, input.nowMs));
   if (live.length === 0) {
-    return { matched: false, skip_reason: 'all_expired' };
+    return {
+      matched: true,
+      dispatch: 'recovery_expired',
+      expired_count: setFactorPendings.length,
+    };
   }
   const hashSafe = live.filter(
     (pa) => !graphHashConflicts(pa, input.currentGraphHash),
   );
   if (hashSafe.length === 0) {
-    return { matched: false, skip_reason: 'graph_hash_changed' };
+    return { matched: true, dispatch: 'recovery_graph_changed' };
   }
 
   if (input.graphLookup === undefined) {
@@ -179,7 +228,7 @@ export function tryClarificationResume(
     targetsResolved.push({ pending, label: node.label });
   }
   if (targetsResolved.length === 0) {
-    return { matched: false, skip_reason: 'all_targets_missing' };
+    return { matched: true, dispatch: 'recovery_targets_missing' };
   }
 
   // Pass 1: exact + substring match (deterministic, high-confidence).
@@ -219,7 +268,20 @@ export function tryClarificationResume(
     return { matched: false, skip_reason: 'no_label_match' };
   }
   if (pickFrom.length > 1) {
-    return { matched: false, skip_reason: 'multiple_label_matches' };
+    // Surface the matched candidates so the caller can emit a focused
+    // re-clarification (one chip per candidate) rather than send the
+    // ambiguous reply to the LLM with no context. Sort high-score
+    // first so the chip order is deterministic and the strongest
+    // match leads.
+    const sorted = [...pickFrom].sort((a, b) => b.score - a.score);
+    return {
+      matched: true,
+      dispatch: 'recovery_label_ambiguous',
+      candidates: sorted.map((c) => ({
+        pending: c.pending,
+        factorLabel: c.label,
+      })),
+    };
   }
 
   return {

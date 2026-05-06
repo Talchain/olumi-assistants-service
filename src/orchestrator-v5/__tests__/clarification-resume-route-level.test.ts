@@ -190,4 +190,84 @@ describe('Wave 5E — clarification-resume route-level', () => {
     // that don't relate to any persisted candidate.
     expect(adapter.chatWithTools).toHaveBeenCalled();
   });
+
+  it('reply matching multiple candidates dispatches recovery_label_ambiguous: focused re-clarify chips, no LLM call', async () => {
+    // Both pending factors share the substring "Time Commitment".
+    // The user's reply ("time commitment") matches BOTH targets, so
+    // tryClarificationResume returns recovery_label_ambiguous. The
+    // route-level wiring must commit a focused re-clarify (one chip
+    // per candidate, curated assistant_text) instead of letting the
+    // ambiguous reply reach Sonnet.
+    const TWO_PENDINGS: PendingAction[] = [
+      {
+        ...PENDING_SET_FACTOR_VALUE,
+        id: `pa-amb-1-${randomUUID()}`,
+        chip_id: 'chip_clarify_factor_0',
+        action: {
+          kind: 'set_factor_value',
+          factor_id: 'f_eng_time',
+          value: 30,
+          unit: '%',
+          operator: 'set',
+        },
+        preconditions: { target_entity_ids: ['f_eng_time'] },
+      },
+      {
+        ...PENDING_SET_FACTOR_VALUE,
+        id: `pa-amb-2-${randomUUID()}`,
+        chip_id: 'chip_clarify_factor_1',
+        action: {
+          kind: 'set_factor_value',
+          factor_id: 'f_owner_time',
+          value: 30,
+          unit: '%',
+          operator: 'set',
+        },
+        preconditions: { target_entity_ids: ['f_owner_time'] },
+      },
+    ];
+    // Override the module-level mock for this single test.
+    const sessionMod = await import('../session/index.js');
+    const orig = sessionMod.getSessionStore;
+    (sessionMod as { getSessionStore: () => unknown }).getSessionStore = () => ({
+      append: async (write: Record<string, unknown>) => {
+        appendCalls.push(write);
+        return { id: `row-${appendCalls.length}` };
+      },
+      readRecent: async () => [],
+      readFactsFor: async () => [],
+      invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
+      invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
+      storeDraftGraph: async () => undefined,
+      loadGraph: async () => null,
+      loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+      ensureScenarioExists: async () => ({ user_id: null }),
+      readMostRecentPendingActions: async () => TWO_PENDINGS,
+    });
+    try {
+      const adapter = throwingRoutingAdapter();
+      const result = await runTurnExecutor(
+        payload('time commitment'),
+        'req-clarification-resume-ambiguous',
+        {
+          routingAdapter: adapter,
+          graphState: FACTOR_GRAPH as never,
+        },
+      );
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.telemetry.commit_performed).toBe(true);
+      expect(result.telemetry.llm_calls_used).toBe(0);
+      expect(result.response.assistant_text).toMatch(/more than one factor/i);
+      const labels = (result.response.suggested_actions ?? []).map(
+        (a) => a.label,
+      );
+      expect(labels).toContain('Engineering Time Commitment');
+      expect(labels).toContain('Owner Time Commitment');
+      // No internal copy leaks at the wire.
+      expect(result.response.assistant_text).not.toMatch(/skip_reason/i);
+      expect(result.response.assistant_text).not.toMatch(/internal error/i);
+    } finally {
+      (sessionMod as { getSessionStore: () => unknown }).getSessionStore = orig;
+    }
+  });
 });

@@ -1254,7 +1254,10 @@ export async function runTurnExecutor(
           ? { currentGraphHash: freshness.current_graph_hash }
           : {}),
       });
-      if (clarificationDispatch.matched) {
+      if (
+        clarificationDispatch.matched &&
+        clarificationDispatch.dispatch === 'set_factor_value'
+      ) {
         const pending = clarificationDispatch.pending;
         const action = pending.action;
         if (action.kind === 'set_factor_value') {
@@ -1313,6 +1316,106 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           consumedPendingAction = pending;
         }
+      } else if (clarificationDispatch.matched) {
+        // Focused recovery dispatches — the resumer claimed the turn
+        // but the persisted clarification is no longer applicable
+        // (expired, graph mutated, targets removed, or the user's
+        // reply is ambiguous between candidates). Compose a curated
+        // direct_answer rather than letting the user's partial label
+        // reach Sonnet with no clarification context — the LLM would
+        // have to guess, and the brief's "every promise has an
+        // executable path" rule says we should surface the lapse and
+        // offer a real next step.
+        let recoveryAssistantText: string;
+        let recoveryChips: SuggestedAction[] = [];
+        let telemetryReason:
+          | 'expired'
+          | 'graph_changed'
+          | 'targets_missing'
+          | 'label_ambiguous';
+        if (clarificationDispatch.dispatch === 'recovery_expired') {
+          telemetryReason = 'expired';
+          recoveryAssistantText =
+            'The earlier question I asked has lapsed, so I’m no longer holding the value you wanted me to apply. Tell me again what you’d like to change and I’ll do it directly.';
+        } else if (clarificationDispatch.dispatch === 'recovery_graph_changed') {
+          telemetryReason = 'graph_changed';
+          recoveryAssistantText =
+            'The model has changed since I asked, so I can’t safely apply what I had ready. Tell me again what you’d like to change against the current model and I’ll do it directly.';
+        } else if (
+          clarificationDispatch.dispatch === 'recovery_targets_missing'
+        ) {
+          telemetryReason = 'targets_missing';
+          recoveryAssistantText =
+            'The factors I was asking about aren’t in the model any more. Tell me which factor you want to change and what value to set, and I’ll apply it.';
+        } else {
+          // recovery_label_ambiguous — emit one chip per candidate so
+          // the user can disambiguate without retyping. No LLM call.
+          telemetryReason = 'label_ambiguous';
+          const labels = clarificationDispatch.candidates.map(
+            (c) => c.factorLabel,
+          );
+          const labelList =
+            labels.length === 2
+              ? `${labels[0]} or ${labels[1]}`
+              : `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]}`;
+          recoveryAssistantText = `Your reply matches more than one factor — did you mean ${labelList}?`;
+          recoveryChips = clarificationDispatch.candidates.map((c, idx) => ({
+            id: `chip_clarify_factor_${idx}`,
+            label: c.factorLabel,
+            message: c.factorLabel,
+          }));
+        }
+        emit(TelemetryEvents.PendingActionSkipped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          reason: `clarification_recovery_${telemetryReason}`,
+        });
+        const recoveryResponse = composeDirectAnswerResponse({
+          assistant_text: recoveryAssistantText,
+          stage: context.stage,
+          suggested_actions: recoveryChips,
+        });
+        sonnetTextForLog = recoveryResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitDirectAnswer(recoveryResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: `clarification_resume_recovery_${telemetryReason}`,
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on clarification recovery',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
       }
 
       // V5 explain-stabilisation Task 4 + V5 D1 golden-path closure
