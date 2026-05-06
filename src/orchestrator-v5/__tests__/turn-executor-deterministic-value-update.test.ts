@@ -286,6 +286,58 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     expect(preRouteEvent?.data.matched).toBe(false);
     expect(preRouteEvent?.data.skip_reason).toBe('hypothetical_gate');
   });
+
+  it('clarify-emit persists graph_hash on every set_factor_value pending action (P0 cross-turn divergence guard)', async () => {
+    // The clarification-resume pre-route checks `preconditions.graph_hash`
+    // on the reply turn and falls through to a focused recovery if the
+    // live graph hash differs (e.g. the client sent a direct_graph_edit
+    // between clarify and reply). For that guard to fire, the clarify
+    // emit MUST persist the live graph hash at emit time. A regression
+    // here would silently apply the original quantity to a model the
+    // user has since edited.
+    const routingAdapter = throwingRoutingAdapter();
+    const ambiguousGraph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Profit' },
+        { id: 'fac_cost', kind: 'factor', label: 'Cost' },
+        { id: 'fac_revenue', kind: 'factor', label: 'Revenue' },
+      ],
+      edges: [],
+    };
+    await runTurnExecutor(
+      payload('Set Cost and Revenue to 5'),
+      'req-clarify-graph-hash-persisted',
+      { routingAdapter, graphState: ambiguousGraph },
+    );
+
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+
+    // The committed turn write carries pending_actions, one per
+    // candidate. Every entry must carry a non-empty preconditions.graph_hash.
+    expect(appendCalls.length).toBeGreaterThan(0);
+    const write = appendCalls[0] as {
+      pending_actions?: ReadonlyArray<{
+        action: { kind: string };
+        preconditions?: {
+          target_entity_ids?: readonly string[];
+          graph_hash?: string;
+        };
+      }>;
+    };
+    const pendings = write.pending_actions ?? [];
+    expect(pendings.length).toBe(2);
+    for (const pa of pendings) {
+      expect(pa.action.kind).toBe('set_factor_value');
+      expect(typeof pa.preconditions?.graph_hash).toBe('string');
+      expect(pa.preconditions?.graph_hash?.length ?? 0).toBeGreaterThan(0);
+      // target_entity_ids stays alongside graph_hash (kind-existence
+      // check is independent of the surrounding-model check).
+      expect(pa.preconditions?.target_entity_ids?.length ?? 0).toBe(1);
+    }
+    // All candidates emitted at the same turn share the same live hash.
+    const hashes = pendings.map((pa) => pa.preconditions?.graph_hash);
+    expect(new Set(hashes).size).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

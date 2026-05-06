@@ -1664,12 +1664,21 @@ export async function runTurnExecutor(
             ),
           }),
         );
-        // Wave 5E — persist set_factor_value pending actions (one per
-        // candidate) carrying the parsed quantity + operator from this
-        // turn. The clarification-resume pre-route on the next turn
-        // matches a typed factor label against these pendings to
+        // Persist set_factor_value pending actions (one per candidate)
+        // carrying the parsed quantity + operator from this turn so the
+        // clarification-resume pre-route on the next turn can
         // reconstruct the proposal `tryDeterministicValueUpdate` would
         // have produced.
+        //
+        // `preconditions.graph_hash` captures the live graph hash at
+        // emit time. The resumer treats a mismatched live hash on the
+        // reply turn as a precondition violation and falls through to a
+        // focused recovery rather than applying the original quantity
+        // to a graph the client has since edited (e.g. via a
+        // direct_graph_edit between clarify and reply). Without this
+        // hash there is no way to detect that divergence — the
+        // target_entity_ids alone only verify that the factor still
+        // exists by id, not that the surrounding model is unchanged.
         const clarifyEmittedAtIso = new Date().toISOString();
         const clarifyExpiresAtIso = new Date(
           Date.parse(clarifyEmittedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
@@ -1678,6 +1687,7 @@ export async function runTurnExecutor(
           deterministicValueUpdate.quantity,
         );
         const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
+        const clarifyEmitGraphHash = freshness?.current_graph_hash;
         const clarifyPendingActions = deterministicValueUpdate.candidates.map(
           (cand, idx): PendingAction => ({
             id: randomUUID(),
@@ -1690,7 +1700,12 @@ export async function runTurnExecutor(
               ...(unit !== undefined ? { unit } : {}),
               operator,
             },
-            preconditions: { target_entity_ids: [cand.id] },
+            preconditions: {
+              target_entity_ids: [cand.id],
+              ...(clarifyEmitGraphHash != null
+                ? { graph_hash: clarifyEmitGraphHash }
+                : {}),
+            },
             expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
             expires_at_iso: clarifyExpiresAtIso,
             emitted_at_iso: clarifyEmittedAtIso,
