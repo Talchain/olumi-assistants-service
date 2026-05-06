@@ -467,6 +467,21 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5RecoveryChipServed: "v5.recovery_chip_served",
         V5UnexpectedExplanationPayload: "v5.unexpected_explanation_payload",
         ValidatorOutcome: "v5.validator_outcome",
+        // V5 interaction recovery tranche (2026-05-06): pending-action
+        // lifecycle telemetry. Matches the keys in src/utils/telemetry.ts.
+        PendingActionCreated: "v5.pending_action.created",
+        PendingActionMatched: "v5.pending_action.matched",
+        PendingActionConsumed: "v5.pending_action.consumed",
+        PendingActionSkipped: "v5.pending_action.skipped",
+        PendingActionExpired: "v5.pending_action.expired",
+        PendingActionInvalidated: "v5.pending_action.invalidated",
+        PendingActionRecoveryExpired: "v5.pending_action.recovery_expired",
+        PendingActionRecoveryAmbiguous: "v5.pending_action.recovery_ambiguous",
+        PendingActionRerunAnalysisRequired: "v5.pending_action.rerun_analysis_required",
+        PendingActionsReadDegraded: "v5.pending_actions.read_degraded",
+        // V5 interaction recovery tranche: add-risk preflight + clarification.
+        EditGraphPreflightSkippedLlm: "v5.edit_graph.preflight_skipped_llm",
+        V5EditGraphAddRiskClarified: "v5.edit_graph.add_risk_clarified",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -494,7 +509,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(brief_text|coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|edit_graph|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v5\.(brief_text|coaching|decision_review|decision_review_degraded|deterministic_value_update|context_pack|edit_graph|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|unexpected_explanation_payload|prompt_resolved|analysis_freshness|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1047,6 +1062,24 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // the response composer rewrote prose to satisfy the
         // numeric-prose contract.
         TelemetryEvents.V5ResponseProseSanitised,
+        // V5 interaction recovery tranche (2026-05-06): pending-action
+        // lifecycle telemetry. Operational signal is the persisted
+        // pending_actions JSONB column on v5_conversation_turns; these
+        // events are diagnostic-only until Datadog dashboards include
+        // the resumer cohort.
+        TelemetryEvents.PendingActionCreated,
+        TelemetryEvents.PendingActionMatched,
+        TelemetryEvents.PendingActionConsumed,
+        TelemetryEvents.PendingActionSkipped,
+        TelemetryEvents.PendingActionExpired,
+        TelemetryEvents.PendingActionInvalidated,
+        TelemetryEvents.PendingActionRecoveryExpired,
+        TelemetryEvents.PendingActionRecoveryAmbiguous,
+        TelemetryEvents.PendingActionRerunAnalysisRequired,
+        TelemetryEvents.PendingActionsReadDegraded,
+        // V5 interaction recovery tranche: add-risk preflight + clarify.
+        TelemetryEvents.EditGraphPreflightSkippedLlm,
+        TelemetryEvents.V5EditGraphAddRiskClarified,
       ];
 
       for (const event of allEvents) {
@@ -1488,6 +1521,20 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.response.prose_sanitised",
         "v5.unexpected_explanation_payload",
         "v5.validator_outcome",
+        // V5 interaction recovery tranche — pending-action lifecycle
+        "v5.pending_action.created",
+        "v5.pending_action.matched",
+        "v5.pending_action.consumed",
+        "v5.pending_action.expired",
+        "v5.pending_action.invalidated",
+        "v5.pending_action.skipped",
+        "v5.pending_action.recovery_expired",
+        "v5.pending_action.recovery_ambiguous",
+        "v5.pending_action.rerun_analysis_required",
+        "v5.pending_actions.read_degraded",
+        // V5 interaction recovery tranche — add-risk preflight + clarification
+        "v5.edit_graph.preflight_skipped_llm",
+        "v5.edit_graph.add_risk_clarified",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

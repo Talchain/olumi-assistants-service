@@ -98,8 +98,20 @@ describe('phase2 numeric format — what_would_flip fallback', () => {
   );
 });
 
-describe('phase2 numeric format — sensitivity stays raw', () => {
-  it('preserves sensitivity_value as a raw number in prose (it is not a probability)', () => {
+describe('phase2 numeric format — sensitivity rendering', () => {
+  it('sensitivity_value is rendered as bucketed lead-framing prose, never as a raw decimal and never as a percentage', () => {
+    // Phase 2's original contract was "sensitivity stays raw — never
+    // a percentage". The V5 interaction recovery tranche superseded
+    // that with a stronger guarantee: sensitivity values must NEVER
+    // appear as raw decimals in user-facing prose either, because
+    // numbers like `-0.7346` were the source of the brief's evidence
+    // #4 failure. The fallback composes adverbial lead-framing prose
+    // via `formatSensitivityDirection` (delegates to
+    // `bandFromMagnitude`).
+    //
+    // The original sub-claim "never as a percentage" remains and is
+    // strengthened: not as a raw decimal either, AND specifically
+    // bucketed prose appears.
     const projection: AnalysisProjectionSummary = {
       status: 'ready',
       leading_option: { label: 'A', probability: 0.6 },
@@ -112,9 +124,13 @@ describe('phase2 numeric format — sensitivity stays raw', () => {
     };
     const prose = composeExplainResultsFallback(projection);
 
-    // sensitivity 0.42 should appear as "0.42" — sensitivity is not a
-    // probability and converting to a percentage would misrepresent it
-    expect(prose).toContain('sensitivity 0.42');
+    // Original contract: never as a percentage.
     expect(prose).not.toContain('sensitivity 42%');
+    // V5 interaction recovery: never as a raw decimal in prose.
+    expect(prose).not.toContain('0.42');
+    expect(prose).not.toMatch(/-?\d+\.\d{2,}/);
+    // Bucketed lead-framing prose appears (0.42 falls in the
+    // moderate band [0.3, 0.7), positive sign).
+    expect(prose).toMatch(/moderately strengthens the lead/);
   });
 });
