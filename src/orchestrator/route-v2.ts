@@ -684,6 +684,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
       DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
     if (isDraftGraphShape) {
+      // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
+      // pipeline. V5 has no deterministic draft_graph handler yet. See
+      // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
       try {
         const dg = await dispatchDraftGraph({
           payload: ingress,
@@ -861,6 +864,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
     const isEditGraphShape = effectiveGraphState != null && editIntentDetected;
     if (isEditGraphShape) {
+      // V4 cordon: dispatchEditGraph delegates to the V4 graph-edit pipeline
+      // for free-form edit intents that do not match a typed V5 mutation
+      // handler (set_factor_value, add_constraint, adjust_edge_strength).
+      // See Docs/v5/v5-cordon.md §2 for trigger conditions and replacement
+      // plan (per-mutation handlers + Workstream 2 apply_proposed_change).
       try {
         // graphState confirmed non-null by the `isEditGraphShape` guard.
         // Pass ingress types through directly — the dispatcher owns the
