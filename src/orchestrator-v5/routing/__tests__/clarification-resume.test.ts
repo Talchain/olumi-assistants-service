@@ -9,8 +9,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { tryClarificationResume } from '../clarification-resume.js';
+import {
+  tryClarificationResume,
+  PENDING_ACTION_KIND_SAFETY,
+} from '../clarification-resume.js';
 import type { PendingAction } from '../../session/pending-action.js';
+import { RESUMABLE_ACTION_TYPES } from '../../session/pending-action.js';
 import type { GraphLookup } from '../validator.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -453,5 +457,44 @@ describe('tryClarificationResume — match cases', () => {
       nowMs: NOW_MS,
     });
     expect(r).toEqual({ matched: false, skip_reason: 'no_pending_clarification' });
+  });
+});
+
+describe('tryClarificationResume — kind classification regression', () => {
+  // The resumer's fail-closed divergence guard reads from
+  // `PENDING_ACTION_KIND_SAFETY` (which wraps `MUTATING_KINDS` and
+  // `NON_MUTATING_KINDS`). TypeScript does NOT enforce that every
+  // kind in the `PendingAction.action.kind` union appears in exactly
+  // one of those sets — a kind added to the union but omitted from
+  // both sets would silently be treated as non-mutating and bypass
+  // the safety gate.
+  //
+  // This test enumerates every kind via `RESUMABLE_ACTION_TYPES`
+  // (which is exported from the same module that defines the union)
+  // and asserts each is classified exactly once. Adding a new kind
+  // without updating the safety classification fails this test.
+
+  it('every PendingAction kind is classified as either mutating or non-mutating, exclusively', () => {
+    const allKinds = [...RESUMABLE_ACTION_TYPES];
+    expect(allKinds.length).toBeGreaterThan(0);
+    for (const kind of allKinds) {
+      const inMutating = PENDING_ACTION_KIND_SAFETY.mutating.has(kind);
+      const inNonMutating = PENDING_ACTION_KIND_SAFETY.nonMutating.has(kind);
+      expect(
+        inMutating !== inNonMutating,
+        `kind '${kind}' must appear in exactly ONE of PENDING_ACTION_KIND_SAFETY.{mutating, nonMutating}; ` +
+          `currently mutating=${inMutating} nonMutating=${inNonMutating}`,
+      ).toBe(true);
+    }
+  });
+
+  it('the classification sets contain only known kinds (no orphan entries)', () => {
+    const allKinds = new Set<string>(RESUMABLE_ACTION_TYPES);
+    for (const kind of PENDING_ACTION_KIND_SAFETY.mutating) {
+      expect(allKinds.has(kind)).toBe(true);
+    }
+    for (const kind of PENDING_ACTION_KIND_SAFETY.nonMutating) {
+      expect(allKinds.has(kind)).toBe(true);
+    }
   });
 });

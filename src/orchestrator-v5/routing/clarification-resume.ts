@@ -151,13 +151,45 @@ function isExpired(pa: PendingAction, nowMs: number): boolean {
  * could change the graph. Resuming any of these against a graph that
  * has diverged since the pending was emitted is unsafe — the target
  * could have moved, structure could have changed, or another mutation
- * could have invalidated the original intent. Kept as an exhaustive
- * set so adding a future mutating kind without updating the safety
- * gate fails loudly.
+ * could have invalidated the original intent.
+ *
+ * MAINTENANCE CONTRACT: this set must be kept in sync with the
+ * `PendingAction.action.kind` union by hand. TypeScript does NOT
+ * enforce exhaustiveness — a kind added to the union but omitted from
+ * this set would silently be treated as non-mutating and bypass the
+ * fail-closed divergence guard. The companion test
+ * `clarification-resume.test.ts` ("kind classification regression")
+ * iterates every kind in the union and asserts each is explicitly
+ * classified, so an unclassified addition trips that test rather than
+ * shipping silently.
  */
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
   'set_factor_value',
 ]);
+
+/**
+ * The non-mutating mirror of `MUTATING_KINDS`. Kept as a separate set
+ * (rather than computed by complement) so the kind-classification
+ * regression test can assert union membership equals the disjoint
+ * union of these two sets — adding a new kind without updating EITHER
+ * set fails the test.
+ */
+const NON_MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
+  'run_analysis',
+  'what_would_flip',
+  'apply_proposed_change',
+  'edit_graph_add_risk',
+]);
+
+/**
+ * Exposed for the kind-classification regression test (and
+ * defence-in-depth for any external caller that needs to know the
+ * resumer's safety classification). Not used in the resumer itself.
+ */
+export const PENDING_ACTION_KIND_SAFETY = {
+  mutating: MUTATING_KINDS,
+  nonMutating: NON_MUTATING_KINDS,
+} as const;
 
 function graphHashConflicts(
   pa: PendingAction,
