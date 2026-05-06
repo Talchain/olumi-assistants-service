@@ -265,10 +265,11 @@ describe('explain_results — answer-carrying contract', () => {
     // Phase 2 workstream C: probability rendered as percentage (0.62 → "62%").
     expect(outcome.assistant_text).toContain('62%');
     expect(outcome.assistant_text).toContain('Engineering Capacity');
-    // Wave 4: driver sensitivity rendered as bucketed direction prose,
-    // not a raw decimal. 0.65 magnitude → "very strongly", positive
-    // sign → "strengthens the lead".
-    expect(outcome.assistant_text).toContain('strengthens the lead');
+    // Wave 5H: driver sensitivity rendered as canonical bucketed
+    // influence prose (formatSensitivityDirection delegates to
+    // bandFromMagnitude). 0.65 magnitude → moderate band [0.3, 0.7),
+    // positive sign → "moderate positive influence".
+    expect(outcome.assistant_text).toContain('positive influence');
     expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
   });
 

@@ -31,43 +31,42 @@ import {
   formatPercentagePoints,
   formatProbability,
 } from '../../format/format-analysis-value.js';
+import {
+  bandFromMagnitude,
+  NEAR_ZERO_INFLUENCE_THRESHOLD,
+} from '../../format/influence-bands.js';
 
 /**
- * Convert a raw sensitivity coefficient into calm, readable prose.
+ * Convert a raw sensitivity coefficient into calm, readable prose using
+ * the canonical `bandFromMagnitude` vocabulary that the upstream
+ * display-safe projection already uses (`format-analysis-for-context.ts`'s
+ * `influencePhrase`). Wave 5H aligned this helper to the canonical bands
+ * so the fallback prose and the prose Sonnet sees in its context pack
+ * cannot drift between layers.
  *
- * The previous `formatRawNumber` passthrough surfaced values like
- * `-0.7346938775510203` directly to the user, which the brief lists as
- * forbidden output. Sensitivity coefficients are unitless signed
- * magnitudes; the natural user-facing rendering is bucketed magnitude
- * plus a plain-English direction.
+ * Bands (single source of truth: `format/influence-bands.ts`):
+ *   |v| < 0.05        → "has no material influence"           (NEAR_ZERO)
+ *   |v| in [0.05, 0.3) → "has a weak {positive|negative} influence"
+ *   |v| in [0.3, 0.7)  → "has a moderate {positive|negative} influence"
+ *   |v| in [0.7, 0.95) → "has a strong {positive|negative} influence"
+ *   |v| ≥ 0.95         → "has a very strong {positive|negative} influence"
  *
- * Buckets (calm business language):
- *   |v| < 0.02         → "has little effect on the result"
- *   0.02 ≤ |v| < 0.1   → "slightly {strengthens|weakens} the lead"
- *   0.1  ≤ |v| < 0.3   → "moderately ..."
- *   0.3  ≤ |v| < 0.6   → "strongly ..."
- *   |v| ≥ 0.6          → "very strongly ..."
+ * The fragment composes after a relative pronoun ("..., which {fragment}.")
+ * or after "today it" ("Today it {fragment}."), so the leading verb is
+ * "has". Sign flips between "positive" and "negative" rather than
+ * "strengthens"/"weakens" because the canonical helper uses
+ * positive/negative and we want the two layers to read the same.
  *
- * Direction maps to the leading-option framing the rest of the prose
- * already uses: positive sensitivity strengthens the lead, negative
- * weakens it. We do not say "up/down" because the underlying value
- * is not on a probability scale and a direction word without a frame
- * of reference is misleading.
- *
- * Telemetry (where it exists for sensitivity values) retains the raw
- * number; this helper only governs USER-FACING prose.
+ * Telemetry (where it exists) retains the raw number; this helper only
+ * governs USER-FACING prose.
  */
 export function formatSensitivityDirection(value: number): string {
+  if (!Number.isFinite(value)) return 'has no material influence';
   const absV = Math.abs(value);
-  if (absV < 0.02) return 'has little effect on the result';
-  let magnitude: string;
-  if (absV < 0.1) magnitude = 'slightly';
-  else if (absV < 0.3) magnitude = 'moderately';
-  else if (absV < 0.6) magnitude = 'strongly';
-  else magnitude = 'very strongly';
-  return value > 0
-    ? `${magnitude} strengthens the lead`
-    : `${magnitude} weakens the lead`;
+  if (absV < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'has no material influence';
+  const band = bandFromMagnitude(absV);
+  const sign = value < 0 ? 'negative' : 'positive';
+  return `has a ${band} ${sign} influence`;
 }
 
 function formatDriver(d: AnalysisProjectionDriver): string {
@@ -76,16 +75,17 @@ function formatDriver(d: AnalysisProjectionDriver): string {
 
 /**
  * Bucketed magnitude for edge strengths in structural explanations.
- * Same calm business vocabulary as `formatSensitivityDirection`,
- * minus the direction (edge strengths are connection magnitudes,
- * not effect-on-leading-option signed quantities).
+ * Delegates to `bandFromMagnitude` so structural prose, analysis prose,
+ * and the upstream display-safe projection all read from the same
+ * thresholds and vocabulary (Wave 5H alignment).
+ *
+ * Returns the bare adjective (`weak | moderate | strong | very strong`)
+ * because edge-strength sentences compose it with a noun ("a {band}
+ * link") rather than an "influence" phrase.
  */
 export function formatEdgeStrengthMagnitude(value: number): string {
-  const absV = Math.abs(value);
-  if (absV < 0.1) return 'weak';
-  if (absV < 0.3) return 'moderate';
-  if (absV < 0.6) return 'strong';
-  return 'very strong';
+  if (!Number.isFinite(value)) return 'weak';
+  return bandFromMagnitude(Math.abs(value));
 }
 
 /**
