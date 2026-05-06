@@ -100,7 +100,7 @@ describe("phase4-tools", () => {
   it("does not mark clarification-only edit_graph as graph_updated", async () => {
     const dispatcher = makeMockDispatcher({
       side_effects: { graph_updated: false, analysis_ran: false, brief_generated: false },
-      assistant_text: "Which one should I update — Onboarding Time or Hiring Delay?",
+      assistant_text: "Which one should I update: Onboarding Time or Hiring Delay?",
       pending_clarification: {
         tool: "edit_graph",
         original_edit_request: "Reduce it by 10%",

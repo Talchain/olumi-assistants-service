@@ -751,7 +751,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
             { role: "user", content: "Reduce it by 10%" },
             {
               role: "assistant",
-              content: "Which one should I update — Onboarding Time or Hiring Delay?",
+              content: "Which one should I update: Onboarding Time or Hiring Delay?",
               assistant_tool_calls: [{
                 name: "edit_graph",
                 input: {

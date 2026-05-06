@@ -244,7 +244,7 @@ describe("assembleV2Envelope", () => {
         }],
       }),
       toolResult: makeToolResult({
-        assistant_text: "Which one should I update — Onboarding Time or Hiring Delay?",
+        assistant_text: "Which one should I update: Onboarding Time or Hiring Delay?",
         pending_clarification: {
           tool: "edit_graph",
           original_edit_request: "Reduce it by 10%",

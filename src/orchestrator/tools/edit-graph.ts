@@ -648,9 +648,9 @@ function buildProposedChanges(
 
 function buildClarificationQuestion(intentCategory: EditIntentCategory, alternatives: string[]): string {
   if (intentCategory === 'option_configuration') {
-    return `Which option should I update${alternatives.length > 0 ? ` — ${alternatives.join(' or ')}` : ''}?`;
+    return `Which option should I update${alternatives.length > 0 ? `: ${alternatives.join(' or ')}` : ''}?`;
   }
-  return `Which one should I update${alternatives.length > 0 ? ` — ${alternatives.join(' or ')}` : ''}?`;
+  return `Which one should I update${alternatives.length > 0 ? `: ${alternatives.join(' or ')}` : ''}?`;
 }
 
 function buildClarificationActions(
@@ -691,7 +691,7 @@ function buildRecoveryQuestion(
       .map((node) => ('label' in node && typeof node.label === 'string') ? node.label : null)
       .filter((label): label is string => label !== null && label.length > 0);
     if (optionLabels.length > 0) {
-      return `Which option should I configure first${optionLabels.length <= 3 ? ` — ${optionLabels.join(', ')}` : ''}?`;
+      return `Which option should I configure first${optionLabels.length <= 3 ? `: ${optionLabels.join(', ')}` : ''}?`;
     }
     return 'Which existing option should I configure, and what factor should it change?';
   }

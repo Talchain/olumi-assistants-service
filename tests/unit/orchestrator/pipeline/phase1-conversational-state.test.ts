@@ -31,7 +31,7 @@ describe("buildConversationalState — pending_clarification", () => {
       { role: "user", content: "Reduce it by 10%" },
       {
         role: "assistant",
-        content: "Which one should I update — Onboarding Time or Hiring Delay?",
+        content: "Which one should I update: Onboarding Time or Hiring Delay?",
         tool_calls: [{
           name: "edit_graph",
           input: {
@@ -129,7 +129,7 @@ describe("buildConversationalState — pending_clarification", () => {
   it("returns null when assistant message has no tool_calls", () => {
     const messages = makeMessages([
       { role: "user", content: "hello" },
-      { role: "assistant", content: "Which one should I update — A or B?" },
+      { role: "assistant", content: "Which one should I update: A or B?" },
     ]);
     const state = buildConversationalState("A", makeContext({ messages }), "conversational");
     expect(state.pending_clarification).toBeNull();
@@ -140,7 +140,7 @@ describe("buildConversationalState — pending_clarification", () => {
       { role: "user", content: "do something" },
       {
         role: "assistant",
-        content: "Which one should I update — A or B?",
+        content: "Which one should I update: A or B?",
         tool_calls: [{ name: "edit_graph", input: { edit_description: "" } }],
       },
     ]);
@@ -153,7 +153,7 @@ describe("buildConversationalState — pending_clarification", () => {
       { role: "user", content: "Update it" },
       {
         role: "assistant",
-        content: "Which option should I update — Option A or Option B?",
+        content: "Which option should I update: Option A or Option B?",
         tool_calls: [{
           name: "edit_graph",
           input: {
