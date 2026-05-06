@@ -392,8 +392,10 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     expect(outcome.assistant_text).toContain('71%');
     // A top driver factor label is present.
     expect(outcome.assistant_text).toContain('Code quality');
-    // Wave 4: sensitivity rendered as bucketed direction prose.
-    expect(outcome.assistant_text).toMatch(/(strengthens|weakens) the lead/);
+    // Wave 5H: sensitivity rendered as canonical bucketed influence
+    // prose (formatSensitivityDirection delegates to bandFromMagnitude
+    // — same vocabulary as influencePhrase).
+    expect(outcome.assistant_text).toMatch(/(positive|negative) influence/);
     expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
     expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');
