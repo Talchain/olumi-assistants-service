@@ -37,36 +37,47 @@ import {
 } from '../../format/influence-bands.js';
 
 /**
- * Convert a raw sensitivity coefficient into calm, readable prose using
- * the canonical `bandFromMagnitude` vocabulary that the upstream
- * display-safe projection already uses (`format-analysis-for-context.ts`'s
- * `influencePhrase`). Wave 5H aligned this helper to the canonical bands
- * so the fallback prose and the prose Sonnet sees in its context pack
- * cannot drift between layers.
+ * Convert a raw sensitivity coefficient into a sentence-fragment that
+ * keeps the leading-option frame the rest of the deterministic
+ * fallback prose uses. The fragment composes after a driver label —
+ * "..., which {fragment}." or "Today it {fragment}." — so the result
+ * reads as "Cost moderately weakens the lead." rather than the more
+ * abstract "Cost has a moderate negative influence."
  *
  * Bands (single source of truth: `format/influence-bands.ts`):
- *   |v| < 0.05        → "has no material influence"           (NEAR_ZERO)
- *   |v| in [0.05, 0.3) → "has a weak {positive|negative} influence"
- *   |v| in [0.3, 0.7)  → "has a moderate {positive|negative} influence"
- *   |v| in [0.7, 0.95) → "has a strong {positive|negative} influence"
- *   |v| ≥ 0.95         → "has a very strong {positive|negative} influence"
+ *   |v| < 0.05         → "has little effect on the lead"      (NEAR_ZERO)
+ *   |v| in [0.05, 0.3) → "slightly {strengthens|weakens} the lead"
+ *   |v| in [0.3, 0.7)  → "moderately ..."
+ *   |v| in [0.7, 0.95) → "strongly ..."
+ *   |v| ≥ 0.95         → "very strongly ..."
  *
- * The fragment composes after a relative pronoun ("..., which {fragment}.")
- * or after "today it" ("Today it {fragment}."), so the leading verb is
- * "has". Sign flips between "positive" and "negative" rather than
- * "strengthens"/"weakens" because the canonical helper uses
- * positive/negative and we want the two layers to read the same.
+ * Thresholds delegate to `bandFromMagnitude` so the deterministic
+ * fallback and the display-safe projection (`influencePhrase`) share
+ * one source of truth for band boundaries. Vocabulary differs by
+ * design: the projection composes nouns ("moderate positive
+ * influence"), while this fallback composes adverbs paired with the
+ * lead-framing verbs the surrounding prose already uses ("moderately
+ * strengthens the lead"). The lowest band uses "slightly" rather than
+ * "weakly" — "weakly weakens" reads awkwardly in English.
  *
  * Telemetry (where it exists) retains the raw number; this helper only
  * governs USER-FACING prose.
  */
 export function formatSensitivityDirection(value: number): string {
-  if (!Number.isFinite(value)) return 'has no material influence';
+  if (!Number.isFinite(value)) return 'has little effect on the lead';
   const absV = Math.abs(value);
-  if (absV < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'has no material influence';
+  if (absV < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'has little effect on the lead';
   const band = bandFromMagnitude(absV);
-  const sign = value < 0 ? 'negative' : 'positive';
-  return `has a ${band} ${sign} influence`;
+  const adverb =
+    band === 'weak'
+      ? 'slightly'
+      : band === 'moderate'
+        ? 'moderately'
+        : band === 'strong'
+          ? 'strongly'
+          : 'very strongly';
+  const direction = value < 0 ? 'weakens' : 'strengthens';
+  return `${adverb} ${direction} the lead`;
 }
 
 function formatDriver(d: AnalysisProjectionDriver): string {
@@ -77,11 +88,11 @@ function formatDriver(d: AnalysisProjectionDriver): string {
  * Bucketed magnitude for edge strengths in structural explanations.
  * Delegates to `bandFromMagnitude` so structural prose, analysis prose,
  * and the upstream display-safe projection all read from the same
- * thresholds and vocabulary (Wave 5H alignment).
+ * thresholds and vocabulary.
  *
  * Returns the bare adjective (`weak | moderate | strong | very strong`)
  * because edge-strength sentences compose it with a noun ("a {band}
- * link") rather than an "influence" phrase.
+ * link") rather than a verb-phrase.
  */
 export function formatEdgeStrengthMagnitude(value: number): string {
   if (!Number.isFinite(value)) return 'weak';

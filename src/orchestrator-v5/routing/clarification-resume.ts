@@ -1,13 +1,13 @@
 /**
- * V5 Wave 5E — deterministic pre-route for clarification continuity.
+ * V5 deterministic pre-route for clarification continuity.
  *
- * Solves the brief's evidence #3: after a value-update clarify
- * ("Which one should I update? Owner Time Commitment / Engineering
- * Time Commitment?"), if the user types JUST a factor label
- * ("Engineering Time Commitment") with no quantity, the existing
- * `tryDeterministicValueUpdate` returns `skip_reason: 'no_quantity'`
- * and the message falls through to the LLM, which has lost the
- * parsed quantity from the prior turn.
+ * After a value-update clarify ("Which one should I update? Owner
+ * Time Commitment / Engineering Time Commitment?"), a user who
+ * types JUST a factor label ("Engineering Time Commitment") with no
+ * quantity would lose the parsed quantity from the prior turn — the
+ * existing `tryDeterministicValueUpdate` returns
+ * `skip_reason: 'no_quantity'` and the message falls through to the
+ * LLM with no clarification context.
  *
  * This pre-route reads the most-recent prior turn's pending actions
  * and looks for a `set_factor_value` pending whose target factor
@@ -23,7 +23,12 @@
  *     `tryShortConfirmResume`)
  *   - no `set_factor_value` pending actions on the prior turn
  *   - no factor whose label matches the message
- *   - multiple factors match → existing recovery_ambiguous path
+ *
+ * Recovery dispatches (focused direct_answer, no LLM call):
+ *   - all candidates expired
+ *   - persisted graph_hash differs from live graph hash
+ *   - all candidate factors have been removed from the live graph
+ *   - the reply matches multiple candidates (re-clarify with chips)
  *
  * `edit_graph_add_risk` continuity is a planned follow-up and is
  * NOT handled here. The shape it needs is different (the user's

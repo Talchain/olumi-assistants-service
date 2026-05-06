@@ -16,16 +16,14 @@
  *                                 (no separate `rerun_analysis` exists)
  *   - `what_would_flip`         — explanation handler precondition gated
  *   - `apply_proposed_change`   — reserved for the V4 propose-and-confirm
- *                                 path. NOT EMITTED today: Wave 5H softened
- *                                 the V4 copy at edit-graph.ts:216 to
- *                                 remove the "I can apply it next"
- *                                 promise because the V5 dispatcher does
- *                                 not persist `pendingProposal` and does
- *                                 not render accept/cancel chips. The kind
- *                                 stays in the union so the persistence
- *                                 layer can carry it once the
- *                                 deterministic-replay plumbing for
- *                                 `pendingProposal` is wired (separate
+ *                                 path. NOT emitted today: the V5
+ *                                 dispatcher does not persist
+ *                                 `pendingProposal` and does not render
+ *                                 accept/cancel chips, so this kind has
+ *                                 no production emit site yet. It stays
+ *                                 in the union so the persistence layer
+ *                                 can carry it once the deterministic-
+ *                                 replay plumbing lands (separate
  *                                 follow-up).
  *   - `edit_graph_add_risk`     — preserves the original risk label
  *                                 across the A4 missing-driver clarify

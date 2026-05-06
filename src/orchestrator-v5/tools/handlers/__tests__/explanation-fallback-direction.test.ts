@@ -1,22 +1,25 @@
 /**
- * Wave 5H — boundary tests for formatSensitivityDirection and
- * formatEdgeStrengthMagnitude after the alignment to the canonical
- * `bandFromMagnitude` thresholds and vocabulary.
+ * Boundary tests for `formatSensitivityDirection` and
+ * `formatEdgeStrengthMagnitude`.
  *
- * Wave 4 introduced these helpers with their own bucket boundaries
- * (0.02 / 0.1 / 0.3 / 0.6) and an adverb form ("moderately strengthens
- * the lead"). The display-safe projection in
- * `format-analysis-for-context.ts` was already using `bandFromMagnitude`
- * (0.3 / 0.7 / 0.95, NEAR_ZERO 0.05) with adjective vocabulary
- * (`weak | moderate | strong | very strong`). That mismatch meant for
- * the SAME sensitivity coefficient (e.g. 0.5) Sonnet's context pack saw
- * "moderate positive influence" while the deterministic fallback emitted
- * "strongly strengthens the lead".
+ * The fallback helper restores the leading-option frame ("Cost
+ * moderately weakens the lead") rather than the noun-phrase form
+ * ("Cost has a moderate negative influence") so the deterministic
+ * prose stays direct about WHAT the influence is on. Thresholds still
+ * delegate to the canonical `bandFromMagnitude` so the bucket
+ * boundaries cannot drift between this fallback and the upstream
+ * display-safe projection.
  *
- * Wave 5H replaces the helpers with thin wrappers over `bandFromMagnitude`
- * so band boundaries and vocabulary cannot drift. This file pins the new
- * thresholds and vocabulary, and asserts the no-raw-decimal egress
- * invariant survives the rewrite.
+ * Vocabulary (adverb form):
+ *   |v| < 0.05         → "has little effect on the lead"
+ *   |v| in [0.05, 0.3) → "slightly strengthens|weakens the lead"
+ *   |v| in [0.3, 0.7)  → "moderately ..."
+ *   |v| in [0.7, 0.95) → "strongly ..."
+ *   |v| ≥ 0.95         → "very strongly ..."
+ *
+ * The lowest band uses "slightly" rather than "weakly" because
+ * "weakly weakens" reads awkwardly. The other bands compose naturally
+ * with `weakens` / `strengthens`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -28,44 +31,44 @@ import {
 describe('formatSensitivityDirection', () => {
   it.each([
     // Near-zero short-circuit (|v| < 0.05).
-    [0, 'has no material influence'],
-    [0.01, 'has no material influence'],
-    [-0.01, 'has no material influence'],
-    [0.049, 'has no material influence'],
-    [-0.049, 'has no material influence'],
-    // Weak band: [0.05, 0.3).
-    [0.05, 'has a weak positive influence'],
-    [-0.05, 'has a weak negative influence'],
-    [0.1, 'has a weak positive influence'],
-    [0.2, 'has a weak positive influence'],
-    [0.299, 'has a weak positive influence'],
+    [0, 'has little effect on the lead'],
+    [0.01, 'has little effect on the lead'],
+    [-0.01, 'has little effect on the lead'],
+    [0.049, 'has little effect on the lead'],
+    [-0.049, 'has little effect on the lead'],
+    // Weak band: [0.05, 0.3) — "slightly" to avoid "weakly weakens".
+    [0.05, 'slightly strengthens the lead'],
+    [-0.05, 'slightly weakens the lead'],
+    [0.1, 'slightly strengthens the lead'],
+    [0.2, 'slightly strengthens the lead'],
+    [0.299, 'slightly strengthens the lead'],
     // Moderate band: [0.3, 0.7).
-    [0.3, 'has a moderate positive influence'],
-    [-0.3, 'has a moderate negative influence'],
-    [0.5, 'has a moderate positive influence'],
-    [0.699, 'has a moderate positive influence'],
+    [0.3, 'moderately strengthens the lead'],
+    [-0.3, 'moderately weakens the lead'],
+    [0.5, 'moderately strengthens the lead'],
+    [0.699, 'moderately strengthens the lead'],
     // Strong band: [0.7, 0.95).
-    [0.7, 'has a strong positive influence'],
-    [-0.7, 'has a strong negative influence'],
-    [0.9, 'has a strong positive influence'],
-    [0.949, 'has a strong positive influence'],
+    [0.7, 'strongly strengthens the lead'],
+    [-0.7, 'strongly weakens the lead'],
+    [0.9, 'strongly strengthens the lead'],
+    [0.949, 'strongly strengthens the lead'],
     // Very strong band: [0.95, ∞).
-    [0.95, 'has a very strong positive influence'],
-    [-0.95, 'has a very strong negative influence'],
-    [1.0, 'has a very strong positive influence'],
+    [0.95, 'very strongly strengthens the lead'],
+    [-0.95, 'very strongly weakens the lead'],
+    [1.0, 'very strongly strengthens the lead'],
     // The brief's evidence #4 raw value: must surface as bucketed prose.
-    [-0.7346938775510203, 'has a strong negative influence'],
+    [-0.7346938775510203, 'strongly weakens the lead'],
   ])('value=%s → %s', (value, expected) => {
     expect(formatSensitivityDirection(value)).toBe(expected);
   });
 
   it('non-finite input is treated as no material influence (does not throw)', () => {
-    expect(formatSensitivityDirection(Number.NaN)).toBe('has no material influence');
+    expect(formatSensitivityDirection(Number.NaN)).toBe('has little effect on the lead');
     expect(formatSensitivityDirection(Number.POSITIVE_INFINITY)).toBe(
-      'has no material influence',
+      'has little effect on the lead',
     );
     expect(formatSensitivityDirection(Number.NEGATIVE_INFINITY)).toBe(
-      'has no material influence',
+      'has little effect on the lead',
     );
   });
 

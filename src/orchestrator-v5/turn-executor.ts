@@ -853,8 +853,8 @@ export async function runTurnExecutor(
           // the model is structurally ready. On a model that's
           // missing options or a goal, clicking the chip would just
           // surface PRECONDITION_UNMET — moving the failure rather
-          // than recovering from it. Mirror Wave 5C's expired-
-          // recovery readiness gate.
+          // than recovering from it. The expired-recovery branch
+          // applies the same readiness gate; both paths must agree.
           const noPendingModelReady = analysisReadyForTurn?.status === 'ready';
           const noPendingAssistantText = noPendingModelReady
             ? "The offer to explore what would change this result is no longer available. " +
@@ -1227,13 +1227,13 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
-      // V5 Wave 5E — clarification-resume pre-route. Closes the
-      // brief evidence #3 gap: a user who types just a factor label
-      // after a value-update clarify ("Engineering Time Commitment")
-      // would otherwise lose the parsed quantity from the prior turn
-      // and fall through to the LLM. The resumer reads the most-
-      // recent prior turn's pending actions and reconstructs the
-      // proposal `tryDeterministicValueUpdate` would have produced.
+      // Clarification-resume pre-route. A user who types just a
+      // factor label after a value-update clarify ("Engineering Time
+      // Commitment") would otherwise lose the parsed quantity from
+      // the prior turn and fall through to the LLM. The resumer
+      // reads the most-recent prior turn's pending actions and
+      // reconstructs the proposal `tryDeterministicValueUpdate`
+      // would have produced.
       //
       // Negative gates inside the module ensure messages with edit
       // verbs / quantities (handled by tryDeterministicValueUpdate)

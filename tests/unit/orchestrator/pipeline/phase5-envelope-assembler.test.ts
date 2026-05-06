@@ -281,11 +281,13 @@ describe("assembleV2Envelope", () => {
         }],
       }),
       toolResult: makeToolResult({
-        // Wave 5H softened the V4 propose-and-confirm copy to remove the
-        // "I can apply it next" promise (the V5 dispatcher does not
-        // persist `pendingProposal` or render accept chips). This text
-        // matches the new constant in src/orchestrator/tools/edit-graph.ts.
-        assistant_text: "I’m not yet certain which factor and value you want changed. Could you describe the change again with the specific factor and the value you’d like?",
+        // The propose-and-confirm copy is honest about the constraint:
+        // the V5 dispatcher does not persist `pendingProposal` or
+        // render accept chips, so the user must restate the change for
+        // the deterministic value-update or edit-graph routes to apply
+        // it. This fixture pins the constant from
+        // src/orchestrator/tools/edit-graph.ts.
+        assistant_text: "I’ve drafted a change that fits your description, but I can’t apply a draft proposal automatically yet. Tell me the specific factor and value you’d like, and I’ll make the change directly.",
         pending_proposal: {
           tool: "edit_graph",
           original_edit_request: "Update all three options",

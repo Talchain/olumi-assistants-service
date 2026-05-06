@@ -178,7 +178,7 @@ describe("buildConversationalState — pending_proposal", () => {
       { role: "user", content: "Update all three options" },
       {
         role: "assistant",
-        content: "I’m not yet certain which factor and value you want changed. Could you describe the change again with the specific factor and the value you’d like?",
+        content: "I’ve drafted a change that fits your description, but I can’t apply a draft proposal automatically yet. Tell me the specific factor and value you’d like, and I’ll make the change directly.",
         tool_calls: [{
           name: "edit_graph",
           input: {
@@ -219,7 +219,7 @@ describe("buildConversationalState — pending_proposal", () => {
       { role: "user", content: "Update all three options" },
       {
         role: "assistant",
-        content: "I’m not yet certain which factor and value you want changed. Could you describe the change again with the specific factor and the value you’d like?",
+        content: "I’ve drafted a change that fits your description, but I can’t apply a draft proposal automatically yet. Tell me the specific factor and value you’d like, and I’ll make the change directly.",
         tool_calls: [{
           name: "edit_graph",
           input: {
