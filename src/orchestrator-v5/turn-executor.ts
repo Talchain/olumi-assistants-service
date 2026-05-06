@@ -1365,81 +1365,109 @@ export async function runTurnExecutor(
           // picked one), and dispatches the original quantity. Without
           // re-persisting the pendings, the chip click would lose the
           // quantity the user typed on the original turn.
-          telemetryReason = 'label_ambiguous';
-          const labels = clarificationDispatch.candidates.map(
-            (c) => c.factorLabel,
-          );
-          const labelList =
-            labels.length === 2
-              ? `${labels[0]} or ${labels[1]}`
-              : `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]}`;
-          recoveryAssistantText = `Your reply matches more than one factor. Did you mean ${labelList}?`;
-          recoveryChips = clarificationDispatch.candidates.map((c, idx) => ({
-            id: `chip_clarify_factor_${idx}`,
-            label: c.factorLabel,
-            message: c.factorLabel,
-          }));
-          // Re-emit each surviving candidate pending so the chip click
-          // on the next turn has something to resume. New id + emit
-          // timestamp so the lifecycle treats this as a fresh offer
-          // (turn-count and wall-clock TTLs reset). The factor_id,
-          // value, unit, and operator are preserved verbatim from the
-          // original clarify; preconditions.graph_hash is re-stamped
-          // from the live graph hash at recovery time so the next
-          // turn's divergence guard reads the right baseline.
           //
           // Invariant: reaching this branch implies the resumer's
           // hash-safety filter passed, which for set_factor_value
           // requires a non-undefined live hash (see
-          // `graphHashConflicts` and `MUTATING_KINDS`). Therefore
-          // `freshness?.current_graph_hash` MUST be defined here. We
-          // assert defensively so a future refactor of the resumer's
-          // gate ordering cannot silently emit hash-less mutating
-          // pendings (the next turn's gate would then refuse to
-          // apply them).
-          const reEmitIso = new Date().toISOString();
-          const reEmitExpiresIso = new Date(
-            Date.parse(reEmitIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
-          ).toISOString();
+          // `graphHashConflicts` and the kind-classification table).
+          // Therefore `freshness?.current_graph_hash` MUST be defined
+          // here.
+          //
+          // Production safety: if the invariant is violated (a future
+          // refactor of the resumer's gate ordering, or a bug we
+          // haven't anticipated), we DO NOT throw — that would surface
+          // a 500 BoundaryError to the user instead of a curated
+          // recovery. Instead, log + emit telemetry + degrade to the
+          // graph_changed recovery (no chips, no re-persistence). The
+          // observability event names the invariant so the regression
+          // is visible without harming UX.
+          //
+          // The route-level test `clarification-resume-route-level.test.ts`
+          // asserts every re-persisted pending carries a non-empty
+          // `preconditions.graph_hash`, which cordons against the
+          // production case (pendings without hash never ship).
           const reEmitGraphHash = freshness?.current_graph_hash;
           if (reEmitGraphHash == null) {
-            throw new Error(
-              'recovery_label_ambiguous: live graph hash is null at re-emit time. ' +
-                'This violates the resumer invariant — set_factor_value pendings ' +
-                'reaching the recovery branch must have passed the hash-safety ' +
-                'gate, which requires a defined live hash. A future refactor ' +
-                'reordered the gates without updating the re-emit guard.',
+            log.error(
+              {
+                event: 'v5.invariant_violation',
+                invariant:
+                  'recovery_label_ambiguous_requires_live_graph_hash',
+                request_id: requestId,
+                scenario_id: context.session_id,
+              },
+              'V5 TurnExecutor invariant violation: recovery_label_ambiguous reached with null live graph hash. ' +
+                'Resumer gate ordering is wrong — degrading to graph_changed recovery to keep UX intact. ' +
+                'Fix: re-check `graphHashConflicts` and the gate order in `tryClarificationResume`.',
+            );
+            emit(TelemetryEvents.PendingActionSkipped, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              reason: 'clarification_recovery_invariant_violation',
+            });
+            telemetryReason = 'graph_changed';
+            recoveryAssistantText =
+              'The model has changed since I asked, so I can’t safely apply what I had ready. Tell me again what you’d like to change against the current model and I’ll do it directly.';
+            // Fall through to the shared commit path below with no
+            // chips and no re-persisted pendings.
+          } else {
+            telemetryReason = 'label_ambiguous';
+            const labels = clarificationDispatch.candidates.map(
+              (c) => c.factorLabel,
+            );
+            const labelList =
+              labels.length === 2
+                ? `${labels[0]} or ${labels[1]}`
+                : `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]}`;
+            recoveryAssistantText = `Your reply matches more than one factor. Did you mean ${labelList}?`;
+            recoveryChips = clarificationDispatch.candidates.map((c, idx) => ({
+              id: `chip_clarify_factor_${idx}`,
+              label: c.factorLabel,
+              message: c.factorLabel,
+            }));
+            // Re-emit each surviving candidate pending so the chip
+            // click on the next turn has something to resume. New id
+            // + emit timestamp so the lifecycle treats this as a
+            // fresh offer (turn-count and wall-clock TTLs reset). The
+            // factor_id, value, unit, and operator are preserved
+            // verbatim from the original clarify;
+            // preconditions.graph_hash is re-stamped from the live
+            // graph hash at recovery time so the next turn's
+            // divergence guard reads the right baseline.
+            const reEmitIso = new Date().toISOString();
+            const reEmitExpiresIso = new Date(
+              Date.parse(reEmitIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+            ).toISOString();
+            recoveryPendingActions = clarificationDispatch.candidates.map(
+              (c, idx): PendingAction => {
+                const a = c.pending.action;
+                if (a.kind !== 'set_factor_value') {
+                  throw new Error(
+                    `recovery_label_ambiguous: unexpected pending kind '${a.kind}'`,
+                  );
+                }
+                return {
+                  id: randomUUID(),
+                  scenario_id: context.session_id,
+                  chip_id: `chip_clarify_factor_${idx}`,
+                  action: {
+                    kind: 'set_factor_value',
+                    factor_id: a.factor_id,
+                    value: a.value,
+                    ...(a.unit !== undefined ? { unit: a.unit } : {}),
+                    operator: a.operator,
+                  },
+                  preconditions: {
+                    target_entity_ids: [a.factor_id],
+                    graph_hash: reEmitGraphHash,
+                  },
+                  expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+                  expires_at_iso: reEmitExpiresIso,
+                  emitted_at_iso: reEmitIso,
+                };
+              },
             );
           }
-          recoveryPendingActions = clarificationDispatch.candidates.map(
-            (c, idx): PendingAction => {
-              const a = c.pending.action;
-              if (a.kind !== 'set_factor_value') {
-                throw new Error(
-                  `recovery_label_ambiguous: unexpected pending kind '${a.kind}'`,
-                );
-              }
-              return {
-                id: randomUUID(),
-                scenario_id: context.session_id,
-                chip_id: `chip_clarify_factor_${idx}`,
-                action: {
-                  kind: 'set_factor_value',
-                  factor_id: a.factor_id,
-                  value: a.value,
-                  ...(a.unit !== undefined ? { unit: a.unit } : {}),
-                  operator: a.operator,
-                },
-                preconditions: {
-                  target_entity_ids: [a.factor_id],
-                  graph_hash: reEmitGraphHash,
-                },
-                expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
-                expires_at_iso: reEmitExpiresIso,
-                emitted_at_iso: reEmitIso,
-              };
-            },
-          );
         }
         emit(TelemetryEvents.PendingActionSkipped, {
           request_id: requestId,
