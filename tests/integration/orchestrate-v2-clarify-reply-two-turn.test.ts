@@ -292,6 +292,160 @@ describe('POST /orchestrate/v2/turn — two-turn clarify→reply HTTP boundary',
     expect(appendCalls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('Wave 5J-1 P0: ambiguous reply re-persists pendings; chip-equivalent reply applies the original quantity, no LLM call across both turns', async () => {
+    // P0 regression cordon. The Wave 5I-2 ambiguous-recovery path
+    // emitted chips but did NOT re-persist the surviving candidate
+    // pending actions. A chip click on the next turn read
+    // `readMostRecentPendingActions` against the recovery row, found
+    // nothing, and silently lost the original quantity. Wave 5J-1
+    // re-persists the candidates on the recovery commit; this test
+    // proves the chip click then applies the original quantity end
+    // to end through the HTTP route.
+
+    // Graph fixture: two factors sharing the substring "Time
+    // Commitment" so a typed "Time Commitment" fuzzy-matches BOTH
+    // (bigram-Dice ≥ 0.5) and triggers recovery_label_ambiguous.
+    const ambiguousTimeGraph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Profit', successThreshold: 100 },
+        {
+          id: 'fac_eng_time',
+          kind: 'factor',
+          label: 'Engineering Time Commitment',
+          observed_state: { value: 0.4, raw_value: 40, unit: '%', cap: 100 },
+        },
+        {
+          id: 'fac_owner_time',
+          kind: 'factor',
+          label: 'Owner Time Commitment',
+          observed_state: { value: 0.5, raw_value: 50, unit: '%', cap: 100 },
+        },
+        { id: 'opt_a', kind: 'option', label: 'Plan A' },
+        { id: 'opt_b', kind: 'option', label: 'Plan B' },
+      ],
+      edges: [],
+      options: [
+        { id: 'opt_a', status: 'ready', interventions: {} },
+        { id: 'opt_b', status: 'ready', interventions: {} },
+      ],
+      goal_node_id: 'goal_1',
+    };
+    function payloadOnAmbiguousTimeGraph(message: string) {
+      return {
+        kind: 'message' as const,
+        turn_id: randomUUID(),
+        scenario_id: SCENARIO_ID,
+        message,
+        turn_class: 'decide' as const,
+        stage: 'analyse' as const,
+        source: 'composer' as const,
+        graph_state: ambiguousTimeGraph,
+        selected_elements: { node_ids: [], edge_ids: [] },
+      };
+    }
+
+    // Pre-seed the SessionStore mock with the two pendings the
+    // value-update clarify would have emitted. Skipping that turn
+    // makes the test focus on the P0 contract — re-persistence on
+    // ambiguous recovery + apply on the next turn — without
+    // depending on the value-update detector's multi-match
+    // tokenisation behaviour for long factor labels.
+    mostRecentPendingActions = [
+      {
+        id: `pa-eng-${randomUUID()}`,
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip_clarify_factor_0',
+        action: {
+          kind: 'set_factor_value',
+          factor_id: 'fac_eng_time',
+          value: 5,
+          unit: '%',
+          operator: 'set',
+        },
+        preconditions: { target_entity_ids: ['fac_eng_time'] },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-05-06T00:00:00.000Z',
+      },
+      {
+        id: `pa-owner-${randomUUID()}`,
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip_clarify_factor_1',
+        action: {
+          kind: 'set_factor_value',
+          factor_id: 'fac_owner_time',
+          value: 5,
+          unit: '%',
+          operator: 'set',
+        },
+        preconditions: { target_entity_ids: ['fac_owner_time'] },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-05-06T00:00:00.000Z',
+      },
+    ];
+
+    // Turn 1 (of this test) — ambiguous reply against the seeded
+    // pendings → recovery_label_ambiguous. The Wave 5J-1 fix
+    // re-persists the surviving pendings on this turn's commit so
+    // the next turn's chip-equivalent reply can find them.
+    const turn1 = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadOnAmbiguousTimeGraph('Time Commitment'),
+    });
+    expect(turn1.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
+    const t1Body = OlumiResponseSchema.parse(JSON.parse(turn1.body));
+    // Wire-level proof of the recovery branch.
+    expect(t1Body.assistant_text).toMatch(/more than one factor/i);
+    expect(t1Body.assistant_text).not.toContain('—');
+    const turn1ChipLabels = (t1Body.suggested_actions ?? []).map((a) => a.label);
+    expect(turn1ChipLabels).toContain('Engineering Time Commitment');
+    expect(turn1ChipLabels).toContain('Owner Time Commitment');
+    // P0 verification at the persistence layer: 2 pendings re-emitted
+    // on the recovery turn. Without this, Turn 2 below would find no
+    // pendings and either fall through to the LLM or surface a
+    // no-pending recovery.
+    expect(mostRecentPendingActions.length).toBe(2);
+    expect(
+      mostRecentPendingActions.every(
+        (pa) =>
+          (pa as { action: { kind: string; value?: number } }).action.kind ===
+            'set_factor_value' &&
+          (pa as { action: { value?: number } }).action.value === 5,
+      ),
+    ).toBe(true);
+
+    // Turn 2 (of this test) — chip-equivalent reply (the user picked
+    // "Engineering Time Commitment"). The resumer reads the
+    // re-persisted pendings, matches the label uniquely against
+    // f_eng_time, reconstructs the original quantity (5), and
+    // dispatches set_factor_value deterministically.
+    const turn2 = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadOnAmbiguousTimeGraph('Engineering Time Commitment'),
+    });
+    expect(turn2.statusCode).toBe(200);
+    // Across BOTH turns, zero LLM calls.
+    expect(llmCallTracker.count).toBe(0);
+    const t2Body = OlumiResponseSchema.parse(JSON.parse(turn2.body));
+    // Wire signature of a successful set_factor_value mutation.
+    const t2Patch = t2Body.blocks.find((b) => b.type === 'graph_patch');
+    expect(t2Patch).toBeDefined();
+    expect((t2Patch as { operation?: string }).operation).toBe('set_factor_value');
+    expect((t2Patch as { target_id?: string }).target_id).toBe('fac_eng_time');
+    // Original quantity (5) survived through the ambiguous-recovery
+    // turn boundary. This is the P0 contract this test cordons.
+    expect(t2Body.assistant_text).toContain('Engineering Time Commitment');
+    expect(t2Body.assistant_text).not.toMatch(/\bfac_eng_time\b/);
+    expect(t2Body.assistant_text).toMatch(/\b5\b/);
+    // No internal copy leaks at any point.
+    expect(t2Body.assistant_text).not.toMatch(/no pending action/i);
+    expect(t2Body.assistant_text).not.toMatch(/internal error/i);
+  });
+
   it('Turn 2 typed message matching neither candidate falls through to LLM (negative gate)', async () => {
     // Turn 1 — same multi-candidate clarify as above.
     await app.inject({

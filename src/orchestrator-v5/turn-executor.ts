@@ -1328,6 +1328,15 @@ export async function runTurnExecutor(
         // offer a real next step.
         let recoveryAssistantText: string;
         let recoveryChips: SuggestedAction[] = [];
+        // Pending actions to re-persist on the recovery turn.
+        // recovery_label_ambiguous re-emits the surviving candidate
+        // pendings so a chip click on the next turn finds them on
+        // `readMostRecentPendingActions` and can dispatch the original
+        // quantity. The other recovery branches (expired, graph changed,
+        // targets missing) deliberately persist nothing — the original
+        // pendings are no longer safe to apply, so the next turn must
+        // collect a fresh proposal from the user.
+        let recoveryPendingActions: readonly PendingAction[] | undefined;
         let telemetryReason:
           | 'expired'
           | 'graph_changed'
@@ -1350,6 +1359,12 @@ export async function runTurnExecutor(
         } else {
           // recovery_label_ambiguous — emit one chip per candidate so
           // the user can disambiguate without retyping. No LLM call.
+          // The chip's `message` is the candidate factor label; on
+          // click, the next turn's resumer reads the re-persisted
+          // pending actions, matches the label uniquely (the user
+          // picked one), and dispatches the original quantity. Without
+          // re-persisting the pendings, the chip click would lose the
+          // quantity the user typed on the original turn.
           telemetryReason = 'label_ambiguous';
           const labels = clarificationDispatch.candidates.map(
             (c) => c.factorLabel,
@@ -1358,12 +1373,56 @@ export async function runTurnExecutor(
             labels.length === 2
               ? `${labels[0]} or ${labels[1]}`
               : `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]}`;
-          recoveryAssistantText = `Your reply matches more than one factor — did you mean ${labelList}?`;
+          recoveryAssistantText = `Your reply matches more than one factor. Did you mean ${labelList}?`;
           recoveryChips = clarificationDispatch.candidates.map((c, idx) => ({
             id: `chip_clarify_factor_${idx}`,
             label: c.factorLabel,
             message: c.factorLabel,
           }));
+          // Re-emit each surviving candidate pending so the chip click
+          // on the next turn has something to resume. New id + emit
+          // timestamp so the lifecycle treats this as a fresh offer
+          // (turn-count and wall-clock TTLs reset). The factor_id,
+          // value, unit, and operator are preserved verbatim from the
+          // original clarify; preconditions.graph_hash is re-stamped
+          // from the live graph hash at recovery time so the next
+          // turn's divergence guard reads the right baseline.
+          const reEmitIso = new Date().toISOString();
+          const reEmitExpiresIso = new Date(
+            Date.parse(reEmitIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+          ).toISOString();
+          const reEmitGraphHash = freshness?.current_graph_hash;
+          recoveryPendingActions = clarificationDispatch.candidates.map(
+            (c, idx): PendingAction => {
+              const a = c.pending.action;
+              if (a.kind !== 'set_factor_value') {
+                throw new Error(
+                  `recovery_label_ambiguous: unexpected pending kind '${a.kind}'`,
+                );
+              }
+              return {
+                id: randomUUID(),
+                scenario_id: context.session_id,
+                chip_id: `chip_clarify_factor_${idx}`,
+                action: {
+                  kind: 'set_factor_value',
+                  factor_id: a.factor_id,
+                  value: a.value,
+                  ...(a.unit !== undefined ? { unit: a.unit } : {}),
+                  operator: a.operator,
+                },
+                preconditions: {
+                  target_entity_ids: [a.factor_id],
+                  ...(reEmitGraphHash != null
+                    ? { graph_hash: reEmitGraphHash }
+                    : {}),
+                },
+                expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+                expires_at_iso: reEmitExpiresIso,
+                emitted_at_iso: reEmitIso,
+              };
+            },
+          );
         }
         emit(TelemetryEvents.PendingActionSkipped, {
           request_id: requestId,
@@ -1392,6 +1451,9 @@ export async function runTurnExecutor(
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
+            ...(recoveryPendingActions !== undefined
+              ? { pending_actions: recoveryPendingActions }
+              : {}),
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');

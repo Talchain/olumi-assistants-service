@@ -258,6 +258,9 @@ describe('Wave 5E — clarification-resume route-level', () => {
       expect(result.telemetry.commit_performed).toBe(true);
       expect(result.telemetry.llm_calls_used).toBe(0);
       expect(result.response.assistant_text).toMatch(/more than one factor/i);
+      // Brief rule: British English, no em dash. The recovery copy
+      // must use a full stop between the statement and the question.
+      expect(result.response.assistant_text).not.toContain('—');
       const labels = (result.response.suggested_actions ?? []).map(
         (a) => a.label,
       );
@@ -266,6 +269,43 @@ describe('Wave 5E — clarification-resume route-level', () => {
       // No internal copy leaks at the wire.
       expect(result.response.assistant_text).not.toMatch(/skip_reason/i);
       expect(result.response.assistant_text).not.toMatch(/internal error/i);
+
+      // Wave 5J-1 P0: the recovery turn MUST re-persist the surviving
+      // candidate pending actions so a chip click on the next turn
+      // can dispatch with the original quantity. Without this,
+      // `readMostRecentPendingActions` on the next turn reads from the
+      // recovery row, finds nothing, and the chip click loses the
+      // quantity (regression that motivated this fix).
+      expect(appendCalls.length).toBeGreaterThan(0);
+      const recoveryWrite = appendCalls[0]!;
+      const persisted = (recoveryWrite as {
+        pending_actions?: ReadonlyArray<{
+          action: { kind: string; factor_id?: string; value?: number };
+          preconditions?: {
+            target_entity_ids?: readonly string[];
+            graph_hash?: string;
+          };
+          chip_id?: string;
+        }>;
+      }).pending_actions ?? [];
+      expect(persisted).toHaveLength(2);
+      expect(persisted.every((pa) => pa.action.kind === 'set_factor_value')).toBe(true);
+      // Original quantity (30) preserved verbatim from the input
+      // pendings — chip click on the next turn will reconstruct
+      // exactly the same proposal.
+      expect(persisted.every((pa) => pa.action.value === 30)).toBe(true);
+      // Both candidate factor_ids are still represented and pair
+      // with the chip ids on the wire so the next-turn resumer can
+      // match by label uniquely after the user picks one.
+      const persistedFactorIds = persisted
+        .map((pa) => pa.action.factor_id)
+        .sort();
+      expect(persistedFactorIds).toEqual(['f_eng_time', 'f_owner_time']);
+      const persistedChipIds = persisted.map((pa) => pa.chip_id).sort();
+      expect(persistedChipIds).toEqual([
+        'chip_clarify_factor_0',
+        'chip_clarify_factor_1',
+      ]);
     } finally {
       (sessionMod as { getSessionStore: () => unknown }).getSessionStore = orig;
     }
