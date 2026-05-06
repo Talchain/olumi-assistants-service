@@ -77,6 +77,10 @@ import {
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
 import {
+  composeStateQueryChip,
+  tryStateQueryGuard,
+} from './routing/state-query-guard.js';
+import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
@@ -393,6 +397,32 @@ export async function runTurnExecutor(
   let coachingMode: CoachingMode | null = null;
   let coachingSignalId: CoachingSignalId | null = null;
   let validationErrorCode: ValidationError['code'] | null = null;
+  // V5 product-state continuity (foamy-bee tranche) — observability for
+  // the state-query guard. `'not_evaluated'` covers turns where the
+  // guard's pre-route never ran (e.g. an earlier pre-route already
+  // synthesised a routingResult); flips to `'unmatched'` /
+  // `'with_recent_change'` / `'no_recent_changes'` once the guard fires.
+  // Threaded into the routing log (and from there to dashboards) so the
+  // misroute class stays observable in production.
+  let stateQueryGuardOutcomeForLog:
+    | 'unmatched'
+    | 'with_recent_change'
+    | 'no_recent_changes'
+    | 'not_evaluated' = 'not_evaluated';
+  // Compute the successful-mutation-fact count ONCE at function entry so
+  // every turn class (including those where an earlier pre-route —
+  // short-confirm, deterministic value-update — synthesises a routing
+  // result before the state-query guard runs) writes the correct count
+  // to the routing log. Anchoring this at the guard block alone left
+  // turns that short-circuit early reporting `prior_mutation_fact_count:
+  // 0` even when the conversation had several persisted mutations.
+  const priorMutationFactCountForLog = context.prior_facts.filter(
+    (f) =>
+      !f.noop &&
+      (f.fact_type === 'add_constraint' ||
+        f.fact_type === 'set_factor_value' ||
+        f.fact_type === 'adjust_edge_strength'),
+  ).length;
   // V5 state-trust: freshness derivation. The PRE-dispatch derivation
   // (`routingFreshness`) is built from `context.prior_facts` and is used
   // to ground Sonnet's analysis projection. The POST-dispatch derivation
@@ -683,6 +713,12 @@ export async function runTurnExecutor(
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
+        // V5 product-state continuity (foamy-bee tranche): thread
+        // prior_facts so the assembler can project the `recent_changes`
+        // summary. Without this, follow-up state-queries ("what update
+        // did you make?") have no human-readable receipt to ground
+        // Sonnet's answer and fall to the legacy `edit_graph` catch-all.
+        priorFacts: context.prior_facts,
         graph: compactedGraph ? undefined : graphStateForTurn,
         compactedGraph,
         compactedConstraints,
@@ -1971,6 +2007,115 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
+      // V5 product-state continuity (foamy-bee tranche) — deterministic
+      // state-query guard. Closes the named "what update did you make?"
+      // misroute class where a state-query falls through every other
+      // pre-route, reaches the LLM with no mutation context, and
+      // routes to legacy edit_graph (which then emits the denial copy
+      // "No changes were needed for this request."). The guard runs
+      // AFTER the existing pre-routes (which won't match a state-query
+      // — their negative gates exclude messages without edit verbs or
+      // quantities) and BEFORE the LLM call.
+      //
+      // When matched, the turn is dispatched as a `direct_answer` with
+      // assistant_text grounded in `contextPack.recent_changes` — no LLM
+      // call. When unmatched, control falls through to `routeWithToolUse`
+      // unchanged; in the unmatched-but-mutation-exists case Sonnet still
+      // sees the same `recent_changes` projection and can ground its
+      // answer (Option B layered with this guard's Option A floor).
+      if (routingResult === undefined) {
+        const stateQueryOutcome = tryStateQueryGuard({
+          message: payload.message,
+          contextPack,
+        });
+
+        // The successful-mutation count is computed once at function
+        // entry (see `priorMutationFactCountForLog`) so the routing log
+        // is correct even when an earlier pre-route synthesised a
+        // routing result before the guard ran. Reuse the same value
+        // here for the per-event telemetry payload.
+        stateQueryGuardOutcomeForLog = stateQueryOutcome.matched
+          ? stateQueryOutcome.dispatch
+          : 'unmatched';
+
+        emit(TelemetryEvents.V5StateQueryGuard, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: stateQueryOutcome.matched,
+          dispatch: stateQueryOutcome.matched
+            ? stateQueryOutcome.dispatch
+            : null,
+          recent_change_count: contextPack.recent_changes.length,
+          prior_mutation_fact_count: priorMutationFactCountForLog,
+        });
+
+        if (stateQueryOutcome.matched) {
+          // Compose the state-query continuity chip INLINE (do not call
+          // generateChips with empty handlerFacts + priorFacts). The
+          // chip-generator's post-mutation rule is now scoped to the
+          // current turn's handlerFacts only, so a generic converse
+          // turn with stale priorFacts cannot accidentally surface a
+          // "Run analysis" chip on every subsequent turn. The
+          // state-query guard knows it just dispatched, so it owns the
+          // chip decision here and applies the same Run / Rerun
+          // analysis logic deterministically.
+          const stateQueryChips = composeStateQueryChip({
+            recentChangeCount: contextPack.recent_changes.length,
+            priorFacts: context.prior_facts,
+            analysisFreshness: buildTurnOutcome()?.analysis_freshness,
+            analysisReadyStatus: analysisReadyForTurn?.status,
+            validationRegistry:
+              options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+          });
+          const stateQueryResponse = composeDirectAnswerResponse({
+            assistant_text: stateQueryOutcome.assistant_text,
+            stage: context.stage,
+            suggested_actions: stateQueryChips,
+          });
+          sonnetTextForLog = stateQueryResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitDirectAnswer(stateQueryResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'state_query_guard',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on state-query guard',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
       // V5 D1 golden-path closure (A3.1): when the deterministic pre-route
       // already synthesised a `routingResult` (unambiguous factor + value
       // case), skip the LLM call entirely. The synthetic result already
@@ -3024,6 +3169,15 @@ export async function runTurnExecutor(
       cqe_ambiguous_phrasing_detected:
         cqeSummaryForLog?.ambiguous_phrasing_detected ?? false,
       coaching_signal_id: coachingSignalId,
+      // V5 product-state continuity (foamy-bee tranche). `recent_changes_count`
+      // mirrors the cap on the projection (0..3); `prior_mutation_fact_count`
+      // is uncapped (whole-history observability); `state_query_guard_outcome`
+      // captures whether the named-follow-up guard matched, dispatched, or
+      // was never reached. All three default to safe zero/`'not_evaluated'`
+      // when the turn fails before the relevant code runs.
+      recent_changes_count: contextPackForLog?.recent_changes.length ?? 0,
+      prior_mutation_fact_count: priorMutationFactCountForLog,
+      state_query_guard_outcome: stateQueryGuardOutcomeForLog,
     });
     safeFireRoutingLogWrite(writer, record, requestId);
   }

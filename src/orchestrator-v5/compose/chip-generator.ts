@@ -196,6 +196,22 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   const hasAnalysis = input.analysis != null;
   const robustnessIsFragile =
     input.analysis != null && input.analysis.robustness_band === 'fragile';
+  // V5 product-state continuity (foamy-bee tranche) — fires only when
+  // the mutation ran on the CURRENT turn (handlerFacts). The
+  // priorFacts surface is intentionally NOT consulted here: a stale
+  // mutation in prior_facts would otherwise trigger the chip on every
+  // subsequent converse turn until analysis is rerun — noise the user
+  // wouldn't expect.
+  //
+  // The state-query continuity path composes its own chip inline (see
+  // turn-executor's state-query guard block) using the same Run /
+  // Rerun analysis logic. Keeping the chip-generator narrow to the
+  // current turn means a generic converse turn that happens to have
+  // an old mutation in prior_facts cannot accidentally surface a
+  // stale "Run analysis" chip.
+  const successfulMutationOnCurrentTurn = hasSuccessfulMutationFact(
+    input.handlerFacts,
+  );
 
   // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
   // require a new handler. "Explain the result" stays a conversational
@@ -218,6 +234,73 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         action_type: 'what_would_flip',
       },
     ]);
+  }
+
+  // V5 product-state continuity (foamy-bee tranche) — post-mutation
+  // analysis chip. Fires ONLY on the turn that ran the mutation
+  // (`successfulMutationOnCurrentTurn`). The user's natural next step
+  // is to see how the change affected the recommendation.
+  //
+  // Boundary with the state-query continuity surface (DO NOT REGRESS):
+  // a state-query turn (handlerFacts empty, priorFacts carries a prior
+  // mutation) gets its own chip from `composeStateQueryChip` in
+  // `routing/state-query-guard.ts`, not from this rule. Re-introducing
+  // the priorFacts surface here would surface a stale "Run analysis"
+  // chip on every subsequent converse turn until the user reruns
+  // analysis — visible noise the user wouldn't expect. The
+  // chip-generator's post-mutation rule is current-turn only by design.
+  //
+  // The chip variant depends on what analysis state already exists:
+  //   - Prior successful run_analysis fact AND freshness === 'stale'
+  //     (graph hash diverged because the mutation invalidated it) →
+  //     "Run analysis again".
+  //   - No prior run_analysis fact (model has never been analysed) →
+  //     "Run analysis".
+  //   - Otherwise (fresh analysis, or model not structurally ready) →
+  //     suppress; emitting a chip in those branches would either
+  //     mislead the user or trip the validation registry's executable
+  //     gate at click time.
+  //
+  // Placed BEFORE the existing stale-explanation rerun-recovery rule
+  // so a turn that both ran a mutation AND would otherwise trigger the
+  // explain-with-stale rule still surfaces the post-mutation chip — a
+  // mutation is the more proximate signal of "what the user just did".
+  if (
+    successfulMutationOnCurrentTurn &&
+    input.analysisReady?.status === 'ready'
+  ) {
+    const hasPriorRunAnalysis = (input.priorFacts ?? []).some(
+      isSuccessfulRunAnalysisFact,
+    );
+    const freshness = input.turnOutcome?.analysis_freshness;
+    const curated = curatedHandlerChips(input.validationRegistry);
+    const runAnalysisRegistered = curated.find(
+      (c) => c.handler_id === 'run_analysis',
+    );
+    if (runAnalysisRegistered) {
+      if (hasPriorRunAnalysis && freshness === 'stale') {
+        return cap([
+          {
+            id: 'chip_action_rerun_analysis_after_mutation',
+            label: 'Run analysis again',
+            message: 'Run the analysis again.',
+            action_type: 'run_analysis',
+          },
+        ]);
+      }
+      if (!hasPriorRunAnalysis) {
+        return cap([
+          executableChip(
+            runAnalysisRegistered.handler_id as V5ActionType,
+            runAnalysisRegistered.label,
+          ),
+        ]);
+      }
+    }
+    // Fresh analysis or `run_analysis` not registered — fall through
+    // to the existing rules. The mutation receipt's deterministic
+    // assistant_text already carries a staleness narrative when prior
+    // analysis exists, so the user is not left without context.
   }
 
   // V5 state-trust — stale-analysis recovery chip.
@@ -457,6 +540,30 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   return [];
 }
 
+
+/**
+ * V5 product-state continuity (foamy-bee tranche) — true when at least
+ * one of the supplied facts is a successful (non-noop) mutation. The
+ * post-mutation chip rule shares this predicate across the
+ * "this turn mutated" (handlerFacts) and "a prior turn mutated"
+ * (priorFacts) surfaces.
+ */
+function hasSuccessfulMutationFact(
+  facts: readonly HandlerFact[] | undefined,
+): boolean {
+  if (!facts) return false;
+  for (const f of facts) {
+    if (
+      !f.noop &&
+      (f.fact_type === 'add_constraint' ||
+        f.fact_type === 'set_factor_value' ||
+        f.fact_type === 'adjust_edge_strength')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function findHandlerJustRan(
   facts: readonly HandlerFact[] | undefined,

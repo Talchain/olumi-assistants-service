@@ -139,6 +139,26 @@ function buildBlocksFromFacts(
       fact.fact_type === 'add_constraint' ||
       fact.fact_type === 'adjust_edge_strength'
     ) {
+      // V5 product-state continuity (foamy-bee tranche) — DEFERRED
+      // CONTRACT GAP: the wire `graph_patch` block emits raw `before`
+      // and `after` records that carry structural identifiers
+      // (`constraint_id`, `node_id`, edge IDs, `provenance`,
+      // `operator` characters). The Phase 0 finding called for a
+      // clean human-readable display field (`display` / `summary` /
+      // `applied_summary`) so the UI doesn't have to render raw
+      // structural fields by default.
+      //
+      // The fix requires widening the boundary `GraphPatchBlockSchema`
+      // (currently `.strict()` and rejecting unknown fields) — a
+      // coordinated change to the vendored schemas package, out of
+      // scope for this tranche. The UI handoff brief
+      // [Docs/v5/foamy-bee-ui-handoff.md] documents the deferral and
+      // the renderer-side workaround (use `assistant_text` as the
+      // primary display source). The deferred contract is pinned as
+      // `it.todo` in
+      // `compose/__tests__/graph-patch-clean-payload.test.ts`; flip
+      // those to real assertions when the schemas package change
+      // lands.
       const { target_id, status, before, after } = fact.result;
       blocks.push({
         type: 'graph_patch',

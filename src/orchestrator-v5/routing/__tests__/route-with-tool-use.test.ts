@@ -169,6 +169,78 @@ describe('routeWithToolUse — happy paths', () => {
     expect(userContent).toContain('hi');
   });
 
+  // V5 product-state continuity (foamy-bee tranche) — recent_changes
+  // must survive `buildUserMessage`'s display-safe transform and reach
+  // the JSON Sonnet actually receives. The transform strips raw
+  // `analysis` and `graph` and substitutes display-safe variants;
+  // `recent_changes` falls into the rest-spread and must be preserved
+  // unchanged.
+  it('serialised user message includes recent_changes verbatim with structured target_label and clean summary', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('ok')], 'end_turn')),
+    };
+
+    const pack = assembleContextPack({
+      payload: {
+        kind: 'message',
+        source: 'composer',
+        turn_id: 't-rc',
+        scenario_id: 'scen-rc',
+        message: 'placeholder',
+        turn_class: 'frame',
+        stage: 'analyse',
+      },
+      priorTurns: [],
+      priorFacts: [
+        {
+          fact_type: 'add_constraint',
+          fact_version: 1,
+          noop: false,
+          result: {
+            target_id: 'gc-llm-1',
+            status: 'applied',
+            before: null,
+            after: {
+              constraint_id: 'gc-llm-1',
+              node_id: 'factor_total_cost',
+              operator: '<=',
+              value: 50000,
+              label: 'Total cost',
+              unit: '£',
+              provenance: 'explicit',
+            },
+          },
+        },
+      ],
+    });
+
+    await routeWithToolUse(pack, 'What update did you make?', {
+      requestId: 'req-recent-changes',
+      adapter,
+    });
+
+    const args = adapter.chatWithTools.mock.calls[0]![0];
+    const userContent = args.messages[0]!.content as string;
+
+    // The clean summary survives the transform and reaches Sonnet.
+    expect(userContent).toContain(
+      'Added constraint: Total cost must be at most £50,000.',
+    );
+    // The structured target_label field survives — future deterministic
+    // copy paths (re-run-analysis chip body, follow-up receipts) can
+    // reference it without parsing the summary string.
+    expect(userContent).toContain('"target_label": "Total cost"');
+    // No raw structural identifiers leak into the LLM payload — the
+    // projection drops them at source (recent-changes.ts).
+    expect(userContent).not.toContain('gc-llm-1');
+    expect(userContent).not.toContain('factor_total_cost');
+    expect(userContent).not.toContain('"constraint_id"');
+    expect(userContent).not.toContain('"node_id"');
+    expect(userContent).not.toContain('"provenance"');
+  });
+
   // brief brief-display-safe-analysis A2 — outbound payload assertion
   it('serialised user message contains display-safe analysis only — no raw analysis floats', async () => {
     const adapter = {

@@ -94,7 +94,34 @@ export interface RoutingLogInput {
    * coaching coverage and precision.
    */
   readonly coaching_signal_id: CoachingSignalId | null;
+  /**
+   * V5 product-state continuity (foamy-bee tranche) — observability for
+   * the layered fix to the "what update did you make?" misroute class.
+   * `recent_changes_count` is the count of curated mutation summaries
+   * projected into the LLM-facing ContextPack on this turn (0..3, capped
+   * by the projection budget). `prior_mutation_fact_count` is the
+   * uncapped count of successful (non-noop) mutation facts across the
+   * whole prior history — useful for distinguishing "long conversation
+   * with several edits" from "fresh scenario". `state_query_guard_outcome`
+   * records the pre-route outcome:
+   *   - `'unmatched'`: guard pattern did not fire; turn proceeded to LLM
+   *   - `'with_recent_change'`: matched, dispatched a deterministic
+   *     direct_answer grounded in recent_changes
+   *   - `'no_recent_changes'`: matched but no mutations to reference;
+   *     dispatched the curated "I haven't applied any changes" reply
+   *   - `'not_evaluated'`: pre-route never ran (e.g. an earlier
+   *     pre-route already synthesised a routingResult)
+   */
+  readonly recent_changes_count: number;
+  readonly prior_mutation_fact_count: number;
+  readonly state_query_guard_outcome: StateQueryGuardOutcomeForLog;
 }
+
+export type StateQueryGuardOutcomeForLog =
+  | 'unmatched'
+  | 'with_recent_change'
+  | 'no_recent_changes'
+  | 'not_evaluated';
 
 export interface RoutingLog {
   readonly turn_id: string;
@@ -133,6 +160,10 @@ export interface RoutingLog {
   readonly cqe_ambiguous_phrasing_detected: boolean;
   /** V5 Group 1 Task C: coaching signal emitted by Step 5, or null. */
   readonly coaching_signal_id: CoachingSignalId | null;
+  /** V5 product-state continuity (foamy-bee tranche). See RoutingLogInput. */
+  readonly recent_changes_count: number;
+  readonly prior_mutation_fact_count: number;
+  readonly state_query_guard_outcome: StateQueryGuardOutcomeForLog;
 }
 
 /**
@@ -177,6 +208,9 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
       cqe_word_range_missed: input.cqe_word_range_missed,
       cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
       coaching_signal_id: input.coaching_signal_id,
+      recent_changes_count: input.recent_changes_count,
+      prior_mutation_fact_count: input.prior_mutation_fact_count,
+      state_query_guard_outcome: input.state_query_guard_outcome,
     };
   }
   return {
@@ -215,6 +249,9 @@ export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
     cqe_word_range_missed: input.cqe_word_range_missed,
     cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
     coaching_signal_id: input.coaching_signal_id,
+    recent_changes_count: input.recent_changes_count,
+    prior_mutation_fact_count: input.prior_mutation_fact_count,
+    state_query_guard_outcome: input.state_query_guard_outcome,
   };
 }
 

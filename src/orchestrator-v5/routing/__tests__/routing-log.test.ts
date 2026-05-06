@@ -11,7 +11,13 @@ import {
 } from '../routing-log.js';
 
 function baseInput(overrides: Partial<RoutingLogInput> = {}): RoutingLogInput {
-  return {
+  // Construct a complete RoutingLogInput — every required field
+  // populated with a documented default. The previous fixture used a
+  // type cast (`as RoutingLogInput`) which silently hid missing fields
+  // and let regressions through; this shape satisfies the interface
+  // structurally so any future required-field addition fails fast at
+  // compile time.
+  const input: RoutingLogInput = {
     turn_id: overrides.turn_id ?? 't-001',
     scenario_id: overrides.scenario_id ?? 'scen-abc',
     stage: overrides.stage ?? 'analyse',
@@ -27,9 +33,33 @@ function baseInput(overrides: Partial<RoutingLogInput> = {}): RoutingLogInput {
     sonnet_text: overrides.sonnet_text ?? 'Running analysis...',
     redacted: overrides.redacted ?? false,
     created_at: overrides.created_at ?? '2026-04-19T02:00:00Z',
+    graph_node_count: overrides.graph_node_count ?? 0,
+    graph_edge_count: overrides.graph_edge_count ?? 0,
+    graph_hash: overrides.graph_hash ?? null,
+    graph_mapped_nodes: overrides.graph_mapped_nodes ?? 0,
+    graph_dropped_by_unknown_kind: overrides.graph_dropped_by_unknown_kind ?? 0,
+    graph_dropped_by_missing_id: overrides.graph_dropped_by_missing_id ?? 0,
+    graph_lookup_outcome: overrides.graph_lookup_outcome ?? 'no_graph',
+    cqe_message_length: overrides.cqe_message_length ?? 0,
+    cqe_result_count: overrides.cqe_result_count ?? 0,
+    cqe_match_count: overrides.cqe_match_count ?? 0,
+    cqe_compromise_match_count: overrides.cqe_compromise_match_count ?? 0,
+    cqe_patterns_matched: overrides.cqe_patterns_matched ?? [],
+    cqe_duration_ms: overrides.cqe_duration_ms ?? 0,
+    cqe_timeout: overrides.cqe_timeout ?? false,
+    cqe_message_too_long: overrides.cqe_message_too_long ?? false,
+    cqe_word_range_missed: overrides.cqe_word_range_missed ?? false,
+    cqe_ambiguous_phrasing_detected:
+      overrides.cqe_ambiguous_phrasing_detected ?? false,
     coaching_signal_id: overrides.coaching_signal_id ?? null,
+    // V5 product-state continuity (foamy-bee tranche).
+    recent_changes_count: overrides.recent_changes_count ?? 0,
+    prior_mutation_fact_count: overrides.prior_mutation_fact_count ?? 0,
+    state_query_guard_outcome:
+      overrides.state_query_guard_outcome ?? 'not_evaluated',
     ...(overrides.label_tier ? { label_tier: overrides.label_tier } : {}),
-  } as RoutingLogInput;
+  };
+  return input;
 }
 
 describe('buildRoutingLog', () => {
@@ -94,6 +124,61 @@ describe('buildRoutingLog', () => {
     );
     expect(redacted.coaching_signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
     expect(redacted.redacted).toBe(true);
+  });
+
+  describe('V5 product-state continuity (foamy-bee tranche) fields', () => {
+    it('defaults the three new fields to safe values when not supplied', () => {
+      const log = buildRoutingLog(baseInput());
+      expect(log.recent_changes_count).toBe(0);
+      expect(log.prior_mutation_fact_count).toBe(0);
+      expect(log.state_query_guard_outcome).toBe('not_evaluated');
+    });
+
+    it('preserves the three new fields through the non-redacted branch', () => {
+      const log = buildRoutingLog(
+        baseInput({
+          recent_changes_count: 3,
+          prior_mutation_fact_count: 7,
+          state_query_guard_outcome: 'with_recent_change',
+          redacted: false,
+        }),
+      );
+      expect(log.recent_changes_count).toBe(3);
+      expect(log.prior_mutation_fact_count).toBe(7);
+      expect(log.state_query_guard_outcome).toBe('with_recent_change');
+    });
+
+    it('preserves the three new fields through the redacted branch (none of them are user-supplied data)', () => {
+      // recent_changes_count, prior_mutation_fact_count, and
+      // state_query_guard_outcome are derived counters / categoricals
+      // — they cross the privacy boundary the same way coaching_signal_id
+      // does (no raw user content). Redaction must NOT drop them or
+      // dashboards lose the misroute observability.
+      const log = buildRoutingLog(
+        baseInput({
+          recent_changes_count: 2,
+          prior_mutation_fact_count: 5,
+          state_query_guard_outcome: 'no_recent_changes',
+          redacted: true,
+        }),
+      );
+      expect(log.redacted).toBe(true);
+      expect(log.recent_changes_count).toBe(2);
+      expect(log.prior_mutation_fact_count).toBe(5);
+      expect(log.state_query_guard_outcome).toBe('no_recent_changes');
+    });
+
+    it('accepts every state_query_guard_outcome categorical value', () => {
+      const outcomes: ReadonlyArray<
+        'unmatched' | 'with_recent_change' | 'no_recent_changes' | 'not_evaluated'
+      > = ['unmatched', 'with_recent_change', 'no_recent_changes', 'not_evaluated'];
+      for (const outcome of outcomes) {
+        const log = buildRoutingLog(
+          baseInput({ state_query_guard_outcome: outcome }),
+        );
+        expect(log.state_query_guard_outcome).toBe(outcome);
+      }
+    });
   });
 });
 

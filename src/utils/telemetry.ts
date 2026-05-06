@@ -705,6 +705,25 @@ export const TelemetryEvents = {
   //   cqe_quantity_count }.
   V5DeterministicValueUpdate: "v5.deterministic_value_update",
 
+  // V5 product-state continuity (foamy-bee tranche) — emitted by the
+  // deterministic state-query guard. Closes the named misroute class
+  // where "what update did you make?" routes to legacy edit_graph and
+  // returns "No changes were needed for this request."
+  //
+  // Payload:
+  //   - matched: boolean — did the message match a state-query phrase
+  //   - dispatch?: 'with_recent_change' | 'no_recent_changes' — only set
+  //     when matched
+  //   - recent_change_count: number — entries projected into ContextPack
+  //   - prior_mutation_fact_count: number — successful mutation facts
+  //     across prior_facts (not capped, used for observability)
+  //
+  // The `matched: true` branch means the turn was dispatched as a
+  // direct_answer with no LLM call. `matched: false` means the guard
+  // declined and the turn proceeded to the LLM (still grounded by the
+  // recent_changes ContextPack projection if any mutations exist).
+  V5StateQueryGuard: "v5.state_query_guard",
+
   // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
   // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
   // so any new PLoT field is covered automatically. Payload:

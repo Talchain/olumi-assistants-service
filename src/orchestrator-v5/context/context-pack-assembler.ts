@@ -25,7 +25,7 @@
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { SessionTurn } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, SessionTurn } from '@talchain/schemas/orchestrator';
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type {
@@ -48,6 +48,7 @@ import {
   runExtraction,
   type CqeExtractionSummary,
 } from './cqe/extract-quantities.js';
+import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
 // five for token budget. Any trim beyond is caller's concern.
@@ -166,6 +167,24 @@ export interface ContextPack {
   readonly display_graph: DisplaySafeGraph;
   readonly conversation: ContextPackConversation;
   /**
+   * Curated summary of the most recent successful mutations from
+   * `prior_facts`, in newest-first order. Capped at three entries with
+   * each summary truncated to 80 chars. Non-mutation facts and noop
+   * facts are filtered out. Empty array when no prior mutations exist.
+   *
+   * Fixes the Phase 0 information-starvation finding for state-query
+   * follow-ups ("what update did you make?", "what changed?"): without
+   * a human-readable receipt of recent actions in the prompt, Sonnet
+   * has no payload to reference and falls to the legacy `edit_graph`
+   * catch-all. The deterministic state-query guard in the routing
+   * pre-route layer also reads this field — both surfaces share the
+   * same projection so their answers stay coherent.
+   *
+   * Hard contract — no raw structural identifiers ever appear here.
+   * See {@link projectRecentChanges} for the cap and shape rules.
+   */
+  readonly recent_changes: readonly RecentMutation[];
+  /**
    * Coaching state assembled from prior turns. draft_coaching is populated
    * from the draft-graph sidecar (logs/v5-draft-graph-coaching.jsonl) keyed
    * by scenario_id. decision_review is populated from the most recent
@@ -197,6 +216,15 @@ export interface AssembleContextPackInput {
   // take a deterministic pre-TurnExecutor path in route-v2.ts).
   readonly payload: MessageTurnPayload;
   readonly priorTurns: readonly SessionTurn[];
+  /**
+   * Prior handler facts (newest-first), used to project the
+   * `recent_changes` summary into the LLM-facing ContextPack. Optional
+   * for backwards-compat with callers (and tests) that don't yet wire
+   * facts through; when absent the projection collapses to an empty
+   * array. Production callers — turn-executor.ts — MUST pass facts so
+   * follow-up state-queries can be grounded.
+   */
+  readonly priorFacts?: readonly HandlerFact[];
   readonly graph?: GraphWithOptions | null;
   /**
    * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
@@ -301,6 +329,7 @@ export function assembleContextPackWithSummary(
     // unchanged for handlers, freshness hashing, telemetry.
     display_graph: formatGraphForContext(projectedGraph),
     conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
+    recent_changes: projectRecentChanges(input.priorFacts),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
     compound_pattern_matched: compound.telemetry.pattern_matched,

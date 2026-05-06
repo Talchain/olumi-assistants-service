@@ -1,0 +1,269 @@
+/**
+ * V5 — Recent-changes projection for the LLM-facing ContextPack.
+ *
+ * Projects up to {@link RECENT_CHANGES_CAP} successful mutation facts from
+ * `prior_facts` into a compact, decision-language summary the routing LLM
+ * can ground its answer on. Fixes the Phase 0 information-starvation
+ * finding: prior facts were persisted and read back correctly, but the
+ * ContextPack only carried `last_tool_used` (a string), so on a follow-up
+ * state-query Sonnet had no payload to reference and fell to the legacy
+ * `edit_graph` catch-all.
+ *
+ * Hard contract:
+ *   - **No raw structural identifiers** in the summary string. No
+ *     `constraint_id`, `node_id`, `target_id`, edge IDs, UUIDs, or
+ *     `provenance` markers. The summary is what a user would say.
+ *   - **Cap is hard.** Maximum {@link RECENT_CHANGES_CAP} entries; each
+ *     summary is truncated to {@link RECENT_CHANGES_SUMMARY_MAX_CHARS}
+ *     characters (with an ellipsis marker if truncated). The cap protects
+ *     the routing prompt token budget — `recent_changes` cannot grow
+ *     unbounded as the conversation extends.
+ *   - **Successful mutations only.** Noop facts (no actual change)
+ *     and non-mutation fact types are filtered out.
+ *
+ * What this module does NOT do:
+ *   - Hash identifiers. The projection drops them entirely; do not
+ *     "redact" them, leave them out.
+ *   - Reach into the live graph. All fields it needs come off the
+ *     fact's `before`/`after` snapshots. Edge summaries stay generic
+ *     because the fact does not carry node labels.
+ *   - Touch the wire response. `recent_changes` is internal context
+ *     only; the boundary `graph_patch` block schema is unchanged.
+ */
+
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
+import {
+  formatConstraintAdded,
+  formatConstraintUpdated,
+  formatFactorChange,
+} from '../tools/handlers/d1-shared/format-confirmation.js';
+
+/**
+ * Maximum number of recent-change entries projected into the ContextPack.
+ *
+ * Three is enough for "what just changed?" follow-ups (the user is almost
+ * always referring to the most recent action) without bloating the prompt.
+ * If the conversation has more mutations than this, the oldest fall off
+ * the projection — they remain in the database for replay and analytics.
+ */
+export const RECENT_CHANGES_CAP = 3;
+
+/**
+ * Maximum characters per summary string. Targets the ~80 char cap from
+ * the implementation brief. Realistic outputs sit at 40–65 chars; the
+ * truncation guard catches pathological inputs (very long node labels,
+ * unusual unit strings) so a single mutation cannot blow the prompt
+ * budget.
+ */
+export const RECENT_CHANGES_SUMMARY_MAX_CHARS = 80;
+
+/**
+ * Permitted change-type discriminators. PRODUCT-DOMAIN VALUES — these
+ * strings ship in the LLM-facing payload (and the assistant_text path
+ * via the state-query guard), so they are deliberately phrased as
+ * decision-language outcomes rather than handler ids. Mapping to the
+ * underlying handler set:
+ *
+ *   constraint_added       ← `add_constraint` handler (D1)
+ *   factor_value_updated   ← `set_factor_value` handler (D1)
+ *   link_strength_updated  ← `adjust_edge_strength` handler (D1)
+ *
+ * Keeping this enum separate from `HandlerFact['fact_type']` means
+ * Sonnet cannot accidentally echo internal handler ids back at the
+ * user. Additions here MUST coincide with a `summariseMutation` branch
+ * AND a documented mapping above.
+ */
+export type RecentChangeAction =
+  | 'constraint_added'
+  | 'factor_value_updated'
+  | 'link_strength_updated';
+
+export interface RecentMutation {
+  /** Discriminator. Used by Sonnet and the deterministic state-query guard. */
+  readonly action: RecentChangeAction;
+  /**
+   * One-line decision-language summary. No identifiers, no internal
+   * terms. Capped at {@link RECENT_CHANGES_SUMMARY_MAX_CHARS}; truncated
+   * with an ellipsis marker when the source string exceeds the cap.
+   */
+  readonly summary: string;
+  /**
+   * Decision-language label of the entity the mutation targeted (e.g.
+   * "Total cost" for an `add_constraint` on the cost factor; "Customer
+   * churn" for a `set_factor_value`). Surfaced separately from
+   * `summary` so future deterministic copy paths (state-query guard,
+   * follow-up receipts, UI handoff) can reference the target without
+   * regex-parsing the summary string.
+   *
+   * Empty string when the fact lacks a clean label (defensive — production
+   * mutation facts always carry one). Edge mutations have no single
+   * target label so this falls back to a generic descriptor.
+   */
+  readonly target_label: string;
+}
+
+/**
+ * Project the recent successful mutations from `prior_facts` into the
+ * ContextPack. Caller MUST pass facts ordered newest-first (matching
+ * `SessionStore.readFactsFor` which orders by `created_at DESC`).
+ *
+ * Returns a frozen, possibly-empty array. Never throws — bad/unknown
+ * fact shapes are skipped silently so a single corrupt fact cannot
+ * blank the entire projection.
+ */
+export function projectRecentChanges(
+  priorFacts: readonly HandlerFact[] | undefined,
+): readonly RecentMutation[] {
+  if (!priorFacts || priorFacts.length === 0) return Object.freeze([]);
+
+  const out: RecentMutation[] = [];
+  for (const fact of priorFacts) {
+    if (out.length >= RECENT_CHANGES_CAP) break;
+    const summarised = summariseMutation(fact);
+    if (summarised) out.push(summarised);
+  }
+  return Object.freeze(out);
+}
+
+function summariseMutation(fact: HandlerFact): RecentMutation | null {
+  // Successful mutations only — noops carry no user-visible change to
+  // reference.
+  if (fact.noop === true) return null;
+
+  if (fact.fact_type === 'add_constraint') {
+    return summariseAddConstraint(fact.result);
+  }
+  if (fact.fact_type === 'set_factor_value') {
+    return summariseSetFactorValue(fact.result);
+  }
+  if (fact.fact_type === 'adjust_edge_strength') {
+    // Edge facts do not carry node labels, only IDs. Without a graph
+    // lookup at projection time we keep the summary intentionally
+    // generic — Sonnet still sees that an edge change happened.
+    return {
+      action: 'link_strength_updated',
+      summary: cap('Adjusted a link in the decision model.'),
+      target_label: 'a link in the decision model',
+    };
+  }
+  return null;
+}
+
+function summariseAddConstraint(
+  result: Record<string, unknown> | undefined,
+): RecentMutation | null {
+  if (!result || typeof result !== 'object') return null;
+  const after = (result as { after?: unknown }).after;
+  const before = (result as { before?: unknown }).before;
+  if (!isRecord(after)) return null;
+
+  const operator = readOperator(after.operator);
+  if (operator === null) return null;
+  const value = typeof after.value === 'number' ? after.value : null;
+  if (value === null || !Number.isFinite(value)) return null;
+
+  // Defensive: the constraint label is always present on a well-formed
+  // GoalConstraint, but if the persisted shape lacks it (older facts,
+  // partial writes) we leave the summary generic rather than fabricate
+  // a target name.
+  const label = readNonEmptyString(after.label) ?? 'this factor';
+  const unit = readNonEmptyString(after.unit);
+
+  // `before` is null on a fresh add, populated on an in-place update.
+  const isUpdate = isRecord(before);
+  const formatter = isUpdate ? formatConstraintUpdated : formatConstraintAdded;
+  const summary = formatter({
+    targetLabel: label,
+    operator,
+    value,
+    ...(unit !== undefined ? { unit } : {}),
+  });
+
+  return {
+    action: 'constraint_added',
+    summary: cap(summary),
+    target_label: label,
+  };
+}
+
+function summariseSetFactorValue(
+  result: Record<string, unknown> | undefined,
+): RecentMutation | null {
+  if (!result || typeof result !== 'object') return null;
+  const after = (result as { after?: unknown }).after;
+  const before = (result as { before?: unknown }).before;
+  if (!isRecord(after) || !isRecord(before)) return null;
+
+  // `formatFactorChange` reads raw_value with a fallback to value, plus
+  // optional unit and label. We mirror the handler-side resolution.
+  const beforeValue = numericFrom(before, ['raw_value', 'value']);
+  const afterValue = numericFrom(after, ['raw_value', 'value']);
+  if (beforeValue === null || afterValue === null) return null;
+
+  const label =
+    readNonEmptyString(after.label) ??
+    readNonEmptyString(before.label) ??
+    'a factor';
+
+  const beforeUnit = readNonEmptyString(before.unit);
+  const afterUnit = readNonEmptyString(after.unit);
+
+  const summary = formatFactorChange({
+    label,
+    before: {
+      raw_value: beforeValue,
+      ...(beforeUnit !== undefined ? { unit: beforeUnit } : {}),
+    },
+    after: {
+      raw_value: afterValue,
+      ...(afterUnit !== undefined ? { unit: afterUnit } : {}),
+    },
+  });
+
+  return {
+    action: 'factor_value_updated',
+    summary: cap(summary),
+    target_label: label,
+  };
+}
+
+// -----------------------------------------------------------------------
+// helpers — kept private; tests exercise them through projectRecentChanges
+// -----------------------------------------------------------------------
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function readOperator(v: unknown): '>=' | '<=' | null {
+  return v === '>=' || v === '<=' ? v : null;
+}
+
+function readNonEmptyString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim().length > 0 ? v : undefined;
+}
+
+function numericFrom(
+  rec: Record<string, unknown>,
+  keys: readonly string[],
+): number | null {
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
+/**
+ * Truncate to {@link RECENT_CHANGES_SUMMARY_MAX_CHARS}. We append a single
+ * ellipsis character (U+2026) on truncation so the budget guarantee
+ * remains exact and the cut is visible. Strings within budget are
+ * returned unchanged.
+ */
+function cap(s: string): string {
+  if (s.length <= RECENT_CHANGES_SUMMARY_MAX_CHARS) return s;
+  // Reserve one char for the ellipsis marker so the post-truncation
+  // string is exactly RECENT_CHANGES_SUMMARY_MAX_CHARS characters long.
+  return `${s.slice(0, RECENT_CHANGES_SUMMARY_MAX_CHARS - 1)}…`;
+}
