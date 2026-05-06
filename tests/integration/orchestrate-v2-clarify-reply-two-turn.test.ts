@@ -132,6 +132,9 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
+const { computeAnalysisAffectingGraphHash } = await import(
+  '../../src/orchestrator-v5/context/graph-hash.js'
+);
 
 function buildAmbiguousGraph() {
   return {
@@ -349,7 +352,14 @@ describe('POST /orchestrate/v2/turn — two-turn clarify→reply HTTP boundary',
     // makes the test focus on the P0 contract — re-persistence on
     // ambiguous recovery + apply on the next turn — without
     // depending on the value-update detector's multi-match
-    // tokenisation behaviour for long factor labels.
+    // tokenisation behaviour for long factor labels. The
+    // `preconditions.graph_hash` matches the live graph hash of
+    // ambiguousTimeGraph so the Wave 5J-2 fail-closed safety gate
+    // doesn't fire.
+    const seededGraphHash = computeAnalysisAffectingGraphHash(
+      ambiguousTimeGraph as never,
+    );
+    expect(seededGraphHash).not.toBeNull();
     mostRecentPendingActions = [
       {
         id: `pa-eng-${randomUUID()}`,
@@ -362,7 +372,12 @@ describe('POST /orchestrate/v2/turn — two-turn clarify→reply HTTP boundary',
           unit: '%',
           operator: 'set',
         },
-        preconditions: { target_entity_ids: ['fac_eng_time'] },
+        preconditions: {
+          target_entity_ids: ['fac_eng_time'],
+          ...(seededGraphHash != null
+            ? { graph_hash: seededGraphHash }
+            : {}),
+        },
         expires_at_turn_count: 2,
         expires_at_iso: '2099-12-31T23:59:59.000Z',
         emitted_at_iso: '2026-05-06T00:00:00.000Z',
@@ -378,7 +393,12 @@ describe('POST /orchestrate/v2/turn — two-turn clarify→reply HTTP boundary',
           unit: '%',
           operator: 'set',
         },
-        preconditions: { target_entity_ids: ['fac_owner_time'] },
+        preconditions: {
+          target_entity_ids: ['fac_owner_time'],
+          ...(seededGraphHash != null
+            ? { graph_hash: seededGraphHash }
+            : {}),
+        },
         expires_at_turn_count: 2,
         expires_at_iso: '2099-12-31T23:59:59.000Z',
         emitted_at_iso: '2026-05-06T00:00:00.000Z',

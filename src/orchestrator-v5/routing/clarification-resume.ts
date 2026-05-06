@@ -146,14 +146,37 @@ function isExpired(pa: PendingAction, nowMs: number): boolean {
   return false;
 }
 
+/**
+ * Mutating pending kinds where applying the persisted operator/value
+ * could change the graph. Resuming any of these against a graph that
+ * has diverged since the pending was emitted is unsafe — the target
+ * could have moved, structure could have changed, or another mutation
+ * could have invalidated the original intent. Kept as an exhaustive
+ * set so adding a future mutating kind without updating the safety
+ * gate fails loudly.
+ */
+const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
+  'set_factor_value',
+]);
+
 function graphHashConflicts(
   pa: PendingAction,
   currentGraphHash: string | undefined,
 ): boolean {
-  // If the persisted action carries no hash precondition, no conflict
-  // possible — any current hash is acceptable. If it does carry one
-  // and the current hash is unknown OR differs, treat as conflict.
   const persisted = pa.preconditions?.graph_hash;
+  // Mutating kinds: missing hash on EITHER side is unsafe. A pending
+  // emitted before the hash invariant existed (legacy row), a pending
+  // emitted via a path that forgot to pass the hash, or a turn where
+  // the hash cannot be computed (no graph state) all fail closed —
+  // treat as conflict and let the caller surface a focused recovery.
+  // For non-mutating kinds (`run_analysis`, `what_would_flip`) the
+  // hash is intentionally not persisted; absence is fine.
+  if (MUTATING_KINDS.has(pa.action.kind)) {
+    if (!persisted) return true;
+    if (currentGraphHash === undefined) return true;
+    return persisted !== currentGraphHash;
+  }
+  // Non-mutating kinds: only flag when both sides exist and differ.
   if (!persisted) return false;
   if (currentGraphHash === undefined) return true;
   return persisted !== currentGraphHash;

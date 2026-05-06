@@ -16,27 +16,12 @@ import type { PendingAction } from '../session/pending-action.js';
 
 const SCENARIO_ID = randomUUID();
 
-// Mock store returns a single set_factor_value pending action with a
-// known factor_id. The route-level test then sends a message that
-// equals that factor's label — tryClarificationResume should match.
-const PENDING_SET_FACTOR_VALUE: PendingAction = {
-  id: `pa-${randomUUID()}`,
-  scenario_id: SCENARIO_ID,
-  chip_id: 'chip_clarify_factor_0',
-  action: {
-    kind: 'set_factor_value',
-    factor_id: 'f_eng_time',
-    value: 30,
-    unit: '%',
-    operator: 'set',
-  },
-  preconditions: { target_entity_ids: ['f_eng_time'] },
-  expires_at_turn_count: 2,
-  expires_at_iso: '2099-12-31T23:59:59.000Z',
-  emitted_at_iso: '2026-05-05T00:00:00.000Z',
-};
-
 const appendCalls: Array<Record<string, unknown>> = [];
+// Let-bound so individual tests can stamp the seeded pendings with
+// the correct `preconditions.graph_hash` (the live hash of the graph
+// fixture, computed AFTER the awaited graph-hash import resolves).
+// Mutated in beforeEach below.
+let mockedPendingActions: ReadonlyArray<PendingAction> = [];
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -52,12 +37,15 @@ vi.mock('../session/index.js', () => ({
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),
-    readMostRecentPendingActions: async () => [PENDING_SET_FACTOR_VALUE],
+    readMostRecentPendingActions: async () => mockedPendingActions,
   }),
   resetSessionStoreForTests: () => undefined,
 }));
 
 const { runTurnExecutor } = await import('../turn-executor.js');
+const { computeAnalysisAffectingGraphHash } = await import(
+  '../context/graph-hash.js'
+);
 
 function payload(message: string): OrchestratorTurnPayload {
   return {
@@ -120,9 +108,46 @@ const FACTOR_GRAPH = {
   ],
 };
 
+// Live hash of FACTOR_GRAPH — used to populate `preconditions.graph_hash`
+// on the seeded pendings so the resumer's safety gate (Wave 5J-2: missing
+// graph_hash on a mutating pending is unsafe) doesn't fire spuriously.
+const FACTOR_GRAPH_HASH = computeAnalysisAffectingGraphHash(
+  FACTOR_GRAPH as never,
+);
+
+// Default seeded pending used by the success-path tests in this
+// suite. Built post-import so `FACTOR_GRAPH_HASH` (which depends on
+// the awaited graph-hash module) is available. The
+// `preconditions.graph_hash` matches the live graph hash so the
+// Wave 5J-2 fail-closed safety gate doesn't fire spuriously.
+function makeDefaultSeededPending(): PendingAction {
+  return {
+    id: `pa-${randomUUID()}`,
+    scenario_id: SCENARIO_ID,
+    chip_id: 'chip_clarify_factor_0',
+    action: {
+      kind: 'set_factor_value',
+      factor_id: 'f_eng_time',
+      value: 30,
+      unit: '%',
+      operator: 'set',
+    },
+    preconditions: {
+      target_entity_ids: ['f_eng_time'],
+      ...(FACTOR_GRAPH_HASH != null
+        ? { graph_hash: FACTOR_GRAPH_HASH }
+        : {}),
+    },
+    expires_at_turn_count: 2,
+    expires_at_iso: '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-05-05T00:00:00.000Z',
+  };
+}
+
 describe('Wave 5E — clarification-resume route-level', () => {
   beforeEach(() => {
     appendCalls.length = 0;
+    mockedPendingActions = [makeDefaultSeededPending()];
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -198,9 +223,10 @@ describe('Wave 5E — clarification-resume route-level', () => {
     // route-level wiring must commit a focused re-clarify (one chip
     // per candidate, curated assistant_text) instead of letting the
     // ambiguous reply reach Sonnet.
+    const baseSeed = makeDefaultSeededPending();
     const TWO_PENDINGS: PendingAction[] = [
       {
-        ...PENDING_SET_FACTOR_VALUE,
+        ...baseSeed,
         id: `pa-amb-1-${randomUUID()}`,
         chip_id: 'chip_clarify_factor_0',
         action: {
@@ -210,10 +236,15 @@ describe('Wave 5E — clarification-resume route-level', () => {
           unit: '%',
           operator: 'set',
         },
-        preconditions: { target_entity_ids: ['f_eng_time'] },
+        preconditions: {
+          target_entity_ids: ['f_eng_time'],
+          ...(FACTOR_GRAPH_HASH != null
+            ? { graph_hash: FACTOR_GRAPH_HASH }
+            : {}),
+        },
       },
       {
-        ...PENDING_SET_FACTOR_VALUE,
+        ...baseSeed,
         id: `pa-amb-2-${randomUUID()}`,
         chip_id: 'chip_clarify_factor_1',
         action: {
@@ -223,28 +254,16 @@ describe('Wave 5E — clarification-resume route-level', () => {
           unit: '%',
           operator: 'set',
         },
-        preconditions: { target_entity_ids: ['f_owner_time'] },
+        preconditions: {
+          target_entity_ids: ['f_owner_time'],
+          ...(FACTOR_GRAPH_HASH != null
+            ? { graph_hash: FACTOR_GRAPH_HASH }
+            : {}),
+        },
       },
     ];
-    // Override the module-level mock for this single test.
-    const sessionMod = await import('../session/index.js');
-    const orig = sessionMod.getSessionStore;
-    (sessionMod as { getSessionStore: () => unknown }).getSessionStore = () => ({
-      append: async (write: Record<string, unknown>) => {
-        appendCalls.push(write);
-        return { id: `row-${appendCalls.length}` };
-      },
-      readRecent: async () => [],
-      readFactsFor: async () => [],
-      invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-      invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-      storeDraftGraph: async () => undefined,
-      loadGraph: async () => null,
-      loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
-      ensureScenarioExists: async () => ({ user_id: null }),
-      readMostRecentPendingActions: async () => TWO_PENDINGS,
-    });
-    try {
+    mockedPendingActions = TWO_PENDINGS;
+    {
       const adapter = throwingRoutingAdapter();
       const result = await runTurnExecutor(
         payload('time commitment'),
@@ -306,8 +325,6 @@ describe('Wave 5E — clarification-resume route-level', () => {
         'chip_clarify_factor_0',
         'chip_clarify_factor_1',
       ]);
-    } finally {
-      (sessionMod as { getSessionStore: () => unknown }).getSessionStore = orig;
     }
   });
 });

@@ -16,6 +16,14 @@ import type { GraphLookup } from '../validator.js';
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const NOW_MS = Date.parse('2026-05-06T12:00:00.000Z');
 
+// Default fixture matches the production invariant: every emitted
+// set_factor_value pending carries a graph_hash precondition. Tests
+// that exercise the legacy/missing-hash path override `preconditions`
+// explicitly. The default `currentGraphHash` ('sha256:default')
+// matches this fixture so the safety gate passes by default; tests
+// that exercise divergence override `currentGraphHash` on the call.
+const DEFAULT_GRAPH_HASH = 'sha256:default';
+
 function setFactorValuePending(overrides: Partial<PendingAction> = {}): PendingAction {
   return {
     id: `pa-${Math.random()}`,
@@ -27,7 +35,7 @@ function setFactorValuePending(overrides: Partial<PendingAction> = {}): PendingA
       value: 0.3,
       operator: 'set',
     },
-    preconditions: {},
+    preconditions: { graph_hash: DEFAULT_GRAPH_HASH },
     expires_at_turn_count: 2,
     expires_at_iso: '2099-12-31T23:59:59.000Z',
     emitted_at_iso: '2026-05-05T00:00:00.000Z',
@@ -98,6 +106,11 @@ describe('tryClarificationResume — negative gates', () => {
       message: 'engineering time commitment',
       pendingActions: [setFactorValuePending()],
       graphLookup: undefined,
+      // currentGraphHash matches the default fixture so the
+      // graph-hash safety gate passes; the test isolates the
+      // no_graph skip reason that fires after the gate.
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(r).toEqual({ matched: false, skip_reason: 'no_graph' });
   });
@@ -113,6 +126,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(r.matched).toBe(true);
     if (r.matched) {
@@ -131,6 +145,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(r.matched).toBe(true);
   });
@@ -144,6 +159,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(r.matched).toBe(true);
   });
@@ -156,6 +172,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(r).toEqual({ matched: false, skip_reason: 'no_label_match' });
   });
@@ -177,6 +194,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_owner', label: 'Owner' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     // Wave 5I-2 — multi-candidate match becomes a focused
     // recovery_label_ambiguous dispatch (caller emits one chip per
@@ -201,6 +219,7 @@ describe('tryClarificationResume — match cases', () => {
       // Empty graph — the factor_id from the prior pending action is gone.
       graphLookup: makeGraphLookup([]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(r).toEqual({ matched: true, dispatch: 'recovery_targets_missing' });
   });
@@ -275,7 +294,7 @@ describe('tryClarificationResume — match cases', () => {
     expect(r).toEqual({ matched: true, dispatch: 'recovery_graph_changed' });
   });
 
-  it('Wave 5F: passes when both persisted and current graph hashes match', () => {
+  it('passes when both persisted and current graph hashes match', () => {
     const pending = setFactorValuePending({
       preconditions: { graph_hash: 'sha256:abc' },
     });
@@ -291,7 +310,50 @@ describe('tryClarificationResume — match cases', () => {
     expect(r.matched).toBe(true);
   });
 
-  it('Wave 5F: fuzzy match catches typos with bigram-Dice ≥ 0.5', () => {
+  it('Wave 5J-2: legacy set_factor_value pending without preconditions.graph_hash dispatches recovery_graph_changed (fail closed)', () => {
+    // Pre-Wave-5I-1 rows in production may carry no graph_hash, and
+    // any future emit path that forgets to pass it falls into the
+    // same shape. For mutating kinds (set_factor_value) the resumer
+    // must fail closed: missing hash on the pending → cannot prove
+    // the model is still safe to mutate → focused recovery.
+    const legacyPending = setFactorValuePending({
+      preconditions: { target_entity_ids: ['f_eng_time'] },
+    });
+    expect(legacyPending.preconditions?.graph_hash).toBeUndefined();
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [legacyPending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+      currentGraphHash: 'sha256:live',
+    });
+    expect(r).toEqual({ matched: true, dispatch: 'recovery_graph_changed' });
+  });
+
+  it('Wave 5J-2: set_factor_value pending where the live graph hash is undefined dispatches recovery_graph_changed', () => {
+    const pending = setFactorValuePending({
+      preconditions: {
+        target_entity_ids: ['f_eng_time'],
+        graph_hash: 'sha256:emit',
+      },
+    });
+    const r = tryClarificationResume({
+      message: 'Engineering Time Commitment',
+      pendingActions: [pending],
+      graphLookup: makeGraphLookup([
+        { id: 'f_eng_time', label: 'Engineering Time Commitment' },
+      ]),
+      nowMs: NOW_MS,
+      // currentGraphHash deliberately omitted — proves the safety
+      // gate fires when the live hash cannot be computed (e.g. no
+      // graph_state on the resume turn).
+    });
+    expect(r).toEqual({ matched: true, dispatch: 'recovery_graph_changed' });
+  });
+
+  it('fuzzy match catches typos with bigram-Dice ≥ 0.5', () => {
     const pending = setFactorValuePending();
     const r = tryClarificationResume({
       // Typo: missing 'i' in "Engineering" and missing 'm' in "Commitment"
@@ -301,6 +363,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(r.matched).toBe(true);
     if (r.matched) {
@@ -308,7 +371,7 @@ describe('tryClarificationResume — match cases', () => {
     }
   });
 
-  it('Wave 5F: fuzzy match returns multiple_label_matches when more than one candidate clusters above threshold', () => {
+  it('fuzzy match returns multiple_label_matches when more than one candidate clusters above threshold', () => {
     const pending1 = setFactorValuePending({
       id: 'pa-1',
       action: { kind: 'set_factor_value', factor_id: 'f_a', value: 0.3, operator: 'set' },
@@ -326,6 +389,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_b', label: 'Owner Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     // Both labels share "Time Commitment" — substring match fires for
     // BOTH, producing a recovery_label_ambiguous dispatch with both
@@ -342,7 +406,7 @@ describe('tryClarificationResume — match cases', () => {
     }
   });
 
-  it('Wave 5F: matchKind is "exact" for exact-equal label, "substring" for substring, "fuzzy" otherwise', () => {
+  it('matchKind is "exact" for exact-equal label, "substring" for substring, "fuzzy" otherwise', () => {
     const pending = setFactorValuePending();
     const exact = tryClarificationResume({
       message: 'Engineering Time Commitment',
@@ -351,6 +415,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(exact.matched).toBe(true);
     if (exact.matched) expect(exact.matchKind).toBe('exact');
@@ -362,6 +427,7 @@ describe('tryClarificationResume — match cases', () => {
         { id: 'f_eng_time', label: 'Engineering Time Commitment' },
       ]),
       nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
     });
     expect(substring.matched).toBe(true);
     if (substring.matched) expect(substring.matchKind).toBe('substring');
