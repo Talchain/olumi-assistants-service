@@ -39,7 +39,7 @@ tests for that product proof.
 | # | Failure | Implemented | Unit | Route | HTTP | Locally proven (wire) | Live staging proven | Deferred |
 |---|---|---|---|---|---|---|---|---|
 | 1 | "yes" after explore-result offer dispatches what_would_flip / run_analysis | ✅ | ✅ | ✅ | ✅ recovery + ✅ success branches | ✅ | ❌ not run | — |
-| 2 | At-limit add-risk no longer spends 16-18s in `edit_graph` | ✅ (preflight) | ✅ | ✅ | ❌ handler-layer only | ✅ (preflight blocks LLM call; recovery is INLINE PROSE, no chips) | ❌ not run | A4 add-risk **clarification continuity** (Wave 5G) |
+| 2 | At-limit add-risk no longer spends 16-18s in `edit_graph` | ✅ (preflight) | ✅ | ✅ | ❌ handler-layer only | ❌ handler-layer only (preflight blocks LLM call; recovery is INLINE PROSE, no chips) | ❌ not run | A4 add-risk **clarification continuity** (Wave 5G) |
 | 3 | Value-update clarification applies the original quantity | ✅ (set_factor_value path; graph_hash persistence + kind-gated divergence guard + ambiguous-recovery re-persistence + invariant graceful fallback + reserved-kind reclassification) | ✅ | ✅ | ✅ four distinct HTTP proofs (single-turn ; real two-turn ; SEEDED two-turn typed ; SEEDED two-turn `source: chip_click`) | ✅ | ❌ not run | A4 add-risk side (Wave 5G) ; deterministic `apply_proposed_change` |
 | 4 | Explanation output has no raw decimals or internal terms | ✅ | ✅ (boundary buckets + denylist) | ✅ | ✅ HTTP deterministic explanation prose checked (Wave 6 journey replay asserts no raw decimals + no forbidden terms on the wire) ; **generated forbidden-answer downgrade NOT HTTP-tested** | ✅ | ❌ not run | — |
 
@@ -295,11 +295,13 @@ substring-share a word (e.g. "Cost" and "Revenue"). Type
 **Action:** In a model that already has 30 edges (or close to it,
 which is the V5 limit), type `Add cultural cohesion as a risk`.
 
-**Expected:**
+**Expected** (production copy from `edit-graph-dispatch.ts:530-533`):
 - Wire response is a recovery message in inline prose (no chips):
   *"I can't add another risk without making the model too complex
-  to analyse reliably. I can rebuild it from your updated brief, or
-  you can tell me which existing risk this should replace."*
+  to analyse reliably. Tell me how to simplify the model so we can
+  fit this in, or which existing risk to replace with 'cultural
+  cohesion'."* (Single-quoted label echoes the user's typed risk
+  name verbatim.)
 - No 16-18 second LLM round trip — the response should arrive in
   well under a second.
 - No `EDGE_LIMIT_EXCEEDED` raw error code in the user-facing copy.
@@ -346,6 +348,39 @@ follow-up brief.
 | 5K | Defensive `reEmitGraphHash` invariant + seeded test rename + classification regression | Honesty + invariant safety |
 | 5L | Reclassify reserved kinds as mutating + TS-enforced exhaustiveness + graceful invariant fallback + chip_click ingress variant | Classification correctness + production safety |
 | 6 | Local journey replay + this acceptance report | **Acceptance gate** |
+| 6.1 | Wave 6 review fixes — chip-derivable / resumable split, em-dash sweep in V4 edit-graph clarification, journey-replay scope corrections, manual-checklist add-risk copy alignment | Honesty + commit-failure cordon |
+
+---
+
+## Wave 6.1 — review disposition
+
+Wave 6 review found four real P1s. All addressed:
+
+| Item | Disposition |
+|---|---|
+| P1: chip-derivable / server-only kinds drift could crash valid responses | **Fixed** in `pending-action.ts` + `derive-pending-actions.ts` — strict `CHIP_DERIVABLE_ACTION_TYPES` subset; chips with server-only `action_type` skip silently instead of throwing. Two regression cases added in `derive-pending-actions.test.ts` exercising `set_factor_value` chip and a mixed chip-derivable + server-only set. |
+| P1: em dashes in V4 edit-graph clarification copy | **Fixed** in `edit-graph.ts:651, 653, 694` — replaced with colons. Five test fixtures updated to match. |
+| P1: journey replay overclaims Failure 2 wire coverage (no-op test) | **Fixed** — no-op test removed from `wave-6-journey-replay.test.ts`. Failure 2 row in the matrix above now reads "❌ handler-layer only" for both the HTTP and locally-proven columns. |
+| P1: journey replay mislabels Failure 3 happy path as clarification proof | **Fixed** — test renamed to "failure 3 (happy path)" and the file docstring explicitly redirects to the dedicated `orchestrate-v2-clarify-reply-two-turn.test.ts` for the clarification loop. |
+| P1: manual checklist add-risk copy doesn't match production | **Fixed** — Step 5 now quotes the actual production copy from `edit-graph-dispatch.ts:530-533`. |
+
+### Updated test counts after Wave 6.1
+
+```
+Wave 6 close-out:           2133 passed / 2 failed / 1 skipped
+Wave 6.1 fixes:
+  + 2 derive-pending-actions regression cases (set_factor_value chip)
+  - 1 no-op Failure 2 placeholder removed
+Wave 6.1 close-out:         2134 passed / 2 failed / 1 skipped
+```
+
+The 2 failing tests are still the pre-existing `no-op-helpers.test.ts`
+"options" wording mismatch on staging (proof in §"Pre-existing test
+failures — proof" above).
+
+### Branch state after Wave 6.1
+
+42 commits ahead of staging. No push, merge, or deploy issued.
 
 ---
 

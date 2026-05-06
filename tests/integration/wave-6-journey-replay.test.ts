@@ -1,30 +1,33 @@
 /**
- * Wave 6 — local journey replay across the four named brief failures.
+ * Wave 6 — local journey replay smoke cordon for the named brief
+ * failures that ARE proveable at the HTTP boundary in this file.
  *
- * Purpose: a single CEE integration test that exercises the canonical
- * happy path for each of the four named failures through the real HTTP
- * route via `app.inject`. This is the acceptance-gate cordon for the
- * tranche; if any block fails, merge is blocked.
+ * Coverage in this file:
+ *   - Failure 1 — chip-click on `what_would_flip` with fresh analysis
+ *     dispatches the handler; explanation prose composed; no LLM call.
+ *   - Failure 3 (UNAMBIGUOUS happy path only) — single-turn
+ *     `Update that factor to £30,000` with selection dispatches
+ *     `set_factor_value`; no LLM call; no edit_graph leak. The
+ *     CLARIFICATION-LOOP variant of Failure 3 (the actual brief
+ *     evidence #3) is NOT in this file — it lives in
+ *     `orchestrate-v2-clarify-reply-two-turn.test.ts` ("Turn 1 emits
+ *     clarify chips… Turn 2 typed factor label dispatches…").
+ *   - Failure 4 — `what_would_flip` deterministic explanation prose
+ *     contains no raw decimals and no forbidden internal terms on
+ *     the wire.
  *
- * The four named failures (from the brief):
- *   1. "yes" after explore-result offer → what_would_flip dispatched
- *   2. At-limit add-risk no longer spends 16-18s in edit_graph
- *   3. Value-update clarification applies the original quantity
- *   4. Explanation output has no raw decimals or internal terms
- *
- * Each failure has its own deeper-coverage integration test elsewhere
- * (chip-click resume, deterministic value-update, edit-graph-dispatch
- * preflight, explanation-fallback). This file is the consolidated
- * smoke proof that the wire shape stays correct for each, in one
- * place, driven through the real Fastify route.
- *
- * Out of scope (acknowledged in the Wave 6 acceptance report):
- *   - Failure 2 HTTP coverage requires a 30-edge fixture and is
- *     handled at the handler-dispatch layer instead.
- *   - Failure 4 generated-forbidden-answer downgrade requires a
- *     Sonnet mock returning a tool_use with forbidden text.
- *   - The deferred A4 add-risk clarification continuity (Wave 5G).
- *   - The deferred deterministic apply_proposed_change wiring.
+ * EXPLICITLY NOT IN THIS FILE:
+ *   - Failure 2 (at-limit add-risk preflight) — exercised at the
+ *     handler-dispatch layer in
+ *     `edit-graph-dispatch-preflight.test.ts`. Reaching the same
+ *     path through HTTP would require constructing a 30-edge graph
+ *     fixture; the Wave 6 acceptance report labels Failure 2 as
+ *     handler-layer-proven only, NOT wire-proven.
+ *   - Failure 3 clarification loop — see the dedicated
+ *     `orchestrate-v2-clarify-reply-two-turn.test.ts` file.
+ *   - Generated-forbidden-answer downgrade — handler-layer only.
+ *   - Deferred A4 add-risk continuity (Wave 5G) and deterministic
+ *     apply_proposed_change wiring.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -314,11 +317,15 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
   });
 
   // ─────────────────────────────────────────────────────────────────
-  // Failure 3 — value-update clarification applies the original quantity
-  // (canonical clarify→reply flow at HTTP boundary)
+  // Failure 3 (HAPPY PATH only) — unambiguous deterministic
+  // value-update at the HTTP boundary. The CLARIFICATION LOOP variant
+  // of Failure 3 lives in `orchestrate-v2-clarify-reply-two-turn.test.ts`
+  // — that's the proof for brief evidence #3. This test is the
+  // single-turn cordon that catches a regression where the
+  // deterministic value-update detector silently routes to the LLM.
   // ─────────────────────────────────────────────────────────────────
 
-  it('failure 3 — single-turn unambiguous "Update that factor to £30,000" dispatches set_factor_value, no LLM call, no edit_graph leak', async () => {
+  it('failure 3 (happy path) — single-turn unambiguous "Update that factor to £30,000" dispatches set_factor_value, no LLM call, no edit_graph leak', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -415,19 +422,11 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
     expect(body.assistant_text).not.toMatch(/\bfac_[a-z]+\b/);
   });
 
-  // ─────────────────────────────────────────────────────────────────
-  // Failure 2 — at-limit add-risk preflight (acknowledged: handler
-  // layer, not HTTP)
-  // ─────────────────────────────────────────────────────────────────
-
-  it('failure 2 — at-limit add-risk preflight is handler-layer; HTTP coverage acknowledged out of scope', () => {
-    // The Wave 3a preflight runs inside `dispatchEditGraph` BEFORE
-    // the LLM call, so it is exercised at the handler dispatch layer
-    // (`edit-graph-dispatch-preflight.test.ts`). Reaching the same
-    // path through HTTP would require constructing a 30-edge
-    // graph_state fixture and routing through Sonnet, which the
-    // throwing adapter blocks here. The Wave 6 acceptance report
-    // labels this as handler-layer-only HTTP coverage.
-    expect(true).toBe(true);
-  });
+  // Failure 2 (at-limit add-risk preflight) is intentionally NOT in
+  // this file. Coverage lives in
+  // `src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch-preflight.test.ts`
+  // at the handler-dispatch layer. A no-op `expect(true).toBe(true)`
+  // placeholder would overclaim HTTP-boundary coverage; the
+  // acceptance report instead labels Failure 2 as handler-layer
+  // proven only.
 });
