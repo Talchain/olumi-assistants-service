@@ -299,7 +299,7 @@ describe('POST /orchestrate/v2/turn — two-turn clarify→reply HTTP boundary',
     expect(appendCalls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('Wave 5J-1 P0: ambiguous reply re-persists pendings; chip-equivalent reply applies the original quantity, no LLM call across both turns', async () => {
+  it('SEEDED two-turn HTTP proof — ambiguous reply re-persists pendings; chip-equivalent reply applies the original quantity, no LLM call across both turns', async () => {
     // P0 regression cordon. The Wave 5I-2 ambiguous-recovery path
     // emitted chips but did NOT re-persist the surviving candidate
     // pending actions. A chip click on the next turn read
@@ -308,6 +308,18 @@ describe('POST /orchestrate/v2/turn — two-turn clarify→reply HTTP boundary',
     // re-persists the candidates on the recovery commit; this test
     // proves the chip click then applies the original quantity end
     // to end through the HTTP route.
+    //
+    // SEEDED: this test pre-populates `mostRecentPendingActions` with
+    // the two pendings the value-update clarify would have emitted on
+    // a prior turn, then drives the recovery + apply turns through
+    // `app.inject`. It does NOT exercise the original
+    // `tryDeterministicValueUpdate` clarify dispatch — the canonical
+    // clarify→reply HTTP flow lives in the test above ("Turn 1 emits
+    // clarify chips + persists pending_actions; Turn 2 typed factor
+    // label dispatches…"). The seeded form lets us isolate the
+    // recovery-and-apply contract (the P0) without depending on the
+    // value-update detector's multi-match tokenisation behaviour for
+    // long factor labels.
 
     // Graph fixture: two factors sharing the substring "Time
     // Commitment" so a typed "Time Commitment" fuzzy-matches BOTH

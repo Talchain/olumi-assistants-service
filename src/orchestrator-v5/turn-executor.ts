@@ -1387,11 +1387,30 @@ export async function runTurnExecutor(
           // original clarify; preconditions.graph_hash is re-stamped
           // from the live graph hash at recovery time so the next
           // turn's divergence guard reads the right baseline.
+          //
+          // Invariant: reaching this branch implies the resumer's
+          // hash-safety filter passed, which for set_factor_value
+          // requires a non-undefined live hash (see
+          // `graphHashConflicts` and `MUTATING_KINDS`). Therefore
+          // `freshness?.current_graph_hash` MUST be defined here. We
+          // assert defensively so a future refactor of the resumer's
+          // gate ordering cannot silently emit hash-less mutating
+          // pendings (the next turn's gate would then refuse to
+          // apply them).
           const reEmitIso = new Date().toISOString();
           const reEmitExpiresIso = new Date(
             Date.parse(reEmitIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
           ).toISOString();
           const reEmitGraphHash = freshness?.current_graph_hash;
+          if (reEmitGraphHash == null) {
+            throw new Error(
+              'recovery_label_ambiguous: live graph hash is null at re-emit time. ' +
+                'This violates the resumer invariant — set_factor_value pendings ' +
+                'reaching the recovery branch must have passed the hash-safety ' +
+                'gate, which requires a defined live hash. A future refactor ' +
+                'reordered the gates without updating the re-emit guard.',
+            );
+          }
           recoveryPendingActions = clarificationDispatch.candidates.map(
             (c, idx): PendingAction => {
               const a = c.pending.action;
@@ -1413,9 +1432,7 @@ export async function runTurnExecutor(
                 },
                 preconditions: {
                   target_entity_ids: [a.factor_id],
-                  ...(reEmitGraphHash != null
-                    ? { graph_hash: reEmitGraphHash }
-                    : {}),
+                  graph_hash: reEmitGraphHash,
                 },
                 expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
                 expires_at_iso: reEmitExpiresIso,

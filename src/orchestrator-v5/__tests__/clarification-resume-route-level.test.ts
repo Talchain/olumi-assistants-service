@@ -325,6 +325,17 @@ describe('Wave 5E — clarification-resume route-level', () => {
         'chip_clarify_factor_0',
         'chip_clarify_factor_1',
       ]);
+      // Wave 5K-1 invariant: re-emitted pendings carry a non-empty
+      // `preconditions.graph_hash` so the next-turn divergence guard
+      // (Wave 5J-2 fail-closed) reads the right baseline. Without
+      // this hash, the chip click on the next turn would dispatch
+      // `recovery_graph_changed` and the original quantity would be
+      // lost — a regression equivalent to the P0 we're cordoning,
+      // just one layer deeper. Pinning here so a future refactor
+      // that drops the re-stamp from turn-executor's recovery
+      // branch breaks loudly.
+      expect(persisted.every((pa) => typeof pa.preconditions?.graph_hash === 'string')).toBe(true);
+      expect(persisted.every((pa) => (pa.preconditions?.graph_hash?.length ?? 0) > 0)).toBe(true);
     }
   });
 });
