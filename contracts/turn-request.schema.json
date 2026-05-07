@@ -238,27 +238,56 @@
                     "options": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "option_id": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "interventions": {
+                        "anyOf": [
+                          {
                             "type": "object",
-                            "additionalProperties": {}
+                            "properties": {
+                              "option_id": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "interventions": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "option_id",
+                              "label",
+                              "interventions"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "option_id": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "interventions": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label",
+                              "interventions"
+                            ],
+                            "additionalProperties": true
                           }
-                        },
-                        "required": [
-                          "label",
-                          "interventions"
-                        ],
-                        "additionalProperties": true
+                        ]
                       }
                     },
                     "constraints": {
