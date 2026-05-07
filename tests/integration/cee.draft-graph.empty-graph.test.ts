@@ -112,7 +112,7 @@ import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 // Skipped: pipeline gap — unified pipeline does not catch empty-graph and return 400 CEE_GRAPH_INVALID. Deterministic (uses fixture mocks). Blocked on source fix in unified-pipeline error handling.
-// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+// TODO: ISSUE-9007 — CEE V1 draft-graph legacy route (empty graph)
 describe.skip("POST /assist/v1/draft-graph (CEE v1) - empty graph", () => {
   let app: FastifyInstance;
 

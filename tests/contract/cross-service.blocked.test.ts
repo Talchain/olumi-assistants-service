@@ -34,7 +34,7 @@ import { ZodError, ZodIssue } from "zod";
 // tests/integration/blocked-response.contract.test.ts. runStageBoundary
 // now fails closed on V3 validation errors (502 earlyReturn) rather than
 // populating ctx.finalResponse with a degraded flag.
-// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+// TODO: ISSUE-9001 — v5-maintenance: superseded by fail-closed migration
 describe.skip("Cross-Service Blocked Response Contract [v5-maintenance: superseded by fail-closed]", () => {
   const fixturePath = join(__dirname, "../fixtures/cross-service/blocked-response.fixture.json");
   const fixture = JSON.parse(readFileSync(fixturePath, "utf-8"));

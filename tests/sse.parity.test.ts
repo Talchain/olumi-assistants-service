@@ -38,7 +38,7 @@ describe("SSE parity and framing", () => {
   });
 
   // Skipped: SSE stream errors with "Pipeline B removed" before emitting COMPLETE — needs SSE route migration to unified pipeline
-  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+  // TODO: ISSUE-9012 — SSE COMPLETE diagnostics parity
   it.skip("v1 SSE COMPLETE payload includes diagnostics with matching correlation_id", async () => {
     const payload = { brief: "A sufficiently long decision brief to pass validation and exercise the pipeline." };
 

@@ -284,7 +284,7 @@ describe.runIf(SHOULD_RUN)('Wave 0 pending_actions RPC integration', () => {
 });
 
 if (!SHOULD_RUN) {
-  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+  // TODO: ISSUE-9003 — Wave 0 pending_actions RPC integration parked
   describe.skip('Wave 0 pending_actions RPC integration (skipped)', () => {
     it('SHOULD_RUN gate is off — set RUN_WAVE0_STAGING=1 + staging env to run', () => {
       // intentional skip

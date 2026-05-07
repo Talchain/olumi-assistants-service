@@ -161,7 +161,7 @@ import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 // Skipped: pipeline gap — trace.goal_handling not populated in unified pipeline enrichment stage. Deterministic (uses fixture mocks). Blocked on goal-handling trace wiring in phase1-enrichment.
-// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+// TODO: ISSUE-9007 — CEE V1 draft-graph legacy route (goal handling trace)
 describe.skip("POST /assist/v1/draft-graph trace.goal_handling", () => {
   let app: FastifyInstance;
 

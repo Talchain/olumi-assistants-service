@@ -151,7 +151,7 @@ describe("ceeOrchestratorStreamRouteV1", () => {
     });
 
     // Skipped: returns 500 due to incomplete mocks — needs mock update for unified pipeline changes
-    // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+    // TODO: ISSUE-9013 — route-stream mocks need update for unified pipeline
     it.skip("returns 200 when orchestratorStreaming is enabled", async () => {
       (executePipelineStream as any).mockImplementation(async function* () {
         yield { type: "turn_start", seq: 0, turn_id: "t1", routing: "deterministic", stage: "frame" };
@@ -337,7 +337,7 @@ describe("ceeOrchestratorStreamRouteV1", () => {
 
   describe("idempotency", () => {
     // Skipped: returns 500 due to incomplete mocks — needs mock update for unified pipeline changes
-    // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+    // TODO: ISSUE-9013 — route-stream mocks need update for unified pipeline
     it.skip("returns cached JSON on idempotency cache hit", async () => {
       const cachedEnvelope = { turn_id: "cached", assistant_text: "cached response" };
       (getIdempotentResponse as any).mockReturnValue(cachedEnvelope);

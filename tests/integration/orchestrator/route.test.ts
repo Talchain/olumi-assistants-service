@@ -274,7 +274,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   });
 
   // Skipped: analysis_response schema no longer requires analysis_status — accepts partial shapes
-  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+  // TODO: ISSUE-9018 — analysis_response missing analysis_status (C.1)
   it.skip("returns 400 when analysis_response missing analysis_status (C.1)", async () => {
     const response = await app.inject({
       method: "POST",
@@ -494,7 +494,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
     expect(body.turn_plan?.selected_tool).toBeNull();
   });
 
-  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+  // TODO: ISSUE-9002 — v5-maintenance: tool/route removed from V1 registry (generate_brief)
   it.skip("routes 'generate brief' deterministically [v5-maintenance: generate_brief tool removed]", async () => {
     // The `generate_brief` tool is no longer in the V4 tool registry
     // (resolved_tools from v4.tool_filtering telemetry now excludes it).
@@ -533,7 +533,7 @@ describe("POST /orchestrate/v1/turn — integration", () => {
   // Error Responses
   // ---------------------------------------------------
 
-  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+  // TODO: ISSUE-9002 — v5-maintenance: tool/route removed from V1 registry (run_analysis)
   it.skip("returns 502 for run_analysis without PLoT client [v5-maintenance: run_analysis removed from V1 tool registry]", async () => {
     // `run_analysis` is no longer an eligible V1 tool (v4.tool_filtering
     // telemetry resolved_tools now reads as

@@ -134,7 +134,7 @@ function makeValidRequest(overrides?: Record<string, unknown>) {
 // behaviour they covered is exercised indirectly by
 // tests/integration/orchestrator/route-v4-disabled-guard.test.ts (V1 410
 // path) and tests/integration/orchestrate-v2-*.test.ts (V5 happy paths).
-// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
+// TODO: ISSUE-9002 — v5-maintenance: V2 flag routing removed
 describe.skip("V2 flag routing — app.inject() [skipped post v5-maintenance]", () => {
   let app: FastifyInstance;
 
