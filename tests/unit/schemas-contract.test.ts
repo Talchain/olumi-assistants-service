@@ -18,7 +18,6 @@ import {
 import type {
   CILWarningCode,
   ValidationWarning,
-  CeeErrorCodeType,
   RepairEntry,
 } from "@talchain/schemas";
 

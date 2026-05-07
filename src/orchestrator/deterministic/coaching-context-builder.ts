@@ -11,10 +11,6 @@
 import type {
   DeterministicTurnContext,
   AnalysisSummary,
-  EntityEntry,
-  EdgeEntry,
-  DriverSummary,
-  FactorSensitivitySummary,
 } from "./types.js";
 import type { SessionState } from "./session-state.js";
 import { log } from "../../utils/telemetry.js";
@@ -725,7 +721,7 @@ function computeCTA(
   move: PrimaryMove,
   calibrationTarget: CalibrationTarget | null,
   drivers: DriverContext[],
-  mode: CoachingMode,
+  _mode: CoachingMode,
 ): CTA | null {
   switch (move) {
     case 'guide_intake':

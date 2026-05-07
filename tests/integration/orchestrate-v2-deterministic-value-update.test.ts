@@ -236,7 +236,7 @@ function buildMultiCandidateGraph() {
   };
 }
 
-function buildMultiCandidateRequest() {
+function _buildMultiCandidateRequest() {
   return {
     kind: 'message' as const,
     turn_id: TURN_ID,

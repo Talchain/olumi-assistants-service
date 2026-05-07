@@ -8,7 +8,6 @@ import { describe, it, expect } from "vitest";
 import {
   detectCurrency,
   buildCurrencyInstruction,
-  type CurrencySignal,
 } from "../../src/cee/signals/currency-signal.js";
 
 // ============================================================================

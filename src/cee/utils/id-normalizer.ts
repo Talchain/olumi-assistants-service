@@ -164,6 +164,6 @@ export function isValidId(id: string): boolean {
  * extractIdPrefix("factor:marketing") // "factor"
  */
 export function extractIdPrefix(id: string): string {
-  const match = id.match(/^([a-z0-9]+)[_:\-]/);
+  const match = id.match(/^([a-z0-9]+)[_:-]/);
   return match ? match[1] : id;
 }

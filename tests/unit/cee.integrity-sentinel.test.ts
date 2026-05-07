@@ -5,8 +5,6 @@ import {
   detectStrengthDefaults,
   detectStrengthDefaultsV1,
   detectStrengthMeanDominant,
-  type IntegrityWarning,
-  type IntegrityWarningsOutput,
 } from "../../src/cee/validation/integrity-sentinel.js";
 
 /**

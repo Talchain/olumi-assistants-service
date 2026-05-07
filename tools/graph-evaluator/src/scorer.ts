@@ -20,7 +20,7 @@
  * populated violation_codes and per-dimension diagnostics where calculable.
  */
 
-import type { LLMResponse, ParsedGraph, GraphNode, GraphEdge, Brief, ScoreResult } from "./types.js";
+import type { LLMResponse, ParsedGraph, GraphEdge, Brief, ScoreResult } from "./types.js";
 import {
   validateStructural,
   buildNodeMap,

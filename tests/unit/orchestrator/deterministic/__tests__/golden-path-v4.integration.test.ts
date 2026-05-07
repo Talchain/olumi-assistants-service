@@ -398,7 +398,7 @@ describe("v4 Golden Path Integration", () => {
       // The gate is advisory — check that the code path executed by looking
       // for the warn log (or absence if healthy).
       const warnCalls = vi.mocked(log.warn).mock.calls;
-      const healthEvent = warnCalls.find(
+      const _healthEvent = warnCalls.find(
         (call) => (call[0] as Record<string, unknown>)?.event === 'v4.mutation_health_warning',
       );
       const healthError = warnCalls.find(

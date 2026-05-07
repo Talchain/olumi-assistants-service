@@ -46,10 +46,8 @@ import {
   parseEditGraphResponse,
   handleEditGraph,
   resolveEditTarget,
-  type EditGraphLLMResult,
-  type EditGraphResult,
 } from "../../../../src/orchestrator/tools/edit-graph.js";
-import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
+import type { ConversationContext, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
 import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
 

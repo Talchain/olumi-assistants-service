@@ -92,7 +92,6 @@ import Fastify from "fastify";
 import { ceeOrchestratorStreamRouteV1 } from "../../../src/orchestrator/route-stream.js";
 import { executePipelineStream } from "../../../src/orchestrator/pipeline/pipeline-stream.js";
 import { config } from "../../../src/config/index.js";
-import { emit } from "../../../src/utils/telemetry.js";
 import { getIdempotentResponse } from "../../../src/orchestrator/idempotency.js";
 
 // ============================================================================

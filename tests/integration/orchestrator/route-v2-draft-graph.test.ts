@@ -98,7 +98,7 @@ const SCENARIO_ID = '22222222-2222-4222-8222-222222222222';
 const TURN_ID = '11111111-1111-4111-8111-111111111111';
 
 const LONG_BRIEF = 'Should we expand the product into the German market next quarter or hold?';
-const SHORT_BRIEF = 'What now?';
+const _SHORT_BRIEF = 'What now?';
 
 function makeDraftGraphMockResult() {
   return {

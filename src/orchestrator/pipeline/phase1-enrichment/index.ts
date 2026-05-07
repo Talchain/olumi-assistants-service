@@ -35,7 +35,6 @@ import { buildDecisionContinuity } from "../../context/decision-continuity.js";
 import { matchReferencedEntities } from "../../context/entity-matcher.js";
 import { trackEntityStates } from "../../context/entity-state-tracker.js";
 import type { GraphV3T } from "../../types.js";
-import type { GapSummary, VoiRankingEntry, EdgeEValue, ConditionalWinner, InferenceWarning, PlotCritique } from "../types.js";
 import { log } from "../../../utils/telemetry.js";
 import { config } from "../../../config/index.js";
 

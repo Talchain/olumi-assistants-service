@@ -1306,7 +1306,7 @@ function validateCoachingAndCausalClaimsRefs(
             warnings.push({
               code: "CAUSAL_CLAIM_INVALID_REF",
               severity: "warn",
-              message: `causal_claims[*].${fieldName}=\"${v}\" does not match any node id`,
+              message: `causal_claims[*].${fieldName}="${v}" does not match any node id`,
               context: { claim_type: claimType, field: fieldName, value: v },
             });
           }
@@ -1319,7 +1319,7 @@ function validateCoachingAndCausalClaimsRefs(
               warnings.push({
                 code: "CAUSAL_CLAIM_GOAL_TARGET",
                 severity: "warn",
-                message: `causal_claims[*].${fieldName}=\"${v}\" targets the goal node, but type=\"${claimType}\" implies an intermediate causal relation`,
+                message: `causal_claims[*].${fieldName}="${v}" targets the goal node, but type="${claimType}" implies an intermediate causal relation`,
                 context: { claim_type: claimType as string, field: fieldName, value: v },
               });
             }
@@ -1342,7 +1342,7 @@ function validateCoachingAndCausalClaimsRefs(
                 warnings.push({
                   code: "CAUSAL_CLAIM_BETWEEN_INVALID",
                   severity: "warn",
-                  message: `unmeasured_confounder.between contains the same id twice (\"${a}\")`,
+                  message: `unmeasured_confounder.between contains the same id twice ("${a}")`,
                   context: { value: a },
                 });
               }
@@ -1352,14 +1352,14 @@ function validateCoachingAndCausalClaimsRefs(
                   warnings.push({
                     code: "CAUSAL_CLAIM_INVALID_REF",
                     severity: "warn",
-                    message: `unmeasured_confounder.between id \"${id}\" does not match any node id`,
+                    message: `unmeasured_confounder.between id "${id}" does not match any node id`,
                     context: { value: id },
                   });
                 } else if (node.kind !== "factor") {
                   warnings.push({
                     code: "CAUSAL_CLAIM_BETWEEN_INVALID",
                     severity: "warn",
-                    message: `unmeasured_confounder.between id \"${id}\" must be a factor-kind node (got kind=\"${node.kind}\")`,
+                    message: `unmeasured_confounder.between id "${id}" must be a factor-kind node (got kind="${node.kind}")`,
                     context: { value: id, kind: node.kind },
                   });
                 }
@@ -1410,7 +1410,7 @@ function validateCoachingAndCausalClaimsRefs(
             warnings.push({
               code: "WIDENING_LOG_INVALID_REF",
               severity: "warn",
-              message: `coaching.widening_log.elements_added contains \"${v}\" which does not match any node id`,
+              message: `coaching.widening_log.elements_added contains "${v}" which does not match any node id`,
               context: { value: v },
             });
           }

@@ -18,7 +18,6 @@ import { setTestSink } from '../../src/utils/telemetry.js';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { RoutingLog } from '../../src/orchestrator-v5/routing/routing-log.js';
 import type {
-  ChatWithToolsArgs,
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../src/adapters/llm/types.js';

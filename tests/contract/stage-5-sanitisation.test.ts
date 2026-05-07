@@ -153,7 +153,7 @@ const baseGraph = {
 function makeCtx(coaching: unknown): any {
   return {
     requestId: "test-req-stage5-sanitise",
-    // eslint-disable-next-line no-undef -- structuredClone is a Node 17+ global; lint config lags
+     
     graph: structuredClone(baseGraph),
     input: { brief: "Test brief", seed: "abc123" },
     opts: { schemaVersion: "v3" as const, strictMode: false, includeDebug: false, unsafeCaptureEnabled: false },

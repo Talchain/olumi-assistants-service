@@ -9,7 +9,6 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { appendDraftCoaching } from '../draft-coaching-log.js';
 import {
   DEFAULT_DRAFT_COACHING_LOG_PATH,
-  readLatestDraftCoaching,
 } from '../draft-coaching-log.js';
 import {
   appendLastCoachingSignal,

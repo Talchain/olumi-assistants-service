@@ -17,7 +17,6 @@ import type { FastifyInstance } from 'fastify';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import type {
-  ChatWithToolsArgs,
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../src/adapters/llm/types.js';

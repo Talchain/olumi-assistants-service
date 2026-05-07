@@ -522,7 +522,7 @@ export function detectIllusionOfControlEnhanced(
 export async function detectBiasesHybrid(
   context: BiasDetectionContext,
 ): Promise<HybridBiasResult> {
-  const { graph, brief, ranked_options } = context;
+  const { graph, brief: _brief, ranked_options } = context;
 
   // Run rule-based detectors
   const ruleBasedFindings: CEEBiasFindingV1[] = [];

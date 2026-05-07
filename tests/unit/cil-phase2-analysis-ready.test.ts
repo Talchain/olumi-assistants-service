@@ -17,7 +17,6 @@ import {
   AnalysisReadyPayload,
   AnalysisBlocker,
   ModelAdjustment,
-  ModelAdjustmentCode,
 } from "../../src/schemas/analysis-ready.js";
 import type { OptionV3T, GraphV3T, NodeV3T } from "../../src/schemas/cee-v3.js";
 

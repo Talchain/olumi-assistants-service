@@ -16,7 +16,7 @@
  * - no from_ prefix on edge fields (CEE sends `from`, not `from_node_id`)
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { handleRunAnalysis } from "../../../src/orchestrator/tools/run-analysis.js";
 import type { ConversationContext, V2RunResponseEnvelope } from "../../../src/orchestrator/types.js";
 import type { PLoTClient } from "../../../src/orchestrator/plot-client.js";

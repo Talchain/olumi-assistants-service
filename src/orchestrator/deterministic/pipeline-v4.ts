@@ -857,7 +857,7 @@ export async function* executePipelineV4(
     //   resolvedToolNames=["draft_graph"], coaching signals all null.
     // Post-draft: stage=ideate, coaching has tradeoff/inference signals,
     //   eligible_actions includes edit actions, chips can pass tool filter.
-    let postDraftRecomputed = false;
+    let _postDraftRecomputed = false;
     if (
       actionResult?.fact?.action === 'draft_created'
       && actionResult.applied_graph
@@ -916,7 +916,7 @@ export async function* executePipelineV4(
         // Update turnContext for downstream consumers (stage_indicator, chips, envelope)
         Object.assign(turnContext, postDraftContext);
         computedStage = turnContext.stage;
-        postDraftRecomputed = true;
+        _postDraftRecomputed = true;
 
         log.info({
           request_id: requestId,

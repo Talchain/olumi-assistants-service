@@ -13,7 +13,6 @@ import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import type {
-  ChatWithToolsArgs,
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../src/adapters/llm/types.js';

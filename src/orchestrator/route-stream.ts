@@ -8,7 +8,7 @@
  * Streams OrchestratorStreamEvent events as SSE to the client.
  */
 
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
 import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
 import type { OrchestratorTurnRequest, SystemEvent } from "./types.js";
@@ -25,8 +25,6 @@ import {
 import {
   getIdempotentResponse,
   setIdempotentResponse,
-  getInflightRequest,
-  registerInflightRequest,
 } from "./idempotency.js";
 import { ORCHESTRATOR_TURN_BUDGET_MS, DRAFT_GRAPH_TURN_BUDGET_MS } from "../config/timeouts.js";
 import { SSE_HEARTBEAT_INTERVAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";

@@ -85,7 +85,7 @@ export async function callResearchAPI(
   const start = Date.now();
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const response = await (client.responses as any).create(
       {
         model: model.model,

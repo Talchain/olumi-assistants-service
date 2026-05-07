@@ -372,7 +372,7 @@ describe("Stage 2 (Normalise) — field preservation contract", () => {
     expect(orphanNode.category).not.toBe("controllable");
 
     // allowedDrops.nodeData fields should be absent after reclassification
-    for (const field of STAGE_CONTRACT.allowedDrops.nodeData) {
+    for (const _field of STAGE_CONTRACT.allowedDrops.nodeData) {
       // These are allowed to be dropped when reclassified
       // (they may or may not be — STRP may keep them if new category still uses them)
     }
@@ -507,7 +507,7 @@ describe("Stage 2 (Normalise) — field preservation contract", () => {
       // e3 is fac_external → goal_1 with positive strength_mean 0.3.
       // Risk normalisation may flip it. Check whether normalise touched any edge.
       const ctx = makeCtx(graph);
-      const baseline = snapshot(ctx.graph);
+      const _baseline = snapshot(ctx.graph);
       await runStageNormalise(ctx);
 
       // At minimum, the stage must have run without error

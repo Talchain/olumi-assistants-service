@@ -237,7 +237,7 @@ describe("runStageThresholdSweep", () => {
       expect(goalAfter.goal_threshold_cap).toBeUndefined();
 
       // All other fields identical
-      const { goal_threshold, goal_threshold_raw, goal_threshold_unit, goal_threshold_cap, ...goalBeforeRest } = goalBefore;
+      const { goal_threshold: _gt1, goal_threshold_raw: _gtr1, goal_threshold_unit: _gtu1, goal_threshold_cap: _gtc1, ...goalBeforeRest } = goalBefore;
       const { goal_threshold: _a, goal_threshold_raw: _b, goal_threshold_unit: _c, goal_threshold_cap: _d, ...goalAfterRest } = goalAfter;
       expect(goalAfterRest).toEqual(goalBeforeRest);
 

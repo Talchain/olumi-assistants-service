@@ -194,7 +194,7 @@ describe("Task 4: Post-draft success floor invariant", () => {
   });
 
   it("graph survives when ALL downstream soft gates fail simultaneously", async () => {
-    const graph = setupSuccessfulDraftAndRepair();
+    const _graph = setupSuccessfulDraftAndRepair();
 
     // Stage 5: Package — make verification fail inside package
     (runStagePackage as any).mockImplementation(async (ctx: any) => {
@@ -411,7 +411,7 @@ describe("Task 6: Resilience canary — graph survives verification failure", ()
   });
 
   it("verification pipeline failure does NOT block the response", async () => {
-    const graph = setupSuccessfulDraftAndRepair();
+    const _graph = setupSuccessfulDraftAndRepair();
 
     // Stage 5: Package — simulate verification pipeline throwing
     (runStagePackage as any).mockImplementation(async (ctx: any) => {

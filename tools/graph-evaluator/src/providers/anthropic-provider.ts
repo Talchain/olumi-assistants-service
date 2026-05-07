@@ -48,7 +48,7 @@ export class AnthropicProvider implements LLMProvider {
 
     // Only pass thinking config for Claude models
     if (isClaudeModel(config.model) && config.thinking !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (params as any)["thinking"] = config.thinking;
     }
 

@@ -5,7 +5,6 @@
  * CEE code sets all field names — no LLM-generated patches.
  */
 
-import { randomUUID } from "node:crypto";
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult } from "../types.js";
 import type { PatchOperation } from "../../types.js";

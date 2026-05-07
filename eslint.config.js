@@ -47,6 +47,13 @@ export default [
         DOMException: 'readonly',
         Blob: 'readonly',
         File: 'readonly',
+        // Node 17+ structured clone + Node-globals as bareword globals
+        structuredClone: 'readonly',
+        crypto: 'readonly',
+        performance: 'readonly',
+        // TypeScript ambient namespace (e.g. NodeJS.Timeout) referenced as a
+        // value identifier by no-undef even though it's type-only at runtime
+        NodeJS: 'readonly',
         // Test globals (vi test framework)
         describe: 'readonly',
         it: 'readonly',
@@ -228,6 +235,13 @@ export default [
         DOMException: 'readonly',
         Blob: 'readonly',
         File: 'readonly',
+        // Node 17+ structured clone + Node-globals as bareword globals
+        structuredClone: 'readonly',
+        crypto: 'readonly',
+        performance: 'readonly',
+        // TypeScript ambient namespace (e.g. NodeJS.Timeout) referenced as a
+        // value identifier by no-undef even though it's type-only at runtime
+        NodeJS: 'readonly',
       },
     },
     rules: {

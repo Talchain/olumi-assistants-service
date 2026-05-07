@@ -363,7 +363,7 @@ export function countUnionParams(obj: unknown): number {
 
 const UNION_PARAM_COUNT = countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
 if (UNION_PARAM_COUNT > 16) {
-  // eslint-disable-next-line no-console
+   
   console.error(
     `[anthropic-graph-schema] UNION BUDGET EXCEEDED: ${UNION_PARAM_COUNT}/16 union-typed params. ` +
     `Anthropic structured outputs will fail. Reduce anyOf/nullable usage.`

@@ -195,7 +195,7 @@ describe('phase 1 C2 regression — run_analysis via tool-use produces same Hand
     // passthrough) still holds without mis-firing on coaching-signal noise.
     const { coaching_signal_id, coaching_signal_turn_id, coaching_signal_produced_at, ...enrichmentWithoutCoaching } =
       write.handler_facts[0]!.result.enrichment as Record<string, unknown>;
-    void coaching_signal_id; // eslint-disable-line @typescript-eslint/no-unused-vars
+    void coaching_signal_id;  
     void coaching_signal_turn_id;
     void coaching_signal_produced_at;
     expect(enrichmentWithoutCoaching).toEqual(plotResponse);

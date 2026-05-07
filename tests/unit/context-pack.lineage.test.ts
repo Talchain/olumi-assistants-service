@@ -5,11 +5,10 @@
  * assembleCeeProvenance() into the CEEProvenance structure.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   assembleCeeProvenance,
   type ProvenanceInput,
-  type CEEProvenance,
 } from "../../src/cee/pipeline-checkpoints.js";
 
 // =============================================================================

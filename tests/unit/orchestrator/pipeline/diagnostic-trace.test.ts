@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DiagnosticTraceCollector, emptyDiagnosticTrace } from "../../../../src/orchestrator/pipeline/diagnostic-trace.js";
-import type { DiagnosticTrace } from "../../../../src/orchestrator/pipeline/diagnostic-trace.js";
 import type {
   EnrichedContext,
   LLMResult,

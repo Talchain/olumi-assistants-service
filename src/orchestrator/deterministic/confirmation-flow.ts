@@ -11,7 +11,6 @@ import { randomUUID } from "node:crypto";
 import type { PatchOperation } from "../types.js";
 import type { DeterministicTurnContext, ActionResult, ProposalBlockData } from "./types.js";
 import type { ActionName } from "./actions/types.js";
-import { ACTION_CATALOGUE } from "./actions/registry.js";
 
 // ============================================================================
 // Constants

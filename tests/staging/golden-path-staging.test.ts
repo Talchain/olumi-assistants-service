@@ -276,7 +276,7 @@ describe("Golden-path staging: PLoT → CEE draft → edit → analyse → expla
 
   // Mutable state carried across turns
   let draftGraph: unknown = null;
-  let draftNodeCount = 0;
+  let _draftNodeCount = 0;
   let analysisResponse: unknown = null;
 
   beforeAll(async () => {
@@ -358,7 +358,7 @@ describe("Golden-path staging: PLoT → CEE draft → edit → analyse → expla
 
       // Extract node count (handles both full_graph.nodes[] and operations[] formats)
       const nodeCount = extractNodeCount(gpBlock as Record<string, unknown>);
-      draftNodeCount = nodeCount;
+      _draftNodeCount = nodeCount;
 
       // Extract full graph if available (for subsequent steps)
       const graph = extractGraph(gpBlock as Record<string, unknown>);

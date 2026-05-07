@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { OrchestratorStreamEventSchema } from "../../../../src/orchestrator/pipeline/stream-events.js";

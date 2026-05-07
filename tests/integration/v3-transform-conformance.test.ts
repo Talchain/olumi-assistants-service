@@ -8,7 +8,7 @@
  * output the downstream Zod schemas reject.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { DraftGraphOutput } from "../../src/schemas/assist.js";
 import { CEEGraphResponseV3 } from "../../src/schemas/cee-v3.js";
 import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";

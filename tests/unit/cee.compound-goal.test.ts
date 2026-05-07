@@ -5,7 +5,7 @@
  * Covers: extractor, node-generator, deadline-extractor, qualitative-proxy.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   extractCompoundGoals,
   toGoalConstraints,
@@ -18,7 +18,6 @@ import {
   getConstraintTargetId,
   extractDeadline,
   mapQualitativeToProxy,
-  QUALITATIVE_PROXY_MAPPINGS,
   type ExtractedGoalConstraint,
 } from "../../src/cee/compound-goal/index.js";
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { OrchestratorFixture, JudgeResult } from "../src/types.js";
+import type { OrchestratorFixture } from "../src/types.js";
 
 // =============================================================================
 // Mock provider before imports

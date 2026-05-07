@@ -520,7 +520,7 @@ function chipRunPremortem(): TypedChip {
   };
 }
 
-function chipGenerateBrief(): TypedChip {
+function _chipGenerateBrief(): TypedChip {
   return {
     chip_id: 'decide_generate_brief',
     type: 'decide',

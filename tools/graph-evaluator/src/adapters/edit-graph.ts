@@ -6,7 +6,7 @@
  */
 
 import { readdir, readFile } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { extractJSON } from "../json-extractor.js";
 import { scoreEditGraph } from "../edit-graph-scorer.js";
 import type {

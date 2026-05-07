@@ -136,7 +136,7 @@ describe("matchReferencedEntities", () => {
 
   it("accepts pass-2 match when only one unmatched node label appears in message", () => {
     // Pass 1 captures 2 nodes. Pass 2 has exactly one remaining match → unambiguous → accepted.
-    const graph: GraphV3Compact = {
+    const _graph: GraphV3Compact = {
       nodes: [
         { id: "n1", kind: "factor", label: "Churn Rate", source: "user" },   // pass 1
         { id: "n2", kind: "factor", label: "Revenue", source: "user" },      // pass 1

@@ -13,7 +13,6 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { build } from "../../src/server.js";
 import type { FastifyInstance } from "fastify";
 import { getRedis } from "../../src/platform/redis.js";
-import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("v1 SSE Stream Integration", () => {

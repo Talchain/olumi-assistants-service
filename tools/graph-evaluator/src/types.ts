@@ -661,7 +661,7 @@ export interface ValidateGraphScore {
 // Evaluator adapter interface
 // =============================================================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export interface EvaluatorAdapter<F = any> {
   loadCases(dir: string): Promise<F[]>;
   buildRequest(fixture: F, prompt: string): { system: string; user: string };
