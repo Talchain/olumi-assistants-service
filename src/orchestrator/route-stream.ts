@@ -10,7 +10,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
-import { log, emit } from "../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
 import type { OrchestratorTurnRequest, SystemEvent } from "./types.js";
 import { config } from "../config/index.js";
 import { createOrchestratorRateLimitHook } from "../middleware/rate-limit.js";
@@ -306,7 +306,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
             // (e.g. phase1 enrichment threw). Emit telemetry so it's distinguishable
             // from mid-stream errors in observability dashboards.
             if (event.type === 'error') {
-              emit('streaming.generator_preflight_failure' as any, {
+              emit(TelemetryEvents.StreamingGeneratorPreflightFailure, {
                 request_id: requestId,
                 error: event.error.code,
               });
@@ -373,7 +373,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
       } catch (error) {
         if (!firstEventEmitted) {
           // Pre-yield error — emit telemetry and error event
-          emit('streaming.generator_preflight_failure' as any, {
+          emit(TelemetryEvents.StreamingGeneratorPreflightFailure, {
             request_id: requestId,
             error: error instanceof Error ? error.message : String(error),
           });
