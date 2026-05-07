@@ -724,6 +724,34 @@ export const TelemetryEvents = {
   // recent_changes ContextPack projection if any mutations exist).
   V5StateQueryGuard: "v5.state_query_guard",
 
+  // V5 WS1 / E4 — pre-LLM evidence that the curated `recent_changes`
+  // projection reached the routing payload assembly. Emitted exactly
+  // once per turn, immediately before the `routeWithToolUse` call,
+  // and only when the state-query guard did NOT short-circuit the turn
+  // (i.e. the LLM is about to be called). NEVER logs the curated
+  // content itself — only the count, a presence flag, and a short
+  // canonical hash so operators can prove the same projection reached
+  // multiple turns / instances.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - recent_change_count: number — 0 when the field is missing or
+  //     not an array (regression signal).
+  //   - recent_changes_field_present: boolean — derived at runtime via
+  //     Array.isArray on the actual contextPack field. Today's
+  //     assembler unconditionally populates `recent_changes` as a
+  //     frozen array, so this flag is `true` on every healthy turn;
+  //     however a future assembler regression that drops the field or
+  //     emits it as a non-array would fire this event with `false` and
+  //     count 0, making the regression detectable from logs alone
+  //     without a code-search.
+  //   - recent_changes_hash: string — see
+  //     `deriveRecentChangesEvidence` in recent-changes.ts. Returns the
+  //     literal "empty" sentinel when count is zero (including the
+  //     missing-field regression case).
+  V5RecentChangesPreLlm: "v5.recent_changes.pre_llm",
+
   // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
   // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
   // so any new PLoT field is covered automatically. Payload:

@@ -18,8 +18,12 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   RECENT_CHANGES_CAP,
+  RECENT_CHANGES_HASH_EMPTY,
   RECENT_CHANGES_SUMMARY_MAX_CHARS,
+  computeRecentChangesHash,
+  deriveRecentChangesEvidence,
   projectRecentChanges,
+  type RecentMutation,
 } from '../recent-changes.js';
 
 function mkAddConstraint(opts: {
@@ -457,5 +461,119 @@ describe('recent_changes — assembler-level budget proof', () => {
     expect(estimateTokens(fullJson)).toBeLessThanOrEqual(
       tinyWindowBudget.conversation,
     );
+  });
+});
+
+describe('computeRecentChangesHash (V5 WS1 / E4)', () => {
+  const mutationA: RecentMutation = {
+    action: 'constraint_added',
+    summary: 'Added constraint: Total cost must be at most £50,000.',
+    target_label: 'Total cost',
+  };
+  const mutationB: RecentMutation = {
+    action: 'factor_value_updated',
+    summary: 'Updated Confidence from 0.6 to 0.8.',
+    target_label: 'Confidence',
+  };
+
+  it('returns the empty sentinel when input has no entries', () => {
+    expect(computeRecentChangesHash([])).toBe(RECENT_CHANGES_HASH_EMPTY);
+  });
+
+  it('returns a 12-char hex string for non-empty input', () => {
+    const hash = computeRecentChangesHash([mutationA]);
+    expect(hash).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  it('is stable for the same canonical input', () => {
+    const a = computeRecentChangesHash([mutationA, mutationB]);
+    const b = computeRecentChangesHash([mutationA, mutationB]);
+    expect(a).toBe(b);
+  });
+
+  it('differs when entries differ', () => {
+    expect(computeRecentChangesHash([mutationA])).not.toBe(
+      computeRecentChangesHash([mutationB]),
+    );
+  });
+
+  it('is order-sensitive (newest-first ordering matters)', () => {
+    // Order is part of the canonical form — reversing the array yields
+    // a different hash. This is intentional: order carries the "most
+    // recent" semantics consumers depend on.
+    expect(computeRecentChangesHash([mutationA, mutationB])).not.toBe(
+      computeRecentChangesHash([mutationB, mutationA]),
+    );
+  });
+
+  it('does not leak the curated summary content into the hash itself', () => {
+    // Hash is deliberately short and one-way; the summary string must
+    // not appear in the hex output. This is a smoke check, not a
+    // cryptographic claim.
+    const hash = computeRecentChangesHash([mutationA]);
+    expect(hash).not.toContain('cost');
+    expect(hash).not.toContain('£');
+    expect(hash).not.toContain('Total');
+  });
+});
+
+describe('deriveRecentChangesEvidence (V5 WS1 / E4 regression-detection helper)', () => {
+  const mutationA: RecentMutation = {
+    action: 'constraint_added',
+    summary: 'Added constraint: Total cost must be at most £50,000.',
+    target_label: 'Total cost',
+  };
+
+  it('healthy populated input — field_present true, count matches, hash is 12 hex', () => {
+    const evidence = deriveRecentChangesEvidence({ recent_changes: [mutationA] });
+    expect(evidence.field_present).toBe(true);
+    expect(evidence.count).toBe(1);
+    expect(evidence.hash).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  it('healthy empty input — field_present true, count 0, hash is "empty" sentinel', () => {
+    const evidence = deriveRecentChangesEvidence({ recent_changes: [] });
+    expect(evidence.field_present).toBe(true);
+    expect(evidence.count).toBe(0);
+    expect(evidence.hash).toBe(RECENT_CHANGES_HASH_EMPTY);
+  });
+
+  it('regression — missing field reports field_present false, count 0, empty hash', () => {
+    // Future assembler regression that dropped recent_changes from the
+    // ContextPack entirely. The helper must tolerate it and surface
+    // the regression signal rather than crashing the emit site.
+    const evidence = deriveRecentChangesEvidence({});
+    expect(evidence.field_present).toBe(false);
+    expect(evidence.count).toBe(0);
+    expect(evidence.hash).toBe(RECENT_CHANGES_HASH_EMPTY);
+  });
+
+  it('regression — null field reports field_present false', () => {
+    // Defensive: an assembler that left the field as null rather than
+    // an empty array also counts as a regression.
+    const evidence = deriveRecentChangesEvidence({ recent_changes: null });
+    expect(evidence.field_present).toBe(false);
+    expect(evidence.count).toBe(0);
+    expect(evidence.hash).toBe(RECENT_CHANGES_HASH_EMPTY);
+  });
+
+  it('regression — non-array field (object) reports field_present false', () => {
+    // Defensive: an assembler that emitted an object instead of an
+    // array also counts as a regression.
+    const evidence = deriveRecentChangesEvidence({
+      recent_changes: { not: 'an array' },
+    });
+    expect(evidence.field_present).toBe(false);
+    expect(evidence.count).toBe(0);
+    expect(evidence.hash).toBe(RECENT_CHANGES_HASH_EMPTY);
+  });
+
+  it('regression — string field reports field_present false', () => {
+    const evidence = deriveRecentChangesEvidence({
+      recent_changes: 'malformed' as unknown,
+    });
+    expect(evidence.field_present).toBe(false);
+    expect(evidence.count).toBe(0);
+    expect(evidence.hash).toBe(RECENT_CHANGES_HASH_EMPTY);
   });
 });

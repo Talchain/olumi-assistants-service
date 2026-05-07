@@ -381,4 +381,218 @@ describe('V5 state-query guard — route-level multi-turn proof', () => {
       expect(chipIds).not.toContain('chip_action_rerun_analysis_after_mutation');
     });
   });
+
+  // V5 WS1 / G6 proof 4 — route-level proof that the new post-mutation
+  // complaint phrases are intercepted by the guard before the routing
+  // LLM is called. Closes the brief's P1.3 coverage gap: the unit tests
+  // cover the guard in isolation; this exercises the full executor wiring.
+  describe('post-mutation complaint phrases (V5 WS1 / G6 proof 4)', () => {
+    beforeEach(() => {
+      mockState.priorTurns = [PRIOR_HANDLER_TURN];
+      mockState.priorFacts = [ADD_CONSTRAINT_FACT_50K];
+    });
+
+    it('"I\'m not seeing that update on the factor" is intercepted: routing adapter NOT called, llm_calls_used = 0', async () => {
+      // The exact failure phrase from manual test 2026-05-07,
+      // scenario 425c8c71-ff9d-485d-ac59-cbaa811fe09d. Pre-fix this
+      // routed to V4 edit_graph and failed STRUCTURAL_VALIDATION_FAILED.
+      const adapter = throwingRoutingAdapter();
+      const result = await runTurnExecutor(
+        payload("I'm not seeing that update on the factor"),
+        'req-post-mutation-1',
+        { routingAdapter: adapter },
+      );
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.telemetry.llm_calls_used).toBe(0);
+      expect(result.telemetry.turn_class).toBe('direct_answer');
+      // Response references the persisted £50,000 fact.
+      expect(result.response.assistant_text).toMatch(/£50,?000|£50k/i);
+    });
+
+    it('"did that apply?" with a recent mutation is intercepted before LLM routing', async () => {
+      const adapter = throwingRoutingAdapter();
+      const result = await runTurnExecutor(
+        payload('did that apply?'),
+        'req-post-mutation-2',
+        { routingAdapter: adapter },
+      );
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.telemetry.llm_calls_used).toBe(0);
+    });
+
+    it('"the value didn\'t change" with a recent mutation is intercepted before LLM routing', async () => {
+      const adapter = throwingRoutingAdapter();
+      const result = await runTurnExecutor(
+        payload("the value didn't change"),
+        'req-post-mutation-3',
+        { routingAdapter: adapter },
+      );
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(result.telemetry.llm_calls_used).toBe(0);
+    });
+
+    it('compound message "did that apply? add a constraint below 50000" FALLS THROUGH to LLM (compound-edit gate)', async () => {
+      // P1 review fix — compound complaint+edit must reach normal
+      // routing so the LLM can disambiguate the second clause. The
+      // post-mutation patterns alone would match the first half; the
+      // POST_MUTATION_NEW_EDIT_GATE must suppress them.
+      const adapter = callingRoutingAdapter();
+      await runTurnExecutor(
+        payload('did that apply? add a constraint below 50000'),
+        'req-post-mutation-compound-1',
+        { routingAdapter: adapter },
+      );
+      expect(adapter.chatWithTools).toHaveBeenCalled();
+    });
+
+    it('compound message "the value didn\'t change. update churn to 5%" FALLS THROUGH to LLM', async () => {
+      const adapter = callingRoutingAdapter();
+      await runTurnExecutor(
+        payload("the value didn't change. update churn to 5%"),
+        'req-post-mutation-compound-2',
+        { routingAdapter: adapter },
+      );
+      expect(adapter.chatWithTools).toHaveBeenCalled();
+    });
+
+    it('"did that apply?" with NO recent mutation FALLS THROUGH to LLM', async () => {
+      // Post-mutation-only patterns are gated on recent_changes; with
+      // no prior mutation the guard does not claim the turn.
+      mockState.priorFacts = [];
+      const adapter = callingRoutingAdapter();
+      await runTurnExecutor(
+        payload('did that apply?'),
+        'req-post-mutation-no-prior',
+        { routingAdapter: adapter },
+      );
+      expect(adapter.chatWithTools).toHaveBeenCalled();
+    });
+  });
+
+  // V5 WS1 / G1 / E4 — route-level proof that the
+  // `v5.recent_changes.pre_llm` event fires once on an LLM-bound turn,
+  // before routing, with the expected payload shape and no leaked
+  // curated content. Closes the brief's P1.4 coverage gap.
+  describe('v5.recent_changes.pre_llm telemetry (V5 WS1 / G1 / E4)', () => {
+    beforeEach(() => {
+      mockState.priorTurns = [PRIOR_HANDLER_TURN];
+      mockState.priorFacts = [ADD_CONSTRAINT_FACT_50K];
+    });
+
+    it('emits exactly one v5.recent_changes.pre_llm event on an LLM-bound turn, before routing, with the expected shape', async () => {
+      const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+      setTestSink((eventName, data) => events.push({ event: eventName, data }));
+
+      const adapter = callingRoutingAdapter();
+      await runTurnExecutor(
+        payload('Tell me more about this decision.'),
+        'req-recent-changes-pre-llm-1',
+        { routingAdapter: adapter },
+      );
+
+      const preLlm = events.filter((e) => e.event === 'v5.recent_changes.pre_llm');
+      expect(preLlm).toHaveLength(1);
+
+      const ev = preLlm[0]!.data;
+      // Identity fields.
+      expect(ev.request_id).toBe('req-recent-changes-pre-llm-1');
+      expect(typeof ev.scenario_id).toBe('string');
+      // Count is a non-negative integer; presence is a boolean.
+      expect(typeof ev.recent_change_count).toBe('number');
+      expect((ev.recent_change_count as number) >= 0).toBe(true);
+      expect(typeof ev.recent_changes_field_present).toBe('boolean');
+      expect(ev.recent_changes_field_present).toBe(true);
+      // Hash matches either 12 lowercase hex chars OR the empty sentinel.
+      expect(typeof ev.recent_changes_hash).toBe('string');
+      expect(ev.recent_changes_hash as string).toMatch(/^([a-f0-9]{12}|empty)$/);
+      // No curated content, no fact fields, no mutation payload fields.
+      const payloadJson = JSON.stringify(ev);
+      expect(payloadJson).not.toMatch(/summary/);
+      expect(payloadJson).not.toMatch(/target_label/);
+      expect(payloadJson).not.toMatch(/£50/);
+      expect(payloadJson).not.toMatch(/Total cost/i);
+      expect(payloadJson).not.toMatch(/constraint_id/);
+      expect(payloadJson).not.toMatch(/factor_total_cost/);
+      expect(payloadJson).not.toMatch(/operator/);
+      expect(payloadJson).not.toMatch(/before/);
+      expect(payloadJson).not.toMatch(/after/);
+    });
+
+    it('event fires BEFORE routing — order proof', async () => {
+      // Adapter records the timestamp at which it is called. The event
+      // sink records each event's index. The pre_llm event must appear
+      // strictly before the adapter is invoked. Use index-based ordering
+      // because the test sink fires synchronously inside the executor.
+      const events: Array<{ index: number; event: string }> = [];
+      let routingCallIndex: number | null = null;
+      setTestSink((eventName) => {
+        events.push({ index: events.length, event: eventName });
+      });
+
+      const adapter = {
+        chatWithTools: vi
+          .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+          .mockImplementation(async () => {
+            routingCallIndex = events.length;
+            return {
+              content: [{ type: 'text', text: 'Mocked Sonnet text.' }],
+              stop_reason: 'end_turn' as const,
+              usage: { input_tokens: 5, output_tokens: 5 },
+              model: 'mock',
+              latencyMs: 0,
+            };
+          }),
+      };
+
+      await runTurnExecutor(
+        payload('Tell me more about this decision.'),
+        'req-recent-changes-order',
+        { routingAdapter: adapter },
+      );
+
+      const preLlmIndex = events.findIndex(
+        (e) => e.event === 'v5.recent_changes.pre_llm',
+      );
+      expect(preLlmIndex).toBeGreaterThanOrEqual(0);
+      expect(routingCallIndex).not.toBeNull();
+      expect(preLlmIndex).toBeLessThan(routingCallIndex!);
+    });
+
+    it('hash is the "empty" sentinel when no recent changes exist', async () => {
+      mockState.priorFacts = [];
+      const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+      setTestSink((eventName, data) => events.push({ event: eventName, data }));
+
+      const adapter = callingRoutingAdapter();
+      await runTurnExecutor(
+        payload('Tell me more.'),
+        'req-recent-changes-empty',
+        { routingAdapter: adapter },
+      );
+
+      const preLlm = events.find((e) => e.event === 'v5.recent_changes.pre_llm');
+      expect(preLlm).toBeDefined();
+      expect(preLlm!.data.recent_change_count).toBe(0);
+      expect(preLlm!.data.recent_changes_field_present).toBe(true);
+      expect(preLlm!.data.recent_changes_hash).toBe('empty');
+    });
+
+    it('does NOT fire when the state-query guard short-circuits the turn (no LLM call)', async () => {
+      const events: Array<{ event: string }> = [];
+      setTestSink((eventName) => events.push({ event: eventName }));
+
+      const adapter = throwingRoutingAdapter();
+      await runTurnExecutor(
+        payload("I'm not seeing that update on the factor"),
+        'req-recent-changes-skipped',
+        { routingAdapter: adapter },
+      );
+
+      // Guard owns the turn; routing never runs; the pre-LLM event
+      // must NOT fire (it's specifically a pre-LLM marker, not a
+      // per-turn marker).
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      expect(events.find((e) => e.event === 'v5.recent_changes.pre_llm')).toBeUndefined();
+    });
+  });
 });
