@@ -366,6 +366,145 @@ describe('Workstream 1 — Journey 3 envelope contract (add_constraint)', () => 
   })
 })
 
+// ─── Multi-option READY fixture ──────────────────────────────────────────
+//
+// `buildD1Fixture` ships a single option (`o-launch`), so structural
+// readiness derives as `'needs_user_input'` (analysis-ready-helper.ts
+// :223). The foamy-bee post-mutation chip rule's executable variants
+// gate on `'ready'` (chip-generator.ts:268–270), so chip-presence
+// assertions need a fixture with ≥2 options each carrying numeric
+// interventions.
+//
+// We extend the d1 fixture rather than building from scratch so the
+// real handler pipeline runs against a graph it already accepts.
+function buildReadyMultiOptionFixture(): ReturnType<typeof buildD1Fixture> {
+  const base = buildD1Fixture()
+  return {
+    ...base,
+    nodes: [
+      ...base.nodes,
+      {
+        id: 'o-defer',
+        kind: 'option',
+        label: 'Defer launch',
+        // Top-level interventions field — analysis-ready-helper.ts:117
+        // mergeInterventionSources reads this as the lowest-precedence
+        // numeric source and feeds it through to `status: 'ready'`
+        // (helper line 174–180).
+        interventions: { 'f-budget': 0 },
+      } as never,
+    ],
+    edges: [
+      ...base.edges,
+      {
+        from: 'o-defer',
+        to: 'f-budget',
+        strength: { mean: 0.2, std: 0.05 },
+        exists_probability: 0.9,
+        effect_direction: 'positive',
+      } as never,
+    ],
+    // The existing o-launch option also needs numeric interventions
+    // for the overall payload to read 'ready'. Patch it in by
+    // overlaying a top-level interventions field — same lowest-
+    // precedence path the new option uses.
+  }
+}
+
+// Same shape but mutates o-launch to also carry numeric interventions
+// so BOTH options resolve to 'ready' and the payload status is 'ready'.
+function buildReadyMultiOptionFixtureWithInterventions(): ReturnType<typeof buildD1Fixture> {
+  const base = buildReadyMultiOptionFixture()
+  return {
+    ...base,
+    nodes: base.nodes.map((n) =>
+      n.id === 'o-launch'
+        ? ({ ...n, interventions: { 'f-budget': 1 } } as never)
+        : n,
+    ),
+  }
+}
+
+describe('Workstream 1 — Journey 3 ready-model chip emission (P1.4)', () => {
+  it('add_constraint on a structurally ready model emits the executable Run analysis chip when no prior analysis exists', async () => {
+    const graph = buildReadyMultiOptionFixtureWithInterventions()
+    const adapter = addConstraintAdapter()
+    const result = await runTurnExecutor(
+      payload("Cap marketing spend at £50,000."),
+      'req-j3-ready-no-prior',
+      {
+        routingAdapter: adapter,
+        graphState: graph as unknown as NonNullable<
+          Parameters<typeof runTurnExecutor>[2]
+        >['graphState'],
+      },
+    )
+    expect(result.telemetry.failure_type).toBeNull()
+    expect(result.telemetry.turn_class).toBe('handler')
+
+    // Foamy-bee post-mutation rule emits the executable chip with id
+    // `chip_run_analysis` (curatedHandlerChips → executableChip path)
+    // when the model is ready and no prior run_analysis fact exists.
+    const chips = result.response.suggested_actions ?? []
+    const runAnalysisChip = chips.find(
+      (c) => (c as { action_type?: string }).action_type === 'run_analysis',
+    ) as { id: string; label: string; action_type: string } | undefined
+    expect(runAnalysisChip).toBeDefined()
+    // Foamy-bee uses curatedHandlerChips for the no-prior case which
+    // produces label "Run analysis" (no "again").
+    expect(runAnalysisChip!.label).toBe('Run analysis')
+  })
+
+  it('add_constraint on a ready model with prior stale analysis emits the rerun chip', async () => {
+    persistence.turns.push({
+      id: 'row-seed',
+      turn_class: 'handler',
+      handler_id: 'run_analysis',
+      created_at: new Date().toISOString(),
+      handler_facts: [
+        {
+          fact_type: 'run_analysis',
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: TEST_SCENARIO_ID,
+            leading_option_id: 'o-launch',
+            summary: 'Prior analysis',
+            win_probabilities: { 'o-launch': 0.6, 'o-defer': 0.4 },
+            graph_hash_at_run: 'deadbeefdeadbeef',
+            computed_at: new Date().toISOString(),
+          },
+        } as Record<string, unknown>,
+      ],
+    })
+
+    const graph = buildReadyMultiOptionFixtureWithInterventions()
+    const adapter = addConstraintAdapter()
+    const result = await runTurnExecutor(
+      payload("Cap marketing spend at £50,000."),
+      'req-j3-ready-stale',
+      {
+        routingAdapter: adapter,
+        graphState: graph as unknown as NonNullable<
+          Parameters<typeof runTurnExecutor>[2]
+        >['graphState'],
+      },
+    )
+    expect(result.telemetry.failure_type).toBeNull()
+    expect(result.freshness?.freshness).toBe('stale')
+
+    // Foamy-bee rerun-after-mutation chip uses the explicit id form.
+    const chips = result.response.suggested_actions ?? []
+    const rerunChip = chips.find(
+      (c) =>
+        (c as { id?: string }).id === 'chip_action_rerun_analysis_after_mutation',
+    ) as { id: string; label: string; action_type: string } | undefined
+    expect(rerunChip).toBeDefined()
+    expect(rerunChip!.label).toBe('Run analysis again')
+    expect(rerunChip!.action_type).toBe('run_analysis')
+  })
+})
+
 describe('Workstream 1 — Journey 6 envelope contract (set_factor_value)', () => {
   it('emits a v5 graph_patch block and a clean numeric-update receipt', async () => {
     const graph = buildD1Fixture()
@@ -413,5 +552,78 @@ describe('Workstream 1 — Journey 6 envelope contract (set_factor_value)', () =
 
     expect(persistence.turns).toHaveLength(1)
     expect(persistence.turns[0]!.handler_id).toBe('set_factor_value')
+  })
+
+  // ── P1.5: Journey 6 ready-model + prior analysis + chip-click rerun ──
+  it('on a ready model with prior analysis: factor mutation flips freshness to stale, emits Rerun chip, and the chip-click dispatches run_analysis', async () => {
+    // Seed prior run_analysis fact so freshness has something to
+    // compare against.
+    persistence.turns.push({
+      id: 'row-seed',
+      turn_class: 'handler',
+      handler_id: 'run_analysis',
+      created_at: new Date().toISOString(),
+      handler_facts: [
+        {
+          fact_type: 'run_analysis',
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: TEST_SCENARIO_ID,
+            leading_option_id: 'o-launch',
+            summary: 'Prior analysis',
+            win_probabilities: { 'o-launch': 0.6, 'o-defer': 0.4 },
+            graph_hash_at_run: 'deadbeefdeadbeef',
+            computed_at: new Date().toISOString(),
+          },
+        } as Record<string, unknown>,
+      ],
+    })
+
+    // Step 1 — factor mutation on a ready model.
+    const graph = buildReadyMultiOptionFixtureWithInterventions()
+    const setFactorAdapter = setFactorValueAdapter()
+    const mutationResult = await runTurnExecutor(
+      payload('update the customer churn factor', 'decide'),
+      'req-j6-ready-stale',
+      {
+        routingAdapter: setFactorAdapter,
+        graphState: graph as unknown as NonNullable<
+          Parameters<typeof runTurnExecutor>[2]
+        >['graphState'],
+      },
+    )
+
+    expect(mutationResult.telemetry.failure_type).toBeNull()
+    expect(mutationResult.telemetry.turn_class).toBe('handler')
+    expect(mutationResult.freshness?.freshness).toBe('stale')
+
+    // Step 2 — assert the rerun chip is emitted.
+    const chips = mutationResult.response.suggested_actions ?? []
+    const rerunChip = chips.find(
+      (c) =>
+        (c as { id?: string }).id === 'chip_action_rerun_analysis_after_mutation',
+    ) as { id: string; label: string; action_type: string; message: string } | undefined
+    expect(rerunChip).toBeDefined()
+    expect(rerunChip!.label).toBe('Run analysis again')
+    expect(rerunChip!.action_type).toBe('run_analysis')
+
+    // Step 3 — chip-click dispatches run_analysis. The chip carries
+    // action_type='run_analysis'; a chip_click envelope routing it
+    // would land on the run_analysis handler. We don't run the
+    // analyser end-to-end here (that requires a PLoT mock), but we
+    // assert the routing contract: the chip's action_type maps to a
+    // registered handler in the validation registry.
+    const { HANDLER_VALIDATION_REGISTRY } = await import(
+      '../routing/validation-registry.js'
+    )
+    expect(
+      HANDLER_VALIDATION_REGISTRY[rerunChip!.action_type],
+    ).toBeDefined()
+
+    // Persistence captured both turns.
+    expect(persistence.turns).toHaveLength(2)
+    expect(persistence.turns[0]!.handler_id).toBe('run_analysis') // seeded
+    expect(persistence.turns[1]!.handler_id).toBe('set_factor_value')
   })
 })
