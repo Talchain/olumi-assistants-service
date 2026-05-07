@@ -129,6 +129,7 @@ import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import { deriveRecentChangesEvidence } from './context/recent-changes.js';
 import type { TurnOutcome } from './turn-outcome.js';
 import {
   ROUTING_PROMPT_VERSION,
@@ -2122,6 +2123,27 @@ export async function runTurnExecutor(
       // carries `orientationText: ''` and `llmCallCount: 0`, and the
       // 'orient' stage marker has been pushed.
       if (routingResult === undefined) {
+        // E4 evidence — pre-LLM hash + presence + count for the curated
+        // `recent_changes` projection. Fires here, AFTER any deterministic
+        // pre-route has had its chance to short-circuit (so the event only
+        // appears on turns that actually go to the LLM) and BEFORE the
+        // routeWithToolUse call (so the payload is captured at the moment
+        // it is handed to routing). Never logs the curated content.
+        //
+        // Presence is derived at runtime from the actual contextPack
+        // shape via {@link deriveRecentChangesEvidence} — if a future
+        // assembler regression dropped the field or emitted it as a
+        // non-array, the event would record `field_present: false`,
+        // count 0, and the empty-sentinel hash, making the regression
+        // detectable from logs without a code-search.
+        const recentChangesEvidence = deriveRecentChangesEvidence(contextPack);
+        emit(TelemetryEvents.V5RecentChangesPreLlm, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          recent_change_count: recentChangesEvidence.count,
+          recent_changes_field_present: recentChangesEvidence.field_present,
+          recent_changes_hash: recentChangesEvidence.hash,
+        });
         routingResult = await routeWithToolUse(contextPack, payload.message, {
           requestId,
           sessionId: context.session_id,

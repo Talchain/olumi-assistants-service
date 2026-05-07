@@ -31,6 +31,8 @@
  *     only; the boundary `graph_patch` block schema is unchanged.
  */
 
+import { createHash } from 'node:crypto';
+
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -266,4 +268,80 @@ function cap(s: string): string {
   // Reserve one char for the ellipsis marker so the post-truncation
   // string is exactly RECENT_CHANGES_SUMMARY_MAX_CHARS characters long.
   return `${s.slice(0, RECENT_CHANGES_SUMMARY_MAX_CHARS - 1)}…`;
+}
+
+// E4 sentinel returned for empty inputs. Stable, distinguishable from a real
+// hash so log readers do not confuse "no recent changes" with a hash that
+// happens to render as twelve zero hex digits.
+export const RECENT_CHANGES_HASH_EMPTY = 'empty';
+
+// Twelve hex chars = 48 bits = roughly one collision per 16M entries; matches
+// the project's existing short-hash conventions (graph hashes, fact hashes).
+const RECENT_CHANGES_HASH_LENGTH = 12;
+
+/**
+ * E4 — short content hash for the curated `recent_changes` projection.
+ *
+ * Used as pre-LLM telemetry evidence in the routing payload assembly so
+ * operators can prove `recent_changes` reached the LLM-bound context
+ * without logging the curated content itself. Returns
+ * {@link RECENT_CHANGES_HASH_EMPTY} when the input has no entries.
+ *
+ * Canonicalisation: stable key order on each entry (`action`, `summary`,
+ * `target_label`) and array order preserved (newest-first, matching
+ * {@link projectRecentChanges}). SHA-256, truncated to twelve hex
+ * characters.
+ *
+ * **Not** a security primitive. Two different curated payloads with the
+ * same prefix-of-12 hex chars are theoretically possible; for E4 evidence
+ * that risk is acceptable because the operator only needs to distinguish
+ * "same payload across calls" from "different payload across calls".
+ */
+export function computeRecentChangesHash(items: readonly RecentMutation[]): string {
+  if (items.length === 0) return RECENT_CHANGES_HASH_EMPTY;
+  const canonical = items.map((m) => ({
+    action: m.action,
+    summary: m.summary,
+    target_label: m.target_label,
+  }));
+  return createHash('sha256')
+    .update(JSON.stringify(canonical))
+    .digest('hex')
+    .slice(0, RECENT_CHANGES_HASH_LENGTH);
+}
+
+/**
+ * E4 — derive the pre-LLM telemetry payload for `recent_changes` from a
+ * possibly-malformed source. Tolerates the regression case where the
+ * field is missing, `null`, or a non-array; in those cases reports
+ * `field_present: false`, `count: 0`, and the empty-sentinel hash so
+ * the regression is detectable from logs without a code-search.
+ *
+ * Extracted into its own helper for unit-testability — the route-level
+ * emit site in `turn-executor.ts` is hard to reach with a malformed
+ * context pack, but the regression signal is exactly what operators
+ * need from this telemetry.
+ *
+ * Type signature deliberately accepts `unknown` as the source field so
+ * callers don't have to widen the type at the emit site.
+ */
+export interface RecentChangesEvidence {
+  readonly count: number;
+  readonly field_present: boolean;
+  readonly hash: string;
+}
+
+export function deriveRecentChangesEvidence(
+  source: { readonly recent_changes?: unknown },
+): RecentChangesEvidence {
+  const field = source.recent_changes;
+  if (!Array.isArray(field)) {
+    return { count: 0, field_present: false, hash: RECENT_CHANGES_HASH_EMPTY };
+  }
+  const items = field as readonly RecentMutation[];
+  return {
+    count: items.length,
+    field_present: true,
+    hash: computeRecentChangesHash(items),
+  };
 }
