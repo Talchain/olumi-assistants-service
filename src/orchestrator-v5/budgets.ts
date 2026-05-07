@@ -43,7 +43,9 @@ function parseMs(raw: string | undefined, fallback: number): number {
 
 export function getTurnExecutorBudgets(): Budgets {
   return {
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
     turn_ms: parseMs(process.env.TURN_BUDGET_MS, DEFAULT_TURN_BUDGET_MS),
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
     llm_narrate_ms: parseMs(process.env.LLM_BUDGET_NARRATE_MS, DEFAULT_LLM_NARRATE_BUDGET_MS),
   };
 }
@@ -60,5 +62,6 @@ export function getTurnExecutorBudgets(): Budgets {
  * (BUDGET_EXCEEDED wins over LLM_TIMEOUT when both apply).
  */
 export function getHandlerBudgetMs(): number {
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
   return parseMs(process.env.LLM_BUDGET_HANDLER_MS, DEFAULT_LLM_HANDLER_BUDGET_MS);
 }

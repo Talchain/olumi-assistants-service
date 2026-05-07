@@ -19,7 +19,7 @@
 
 import type { FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { ORCHESTRATOR_TURN_BUDGET_MS, DRAFT_GRAPH_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS, ORCHESTRATOR_ACK_TIMEOUT_MS } from "../config/timeouts.js";
+import { ORCHESTRATOR_TURN_BUDGET_MS, DRAFT_GRAPH_TURN_BUDGET_MS, ORCHESTRATOR_TIMEOUT_MS } from "../config/timeouts.js";
 import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
 import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 import type {
@@ -27,7 +27,6 @@ import type {
   OrchestratorResponseEnvelope,
   TypedConversationBlock,
   OrchestratorError,
-  TurnPlan,
   ConversationContext,
   ConversationMessage,
   V2RunResponseEnvelope,
@@ -236,10 +235,10 @@ export async function handleTurn(
 
   // Register this request as in-flight for concurrent dedup
   let resolveInflight!: (value: OrchestratorResponseEnvelope) => void;
-  let rejectInflight!: (reason: unknown) => void;
+  let _rejectInflight!: (reason: unknown) => void;
   const inflightPromise = new Promise<OrchestratorResponseEnvelope>((resolve, reject) => {
     resolveInflight = resolve;
-    rejectInflight = reject;
+    _rejectInflight = reject;
   });
   registerInflightRequest(turnRequest.scenario_id, turnRequest.client_turn_id, inflightPromise);
 
@@ -501,8 +500,11 @@ async function dispatchViaLLM(
   // CEE_ORCHESTRATOR_CONTEXT_ENABLED: enables the Context Fabric (3-zone) prompt path.
   // DO NOT enable on staging until the V2 prompt path (assembleV2SystemPrompt) has
   // feature parity: full graph summary, analysis summary, selected elements rendering.
-  // Tracked under A.4 / F.2.
+  // Tracked under A.4 / F.2. Read at call time (not via config cache) so per-test
+  // process.env stubs are honoured by the matching wiring test.
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 fabric flag intentionally read at call time (see context-fabric/renderer.ts comment)
   const fabricEnabled = process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED === 'true'
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 fabric flag intentionally read at call time (see context-fabric/renderer.ts comment)
     || process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED === '1';
 
   if (fabricEnabled) {
@@ -1360,8 +1362,10 @@ function attachV1DiagnosticTrace(
   envelope: import("./types.js").OrchestratorResponseEnvelope,
   toolTelemetry?: import("./pipeline/types.js").ToolResult['_tool_llm_telemetry'],
 ): void {
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
   const isEnabled = process.env.CEE_DIAGNOSTIC_TRACE_ENABLED !== undefined
     ? config.features.diagnosticTraceEnabled
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
     : process.env.NODE_ENV !== 'production';
 
   if (!isEnabled) return;

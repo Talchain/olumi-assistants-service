@@ -468,9 +468,12 @@ export function assembleContext(
   selectedElements?: string[],
   archetypes?: string[],
 ): AssembledContext {
-  // Feature flag check — reads env var directly for simplicity and ESM compatibility.
-  // The config schema (src/config/index.ts) maps CEE_ORCHESTRATOR_CONTEXT_ENABLED to
+  // Feature flag check — reads env var directly for simplicity and ESM compatibility,
+  // and to allow per-test toggling via direct process.env assignment (see
+  // tests/unit/orchestrator/context-fabric-wiring.test.ts). The config schema
+  // (src/config/index.ts) maps CEE_ORCHESTRATOR_CONTEXT_ENABLED to
   // config.features.contextFabric for startup validation and telemetry.
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 fabric flag intentionally read at call time so per-test env stubs are honoured (see test note above)
   const envFlag = process.env.CEE_ORCHESTRATOR_CONTEXT_ENABLED;
   if (envFlag !== "true" && envFlag !== "1") {
     return disabledPassthrough(promptVersion, route);

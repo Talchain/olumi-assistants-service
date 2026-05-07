@@ -11,6 +11,7 @@ import { beforeAll, beforeEach } from "vitest";
 import { _resetConfigCache } from "./src/config/index.js";
 
 // Enable unified pipeline for all tests (legacy Pipeline A+B has been removed).
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 test bootstrap: seeds env before app config initialises
 process.env.CEE_UNIFIED_PIPELINE_ENABLED = "true";
 
 /**

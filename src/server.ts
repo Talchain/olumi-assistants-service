@@ -252,6 +252,7 @@ export async function build() {
   logFeatureHealth();
 
   // Startup health summary — single structured log line for deployment diagnostics
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
   const diagnosticTraceEnabled = process.env.CEE_DIAGNOSTIC_TRACE_ENABLED !== undefined
     ? config.features.diagnosticTraceEnabled
     : nodeEnv !== 'production';
