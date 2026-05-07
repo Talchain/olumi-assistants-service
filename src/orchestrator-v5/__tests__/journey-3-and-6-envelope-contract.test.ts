@@ -554,8 +554,18 @@ describe('Workstream 1 — Journey 6 envelope contract (set_factor_value)', () =
     expect(persistence.turns[0]!.handler_id).toBe('set_factor_value')
   })
 
-  // ── P1.5: Journey 6 ready-model + prior analysis + chip-click rerun ──
-  it('on a ready model with prior analysis: factor mutation flips freshness to stale, emits Rerun chip, and the chip-click dispatches run_analysis', async () => {
+  // ── P1.5: Journey 6 ready-model + prior analysis + rerun chip ──
+  //
+  // SCOPE NOTE: this test proves the EMISSION contract — the rerun
+  // chip is emitted with `action_type: 'run_analysis'` mapping to a
+  // registered handler. End-to-end chip-click dispatch
+  // (`dispatchChipClickRunAnalysis` actually running run_analysis
+  // through PLoT and emitting a result envelope) is owned by
+  // `chip-click-dispatch-analysis-ready.test.ts` (7+ cases covering
+  // analysisReady surfacing, snapshot single-load, freshness
+  // derivation against the just-produced fact). The two test files
+  // together prove the journey: emission here, dispatch there.
+  it('on a ready model with prior analysis: factor mutation flips freshness to stale, emits Rerun chip with the registered run_analysis handler contract', async () => {
     // Seed prior run_analysis fact so freshness has something to
     // compare against.
     persistence.turns.push({
@@ -608,18 +618,26 @@ describe('Workstream 1 — Journey 6 envelope contract (set_factor_value)', () =
     expect(rerunChip!.label).toBe('Run analysis again')
     expect(rerunChip!.action_type).toBe('run_analysis')
 
-    // Step 3 — chip-click dispatches run_analysis. The chip carries
-    // action_type='run_analysis'; a chip_click envelope routing it
-    // would land on the run_analysis handler. We don't run the
-    // analyser end-to-end here (that requires a PLoT mock), but we
-    // assert the routing contract: the chip's action_type maps to a
-    // registered handler in the validation registry.
+    // Step 3 — registered-handler contract. The chip carries
+    // action_type='run_analysis'; assert that action_type maps to
+    // a handler the validator and chip-click dispatcher recognise.
+    // This is the EMISSION-side contract; the actual chip-click
+    // round-trip (envelope → dispatchChipClickRunAnalysis → handler
+    // invocation → analysis_ready surfacing) is proven separately
+    // in `chip-click-dispatch-analysis-ready.test.ts`. Together
+    // they form the end-to-end Journey-6 chip-click proof.
     const { HANDLER_VALIDATION_REGISTRY } = await import(
       '../routing/validation-registry.js'
     )
     expect(
       HANDLER_VALIDATION_REGISTRY[rerunChip!.action_type],
     ).toBeDefined()
+    // Also assert the chip carries an id the chip-click envelope
+    // can address — chip-click-dispatch.ts:120 reads chip.id +
+    // chip.action_type. Empty/missing id would route to the
+    // validator's UNSUPPORTED_ACTION path even with a valid
+    // action_type.
+    expect(rerunChip!.id).toBeTruthy()
 
     // Persistence captured both turns.
     expect(persistence.turns).toHaveLength(2)
