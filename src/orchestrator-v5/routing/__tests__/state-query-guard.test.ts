@@ -448,6 +448,85 @@ describe('tryStateQueryGuard', () => {
       });
       expect(outcome.matched).toBe(false);
     });
+
+    // Gemini Code Assist review — natural-language coverage gaps.
+    // Compound bail-out must fire for article-less and multi-word
+    // edit imperatives.
+    describe('natural-language coverage — compound bail-out', () => {
+      const compoundNaturalMessages = [
+        // article-less imperatives
+        'what changed? add constraint below 50000',
+        "I'm not seeing that update. add risk for capacity",
+        // multi-word noun phrases between verb and `to`
+        'what changed? set the budget to 100k',
+        'what changed? set total cost to 50k',
+        'what changed? set the total cost to 50k',
+        'did that apply? change customer satisfaction to high',
+        'is that reflected? update the marketing budget to 200000',
+      ];
+
+      for (const message of compoundNaturalMessages) {
+        it(`falls through to normal routing for natural-language compound: ${JSON.stringify(message)}`, () => {
+          const outcome = tryStateQueryGuard({
+            message,
+            contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+          });
+          expect(outcome.matched).toBe(false);
+        });
+      }
+
+      // Lookbehind preservation — multi-word value-update tails inside
+      // a `did you ...` interrogative must NOT trigger the bail-out.
+      // "did you set the budget to 100k?" is a state-query about a
+      // prior set, not a fresh imperative.
+      it('"did you set the budget to 100k?" — multi-word interrogative is preserved by the lookbehind', () => {
+        // No legacy STATE_QUERY_PATTERN matches `did you set` so the
+        // outcome is matched=false (falls through to LLM) either way.
+        // The point of this test is to prove the bail-out does NOT
+        // fire on the imperative-shaped tail of a `did you ...`
+        // interrogative — i.e. the lookbehind keeps doing its job
+        // for multi-word noun phrases too.
+        const outcome = tryStateQueryGuard({
+          message: 'did you set the budget to 100k?',
+          contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+        });
+        expect(outcome.matched).toBe(false);
+      });
+    });
+
+    // Gemini Code Assist review — multi-word labels are common in
+    // this app ("Total cost", "Customer churn"). Post-mutation
+    // patterns must catch them.
+    describe('natural-language coverage — multi-word labels in complaints', () => {
+      const multiWordComplaints = [
+        // `did the X apply` with multi-word X
+        'did the total cost apply?',
+        'did the customer churn apply?',
+        // `the X didn't change/update/apply` with multi-word X
+        "the total cost didn't change",
+        "the customer churn didn't apply",
+        'the marketing budget did not update',
+        // `is the X reflected` with multi-word X
+        'is the total cost reflected?',
+        'is the customer churn reflected?',
+        // `the X isn't showing` with multi-word X
+        "the customer churn isn't showing",
+        'the total cost is not showing',
+        // `is the X applied` with multi-word X
+        'is the customer churn applied yet?',
+        'is the total cost applied?',
+      ];
+
+      for (const message of multiWordComplaints) {
+        it(`matches multi-word label complaint: ${JSON.stringify(message)}`, () => {
+          const outcome = tryStateQueryGuard({
+            message,
+            contextPack: ctxWith([ADD_CONSTRAINT_50K]),
+          });
+          expect(outcome.matched).toBe(true);
+        });
+      }
+    });
   });
 
   describe('boundary cases', () => {

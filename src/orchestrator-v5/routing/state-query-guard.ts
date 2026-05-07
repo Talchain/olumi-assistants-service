@@ -130,22 +130,29 @@ const STATE_QUERY_PATTERNS: readonly RegExp[] = [
  */
 const POST_MUTATION_COMPLAINT_PATTERNS: readonly RegExp[] = [
   // "I'm not seeing that update", "I am not seeing the change",
-  // "I'm not seeing that update on the factor"
+  // "I'm not seeing that update on the factor". Multi-word labels
+  // ("the customer churn") work without explicit support because the
+  // pattern has no terminator after `\S+` — extra label words trail.
   /\bi(?:'m|\s+am)\s+not\s+seeing\s+(?:the|that|my|this)\s+\S+/i,
   // "did that apply", "did it apply", "did my change apply",
-  // "did the update apply"
-  /\bdid\s+(?:that|it|my\s+\S+|the\s+\S+)\s+apply\b/i,
-  // "the value didn't change", "the factor didn't update",
+  // "did the update apply". Multi-word labels ("did the total cost
+  // apply?") supported via `(?:\s+\S+){0,2}` after the leading noun.
+  /\bdid\s+(?:that|it|my\s+\S+(?:\s+\S+){0,2}|the\s+\S+(?:\s+\S+){0,2})\s+apply\b/i,
+  // "the value didn't change", "the customer churn didn't apply",
   // "the constraint did not apply"
-  /\bthe\s+\S+\s+(?:didn'?t|did\s+not)\s+(?:change|update|apply|reflect)\b/i,
-  // "is that reflected", "is the change reflected", "is it reflected"
-  /\bis\s+(?:that|the|this|my|it)\s+\S*\s*reflected\b/i,
-  // "why can't I see the change", "why cannot I see my update"
+  /\bthe\s+\S+(?:\s+\S+){0,2}\s+(?:didn'?t|did\s+not)\s+(?:change|update|apply|reflect)\b/i,
+  // "is that reflected", "is the change reflected", "is the total cost
+  // reflected". Allows up to three label words between determiner and
+  // `reflected`.
+  /\bis\s+(?:that|the|this|my|it)\s+(?:\S+\s+){0,3}reflected\b/i,
+  // "why can't I see the change", "why cannot I see the customer
+  // churn". Multi-word labels work because the pattern has no
+  // terminator after `\S+`.
   /\bwhy\s+can(?:'t|not)\s+i\s+see\s+(?:the|my|this|that)\s+\S+/i,
-  // "the change isn't showing", "the update is not shown"
-  /\bthe\s+\S+\s+(?:isn'?t|is\s+not|aren'?t|are\s+not)\s+show(?:ing|n)\b/i,
-  // "is the update applied", "is that applied yet", "is my change applied"
-  /\bis\s+(?:the|that|my|this)\s+\S+\s+applied(?:\s+yet)?\b/i,
+  // "the change isn't showing", "the customer churn isn't showing"
+  /\bthe\s+\S+(?:\s+\S+){0,2}\s+(?:isn'?t|is\s+not|aren'?t|are\s+not)\s+show(?:ing|n)\b/i,
+  // "is the update applied", "is the customer churn applied yet"
+  /\bis\s+(?:the|that|my|this)\s+\S+(?:\s+\S+){0,2}\s+applied(?:\s+yet)?\b/i,
   // "that didn't work", "that did not seem to work"
   /\bthat\s+(?:didn'?t|did\s+not)\s+(?:seem\s+to\s+)?work\b/i,
 ];
@@ -181,19 +188,23 @@ const POST_MUTATION_COMPLAINT_PATTERNS: readonly RegExp[] = [
  */
 const FRESH_EDIT_BAIL_OUT_PATTERNS: readonly RegExp[] = [
   // "add a constraint", "add another factor", "add the option",
-  // "create an option" — requires an article between the verb and the
-  // noun, which excludes pronoun cases like "add it". The negative
-  // lookbehind on `did you ` preserves interrogative state-queries
-  // such as "did you add a constraint?" — those are owned by the
-  // legacy STATE_QUERY_PATTERNS and must keep matching.
-  /(?<!did\s+you\s+)\b(?:add|create|make)\s+(?:a|an|another|the|some)\s+\w+/i,
+  // "create an option" — and the article-less form "add constraint"
+  // / "add risk for capacity" that natural-language users frequently
+  // type. The article group is now optional. The negative lookbehind
+  // on `did you ` preserves interrogative state-queries such as "did
+  // you add a constraint?" — those are owned by the legacy
+  // STATE_QUERY_PATTERNS and must keep matching.
+  /(?<!did\s+you\s+)\b(?:add|create|make)\s+(?:(?:a|an|another|the|some)\s+)?\S+/i,
   // "change X to Y", "update X to Y", "set X to Y" — value-update
-  // imperatives. The negative lookbehind preserves the existing
-  // refined-gate test fixtures where digit-bearing state-queries like
-  // "did you change it to £50k?" must still match the legacy pattern
-  // (the "to £50k" tail is a value reference in an interrogative,
-  // not a fresh-edit imperative).
-  /(?<!did\s+you\s+)\b(?:change|update|set)\s+\S+\s+to\s+\S+/i,
+  // imperatives. Supports multi-word noun phrases ("set the budget
+  // to 100k", "set total cost to 50k", "set the total cost to 50k")
+  // via `(?:\s+\S+){0,2}` after the leading noun. The negative
+  // lookbehind preserves the existing refined-gate fixtures where
+  // digit-bearing state-queries like "did you change it to £50k?"
+  // and "did you set the budget to 100k?" must still match the
+  // legacy pattern (the "to <value>" tail is a value reference in
+  // an interrogative, not a fresh-edit imperative).
+  /(?<!did\s+you\s+)\b(?:change|update|set)\s+\S+(?:\s+\S+){0,2}\s+to\s+\S+/i,
 ];
 
 /**
