@@ -256,6 +256,7 @@ describe.runIf(SHOULD_RUN)('Wave 1 end-to-end: chip → pending action persisten
 });
 
 if (!SHOULD_RUN) {
+  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
   describe.skip('Wave 1 end-to-end (skipped)', () => {
     it('SHOULD_RUN gate is off — set RUN_WAVE0_STAGING=1 + staging env to run', () => {
       // intentional skip

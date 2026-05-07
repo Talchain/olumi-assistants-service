@@ -105,6 +105,7 @@ const v1ResponseWithConstraintDrops = {
 };
 
 // Skipped: pipeline gap — test mocks finaliseCeeDraftResponse() which is archived (Pipeline B). Deterministic. Blocked on rewrite to test constraint blocker injection via unified pipeline.
+// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
 describe.skip("Legacy V3 route: constraint-drop blockers", () => {
   let app: FastifyInstance;
 

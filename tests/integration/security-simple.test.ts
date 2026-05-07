@@ -32,6 +32,7 @@ vi.mock("../../src/services/validateClient.js", () => ({
 }));
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
 describe.skip("Security Tests (Simplified)", () => {
   describe("Body size limits", () => {
     it("rejects requests larger than 1MB", async () => {

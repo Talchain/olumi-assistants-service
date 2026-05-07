@@ -13,6 +13,7 @@ import draftRoute from "../../src/routes/assist.draft-graph.js";
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
 describe.skip("Determinism - Stable Edge IDs (v04)", () => {
   let app: ReturnType<typeof Fastify>;
 

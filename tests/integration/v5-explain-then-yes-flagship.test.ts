@@ -248,6 +248,7 @@ describe.runIf(SHOULD_RUN)('Wave 5 flagship: explain_results → yes resume seam
 });
 
 if (!SHOULD_RUN) {
+  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
   describe.skip('Wave 5 flagship (skipped)', () => {
     it('SHOULD_RUN gate is off — set RUN_WAVE0_STAGING=1 + staging env', () => {
       // intentional skip

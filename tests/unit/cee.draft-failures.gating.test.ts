@@ -17,6 +17,7 @@ vi.mock('../../src/cee/draft-failures/store.js', () => ({
 import { build } from '../../src/server.js';
 
 // Skipped: pipeline gap — X-Debug-Force-Missing-Kinds no longer produces 400 in unified pipeline. Deterministic (uses fixture mocks). Blocked on gating logic update or assertion rewrite.
+// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
 describe.skip('CEE draft failures unsafe gating', () => {
   beforeEach(() => {
     _resetConfigCache();

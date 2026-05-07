@@ -132,6 +132,7 @@ async function streamWithDisconnect(
 }
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
 describe.skip("Chaos: Mid-Stream Disconnect", () => {
   let app: FastifyInstance;
   let redisAvailable = false;

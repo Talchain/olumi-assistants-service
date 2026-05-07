@@ -193,6 +193,7 @@ describe.runIf(SHOULD_RUN)('Wave 2 staging: short-confirm resume seam', () => {
 });
 
 if (!SHOULD_RUN) {
+  // TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
   describe.skip('Wave 2 staging short-confirm seam (skipped)', () => {
     it('SHOULD_RUN gate is off — set RUN_WAVE0_STAGING=1 + staging env', () => {
       // intentional skip

@@ -11,6 +11,7 @@ import { cleanBaseUrl } from "../helpers/env-setup.js";
 vi.mock("dotenv/config", () => ({}));
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9000 — CI hygiene baseline: inherited skip retained pending triage
 describe.skip("Legacy SSE Flag", () => {
   const originalEnv = { ...process.env };
 
