@@ -808,8 +808,9 @@ export const TelemetryEvents = {
   // CI hygiene baseline (claude-v5/ci-hygiene-baseline) — pre-existing live
   // emit() call sites that were never registered, causing Telemetry Event
   // Name Validation to fail on every staging push. Registry-only addition;
-  // no new emissions. Each entry below is paired with a single, currently
-  // active call site in src/.
+  // no new emissions. Each entry corresponds to one or more currently active
+  // emit() sites in src/ (xml_parse_fallback fires from three sites, the
+  // streaming preflight failure from two, the rest from one each).
   EditGraphNoOperations: "edit_graph.no_operations",
   StreamingGeneratorPreflightFailure: "streaming.generator_preflight_failure",
   DeterministicPmsFallbackUsed: "deterministic.pms_fallback_used",
