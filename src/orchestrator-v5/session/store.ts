@@ -21,6 +21,22 @@ import type {
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import type { PendingAction } from './pending-action.js';
 
+/**
+ * A {@link HandlerFact} paired with its parent turn's row id and
+ * creation timestamp. Returned by {@link SessionStore.readFactsWithTurnFor}.
+ *
+ * The proposed-change synthesis idempotency path filters by
+ * `turn_created_at >= proposal.emitted_at_iso` so pre-emit facts are
+ * NEVER eligible. This binding is schema-aligned (the FK
+ * `v5_handler_facts.v5_conversation_turn_id` ⇒ `v5_conversation_turns.id`
+ * supplies the link) rather than positional.
+ */
+export interface HandlerFactWithTurn {
+  readonly fact: HandlerFact;
+  readonly turn_id: string;
+  readonly turn_created_at: string;
+}
+
 export interface SessionTurnWrite {
   readonly scenario_id: string;
   readonly turn_id: string;
@@ -99,6 +115,25 @@ export interface SessionStore {
     conversationTurnRowIds: readonly string[],
     handlerId?: V5ActionType,
   ): Promise<readonly HandlerFact[]>;
+  /**
+   * Variant of {@link readFactsFor} that pairs each fact with its
+   * parent turn id and creation timestamp. The proposed-change
+   * synthesis path uses this to gate idempotency by an explicit
+   * schema-aligned ownership link rather than positional ordering
+   * across `priorTurns` and `priorFacts`.
+   *
+   * Results are ordered newest-first by the fact's `created_at DESC`,
+   * matching `readFactsFor`.
+   *
+   * Optional on the interface so existing test mocks aren't forced
+   * to implement it; buildTurnContext falls back to an empty array
+   * when absent. Production (`SupabaseSessionStore`) always
+   * implements this.
+   */
+  readFactsWithTurnFor?(
+    conversationTurnRowIds: readonly string[],
+    handlerId?: V5ActionType,
+  ): Promise<readonly HandlerFactWithTurn[]>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**

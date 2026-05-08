@@ -677,6 +677,107 @@ describe('SupabaseSessionStore.readFactsFor', () => {
   });
 });
 
+describe('SupabaseSessionStore.readFactsWithTurnFor (V5 G7/G8 P0-3)', () => {
+  // The proposed-change synthesis idempotency path filters facts by
+  // `turn_created_at >= proposal.emitted_at_iso` against an explicit
+  // FK ownership link. These tests pin the production read path's
+  // return shape and column projection.
+
+  it('exists on the production store and returns wrapped { fact, turn_id, turn_created_at }', async () => {
+    const stagingRow = {
+      noop: false,
+      handler_id: 'add_constraint',
+      action_type: 'add_constraint',
+      v5_conversation_turn_id: 'turn-row-uuid-1',
+      created_at: '2026-05-08T12:00:30.000Z',
+      payload: {
+        fact_type: 'add_constraint',
+        fact_version: 1,
+        result: {
+          target_id: 'constraint-uuid-1',
+          status: 'applied',
+          before: null,
+          after: {
+            constraint_id: 'constraint-uuid-1',
+            node_id: 'goal-g',
+            operator: '<=',
+            value: 100,
+          },
+        },
+      },
+    };
+    const { client } = makeClient({
+      selectResult: { data: [stagingRow], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    expect(typeof store.readFactsWithTurnFor).toBe('function');
+    const wrapped = await store.readFactsWithTurnFor(['turn-row-uuid-1']);
+    expect(wrapped).toHaveLength(1);
+    const entry = wrapped[0]!;
+    expect(entry.fact.fact_type).toBe('add_constraint');
+    expect(entry.fact.noop).toBe(false);
+    expect(entry.turn_id).toBe('turn-row-uuid-1');
+    expect(entry.turn_created_at).toBe('2026-05-08T12:00:30.000Z');
+  });
+
+  it('SELECT includes v5_conversation_turn_id and created_at columns', async () => {
+    const { client, selectCalls } = makeClient();
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    await store.readFactsWithTurnFor(['turn-row-uuid-1']);
+    expect(selectCalls).toHaveLength(1);
+    const selected = selectCalls[0]!;
+    expect(selected.cols).toContain('v5_conversation_turn_id');
+    expect(selected.cols).toContain('created_at');
+  });
+
+  it('short-circuits on empty turn-id list without hitting DB', async () => {
+    const { client, selectCalls } = makeClient();
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    const got = await store.readFactsWithTurnFor([]);
+    expect(got).toEqual([]);
+    expect(selectCalls).toHaveLength(0);
+  });
+
+  it('throws SessionReadError on DB error', async () => {
+    const { client } = makeClient({
+      selectResult: { error: { message: 'boom', code: '42P01' } },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    await expect(store.readFactsWithTurnFor(['row-1'])).rejects.toBeInstanceOf(SessionReadError);
+  });
+
+  it('readFactsFor delegates to readFactsWithTurnFor (single source of truth)', async () => {
+    const stagingRow = {
+      noop: false,
+      handler_id: 'run_analysis',
+      action_type: 'run_analysis',
+      v5_conversation_turn_id: 'turn-row-uuid-1',
+      created_at: '2026-05-08T12:00:30.000Z',
+      payload: {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        result: {
+          scenario_id: '40927e27-bf1f-4788-b86f-40eeadaa4fca',
+          leading_option_id: 'opt-a',
+          summary: 'ok',
+        },
+      },
+    };
+    const { client } = makeClient({
+      selectResult: { data: [stagingRow], error: null },
+    });
+    const cache = new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 });
+    const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+    const facts = await store.readFactsFor(['turn-row-uuid-1']);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]!.fact_type).toBe('run_analysis');
+  });
+});
+
 describe('SupabaseSessionStore.loadGraph', () => {
   it('returns null when scenarios.graph is null (no graph stored yet)', async () => {
     const { client, selectCalls } = makeClient({

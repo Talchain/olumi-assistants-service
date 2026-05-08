@@ -154,10 +154,13 @@ function isExpired(pa: PendingAction, nowMs: number): boolean {
  *
  * `apply_proposed_change` and `edit_graph_add_risk` are both
  * graph-mutating kinds (their docstring in `pending-action.ts` notes
- * they depend on `graph_hash`). They are reserved-but-not-emitted
- * today; classifying them as `mutating` now means the day they wire
- * up they fail closed by default rather than slipping through the
- * non-mutating branch and bypassing the divergence guard.
+ * they depend on `graph_hash`). `apply_proposed_change` is now
+ * emitted by `compose/proposed-change.ts::emitProposedChange` and
+ * resumed via the deterministic short-confirm path, with hash
+ * divergence enforced by `decideProposedChangeSynthesis` before
+ * dispatch. `edit_graph_add_risk` remains reserved-but-not-emitted.
+ * Classifying both as `mutating` means the divergence guard fires
+ * by default rather than slipping through the non-mutating branch.
  *
  * Type design: `Record<PendingActionKind, ...>` is exhaustive at
  * compile time — adding a kind to the `PendingAction.action.kind`

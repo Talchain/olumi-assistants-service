@@ -23,6 +23,7 @@
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact, SessionTurn, TurnContext } from '@talchain/schemas/orchestrator';
+import type { HandlerFactWithTurn } from './session/store.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
@@ -49,6 +50,20 @@ export interface EnrichedTurnContext extends TurnContext {
    * handler turns exist or when the facts read degraded.
    */
   readonly prior_facts: readonly HandlerFact[];
+  /**
+   * Same facts as `prior_facts` but each entry pairs the fact with
+   * its parent turn's row id and creation timestamp via the FK
+   * `v5_handler_facts.v5_conversation_turn_id`. Consumed by the
+   * proposed-change synthesis idempotency path which filters facts
+   * by `turn_created_at >= proposal.emitted_at_iso` — a schema-
+   * aligned ownership link, not a positional heuristic across
+   * `prior_turns` and `prior_facts`. Order matches `prior_facts`.
+   *
+   * Empty when the session store doesn't implement
+   * `readFactsWithTurnFor` (only the case for legacy test mocks);
+   * production always populates this from the FK join.
+   */
+  readonly prior_facts_with_turn: readonly HandlerFactWithTurn[];
   /**
    * V5 Phase 1 brief persistence: the user-supplied free-text decision
    * brief, sourced from canonical state (`scenarios.brief_text`) rather
@@ -180,7 +195,12 @@ export async function buildTurnContext(
 
   const store = options.sessionStore ?? tryGetSessionStore(requestId, payload.scenario_id);
   const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, store);
-  const priorFacts = await fetchPriorFacts(priorTurns, requestId, payload.scenario_id, store);
+  const { facts: priorFacts, factsWithTurn: priorFactsWithTurn } = await fetchPriorFacts(
+    priorTurns,
+    requestId,
+    payload.scenario_id,
+    store,
+  );
   // V5 Phase 1 brief persistence: load the persisted brief_text alongside
   // the graph so callers can read both from canonical state. Failure to
   // read scenarios.* is non-fatal (graceful degradation); the field
@@ -205,6 +225,7 @@ export async function buildTurnContext(
     ...baseContext,
     prior_turns: priorTurns,
     prior_facts: priorFacts,
+    prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
     most_recent_pending_actions: mostRecentPendingActions,
@@ -327,7 +348,10 @@ async function fetchPriorFacts(
   requestId: string,
   scenarioId: string,
   store: SessionStore | undefined,
-): Promise<readonly HandlerFact[]> {
+): Promise<{
+  readonly facts: readonly HandlerFact[];
+  readonly factsWithTurn: readonly HandlerFactWithTurn[];
+}> {
   // Critical correctness fix: `readFactsFor` filters against
   // `v5_handler_facts.v5_conversation_turn_id`, which is the FK to the
   // `v5_conversation_turns.id` row UUID — NOT the client-supplied
@@ -363,11 +387,24 @@ async function fetchPriorFacts(
     },
     'V5 buildTurnContext: fact chain trace (verbose)',
   );
-  if (!store) return [];
-  if (priorTurns.length === 0) return [];
-  if (handlerRowIds.length === 0) return [];
+  const empty = { facts: [] as readonly HandlerFact[], factsWithTurn: [] as readonly HandlerFactWithTurn[] };
+  if (!store) return empty;
+  if (priorTurns.length === 0) return empty;
+  if (handlerRowIds.length === 0) return empty;
   try {
-    const facts = await store.readFactsFor(handlerRowIds);
+    // Prefer the with-turn variant when the store implements it
+    // (production SupabaseSessionStore always does). Test mocks
+    // that pre-date this method fall back to readFactsFor with an
+    // empty factsWithTurn — the proposed-change synthesis path is
+    // disabled in that case (it never triggers without facts), but
+    // every other consumer keeps working.
+    const factsWithTurn = store.readFactsWithTurnFor
+      ? await store.readFactsWithTurnFor(handlerRowIds)
+      : ([] as readonly HandlerFactWithTurn[]);
+    const facts =
+      factsWithTurn.length > 0
+        ? factsWithTurn.map((w) => w.fact)
+        : await store.readFactsFor(handlerRowIds);
     log.info(
       {
         event: 'v5_turn_context_facts',
@@ -381,7 +418,7 @@ async function fetchPriorFacts(
       },
       'V5 buildTurnContext: prior_facts loaded',
     );
-    return facts;
+    return { facts, factsWithTurn };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
@@ -395,7 +432,7 @@ async function fetchPriorFacts(
       error_code: errorCode ?? 'unknown',
       severity: 'warning',
     });
-    return [];
+    return empty;
   }
 }
 
