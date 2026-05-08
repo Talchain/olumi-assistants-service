@@ -19,7 +19,7 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
 }));
 
 import { composeResponse } from "../../../../src/orchestrator/deterministic/response-composer.js";
-import type { HandlerFact, HandlerAction } from "../../../../src/orchestrator/deterministic/response-composer.js";
+import type { HandlerFact } from "../../../../src/orchestrator/deterministic/response-composer.js";
 import type { CoachingContext } from "../../../../src/orchestrator/deterministic/coaching-context-builder.js";
 
 // ============================================================================

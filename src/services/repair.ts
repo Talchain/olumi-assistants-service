@@ -359,7 +359,7 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
   }
 
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const nodeKindMap = new Map(nodes.map((node) => [node.id, node.kind]));
+  const _nodeKindMap = new Map(nodes.map((node) => [node.id, node.kind]));
 
   // Filter only dangling edges (references to nodes outside the trimmed set)
   let validEdges = g.edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));

@@ -194,7 +194,7 @@ async function postProxy(): Promise<ProxyResult> {
 
 describe.skipIf(SKIP_REASON !== null)("staging proxy v5 hiring-prompt smoke", () => {
   if (SKIP_REASON !== null) {
-    // eslint-disable-next-line no-console
+     
     console.log(`[proxy-v5-hiring-prompt] ${SKIP_REASON}`);
   }
 
@@ -205,7 +205,7 @@ describe.skipIf(SKIP_REASON !== null)("staging proxy v5 hiring-prompt smoke", ()
       const url = proxyUrl();
       const result = await preflight();
 
-      // eslint-disable-next-line no-console
+       
       console.log(
         `[proxy-v5-hiring-prompt] OPTIONS host=${hostFor(url)} ` +
           `status=${result.status} elapsed_ms=${result.elapsed_ms} ` +
@@ -252,7 +252,7 @@ describe.skipIf(SKIP_REASON !== null)("staging proxy v5 hiring-prompt smoke", ()
       const result = await postProxy();
 
       // Bounded, non-leaky log (host only, no path, no query, no auth).
-      // eslint-disable-next-line no-console
+       
       console.log(
         `[proxy-v5-hiring-prompt] POST host=${hostFor(url)} ` +
           `status=${result.status} elapsed_ms=${result.elapsed_ms} ` +

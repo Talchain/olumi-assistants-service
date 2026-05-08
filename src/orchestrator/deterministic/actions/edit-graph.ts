@@ -22,7 +22,7 @@
  */
 
 import type { ActionDefinition } from "./types.js";
-import type { DeterministicTurnContext, ActionResult, ActionFailure } from "../types.js";
+import type { DeterministicTurnContext, ActionResult } from "../types.js";
 import type { HandlerFact } from "../response-composer.js";
 import type {
   ConversationContext,

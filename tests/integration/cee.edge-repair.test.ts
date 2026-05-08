@@ -96,6 +96,7 @@ import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 // Skipped: pipeline gap — edge repair assertions expect trace fields not populated in unified pipeline. Deterministic (uses fixture mocks). Blocked on repair trace wiring.
+// TODO: ISSUE-9007 — CEE V1 draft-graph legacy route (edge repair)
 describe.skip("POST /assist/v1/draft-graph (CEE v1) - edge repair", () => {
   let app: FastifyInstance;
 

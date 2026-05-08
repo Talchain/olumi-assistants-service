@@ -188,6 +188,7 @@ vi.mock("../../src/services/validateClient.js", () => ({
 }));
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9016 — Golden brief archetypes (separate from existing GOLDEN-001)
 describe.skip("Golden Brief Archetypes", () => {
   beforeAll(async () => {
     // Load all golden brief fixtures into map for mock lookups

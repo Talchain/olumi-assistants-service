@@ -36,7 +36,7 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
 }));
 
 const { runTurnExecutor } = await import('../../src/orchestrator-v5/turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../../src/orchestrator-v5/routing/tool-schema.js');
+const { OLUMI_ACTION_TOOL_NAME: _OLUMI_ACTION_TOOL_NAME } = await import('../../src/orchestrator-v5/routing/tool-schema.js');
 const { computeDeterministicGraphHash } = await import(
   '../../src/orchestrator-v5/context/graph-hash.js'
 );

@@ -17,7 +17,7 @@ import type { FieldDeletionEvent } from "./utils/field-deletion-audit.js";
 import type { components } from "../../generated/openapi.d.ts";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
-type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
+type _CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
 type CEEQualityMeta = components["schemas"]["CEEQualityMeta"];
 

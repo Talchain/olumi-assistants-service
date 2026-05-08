@@ -411,7 +411,7 @@ if (stillInvalid.length > 0) {
 
 // Post-repair pass rate calculation
 console.log("\n=== Post-Repair Pass Rate (by model) ===\n");
-const modelStats = new Map<string, { total: number; originalPass: number; postRepairPass: number }>();
+const _modelStats = new Map<string, { total: number; originalPass: number; postRepairPass: number }>();
 
 // Total briefs per model = 14
 for (const model of ["gpt-4.1", "gpt-4o"]) {

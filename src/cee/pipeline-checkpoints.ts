@@ -236,7 +236,8 @@ export interface ProvenanceInput {
 
 export function assembleCeeProvenance(input: ProvenanceInput): CEEProvenance {
   const promptSource: CEEProvenance['prompt_source'] =
-    Boolean(process.env.CEE_DRAFT_PROMPT_VERSION)
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
+    process.env.CEE_DRAFT_PROMPT_VERSION
       ? 'env_override'
       : input.promptSource === 'store'
         ? 'supabase'
@@ -248,9 +249,11 @@ export function assembleCeeProvenance(input: ProvenanceInput): CEEProvenance {
     build_timestamp: BUILD_TIMESTAMP,
     prompt_version: input.promptVersion ?? 'unknown',
     prompt_source: promptSource,
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
     prompt_override_active: Boolean(process.env.CEE_DRAFT_PROMPT_VERSION),
     model: input.model,
     pipeline_path: input.pipelinePath,
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
     engine_base_url_configured: Boolean(process.env.ENGINE_BASE_URL),
     model_override_active: input.modelOverrideActive ?? false,
     prompt_store_version: input.promptStoreVersion ?? null,

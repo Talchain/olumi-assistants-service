@@ -6,17 +6,16 @@
  * not just on constructed object shapes.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   validateAssembly,
   PromptValidationError,
 } from "../../src/orchestrator/prompt-zones/validate.js";
-import type { Zone2Block } from "../../src/orchestrator/prompt-zones/zone2-blocks.js";
 import {
   buildAnalysisReadyPayload,
   type AnalysisReadyFallbackMeta,
 } from "../../src/cee/transforms/analysis-ready.js";
-import type { OptionV3T, GraphV3T, NodeV3T } from "../../src/schemas/cee-v3.js";
+import type { OptionV3T, GraphV3T } from "../../src/schemas/cee-v3.js";
 import {
   transformEdgeToV3,
   transformGraphToV3,

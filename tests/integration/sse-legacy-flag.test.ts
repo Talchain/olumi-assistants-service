@@ -11,6 +11,7 @@ import { cleanBaseUrl } from "../helpers/env-setup.js";
 vi.mock("dotenv/config", () => ({}));
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9011 — Legacy SSE flag suite parked
 describe.skip("Legacy SSE Flag", () => {
   const originalEnv = { ...process.env };
 

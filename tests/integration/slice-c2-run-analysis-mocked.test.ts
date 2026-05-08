@@ -262,7 +262,7 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
       coaching_signal_produced_at,
       ...enrichmentWithoutCoaching
     } = fact.result.enrichment;
-    void coaching_signal_id; // eslint-disable-line @typescript-eslint/no-unused-vars
+    void coaching_signal_id;  
     void coaching_signal_turn_id;
     void coaching_signal_produced_at;
     expect(enrichmentWithoutCoaching).toEqual(largerFixture);

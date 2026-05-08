@@ -27,7 +27,7 @@ beforeAll(() => {
   // Configure an admin key for the test. The middleware reads from
   // config.prompts.adminApiKey at call time; we set the env var that the
   // config layer reads from.
-  // eslint-disable-next-line no-restricted-syntax
+   
   process.env.ADMIN_API_KEY = 'test-admin-key';
 });
 

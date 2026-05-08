@@ -14,23 +14,17 @@ import { isToolAllowedAtStage } from "../tools/stage-policy.js";
 import type { OrchestratorTurnRequest } from "../types.js";
 import type {
   PipelineDeps,
-  OrchestratorResponseEnvelopeV2,
   EnrichedContext,
   LLMResult,
-  LLMClient,
-  TypedConversationBlock,
 } from "./types.js";
 import type { Phase4Result } from "./phase4-tools/index.js";
 import { phase1Enrich } from "./phase1-enrichment/index.js";
 import { phase2Route } from "./phase2-specialists/index.js";
-import { phase3Generate } from "./phase3-llm/index.js";
 import { phase3PrepareForStreaming } from "./phase3-llm/index.js";
 import { assembleV2SystemPrompt } from "./phase3-llm/prompt-assembler.js";
 import { phase4Execute } from "./phase4-tools/index.js";
 import { phase5Validate } from "./phase5-validation/index.js";
-import { buildErrorEnvelope, resolveContextHash } from "./phase5-validation/envelope-assembler.js";
-import { routeSystemEvent, appendSystemMessages } from "../system-event-router.js";
-import { getAdapter } from "../../adapters/llm/router.js";
+import { buildErrorEnvelope } from "./phase5-validation/envelope-assembler.js";
 import { classifyIntent, classifyIntentWithContext } from "../intent-gate.js";
 import type { IntentGateResult } from "../intent-gate.js";
 import { isLongRunningTool } from "../tools/registry.js";

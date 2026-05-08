@@ -21,7 +21,9 @@ import { log } from '../utils/telemetry.js';
 // Configuration
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const DAILY_TOKEN_BUDGET = Number(process.env.CEE_DAILY_TOKEN_BUDGET) || 500_000;
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const BUDGET_ENABLED = (process.env.CEE_TOKEN_BUDGET_ENABLED ?? 'true') !== 'false';
 
 /** Whether budget enforcement is enabled. */

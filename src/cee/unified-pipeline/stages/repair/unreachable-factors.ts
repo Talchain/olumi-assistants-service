@@ -101,7 +101,7 @@ function hasPathToGoal(
 /**
  * Find the most commonly targeted outcome/risk node by other factors.
  */
-function findMostCommonOutcomeRiskTarget(
+function _findMostCommonOutcomeRiskTarget(
   nodes: readonly NodeT[],
   edges: readonly EdgeT[],
 ): string | undefined {

@@ -241,7 +241,7 @@ export function synthesiseDisplayValue(data: DisplayValueInput): string | undefi
 export function synthesiseRangeDisplayValue(
   prior: RangeDisplayValueInput,
   unit?: string,
-  factorType?: string,
+  _factorType?: string,
 ): string | undefined {
   const { range_min: rangeMin, range_max: rangeMax, distribution } = prior;
 

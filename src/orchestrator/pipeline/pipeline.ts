@@ -38,8 +38,7 @@ import type { EditGraphTraceDiagnostics } from "../tools/edit-graph.js";
 import { isAnalysisCurrent, isAnalysisExplainable, isAnalysisPresent, isAnalysisRunnable, isResultsExplanationEligible, normalizeAnalysisEnvelope } from "../analysis-state.js";
 import { config } from "../../config/index.js";
 import { resolveDskHash } from "../dsk-loader.js";
-import { DiagnosticTraceCollector, emptyDiagnosticTrace } from "./diagnostic-trace.js";
-import type { DiagnosticTrace } from "./diagnostic-trace.js";
+import { DiagnosticTraceCollector } from "./diagnostic-trace.js";
 import { getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 
 /**
@@ -1139,6 +1138,7 @@ function attachDebugBundleToEnvelope(
 }
 
 function shouldExposeDebugBundleInEnvelope(): boolean {
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
   return process.env.NODE_ENV !== 'production' || process.env.ORCHESTRATOR_DEBUG_BUNDLE === 'true';
 }
 
@@ -1149,10 +1149,12 @@ function shouldExposeDebugBundleInEnvelope(): boolean {
  */
 function isDiagnosticTraceEnabled(): boolean {
   // Explicit flag always wins
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
   if (process.env.CEE_DIAGNOSTIC_TRACE_ENABLED !== undefined) {
     return config.features.diagnosticTraceEnabled;
   }
   // Default: on in non-production (staging/dev/test), off in production
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
   return process.env.NODE_ENV !== 'production';
 }
 

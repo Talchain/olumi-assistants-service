@@ -80,6 +80,7 @@ export function buildDeterministicPrompt(ctx: DeterministicTurnContext): string 
     sections.push(RESPONSE_CONTRACT);
     sections.push(SCIENCE_TRIGGERS);
 
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
     const fallbackMeta = { task: 'orchestrator', env: process.env.NODE_ENV ?? 'unknown' };
     emit('deterministic.pms_fallback_used', fallbackMeta);
     log.warn(fallbackMeta, 'deterministic.pms_fallback_used');

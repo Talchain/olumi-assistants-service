@@ -8,7 +8,7 @@
  * challenge_assumption, run_premortem, what_would_flip.
  */
 
-import type { DeterministicTurnContext, AnalysisSummary, DriverSummary } from "./types.js";
+import type { DeterministicTurnContext, AnalysisSummary } from "./types.js";
 
 // ============================================================================
 // Template Types

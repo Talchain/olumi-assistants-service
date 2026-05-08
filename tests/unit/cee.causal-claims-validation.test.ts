@@ -68,7 +68,7 @@ describe("validateCausalClaims", () => {
 
   // Test 4: Truncation at 20
   it("truncates to first 20 claims and emits TRUNCATED warning", () => {
-    const raw = Array.from({ length: 25 }, (_, i) => ({
+    const raw = Array.from({ length: 25 }, (_, _i) => ({
       type: "direct_effect" as const,
       from: "fac_1",
       to: "out_1",

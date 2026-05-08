@@ -244,7 +244,7 @@ function mapOptions(signals: BriefSignals): BriefIntelligence['options'] {
 
 function classifyConstraintType(
   marker: ConstraintMarker,
-  briefLower: string,
+  _briefLower: string,
 ): 'hard_limit' | 'success_condition' | 'guardrail' {
   const source = marker.source_text.toLowerCase();
 

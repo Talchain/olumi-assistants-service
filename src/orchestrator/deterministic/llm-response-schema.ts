@@ -6,7 +6,6 @@
  */
 
 import { z } from "zod";
-import { ACTION_NAMES } from "./actions/types.js";
 
 // ============================================================================
 // Canonical enums

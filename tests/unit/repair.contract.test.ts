@@ -74,7 +74,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 }));
 
 vi.mock("../../src/cee/validation/pipeline.js", () => ({
-  buildCeeErrorResponse: (code: string, msg: string, meta?: any) => ({
+  buildCeeErrorResponse: (code: string, msg: string, _meta?: any) => ({
     error: { code, message: msg },
   }),
   integrateClarifier: vi.fn(),
@@ -167,10 +167,7 @@ import { runStageRepair } from "../../src/cee/unified-pipeline/stages/repair/ind
 import { validateGraph } from "../../src/services/validateClientWithCache.js";
 import {
   validateAndFixGraph,
-  ensureGoalNode,
-  hasGoalNode,
 } from "../../src/cee/structure/index.js";
-import { validateMinimumStructure } from "../../src/cee/transforms/structure-checks.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -459,7 +456,7 @@ function setupDefaults(): void {
   vi.clearAllMocks();
 
   // PLoT validation passes, returning graph as-is
-  (validateGraph as any).mockImplementation(async (g: any) => ({
+  (validateGraph as any).mockImplementation(async (_g: any) => ({
     ok: true,
     violations: [],
     normalized: undefined,
@@ -664,7 +661,7 @@ describe("Stage 4 (Repair) — field preservation contract", () => {
       } as any);
 
       const ctx = makeCtx(graph);
-      const baselineEdgeCount = ctx.graph.edges.length;
+      const _baselineEdgeCount = ctx.graph.edges.length;
       await runStageRepair(ctx);
 
       // Contract allows edge removal
@@ -853,7 +850,7 @@ describe("Stage 4 (Repair) — field preservation contract", () => {
 
     it("edge stabilisation assigns deterministic IDs (allowedModifications.edge includes id)", async () => {
       const ctx = makeCtx();
-      const baselineIds = ctx.graph.edges.map((e: any) => e.id);
+      const _baselineIds = ctx.graph.edges.map((e: any) => e.id);
       await runStageRepair(ctx);
 
       // Edge IDs are stabilised to from::to::index format

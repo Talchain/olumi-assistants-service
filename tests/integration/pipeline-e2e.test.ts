@@ -430,7 +430,7 @@ describe("3e. Conversational retry — suppressed tool triggers plain chat", () 
     // No graph → frame stage. run_analysis is NOT allowed at frame stage.
     // LLM selects run_analysis but intent is conversational → retry with chat()
 
-    const xml = `<diagnostics>Mode: ACT</diagnostics>
+    const _xml = `<diagnostics>Mode: ACT</diagnostics>
 <response>
   <tool_calls>
     <tool name="run_analysis">

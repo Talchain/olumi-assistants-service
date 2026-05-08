@@ -31,7 +31,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
-import { validateStructural } from "../src/validator.js";
 import { score as scoreDraftGraph } from "../src/scorer.js";
 import { getProvider } from "../src/providers/index.js";
 import { extractJSON } from "../src/json-extractor.js";
@@ -662,7 +661,7 @@ async function main(): Promise<void> {
 
     // ── Raw LLM call ──
     console.log(`  [raw] Calling LLM directly...`);
-    const { response: rawResponse, raw_text: rawText } = await callRawLLM(brief, promptContent, model);
+    const { response: rawResponse, raw_text: _rawText } = await callRawLLM(brief, promptContent, model);
     const rawLatency = rawResponse.latency_ms;
 
     let rawScoreResult: ScoreResult;

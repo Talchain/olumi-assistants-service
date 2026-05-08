@@ -303,7 +303,6 @@ describe("Artefact Block Parsing", () => {
 // Artefact Suppression (convertExtractedBlocks)
 // ============================================================================
 
-import { vi } from "vitest";
 import { convertExtractedBlocks } from "../../../src/orchestrator/turn-handler.js";
 import type { ExtractedBlock } from "../../../src/orchestrator/response-parser.js";
 

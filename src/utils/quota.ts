@@ -120,7 +120,9 @@ export interface KeyQuota {
 }
 
 // In-memory fallback storage (bounded LRU, 10 000 keys, 1 hour TTL)
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const QUOTA_STORE_CAPACITY = Number(process.env.CEE_QUOTA_STORE_CAPACITY) || 10_000;
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const QUOTA_STORE_TTL_MS = Number(process.env.CEE_QUOTA_STORE_TTL_MS) || 60 * 60_000; // 1 hour
 const memoryQuotas = new LruTtlCache<string, KeyQuota>(QUOTA_STORE_CAPACITY, QUOTA_STORE_TTL_MS, (_key, _value, reason) => {
   log.warn({ event: 'cache_eviction', store: 'quota', reason }, 'Quota store entry evicted');

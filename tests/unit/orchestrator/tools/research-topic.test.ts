@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { classifyIntent, RESEARCH_PREFIXES } from "../../../../src/orchestrator/intent-gate.js";
+import { classifyIntent } from "../../../../src/orchestrator/intent-gate.js";
 
 // ============================================================================
 // Mock research client

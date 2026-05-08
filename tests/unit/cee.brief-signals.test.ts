@@ -5,11 +5,10 @@
  * has_measurable_target, baseline_state, etc.). Does NOT assert exact
  * marker strings — markers will churn.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { computeBriefSignals } from "../../src/cee/signals/brief-signals.js";
 import { formatBriefHeader } from "../../src/cee/signals/brief-header.js";
 import { evaluatePreflightDecision } from "../../src/cee/validation/preflight-decision.js";
-import type { BriefSignals } from "../../src/cee/signals/types.js";
 
 // ============================================================================
 // Golden fixtures — 6 preflight calibration briefs
@@ -343,7 +342,7 @@ describe("Integration", () => {
     expect(body).not.toContain("\n");
     // No brackets, quotes, backticks in body AFTER the version prefix
     const afterPrefix = body.replace("[BRIEF_SIGNALS v1] ", "");
-    expect(afterPrefix).not.toMatch(/[\[\]"'`]/);
+    expect(afterPrefix).not.toMatch(/[[\]"'`]/);
   });
 
   it("Weak brief → preflight populates clarification_questions from missing_items (strict mode)", () => {

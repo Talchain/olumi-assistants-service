@@ -51,7 +51,6 @@ import type {
   RunManifest,
   RunConfig,
   PromptType,
-  BaseFixture,
   GenericScoredResult,
   LLMResponse,
   EvaluatorAdapter,
@@ -784,7 +783,7 @@ async function runGenericType(args: GenericRunArgs): Promise<void> {
   // Override brief bodies with adapter-built user messages
   for (const pb of pseudoBriefs) {
     const fixture = fixtureMap.get(pb.id)!;
-    const { system, user } = adapter.buildRequest(fixture, promptContent);
+    const { system: _system, user } = adapter.buildRequest(fixture, promptContent);
     // Store the adapter-built user message as the brief body
     pb.body = user;
     // For non-draft_graph, the system prompt may be modified (e.g. DSK injection)

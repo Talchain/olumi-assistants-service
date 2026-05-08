@@ -8,13 +8,12 @@
  * - sampleEdgesStratified: deterministic sort, edge category sampling, fallback
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   captureCheckpoint,
   assembleCeeProvenance,
   applyCheckpointSizeGuard,
   type PipelineCheckpoint,
-  type CEEProvenance,
   type CheckpointStage,
 } from '../../src/cee/pipeline-checkpoints.js';
 

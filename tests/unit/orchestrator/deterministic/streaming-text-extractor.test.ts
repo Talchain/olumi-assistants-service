@@ -5,7 +5,7 @@
  * including escape handling, chunk boundary splitting, and fallback behaviour.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { StreamingTextExtractor } from "../../../../src/orchestrator/deterministic/streaming-text-extractor.js";
 
 function createExtractor() {

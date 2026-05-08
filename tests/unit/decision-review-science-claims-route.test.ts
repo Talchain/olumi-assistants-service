@@ -24,7 +24,7 @@ const {
   mockGetSystemPrompt,
   mockGetSystemPromptMeta,
   mockBuildScienceClaimsSection,
-  mockInjectScienceClaimsSection,
+  _mockInjectScienceClaimsSection,
   mockGetAdapter,
   mockGetMaxTokensFromConfig,
   mockLog,

@@ -46,7 +46,7 @@ export class OpenAIProvider implements LLMProvider {
     const start = Date.now();
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const response = await (client.responses as any).create(params, {
         signal: controller.signal,
       });

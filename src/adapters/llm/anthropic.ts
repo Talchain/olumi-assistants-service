@@ -19,8 +19,6 @@ import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './p
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 import { extractJsonFromResponse, type JsonExtractionOptions, type JsonExtractionResult } from '../../utils/json-extractor.js';
 import {
-  LLMNode as AnthropicNode,
-  LLMEdge as AnthropicEdge,
   LLMDraftResponse as AnthropicDraftResponse,
   LLMRepairResponse as AnthropicRepairResponse,
   LLMOptionsResponse as AnthropicOptionsResponse,

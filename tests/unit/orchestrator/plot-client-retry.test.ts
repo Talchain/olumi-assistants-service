@@ -394,7 +394,7 @@ describe("PLoT Client Retry Logic (H.4)", () => {
 
   describe("run — timeout retry with remaining budget", () => {
     it("retries once on PLoT timeout", async () => {
-      const controller = new AbortController();
+      const _controller = new AbortController();
 
       // First call: abort (simulating timeout)
       fetchSpy

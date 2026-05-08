@@ -6,7 +6,7 @@
  */
 
 import type { BriefStabilityMetrics } from "./stability-metrics.js";
-import type { BriefAggregateMetrics, ISLOutcomeStabilityStub } from "./aggregate-metrics.js";
+import type { BriefAggregateMetrics } from "./aggregate-metrics.js";
 import type { SensitivityComparison } from "./prompt-sensitivity.js";
 
 // ---------------------------------------------------------------------------

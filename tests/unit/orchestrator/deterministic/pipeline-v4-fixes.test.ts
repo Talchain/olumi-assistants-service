@@ -15,7 +15,7 @@ import { buildCoachingContext } from "../../../../src/orchestrator/deterministic
 import { buildToolDefinitions } from "../../../../src/orchestrator/deterministic/tool-builder.js";
 import { assembleV4Envelope } from "../../../../src/orchestrator/deterministic/pipeline-v4.js";
 import { mergeSessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
-import type { OrchestratorTurnRequest, V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
+import type { OrchestratorTurnRequest } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 import type { ActionName } from "../../../../src/orchestrator/deterministic/actions/types.js";
 

@@ -30,7 +30,6 @@ import {
   generateConstraintEdge,
 } from "../../src/cee/compound-goal/node-generator.js";
 import type { OptionV3T, GraphV3T, NodeV3T } from "../../src/schemas/cee-v3.js";
-import type { ExtractedGoalConstraint } from "../../src/cee/compound-goal/extractor.js";
 import { AnalysisBlocker } from "../../src/schemas/analysis-ready.js";
 
 // ============================================================================

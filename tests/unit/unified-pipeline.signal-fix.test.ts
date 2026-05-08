@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EventEmitter } from "events";
 
 // Mock all stage modules
 vi.mock("../../src/cee/unified-pipeline/stages/parse.js", () => ({
@@ -209,7 +210,6 @@ describe("Route-level socket signal creation (unit)", () => {
   });
 
   it("socket close event triggers abort on controller signal", () => {
-    const { EventEmitter } = require("events");
     const socket = new EventEmitter();
     socket.destroyed = false;
 
@@ -227,7 +227,6 @@ describe("Route-level socket signal creation (unit)", () => {
   });
 
   it("socket already destroyed → controller signal remains non-aborted", () => {
-    const { EventEmitter } = require("events");
     const socket = new EventEmitter();
     socket.destroyed = true;
 
@@ -241,7 +240,6 @@ describe("Route-level socket signal creation (unit)", () => {
   });
 
   it("socket listener is cleaned up after normal completion", () => {
-    const { EventEmitter } = require("events");
     const socket = new EventEmitter();
     socket.destroyed = false;
 

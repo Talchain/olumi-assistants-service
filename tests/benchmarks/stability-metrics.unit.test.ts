@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import { computeBriefStabilityMetrics } from "./stability-metrics.js";
-import type { MatchResult, MatchedNode, MatchedEdge } from "./matching.js";
+import type { MatchResult, MatchedEdge } from "./matching.js";
 import type { EdgeV3T } from "../../src/schemas/cee-v3.js";
 
 // ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@
  * - Unknown block types in <blocks> are dropped with a warning.
  */
 
-import type { ToolResponseBlock, ChatWithToolsResult } from "../adapters/llm/types.js";
+import type { ChatWithToolsResult } from "../adapters/llm/types.js";
 import type { SuggestedAction } from "./types.js";
 import { log, emit } from "../utils/telemetry.js";
 

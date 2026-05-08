@@ -14,7 +14,6 @@ import {
 import type {
   DecisionState,
   ConversationTurn,
-  RouteProfile,
   ContextFabricRoute,
   DecisionStage,
 } from "../../../../src/orchestrator/context-fabric/types.js";
@@ -277,7 +276,7 @@ describe("renderZone3", () => {
     ];
     const z3 = renderZone3(profile, minimalState(), turns, "current");
     // user_originated_fields should be wrapped
-    const wrappedIdx = z3.indexOf(UNTRUSTED_OPEN);
+    const _wrappedIdx = z3.indexOf(UNTRUSTED_OPEN);
     const labelIdx = z3.indexOf("User Label");
     expect(labelIdx).toBeGreaterThan(-1);
     // Find the UNTRUSTED_OPEN that precedes it

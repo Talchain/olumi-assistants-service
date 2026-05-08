@@ -124,6 +124,7 @@ export async function buildDeterministicPromptV2(
     staticBlock = promptCache.content;
   } else {
     staticBlock = STATIC_PROMPT_FALLBACK;
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
     const fallbackMeta = { task: 'orchestrator', env: process.env.NODE_ENV ?? 'unknown' };
     emit('v4.pms_fallback_used', fallbackMeta);
     log.warn(fallbackMeta, 'v4.pms_fallback_used');

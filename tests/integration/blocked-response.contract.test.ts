@@ -77,6 +77,7 @@ function makeCtx(overrides: Partial<{ requestId: string; ceeResponse: any }>): S
 // with a degraded flag. All of this contract's "soft gate" assertions are
 // now against defunct behaviour. Kept as a change record only — unskip
 // only after a follow-up brief restores a typed soft-gate path.
+// TODO: ISSUE-9001 — v5-maintenance: superseded by fail-closed migration
 describe.skip("Blocked Response Contract (Stream F) [v5-maintenance: superseded by fail-closed]", () => {
   let originalEnv: NodeJS.ProcessEnv;
 

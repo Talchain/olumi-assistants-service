@@ -17,7 +17,6 @@ import type {
   EditGraphFixture,
   EditGraphScore,
   GraphNode,
-  GraphEdge,
   ParsedGraph,
 } from "./types.js";
 

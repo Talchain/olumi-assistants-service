@@ -343,7 +343,7 @@ describe("Plan Annotation Checkpoint (Stage 3)", () => {
   });
 
   it("planAnnotation not set when graph is undefined (early return path)", async () => {
-    let capturedCtx: any;
+    let _capturedCtx: any;
 
     (runStageParse as any).mockImplementation(async (ctx: any) => {
       // Don't set ctx.graph — simulate parse failure with early return

@@ -15,7 +15,7 @@ import { z } from "zod";
 // Valid operation types (must match PatchOperation.op in types.ts)
 // ============================================================================
 
-const PatchOp = z.enum([
+const _PatchOp = z.enum([
   'add_node',
   'remove_node',
   'update_node',

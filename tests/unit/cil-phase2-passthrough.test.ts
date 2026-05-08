@@ -8,8 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { z } from "zod";
-import { Graph, Edge, Node } from "../../src/schemas/graph.js";
+import { Graph } from "../../src/schemas/graph.js";
 import { LLMEdge } from "../../src/adapters/llm/shared-schemas.js";
 import { DraftGraphOutput } from "../../src/schemas/assist.js";
 import { PipelineTraceSchema } from "../../src/schemas/ceeResponses.js";
