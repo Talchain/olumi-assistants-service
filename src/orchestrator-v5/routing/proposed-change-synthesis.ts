@@ -275,8 +275,13 @@ const HANDLER_MATCHERS: Readonly<
 /**
  * Pick the post-emit subset of facts for a given `handler_id`.
  *
- * Each entry's `fact_created_at` is the parent turn's creation
- * timestamp via the FK `v5_handler_facts.v5_conversation_turn_id`.
+ * Each entry's `fact_created_at` is the fact row's own DB-stamped
+ * `created_at`. Facts and their parent turn are written inside the
+ * same `append_turn_atomic` transaction (FK
+ * `v5_handler_facts.v5_conversation_turn_id`), so the fact-side
+ * timestamp is equivalent to the parent turn's `created_at` for the
+ * post-emit gate; we surface the fact-side value because it requires
+ * no JOIN at read time.
  * We filter directly on that — no positional pairing across
  * separate `priorTurns` / `priorFacts` arrays.
  */

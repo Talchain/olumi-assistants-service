@@ -669,30 +669,109 @@ describe('Proposed-change route-level — render-vs-raw label resolution couplin
     expect(addConstraintCalls).toHaveLength(0);
   });
 
-  it('two proposals BOTH rendering to "Apply this change" do NOT resolve by label (P1-2 ambiguity)', async () => {
+  it('two proposals BOTH rendering to "Apply this change" commit a deterministic clarification (pass-10 P1)', async () => {
     pendingActionsForRead = [
       unsafeLabelProposal('prop_aaaaaaaaaaaa'),
       unsafeLabelProposal('prop_bbbbbbbbbbbb'),
     ];
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-        .mockImplementation(async () => ({
-          content: [{ type: 'text', text: 'mock' }],
-          stop_reason: 'end_turn',
-          usage: { input_tokens: 1, output_tokens: 1 },
-          model: 'mock',
-          latencyMs: 0,
-        })),
-    };
-    await runTurnExecutor(payload('Apply this change'), 'req-rendered-fallback-ambiguous', {
-      routingAdapter: adapter,
-      handlerRegistry: stubbedRegistry(),
-    });
-    // Both candidates render to the same fallback. The matcher
-    // requires unambiguous resolution; the call falls through to
-    // the LLM rather than silently executing the first proposal.
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      payload('Apply this change'),
+      'req-rendered-fallback-ambiguous',
+      {
+        routingAdapter: adapter,
+        handlerRegistry: stubbedRegistry(),
+      },
+    );
+    // Pass-10 P1: ambiguous label match commits a deterministic
+    // clarification; LLM is NOT called and no proposal executes.
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
     expect(addConstraintCalls).toHaveLength(0);
+    // Exactly one commit — the deterministic clarification.
+    expect(appendCalls).toHaveLength(1);
+    // The clarification re-persists the ambiguous proposals so the
+    // user can disambiguate on the next turn.
+    const persisted = (
+      appendCalls[0] as {
+        pending_actions?: ReadonlyArray<{ chip_id: string; action: { kind: string } }>;
+      }
+    ).pending_actions;
+    expect(persisted).toBeDefined();
+    expect(persisted!.length).toBe(2);
+    expect(persisted!.map((p) => p.chip_id).sort()).toEqual(
+      ['prop_aaaaaaaaaaaa', 'prop_bbbbbbbbbbbb'].sort(),
+    );
+    // Assistant text is the generic prompt (both labels equal the
+    // safe fallback, so a numbered list of identical labels would
+    // not help).
+    expect(result.response.assistant_text).toBe(
+      'I had more than one offer open. Which would you like?',
+    );
+  });
+
+  it('two proposals with DISTINCT labels both matching the user input commit a numbered clarification', async () => {
+    // Less common edge case: labels are different but both
+    // happen to match the user input by message overlap. The
+    // clarification text uses the rendered labels to disambiguate.
+    pendingActionsForRead = [
+      {
+        id: `pa-${randomUUID()}`,
+        scenario_id: SCENARIO_ID,
+        chip_id: 'prop_aaaaaaaaaaaa',
+        action: {
+          kind: 'apply_proposed_change',
+          proposal_ref: 'prop_aaaaaaaaaaaa',
+          inline_patch: {
+            handler_id: 'add_constraint',
+            params: { value: 100, constraint_type: 'at_most', label: 'Cost cap' },
+            target_entity_ids: ['goal-g'],
+          },
+          public_label: 'Apply the cap',
+          public_message: 'Apply this change',
+        },
+        preconditions: { graph_hash: GRAPH_HASH },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: EMITTED_AT_ISO,
+      },
+      {
+        id: `pa-${randomUUID()}`,
+        scenario_id: SCENARIO_ID,
+        chip_id: 'prop_bbbbbbbbbbbb',
+        action: {
+          kind: 'apply_proposed_change',
+          proposal_ref: 'prop_bbbbbbbbbbbb',
+          inline_patch: {
+            handler_id: 'add_constraint',
+            params: { value: 200, constraint_type: 'at_most', label: 'Time cap' },
+            target_entity_ids: ['goal-g'],
+          },
+          public_label: 'Apply this change',
+          public_message: 'Apply the change',
+        },
+        preconditions: { graph_hash: GRAPH_HASH },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: EMITTED_AT_ISO,
+      },
+    ];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      payload('Apply this change'),
+      'req-distinct-labels-ambiguous',
+      {
+        routingAdapter: adapter,
+        handlerRegistry: stubbedRegistry(),
+      },
+    );
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(0);
+    expect(appendCalls).toHaveLength(1);
+    // At least one rendered label is distinct from the safe
+    // fallback, so the clarification renders the numbered list.
+    expect(result.response.assistant_text).toContain('Which one would you like?');
+    expect(result.response.assistant_text).toContain('1)');
+    expect(result.response.assistant_text).toContain('2)');
   });
 
   it('chip-click replay: typing the rendered MESSAGE text resolves the same way as the label', async () => {
@@ -1108,8 +1187,7 @@ describe('Proposed-change route-level — pre-route stack stays deterministic (p
   // ambiguity) MUST stay free of LLM round-trips. Each match path is
   // expected to commit exactly once — either via the handler-dispatch
   // commit (label / message / ordinal match) or via a deterministic
-  // direct-answer commit (dismissal, duplicate-label ambiguity falls
-  // through to LLM and is NOT included here).
+  // direct-answer commit (dismissal, duplicate-label ambiguity).
   //
   // This is NOT a wall-clock latency test — it asserts the structural
   // invariant that pre-routes never enter LLM paths. Latency
@@ -1224,7 +1302,7 @@ describe('Proposed-change route-level — pre-route stack stays deterministic (p
     expect(appendCalls).toHaveLength(1);
   });
 
-  it('duplicate-label ambiguity: 0 handler dispatch (matcher refuses; clarification or LLM)', async () => {
+  it('duplicate-label ambiguity: 0 LLM, 0 handler dispatch, exactly 1 deterministic clarification commit (pass-10 P1)', async () => {
     pendingActionsForRead = [
       safeProposal({
         chipId: 'prop_aaaaaaaaaaaa',
@@ -1237,24 +1315,24 @@ describe('Proposed-change route-level — pre-route stack stays deterministic (p
         message: 'B unique message',
       }),
     ];
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-        .mockImplementation(async () => ({
-          content: [{ type: 'text', text: 'mock' }],
-          stop_reason: 'end_turn',
-          usage: { input_tokens: 1, output_tokens: 1 },
-          model: 'mock',
-          latencyMs: 0,
-        })),
-    };
+    const adapter = throwingRoutingAdapter();
     await runTurnExecutor(payload('Apply this change'), 'req-smoke-ambiguous', {
       routingAdapter: adapter,
       handlerRegistry: stubbedRegistry(),
     });
-    // The crucial structural invariant: even when LLM falls in to
-    // resolve the ambiguity, the handler is NEVER silently invoked.
+    // Pass-10 P1: duplicate-label ambiguity is a deterministic
+    // clarification path — no LLM, no handler dispatch, exactly
+    // one commit, and the ambiguous proposals are re-persisted so
+    // the next-turn reply can disambiguate.
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
     expect(addConstraintCalls).toHaveLength(0);
+    expect(appendCalls).toHaveLength(1);
+    const persisted = (
+      appendCalls[0] as {
+        pending_actions?: ReadonlyArray<{ chip_id: string }>;
+      }
+    ).pending_actions;
+    expect(persisted!.length).toBe(2);
   });
 });
 

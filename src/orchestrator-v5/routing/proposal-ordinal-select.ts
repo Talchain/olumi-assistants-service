@@ -1,23 +1,34 @@
 /**
- * V5 G7/G8 — proposal ordinal / label select pre-route.
+ * V5 G7/G8 — proposal ordinal / label / message select pre-route.
  *
- * Fires only when `tryShortConfirmResume` returns `recovery_ambiguous`
- * (multiple live `apply_proposed_change` candidates and the user said
- * something like "yes" or "do it"). When the user's message is an
- * ordinal pointer ("the first one", "option 2", "#3") or an exact label
- * match against one of the candidate chips, this module resolves the
- * ambiguity deterministically without an LLM round-trip.
+ * Used by TurnExecutor in TWO places:
+ *   1. Inside the `recovery_ambiguous` branch of `tryShortConfirmResume`
+ *      — when "yes"-style input meets multiple live proposals, this
+ *      helper picks ordinal / label / message matches against the
+ *      ambiguous chips before the numbered clarification commits.
+ *   2. Pass-7 P1-1 live-proposal label/ordinal pre-route — when
+ *      short-confirm returned no-match, this helper runs against ALL
+ *      live `apply_proposed_change` candidates so an exact-label or
+ *      ordinal reply ("Add the cost cap", "the first one") resolves
+ *      deterministically without going through the LLM.
  *
- * Pre-route order (locked in plan): state-query → short-confirm →
- * **proposal-ordinal-select (here, gated on ambiguous)** → proposal
- * dismissal → LLM. This module short-circuits cleanly: if the message
- * is not an ordinal / label match, returns `{ matched: false }` and the
- * existing ambiguous-clarification flow runs.
+ * Both call sites consume `resolveProposalRenderCopy` from
+ * `compose/proposed-change.ts` so the strings the matcher tests
+ * against are exactly the strings the user saw rendered.
+ *
+ * Result discriminates three outcomes (pass-10 P1):
+ *   - `matched: true` → exactly one candidate matched
+ *   - `matched: false, reason: 'no_match'` → caller continues to
+ *     dismissal / LLM as appropriate
+ *   - `matched: false, reason: 'ambiguous', ambiguousIndexes` → two
+ *     or more candidates matched. Caller MUST commit a deterministic
+ *     clarification rather than fall through to the LLM.
  *
  * Scope:
  *   - ordinals: "first" / "second" / "third" / "fourth" / "fifth"
  *   - phrasal forms: "the first one", "first one", "option 1", "#1"
  *   - exact label match (case-insensitive, full-string)
+ *   - exact message match (chip-click parity)
  *
  * Out of scope (deliberate):
  *   - Fuzzy label matching, partial-prefix label matching, synonyms.
@@ -89,7 +100,16 @@ export interface TryProposalOrdinalSelectInput {
 
 export type ProposalOrdinalSelectResult =
   | { readonly matched: true; readonly pending: PendingAction; readonly index: number }
-  | { readonly matched: false };
+  | { readonly matched: false; readonly reason: 'no_match' }
+  /**
+   * The user's input matched two or more candidates' rendered label
+   * or rendered message. The caller MUST NOT execute any candidate
+   * (executing the first would silently misroute) and SHOULD commit
+   * a deterministic clarification rather than fall through to the
+   * LLM. `ambiguousIndexes` carries the indexes of every candidate
+   * that matched, in the original `candidates` order.
+   */
+  | { readonly matched: false; readonly reason: 'ambiguous'; readonly ambiguousIndexes: readonly number[] };
 
 function tryOrdinalIndex(message: string): number | null {
   // Word ordinal: "first" / "the first one" / "first one" / "first option"
@@ -130,10 +150,25 @@ function normaliseForExactMatch(value: string): string {
   return value.trim().replace(/[.!?]+$/u, '').trim().toLowerCase();
 }
 
-function tryExactLabelOrMessageUnambiguous(
+/**
+ * Pass-10 P1: classify exact label/message matching into three
+ * outcomes:
+ *   - `null`: no candidate matches
+ *   - `{ kind: 'unique', index }`: exactly one candidate matches
+ *   - `{ kind: 'ambiguous', indexes }`: two or more candidates
+ *     match (e.g. both falling back to "Apply this change"). The
+ *     caller must NOT silently execute the first one; it should
+ *     commit a deterministic clarification.
+ */
+type ExactMatchOutcome =
+  | null
+  | { readonly kind: 'unique'; readonly index: number }
+  | { readonly kind: 'ambiguous'; readonly indexes: readonly number[] };
+
+function classifyExactLabelOrMessageMatch(
   message: string,
   copy: readonly CandidateRenderCopy[],
-): number | null {
+): ExactMatchOutcome {
   const needle = normaliseForExactMatch(message);
   if (needle.length === 0) return null;
   const hits: number[] = [];
@@ -145,36 +180,40 @@ function tryExactLabelOrMessageUnambiguous(
     const messageMatches = messageNorm.length > 0 && messageNorm === needle;
     if (labelMatches || messageMatches) hits.push(i);
   }
-  if (hits.length === 1) return hits[0]!;
-  return null;
+  if (hits.length === 0) return null;
+  if (hits.length === 1) return { kind: 'unique', index: hits[0]! };
+  return { kind: 'ambiguous', indexes: hits };
 }
 
 export function tryProposalOrdinalSelect(
   input: TryProposalOrdinalSelectInput,
 ): ProposalOrdinalSelectResult {
-  if (input.candidates.length === 0) return { matched: false };
+  if (input.candidates.length === 0) return { matched: false, reason: 'no_match' };
   if (input.candidates.length !== input.candidateRenderCopy.length) {
     // Defensive: the caller should pin parallel arrays. If they
     // diverge, refuse to match rather than guess.
-    return { matched: false };
+    return { matched: false, reason: 'no_match' };
   }
-  // Exact-label-or-message match takes priority over ordinal (a label
-  // happens to be "First quarter" should not silently resolve as
-  // ordinal "first"). Resolution is gated on uniqueness — two
-  // candidates that render to the same string fall through to
-  // clarification (P1-2).
-  const labelIndex = tryExactLabelOrMessageUnambiguous(input.message, input.candidateRenderCopy);
-  if (labelIndex !== null) {
-    return { matched: true, pending: input.candidates[labelIndex]!, index: labelIndex };
+  // Exact-label-or-message match takes priority over ordinal. A label
+  // happening to be "First quarter" must not silently resolve as
+  // ordinal "first"; an ambiguous label/message must yield the
+  // matching indexes so the caller can commit a deterministic
+  // clarification (pass-10 P1) rather than fall through to the LLM.
+  const exact = classifyExactLabelOrMessageMatch(input.message, input.candidateRenderCopy);
+  if (exact !== null) {
+    if (exact.kind === 'unique') {
+      return { matched: true, pending: input.candidates[exact.index]!, index: exact.index };
+    }
+    return { matched: false, reason: 'ambiguous', ambiguousIndexes: exact.indexes };
   }
   // Negative gate: an edit verb in the message means this is not a
   // pure ordinal pick.
-  if (EDIT_VERB_PATTERN.test(input.message)) return { matched: false };
+  if (EDIT_VERB_PATTERN.test(input.message)) return { matched: false, reason: 'no_match' };
 
   const ordinalIndex = tryOrdinalIndex(input.message);
-  if (ordinalIndex === null) return { matched: false };
+  if (ordinalIndex === null) return { matched: false, reason: 'no_match' };
   if (ordinalIndex < 0 || ordinalIndex >= input.candidates.length) {
-    return { matched: false };
+    return { matched: false, reason: 'no_match' };
   }
   return { matched: true, pending: input.candidates[ordinalIndex]!, index: ordinalIndex };
 }

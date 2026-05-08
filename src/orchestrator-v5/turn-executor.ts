@@ -1648,6 +1648,117 @@ export async function runTurnExecutor(
                 `apply_proposed_change_label_${decision.status}`,
               );
             }
+          } else if (labelPick.reason === 'ambiguous') {
+            // Pass-10 P1: the user's input matched the rendered label
+            // or message of TWO OR MORE live proposals. Executing the
+            // first would silently misroute. Falling through to the
+            // LLM would lose the deterministic-routing contract. We
+            // commit a numbered clarification listing the matching
+            // candidates' rendered copy and re-persist them so the
+            // user can disambiguate on the next turn.
+            const ambiguousProposals = labelPick.ambiguousIndexes.map(
+              (idx) => liveProposals[idx]!,
+            );
+            const ambiguousRenderCopy = labelPick.ambiguousIndexes.map(
+              (idx) => liveRenderCopy[idx]!,
+            );
+            emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              candidate_count: ambiguousProposals.length,
+              kinds: ambiguousProposals.map((p) => p.action.kind),
+            });
+            // Build chips using the SAME rendered copy the user saw.
+            // Each candidate's chip carries its persisted chip_id and
+            // an action_type derived from its handler_id, matching
+            // the format used by the recovery_ambiguous flow.
+            const labelAmbiguousChips: SuggestedAction[] = ambiguousProposals.map(
+              (cand, idx) => {
+                const inlineHandlerId =
+                  cand.action.kind === 'apply_proposed_change'
+                    ? (cand.action.inline_patch as { handler_id?: unknown })?.handler_id
+                    : undefined;
+                const proposalActionType:
+                  | 'add_constraint'
+                  | 'set_factor_value'
+                  | 'adjust_edge_strength' = isProposedChangeActionType(inlineHandlerId)
+                  ? inlineHandlerId
+                  : 'add_constraint';
+                return {
+                  id: cand.chip_id,
+                  label: ambiguousRenderCopy[idx]!.label,
+                  message: ambiguousRenderCopy[idx]!.message,
+                  action_type: proposalActionType,
+                };
+              },
+            );
+            // Numbered clarification text uses the rendered labels
+            // when at least one is distinct from the safe fallback;
+            // otherwise the generic prompt — both labels equal the
+            // fallback means the user's input matched the fallback
+            // for every ambiguous candidate, and a numbered list of
+            // identical strings would not help.
+            const allLabelsAreFallback = labelAmbiguousChips.every(
+              (c) => c.label === RENDER_SAFE_LABEL_FALLBACK,
+            );
+            const numberedList = labelAmbiguousChips
+              .map((c, i) => `${i + 1}) ${c.label}`)
+              .join(' ');
+            const ambiguousAssistantText = allLabelsAreFallback
+              ? 'I had more than one offer open. Which would you like?'
+              : `Which one would you like? ${numberedList}`;
+            const ambiguousResponse = composeDirectAnswerResponse({
+              assistant_text: ambiguousAssistantText,
+              stage: context.stage,
+              suggested_actions: labelAmbiguousChips,
+            });
+            sonnetTextForLog = ambiguousResponse.assistant_text;
+            resolvedTurnClass = 'direct_answer';
+            intentClass = 'converse';
+            responseTypeForObs = 'direct_answer';
+            llmCallsUsed = 0;
+            stagesCompleted.push('orient');
+            stagesCompleted.push('compose');
+            try {
+              // Re-persist the ambiguous proposals so the next-turn
+              // ordinal / label / message reply has live offers to
+              // resolve. Identity preserved: chip_id, proposal_ref,
+              // expires_at_iso unchanged; wall-clock TTL still
+              // applies.
+              const committed = await commitDirectAnswer(ambiguousResponse, {
+                scenario_id: context.session_id,
+                turn_id: context.request_id,
+                turn_class: 'direct_answer',
+                handler_id: null,
+                request_hash: computeRequestHash(payload),
+                llm_calls_used: 0,
+                duration_ms: Date.now() - startedAt,
+                handler_facts: [],
+                pending_actions: ambiguousProposals,
+              });
+              commitPerformed = committed.performed;
+              stagesCompleted.push('commit');
+              response = committed.response;
+            } catch (error) {
+              log.error(
+                {
+                  event: 'v5.state_commit_failed',
+                  request_id: requestId,
+                  session_id: context.session_id,
+                  path: 'apply_proposed_change_label_ambiguous',
+                  err: serialiseError(error),
+                },
+                'V5 TurnExecutor commit failure on label-pre-route ambiguous clarification',
+              );
+              failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+              response = buildFailureResponse(
+                'STATE_COMMIT_FAILED',
+                context.stage,
+                { phase: 'commit' },
+                recoveryCtx(),
+              );
+            }
+            return finalizeRun();
           }
         }
       }

@@ -16,6 +16,11 @@ function pa(id: string): PendingAction {
       kind: 'apply_proposed_change',
       proposal_ref: id,
       inline_patch: { handler_id: 'add_constraint', params: {}, target_entity_ids: [] },
+      // Pass-10 P2-1: include the standard-variant required fields so
+      // fixtures match the tightened type union (and a future tsc
+      // run on tests does not flag this helper).
+      public_label: `Label for ${id}`,
+      public_message: `Message for ${id}`,
     },
     preconditions: { graph_hash: 'h' },
     expires_at_turn_count: 2,
