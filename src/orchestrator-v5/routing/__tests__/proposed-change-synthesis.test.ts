@@ -22,7 +22,7 @@ import {
   decideProposedChangeSynthesis,
 } from '../proposed-change-synthesis.js';
 import type { PendingAction } from '../../session/pending-action.js';
-import type { HandlerFactWithTurn } from '../../session/store.js';
+import type { HandlerFactWithTurn } from '../../types/handler-fact.js';
 
 const GRAPH_HASH = 'aaaaaaaaaaaa';
 const EMITTED_AT_ISO = '2026-05-07T12:00:00.000Z';

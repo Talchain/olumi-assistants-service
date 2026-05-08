@@ -20,34 +20,17 @@ import type {
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import type { PendingAction } from './pending-action.js';
+import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 
 /**
- * A {@link HandlerFact} paired with its parent turn's row id and the
- * fact's own creation timestamp. Returned by
- * {@link SessionStore.readFactsWithTurnFor}.
- *
- * The proposed-change synthesis idempotency path filters by
- * `fact_created_at >= proposal.emitted_at_iso` so pre-emit facts are
- * NEVER eligible. This binding is schema-aligned (the FK
- * `v5_handler_facts.v5_conversation_turn_id` ⇒ `v5_conversation_turns.id`
- * supplies the link) rather than positional.
- *
- * `fact_created_at` is the fact row's own `created_at`. Facts and
- * their parent turns are written inside the same `append_turn_atomic`
- * transaction, so the two timestamps are equivalent for the
- * post-emit gate. We surface the fact-side timestamp directly because
- * it requires no JOIN at read time.
+ * Re-export so existing in-session callers (and `commit.ts` /
+ * `build-turn-context.ts`) keep importing from `session/store.js` if
+ * they prefer. The canonical definition lives in
+ * `../types/handler-fact.ts` so leaf consumers (e.g.
+ * `routing/proposed-change-synthesis.ts`) can import it without
+ * crossing the state-write-invariant boundary.
  */
-export interface HandlerFactWithTurn {
-  readonly fact: HandlerFact;
-  readonly turn_id: string;
-  /**
-   * The fact row's own `created_at` (DB-stamped). Equivalent to the
-   * parent turn's `created_at` due to atomic-write coupling — see
-   * the type docstring above.
-   */
-  readonly fact_created_at: string;
-}
+export type { HandlerFactWithTurn };
 
 export interface SessionTurnWrite {
   readonly scenario_id: string;

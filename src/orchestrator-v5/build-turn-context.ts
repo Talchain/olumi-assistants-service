@@ -23,7 +23,7 @@
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact, SessionTurn, TurnContext } from '@talchain/schemas/orchestrator';
-import type { HandlerFactWithTurn } from './session/store.js';
+import type { HandlerFactWithTurn } from './types/handler-fact.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';

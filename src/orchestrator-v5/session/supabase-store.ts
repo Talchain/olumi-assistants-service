@@ -39,10 +39,10 @@ import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import {
   SessionReadError,
   StateCommitFailedError,
-  type HandlerFactWithTurn,
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
+import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 

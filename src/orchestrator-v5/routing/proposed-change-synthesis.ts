@@ -29,7 +29,7 @@
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import type { PendingAction } from '../session/pending-action.js';
-import type { HandlerFactWithTurn } from '../session/store.js';
+import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import type { ProposalAction } from './types.js';
 
 export type ProposedChangeSynthesisDecision =
