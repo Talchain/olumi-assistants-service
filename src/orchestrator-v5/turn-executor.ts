@@ -95,9 +95,7 @@ import { isProposedChangeActionType } from './types/proposed-change.js';
 import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
 import {
   RENDER_SAFE_LABEL_FALLBACK,
-  RENDER_SAFE_MESSAGE_FALLBACK,
   resolveProposalRenderCopy,
-  sanitisePublicCopyOrFallback,
 } from './compose/proposed-change.js';
 import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
