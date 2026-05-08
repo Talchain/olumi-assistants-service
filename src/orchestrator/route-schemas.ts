@@ -96,18 +96,19 @@ const FramingSchema = z.object({
 // The UI's buildRunAnalysisTurnRequest emits options with `id`; CEE's
 // historical shape uses `option_id`. Accept either, normalise downstream.
 // Expressed as a union of two structurally-required shapes so the invariant
-// survives zod-to-json-schema export (refine() does not).
-const AnalysisOptionWithOptionId = z.object({
+// survives zod-to-json-schema export (refine() does not). Shared fields live
+// on a common base so adding a new option field only requires one edit.
+const AnalysisOptionBase = z.object({
+  label: z.string(),
+  interventions: z.record(z.unknown()),
+});
+const AnalysisOptionWithOptionId = AnalysisOptionBase.extend({
   option_id: z.string(),
   id: z.string().optional(),
-  label: z.string(),
-  interventions: z.record(z.unknown()),
 }).passthrough();
-const AnalysisOptionWithId = z.object({
+const AnalysisOptionWithId = AnalysisOptionBase.extend({
   option_id: z.string().optional(),
   id: z.string(),
-  label: z.string(),
-  interventions: z.record(z.unknown()),
 }).passthrough();
 const AnalysisOptionSchema = z.union([AnalysisOptionWithOptionId, AnalysisOptionWithId]);
 

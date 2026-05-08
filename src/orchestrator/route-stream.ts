@@ -370,10 +370,22 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         }
       } catch (error) {
         if (!firstEventEmitted) {
-          // Pre-yield error — emit telemetry and error event
+          // Pre-yield error — emit telemetry and error event.
+          // `error` carries a stable code so dashboards can filter on it; the
+          // descriptive prose moves to `message`. Mirrors the wire-event code
+          // emitted just below (DailyBudgetExceededError → DAILY_BUDGET_EXCEEDED,
+          // everything else → PIPELINE_ERROR), plus an AbortError branch that
+          // distinguishes client-side aborts (no recovery action required).
+          let preflightErrorCode = 'PIPELINE_ERROR';
+          if (error instanceof DailyBudgetExceededError) {
+            preflightErrorCode = 'DAILY_BUDGET_EXCEEDED';
+          } else if (error instanceof Error && error.name === 'AbortError') {
+            preflightErrorCode = 'ABORTED';
+          }
           emit(TelemetryEvents.StreamingGeneratorPreflightFailure, {
             request_id: requestId,
-            error: error instanceof Error ? error.message : String(error),
+            error: preflightErrorCode,
+            message: error instanceof Error ? error.message : String(error),
           });
         }
 

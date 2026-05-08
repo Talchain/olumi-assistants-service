@@ -242,48 +242,47 @@
                           {
                             "type": "object",
                             "properties": {
-                              "option_id": {
-                                "type": "string"
-                              },
-                              "id": {
-                                "type": "string"
-                              },
                               "label": {
                                 "type": "string"
                               },
                               "interventions": {
                                 "type": "object",
                                 "additionalProperties": {}
+                              },
+                              "option_id": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
                               }
                             },
                             "required": [
-                              "option_id",
                               "label",
-                              "interventions"
+                              "interventions",
+                              "option_id"
                             ],
                             "additionalProperties": true
                           },
                           {
                             "type": "object",
                             "properties": {
+                              "label": {
+                                "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/analysis_inputs/anyOf/0/properties/options/items/anyOf/0/properties/label"
+                              },
+                              "interventions": {
+                                "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/analysis_inputs/anyOf/0/properties/options/items/anyOf/0/properties/interventions"
+                              },
                               "option_id": {
                                 "type": "string"
                               },
                               "id": {
                                 "type": "string"
-                              },
-                              "label": {
-                                "type": "string"
-                              },
-                              "interventions": {
-                                "type": "object",
-                                "additionalProperties": {}
                               }
                             },
                             "required": [
-                              "id",
                               "label",
-                              "interventions"
+                              "interventions",
+                              "id"
                             ],
                             "additionalProperties": true
                           }
