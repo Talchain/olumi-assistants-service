@@ -93,6 +93,39 @@
           "properties": {
             "type": {
               "type": "string",
+              "const": "progress"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "elapsed_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "tool_name",
+            "elapsed_ms",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
               "const": "block"
             },
             "seq": {

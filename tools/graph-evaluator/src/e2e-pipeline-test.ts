@@ -30,7 +30,7 @@ const TOOL_ROOT = resolve(__dirname, "..");
 // Config
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_URL = "https://cee-staging.onrender.com/assist/v1/draft-graph";
+const _DEFAULT_URL = "https://cee-staging.onrender.com/assist/v1/draft-graph";
 const LOCAL_URL = "http://localhost:3101/assist/v1/draft-graph";
 const REQUEST_TIMEOUT_MS = 120_000;
 const INTER_REQUEST_DELAY_MS = 3_000; // rate-limit guard
@@ -199,8 +199,8 @@ function extractRepairTrace(body: Record<string, unknown>): {
   const fallbackReason = (repair?.plot_validation_fallback_reason as string) ?? null;
 
   // Pre-repair violations
-  const violationsBefore = (sweep?.violations_before as number) ?? 0;
-  const violationsAfter = (sweep?.violations_after as number) ?? 0;
+  const _violationsBefore = (sweep?.violations_before as number) ?? 0;
+  const _violationsAfter = (sweep?.violations_after as number) ?? 0;
 
   // Try to extract violation codes from repair summary
   const stage1Violations: string[] = [];
@@ -697,7 +697,7 @@ async function main(): Promise<void> {
   await writeFile(join(outputDir, "report.md"), reportMd, "utf-8");
   await writeFile(join(outputDir, "results.csv"), reportCsv, "utf-8");
   // Strip response_body from all-results to keep it small; individual files have full data
-  const slimResults = allResults.map(({ response_body, ...rest }) => rest);
+  const slimResults = allResults.map(({ _response_body, ...rest }) => rest);
   await writeFile(join(outputDir, "all-results.json"), JSON.stringify(slimResults, null, 2), "utf-8");
 
   console.log(`\nResults saved to: ${outputDir}`);

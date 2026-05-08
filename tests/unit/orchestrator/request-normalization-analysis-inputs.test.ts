@@ -136,3 +136,24 @@ describe("TurnRequestSchema — accepts top-level analysis_inputs", () => {
     expect(parsed.success).toBe(false);
   });
 });
+
+describe("AnalysisInputsSchema option_id|id discriminator (regression for JSON-schema-representable refactor)", () => {
+  const baseOption = { label: 'Option A', interventions: {} };
+  const wrap = (option: Record<string, unknown>) => ({
+    scenario_id: 's',
+    client_turn_id: 't',
+    analysis_inputs: { options: [option] },
+  });
+
+  it("rejects an option with neither option_id nor id", () => {
+    expect(TurnRequestSchema.safeParse(wrap(baseOption)).success).toBe(false);
+  });
+
+  it("accepts an option with option_id only", () => {
+    expect(TurnRequestSchema.safeParse(wrap({ ...baseOption, option_id: 'opt_a' })).success).toBe(true);
+  });
+
+  it("accepts an option with id only", () => {
+    expect(TurnRequestSchema.safeParse(wrap({ ...baseOption, id: 'opt_a' })).success).toBe(true);
+  });
+});

@@ -311,7 +311,7 @@ export function validateStructural(graph: ParsedGraph): ValidationResult {
   // it can still reach the goal (matches production EXEMPT_UNREACHABLE_OUTCOME_RISK).
   const bridgeNodes = [...outcomes, ...risks];
   if (decisions.length === 1 && bridgeNodes.length > 0) {
-    const decisionId = decisions[0].id;
+    const _decisionId = decisions[0].id;
 
     // Find nodes reachable from decision through controllable factors
     // (decision → option → controllable factor → downstream)

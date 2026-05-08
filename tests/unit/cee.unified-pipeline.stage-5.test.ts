@@ -115,7 +115,7 @@ import { runStagePackage } from "../../src/cee/unified-pipeline/stages/package.j
 import { config, isProduction } from "../../src/config/index.js";
 import { inferArchetype } from "../../src/cee/archetypes/index.js";
 import { computeQuality } from "../../src/cee/quality/index.js";
-import { detectBiases, sortBiasFindings } from "../../src/cee/bias/index.js";
+import { detectBiases } from "../../src/cee/bias/index.js";
 import { applyResponseCaps } from "../../src/cee/transforms/response-caps.js";
 import { ceeAnyTruncated, buildCeeGuidance } from "../../src/cee/guidance/index.js";
 import {

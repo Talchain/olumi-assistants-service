@@ -245,7 +245,7 @@ describe("executePipelineV4", () => {
         chip_metadata: { action_type: 'draft_graph' },
       } as unknown as Partial<OrchestratorTurnRequest>);
 
-      const events = await collectEvents(executePipelineV4(req, 'req-1'));
+      const _events = await collectEvents(executePipelineV4(req, 'req-1'));
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0];
@@ -672,7 +672,7 @@ describe("executePipelineV4", () => {
         },
       });
 
-      const events = await collectEvents(executePipelineV4(req, 'req-empty-graph'));
+      const _events = await collectEvents(executePipelineV4(req, 'req-empty-graph'));
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0];
@@ -697,7 +697,7 @@ describe("executePipelineV4", () => {
         },
       });
 
-      const events = await collectEvents(executePipelineV4(req, 'req-null-graph'));
+      const _events = await collectEvents(executePipelineV4(req, 'req-null-graph'));
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0];
@@ -731,7 +731,7 @@ describe("executePipelineV4", () => {
         },
       });
 
-      const events = await collectEvents(executePipelineV4(req, 'req-with-graph'));
+      const _events = await collectEvents(executePipelineV4(req, 'req-with-graph'));
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0];
@@ -766,7 +766,7 @@ describe("executePipelineV4", () => {
         },
       } as unknown as Partial<OrchestratorTurnRequest>);
 
-      const events = await collectEvents(executePipelineV4(req, 'req-regenerate'));
+      const _events = await collectEvents(executePipelineV4(req, 'req-regenerate'));
 
       expect(mockStreamChatWithTools).toHaveBeenCalledTimes(1);
       const callArgs = mockStreamChatWithTools.mock.calls[0][0];

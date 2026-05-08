@@ -16,7 +16,6 @@ import { config as loadDotenv } from "dotenv";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
 import OpenAI from "openai";
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
@@ -142,7 +141,7 @@ async function callO4Mini(
   const start = Date.now();
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const response = await (client.responses as any).create(params, { signal: controller.signal });
     clearTimeout(timer);
     const latency_ms = Date.now() - start;
@@ -470,7 +469,7 @@ function strengthBand(mean: number): string {
   return "negligible";
 }
 
-function analyseStability(runs: RunResult[], fixture_id: string): StabilityEdge[] {
+function analyseStability(runs: RunResult[], _fixture_id: string): StabilityEdge[] {
   const successfulRuns = runs.filter((r) => r.ok && r.parsed);
   if (successfulRuns.length < 2) return [];
 

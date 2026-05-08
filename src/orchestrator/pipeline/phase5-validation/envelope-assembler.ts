@@ -5,7 +5,7 @@
  * stage_indicator, progress_marker, science_ledger, observability, turn_plan, lineage.
  */
 
-import { isProduction, config } from "../../../config/index.js";
+import { isProduction } from "../../../config/index.js";
 import { checkFeatureHealth } from "../../../diagnostics/feature-health.js";
 import { isLongRunningTool } from "../../tools/registry.js";
 import { isToolAllowedAtStage } from "../../tools/stage-policy.js";

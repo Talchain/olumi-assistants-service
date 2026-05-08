@@ -804,6 +804,22 @@ export const TelemetryEvents = {
   //       | 'unsupported_chip_actions' | 'non_analyse_stage'
   //       | 'freshness_unknown'.
   PostAnalysisDirectAnswerRecoverySkipped: "v5.post_analysis.direct_answer_recovery_skipped",
+
+  // CI hygiene baseline (claude-v5/ci-hygiene-baseline) — pre-existing live
+  // emit() call sites that were never registered, causing Telemetry Event
+  // Name Validation to fail on every staging push. Registry-only addition;
+  // no new emissions. Each entry corresponds to one or more currently active
+  // emit() sites in src/ (xml_parse_fallback fires from three sites, the
+  // streaming preflight failure from two, the rest from one each).
+  EditGraphNoOperations: "edit_graph.no_operations",
+  StreamingGeneratorPreflightFailure: "streaming.generator_preflight_failure",
+  DeterministicPmsFallbackUsed: "deterministic.pms_fallback_used",
+  V4PmsFallbackUsed: "v4.pms_fallback_used",
+  DeterministicBannedTermDetected: "deterministic.banned_term_detected",
+  OrchestratorDiagnosticsPreambleStripped: "orchestrator.diagnostics_preamble_stripped",
+  OrchestratorXmlParseFallback: "orchestrator.xml_parse_fallback",
+  CeeStage2EdgeCountInvariantViolated: "cee.stage2.edge_count_invariant_violated",
+  CeePostEnrichInvariantViolation: "cee.post_enrich.invariant_violation",
 } as const;
 
 /**

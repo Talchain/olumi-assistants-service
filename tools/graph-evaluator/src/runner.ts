@@ -151,7 +151,7 @@ async function callModel(
     brief_id: "",
     status: "success",
     raw_text: rawText,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     parsed_graph: extraction.parsed as any,
     extraction_attempted: extraction.extraction_attempted,
     latency_ms: result.latency_ms,

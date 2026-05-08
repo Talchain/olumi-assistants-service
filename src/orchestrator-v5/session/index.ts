@@ -68,7 +68,9 @@ export function resetSessionStoreForTests(): void {
 
 function readConfig(): ResolvedConfig {
   // Call-time env read — see file-level comment above.
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
   const url = process.env.SUPABASE_URL;
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceRoleKey) {
     throw new Error(
@@ -79,14 +81,17 @@ function readConfig(): ResolvedConfig {
     url,
     serviceRoleKey,
     readWindow: parsePositiveIntEnv(
+      // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
       process.env.SESSION_READ_WINDOW_TURNS,
       SESSION_READ_WINDOW_DEFAULT,
     ),
     cacheMaxScenarios: parsePositiveIntEnv(
+      // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
       process.env.SESSION_CACHE_MAX_SCENARIOS,
       SESSION_CACHE_MAX_SCENARIOS_DEFAULT,
     ),
     cacheMaxTurnsPerScenario: parsePositiveIntEnv(
+      // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 call-time read: tolerates env rotation without restart (see file header)
       process.env.SESSION_CACHE_MAX_TURNS_PER_SCENARIO,
       SESSION_CACHE_MAX_TURNS_PER_SCENARIO_DEFAULT,
     ),

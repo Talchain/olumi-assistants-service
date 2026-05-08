@@ -1009,7 +1009,7 @@ describe('handleTurn — stage inference override', () => {
     expect(result.envelope.stage_label).toBe('Framing the decision');
 
     // 2. Telemetry stage must be frame
-    const logInfoCalls = vi.mocked(vi.fn()).mock?.calls ?? [];
+    const _logInfoCalls = vi.mocked(vi.fn()).mock?.calls ?? [];
     // The telemetry log is emitted via log.info — check envelope carries frame
     // (telemetry stage is derived from the same currentStage used for envelope)
     expect(result.envelope.stage_indicator).not.toBe('ideate');

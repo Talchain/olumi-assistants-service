@@ -22,7 +22,6 @@ import { extractPromptExamples } from './extract-prompt-examples.js';
 import type { ExtractedExample } from './extract-prompt-examples.js';
 import {
   CANONICAL_NODE_FIELDS,
-  CANONICAL_EDGE_FIELDS,
   VALID_NODE_KINDS,
   collectViolations,
   validateNodeFields,
@@ -32,7 +31,6 @@ import {
   isEdgeShape,
   isPatchOperation,
   type FieldViolation,
-  type PipelineContext,
 } from './canonical-fields.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════

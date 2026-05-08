@@ -73,7 +73,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
       },
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = await runPreFlight(req as any);
 
     expect(result.ok).toBe(false);
@@ -112,7 +112,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
       source: 'composer',
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = await runPreFlight(req as any);
 
     expect(result.ok).toBe(false);
@@ -149,7 +149,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
       // no user_id — guest session
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = await runPreFlight(req as any);
 
     expect(result.ok).toBe(true);
@@ -173,7 +173,7 @@ describe('runPreFlight — 422 envelope shapes', () => {
       user_id: CALLER_USER_ID,
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const result = await runPreFlight(req as any);
 
     expect(result.ok).toBe(false);

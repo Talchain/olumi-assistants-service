@@ -15,6 +15,7 @@ import { CeeTaskIdSchema } from '../../src/prompts/schema.js';
 
 describe('PROMPT_TASKS Registry', () => {
   // Skipped: validate_graph added to CeeTaskIdSchema but not yet to PROMPT_TASKS — needs source update
+  // TODO: ISSUE-9017 — prompt-tasks-registry sync with CeeTaskIdSchema
   describe.skip('sync with CeeTaskIdSchema', () => {
     it('contains all tasks from CeeTaskIdSchema', () => {
       // Get all values from the Zod enum schema

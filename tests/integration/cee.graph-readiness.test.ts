@@ -12,7 +12,7 @@ vi.stubEnv("LLM_PROVIDER", "fixtures");
 
 import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
-import { emit, TelemetryEvents } from "../../src/utils/telemetry.js";
+import { TelemetryEvents } from "../../src/utils/telemetry.js";
 
 describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   let app: FastifyInstance;

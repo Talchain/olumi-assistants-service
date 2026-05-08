@@ -20,8 +20,7 @@
  *        Anthropic content block types.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { z } from "zod";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OrchestratorStreamEventSchema } from "../../src/orchestrator/pipeline/stream-events.js";
 import type { OrchestratorStreamEvent } from "../../src/orchestrator/pipeline/stream-events.js";
 
@@ -626,16 +625,16 @@ describe("P1-2: transport reliability — abort signal propagation", () => {
       postProcess: vi.fn(),
     });
 
-    let yieldCount = 0;
+    let _yieldCount = 0;
     mockLLMClient.streamChatWithTools.mockImplementation(async function* () {
       yield { type: "text_delta" as const, delta: "First" };
-      yieldCount++;
+      _yieldCount++;
       // Abort after first yield
       controller.abort();
       yield { type: "text_delta" as const, delta: "Second" };
-      yieldCount++;
+      _yieldCount++;
       yield { type: "message_complete" as const, result: { content: [], stop_reason: "end_turn", usage: { input_tokens: 0, output_tokens: 0 }, model: "test", latencyMs: 0 } };
-      yieldCount++;
+      _yieldCount++;
     });
 
     const events = await collectEvents(

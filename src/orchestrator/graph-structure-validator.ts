@@ -56,7 +56,9 @@ function parseEnvInt(envVar: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const MAX_NODES = parseEnvInt(process.env.CEE_GRAPH_MAX_NODES, DEFAULT_MAX_NODES);
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const MAX_EDGES = parseEnvInt(process.env.CEE_GRAPH_MAX_EDGES, DEFAULT_MAX_EDGES);
 const MIN_OPTIONS = 2;
 

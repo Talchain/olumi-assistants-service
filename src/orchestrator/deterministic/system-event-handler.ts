@@ -15,7 +15,7 @@
  * - Never calls the LLM
  */
 
-import type { OrchestratorTurnRequest, SystemEvent } from "../types.js";
+import type { OrchestratorTurnRequest } from "../types.js";
 import type { DeterministicPipelineResult } from "./types.js";
 import { log } from "../../utils/telemetry.js";
 

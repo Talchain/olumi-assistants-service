@@ -7,9 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   reconcileStructuralTruth,
-  normaliseConstraintTargets,
   fuzzyMatchNodeId,
-  type STRPResult,
 } from '../../src/validators/structural-reconciliation.js';
 import { validateGraph } from '../../src/validators/graph-validator.js';
 import type { GraphT } from '../../src/schemas/graph.js';

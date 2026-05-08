@@ -117,7 +117,7 @@ vi.mock("../../src/cee/graph-orchestrator.js", () => ({
 
 // -- Stage 4 deps: validation pipeline
 vi.mock("../../src/cee/validation/pipeline.js", () => ({
-  buildCeeErrorResponse: (code: string, msg: string, meta?: any) => ({
+  buildCeeErrorResponse: (code: string, msg: string, _meta?: any) => ({
     error: { code, message: msg },
   }),
   integrateClarifier: vi.fn(),

@@ -155,7 +155,7 @@ function makeDeps(llmClient: LLMClient, toolDispatcher?: ToolDispatcher): Pipeli
 // Per-turn assertion helpers
 // ============================================================================
 
-const FORBIDDEN_TOOLS_BY_STAGE: Record<string, string[]> = {
+const _FORBIDDEN_TOOLS_BY_STAGE: Record<string, string[]> = {
   frame: ["research_topic", "edit_graph", "run_analysis", "explain_results"],
   ideate: ["research_topic"],
   evaluate: [],

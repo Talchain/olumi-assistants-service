@@ -10,7 +10,7 @@ const mockCreate = vi.fn();
 // Mock the openai module before importing the provider.
 // Use a plain function (not arrow) so `new OpenAI(...)` works.
 vi.mock("openai", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   function MockOpenAI(this: any) {
     this.responses = { create: mockCreate };
   }

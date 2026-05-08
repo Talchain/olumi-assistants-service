@@ -228,7 +228,7 @@ function extractPrimaryGoal(brief: string): CompoundGoalExtractionResult["primar
     const match = pattern.exec(brief);
     if (match) {
       const [fullMatch, verb, targetName, valueStr] = match;
-      const { value, unit } = parseValue(valueStr);
+      const { value: _value, unit: _unit } = parseValue(valueStr);
       const targetNodeId = generateNodeId(targetName);
 
       return {

@@ -176,8 +176,8 @@ describe("processAdapterStream", () => {
   it("defers long-running tools to pipeline (returns pendingLongRunningTool)", async () => {
     // Mock a long-running tool in the catalogue
     const { ACTION_CATALOGUE } = await import("../../../../src/orchestrator/deterministic/actions/registry.js");
-    const originalHas = ACTION_CATALOGUE.has.bind(ACTION_CATALOGUE);
-    const originalGet = ACTION_CATALOGUE.get.bind(ACTION_CATALOGUE);
+    const _originalHas = ACTION_CATALOGUE.has.bind(ACTION_CATALOGUE);
+    const _originalGet = ACTION_CATALOGUE.get.bind(ACTION_CATALOGUE);
 
     // run_analysis is in LONG_RUNNING_ACTIONS
     const stream = mockStream([

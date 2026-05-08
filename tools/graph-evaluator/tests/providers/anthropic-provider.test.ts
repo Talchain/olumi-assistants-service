@@ -10,7 +10,7 @@ const mockCreate = vi.fn();
 // Mock the @anthropic-ai/sdk module before importing the provider.
 // Use a plain function (not arrow) so `new Anthropic(...)` works.
 vi.mock("@anthropic-ai/sdk", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   function MockAnthropic(this: any) {
     this.messages = { create: mockCreate };
   }

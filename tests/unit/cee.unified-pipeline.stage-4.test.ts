@@ -728,7 +728,7 @@ describe("Substep 2: PLoT validation", () => {
   });
 
   it("sets repairFallbackReason='dag_transform_failed' when DAG stabilisation fails", async () => {
-    const { stabiliseGraph } = await import("../../src/orchestrator/index.js");
+    const { stabiliseGraph: _stabiliseGraph } = await import("../../src/orchestrator/index.js");
     const { ensureDagAndPrune } = await import("../../src/orchestrator/index.js");
 
     const mockRepairAdapter = {

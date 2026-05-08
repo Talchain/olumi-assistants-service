@@ -512,7 +512,7 @@ export function validateUpdateOpAfterNormalisation(
 export function simulateNormaliseEdgeValue(obj: Record<string, unknown>): Record<string, unknown> {
   if (obj.strength && typeof obj.strength === 'object') {
     const s = obj.strength as Record<string, unknown>;
-    const { strength, ...rest } = obj;
+    const { strength: _strength, ...rest } = obj;
     return {
       ...rest,
       ...(s.mean !== undefined && { strength_mean: s.mean }),

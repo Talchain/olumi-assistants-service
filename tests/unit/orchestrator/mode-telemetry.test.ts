@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { extractDeclaredMode, inferResponseMode } from "../../../src/orchestrator/response-parser.js";
 import { setTestSink, TelemetryEvents, emit } from "../../../src/utils/telemetry.js";
 

@@ -1024,7 +1024,7 @@ describe(
         // with the constraint text. Sometimes the LLM responds conversationally instead.
         const blocks = b.blocks as Array<Record<string, unknown>>;
         const gpBlock = findBlock(blocks, "graph_patch");
-        const tp = b.turn_plan as Record<string, unknown>;
+        const _tp = b.turn_plan as Record<string, unknown>;
         let step4Outcome: string;
 
         if (gpBlock) {

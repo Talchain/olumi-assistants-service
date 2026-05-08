@@ -904,6 +904,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     promptVersion,
     promptSource: ctx.llmMeta?.prompt_source,
     promptStoreVersion: ctx.llmMeta?.prompt_store_version,
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
     modelOverrideActive: Boolean(process.env.CEE_DRAFT_MODEL),
     // ContextPack v1 lineage (Stream C)
     contextHash: contextPack.context_hash,

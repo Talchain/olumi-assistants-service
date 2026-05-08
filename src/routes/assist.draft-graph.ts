@@ -1,57 +1,25 @@
 import { Buffer } from "node:buffer";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { getRequestId } from "../utils/request-id.js";
-import { DraftGraphInput, DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
-import { calcConfidence, shouldClarify } from "../utils/confidence.js";
-import { estimateTokens, allowedCostUSD } from "../utils/costGuard.js";
+import { DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
+import { shouldClarify } from "../utils/confidence.js";
 import { type DocPreview } from "../services/docProcessing.js";
 import { processAttachments, type AttachmentInput, type GroundingStats } from "../grounding/process-attachments.js";
-import { getAdapter } from "../adapters/llm/router.js";
-import { validateGraph } from "../services/validateClientWithCache.js";
-import { coerceViolations } from "../cee/unified-pipeline/stages/repair/plot-validation.js";
-import { simpleRepair } from "../services/repair.js";
-import { stabiliseGraph, ensureDagAndPrune } from "../orchestrator/index.js";
-import { validateAndFixGraph } from "../cee/structure/index.js";
-import { enrichGraphWithFactorsAsync } from "../cee/factor-extraction/enricher.js";
-import { createCorrectionCollector } from "../cee/corrections.js";
-import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
-import { hasLegacyProvenance } from "../schemas/graph.js";
-import { fixtureGraph } from "../utils/fixtures.js";
+import { log } from "../utils/telemetry.js";
 import type { GraphT } from "../schemas/graph.js";
-import { validateResponse } from "../utils/responseGuards.js";
-import { enforceStableEdgeIds } from "../utils/graph-determinism.js";
-import { detectCycles } from "../utils/graphGuards.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
-import { createResumeToken, verifyResumeToken } from "../utils/sse-resume-token.js";
-import { initStreamState, bufferEvent, markStreamComplete, cleanupStreamState, getStreamState, getBufferedEvents, getSnapshot, renewSnapshot } from "../utils/sse-state.js";
-import { getRedis } from "../platform/redis.js";
 import {
-  SSE_DEGRADED_HEADER_NAME,
-  SSE_DEGRADED_REDIS_REASON,
-  SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
 } from "../utils/degraded-mode.js";
-import { HTTP_CLIENT_TIMEOUT_MS, getJitteredRetryDelayMs, FIXTURE_TIMEOUT_MS, DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS, DRAFT_LLM_TIMEOUT_MS, LLM_POST_PROCESSING_HEADROOM_MS, SSE_HEARTBEAT_INTERVAL_MS, SSE_RESUME_LIVE_TIMEOUT_MS, SSE_RESUME_POLL_INTERVAL_MS, SSE_RESUME_SNAPSHOT_RENEWAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
-import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError } from "../adapters/llm/errors.js";
+import { DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
-import { config, shouldUseStagingPrompts } from "../config/index.js";
-import { captureCheckpoint, assembleCeeProvenance, applyCheckpointSizeGuard, type PipelineCheckpoint } from "../cee/pipeline-checkpoints.js";
-import { getModelConfig, getClientAllowedModels } from "../config/models.js";
-import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
+import { config } from "../config/index.js";
 import {
-  validateAndRepairGraph,
-  GraphValidationError,
-  type RepairOnlyAdapter,
 } from "../cee/graph-orchestrator.js";
-import { reconcileStructuralTruth } from "../validators/structural-reconciliation.js";
 import {
-  extractCompoundGoals,
-  toGoalConstraints,
-  remapConstraintTargets,
 } from "../cee/compound-goal/index.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";
-const SSE_HEADERS = {
+const _SSE_HEADERS = {
   "content-type": EVENT_STREAM,
   connection: "keep-alive",
   "cache-control": "no-cache"
@@ -60,11 +28,11 @@ const SSE_HEADERS = {
 // All timeout constants are imported from config/timeouts.ts (env-var controlled):
 // FIXTURE_TIMEOUT_MS, DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, SSE_HEARTBEAT_INTERVAL_MS
 
-function getDraftBudgetMs(): number {
+function _getDraftBudgetMs(): number {
   return DRAFT_BUDGET_MS;
 }
 
-function getRepairTimeoutMs(): number {
+function _getRepairTimeoutMs(): number {
   return REPAIR_TIMEOUT_MS;
 }
 
@@ -275,12 +243,12 @@ export function preserveFieldsFromOriginal(
 }
 
 // Lazy config access to avoid module-level initialization issues
-function getDeprecationSunset(): string {
+function _getDeprecationSunset(): string {
   return config.server.deprecationSunset;
 }
 
 // Lazy config access to avoid module-level initialization issues in tests
-function getCostMaxUsd(): number {
+function _getCostMaxUsd(): number {
   return config.graph.costMaxUsd;
 }
 
@@ -289,12 +257,12 @@ function getCostMaxUsd(): number {
  */
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 // v1.3.0: Legacy SSE flag (read at request time for testability)
-function isLegacySSEEnabled(): boolean {
+function _isLegacySSEEnabled(): boolean {
   return config.features.enableLegacySSE;
 }
-const defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
+const _defaultPatch = { adds: { nodes: [], edges: [] }, updates: [], removes: [] } as const;
 
-function refinementEnabled(): boolean {
+function _refinementEnabled(): boolean {
   return config.cee.refinementEnabled;
 }
 
@@ -403,7 +371,7 @@ type StructuralMeta = {
   had_pruned_nodes?: boolean;
 };
 
-function buildDiagnosticsFromPayload(
+function _buildDiagnosticsFromPayload(
   payload: Record<string, any>,
   correlationId: string,
   overrides?: Partial<Pick<Diagnostics, "resumes" | "trims" | "recovered_events">>
@@ -419,7 +387,7 @@ function buildDiagnosticsFromPayload(
   };
 }
 
-function withDiagnostics<T extends Record<string, any>>(
+function _withDiagnostics<T extends Record<string, any>>(
   payload: T,
   diagnostics: Diagnostics
 ): T & { diagnostics: Diagnostics } {
@@ -558,11 +526,11 @@ type PipelineResult =
     }
   | { kind: "error"; statusCode: number; envelope: ErrorEnvelope };
 
-function buildError(code: "BAD_INPUT" | "RATE_LIMITED" | "INTERNAL", message: string, details?: unknown): ErrorEnvelope {
+function _buildError(code: "BAD_INPUT" | "RATE_LIMITED" | "INTERNAL", message: string, details?: unknown): ErrorEnvelope {
   return ErrorV1.parse({ schema: "error.v1", code, message, details });
 }
 
-function determineClarifier(confidence: number): "complete" | "max_rounds" | "confident" {
+function _determineClarifier(confidence: number): "complete" | "max_rounds" | "confident" {
   if (confidence >= 0.9) return "confident";
   return shouldClarify(confidence, 0) ? "max_rounds" : "complete";
 }
@@ -572,7 +540,7 @@ function determineClarifier(confidence: number): "complete" | "max_rounds" | "co
  * Each line of the data field must be prefixed with "data: "
  * Optimized: avoid split/loop for single-line JSON (common case)
  */
-async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void> {
+async function _writeStage(reply: FastifyReply, event: StageEvent): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const jsonStr = JSON.stringify(event);
 

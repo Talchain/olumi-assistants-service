@@ -6,7 +6,7 @@
  * adapter brief inclusion, contract alignment, observability.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,6 @@ import {
   canonicalStructuralEdge,
   neutralCausalEdge,
 } from "../../src/cee/unified-pipeline/utils/edge-format.js";
-import type { EdgeFormat } from "../../src/cee/unified-pipeline/utils/edge-format.js";
 import { handleUnreachableFactors } from "../../src/cee/unified-pipeline/stages/repair/unreachable-factors.js";
 import { fixStatusQuoConnectivity } from "../../src/cee/unified-pipeline/stages/repair/status-quo-fix.js";
 import { log } from "../../src/utils/telemetry.js";
@@ -597,7 +596,7 @@ describe("violation routing", () => {
   it("only Bucket A → llmRepairNeeded = false", () => {
     // When all violations are Bucket A (NAN_VALUE, SIGN_MISMATCH, etc.)
     // the sweep resolves them and llmRepairNeeded should be false
-    const bucketACodes = new Set(["NAN_VALUE", "SIGN_MISMATCH", "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR", "INVALID_EDGE_REF", "GOAL_HAS_OUTGOING", "DECISION_HAS_INCOMING"]);
+    const _bucketACodes = new Set(["NAN_VALUE", "SIGN_MISMATCH", "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR", "INVALID_EDGE_REF", "GOAL_HAS_OUTGOING", "DECISION_HAS_INCOMING"]);
     const bucketCCodes = new Set(["NO_PATH_TO_GOAL", "NO_EFFECT_PATH", "UNREACHABLE_FROM_DECISION", "MISSING_BRIDGE", "MISSING_GOAL", "MISSING_DECISION", "INVALID_EDGE_TYPE", "CYCLE_DETECTED", "OPTIONS_IDENTICAL", "GOAL_NUMBER_AS_FACTOR", "INSUFFICIENT_OPTIONS"]);
 
     const violations = [{ code: "NAN_VALUE" }, { code: "SIGN_MISMATCH" }];
@@ -649,7 +648,7 @@ describe("format lock", () => {
       ],
     });
 
-    const result = fixStatusQuoConnectivity(
+    const _result = fixStatusQuoConnectivity(
       sqGraph,
       [{ code: "NO_PATH_TO_GOAL" }],
       "V1_FLAT",

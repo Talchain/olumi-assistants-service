@@ -19,7 +19,6 @@ import type {
   LLMClient,
   ToolDispatcher,
   ToolResult,
-  OrchestratorResponseEnvelopeV2,
 } from "../../src/orchestrator/pipeline/types.js";
 import type { ConversationContext, ConversationBlock } from "../../src/orchestrator/types.js";
 

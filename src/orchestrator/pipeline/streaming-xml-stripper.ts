@@ -85,7 +85,7 @@ export class StreamingEnvelopeStripper {
     let output = '';
 
     // Process complete tag transitions in the buffer
-    // eslint-disable-next-line no-constant-condition
+     
     while (true) {
       if (this.state === 'SUPPRESS_DIAGNOSTICS') {
         const endIdx = this.buffer.indexOf('</diagnostics>');

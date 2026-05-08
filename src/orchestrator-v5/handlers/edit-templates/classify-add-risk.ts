@@ -55,7 +55,7 @@ const PRONOUN_DEMONSTRATIVE_RE =
 // guard against "team dynamics, !!!" or smuggled JSON / markdown fragments
 // being baked into a node ID and the user-facing assistant text.
 const MAX_PUNCT_DENSITY = 0.4;
-const PUNCT_RE = /[!"#$%&'()*+,./:;<=>?@\[\\\]^`{|}~]/g;
+const PUNCT_RE = /[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g;
 
 // Invisible / control codepoints rejected from labels. Codepoint ranges are
 // written numerically and the regex is built at module load time so the

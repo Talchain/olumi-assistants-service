@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { LLMResponseSchema, InsightSchema, RecommendedActionSchema } from "../../../../src/orchestrator/deterministic/llm-response-schema.js";
 import { computeTurnContext } from "../../../../src/orchestrator/deterministic/turn-context.js";
-import type { OrchestratorTurnRequest, V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
+import type { OrchestratorTurnRequest } from "../../../../src/orchestrator/types.js";
 import type { GraphV3T } from "../../../../src/schemas/cee-v3.js";
 
 // ============================================================================

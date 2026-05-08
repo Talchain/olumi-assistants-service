@@ -143,7 +143,7 @@ const RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
   'what_would_flip',
 ]);
 
-function isExpired(pa: PendingAction, nowMs: number, currentTurnIndex: number): boolean {
+function isExpired(pa: PendingAction, nowMs: number, _currentTurnIndex: number): boolean {
   // Wall-clock TTL: emitted_at_iso + expires_at_iso are both written
   // at emit time. We trust expires_at_iso as the canonical expiry.
   const expiresMs = Date.parse(pa.expires_at_iso);

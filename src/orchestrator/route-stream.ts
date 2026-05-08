@@ -8,9 +8,9 @@
  * Streams OrchestratorStreamEvent events as SSE to the client.
  */
 
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { getOrGenerateRequestId } from "../utils/request-id.js";
-import { log, emit } from "../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../utils/telemetry.js";
 import type { OrchestratorTurnRequest, SystemEvent } from "./types.js";
 import { config } from "../config/index.js";
 import { createOrchestratorRateLimitHook } from "../middleware/rate-limit.js";
@@ -25,8 +25,6 @@ import {
 import {
   getIdempotentResponse,
   setIdempotentResponse,
-  getInflightRequest,
-  registerInflightRequest,
 } from "./idempotency.js";
 import { ORCHESTRATOR_TURN_BUDGET_MS, DRAFT_GRAPH_TURN_BUDGET_MS } from "../config/timeouts.js";
 import { SSE_HEARTBEAT_INTERVAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
@@ -306,7 +304,7 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
             // (e.g. phase1 enrichment threw). Emit telemetry so it's distinguishable
             // from mid-stream errors in observability dashboards.
             if (event.type === 'error') {
-              emit('streaming.generator_preflight_failure' as any, {
+              emit(TelemetryEvents.StreamingGeneratorPreflightFailure, {
                 request_id: requestId,
                 error: event.error.code,
               });
@@ -372,10 +370,22 @@ export async function ceeOrchestratorStreamRouteV1(app: FastifyInstance): Promis
         }
       } catch (error) {
         if (!firstEventEmitted) {
-          // Pre-yield error — emit telemetry and error event
-          emit('streaming.generator_preflight_failure' as any, {
+          // Pre-yield error — emit telemetry and error event.
+          // `error` carries a stable code so dashboards can filter on it; the
+          // descriptive prose moves to `message`. Mirrors the wire-event code
+          // emitted just below (DailyBudgetExceededError → DAILY_BUDGET_EXCEEDED,
+          // everything else → PIPELINE_ERROR), plus an AbortError branch that
+          // distinguishes client-side aborts (no recovery action required).
+          let preflightErrorCode = 'PIPELINE_ERROR';
+          if (error instanceof DailyBudgetExceededError) {
+            preflightErrorCode = 'DAILY_BUDGET_EXCEEDED';
+          } else if (error instanceof Error && error.name === 'AbortError') {
+            preflightErrorCode = 'ABORTED';
+          }
+          emit(TelemetryEvents.StreamingGeneratorPreflightFailure, {
             request_id: requestId,
-            error: error instanceof Error ? error.message : String(error),
+            error: preflightErrorCode,
+            message: error instanceof Error ? error.message : String(error),
           });
         }
 

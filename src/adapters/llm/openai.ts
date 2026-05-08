@@ -17,8 +17,6 @@ import { getMaxTokensFromConfig } from "./router.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
 import {
-  LLMNode as OpenAINode,
-  LLMEdge as OpenAIEdge,
   LLMDraftResponse as OpenAIDraftResponse,
   LLMRepairResponse as OpenAIRepairResponse,
   LLMOptionsResponse as OpenAIOptionsResponse,

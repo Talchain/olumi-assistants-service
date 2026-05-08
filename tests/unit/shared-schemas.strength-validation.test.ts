@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LLMEdge, EdgeStrength } from "../../src/adapters/llm/shared-schemas.js";
+import { LLMEdge } from "../../src/adapters/llm/shared-schemas.js";
 import { log } from "../../src/utils/telemetry.js";
 
 describe("LLMEdge strength validation", () => {

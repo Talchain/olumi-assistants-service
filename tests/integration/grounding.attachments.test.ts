@@ -21,6 +21,7 @@ vi.stubEnv("LLM_PROVIDER", "fixtures");
 vi.stubEnv("GROUNDING_ENABLED", "true");
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
+// TODO: ISSUE-9009 — v04 grounding/determinism integration parked
 describe.skip("Grounding: Attachments Integration (v04)", () => {
   let draftApp: ReturnType<typeof Fastify>;
   let critiqueApp: ReturnType<typeof Fastify>;

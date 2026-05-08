@@ -17,7 +17,6 @@ import type { FastifyInstance } from 'fastify';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import type {
-  ChatWithToolsArgs,
   ChatWithToolsResult,
   ToolResponseBlock,
 } from '../../src/adapters/llm/types.js';
@@ -129,6 +128,7 @@ describe('Actionable failure responses — HTTP boundary', () => {
   });
   afterEach(() => setTestSink(null));
 
+  // TODO: ISSUE-9001 — v5-maintenance: superseded by fail-closed migration
   it.skip('ENTITY_NOT_FOUND round-trips through HTTP with specific text + entity-suggestion chips [v5-maintenance: superseded by fail-closed]', async () => {
     // v5-maintenance: this test predates the Group 3 Task B fail-closed
     // invariant (v5-exclusive-cee brief). Validator failure produces

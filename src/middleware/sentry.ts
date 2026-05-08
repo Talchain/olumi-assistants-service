@@ -68,13 +68,17 @@ function deepRedact(obj: Record<string, unknown>, depth = 0): Record<string, unk
  * Call this early in the server build function.
  */
 export function initSentry(): void {
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 bootstrap: Sentry init reads env before/around config bootstrap
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return;
 
   Sentry.init({
     dsn,
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 bootstrap: Sentry init reads env before/around config bootstrap
     environment: process.env.NODE_ENV || 'development',
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 bootstrap: Sentry init reads env before/around config bootstrap
     release: process.env.CEE_BUILD_HASH || process.env.npm_package_version,
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 bootstrap: Sentry init reads env before/around config bootstrap
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0.5,
 
     beforeSend(event) {
@@ -121,6 +125,7 @@ export function initSentry(): void {
  * Uses withScope to avoid tag leakage between concurrent requests.
  */
 export function setSentryRequestTag(requestId: string): void {
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 bootstrap: Sentry init reads env before/around config bootstrap
   if (!process.env.SENTRY_DSN) return;
   Sentry.getCurrentScope().setTag('request_id', requestId);
 }
@@ -131,6 +136,7 @@ export function setSentryRequestTag(requestId: string): void {
  */
 export function createSentryRequestHook() {
   return async function sentryRequestHook(request: FastifyRequest): Promise<void> {
+    // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 bootstrap: Sentry init reads env before/around config bootstrap
     if (!process.env.SENTRY_DSN) return;
     const requestId = getRequestId(request);
     Sentry.withIsolationScope((scope) => {
@@ -146,6 +152,7 @@ export function createSentryRequestHook() {
  * Call after all routes are registered.
  */
 export function setupSentryFastify(app: FastifyInstance): void {
+  // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 bootstrap: Sentry init reads env before/around config bootstrap
   if (!process.env.SENTRY_DSN) return;
   Sentry.setupFastifyErrorHandler(app);
 }

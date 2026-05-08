@@ -25,8 +25,10 @@ import { LruTtlCache } from '../utils/cache.js';
 // Configuration (env-driven with sensible defaults)
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const MAX_REQUESTS = Number(process.env.CEE_ORCHESTRATOR_RATE_LIMIT_MAX) || 30;
 const MAX_REQUESTS_UNAUTHENTICATED = 10; // Stricter for IP-only
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const WINDOW_MS = Number(process.env.CEE_ORCHESTRATOR_RATE_LIMIT_WINDOW_MS) || 60_000; // 1 minute
 
 // ---------------------------------------------------------------------------
@@ -38,7 +40,9 @@ interface RateLimitEntry {
   windowStart: number;
 }
 
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const STORE_CAPACITY = Number(process.env.CEE_RATE_LIMIT_STORE_CAPACITY) || 10_000;
+// eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 inherited not-yet-in-config; pending migration to src/config
 const STORE_TTL_MS = Number(process.env.CEE_RATE_LIMIT_STORE_TTL_MS) || 5 * 60_000; // 5 min
 
 /** Exported for testing — not for production use. */

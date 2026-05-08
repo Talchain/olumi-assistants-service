@@ -238,25 +238,55 @@
                     "options": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "option_id": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "interventions": {
+                        "anyOf": [
+                          {
                             "type": "object",
-                            "additionalProperties": {}
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "interventions": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "option_id": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "interventions",
+                              "option_id"
+                            ],
+                            "additionalProperties": true
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/analysis_inputs/anyOf/0/properties/options/items/anyOf/0/properties/label"
+                              },
+                              "interventions": {
+                                "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/analysis_inputs/anyOf/0/properties/options/items/anyOf/0/properties/interventions"
+                              },
+                              "option_id": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "interventions",
+                              "id"
+                            ],
+                            "additionalProperties": true
                           }
-                        },
-                        "required": [
-                          "option_id",
-                          "label",
-                          "interventions"
-                        ],
-                        "additionalProperties": true
+                        ]
                       }
                     },
                     "constraints": {
@@ -558,12 +588,131 @@
             "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/messages/items"
           }
         },
+        "analysis_inputs": {
+          "$ref": "#/definitions/TurnRequestSchema/properties/context/properties/analysis_inputs"
+        },
         "generate_model": {
           "type": "boolean",
           "default": false
         },
         "explicit_generate": {
           "type": "boolean"
+        },
+        "session_state": {
+          "type": "object",
+          "properties": {
+            "prediction": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "calibrations_provided": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "plays_fired": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "questions_asked": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "accepted_patches": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "dismissed_patches": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "last_chip_ids_shown": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "chip_ids_shown_prev_turn": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "chip_ids_clicked": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "last_question_turn": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "preferred_option": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "convergence_signal": {
+              "type": "string",
+              "enum": [
+                "exploring",
+                "narrowing",
+                "converging"
+              ]
+            },
+            "analysis_graph_hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "analysis_scenario_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prior_analysis_envelope": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "chip_metadata": {
+          "type": "object",
+          "properties": {
+            "action_type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "parameters": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "action_type"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

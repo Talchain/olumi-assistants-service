@@ -10,9 +10,7 @@ vi.mock("../../../../src/utils/telemetry.js", () => ({
 }));
 
 import { buildCoachingContext } from "../../../../src/orchestrator/deterministic/coaching-context-builder.js";
-import type { CoachingContext } from "../../../../src/orchestrator/deterministic/coaching-context-builder.js";
 import { defaultSessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
-import type { SessionState } from "../../../../src/orchestrator/deterministic/session-state.js";
 import type { DeterministicTurnContext } from "../../../../src/orchestrator/deterministic/types.js";
 
 // ============================================================================

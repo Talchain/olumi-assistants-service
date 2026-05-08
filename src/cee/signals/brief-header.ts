@@ -18,7 +18,7 @@ import type { BriefSignals } from "./types.js";
  */
 function sanitise(value: string, maxLen: number): string {
   return value
-    .replace(/[\n\r\[\]"'`{}]/g, "")
+    .replace(/[\n\r[\]"'`{}]/g, "")
     .replace(/[^\w£$€%\s.,;:/-]/g, "")
     .trim()
     .slice(0, maxLen);

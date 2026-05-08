@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { transformEdgeToV3, transformGraphToV3, type TransformDefaultRecord } from "../../src/cee/transforms/schema-v3.js";
+import { transformEdgeToV3, transformGraphToV3 } from "../../src/cee/transforms/schema-v3.js";
 import { detectStrengthDefaults } from "../../src/cee/validation/integrity-sentinel.js";
 import {
   DEFAULT_STRENGTH_MEAN,

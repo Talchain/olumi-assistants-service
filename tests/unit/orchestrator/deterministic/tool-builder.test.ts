@@ -1161,7 +1161,7 @@ describe("validateToolSchema — strict additionalProperties: false enforcement"
 
 describe("add_option action — array and legacy format support", () => {
   it("accepts new array format interventions", () => {
-    const params = {
+    const _params = {
       label: 'Expand East',
       interventions: [
         { factor_id: 'f1', value: 0.8 },
