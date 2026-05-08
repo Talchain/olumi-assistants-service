@@ -22,19 +22,31 @@ import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import type { PendingAction } from './pending-action.js';
 
 /**
- * A {@link HandlerFact} paired with its parent turn's row id and
- * creation timestamp. Returned by {@link SessionStore.readFactsWithTurnFor}.
+ * A {@link HandlerFact} paired with its parent turn's row id and the
+ * fact's own creation timestamp. Returned by
+ * {@link SessionStore.readFactsWithTurnFor}.
  *
  * The proposed-change synthesis idempotency path filters by
- * `turn_created_at >= proposal.emitted_at_iso` so pre-emit facts are
+ * `fact_created_at >= proposal.emitted_at_iso` so pre-emit facts are
  * NEVER eligible. This binding is schema-aligned (the FK
  * `v5_handler_facts.v5_conversation_turn_id` ⇒ `v5_conversation_turns.id`
  * supplies the link) rather than positional.
+ *
+ * `fact_created_at` is the fact row's own `created_at`. Facts and
+ * their parent turns are written inside the same `append_turn_atomic`
+ * transaction, so the two timestamps are equivalent for the
+ * post-emit gate. We surface the fact-side timestamp directly because
+ * it requires no JOIN at read time.
  */
 export interface HandlerFactWithTurn {
   readonly fact: HandlerFact;
   readonly turn_id: string;
-  readonly turn_created_at: string;
+  /**
+   * The fact row's own `created_at` (DB-stamped). Equivalent to the
+   * parent turn's `created_at` due to atomic-write coupling — see
+   * the type docstring above.
+   */
+  readonly fact_created_at: string;
 }
 
 export interface SessionTurnWrite {

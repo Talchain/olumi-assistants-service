@@ -66,17 +66,49 @@ export type PendingActionAction =
        */
       readonly inline_patch: Readonly<Record<string, unknown>>;
       /**
-       * The chip's user-facing label, captured at emit time. Persisted
-       * so the resumer can render numbered ambiguous-clarification copy
-       * with the original labels rather than a generic placeholder.
-       * Must pass the safety filter in `emitProposedChange`.
+       * The chip's user-facing label, captured at emit time. REQUIRED
+       * for V5 emits — `parsePendingAction` rejects new entries without
+       * it. Persisted so the resumer can render numbered ambiguous-
+       * clarification copy with the original labels rather than a
+       * generic placeholder, and so the label/ordinal pre-route can
+       * exact-match against it. Must pass the safety filter in
+       * `emitProposedChange`.
+       *
+       * Marked optional in the type only to accommodate the legacy
+       * variant below (`__legacy_no_public_copy: true`); the parser
+       * enforces presence on the standard variant.
        */
-      readonly public_label?: string;
+      readonly public_label: string;
       /**
        * The chip's user-facing message, captured at emit time. Same
-       * rationale as `public_label`.
+       * rationale as `public_label`. REQUIRED for V5 emits.
        */
-      readonly public_message?: string;
+      readonly public_message: string;
+      /**
+       * Standard (post-P1-1) variant flag — always undefined on V5
+       * emits. The legacy escape hatch below sets this to `true`.
+       */
+      readonly __legacy_no_public_copy?: undefined;
+    }
+  | {
+      /**
+       * Legacy variant of apply_proposed_change for pre-P1-1 entries
+       * persisted before the public-copy fields became required.
+       * Distinguished from the standard variant by
+       * `__legacy_no_public_copy: true`. The parser accepts this
+       * variant via `parsePendingAction`'s explicit opt-out check.
+       *
+       * `emitProposedChange` NEVER constructs this variant — it is
+       * read-only for forward compatibility with old persisted rows.
+       * If the wider system ever migrates legacy rows in place, this
+       * variant becomes a no-op and can be removed in a follow-up.
+       */
+      readonly kind: 'apply_proposed_change';
+      readonly proposal_ref: string;
+      readonly inline_patch: Readonly<Record<string, unknown>>;
+      readonly public_label?: undefined;
+      readonly public_message?: undefined;
+      readonly __legacy_no_public_copy: true;
     }
   | {
       readonly kind: 'edit_graph_add_risk';

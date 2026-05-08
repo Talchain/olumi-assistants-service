@@ -679,11 +679,11 @@ describe('SupabaseSessionStore.readFactsFor', () => {
 
 describe('SupabaseSessionStore.readFactsWithTurnFor (V5 G7/G8 P0-3)', () => {
   // The proposed-change synthesis idempotency path filters facts by
-  // `turn_created_at >= proposal.emitted_at_iso` against an explicit
+  // `fact_created_at >= proposal.emitted_at_iso` against an explicit
   // FK ownership link. These tests pin the production read path's
   // return shape and column projection.
 
-  it('exists on the production store and returns wrapped { fact, turn_id, turn_created_at }', async () => {
+  it('exists on the production store and returns wrapped { fact, turn_id, fact_created_at }', async () => {
     const stagingRow = {
       noop: false,
       handler_id: 'add_constraint',
@@ -718,7 +718,7 @@ describe('SupabaseSessionStore.readFactsWithTurnFor (V5 G7/G8 P0-3)', () => {
     expect(entry.fact.fact_type).toBe('add_constraint');
     expect(entry.fact.noop).toBe(false);
     expect(entry.turn_id).toBe('turn-row-uuid-1');
-    expect(entry.turn_created_at).toBe('2026-05-08T12:00:30.000Z');
+    expect(entry.fact_created_at).toBe('2026-05-08T12:00:30.000Z');
   });
 
   it('SELECT includes v5_conversation_turn_id and created_at columns', async () => {

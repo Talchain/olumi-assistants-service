@@ -18,7 +18,14 @@ import { describe, expect, it } from 'vitest';
 
 import { ActionSchema } from '@talchain/schemas/boundary';
 
-import { computeProposalId, emitProposedChange } from '../proposed-change.js';
+import {
+  RENDER_SAFE_LABEL_FALLBACK,
+  RENDER_SAFE_MESSAGE_FALLBACK,
+  SAFETY_FORBIDDEN_TOKENS,
+  computeProposalId,
+  emitProposedChange,
+  sanitisePublicCopyOrFallback,
+} from '../proposed-change.js';
 import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
@@ -341,5 +348,90 @@ describe('emitProposedChange — case-insensitive + handler-id safety filter (P1
       makeCtx(),
     );
     expect(out.status).toBe('unsafe_copy');
+  });
+});
+
+describe('sanitisePublicCopyOrFallback — render-time safety hardening (pass-7)', () => {
+  // Pass-7 belt-and-braces: emit-time validation is primary; this
+  // helper is the last-line fallback at render time when persisted
+  // public copy carries unsafe tokens (legacy entries, malformed
+  // writes that bypassed `emitProposedChange`, etc.).
+
+  it('returns the original string when it is safe', () => {
+    expect(sanitisePublicCopyOrFallback('Add the cost cap', RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      'Add the cost cap',
+    );
+    expect(sanitisePublicCopyOrFallback('Add the cost cap.', RENDER_SAFE_MESSAGE_FALLBACK)).toBe(
+      'Add the cost cap.',
+    );
+  });
+
+  it('returns the fallback when the input is undefined or empty', () => {
+    expect(sanitisePublicCopyOrFallback(undefined, RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      RENDER_SAFE_LABEL_FALLBACK,
+    );
+    expect(sanitisePublicCopyOrFallback('', RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      RENDER_SAFE_LABEL_FALLBACK,
+    );
+  });
+
+  describe('rejects each forbidden category by replacing with the fallback', () => {
+    it.each([
+      // Raw JSON tokens
+      ['raw JSON quote-brace', 'See {"id":"x"}'],
+      ['raw JSON colon-quote', 'value":"x"'],
+      // Handler ids
+      ['handler id set_factor_value', 'Trigger set_factor_value now'],
+      ['handler id add_constraint', 'Run add_constraint please'],
+      ['handler id adjust_edge_strength', 'Apply adjust_edge_strength'],
+      ['handler id run_analysis', 'Trigger run_analysis'],
+      ['handler id what_would_flip', 'Show what_would_flip detail'],
+      // Schema / validation jargon
+      ['schema term zod', 'Failed zod validation'],
+      ['schema term STRUCTURAL_VALIDATION_FAILED', 'STRUCTURAL_VALIDATION_FAILED occurred'],
+      ['schema term invalid_type', 'invalid_type encountered'],
+      // Internal id/prefix
+      ['internal proposal_ref', 'See proposal_ref abc'],
+      ['internal pending_actions', 'Inspect pending_actions'],
+      ['internal chip_metadata', 'See chip_metadata'],
+      ['internal graph_hash', 'graph_hash mismatch'],
+      ['raw prefix prop_', 'See prop_abc123 details'],
+      ['raw prefix chip_', 'See chip_run_analysis details'],
+    ])('forbidden %s', (_name, raw) => {
+      expect(sanitisePublicCopyOrFallback(raw, RENDER_SAFE_LABEL_FALLBACK)).toBe(
+        RENDER_SAFE_LABEL_FALLBACK,
+      );
+    });
+  });
+
+  it('case-insensitive matching: uppercase variants of forbidden tokens trigger fallback', () => {
+    expect(sanitisePublicCopyOrFallback('APPLY_PROPOSED_CHANGE now', RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      RENDER_SAFE_LABEL_FALLBACK,
+    );
+    expect(sanitisePublicCopyOrFallback('Pending_Actions list', RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      RENDER_SAFE_LABEL_FALLBACK,
+    );
+  });
+
+  it('the fallback strings themselves contain no forbidden tokens', () => {
+    // Safety invariant: replacing unsafe input with the fallback must
+    // never re-introduce a forbidden token.
+    for (const fallback of [RENDER_SAFE_LABEL_FALLBACK, RENDER_SAFE_MESSAGE_FALLBACK]) {
+      const lower = fallback.toLowerCase();
+      for (const token of SAFETY_FORBIDDEN_TOKENS) {
+        expect(lower).not.toContain(token.toLowerCase());
+      }
+    }
+  });
+
+  it('renders the same fallback for both label and message when one is unsafe (independent calls)', () => {
+    // The two fallbacks differ — a label-render call and a message-
+    // render call MUST receive their own correct fallback.
+    expect(sanitisePublicCopyOrFallback('add_constraint', RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      'Apply this change',
+    );
+    expect(sanitisePublicCopyOrFallback('add_constraint', RENDER_SAFE_MESSAGE_FALLBACK)).toBe(
+      'Apply the proposed change',
+    );
   });
 });

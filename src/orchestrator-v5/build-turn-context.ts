@@ -55,7 +55,7 @@ export interface EnrichedTurnContext extends TurnContext {
    * its parent turn's row id and creation timestamp via the FK
    * `v5_handler_facts.v5_conversation_turn_id`. Consumed by the
    * proposed-change synthesis idempotency path which filters facts
-   * by `turn_created_at >= proposal.emitted_at_iso` — a schema-
+   * by `fact_created_at >= proposal.emitted_at_iso` — a schema-
    * aligned ownership link, not a positional heuristic across
    * `prior_turns` and `prior_facts`. Order matches `prior_facts`.
    *

@@ -59,12 +59,25 @@ const PROPOSAL_ID_PREFIX = 'prop_';
  * Forbidden tokens in user-facing copy. Case-insensitive substring
  * match; mirrors the safety filter applied in tests so production
  * emit refuses to surface internal vocabulary regardless of the
- * caller's casing. Categories:
+ * caller's casing.
+ *
+ * Used by TWO defences (pass-7 hardening):
+ *   - Emit-time (primary): `emitProposedChange` REJECTS the proposal
+ *     entirely if the caller-supplied `label` or `message` contains
+ *     any forbidden token. This is the strict gate.
+ *   - Render-time (belt-and-braces): `sanitisePublicCopyOrFallback`
+ *     swaps in safe fallback copy if the persisted `public_label` /
+ *     `public_message` contains a forbidden token. Catches malformed,
+ *     legacy, or pre-validation entries that bypass the emit helper.
+ *
+ * Categories:
  *   - internal pending-action / proposal vocabulary
  *   - V5 handler ids (must never appear in chips or messages)
- *   - schema/validation jargon
- *   - obvious raw-id patterns (e.g. UUIDs, prop_ / chip_ prefixes
- *     used for internal handles)
+ *   - schema / validation / Zod jargon
+ *   - raw JSON-shaped fragments (signals serialised internals
+ *     leaking into a label)
+ *   - obvious raw-id patterns (prop_ / chip_ prefixes; internal
+ *     field names like graph_hash)
  *   - typographic constraints (em dash)
  */
 const SAFETY_FORBIDDEN_TOKENS: readonly string[] = [
@@ -73,6 +86,7 @@ const SAFETY_FORBIDDEN_TOKENS: readonly string[] = [
   'pending_actions',
   'proposal_ref',
   'chip_metadata',
+  'graph_hash',
   // V5 handler ids — bare identifiers must never appear in user copy
   'add_constraint',
   'set_factor_value',
@@ -84,11 +98,16 @@ const SAFETY_FORBIDDEN_TOKENS: readonly string[] = [
   'explain_result',
   'compare_options',
   'edit_graph_add_risk',
-  // schema / validation jargon
+  // schema / validation / Zod jargon
   'zod',
   'structural_validation_failed',
   'entity_kind_mismatch',
   'precondition_unmet',
+  'invalid_type',
+  // raw JSON-shaped fragments — serialised internals leaking into
+  // a user-facing label
+  '{"',
+  '":',
   // raw id patterns the chip layer must not leak
   'prop_',
   'chip_',
@@ -235,3 +254,42 @@ export function emitProposedChange(
  * the production emit applies — single source of truth.
  */
 export { SAFETY_FORBIDDEN_TOKENS };
+
+/**
+ * Render-time fallback copy used when persisted `public_label` /
+ * `public_message` fail the safety filter. The emit-time gate
+ * (`emitProposedChange`) is the primary defence; these fallbacks are
+ * the belt-and-braces last line so unsafe persisted data NEVER
+ * reaches the user.
+ */
+export const RENDER_SAFE_LABEL_FALLBACK = 'Apply this change';
+export const RENDER_SAFE_MESSAGE_FALLBACK = 'Apply the proposed change';
+
+/**
+ * Sanitise a persisted user-facing string at render time. Returns the
+ * original string when it is safe; otherwise returns the supplied
+ * fallback. Use at the point persisted `public_label` /
+ * `public_message` is rendered into chips or assistant text.
+ *
+ * Safety contract: the returned string is GUARANTEED to contain no
+ * forbidden token from `SAFETY_FORBIDDEN_TOKENS` (since both the raw
+ * input and the deterministic in-code fallback are checked / authored
+ * against the same list).
+ *
+ * Pass-7 design note: emit-time validation already gates new
+ * proposals, so in steady-state production this sanitiser should be a
+ * no-op. It exists to harden the system against three failure modes:
+ *   1. legacy entries persisted before P1-1 (pre-`public_label` era);
+ *   2. third-party tooling writing directly to `pending_actions`
+ *      JSONB without going through `emitProposedChange`;
+ *   3. future schema-evolution mistakes that widen the persisted
+ *      shape and accidentally surface raw internals.
+ */
+export function sanitisePublicCopyOrFallback(
+  raw: string | undefined,
+  fallback: string,
+): string {
+  if (typeof raw !== 'string' || raw.length === 0) return fallback;
+  if (findForbiddenToken(raw) !== null) return fallback;
+  return raw;
+}

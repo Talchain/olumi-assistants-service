@@ -288,7 +288,7 @@ export class SupabaseSessionStore implements SessionStore {
       out.push({
         fact: parsed.data,
         turn_id: turnId,
-        turn_created_at: createdAt,
+        fact_created_at: createdAt,
       });
     }
     return out;

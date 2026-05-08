@@ -30,15 +30,15 @@ const EMITTED_AT_ISO = '2026-05-07T12:00:00.000Z';
 /**
  * Build a HandlerFactWithTurn entry. The synthesis input is now a
  * single wrapper carrying the FK ownership link
- * (`turn_created_at`) per fact — replacing the prior split
+ * (`fact_created_at`) per fact — replacing the prior split
  * priorTurns / priorFacts inputs.
  */
 function fwt(
   fact: HandlerFact,
-  turnCreatedAt: string,
+  factCreatedAt: string,
   turnId: string = 't1',
 ): HandlerFactWithTurn {
-  return { fact, turn_id: turnId, turn_created_at: turnCreatedAt };
+  return { fact, turn_id: turnId, fact_created_at: factCreatedAt };
 }
 
 const POST_EMIT_TS = '2026-05-07T12:00:30.000Z';
@@ -727,6 +727,118 @@ describe('decideProposedChangeSynthesis — fact-to-turn binding (P0-2)', () => 
         }), POST_EMIT_TS)],
     });
     expect(out.status).toBe('execute');
+  });
+});
+
+describe('buildApplyProposedChangeProposal — per-handler ProposalParameter shaping (P1-2)', () => {
+  it('set_factor_value with bare numeric value produces ONE value parameter', () => {
+    const proposal = buildApplyProposedChangeProposal(
+      pa({
+        inlinePatch: {
+          handler_id: 'set_factor_value',
+          params: { value: 100 },
+          target_entity_ids: ['factor_X'],
+        },
+      }),
+      { id: 'factor_X', kind: 'node', label: null },
+    );
+    expect(proposal.handler_id).toBe('set_factor_value');
+    expect(proposal.parameters).toHaveLength(1);
+    expect(proposal.parameters[0]!.name).toBe('value');
+    expect(proposal.parameters[0]!.value).toBe(100);
+  });
+
+  it('set_factor_value with operator folds it into the value parameter (NOT separate)', () => {
+    const proposal = buildApplyProposedChangeProposal(
+      pa({
+        inlinePatch: {
+          handler_id: 'set_factor_value',
+          params: { value: 100, operator: 'increase' },
+          target_entity_ids: ['factor_X'],
+        },
+      }),
+      { id: 'factor_X', kind: 'node', label: null },
+    );
+    // EXACTLY ONE parameter — operator must NOT become its own parameter.
+    expect(proposal.parameters).toHaveLength(1);
+    const p0 = proposal.parameters[0]! as {
+      name: string;
+      value: unknown;
+      operator?: string;
+    };
+    expect(p0.name).toBe('value');
+    expect(p0.value).toBe(100);
+    expect(p0.operator).toBe('increase');
+  });
+
+  it('set_factor_value with unit and cap folds them into a structured value object', () => {
+    const proposal = buildApplyProposedChangeProposal(
+      pa({
+        inlinePatch: {
+          handler_id: 'set_factor_value',
+          params: { value: 5, unit: '%', cap: 100 },
+          target_entity_ids: ['factor_churn'],
+        },
+      }),
+      { id: 'factor_churn', kind: 'node', label: null },
+    );
+    expect(proposal.parameters).toHaveLength(1);
+    expect(proposal.parameters[0]!.name).toBe('value');
+    expect(proposal.parameters[0]!.value).toEqual({ value: 5, unit: '%', cap: 100 });
+  });
+
+  it('set_factor_value rejects unknown operator (does not pass it through)', () => {
+    const proposal = buildApplyProposedChangeProposal(
+      pa({
+        inlinePatch: {
+          handler_id: 'set_factor_value',
+          params: { value: 100, operator: 'mystery' },
+          target_entity_ids: ['factor_X'],
+        },
+      }),
+      { id: 'factor_X', kind: 'node', label: null },
+    );
+    expect(proposal.parameters).toHaveLength(1);
+    const p0 = proposal.parameters[0]! as { operator?: string };
+    expect(p0.operator).toBeUndefined();
+  });
+
+  it('add_constraint keeps one parameter per top-level key (matches validator parameter_schemas)', () => {
+    const proposal = buildApplyProposedChangeProposal(
+      pa({
+        inlinePatch: {
+          handler_id: 'add_constraint',
+          params: {
+            constraint_type: 'at_most',
+            value: 100,
+            unit: 'GBP',
+            label: 'Cost cap',
+          },
+          target_entity_ids: ['goal-g'],
+        },
+      }),
+      { id: 'goal-g', kind: 'goal', label: null },
+    );
+    expect(proposal.handler_id).toBe('add_constraint');
+    expect(proposal.parameters.map((p) => p.name).sort()).toEqual(
+      ['constraint_type', 'label', 'unit', 'value'].sort(),
+    );
+  });
+
+  it('adjust_edge_strength keeps strength and std as separate parameters', () => {
+    const proposal = buildApplyProposedChangeProposal(
+      pa({
+        inlinePatch: {
+          handler_id: 'adjust_edge_strength',
+          params: { strength: 0.7, std: 0.05 },
+          target_entity_ids: ['edge_AB'],
+        },
+      }),
+      { id: 'edge_AB', kind: 'edge', label: null },
+    );
+    expect(proposal.handler_id).toBe('adjust_edge_strength');
+    expect(proposal.parameters).toHaveLength(2);
+    expect(proposal.parameters.map((p) => p.name).sort()).toEqual(['std', 'strength']);
   });
 });
 

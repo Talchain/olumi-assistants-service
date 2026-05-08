@@ -126,7 +126,7 @@ vi.mock('../session/index.js', () => ({
       priorFactsForRead.map((fact, idx) => ({
         fact,
         turn_id: `turn-${idx}`,
-        turn_created_at: '2026-05-08T00:00:00.000Z',
+        fact_created_at: '2026-05-08T00:00:00.000Z',
       })),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
@@ -576,6 +576,378 @@ describe('Proposed-change route-level — ambiguous clarification text contains 
     expect(result.response.assistant_text).toContain('1) Add the cost cap');
     expect(result.response.assistant_text).toContain('2) Add the time cap');
     expect(result.response.assistant_text).toContain('Which one would you like?');
+  });
+});
+
+describe('Proposed-change route-level — exact-label pre-route (P1-1)', () => {
+  beforeEach(() => {
+    appendCalls.length = 0;
+    addConstraintCalls.length = 0;
+    priorTurnsForRead = [];
+    priorFactsForRead = [];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('exact-label reply ("Add the cost cap") with one live proposal dispatches the handler', async () => {
+    // Reproduces the reviewer's P1-1 scenario: short-confirm rejects
+    // the message because of the edit-verb gate ("Add"). Without the
+    // dedicated label/ordinal pre-route, this falls through to the
+    // LLM. With the pre-route, the exact-label match resolves
+    // deterministically.
+    pendingActionsForRead = [applyProposedPendingAction()];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('Add the cost cap'), 'req-label-single', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
+  });
+
+  it('exact-label reply with two live proposals resolves to the matching one (no LLM)', async () => {
+    pendingActionsForRead = [
+      applyProposedPendingAction(),
+      {
+        ...applyProposedPendingAction(),
+        id: `pa-${randomUUID()}`,
+        chip_id: 'prop_bbbbbbbbbbbb',
+        action: {
+          kind: 'apply_proposed_change',
+          proposal_ref: 'prop_bbbbbbbbbbbb',
+          inline_patch: {
+            handler_id: 'add_constraint',
+            params: { value: 200, constraint_type: 'at_most', label: 'Time cap' },
+            target_entity_ids: ['goal-g'],
+          },
+          public_label: 'Add the time cap',
+          public_message: 'Add the time cap.',
+        },
+      },
+    ];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('Add the time cap'), 'req-label-multi', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
+  });
+
+  it('label match is case-insensitive', async () => {
+    pendingActionsForRead = [applyProposedPendingAction()];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('add the COST cap'), 'req-label-case', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
+  });
+
+  it('non-matching message with live proposals still falls through to LLM', async () => {
+    pendingActionsForRead = [applyProposedPendingAction()];
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text: 'mock' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+    await runTurnExecutor(payload('explain why this matters'), 'req-label-no-match', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(0);
+  });
+});
+
+describe('Proposed-change route-level — state-query order regression (P2-1)', () => {
+  beforeEach(() => {
+    appendCalls.length = 0;
+    addConstraintCalls.length = 0;
+    priorTurnsForRead = [];
+    priorFactsForRead = [];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('"what changed?" with live proposals does NOT execute and does NOT call the LLM', async () => {
+    // The reviewer flagged that the ordering of state-query vs the
+    // proposed-change pre-routes is not contract-literal. Practical
+    // risk should be zero because state-query phrases never match
+    // short-confirm / proposal-confirm / dismissal / label gates.
+    // This test pins that contract: a state-query-style message with
+    // a live proposal must not dispatch the proposal AND must not
+    // reach the LLM.
+    pendingActionsForRead = [applyProposedPendingAction()];
+    priorFactsForRead = [
+      {
+        fact_type: 'add_constraint',
+        fact_version: 1,
+        noop: false,
+        result: {
+          target_id: 'c1',
+          status: 'applied',
+          before: null,
+          after: {
+            constraint_id: 'c1',
+            node_id: 'goal-g',
+            operator: '<=',
+            value: 100,
+            label: 'Cost cap',
+          },
+        },
+      } as unknown as Record<string, unknown>,
+    ];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('what changed?'), 'req-state-query', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(0);
+    expect(result.response.assistant_text.length).toBeGreaterThan(0);
+  });
+
+  it('"what did you update?" with live proposals does NOT dispatch the proposal', async () => {
+    pendingActionsForRead = [applyProposedPendingAction()];
+    priorFactsForRead = [
+      {
+        fact_type: 'add_constraint',
+        fact_version: 1,
+        noop: false,
+        result: {
+          target_id: 'c1',
+          status: 'applied',
+          before: null,
+          after: {
+            constraint_id: 'c1',
+            node_id: 'goal-g',
+            operator: '<=',
+            value: 100,
+            label: 'Cost cap',
+          },
+        },
+      } as unknown as Record<string, unknown>,
+    ];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('what did you update?'), 'req-state-query-2', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(0);
+  });
+});
+
+describe('Proposed-change route-level — render-time sanitisation of unsafe persisted copy (pass-7)', () => {
+  // Pass-7 hardening: the parser already enforces public_label /
+  // public_message presence on new emits, but legacy entries or
+  // direct DB writes could land malformed copy in the JSONB. The
+  // ambiguous-clarification render path re-sanitises and falls back
+  // to safe deterministic copy when an unsafe token is detected.
+  // These tests pin that contract end-to-end through TurnExecutor.
+
+  beforeEach(() => {
+    appendCalls.length = 0;
+    addConstraintCalls.length = 0;
+    priorTurnsForRead = [];
+    priorFactsForRead = [];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function applyProposedWithUnsafePublicCopy(args: {
+    chipId: string;
+    label: string;
+    message: string;
+  }): PendingAction {
+    return {
+      id: `pa-${randomUUID()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: args.chipId,
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: args.chipId,
+        inline_patch: {
+          handler_id: 'add_constraint',
+          params: { value: 100, constraint_type: 'at_most', label: 'Cost cap' },
+          target_entity_ids: ['goal-g'],
+        },
+        public_label: args.label,
+        public_message: args.message,
+      },
+      preconditions: { graph_hash: GRAPH_HASH },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: EMITTED_AT_ISO,
+    };
+  }
+
+  const FORBIDDEN_AT_RENDER = [
+    'apply_proposed_change',
+    'pending_actions',
+    'proposal_ref',
+    'chip_metadata',
+    'graph_hash',
+    'add_constraint',
+    'set_factor_value',
+    'adjust_edge_strength',
+    'run_analysis',
+    'what_would_flip',
+    'zod',
+    'STRUCTURAL_VALIDATION_FAILED',
+    'invalid_type',
+    'prop_',
+    'chip_',
+    '{"',
+    '":',
+  ];
+
+  it.each([
+    {
+      kind: 'handler-id leak in label only',
+      label: 'Trigger add_constraint now',
+      message: 'Add the cost cap.',
+      expectLabelFallback: true,
+      expectMessageFallback: false,
+    },
+    {
+      kind: 'handler-id leak in message only',
+      label: 'Add the cost cap',
+      message: 'set_factor_value via tool',
+      expectLabelFallback: false,
+      expectMessageFallback: true,
+    },
+    {
+      kind: 'raw JSON in label only',
+      label: 'See {"id":"prop_abc"}',
+      message: 'Add the cost cap.',
+      expectLabelFallback: true,
+      expectMessageFallback: false,
+    },
+    {
+      kind: 'Zod jargon in message only',
+      label: 'Add the cost cap',
+      message: 'invalid_type detected by zod',
+      expectLabelFallback: false,
+      expectMessageFallback: true,
+    },
+    {
+      kind: 'internal field name in label only',
+      label: 'Inspect graph_hash',
+      message: 'Add the cost cap.',
+      expectLabelFallback: true,
+      expectMessageFallback: false,
+    },
+    {
+      kind: 'raw prop_ prefix in label only',
+      label: 'Apply prop_aaaaaaaaaaaa',
+      message: 'Add the cost cap.',
+      expectLabelFallback: true,
+      expectMessageFallback: false,
+    },
+    {
+      kind: 'unsafe BOTH label and message',
+      label: 'Trigger add_constraint',
+      message: 'invalid_type encountered',
+      expectLabelFallback: true,
+      expectMessageFallback: true,
+    },
+  ])(
+    '$kind: render-time sanitiser swaps unsafe persisted copy for the deterministic fallback',
+    async ({ label, message, expectLabelFallback, expectMessageFallback }) => {
+      pendingActionsForRead = [
+        applyProposedWithUnsafePublicCopy({
+          chipId: 'prop_aaaaaaaaaaaa',
+          label,
+          message,
+        }),
+        // Add a second SAFE proposal so the ambiguous flow is triggered.
+        applyProposedWithUnsafePublicCopy({
+          chipId: 'prop_bbbbbbbbbbbb',
+          label: 'Add the time cap',
+          message: 'Add the time cap.',
+        }),
+      ];
+      const adapter = throwingRoutingAdapter();
+      const result = await runTurnExecutor(payload('yes'), 'req-render-sanitise', {
+        routingAdapter: adapter,
+        handlerRegistry: stubbedRegistry(),
+      });
+      // recovery_ambiguous path commits clarification; no LLM call.
+      expect(adapter.chatWithTools).not.toHaveBeenCalled();
+      // No forbidden token leaks into assistant_text or any chip.
+      for (const token of FORBIDDEN_AT_RENDER) {
+        expect(result.response.assistant_text).not.toContain(token);
+      }
+      const chips = result.response.suggested_actions ?? [];
+      for (const chip of chips) {
+        for (const token of FORBIDDEN_AT_RENDER) {
+          expect(chip.label).not.toContain(token);
+          expect(chip.message).not.toContain(token);
+        }
+      }
+      // The malformed-copy chip renders the deterministic fallback
+      // for whichever field was unsafe; safe fields render verbatim.
+      const malformedChip = chips.find((c) => c.id === 'prop_aaaaaaaaaaaa');
+      expect(malformedChip).toBeDefined();
+      if (expectLabelFallback) {
+        expect(malformedChip!.label).toBe('Apply this change');
+      } else {
+        expect(malformedChip!.label).toBe(label);
+      }
+      if (expectMessageFallback) {
+        expect(malformedChip!.message).toBe('Apply the proposed change');
+      } else {
+        expect(malformedChip!.message).toBe(message);
+      }
+    },
+  );
+
+  it('when ALL candidates have malformed copy, the assistant text falls back to the generic prompt (no numbered list)', async () => {
+    pendingActionsForRead = [
+      applyProposedWithUnsafePublicCopy({
+        chipId: 'prop_aaaaaaaaaaaa',
+        label: 'Trigger add_constraint',
+        message: 'add_constraint via zod',
+      }),
+      applyProposedWithUnsafePublicCopy({
+        chipId: 'prop_bbbbbbbbbbbb',
+        label: 'See {"raw":"json"}',
+        message: 'invalid_type encountered',
+      }),
+    ];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(payload('yes'), 'req-render-all-malformed', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    // Both chips render the same fallback; the assistant text falls
+    // back to the generic prompt rather than a numbered list of
+    // identical fallbacks.
+    expect(result.response.assistant_text).toBe(
+      'I had more than one offer open. Which would you like?',
+    );
+    for (const token of FORBIDDEN_AT_RENDER) {
+      expect(result.response.assistant_text).not.toContain(token);
+    }
+    const chips = result.response.suggested_actions ?? [];
+    expect(chips.length).toBe(2);
+    for (const chip of chips) {
+      expect(chip.label).toBe('Apply this change');
+      expect(chip.message).toBe('Apply the proposed change');
+    }
   });
 });
 

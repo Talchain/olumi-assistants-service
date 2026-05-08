@@ -55,7 +55,7 @@ export interface DecideProposedChangeSynthesisInput {
   /**
    * Mutation facts paired with their parent turn id and creation
    * timestamp. The idempotency check filters by
-   * `turn_created_at >= emitted_at_iso` to ensure ONLY post-emit
+   * `fact_created_at >= emitted_at_iso` to ensure ONLY post-emit
    * facts can trigger `already_applied`. Read-only input; the
    * helper filters in-process and never calls the DB.
    *
@@ -275,7 +275,7 @@ const HANDLER_MATCHERS: Readonly<
 /**
  * Pick the post-emit subset of facts for a given `handler_id`.
  *
- * Each entry's `turn_created_at` is the parent turn's creation
+ * Each entry's `fact_created_at` is the parent turn's creation
  * timestamp via the FK `v5_handler_facts.v5_conversation_turn_id`.
  * We filter directly on that — no positional pairing across
  * separate `priorTurns` / `priorFacts` arrays.
@@ -288,7 +288,7 @@ function pickPostEmitFacts(
   const out: HandlerFact[] = [];
   for (const entry of priorFactsWithTurn) {
     if (entry.fact.fact_type !== handlerId) continue;
-    const createdMs = Date.parse(entry.turn_created_at);
+    const createdMs = Date.parse(entry.fact_created_at);
     if (!Number.isFinite(createdMs)) continue;
     if (createdMs < emittedAtMs) continue;
     out.push(entry.fact);
@@ -336,7 +336,7 @@ function hasMinExecutablePayload(
  *      and the handler-required minimum executable payload (P0-2).
  *   2. Filter facts to those whose parent turn was dispatched at or
  *      after the proposal's `emitted_at_iso` via the explicit
- *      `turn_created_at` field on each `HandlerFactWithTurn` entry.
+ *      `fact_created_at` field on each `HandlerFactWithTurn` entry.
  *      Pre-emit facts are NEVER eligible. Schema-aligned ownership
  *      link (P0-3).
  *   3. Build "latest fact per target_id" from the post-emit subset.
@@ -493,6 +493,82 @@ export interface SynthesisEntityLookup {
   (id: string): { kind: 'option' | 'goal' | 'node' | 'edge' | 'constraint'; label?: string | null } | null;
 }
 
+/**
+ * Project a proposal's `inline_patch.params` Record into the
+ * handler-specific `ProposalParameter[]` shape the validator expects.
+ *
+ * Canonical inline_patch.params shape per intent (P1-2):
+ *   - `set_factor_value`:
+ *       `{ value: number | { value, unit?, cap? }, unit?, cap?, operator? }`
+ *       where `operator` is one of 'set' | 'increase' | 'decrease' |
+ *       'multiply'. Produces ONE `value` ProposalParameter; `unit`,
+ *       `cap`, and `operator` are folded into either the structured
+ *       value object or sibling fields on the parameter.
+ *   - `add_constraint`:
+ *       `{ constraint_type, value, label?, unit? }`
+ *       Produces one ProposalParameter per top-level key.
+ *   - `adjust_edge_strength`:
+ *       `{ strength, std? }`
+ *       Produces one ProposalParameter per top-level key.
+ *
+ * Unknown handler ids fall back to the flat-projection shape so a
+ * future handler keeps working without code changes here, but the
+ * V5 handlers we care about today are exhaustively covered.
+ */
+function buildHandlerParameters(
+  handlerId: V5ActionType,
+  params: Readonly<Record<string, unknown>>,
+): ProposalAction['parameters'] {
+  if (handlerId === 'set_factor_value') {
+    // Build at most ONE parameter named 'value'. Compose the structured
+    // value object only if unit or cap are present. Operator and unit
+    // become sibling fields on the parameter (matching how the LLM
+    // validator interprets `ProposalParameter.operator` /
+    // `ProposalParameter.unit`).
+    if (!('value' in params) || params.value === undefined) return [];
+    const baseValue = params.value as unknown;
+    const proposalUnit = typeof params.unit === 'string' ? params.unit : undefined;
+    const proposalCap = typeof params.cap === 'number' ? params.cap : undefined;
+    const proposalOperator =
+      params.operator === 'set' ||
+      params.operator === 'increase' ||
+      params.operator === 'decrease' ||
+      params.operator === 'multiply'
+        ? params.operator
+        : undefined;
+    // If the proposal carried a structured value object, pass it
+    // through verbatim. Otherwise fold unit/cap into a structured
+    // object only when at least one is present; else use the bare
+    // numeric.
+    let valueField: unknown = baseValue;
+    if (typeof baseValue === 'number' && (proposalUnit !== undefined || proposalCap !== undefined)) {
+      valueField = {
+        value: baseValue,
+        ...(proposalUnit !== undefined ? { unit: proposalUnit } : {}),
+        ...(proposalCap !== undefined ? { cap: proposalCap } : {}),
+      };
+    }
+    return [
+      {
+        name: 'value',
+        value: valueField,
+        source: 'user_explicit' as const,
+        ...(proposalOperator !== undefined ? { operator: proposalOperator } : {}),
+        ...(proposalUnit !== undefined && typeof baseValue !== 'number'
+          ? { unit: proposalUnit }
+          : {}),
+      },
+    ];
+  }
+  // add_constraint and adjust_edge_strength: one parameter per
+  // top-level key, matching the validator's parameter_schemas.
+  return Object.entries(params).map(([name, value]) => ({
+    name,
+    value,
+    source: 'user_explicit' as const,
+  }));
+}
+
 export function buildApplyProposedChangeProposal(
   pending: PendingAction,
   fallbackEntity: FallbackEntity,
@@ -558,11 +634,22 @@ export function buildApplyProposedChangeProposal(
     !Array.isArray(ip.params)
       ? (ip.params as Readonly<Record<string, unknown>>)
       : ({} as Readonly<Record<string, unknown>>);
-  const parameters = Object.entries(params).map(([name, value]) => ({
-    name,
-    value,
-    source: 'user_explicit' as const,
-  }));
+  // Per-handler ProposalParameter shaping (P1-2). The validator's
+  // `parameter_schemas` differs per handler:
+  //   - set_factor_value: ONE `value` parameter accepting either a
+  //     bare number OR `{ value, unit?, cap? }`; an `operator`
+  //     ('set' | 'increase' | 'decrease' | 'multiply') and `unit`
+  //     are SIBLING fields on the parameter, NOT separate parameters.
+  //   - add_constraint: 4 separate parameters
+  //     (`constraint_type`, `value`, `label`, `unit`).
+  //   - adjust_edge_strength: 2 separate parameters (`strength`, `std`).
+  //
+  // Naively flattening every key in `params` into its own parameter
+  // works for `add_constraint` and `adjust_edge_strength` but
+  // misshapes `set_factor_value` — splitting `unit` / `cap` /
+  // `operator` away from the `value` parameter the validator and
+  // handler expect.
+  const parameters = buildHandlerParameters(handlerId, params);
   // Prefer the graph-resolved label, else the fallback label (no
   // targets case), else omit.
   const labelToUse =

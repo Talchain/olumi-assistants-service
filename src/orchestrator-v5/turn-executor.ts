@@ -94,6 +94,11 @@ import {
 import { isProposedChangeActionType } from './types/proposed-change.js';
 import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
 import {
+  RENDER_SAFE_LABEL_FALLBACK,
+  RENDER_SAFE_MESSAGE_FALLBACK,
+  sanitisePublicCopyOrFallback,
+} from './compose/proposed-change.js';
+import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
   type PendingAction,
@@ -1334,15 +1339,31 @@ export async function runTurnExecutor(
             // adjust_edge_strength proposals with the wrong wire
             // action type. Falls back to generic strings only for
             // legacy entries missing the persisted copy.
+            // Pass-7 hardening: re-sanitise persisted public_label /
+            // public_message at render time. Emit-time validation
+            // (see compose/proposed-change.ts::emitProposedChange) is
+            // the primary defence; this is the belt-and-braces
+            // fallback for malformed, legacy, or pre-validation
+            // entries that bypass the emit helper. When the persisted
+            // string fails the safety filter, the deterministic
+            // in-code fallback copy is used.
             const proposalAction = cand.action;
-            const persistedLabel =
+            const rawPersistedLabel =
               proposalAction.kind === 'apply_proposed_change'
-                ? (proposalAction.public_label ?? 'Apply this change')
-                : 'Apply this change';
-            const persistedMessage =
+                ? proposalAction.public_label
+                : undefined;
+            const rawPersistedMessage =
               proposalAction.kind === 'apply_proposed_change'
-                ? (proposalAction.public_message ?? 'Apply this change.')
-                : 'Apply this change.';
+                ? proposalAction.public_message
+                : undefined;
+            const persistedLabel = sanitisePublicCopyOrFallback(
+              rawPersistedLabel,
+              RENDER_SAFE_LABEL_FALLBACK,
+            );
+            const persistedMessage = sanitisePublicCopyOrFallback(
+              rawPersistedMessage,
+              RENDER_SAFE_MESSAGE_FALLBACK,
+            );
             const inlineHandlerId =
               proposalAction.kind === 'apply_proposed_change'
                 ? (proposalAction.inline_patch as { handler_id?: unknown })?.handler_id
@@ -1454,7 +1475,7 @@ export async function runTurnExecutor(
         // like? 1) <label> 2) <label>"). Mixed-kind candidates fall
         // back to the generic prompt.
         const allCandidatesHaveLabels = ambiguousChips.every(
-          (c) => c.label.length > 0 && c.label !== 'Apply this change',
+          (c) => c.label.length > 0 && c.label !== RENDER_SAFE_LABEL_FALLBACK,
         );
         const numberedList = ambiguousChips
           .map((c, i) => `${i + 1}) ${c.label}`)
@@ -1542,12 +1563,102 @@ export async function runTurnExecutor(
         }
       }
 
-      // V5 G7/G8: dismissal pre-route. Fires when short-confirm
-      // returned matched=false and at least one live
-      // apply_proposed_change pending action exists. The negative-
-      // control gate ensures messages mixing dismissal with positive
-      // tokens ("not now, but add it anyway") fall through to the LLM.
+      // V5 G7/G8 P1-1: live-proposal label/ordinal pre-route. Fires
+      // when short-confirm returned matched=false. A user replying
+      // with the proposal's exact public label ("Add the cost cap")
+      // would otherwise hit the edit-verb gate on short-confirm and
+      // fall through to the LLM, never reaching the recovery_ambiguous
+      // ordinal-select branch. This pre-route runs the same helper
+      // against ALL live apply_proposed_change candidates so an
+      // exact-label or ordinal pick resolves deterministically
+      // regardless of how short-confirm classified the message.
       if (!shortConfirmDispatch.matched) {
+        const liveProposals = (context.most_recent_pending_actions ?? []).filter(
+          (pa) => pa.action.kind === 'apply_proposed_change',
+        );
+        if (liveProposals.length > 0) {
+          // Use the SAME public_label the ambiguous-clarification
+          // chip builder renders so the resolution mirrors what the
+          // user saw. Falls back to a safe placeholder for legacy
+          // entries missing the field — those entries cannot be
+          // exact-label-matched (the placeholder is never spoken by
+          // the user).
+          const liveLabels = liveProposals.map((pa) =>
+            pa.action.kind === 'apply_proposed_change' && typeof pa.action.public_label === 'string'
+              ? pa.action.public_label
+              : ' __legacy_no_label__ ',
+          );
+          const labelPick = tryProposalOrdinalSelect({
+            message: payload.message,
+            candidates: liveProposals,
+            candidateLabels: liveLabels,
+          });
+          if (labelPick.matched) {
+            emit(TelemetryEvents.PendingActionMatched, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: labelPick.pending.id,
+              kind: labelPick.pending.action.kind,
+              chip_id: labelPick.pending.chip_id,
+              candidate_count: liveProposals.length,
+            });
+            const decision = decideProposedChangeSynthesis({
+              pending: labelPick.pending,
+              currentGraphHash: freshness?.current_graph_hash ?? undefined,
+              priorFactsWithTurn: context.prior_facts_with_turn,
+            });
+            if (decision.status === 'execute') {
+              const fallbackEnt = (() => {
+                if (graphLookupForValidate) {
+                  const opts = graphLookupForValidate.listEntitiesByKind('option');
+                  if (opts.length > 0) {
+                    return { id: opts[0]!.id, kind: 'option' as const, label: opts[0]!.label };
+                  }
+                }
+                return { id: context.session_id, kind: 'option' as const, label: null };
+              })();
+              const proposalForLabel = buildApplyProposedChangeProposal(
+                labelPick.pending,
+                fallbackEnt,
+                (id) =>
+                  graphLookupForValidate ? graphLookupForValidate.findEntityById(id) : null,
+              );
+              routingResult = {
+                type: 'tool_call',
+                proposal: { intent_class: 'execute', action: proposalForLabel },
+                orientationText: '',
+                rawResult: {
+                  content: [],
+                  stop_reason: 'tool_use',
+                  usage: { input_tokens: 0, output_tokens: 0 },
+                  model: 'deterministic-short-confirm',
+                  latencyMs: 0,
+                },
+                llmCallCount: 0,
+              };
+              llmCallsUsed = 0;
+              sonnetTextForLog = '';
+              stagesCompleted.push('orient');
+              consumedPendingAction = labelPick.pending;
+              // Fall through to handler dispatch.
+            } else {
+              return commitProposedChangeRecovery(
+                decision.status,
+                `apply_proposed_change_label_${decision.status}`,
+              );
+            }
+          }
+        }
+      }
+
+      // V5 G7/G8: dismissal pre-route. Fires when short-confirm
+      // returned matched=false (and the label/ordinal pre-route
+      // above did not synthesise a routing result) and at least one
+      // live apply_proposed_change pending action exists. The
+      // negative-control gate ensures messages mixing dismissal with
+      // positive tokens ("not now, but add it anyway") fall through
+      // to the LLM.
+      if (!shortConfirmDispatch.matched && routingResult === undefined) {
         const dismissal = tryProposalDismissal({
           message: payload.message,
           livePendingActions: context.most_recent_pending_actions ?? [],
