@@ -14,15 +14,19 @@
  * in the TurnExecutor caller (mirrors `deterministic-value-update.ts`'s
  * separation of detection from dispatch).
  *
- * Wave 2 implementation scope:
- *   - Resumable kind handled today: `run_analysis`.
- *   - Other kinds (`what_would_flip`, `set_factor_value`,
- *     `apply_proposed_change`, `edit_graph_add_risk`) are recognised
- *     as "valid pending actions" but do not yet have a synthesis path
- *     in TurnExecutor; they will be added in Waves 3+ as their emit
- *     sites land. Until then, those kinds appear in `candidates` and
- *     fall through to the LLM (matched=false, skip_reason=
- *     'kind_not_yet_resumable') — never silently misfired.
+ * Resumable kinds today:
+ *   - `run_analysis` and `what_would_flip` (Wave 2).
+ *   - `apply_proposed_change` (V5 G7/G8): TurnExecutor calls
+ *     `decideProposedChangeSynthesis` after this resumer matches, to
+ *     check graph-hash divergence and idempotency before dispatching
+ *     the handler indicated by `inline_patch.handler_id`.
+ *
+ *   The remaining kinds (`set_factor_value`, `edit_graph_add_risk`)
+ *   are recognised as "valid pending actions" but do not yet have a
+ *   synthesis path in TurnExecutor; they will be added when their
+ *   resume drivers land. Until then, those kinds appear in
+ *   `candidates` and fall through to the LLM (matched=false,
+ *   skip_reason='kind_not_yet_resumable') — never silently misfired.
  *
  * Negative gate: messages containing edit verbs or numeric quantities
  * are NOT short-confirmations. They might be value updates instead and
@@ -53,9 +57,59 @@ export const SHORT_CONFIRM_PATTERN =
  * Negative gate. If any of these appear in the message, the user is
  * not making a bare confirmation — they're probably typing a fresh
  * request that happens to start with "yes". Stay out of the way.
+ *
+ * EXCEPTION: when at least one live `apply_proposed_change` pending
+ * action exists, `PROPOSAL_CONFIRM_PATTERN` overrides this gate for
+ * proposal-targeted phrases like "add that" / "make that change".
+ * Those edit verbs are part of an idiomatic confirmation, not a
+ * fresh request, when the assistant has just offered a matching
+ * proposal.
  */
 const EDIT_VERB_OR_QUANTITY_PATTERN =
   /\b(?:increase|decrease|reduce|raise|lower|set|change|update|make|adjust|add|remove|replace|simplif|rebuild)\b|\d/i;
+
+/**
+ * Proposal-targeted confirmation phrases. Match ONLY when at least
+ * one live `apply_proposed_change` pending action exists, and override
+ * the edit-verb gate. The brief explicitly lists "add that" and
+ * "make that change" as required deterministic confirmations.
+ */
+export const PROPOSAL_CONFIRM_PATTERN =
+  /^\s*(?:add\s+that|make\s+that(?:\s+change)?|do\s+that\s+change|apply\s+that(?:\s+change)?|let'?s\s+(?:do\s+that|apply\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+
+/**
+ * Phrasal-ordinal confirmation patterns. When at least one live
+ * `apply_proposed_change` pending action exists and the message is
+ * an ordinal pointer ("the first one", "first", "option 2", "#3"),
+ * the resumer resolves the indexed proposal directly without
+ * routing through `recovery_ambiguous`. The brief lists these as
+ * deterministic resolutions.
+ */
+const ORDINAL_WORD_PATTERN =
+  /^\s*(?:the\s+)?(first|second|third|fourth|fifth)(?:\s+(?:one|option|choice))?(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?]*$/iu;
+const ORDINAL_DIGIT_PATTERN =
+  /^\s*(?:#|option\s+|number\s+|the\s+)?(\d{1,2})(?:\s+(?:one|option|choice))?(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?]*$/iu;
+const ORDINAL_WORD_TO_INDEX: ReadonlyMap<string, number> = new Map([
+  ['first', 0],
+  ['second', 1],
+  ['third', 2],
+  ['fourth', 3],
+  ['fifth', 4],
+]);
+function tryParseOrdinalIndex(message: string): number | null {
+  const word = ORDINAL_WORD_PATTERN.exec(message);
+  if (word !== null) {
+    const idx = ORDINAL_WORD_TO_INDEX.get(word[1]!.toLowerCase());
+    return idx ?? null;
+  }
+  const digit = ORDINAL_DIGIT_PATTERN.exec(message);
+  if (digit !== null) {
+    const n = Number.parseInt(digit[1]!, 10);
+    if (!Number.isFinite(n) || n < 1) return null;
+    return n - 1;
+  }
+  return null;
+}
 
 export type ShortConfirmSkipReason =
   | 'no_short_confirm'
@@ -128,19 +182,25 @@ export interface TryShortConfirmResumeInput {
  * without further user input:
  *   - `run_analysis`           — no params; the handler reads scenario state
  *   - `what_would_flip`        — no params; reads the live analysis projection
+ *   - `apply_proposed_change`  — `inline_patch.handler_id` plus `params`
+ *                                and `target_entity_ids` carry the full
+ *                                replay payload. Hash divergence and
+ *                                idempotency are enforced by
+ *                                `decideProposedChangeSynthesis` in
+ *                                TurnExecutor before dispatch.
  *
- * The remaining kinds (`set_factor_value`, `apply_proposed_change`,
- * `edit_graph_add_risk`) are persisted but resume requires either a
- * follow-up driver/parameter or a label-match pre-route that
- * disambiguates between candidates of the same kind (e.g. user types
- * "Engineering Budget" alone after a multi-candidate clarify). That
- * pre-route is the bounded follow-up for full clarification
- * continuity; until it lands those kinds are deliberately excluded
- * from the bare-confirm resumer.
+ * The remaining kinds (`set_factor_value`, `edit_graph_add_risk`) are
+ * persisted but resume requires either a follow-up driver/parameter
+ * or a label-match pre-route that disambiguates between candidates of
+ * the same kind (e.g. user types "Engineering Budget" alone after a
+ * multi-candidate clarify). That pre-route is the bounded follow-up
+ * for full clarification continuity; until it lands those kinds are
+ * deliberately excluded from the bare-confirm resumer.
  */
 const RESUMABLE_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set([
   'run_analysis',
   'what_would_flip',
+  'apply_proposed_change',
 ]);
 
 function isExpired(pa: PendingAction, nowMs: number, _currentTurnIndex: number): boolean {
@@ -168,12 +228,45 @@ function isExpired(pa: PendingAction, nowMs: number, _currentTurnIndex: number):
 export function tryShortConfirmResume(
   input: TryShortConfirmResumeInput,
 ): ShortConfirmDispatch {
-  // Negative gate first — cheapest. A "yes" with edit verbs is a fresh
-  // request, not a confirmation.
-  if (EDIT_VERB_OR_QUANTITY_PATTERN.test(input.message)) {
+  // Pre-compute live apply_proposed_change candidates once. They unlock
+  // two pre-route branches: (1) PROPOSAL_CONFIRM_PATTERN bypasses the
+  // edit-verb gate for proposal-targeted phrases ("add that", "make
+  // that change"); (2) ordinal pointers ("the first one", "option 2")
+  // resolve directly to the indexed proposal without going through
+  // `recovery_ambiguous`.
+  const liveApplyProposed = input.pendingActions.filter(
+    (pa) =>
+      pa.action.kind === 'apply_proposed_change' &&
+      !isExpired(pa, input.nowMs, input.currentTurnIndex),
+  );
+
+  // Phrasal-ordinal pre-resolve. Only fires when at least one live
+  // apply_proposed_change exists. Single-proposal "the first one"
+  // resolves to that one offer; multi-proposal ordinal picks the
+  // indexed candidate. This deliberately short-circuits
+  // `recovery_ambiguous` so deterministic ordinal picks never produce
+  // a clarification round-trip.
+  if (liveApplyProposed.length > 0) {
+    const ordinalIdx = tryParseOrdinalIndex(input.message);
+    if (ordinalIdx !== null && ordinalIdx >= 0 && ordinalIdx < liveApplyProposed.length) {
+      return {
+        matched: true,
+        dispatch: 'pending_action',
+        pending: liveApplyProposed[ordinalIdx]!,
+      };
+    }
+  }
+
+  // Edit-verb / numeric-quantity gate. Override only when a live
+  // apply_proposed_change exists AND the message matches a
+  // proposal-targeted confirmation phrase ("add that" / "make that
+  // change" / "apply that change").
+  const isProposalConfirm =
+    liveApplyProposed.length > 0 && PROPOSAL_CONFIRM_PATTERN.test(input.message);
+  if (EDIT_VERB_OR_QUANTITY_PATTERN.test(input.message) && !isProposalConfirm) {
     return { matched: false, skip_reason: 'no_short_confirm' };
   }
-  if (!SHORT_CONFIRM_PATTERN.test(input.message)) {
+  if (!SHORT_CONFIRM_PATTERN.test(input.message) && !isProposalConfirm) {
     return { matched: false, skip_reason: 'no_short_confirm' };
   }
   if (input.pendingActions.length === 0) {
@@ -196,7 +289,13 @@ export function tryShortConfirmResume(
   }
 
   // Filter to kinds with a synthesis path.
-  const resumable = live.filter((pa) => RESUMABLE_KINDS.has(pa.action.kind));
+  let resumable = live.filter((pa) => RESUMABLE_KINDS.has(pa.action.kind));
+  // PROPOSAL_CONFIRM_PATTERN is unambiguous about proposal intent —
+  // narrow the resumable set to apply_proposed_change candidates only,
+  // even if other resumable kinds (e.g. run_analysis) are also live.
+  if (isProposalConfirm) {
+    resumable = resumable.filter((pa) => pa.action.kind === 'apply_proposed_change');
+  }
   if (resumable.length === 0) {
     // Pending action is live but its kind is not yet wired in
     // TurnExecutor. Fall through to the LLM rather than misfire.

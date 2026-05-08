@@ -13,7 +13,12 @@
  * round-trip as natural-language messages here and DO NOT crash the
  * commit path. Pending actions for those kinds are emitted via
  * explicit `CommitMetadata.pending_actions` at their dedicated emit
- * sites.
+ * sites — for `apply_proposed_change` the dedicated site is
+ * `compose/proposed-change.ts::emitProposedChange`, which produces a
+ * matching wire chip (using one of the existing `boundary.ActionType`
+ * literals such as `add_constraint`) plus the server-side pending
+ * action carrying `inline_patch.handler_id` / `inline_patch.params` /
+ * `inline_patch.target_entity_ids`.
  *
  * Today the mapping is:
  *   action_type='run_analysis'    → PendingActionAction { kind: 'run_analysis' }

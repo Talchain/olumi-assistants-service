@@ -20,6 +20,17 @@ import type {
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import type { PendingAction } from './pending-action.js';
+import type { HandlerFactWithTurn } from '../types/handler-fact.js';
+
+/**
+ * Re-export so existing in-session callers (and `commit.ts` /
+ * `build-turn-context.ts`) keep importing from `session/store.js` if
+ * they prefer. The canonical definition lives in
+ * `../types/handler-fact.ts` so leaf consumers (e.g.
+ * `routing/proposed-change-synthesis.ts`) can import it without
+ * crossing the state-write-invariant boundary.
+ */
+export type { HandlerFactWithTurn };
 
 export interface SessionTurnWrite {
   readonly scenario_id: string;
@@ -99,6 +110,25 @@ export interface SessionStore {
     conversationTurnRowIds: readonly string[],
     handlerId?: V5ActionType,
   ): Promise<readonly HandlerFact[]>;
+  /**
+   * Variant of {@link readFactsFor} that pairs each fact with its
+   * parent turn id and creation timestamp. The proposed-change
+   * synthesis path uses this to gate idempotency by an explicit
+   * schema-aligned ownership link rather than positional ordering
+   * across `priorTurns` and `priorFacts`.
+   *
+   * Results are ordered newest-first by the fact's `created_at DESC`,
+   * matching `readFactsFor`.
+   *
+   * Optional on the interface so existing test mocks aren't forced
+   * to implement it; buildTurnContext falls back to an empty array
+   * when absent. Production (`SupabaseSessionStore`) always
+   * implements this.
+   */
+  readFactsWithTurnFor?(
+    conversationTurnRowIds: readonly string[],
+    handlerId?: V5ActionType,
+  ): Promise<readonly HandlerFactWithTurn[]>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**

@@ -80,6 +80,23 @@ import {
   composeStateQueryChip,
   tryStateQueryGuard,
 } from './routing/state-query-guard.js';
+import { tryProposalOrdinalSelect } from './routing/proposal-ordinal-select.js';
+import {
+  PROPOSAL_DISMISSAL_RESPONSE,
+  tryProposalDismissal,
+} from './routing/proposal-dismissal.js';
+import {
+  buildApplyProposedChangeProposal,
+  decideProposedChangeSynthesis,
+  PROPOSAL_ALREADY_APPLIED_RESPONSE,
+  PROPOSAL_SUPERSEDED_RESPONSE,
+} from './routing/proposed-change-synthesis.js';
+import { isProposedChangeActionType } from './types/proposed-change.js';
+import { derivePendingActionsFromChips } from './compose/derive-pending-actions.js';
+import {
+  RENDER_SAFE_LABEL_FALLBACK,
+  resolveProposalRenderCopy,
+} from './compose/proposed-change.js';
 import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
@@ -845,6 +862,68 @@ export async function runTurnExecutor(
       // enforced by regex content: short-confirm requires the message
       // to be bare "yes"-style; value-update requires an edit verb
       // plus a CQE quantity. The two cannot match the same message.
+      // V5 G7/G8: shared recovery-commit closure for the
+      // apply_proposed_change `superseded` / `already_applied` /
+      // `invalid` lifecycle states. Both the direct pending_action
+      // branch and the ordinal-select branch reach for the same
+      // commit shape; centralising prevents drift between them.
+      const commitProposedChangeRecovery = async (
+        decisionStatus: 'superseded' | 'already_applied' | 'invalid',
+        pathTag: string,
+      ): Promise<TurnExecutorRunResult> => {
+        const recoveryAssistantText =
+          decisionStatus === 'superseded'
+            ? PROPOSAL_SUPERSEDED_RESPONSE
+            : decisionStatus === 'already_applied'
+              ? PROPOSAL_ALREADY_APPLIED_RESPONSE
+              : 'The offer I had open is no longer valid. Tell me what to explore next.';
+        const recoveryResponse = composeDirectAnswerResponse({
+          assistant_text: recoveryAssistantText,
+          stage: context.stage,
+          suggested_actions: [],
+        });
+        sonnetTextForLog = recoveryResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitDirectAnswer(recoveryResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: pathTag,
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on proposed-change recovery',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
       // Chip-click parity for what_would_flip: route-v2 sets
       // `chipClickResumeIntent` so the resumer treats the click as a
       // confirmation regardless of the chip's natural-language
@@ -965,6 +1044,30 @@ export async function runTurnExecutor(
           chip_id: pending.chip_id,
           candidate_count: 1,
         });
+        // V5 G7/G8: apply_proposed_change carries an inline patch with a
+        // handler_id, params and target entity ids. The synthesis helper
+        // gates on graph-hash divergence and idempotency before we
+        // proceed to handler dispatch — both can short-circuit into a
+        // direct-answer recovery without an LLM round-trip.
+        if (pending.action.kind === 'apply_proposed_change') {
+          const decision = decideProposedChangeSynthesis({
+            pending,
+            currentGraphHash: freshness?.current_graph_hash ?? undefined,
+            priorFactsWithTurn: context.prior_facts_with_turn,
+          });
+          if (
+            decision.status === 'superseded' ||
+            decision.status === 'already_applied' ||
+            decision.status === 'invalid'
+          ) {
+            return commitProposedChangeRecovery(
+              decision.status,
+              `apply_proposed_change_${decision.status}`,
+            );
+          }
+          // status === 'execute' falls through to handler dispatch
+          // below, after we synthesise the ProposalAction.
+        }
         // Synthesise a proposal entity that will pass the validator's
         // graph-existence check (line 281 of validator.ts). For
         // run_analysis and what_would_flip the validator accepts
@@ -1006,18 +1109,30 @@ export async function runTurnExecutor(
                 parameters: [],
                 cited_context_fields: ['graph.options'],
               }
-            : {
-                handler_id: 'what_would_flip',
-                entity: {
-                  id: ent.id,
-                  kind: ent.kind,
-                  ...(ent.label !== null ? { label: ent.label } : {}),
-                  resolution_status: 'resolved',
-                  resolution_method: 'id_match',
-                },
-                parameters: [],
-                cited_context_fields: ['analysis.leading_option'],
-              };
+            : pending.action.kind === 'what_would_flip'
+              ? {
+                  handler_id: 'what_would_flip',
+                  entity: {
+                    id: ent.id,
+                    kind: ent.kind,
+                    ...(ent.label !== null ? { label: ent.label } : {}),
+                    resolution_status: 'resolved',
+                    resolution_method: 'id_match',
+                  },
+                  parameters: [],
+                  cited_context_fields: ['analysis.leading_option'],
+                }
+              : // apply_proposed_change — use inline_patch handler_id
+                // and target. The synthesis helper above already
+                // narrowed the kind and rejected invalid/superseded/
+                // already-applied cases; here we know the patch is
+                // executable. Pass the live graph lookup so the
+                // synthesised entity.kind matches the graph-resolved
+                // kind (validator runs both structural and per-entity
+                // kind checks).
+                buildApplyProposedChangeProposal(pending, ent, (id) =>
+                  graphLookupForValidate ? graphLookupForValidate.findEntityById(id) : null,
+                );
         const synthesisedRouting: RoutingResult = {
           type: 'tool_call',
           proposal: { intent_class: 'execute', action: proposal },
@@ -1207,17 +1322,160 @@ export async function runTurnExecutor(
                 action_type: 'run_analysis',
               };
             }
-            // what_would_flip
+            if (cand.action.kind === 'what_would_flip') {
+              return {
+                id: `chip_clarify_pending_${idx}`,
+                label: 'Explore what would change this',
+                message: 'Explore what would change the result.',
+                action_type: 'what_would_flip',
+              };
+            }
+            // apply_proposed_change — surface the proposal's chip id
+            // (the public proposal_ref) plus the user-facing label,
+            // message and the intended public action_type derived
+            // from the stored `inline_patch.handler_id`. Hard-coding
+            // `add_constraint` would mis-render set_factor_value and
+            // adjust_edge_strength proposals with the wrong wire
+            // action type. Falls back to generic strings only for
+            // legacy entries missing the persisted copy.
+            // Pass-8 P1-1: render-copy resolution goes through ONE
+            // helper so the strings the user sees are identical to
+            // the strings the deterministic label/ordinal pre-route
+            // matches against. Emit-time validation (see
+            // compose/proposed-change.ts::emitProposedChange) is the
+            // primary safety defence; the helper is the belt-and-
+            // braces fallback for malformed, legacy, or pre-
+            // validation entries that bypass the emit helper.
+            const renderCopy = resolveProposalRenderCopy(cand.action);
+            const persistedLabel = renderCopy.label;
+            const persistedMessage = renderCopy.message;
+            const inlineHandlerId =
+              cand.action.kind === 'apply_proposed_change'
+                ? (cand.action.inline_patch as { handler_id?: unknown })?.handler_id
+                : undefined;
+            // Use the shared helper so the ambiguous-chip wire
+            // `action_type` is always one of the proposal-backing
+            // V5ActionType literals. Falls back to add_constraint
+            // only for legacy or malformed entries that lack a
+            // resolvable handler_id (defence-in-depth — emit-time
+            // validation prevents this in practice).
+            const proposalActionType: 'add_constraint' | 'set_factor_value' | 'adjust_edge_strength' =
+              isProposedChangeActionType(inlineHandlerId) ? inlineHandlerId : 'add_constraint';
             return {
-              id: `chip_clarify_pending_${idx}`,
-              label: 'Explore what would change this',
-              message: 'Explore what would change the result.',
-              action_type: 'what_would_flip',
+              id: cand.chip_id,
+              label: persistedLabel,
+              message: persistedMessage,
+              action_type: proposalActionType,
             };
           },
         );
+        // V5 G7/G8: when every candidate is an apply_proposed_change,
+        // try the deterministic ordinal / label pre-route ("the first
+        // one", "option 2", exact label). If it matches, fall through
+        // into the pending_action synthesis path with the resolved
+        // candidate; otherwise emit the numbered clarification below.
+        const allProposals = shortConfirmDispatch.candidates.every(
+          (c) => c.action.kind === 'apply_proposed_change',
+        );
+        if (allProposals) {
+          // Pass-8 P1-1: pass the same render copy the chips show.
+          // The matcher uses both label AND message for exact-match
+          // resolution, and demands an unambiguous unique match.
+          const ordinal = tryProposalOrdinalSelect({
+            message: resumerMessage,
+            candidates: shortConfirmDispatch.candidates,
+            candidateRenderCopy: ambiguousChips.map((c) => ({
+              label: c.label,
+              message: c.message,
+            })),
+          });
+          if (ordinal.matched) {
+            emit(TelemetryEvents.PendingActionMatched, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: ordinal.pending.id,
+              kind: ordinal.pending.action.kind,
+              chip_id: ordinal.pending.chip_id,
+              candidate_count: shortConfirmDispatch.candidates.length,
+            });
+            const decision = decideProposedChangeSynthesis({
+              pending: ordinal.pending,
+              currentGraphHash: freshness?.current_graph_hash ?? undefined,
+              priorFactsWithTurn: context.prior_facts_with_turn,
+            });
+            if (decision.status === 'execute') {
+              const fallbackEnt = (() => {
+                if (graphLookupForValidate) {
+                  const opts = graphLookupForValidate.listEntitiesByKind('option');
+                  if (opts.length > 0) {
+                    return { id: opts[0]!.id, kind: 'option' as const, label: opts[0]!.label };
+                  }
+                }
+                return { id: context.session_id, kind: 'option' as const, label: null };
+              })();
+              const proposalForOrdinal = buildApplyProposedChangeProposal(
+                ordinal.pending,
+                fallbackEnt,
+                (id) =>
+                  graphLookupForValidate ? graphLookupForValidate.findEntityById(id) : null,
+              );
+              routingResult = {
+                type: 'tool_call',
+                proposal: { intent_class: 'execute', action: proposalForOrdinal },
+                orientationText: '',
+                rawResult: {
+                  content: [],
+                  stop_reason: 'tool_use',
+                  usage: { input_tokens: 0, output_tokens: 0 },
+                  model: 'deterministic-short-confirm',
+                  latencyMs: 0,
+                },
+                llmCallCount: 0,
+              };
+              llmCallsUsed = 0;
+              sonnetTextForLog = '';
+              stagesCompleted.push('orient');
+              consumedPendingAction = ordinal.pending;
+              // Fall through to the rest of TurnExecutor (validator,
+              // handler dispatch). DO NOT return finalizeRun here.
+            } else {
+              // superseded / already_applied / invalid — emit the
+              // matching deterministic recovery copy and finalise via
+              // the shared helper.
+              return commitProposedChangeRecovery(
+                decision.status,
+                `apply_proposed_change_ordinal_${decision.status}`,
+              );
+            }
+          }
+        }
+        // No ordinal match (or candidates aren't all proposals) —
+        // fall through to the numbered clarification below.
+        // routingResult is `RoutingResult | undefined` (initialised
+        // undefined at the top of the run); the ordinal branch above
+        // only assigns it on a successful execute decision.
+        if (routingResult !== undefined) {
+          // Ordinal matched and synthesised a routing result; skip
+          // the numbered-clarification commit. The handler-dispatch
+          // path picks it up after this if/else block.
+        } else {
+        // V5 G7/G8 P1-1: when every candidate is a proposal with a
+        // persisted public label, render the assistant text as a
+        // numbered list of those labels so the user can read the
+        // options as a list (per the brief: "Which one would you
+        // like? 1) <label> 2) <label>"). Mixed-kind candidates fall
+        // back to the generic prompt.
+        const allCandidatesHaveLabels = ambiguousChips.every(
+          (c) => c.label.length > 0 && c.label !== RENDER_SAFE_LABEL_FALLBACK,
+        );
+        const numberedList = ambiguousChips
+          .map((c, i) => `${i + 1}) ${c.label}`)
+          .join(' ');
+        const ambiguousAssistantText = allCandidatesHaveLabels
+          ? `Which one would you like? ${numberedList}`
+          : 'I had more than one offer open. Which would you like?';
         const ambiguousResponse = composeDirectAnswerResponse({
-          assistant_text: 'I had more than one offer open. Which would you like?',
+          assistant_text: ambiguousAssistantText,
           stage: context.stage,
           suggested_actions: ambiguousChips,
         });
@@ -1229,6 +1487,34 @@ export async function runTurnExecutor(
         stagesCompleted.push('orient');
         stagesCompleted.push('compose');
         try {
+          // V5 G7/G8 P0-1 + P0-3: re-persist the apply_proposed_change
+          // pending actions on the clarification turn so the
+          // next-turn ordinal resolution ("the first one") has live
+          // offers to match. For mixed ambiguity (a run_analysis or
+          // what_would_flip pending action alongside a proposal), we
+          // ALSO derive pending actions from the run_analysis /
+          // what_would_flip ambiguous chips so those follow-up paths
+          // remain resumable on the next turn — passing only the
+          // proposals would suppress chip-derivation entirely.
+          //
+          // Identity is preserved across the re-persist: each
+          // proposal's chip_id, proposal_ref, expires_at_iso are
+          // unchanged. Wall-clock TTL still applies, so an offer
+          // that would have expired before resume still expires.
+          const proposalsToRepersist = shortConfirmDispatch.candidates.filter(
+            (c) => c.action.kind === 'apply_proposed_change',
+          );
+          const chipDerivedForAmbiguous = derivePendingActionsFromChips(ambiguousChips, {
+            scenario_id: context.session_id,
+            emitted_at_iso: new Date().toISOString(),
+            ...(freshness?.current_graph_hash != null
+              ? { graph_hash: freshness.current_graph_hash }
+              : {}),
+          });
+          const mergedPendingActions = [
+            ...proposalsToRepersist,
+            ...chipDerivedForAmbiguous,
+          ];
           const committed = await commitDirectAnswer(ambiguousResponse, {
             scenario_id: context.session_id,
             turn_id: context.request_id,
@@ -1238,6 +1524,9 @@ export async function runTurnExecutor(
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
+            ...(mergedPendingActions.length > 0
+              ? { pending_actions: mergedPendingActions }
+              : {}),
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
@@ -1262,6 +1551,282 @@ export async function runTurnExecutor(
           );
         }
         return finalizeRun();
+        }
+      }
+
+      // V5 G7/G8 P1-1: live-proposal label/ordinal pre-route. Fires
+      // when short-confirm returned matched=false. A user replying
+      // with the proposal's exact public label ("Add the cost cap")
+      // would otherwise hit the edit-verb gate on short-confirm and
+      // fall through to the LLM, never reaching the recovery_ambiguous
+      // ordinal-select branch. This pre-route runs the same helper
+      // against ALL live apply_proposed_change candidates so an
+      // exact-label or ordinal pick resolves deterministically
+      // regardless of how short-confirm classified the message.
+      if (!shortConfirmDispatch.matched) {
+        const liveProposals = (context.most_recent_pending_actions ?? []).filter(
+          (pa) => pa.action.kind === 'apply_proposed_change',
+        );
+        if (liveProposals.length > 0) {
+          // Pass-8 P1-1: build the same render-copy the chip builder
+          // would have produced and pass label AND message into the
+          // matcher. This guarantees that:
+          //   - the user matches on the same strings they would have
+          //     seen (rendered fallback for unsafe persisted copy);
+          //   - a chip-click replay carrying the message text
+          //     resolves the same way as a typed label reply;
+          //   - an unsafe persisted label cannot be silently matched
+          //     by a user typing its raw form.
+          // The matcher (`tryProposalOrdinalSelect`) ALSO requires
+          // exactly one candidate to match (P1-2): two proposals
+          // sharing the rendered fallback fall through to LLM rather
+          // than silently executing the first.
+          const liveRenderCopy = liveProposals.map((pa) =>
+            resolveProposalRenderCopy(pa.action),
+          );
+          const labelPick = tryProposalOrdinalSelect({
+            message: payload.message,
+            candidates: liveProposals,
+            candidateRenderCopy: liveRenderCopy.map((c) => ({
+              label: c.label,
+              message: c.message,
+            })),
+          });
+          if (labelPick.matched) {
+            emit(TelemetryEvents.PendingActionMatched, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: labelPick.pending.id,
+              kind: labelPick.pending.action.kind,
+              chip_id: labelPick.pending.chip_id,
+              candidate_count: liveProposals.length,
+            });
+            const decision = decideProposedChangeSynthesis({
+              pending: labelPick.pending,
+              currentGraphHash: freshness?.current_graph_hash ?? undefined,
+              priorFactsWithTurn: context.prior_facts_with_turn,
+            });
+            if (decision.status === 'execute') {
+              const fallbackEnt = (() => {
+                if (graphLookupForValidate) {
+                  const opts = graphLookupForValidate.listEntitiesByKind('option');
+                  if (opts.length > 0) {
+                    return { id: opts[0]!.id, kind: 'option' as const, label: opts[0]!.label };
+                  }
+                }
+                return { id: context.session_id, kind: 'option' as const, label: null };
+              })();
+              const proposalForLabel = buildApplyProposedChangeProposal(
+                labelPick.pending,
+                fallbackEnt,
+                (id) =>
+                  graphLookupForValidate ? graphLookupForValidate.findEntityById(id) : null,
+              );
+              routingResult = {
+                type: 'tool_call',
+                proposal: { intent_class: 'execute', action: proposalForLabel },
+                orientationText: '',
+                rawResult: {
+                  content: [],
+                  stop_reason: 'tool_use',
+                  usage: { input_tokens: 0, output_tokens: 0 },
+                  model: 'deterministic-short-confirm',
+                  latencyMs: 0,
+                },
+                llmCallCount: 0,
+              };
+              llmCallsUsed = 0;
+              sonnetTextForLog = '';
+              stagesCompleted.push('orient');
+              consumedPendingAction = labelPick.pending;
+              // Fall through to handler dispatch.
+            } else {
+              return commitProposedChangeRecovery(
+                decision.status,
+                `apply_proposed_change_label_${decision.status}`,
+              );
+            }
+          } else if (labelPick.reason === 'ambiguous') {
+            // Pass-10 P1: the user's input matched the rendered label
+            // or message of TWO OR MORE live proposals. Executing the
+            // first would silently misroute. Falling through to the
+            // LLM would lose the deterministic-routing contract. We
+            // commit a numbered clarification listing the matching
+            // candidates' rendered copy and re-persist them so the
+            // user can disambiguate on the next turn.
+            const ambiguousProposals = labelPick.ambiguousIndexes.map(
+              (idx) => liveProposals[idx]!,
+            );
+            const ambiguousRenderCopy = labelPick.ambiguousIndexes.map(
+              (idx) => liveRenderCopy[idx]!,
+            );
+            emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              candidate_count: ambiguousProposals.length,
+              kinds: ambiguousProposals.map((p) => p.action.kind),
+            });
+            // Build chips using the SAME rendered copy the user saw.
+            // Each candidate's chip carries its persisted chip_id and
+            // an action_type derived from its handler_id, matching
+            // the format used by the recovery_ambiguous flow.
+            const labelAmbiguousChips: SuggestedAction[] = ambiguousProposals.map(
+              (cand, idx) => {
+                const inlineHandlerId =
+                  cand.action.kind === 'apply_proposed_change'
+                    ? (cand.action.inline_patch as { handler_id?: unknown })?.handler_id
+                    : undefined;
+                const proposalActionType:
+                  | 'add_constraint'
+                  | 'set_factor_value'
+                  | 'adjust_edge_strength' = isProposedChangeActionType(inlineHandlerId)
+                  ? inlineHandlerId
+                  : 'add_constraint';
+                return {
+                  id: cand.chip_id,
+                  label: ambiguousRenderCopy[idx]!.label,
+                  message: ambiguousRenderCopy[idx]!.message,
+                  action_type: proposalActionType,
+                };
+              },
+            );
+            // Numbered clarification text uses the rendered labels
+            // when at least one is distinct from the safe fallback;
+            // otherwise the generic prompt — both labels equal the
+            // fallback means the user's input matched the fallback
+            // for every ambiguous candidate, and a numbered list of
+            // identical strings would not help.
+            const allLabelsAreFallback = labelAmbiguousChips.every(
+              (c) => c.label === RENDER_SAFE_LABEL_FALLBACK,
+            );
+            const numberedList = labelAmbiguousChips
+              .map((c, i) => `${i + 1}) ${c.label}`)
+              .join(' ');
+            const ambiguousAssistantText = allLabelsAreFallback
+              ? 'I had more than one offer open. Which would you like?'
+              : `Which one would you like? ${numberedList}`;
+            const ambiguousResponse = composeDirectAnswerResponse({
+              assistant_text: ambiguousAssistantText,
+              stage: context.stage,
+              suggested_actions: labelAmbiguousChips,
+            });
+            sonnetTextForLog = ambiguousResponse.assistant_text;
+            resolvedTurnClass = 'direct_answer';
+            intentClass = 'converse';
+            responseTypeForObs = 'direct_answer';
+            llmCallsUsed = 0;
+            stagesCompleted.push('orient');
+            stagesCompleted.push('compose');
+            try {
+              // Re-persist the ambiguous proposals so the next-turn
+              // ordinal / label / message reply has live offers to
+              // resolve. Identity preserved: chip_id, proposal_ref,
+              // expires_at_iso unchanged; wall-clock TTL still
+              // applies.
+              const committed = await commitDirectAnswer(ambiguousResponse, {
+                scenario_id: context.session_id,
+                turn_id: context.request_id,
+                turn_class: 'direct_answer',
+                handler_id: null,
+                request_hash: computeRequestHash(payload),
+                llm_calls_used: 0,
+                duration_ms: Date.now() - startedAt,
+                handler_facts: [],
+                pending_actions: ambiguousProposals,
+              });
+              commitPerformed = committed.performed;
+              stagesCompleted.push('commit');
+              response = committed.response;
+            } catch (error) {
+              log.error(
+                {
+                  event: 'v5.state_commit_failed',
+                  request_id: requestId,
+                  session_id: context.session_id,
+                  path: 'apply_proposed_change_label_ambiguous',
+                  err: serialiseError(error),
+                },
+                'V5 TurnExecutor commit failure on label-pre-route ambiguous clarification',
+              );
+              failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+              response = buildFailureResponse(
+                'STATE_COMMIT_FAILED',
+                context.stage,
+                { phase: 'commit' },
+                recoveryCtx(),
+              );
+            }
+            return finalizeRun();
+          }
+        }
+      }
+
+      // V5 G7/G8: dismissal pre-route. Fires when short-confirm
+      // returned matched=false (and the label/ordinal pre-route
+      // above did not synthesise a routing result) and at least one
+      // live apply_proposed_change pending action exists. The
+      // negative-control gate ensures messages mixing dismissal with
+      // positive tokens ("not now, but add it anyway") fall through
+      // to the LLM.
+      if (!shortConfirmDispatch.matched && routingResult === undefined) {
+        const dismissal = tryProposalDismissal({
+          message: payload.message,
+          livePendingActions: context.most_recent_pending_actions ?? [],
+        });
+        if (dismissal.matched) {
+          emit(TelemetryEvents.PendingActionRecoveryAmbiguous, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            candidate_count: dismissal.dismissed_count,
+            kinds: ['apply_proposed_change'],
+          });
+          const dismissalResponse = composeDirectAnswerResponse({
+            assistant_text: PROPOSAL_DISMISSAL_RESPONSE,
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = dismissalResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitDirectAnswer(dismissalResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'proposal_dismissal',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on proposal-dismissal',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
       }
 
       // Clarification-resume pre-route. A user who types just a

@@ -42,6 +42,7 @@ import {
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
+import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 
@@ -192,6 +193,14 @@ export class SupabaseSessionStore implements SessionStore {
     conversationTurnRowIds: readonly string[],
     handlerId?: V5ActionType,
   ): Promise<readonly HandlerFact[]> {
+    const wrapped = await this.readFactsWithTurnFor(conversationTurnRowIds, handlerId);
+    return wrapped.map((w) => w.fact);
+  }
+
+  async readFactsWithTurnFor(
+    conversationTurnRowIds: readonly string[],
+    handlerId?: V5ActionType,
+  ): Promise<readonly HandlerFactWithTurn[]> {
     if (conversationTurnRowIds.length === 0) return [];
 
     // V5 review: facts must come back newest-first so callers (e.g. the
@@ -199,6 +208,13 @@ export class SupabaseSessionStore implements SessionStore {
     // most recent entry deterministically via `.find()`. The prior
     // implementation relied on undefined Supabase row order, which made the
     // selection non-deterministic.
+    //
+    // V5 G7/G8 P0-3: SELECT also pulls `v5_conversation_turn_id` and
+    // `created_at` so callers can filter facts by their parent turn's
+    // ownership link (rather than positional ordering across
+    // `priorTurns` and `priorFacts`). The fact's own `created_at` is
+    // a faithful proxy for the parent turn's `created_at` — both rows
+    // are written inside the same `append_turn_atomic` call.
     //
     // Index note: the existing `v5_handler_facts_turn_idx` on
     // `v5_conversation_turn_id` covers the `IN` filter; the `ORDER BY
@@ -211,7 +227,7 @@ export class SupabaseSessionStore implements SessionStore {
     // for the current workload.
     let query = this.client
       .from('v5_handler_facts')
-      .select('payload, handler_id, action_type, noop')
+      .select('payload, handler_id, action_type, noop, v5_conversation_turn_id, created_at')
       .in('v5_conversation_turn_id', conversationTurnRowIds as string[])
       .order('created_at', { ascending: false });
 
@@ -223,7 +239,7 @@ export class SupabaseSessionStore implements SessionStore {
 
     if (error) {
       throw new SessionReadError(
-        `readFactsFor failed: ${errMsg(error)}`,
+        `readFactsWithTurnFor failed: ${errMsg(error)}`,
         { cause: error, code: errCode(error) },
       );
     }
@@ -240,8 +256,13 @@ export class SupabaseSessionStore implements SessionStore {
     // coaching-cache reader, …). Prefer `row.noop`; fall through to a
     // payload-side `noop` if a future writer puts it there; default to
     // `false` so a missing column on legacy rows still parses.
-    const facts: HandlerFact[] = [];
-    for (const row of (data ?? []) as Array<{ payload: unknown; noop?: unknown }>) {
+    const out: HandlerFactWithTurn[] = [];
+    for (const row of (data ?? []) as Array<{
+      payload: unknown;
+      noop?: unknown;
+      v5_conversation_turn_id?: unknown;
+      created_at?: unknown;
+    }>) {
       const payloadObj =
         row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
           ? (row.payload as Record<string, unknown>)
@@ -254,16 +275,23 @@ export class SupabaseSessionStore implements SessionStore {
             : false;
       const hydrated = { ...payloadObj, noop };
       const parsed = HandlerFactSchema.safeParse(hydrated);
-      if (parsed.success) {
-        facts.push(parsed.data);
-      } else {
+      if (!parsed.success) {
         throw new SessionReadError(
-          `readFactsFor: payload failed HandlerFactSchema — ${parsed.error.message}`,
+          `readFactsWithTurnFor: payload failed HandlerFactSchema — ${parsed.error.message}`,
           { cause: parsed.error },
         );
       }
+      const turnId = typeof row.v5_conversation_turn_id === 'string'
+        ? row.v5_conversation_turn_id
+        : '';
+      const createdAt = typeof row.created_at === 'string' ? row.created_at : '';
+      out.push({
+        fact: parsed.data,
+        turn_id: turnId,
+        fact_created_at: createdAt,
+      });
     }
-    return facts;
+    return out;
   }
 
   async invalidateScoped(

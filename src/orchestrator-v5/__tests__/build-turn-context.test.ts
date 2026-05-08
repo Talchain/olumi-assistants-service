@@ -40,6 +40,7 @@ describe('buildTurnContext', () => {
     const {
       prior_turns: _pt,
       prior_facts: _pf,
+      prior_facts_with_turn: _pfwt,
       scenarioBriefText: _sb,
       persistedGraph: _pg,
       most_recent_pending_actions: _mrpa,
