@@ -312,6 +312,16 @@ export function sanitisePublicCopyOrFallback(
  * ambiguous-clarification chip builder AND the deterministic
  * label/ordinal pre-route MUST consume this so the strings the user
  * sees and the strings the resolver matches against are identical.
+ *
+ * Layering note: this helper is exported from `compose/` and consumed
+ * from `routing/` (the label/ordinal pre-route) and `turn-executor.ts`
+ * (the chip builder). The dependency direction follows existing V5
+ * precedent — `routing/state-query-guard.ts` already imports from
+ * `compose/types.ts`, and `routing/validator.ts` imports from
+ * `compose/helpers.ts`. The export lives here next to
+ * `emitProposedChange` so render-time sanitisation and emit-time
+ * sanitisation share the SAME `SAFETY_FORBIDDEN_TOKENS` list and the
+ * SAME fallback constants — a single source of truth.
  * Without this coupling, an unsafe persisted label would render as
  * the safe fallback to the user but still match its raw form when
  * typed back, and the rendered fallback string the user actually saw
@@ -324,16 +334,6 @@ export function sanitisePublicCopyOrFallback(
 export interface ProposalRenderCopy {
   readonly label: string;
   readonly message: string;
-  /**
-   * `true` when the persisted `public_label` was missing, blank, or
-   * unsafe and the deterministic fallback was substituted. The
-   * ambiguous-clarification text uses this to decide whether to
-   * render a numbered list of distinct labels or fall back to a
-   * generic prompt when every candidate is a fallback.
-   */
-  readonly wasLabelFallback: boolean;
-  /** Mirror of `wasLabelFallback` for the message. */
-  readonly wasMessageFallback: boolean;
 }
 
 /**
@@ -351,23 +351,10 @@ export function resolveProposalRenderCopy(action: {
     return {
       label: RENDER_SAFE_LABEL_FALLBACK,
       message: RENDER_SAFE_MESSAGE_FALLBACK,
-      wasLabelFallback: true,
-      wasMessageFallback: true,
     };
   }
-  const rawLabel = action.public_label;
-  const rawMessage = action.public_message;
-  const label = sanitisePublicCopyOrFallback(rawLabel, RENDER_SAFE_LABEL_FALLBACK);
-  const message = sanitisePublicCopyOrFallback(rawMessage, RENDER_SAFE_MESSAGE_FALLBACK);
-  // wasLabelFallback iff the resolved label equals the fallback AND
-  // the raw input did NOT itself equal the fallback (so a legitimate
-  // caller who chose the fallback as their actual label is not
-  // mis-flagged).
-  const wasLabelFallback =
-    label === RENDER_SAFE_LABEL_FALLBACK &&
-    (typeof rawLabel !== 'string' || rawLabel.trim() !== RENDER_SAFE_LABEL_FALLBACK);
-  const wasMessageFallback =
-    message === RENDER_SAFE_MESSAGE_FALLBACK &&
-    (typeof rawMessage !== 'string' || rawMessage.trim() !== RENDER_SAFE_MESSAGE_FALLBACK);
-  return { label, message, wasLabelFallback, wasMessageFallback };
+  return {
+    label: sanitisePublicCopyOrFallback(action.public_label, RENDER_SAFE_LABEL_FALLBACK),
+    message: sanitisePublicCopyOrFallback(action.public_message, RENDER_SAFE_MESSAGE_FALLBACK),
+  };
 }

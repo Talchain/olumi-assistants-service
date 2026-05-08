@@ -1102,6 +1102,162 @@ describe('Proposed-change route-level — render-time sanitisation of unsafe per
   });
 });
 
+describe('Proposed-change route-level — pre-route stack stays deterministic (pass-9)', () => {
+  // Consolidated smoke test: each proposal pre-route resolution path
+  // (exact label, exact message, ordinal, dismissal, duplicate-label
+  // ambiguity) MUST stay free of LLM round-trips. Each match path is
+  // expected to commit exactly once — either via the handler-dispatch
+  // commit (label / message / ordinal match) or via a deterministic
+  // direct-answer commit (dismissal, duplicate-label ambiguity falls
+  // through to LLM and is NOT included here).
+  //
+  // This is NOT a wall-clock latency test — it asserts the structural
+  // invariant that pre-routes never enter LLM paths. Latency
+  // observation is a post-activation monitoring concern.
+
+  beforeEach(() => {
+    appendCalls.length = 0;
+    addConstraintCalls.length = 0;
+    priorTurnsForRead = [];
+    priorFactsForRead = [];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function safeProposal(args: {
+    chipId: string;
+    label: string;
+    message: string;
+  }): PendingAction {
+    return {
+      id: `pa-${randomUUID()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: args.chipId,
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: args.chipId,
+        inline_patch: {
+          handler_id: 'add_constraint',
+          params: { value: 100, constraint_type: 'at_most', label: 'Cost cap' },
+          target_entity_ids: ['goal-g'],
+        },
+        public_label: args.label,
+        public_message: args.message,
+      },
+      preconditions: { graph_hash: GRAPH_HASH },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: EMITTED_AT_ISO,
+    };
+  }
+
+  it('exact-label match: 0 LLM calls, exactly 1 handler dispatch, exactly 1 commit', async () => {
+    pendingActionsForRead = [
+      safeProposal({
+        chipId: 'prop_aaaaaaaaaaaa',
+        label: 'Add the cost cap',
+        message: 'Add the cost cap.',
+      }),
+    ];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('Add the cost cap'), 'req-smoke-label', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
+    expect(appendCalls).toHaveLength(1);
+  });
+
+  it('exact-message match (chip-click parity): 0 LLM calls, exactly 1 handler dispatch, exactly 1 commit', async () => {
+    pendingActionsForRead = [
+      safeProposal({
+        chipId: 'prop_aaaaaaaaaaaa',
+        label: 'Add the cost cap',
+        message: 'Add the cost cap.',
+      }),
+    ];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('Add the cost cap.'), 'req-smoke-message', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
+    expect(appendCalls).toHaveLength(1);
+  });
+
+  it('ordinal match: 0 LLM calls, exactly 1 handler dispatch, exactly 1 commit', async () => {
+    pendingActionsForRead = [
+      safeProposal({
+        chipId: 'prop_aaaaaaaaaaaa',
+        label: 'Add the cost cap',
+        message: 'Add the cost cap.',
+      }),
+    ];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('the first one'), 'req-smoke-ordinal', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
+    expect(appendCalls).toHaveLength(1);
+  });
+
+  it('dismissal: 0 LLM calls, 0 handler dispatch, exactly 1 deterministic commit', async () => {
+    pendingActionsForRead = [
+      safeProposal({
+        chipId: 'prop_aaaaaaaaaaaa',
+        label: 'Add the cost cap',
+        message: 'Add the cost cap.',
+      }),
+    ];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('no'), 'req-smoke-dismiss', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(0);
+    expect(appendCalls).toHaveLength(1);
+  });
+
+  it('duplicate-label ambiguity: 0 handler dispatch (matcher refuses; clarification or LLM)', async () => {
+    pendingActionsForRead = [
+      safeProposal({
+        chipId: 'prop_aaaaaaaaaaaa',
+        label: 'Apply this change',
+        message: 'A unique message',
+      }),
+      safeProposal({
+        chipId: 'prop_bbbbbbbbbbbb',
+        label: 'Apply this change',
+        message: 'B unique message',
+      }),
+    ];
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text: 'mock' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+    await runTurnExecutor(payload('Apply this change'), 'req-smoke-ambiguous', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    // The crucial structural invariant: even when LLM falls in to
+    // resolve the ambiguity, the handler is NEVER silently invoked.
+    expect(addConstraintCalls).toHaveLength(0);
+  });
+});
+
 describe('Proposed-change route-level — safety string filter on emitted text', () => {
   beforeEach(() => {
     appendCalls.length = 0;

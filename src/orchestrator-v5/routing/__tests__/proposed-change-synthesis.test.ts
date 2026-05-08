@@ -385,7 +385,7 @@ describe('decideProposedChangeSynthesis — already_applied (timestamp-bounded, 
       priorFactsWithTurn: [fwt(fact({
           type: 'set_factor_value',
           targetId: 'factor_X',
-          after: { value: 100 },
+          after: { value: 100, raw_value: 100 },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('already_applied');
@@ -404,7 +404,7 @@ describe('decideProposedChangeSynthesis — already_applied (timestamp-bounded, 
       priorFactsWithTurn: [fwt(fact({
           type: 'set_factor_value',
           targetId: 'factor_Y',
-          after: { value: 100 },
+          after: { value: 100, raw_value: 100 },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('execute');
@@ -423,7 +423,7 @@ describe('decideProposedChangeSynthesis — already_applied (timestamp-bounded, 
       priorFactsWithTurn: [fwt(fact({
           type: 'set_factor_value',
           targetId: 'factor_X',
-          after: { value: 200 },
+          after: { value: 200, raw_value: 200 },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('execute');
@@ -442,7 +442,7 @@ describe('decideProposedChangeSynthesis — already_applied (timestamp-bounded, 
       priorFactsWithTurn: [fwt(fact({
           type: 'adjust_edge_strength',
           targetId: 'edge_AB',
-          after: { strength: { mean: 0.7, stdev: 0.1 } },
+          after: { strength: { mean: 0.7, stdev: 0.1, from: 'A', to: 'B', effect_direction: 'positive' } },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('already_applied');
@@ -461,7 +461,7 @@ describe('decideProposedChangeSynthesis — already_applied (timestamp-bounded, 
       priorFactsWithTurn: [fwt(fact({
           type: 'adjust_edge_strength',
           targetId: 'edge_AB',
-          after: { strength: { mean: 0.5 } },
+          after: { strength: { mean: 0.5, from: 'A', to: 'B', effect_direction: 'positive' } },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('execute');
@@ -482,7 +482,7 @@ describe('decideProposedChangeSynthesis — already_applied (timestamp-bounded, 
       priorFactsWithTurn: [fwt(fact({
           type: 'adjust_edge_strength',
           targetId: 'edge_AB',
-          after: { strength: { mean: 0.7, std: 0.2 } },
+          after: { strength: { mean: 0.7, std: 0.2, from: 'A', to: 'B', effect_direction: 'positive' } },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('execute');
@@ -501,7 +501,7 @@ describe('decideProposedChangeSynthesis — already_applied (timestamp-bounded, 
       priorFactsWithTurn: [fwt(fact({
           type: 'adjust_edge_strength',
           targetId: 'edge_AB',
-          after: { strength: { mean: 0.7, std: 0.05 } },
+          after: { strength: { mean: 0.7, std: 0.05, from: 'A', to: 'B', effect_direction: 'positive' } },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('already_applied');
@@ -555,7 +555,7 @@ describe('decideProposedChangeSynthesis — fail-closed min-payload guard (P0-2)
           fact({
             type: 'set_factor_value',
             targetId: 'factor_X',
-            after: { value: 100 },
+            after: { value: 100, raw_value: 100 },
           }),
           POST_EMIT_TS,
         ),
@@ -581,7 +581,7 @@ describe('decideProposedChangeSynthesis — fail-closed min-payload guard (P0-2)
           fact({
             type: 'set_factor_value',
             targetId: 'factor_X',
-            after: { value: 100 },
+            after: { value: 100, raw_value: 100 },
           }),
           POST_EMIT_TS,
         ),
@@ -634,7 +634,7 @@ describe('decideProposedChangeSynthesis — fail-closed min-payload guard (P0-2)
           fact({
             type: 'adjust_edge_strength',
             targetId: 'edge_AB',
-            after: { strength: { mean: 0.7 } },
+            after: { strength: { mean: 0.7, from: 'A', to: 'B', effect_direction: 'positive' } },
           }),
           POST_EMIT_TS,
         ),
@@ -667,7 +667,7 @@ describe('decideProposedChangeSynthesis — fact-to-turn binding (P0-2)', () => 
           fact({
             type: 'set_factor_value',
             targetId: 'factor_X',
-            after: { value: 999 }, // post-emit Turn B's outcome
+            after: { value: 999, raw_value: 999 }, // post-emit Turn B's outcome
           }),
           POST_EMIT_TS,
           'turn-B',
@@ -676,7 +676,7 @@ describe('decideProposedChangeSynthesis — fact-to-turn binding (P0-2)', () => 
           fact({
             type: 'set_factor_value',
             targetId: 'factor_X',
-            after: { value: 100 }, // matches but pre-emit
+            after: { value: 100, raw_value: 100 }, // matches but pre-emit
           }),
           PRE_EMIT_TS,
           'turn-A',
@@ -699,7 +699,7 @@ describe('decideProposedChangeSynthesis — fact-to-turn binding (P0-2)', () => 
       priorFactsWithTurn: [fwt(fact({
           type: 'set_factor_value',
           targetId: 'factor_X',
-          after: { value: 100 },
+          after: { value: 100, raw_value: 100 },
         }), '2026-05-07T12:00:30.000Z')],
     });
     expect(out.status).toBe('already_applied');
@@ -723,7 +723,7 @@ describe('decideProposedChangeSynthesis — fact-to-turn binding (P0-2)', () => 
         fact({
           type: 'set_factor_value',
           targetId: 'factor_X',
-          after: { value: 200 },
+          after: { value: 200, raw_value: 200 },
         }), POST_EMIT_TS)],
     });
     expect(out.status).toBe('execute');
