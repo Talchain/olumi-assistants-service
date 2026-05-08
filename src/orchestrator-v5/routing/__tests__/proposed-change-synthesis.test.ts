@@ -70,6 +70,11 @@ function pa(overrides: {
       // defensive runtime branch where inline_patch is missing,
       // even though the type now requires it.
       ...(inline === null ? {} : { inline_patch: inline as Readonly<Record<string, unknown>> }),
+      // Pass-10 P2-1: standard-variant required render copy. Synthesis
+      // tests do not read these fields, but including them keeps
+      // fixtures aligned with the tightened discriminated union.
+      public_label: 'Label for proposal',
+      public_message: 'Message for proposal.',
     } as unknown as PendingAction['action'],
     preconditions: { graph_hash: overrides.graphHash ?? GRAPH_HASH },
     expires_at_turn_count: 2,

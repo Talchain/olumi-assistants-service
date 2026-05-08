@@ -25,6 +25,11 @@ function applyProposed(overrides: { id?: string; chipId?: string } = {}): Pendin
       kind: 'apply_proposed_change',
       proposal_ref: overrides.chipId ?? 'prop_aaaaaaaaaaaa',
       inline_patch: { handler_id: 'add_constraint', params: {}, target_entity_ids: [] },
+      // Pass-10 P2-1: standard-variant required render copy. The
+      // helper builds standard-variant fixtures, so include the
+      // fields rather than relying on the legacy escape hatch.
+      public_label: 'Label for proposal',
+      public_message: 'Message for proposal.',
     },
     preconditions: { graph_hash: 'h' },
     expires_at_turn_count: 2,

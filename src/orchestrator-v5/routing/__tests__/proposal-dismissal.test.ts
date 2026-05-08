@@ -23,6 +23,9 @@ function applyProposed(): PendingAction {
       kind: 'apply_proposed_change',
       proposal_ref: 'prop_aaaaaaaaaaaa',
       inline_patch: { handler_id: 'add_constraint', params: {}, target_entity_ids: [] },
+      // Pass-10 P2-1: standard-variant required render copy.
+      public_label: 'Label for proposal',
+      public_message: 'Message for proposal.',
     },
     preconditions: { graph_hash: 'h' },
     expires_at_turn_count: 2,
