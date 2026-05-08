@@ -96,6 +96,7 @@ import { derivePendingActionsFromChips } from './compose/derive-pending-actions.
 import {
   RENDER_SAFE_LABEL_FALLBACK,
   RENDER_SAFE_MESSAGE_FALLBACK,
+  resolveProposalRenderCopy,
   sanitisePublicCopyOrFallback,
 } from './compose/proposed-change.js';
 import {
@@ -1339,34 +1340,20 @@ export async function runTurnExecutor(
             // adjust_edge_strength proposals with the wrong wire
             // action type. Falls back to generic strings only for
             // legacy entries missing the persisted copy.
-            // Pass-7 hardening: re-sanitise persisted public_label /
-            // public_message at render time. Emit-time validation
-            // (see compose/proposed-change.ts::emitProposedChange) is
-            // the primary defence; this is the belt-and-braces
-            // fallback for malformed, legacy, or pre-validation
-            // entries that bypass the emit helper. When the persisted
-            // string fails the safety filter, the deterministic
-            // in-code fallback copy is used.
-            const proposalAction = cand.action;
-            const rawPersistedLabel =
-              proposalAction.kind === 'apply_proposed_change'
-                ? proposalAction.public_label
-                : undefined;
-            const rawPersistedMessage =
-              proposalAction.kind === 'apply_proposed_change'
-                ? proposalAction.public_message
-                : undefined;
-            const persistedLabel = sanitisePublicCopyOrFallback(
-              rawPersistedLabel,
-              RENDER_SAFE_LABEL_FALLBACK,
-            );
-            const persistedMessage = sanitisePublicCopyOrFallback(
-              rawPersistedMessage,
-              RENDER_SAFE_MESSAGE_FALLBACK,
-            );
+            // Pass-8 P1-1: render-copy resolution goes through ONE
+            // helper so the strings the user sees are identical to
+            // the strings the deterministic label/ordinal pre-route
+            // matches against. Emit-time validation (see
+            // compose/proposed-change.ts::emitProposedChange) is the
+            // primary safety defence; the helper is the belt-and-
+            // braces fallback for malformed, legacy, or pre-
+            // validation entries that bypass the emit helper.
+            const renderCopy = resolveProposalRenderCopy(cand.action);
+            const persistedLabel = renderCopy.label;
+            const persistedMessage = renderCopy.message;
             const inlineHandlerId =
-              proposalAction.kind === 'apply_proposed_change'
-                ? (proposalAction.inline_patch as { handler_id?: unknown })?.handler_id
+              cand.action.kind === 'apply_proposed_change'
+                ? (cand.action.inline_patch as { handler_id?: unknown })?.handler_id
                 : undefined;
             // Use the shared helper so the ambiguous-chip wire
             // `action_type` is always one of the proposal-backing
@@ -1393,10 +1380,16 @@ export async function runTurnExecutor(
           (c) => c.action.kind === 'apply_proposed_change',
         );
         if (allProposals) {
+          // Pass-8 P1-1: pass the same render copy the chips show.
+          // The matcher uses both label AND message for exact-match
+          // resolution, and demands an unambiguous unique match.
           const ordinal = tryProposalOrdinalSelect({
             message: resumerMessage,
             candidates: shortConfirmDispatch.candidates,
-            candidateLabels: ambiguousChips.map((c) => c.label),
+            candidateRenderCopy: ambiguousChips.map((c) => ({
+              label: c.label,
+              message: c.message,
+            })),
           });
           if (ordinal.matched) {
             emit(TelemetryEvents.PendingActionMatched, {
@@ -1577,21 +1570,29 @@ export async function runTurnExecutor(
           (pa) => pa.action.kind === 'apply_proposed_change',
         );
         if (liveProposals.length > 0) {
-          // Use the SAME public_label the ambiguous-clarification
-          // chip builder renders so the resolution mirrors what the
-          // user saw. Falls back to a safe placeholder for legacy
-          // entries missing the field — those entries cannot be
-          // exact-label-matched (the placeholder is never spoken by
-          // the user).
-          const liveLabels = liveProposals.map((pa) =>
-            pa.action.kind === 'apply_proposed_change' && typeof pa.action.public_label === 'string'
-              ? pa.action.public_label
-              : ' __legacy_no_label__ ',
+          // Pass-8 P1-1: build the same render-copy the chip builder
+          // would have produced and pass label AND message into the
+          // matcher. This guarantees that:
+          //   - the user matches on the same strings they would have
+          //     seen (rendered fallback for unsafe persisted copy);
+          //   - a chip-click replay carrying the message text
+          //     resolves the same way as a typed label reply;
+          //   - an unsafe persisted label cannot be silently matched
+          //     by a user typing its raw form.
+          // The matcher (`tryProposalOrdinalSelect`) ALSO requires
+          // exactly one candidate to match (P1-2): two proposals
+          // sharing the rendered fallback fall through to LLM rather
+          // than silently executing the first.
+          const liveRenderCopy = liveProposals.map((pa) =>
+            resolveProposalRenderCopy(pa.action),
           );
           const labelPick = tryProposalOrdinalSelect({
             message: payload.message,
             candidates: liveProposals,
-            candidateLabels: liveLabels,
+            candidateRenderCopy: liveRenderCopy.map((c) => ({
+              label: c.label,
+              message: c.message,
+            })),
           });
           if (labelPick.matched) {
             emit(TelemetryEvents.PendingActionMatched, {

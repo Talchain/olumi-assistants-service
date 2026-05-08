@@ -184,15 +184,26 @@ function stubbedRegistry(): HandlerRegistry {
     return {
       assistant_text: 'Added the cost cap.',
       handler_facts: [
+        // Pass-8 P2-1: emit the canonical `GoalConstraint` shape the
+        // production handler persists. result.target_id is the new
+        // constraint's id; result.after carries
+        // `{ constraint_id, node_id, operator, value, unit?, label? }`.
         {
           fact_type: 'add_constraint' as const,
           fact_version: 1,
           noop: false,
           result: {
-            target_id: 'node_X',
+            target_id: 'constraint-uuid-stub-1',
             status: 'applied' as const,
             before: null,
-            after: { value: 100, unit: 'GBP' },
+            after: {
+              constraint_id: 'constraint-uuid-stub-1',
+              node_id: 'goal-g',
+              operator: '<=',
+              value: 100,
+              unit: 'GBP',
+              label: 'Cost cap',
+            },
           },
         },
       ],
@@ -576,6 +587,146 @@ describe('Proposed-change route-level — ambiguous clarification text contains 
     expect(result.response.assistant_text).toContain('1) Add the cost cap');
     expect(result.response.assistant_text).toContain('2) Add the time cap');
     expect(result.response.assistant_text).toContain('Which one would you like?');
+  });
+});
+
+describe('Proposed-change route-level — render-vs-raw label resolution coupling (pass-8 P1-1)', () => {
+  // The label/ordinal pre-route must match against the SAME strings
+  // the user sees rendered, NOT against the raw persisted public_label
+  // when that was sanitised away. Key invariants:
+  //   1. Typing the rendered fallback ("Apply this change") resolves
+  //      ONLY when exactly one live proposal renders to it.
+  //   2. Typing the raw unsafe label (e.g. "Trigger add_constraint")
+  //      MUST NOT resolve — the user never saw it.
+  //   3. Two proposals both rendering to the fallback (because both
+  //      had unsafe persisted copy) cannot resolve by label — falls
+  //      through to LLM (or stays in clarification on a follow-up).
+
+  beforeEach(() => {
+    appendCalls.length = 0;
+    addConstraintCalls.length = 0;
+    priorTurnsForRead = [];
+    priorFactsForRead = [];
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function unsafeLabelProposal(chipId: string): PendingAction {
+    return {
+      id: `pa-${randomUUID()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: chipId,
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: chipId,
+        inline_patch: {
+          handler_id: 'add_constraint',
+          params: { value: 100, constraint_type: 'at_most', label: 'Cost cap' },
+          target_entity_ids: ['goal-g'],
+        },
+        public_label: 'Trigger add_constraint',
+        public_message: 'set_factor_value via tool',
+      },
+      preconditions: { graph_hash: GRAPH_HASH },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: EMITTED_AT_ISO,
+    };
+  }
+
+  it('rendered fallback "Apply this change" resolves when there is exactly ONE matching live proposal', async () => {
+    pendingActionsForRead = [unsafeLabelProposal('prop_aaaaaaaaaaaa')];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('Apply this change'), 'req-rendered-fallback-single', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
+  });
+
+  it('typing the RAW unsafe persisted label does NOT resolve (the user never saw it)', async () => {
+    pendingActionsForRead = [unsafeLabelProposal('prop_aaaaaaaaaaaa')];
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text: 'mock' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+    await runTurnExecutor(payload('Trigger add_constraint'), 'req-raw-label-no-match', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    // The raw label is unsafe — short-confirm's edit-verb gate AND
+    // the new label pre-route both reject it. Falls through to LLM.
+    expect(adapter.chatWithTools).toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(0);
+  });
+
+  it('two proposals BOTH rendering to "Apply this change" do NOT resolve by label (P1-2 ambiguity)', async () => {
+    pendingActionsForRead = [
+      unsafeLabelProposal('prop_aaaaaaaaaaaa'),
+      unsafeLabelProposal('prop_bbbbbbbbbbbb'),
+    ];
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text: 'mock' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+    await runTurnExecutor(payload('Apply this change'), 'req-rendered-fallback-ambiguous', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    // Both candidates render to the same fallback. The matcher
+    // requires unambiguous resolution; the call falls through to
+    // the LLM rather than silently executing the first proposal.
+    expect(addConstraintCalls).toHaveLength(0);
+  });
+
+  it('chip-click replay: typing the rendered MESSAGE text resolves the same way as the label', async () => {
+    // A chip-click that replays the chip's message (e.g. "Add the
+    // cost cap.") must resolve to the same proposal as typing the
+    // chip's label.
+    const safeProposal: PendingAction = {
+      id: `pa-${randomUUID()}`,
+      scenario_id: SCENARIO_ID,
+      chip_id: 'prop_aaaaaaaaaaaa',
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: 'prop_aaaaaaaaaaaa',
+        inline_patch: {
+          handler_id: 'add_constraint',
+          params: { value: 100, constraint_type: 'at_most', label: 'Cost cap' },
+          target_entity_ids: ['goal-g'],
+        },
+        public_label: 'Add the cost cap',
+        public_message: 'Add the cost cap.',
+      },
+      preconditions: { graph_hash: GRAPH_HASH },
+      expires_at_turn_count: 2,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: EMITTED_AT_ISO,
+    };
+    pendingActionsForRead = [safeProposal];
+    const adapter = throwingRoutingAdapter();
+    await runTurnExecutor(payload('Add the cost cap.'), 'req-message-resolves', {
+      routingAdapter: adapter,
+      handlerRegistry: stubbedRegistry(),
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(addConstraintCalls).toHaveLength(1);
   });
 });
 

@@ -11,7 +11,11 @@
  *   - Wire chip uses an existing `boundary.ActionType` literal —
  *     `add_constraint`, `set_factor_value`, or `adjust_edge_strength`.
  *   - Chip `id` is a stable `prop_<sha256-12hex>` derived from
- *     `(scenario_id, intent, params, graph_hash)`.
+ *     `(scenario_id, intent, params, graph_hash, target_entity_ids)`
+ *     — see `ProposalIdInputs` and `computeProposalId`. Two proposals
+ *     identical in scenario / intent / params / graph_hash but
+ *     different in targets produce DISTINCT ids and therefore never
+ *     collide (P0-1, pass-5).
  *   - The chip's `id` is the public `proposal_ref` carried inside the
  *     pending action's `inline_patch.proposal_ref` mirror plus the
  *     pending action's top-level `proposal_ref` field. The exact-match
@@ -232,8 +236,11 @@ export function emitProposedChange(
       // Persist the user-facing label and message so the ambiguous-
       // clarification path can render numbered options with the
       // proposal's actual labels (P1-1). Both are validated against
-      // the safety filter at the top of this function, so the
-      // resumer can re-render without re-validating.
+      // the safety filter here at emit time as the primary gate.
+      // Pass-7 hardening adds a render-time re-sanitisation pass via
+      // `resolveProposalRenderCopy` so persisted entries that bypass
+      // this emit helper (legacy rows, direct DB writes, future
+      // schema drift) cannot leak unsafe tokens to the user.
       public_label: proposal.label,
       public_message: proposal.message,
     },
@@ -267,14 +274,16 @@ export const RENDER_SAFE_MESSAGE_FALLBACK = 'Apply the proposed change';
 
 /**
  * Sanitise a persisted user-facing string at render time. Returns the
- * original string when it is safe; otherwise returns the supplied
- * fallback. Use at the point persisted `public_label` /
+ * trimmed original string when it is safe; otherwise returns the
+ * supplied fallback. Use at the point persisted `public_label` /
  * `public_message` is rendered into chips or assistant text.
  *
  * Safety contract: the returned string is GUARANTEED to contain no
  * forbidden token from `SAFETY_FORBIDDEN_TOKENS` (since both the raw
  * input and the deterministic in-code fallback are checked / authored
- * against the same list).
+ * against the same list). The returned string is also GUARANTEED to
+ * be non-blank: whitespace-only persisted copy (e.g. `'   '`) returns
+ * the fallback so chips never render empty (pass-8 P2-2).
  *
  * Pass-7 design note: emit-time validation already gates new
  * proposals, so in steady-state production this sanitiser should be a
@@ -289,7 +298,76 @@ export function sanitisePublicCopyOrFallback(
   raw: string | undefined,
   fallback: string,
 ): string {
-  if (typeof raw !== 'string' || raw.length === 0) return fallback;
-  if (findForbiddenToken(raw) !== null) return fallback;
-  return raw;
+  if (typeof raw !== 'string') return fallback;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return fallback;
+  if (findForbiddenToken(trimmed) !== null) return fallback;
+  return trimmed;
+}
+
+/**
+ * Render-copy bundle for an `apply_proposed_change` pending action.
+ *
+ * Single source of truth (pass-8 P1-1). Both the
+ * ambiguous-clarification chip builder AND the deterministic
+ * label/ordinal pre-route MUST consume this so the strings the user
+ * sees and the strings the resolver matches against are identical.
+ * Without this coupling, an unsafe persisted label would render as
+ * the safe fallback to the user but still match its raw form when
+ * typed back, and the rendered fallback string the user actually saw
+ * would fail to match against the raw label in the matcher.
+ *
+ * `label` and `message` are guaranteed safe per
+ * `sanitisePublicCopyOrFallback`. Both are trimmed; both are
+ * non-empty.
+ */
+export interface ProposalRenderCopy {
+  readonly label: string;
+  readonly message: string;
+  /**
+   * `true` when the persisted `public_label` was missing, blank, or
+   * unsafe and the deterministic fallback was substituted. The
+   * ambiguous-clarification text uses this to decide whether to
+   * render a numbered list of distinct labels or fall back to a
+   * generic prompt when every candidate is a fallback.
+   */
+  readonly wasLabelFallback: boolean;
+  /** Mirror of `wasLabelFallback` for the message. */
+  readonly wasMessageFallback: boolean;
+}
+
+/**
+ * Resolve the render-time public copy for a pending action. Returns
+ * the same fixed fallback for non-`apply_proposed_change` actions —
+ * those should never reach the chip builder via this path, but
+ * defending here avoids any future mis-wiring leaking raw internals.
+ */
+export function resolveProposalRenderCopy(action: {
+  readonly kind: string;
+  readonly public_label?: string | undefined;
+  readonly public_message?: string | undefined;
+}): ProposalRenderCopy {
+  if (action.kind !== 'apply_proposed_change') {
+    return {
+      label: RENDER_SAFE_LABEL_FALLBACK,
+      message: RENDER_SAFE_MESSAGE_FALLBACK,
+      wasLabelFallback: true,
+      wasMessageFallback: true,
+    };
+  }
+  const rawLabel = action.public_label;
+  const rawMessage = action.public_message;
+  const label = sanitisePublicCopyOrFallback(rawLabel, RENDER_SAFE_LABEL_FALLBACK);
+  const message = sanitisePublicCopyOrFallback(rawMessage, RENDER_SAFE_MESSAGE_FALLBACK);
+  // wasLabelFallback iff the resolved label equals the fallback AND
+  // the raw input did NOT itself equal the fallback (so a legitimate
+  // caller who chose the fallback as their actual label is not
+  // mis-flagged).
+  const wasLabelFallback =
+    label === RENDER_SAFE_LABEL_FALLBACK &&
+    (typeof rawLabel !== 'string' || rawLabel.trim() !== RENDER_SAFE_LABEL_FALLBACK);
+  const wasMessageFallback =
+    message === RENDER_SAFE_MESSAGE_FALLBACK &&
+    (typeof rawMessage !== 'string' || rawMessage.trim() !== RENDER_SAFE_MESSAGE_FALLBACK);
+  return { label, message, wasLabelFallback, wasMessageFallback };
 }

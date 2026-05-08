@@ -375,6 +375,21 @@ describe('sanitisePublicCopyOrFallback — render-time safety hardening (pass-7)
     );
   });
 
+  it('returns the fallback for whitespace-only input (P2-2)', () => {
+    expect(sanitisePublicCopyOrFallback('   ', RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      RENDER_SAFE_LABEL_FALLBACK,
+    );
+    expect(sanitisePublicCopyOrFallback('\t\n  \t', RENDER_SAFE_MESSAGE_FALLBACK)).toBe(
+      RENDER_SAFE_MESSAGE_FALLBACK,
+    );
+  });
+
+  it('trims surrounding whitespace from safe input', () => {
+    expect(sanitisePublicCopyOrFallback('  Add the cost cap  ', RENDER_SAFE_LABEL_FALLBACK)).toBe(
+      'Add the cost cap',
+    );
+  });
+
   describe('rejects each forbidden category by replacing with the fallback', () => {
     it.each([
       // Raw JSON tokens

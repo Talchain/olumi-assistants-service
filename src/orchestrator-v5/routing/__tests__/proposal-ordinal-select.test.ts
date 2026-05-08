@@ -41,7 +41,7 @@ describe('tryProposalOrdinalSelect — ordinals', () => {
     const out = tryProposalOrdinalSelect({
       message: msg,
       candidates: [A, B, C],
-      candidateLabels: ['Add cost cap', 'Add time cap', 'Add scope cap'],
+      candidateRenderCopy: [{ label: 'Add cost cap', message: 'Add cost cap.' }, { label: 'Add time cap', message: 'Add time cap.' }, { label: 'Add scope cap', message: 'Add scope cap.' }],
     });
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -60,7 +60,7 @@ describe('tryProposalOrdinalSelect — ordinals', () => {
     const out = tryProposalOrdinalSelect({
       message: msg,
       candidates: [A, B, C],
-      candidateLabels: ['Add cost cap', 'Add time cap', 'Add scope cap'],
+      candidateRenderCopy: [{ label: 'Add cost cap', message: 'Add cost cap.' }, { label: 'Add time cap', message: 'Add time cap.' }, { label: 'Add scope cap', message: 'Add scope cap.' }],
     });
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -71,7 +71,7 @@ describe('tryProposalOrdinalSelect — ordinals', () => {
     const out = tryProposalOrdinalSelect({
       message: 'the first one',
       candidates: [A],
-      candidateLabels: ['Add cost cap'],
+      candidateRenderCopy: [{ label: 'Add cost cap', message: 'Add cost cap.' }],
     });
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -82,9 +82,77 @@ describe('tryProposalOrdinalSelect — ordinals', () => {
     const out = tryProposalOrdinalSelect({
       message: 'option 5',
       candidates: [A, B],
-      candidateLabels: ['x', 'y'],
+      candidateRenderCopy: [{ label: 'x', message: 'x.' }, { label: 'y', message: 'y.' }],
     });
     expect(out.matched).toBe(false);
+  });
+});
+
+describe('tryProposalOrdinalSelect — exact match also works against the rendered message (P1-1)', () => {
+  it('resolves when the user types the rendered message text instead of the label', () => {
+    const out = tryProposalOrdinalSelect({
+      message: 'Add the cost cap.',
+      candidates: [A, B],
+      candidateRenderCopy: [
+        { label: 'Add cost cap', message: 'Add the cost cap.' },
+        { label: 'Add time cap', message: 'Add the time cap.' },
+      ],
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.index).toBe(0);
+  });
+});
+
+describe('tryProposalOrdinalSelect — exact-label/message match must be unambiguous (P1-2)', () => {
+  it('two candidates with identical rendered LABEL and the user types it: NO match', () => {
+    const out = tryProposalOrdinalSelect({
+      message: 'Apply this change',
+      candidates: [A, B],
+      candidateRenderCopy: [
+        { label: 'Apply this change', message: 'A unique message' },
+        { label: 'Apply this change', message: 'B unique message' },
+      ],
+    });
+    expect(out.matched).toBe(false);
+  });
+
+  it('two candidates with identical rendered MESSAGE and the user types it: NO match', () => {
+    const out = tryProposalOrdinalSelect({
+      message: 'Apply the proposed change',
+      candidates: [A, B],
+      candidateRenderCopy: [
+        { label: 'A unique label', message: 'Apply the proposed change' },
+        { label: 'B unique label', message: 'Apply the proposed change' },
+      ],
+    });
+    expect(out.matched).toBe(false);
+  });
+
+  it('different candidates matching the same string by different fields: NO match', () => {
+    const out = tryProposalOrdinalSelect({
+      message: 'shared text',
+      candidates: [A, B],
+      candidateRenderCopy: [
+        { label: 'shared text', message: 'A unique message' },
+        { label: 'B unique label', message: 'shared text' },
+      ],
+    });
+    expect(out.matched).toBe(false);
+  });
+
+  it('a candidate whose label AND message both equal the user input is still ONE match (resolves)', () => {
+    const out = tryProposalOrdinalSelect({
+      message: 'Apply',
+      candidates: [A, B],
+      candidateRenderCopy: [
+        { label: 'Apply', message: 'Apply' },
+        { label: 'Different', message: 'Different.' },
+      ],
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.index).toBe(0);
   });
 });
 
@@ -93,7 +161,7 @@ describe('tryProposalOrdinalSelect — exact label match', () => {
     const out = tryProposalOrdinalSelect({
       message: 'Add Time Cap',
       candidates: [A, B],
-      candidateLabels: ['Add cost cap', 'Add time cap'],
+      candidateRenderCopy: [{ label: 'Add cost cap', message: 'Add cost cap.' }, { label: 'Add time cap', message: 'Add time cap.' }],
     });
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -105,7 +173,7 @@ describe('tryProposalOrdinalSelect — exact label match', () => {
     const out = tryProposalOrdinalSelect({
       message: 'First quarter',
       candidates: [A, B],
-      candidateLabels: ['Lock pricing', 'First quarter'],
+      candidateRenderCopy: [{ label: 'Lock pricing', message: 'Lock pricing.' }, { label: 'First quarter', message: 'First quarter.' }],
     });
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -116,7 +184,7 @@ describe('tryProposalOrdinalSelect — exact label match', () => {
     const out = tryProposalOrdinalSelect({
       message: 'cost',
       candidates: [A],
-      candidateLabels: ['Add cost cap'],
+      candidateRenderCopy: [{ label: 'Add cost cap', message: 'Add cost cap.' }],
     });
     expect(out.matched).toBe(false);
   });
@@ -127,7 +195,7 @@ describe('tryProposalOrdinalSelect — negative gates', () => {
     const out = tryProposalOrdinalSelect({
       message: 'set 2',
       candidates: [A, B],
-      candidateLabels: ['x', 'y'],
+      candidateRenderCopy: [{ label: 'x', message: 'x.' }, { label: 'y', message: 'y.' }],
     });
     expect(out.matched).toBe(false);
   });
@@ -136,7 +204,7 @@ describe('tryProposalOrdinalSelect — negative gates', () => {
     const out = tryProposalOrdinalSelect({
       message: 'add 1',
       candidates: [A],
-      candidateLabels: ['x'],
+      candidateRenderCopy: [{ label: 'x', message: 'x.' }],
     });
     expect(out.matched).toBe(false);
   });
@@ -145,7 +213,7 @@ describe('tryProposalOrdinalSelect — negative gates', () => {
     const out = tryProposalOrdinalSelect({
       message: 'first',
       candidates: [A, B],
-      candidateLabels: ['only one'],
+      candidateRenderCopy: [{ label: 'only one', message: 'only one.' }],
     });
     expect(out.matched).toBe(false);
   });
@@ -154,7 +222,7 @@ describe('tryProposalOrdinalSelect — negative gates', () => {
     const out = tryProposalOrdinalSelect({
       message: 'first',
       candidates: [],
-      candidateLabels: [],
+      candidateRenderCopy: [],
     });
     expect(out.matched).toBe(false);
   });

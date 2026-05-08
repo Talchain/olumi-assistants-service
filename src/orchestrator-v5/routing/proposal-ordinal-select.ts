@@ -62,16 +62,29 @@ const PHRASAL_ORDINAL_WORD =
 const PHRASAL_ORDINAL_DIGIT =
   /^\s*(?:#|option\s+|number\s+|the\s+)?(\d{1,2})(?:\s+(?:one|option|choice))?\s*[.!?]*\s*(?:please|now|thanks|thank\s+you)?\s*[.!?]*\s*$/i;
 
+/**
+ * The render-time copy bundle that drove a chip's label and message
+ * for one candidate. Both fields are sanitised by
+ * `compose/proposed-change.ts::resolveProposalRenderCopy` so the
+ * matcher tests against EXACTLY what the user saw.
+ */
+export interface CandidateRenderCopy {
+  readonly label: string;
+  readonly message: string;
+}
+
 export interface TryProposalOrdinalSelectInput {
   readonly message: string;
   readonly candidates: readonly PendingAction[];
   /**
-   * Public chip labels parallel to `candidates` — the same labels the
-   * user saw in the ambiguous-clarification message ("Which one would
-   * you like? 1) <label> 2) <label>"). Required for exact-label
-   * matching.
+   * Render-time copy parallel to `candidates`. Pass-8 P1-1 tightening:
+   * exact-label matching now runs against BOTH the rendered label AND
+   * the rendered message for each candidate, so a chip-click replay
+   * carrying the message text resolves the same way as a typed label
+   * reply, AND the user can never see one string but be matched
+   * against another.
    */
-  readonly candidateLabels: readonly string[];
+  readonly candidateRenderCopy: readonly CandidateRenderCopy[];
 }
 
 export type ProposalOrdinalSelectResult =
@@ -95,18 +108,44 @@ function tryOrdinalIndex(message: string): number | null {
   return null;
 }
 
-function tryExactLabel(
+/**
+ * Pass-8 P1-2 tightening: exact-label matching is unambiguous.
+ *
+ * Iterates every candidate; collects the indexes whose rendered
+ * `label` OR rendered `message` exactly equals the user's input
+ * (case-insensitive, trimmed). Returns the index ONLY when EXACTLY
+ * ONE candidate matches. Two candidates with the same rendered
+ * label (e.g. both falling back to "Apply this change") therefore
+ * fall through to the clarification path rather than silently
+ * executing the first one.
+ */
+/**
+ * Normalise a string for exact-match comparison: trim surrounding
+ * whitespace, strip trailing `.!?` punctuation, lowercase. Both the
+ * user input and each candidate field are normalised the same way so
+ * `"Add the cost cap"` matches `"Add the cost cap."` (a chip whose
+ * rendered message ends with a full stop).
+ */
+function normaliseForExactMatch(value: string): string {
+  return value.trim().replace(/[.!?]+$/u, '').trim().toLowerCase();
+}
+
+function tryExactLabelOrMessageUnambiguous(
   message: string,
-  candidateLabels: readonly string[],
+  copy: readonly CandidateRenderCopy[],
 ): number | null {
-  const trimmed = message.trim().replace(/[.!?]+$/u, '').trim();
-  if (trimmed.length === 0) return null;
-  const lower = trimmed.toLowerCase();
-  for (let i = 0; i < candidateLabels.length; i += 1) {
-    const labelTrimmed = candidateLabels[i]!.trim();
-    if (labelTrimmed.length === 0) continue;
-    if (labelTrimmed.toLowerCase() === lower) return i;
+  const needle = normaliseForExactMatch(message);
+  if (needle.length === 0) return null;
+  const hits: number[] = [];
+  for (let i = 0; i < copy.length; i += 1) {
+    const candidate = copy[i]!;
+    const labelNorm = normaliseForExactMatch(candidate.label);
+    const messageNorm = normaliseForExactMatch(candidate.message);
+    const labelMatches = labelNorm.length > 0 && labelNorm === needle;
+    const messageMatches = messageNorm.length > 0 && messageNorm === needle;
+    if (labelMatches || messageMatches) hits.push(i);
   }
+  if (hits.length === 1) return hits[0]!;
   return null;
 }
 
@@ -114,14 +153,17 @@ export function tryProposalOrdinalSelect(
   input: TryProposalOrdinalSelectInput,
 ): ProposalOrdinalSelectResult {
   if (input.candidates.length === 0) return { matched: false };
-  if (input.candidates.length !== input.candidateLabels.length) {
+  if (input.candidates.length !== input.candidateRenderCopy.length) {
     // Defensive: the caller should pin parallel arrays. If they
     // diverge, refuse to match rather than guess.
     return { matched: false };
   }
-  // Exact-label match takes priority over ordinal (a label happens to
-  // be `"First quarter"` should not silently resolve as ordinal "first").
-  const labelIndex = tryExactLabel(input.message, input.candidateLabels);
+  // Exact-label-or-message match takes priority over ordinal (a label
+  // happens to be "First quarter" should not silently resolve as
+  // ordinal "first"). Resolution is gated on uniqueness — two
+  // candidates that render to the same string fall through to
+  // clarification (P1-2).
+  const labelIndex = tryExactLabelOrMessageUnambiguous(input.message, input.candidateRenderCopy);
   if (labelIndex !== null) {
     return { matched: true, pending: input.candidates[labelIndex]!, index: labelIndex };
   }
