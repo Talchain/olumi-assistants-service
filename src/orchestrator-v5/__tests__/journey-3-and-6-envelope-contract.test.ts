@@ -80,6 +80,28 @@ function asPriorFacts(forRowIds: readonly string[]): readonly Record<string, unk
     .flatMap((t) => t.handler_facts)
 }
 
+// Production parity: `SupabaseSessionStore.readFactsFor` delegates to
+// `readFactsWithTurnFor` (single source of truth). Without this helper,
+// `build-turn-context.fetchPriorFacts` hits the legacy fallback that
+// produces an empty `factsWithTurn` array and silently disables the
+// proposed-change synthesis idempotency lookback — masking a real
+// production code path. Each fact carries forward its parent turn's row
+// id and atomic-write timestamp.
+function asPriorFactsWithTurn(
+  forRowIds: readonly string[],
+): readonly { fact: Record<string, unknown>; turn_id: string; fact_created_at: string }[] {
+  return [...persistence.turns]
+    .filter((t) => forRowIds.includes(t.id))
+    .reverse()
+    .flatMap((t) =>
+      t.handler_facts.map((fact) => ({
+        fact,
+        turn_id: t.id,
+        fact_created_at: t.created_at,
+      })),
+    )
+}
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: {
@@ -99,6 +121,8 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => asPriorTurns(),
     readFactsFor: async (rowIds: readonly string[]) => asPriorFacts(rowIds),
+    readFactsWithTurnFor: async (rowIds: readonly string[]) =>
+      asPriorFactsWithTurn(rowIds),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,

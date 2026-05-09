@@ -334,6 +334,25 @@ vi.mock('../session/index.js', () => ({
     },
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
+    // Production parity: `SupabaseSessionStore.readFactsFor` delegates to
+    // `readFactsWithTurnFor` (single source of truth). The mockState in
+    // this file already carries paired `priorTurns` / `priorFacts` arrays
+    // — bind each fact to its corresponding turn by index, matching the
+    // way each test setup populates them in lockstep. Falls through to
+    // empty `turn_id` / current timestamp if the arrays are misaligned
+    // (no test currently sets that up, but the guard keeps the helper
+    // defensive).
+    readFactsWithTurnFor: async () =>
+      mockState.priorFacts.map((fact, idx) => {
+        const turn = mockState.priorTurns[idx] as
+          | { id?: string; created_at?: string }
+          | undefined;
+        return {
+          fact,
+          turn_id: turn?.id ?? '',
+          fact_created_at: turn?.created_at ?? new Date().toISOString(),
+        };
+      }),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
