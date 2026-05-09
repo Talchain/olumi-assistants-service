@@ -2621,27 +2621,40 @@ export function parseEditGraphResponse(text: string): EditGraphLLMResult {
     // operators can migrate at their own pace. See DL-2 in
     // Docs/edit_graph_v9_deferred_items.md for the sunset protocol —
     // the old event MUST NOT be removed in this branch.
+    //
+    // Telemetry fires regardless of array length: an empty bare-array
+    // is still a bare-array shape and operators may want the signal.
     const telemetryFields = { format: 'legacy_array', operations_count: parsed.length };
     log.info(telemetryFields, 'edit_graph.legacy_array_response');
     log.info(telemetryFields, 'edit_graph.legacy_array_wrapped');
     const normalised = (parsed as Array<Record<string, unknown>>).map(normaliseOperation);
+    // Phase 2A — safe coaching defaults, gated on a non-empty array.
+    //
+    // The defaults exist to fix the success-path quality gap: when the
+    // model emits a bare-array response with operations, the
+    // success-path text builder at line ~2341 needs something to
+    // render so assistantText isn't null. "Proposed graph edit." is
+    // the safe fallback for that case.
+    //
+    // For an EMPTY bare-array (parsed.length === 0), the operations
+    // are about to short-circuit through the empty-ops branch at
+    // line ~1625 which has its own correct user-facing fallback:
+    // "No changes were needed for this request." Populating coaching
+    // here would leak "Proposed graph edit." into a no-op response
+    // (misleading to the user — nothing was proposed). Keep
+    // coaching=null on the empty case so the existing fallback fires.
+    //
+    // Test coverage: A5 (non-empty defaults), A8 (empty no-op text),
+    // and A6 (jargon-free) in
+    // tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts.
+    const coaching: EditGraphCoaching | null = parsed.length > 0
+      ? { summary: 'Proposed graph edit.', rerun_recommended: false }
+      : null;
     return {
       operations: normalised,
       removed_edges: [],
       warnings: [],
-      // Phase 2A — safe coaching defaults. When the model emits a bare-
-      // array response (no envelope), this branch previously set
-      // coaching=null, which left the success-path text builder at
-      // line 2341 with nothing to render and produced a null
-      // assistantText. Populate a non-empty user-facing summary and
-      // pin rerun_recommended=false as the conservative invariant for
-      // the bare-array path. The summary text contains no internal
-      // jargon (parser/normaliser/wrapper terminology) — see test A6
-      // for the explicit jargon guard.
-      coaching: {
-        summary: 'Proposed graph edit.',
-        rerun_recommended: false,
-      },
+      coaching,
     };
   }
 
