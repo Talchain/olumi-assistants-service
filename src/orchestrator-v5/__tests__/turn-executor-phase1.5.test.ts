@@ -10,7 +10,8 @@
  *   - never emits the old `validate_skipped_graph_checks` stage
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from './fixtures.js';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import type {
@@ -74,13 +75,11 @@ function mockRoutingAdapter(result: ChatWithToolsResult) {
   };
 }
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   message: 'analyse options',
-  turn_class: 'frame',
-  stage: 'frame',
-};
+});
 
 const RUN_ANALYSIS_PROPOSAL_OPT_A = {
   intent_class: 'execute',

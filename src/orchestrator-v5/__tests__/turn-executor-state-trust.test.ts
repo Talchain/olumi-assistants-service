@@ -17,8 +17,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
+import { makeMessagePayload } from './fixtures.js';
 
 import type { ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from '../../adapters/llm/types.js';
 import { setTestSink } from '../../utils/telemetry.js';
@@ -28,13 +29,13 @@ import type { HandlerRegistry, HandlerFn, HandlerInvocation, HandlerOutcome } fr
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const TURN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: TURN_ID,
   scenario_id: SCENARIO_ID,
   message: 'why does the leading option win?',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 // In-memory store handle the test mutates per scenario.
 let mockedPriorFacts: HandlerFact[] = [];

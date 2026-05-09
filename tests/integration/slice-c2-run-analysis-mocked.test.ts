@@ -16,7 +16,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 
 import happyFixture from '../fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
 import minimalFixture from '../fixtures/plot/v2-run-golden-minimal.json' with { type: 'json' };
@@ -156,13 +157,13 @@ function makeMockPlot(response: V2RunResponseEnvelope): PLoTClient {
   } as unknown as PLoTClient;
 }
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
   scenario_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
   message: 'run the analysis',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 // Telemetry sink
 type Event = { event: string; data: Record<string, unknown> };

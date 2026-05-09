@@ -13,7 +13,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from './fixtures.js';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
@@ -43,14 +45,14 @@ const { EMPTY_HANDLER_REGISTRY } = await import('../tools/registry.js');
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const TURN_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 
-function payload(message: string): OrchestratorTurnPayload {
-  return {
+function payload(message: string): MessageTurnPayload {
+  return makeMessagePayload({
     turn_id: TURN_ID,
     scenario_id: SCENARIO_ID,
     message,
     turn_class: 'decide',
     stage: 'analyse',
-  };
+  });
 }
 
 function graphWithFactor(label: string) {

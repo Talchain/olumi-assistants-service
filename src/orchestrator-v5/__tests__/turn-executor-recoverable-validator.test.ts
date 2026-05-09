@@ -21,7 +21,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from './fixtures.js';
 
 import { log, setTestSink } from '../../utils/telemetry.js';
 import type {
@@ -55,13 +56,13 @@ const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   scenario_id: SCENARIO_ID,
   message: 'run the analysis',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 function mkToolUseResult(input: unknown, textBefore?: string): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [];

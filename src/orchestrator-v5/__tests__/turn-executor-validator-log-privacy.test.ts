@@ -19,7 +19,8 @@
 import { createHash } from 'node:crypto';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from './fixtures.js';
 
 import { log, setTestSink } from '../../utils/telemetry.js';
 import type {
@@ -45,13 +46,13 @@ const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 const SCENARIO_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: SCENARIO_ID,
   message: 'run the analysis',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 // Distinctive strings that must NEVER appear in any log call. These
 // stand in for real user-authored decision content — if they leak, a

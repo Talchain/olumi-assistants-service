@@ -10,9 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { makeMessagePayload } from './fixtures.js';
 
 const SCENARIO_ID = randomUUID();
 
@@ -47,14 +48,14 @@ const { computeAnalysisAffectingGraphHash } = await import(
   '../context/graph-hash.js'
 );
 
-function payload(message: string): OrchestratorTurnPayload {
-  return {
+function payload(message: string): MessageTurnPayload {
+  return makeMessagePayload({
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
     message,
-    turn_class: 'analyse',
+    turn_class: 'clarify',
     stage: 'analyse',
-  };
+  });
 }
 
 function throwingRoutingAdapter() {

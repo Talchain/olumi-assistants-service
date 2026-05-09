@@ -16,7 +16,8 @@
  * boundary is covered in phase1.5-graph-routing.test.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import type {
@@ -66,13 +67,13 @@ function mockAdapter(result: ChatWithToolsResult) {
   };
 }
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   message: 'run analysis on option A',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 function mkGraph(
   nodes: Array<{ id: string; kind: string; label: string }>,
