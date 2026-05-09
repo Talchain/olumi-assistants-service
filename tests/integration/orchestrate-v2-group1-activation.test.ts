@@ -24,9 +24,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -84,13 +84,13 @@ const { OLUMI_ACTION_TOOL_NAME } = await import('../../src/orchestrator-v5/routi
 
 const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
-const RUN_ANALYSIS_PAYLOAD: OrchestratorTurnPayload = {
+const RUN_ANALYSIS_PAYLOAD = makeMessagePayload({
   turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   scenario_id: TEST_SCENARIO_ID,
   message: 'run the analysis on my scenario',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 const RUN_ANALYSIS_TOOL_CALL_INPUT = {
   intent_class: 'execute',

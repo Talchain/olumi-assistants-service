@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 import { setTestSink } from '../../../../utils/telemetry.js';
 import type {
@@ -41,13 +41,11 @@ const { runTurnExecutor } = await import('../../../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../../../routing/tool-schema.js');
 
 const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   scenario_id: TEST_SCENARIO_ID,
   message: 'add a constraint to the customer churn factor',
-  turn_class: 'frame',
-  stage: 'frame',
-};
+});
 
 const ADD_CONSTRAINT_TOOL_CALL = {
   intent_class: 'execute',

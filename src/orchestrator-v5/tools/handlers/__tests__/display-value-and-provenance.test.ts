@@ -22,6 +22,7 @@ import { describe, it, expect } from 'vitest';
 
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import type { ProposalAction } from '../../../routing/types.js';
+import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 import { assembleContextPack } from '../../../context/context-pack-assembler.js';
 import type { GraphWithOptions } from '../../../context/context-pack-assembler.js';
@@ -271,14 +272,13 @@ describe('A2.2 set-then-read — handler-stamped display_value reaches the LLM d
     // (caller did not pre-compact the graph). assembleContextPack
     // produces `display_graph` via `formatGraphForContext`.
     const pack = assembleContextPack({
-      payload: {
-        kind: 'message',
+      payload: makeMessagePayload({
         stage: 'analyse',
         message: 'what is the current churn rate?',
         scenario_id: 'scn-a22',
         turn_id: 'turn-a22',
-        created_at: new Date().toISOString(),
-      } as Parameters<typeof assembleContextPack>[0]['payload'],
+        turn_class: 'decide',
+      }),
       priorTurns: [],
       graph: persistedGraph as unknown as GraphWithOptions,
     });

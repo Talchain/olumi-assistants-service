@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 import { setTestSink } from '../../../../utils/telemetry.js';
 import type {
@@ -54,13 +54,11 @@ const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 // CQE pattern), and Sonnet emits the structured set_factor_value
 // proposal. This proves the proposal → handler → mutation → commit
 // chain end-to-end.
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   scenario_id: TEST_SCENARIO_ID,
   message: 'update the customer churn factor',
-  turn_class: 'frame',
-  stage: 'frame',
-};
+});
 
 const SET_FACTOR_VALUE_TOOL_CALL = {
   intent_class: 'execute',

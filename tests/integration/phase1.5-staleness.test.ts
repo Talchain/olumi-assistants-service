@@ -10,7 +10,8 @@
  * computation runs end-to-end on the routing log.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import type {
@@ -59,13 +60,11 @@ function mockAdapter(result: ChatWithToolsResult) {
   };
 }
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   message: 'what does the model say',
-  turn_class: 'frame',
-  stage: 'frame',
-};
+});
 
 function mkGraph(nodes: number, edges: number): GraphStateIngress {
   const n = Array.from({ length: nodes }, (_, i) => ({
