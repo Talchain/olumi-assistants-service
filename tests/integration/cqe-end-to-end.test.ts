@@ -58,7 +58,7 @@ describe('CQE end-to-end via assembleContextPack', () => {
 
   it('runs for non-action turns (coach / converse) just as for action turns', () => {
     const coachPack = assembleContextPack({
-      payload: { ...basePayload, message: 'at least 3 developers', turn_class: 'direct_answer' as const },
+      payload: { ...basePayload, message: 'at least 3 developers', turn_class: 'review' as const },
       priorTurns: [],
     });
     expect(coachPack.parsed_quantities.length).toBeGreaterThan(0);

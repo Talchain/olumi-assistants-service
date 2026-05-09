@@ -266,13 +266,13 @@ describe('routeWithToolUse — happy paths', () => {
       ],
     };
     const pack = assembleContextPack({
-      payload: {
-        turn_id: 't-da-01',
-        scenario_id: 'scen-display-safe',
+      payload: makeMessagePayload({
+        turn_id: '00000000-0000-4000-8000-0000000000da',
+        scenario_id: '00000000-0000-4000-8000-0000000000d5',
         message: 'How is option A doing?',
-        turn_class: 'analyse',
+        turn_class: 'decide',
         stage: 'analyse',
-      },
+      }),
       priorTurns: [],
       graph,
       analysis: {

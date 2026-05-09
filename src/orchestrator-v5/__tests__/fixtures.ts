@@ -20,8 +20,15 @@ import type {
   SystemEventTurnPayload,
 } from '@talchain/schemas/boundary';
 
-const DEFAULT_TURN_ID = 't-001';
-const DEFAULT_SCENARIO_ID = 'scen-abc';
+// `OrchestratorTurnPayloadSchema` validates `turn_id` and `scenario_id`
+// as UUIDs at runtime (see `@talchain/schemas/boundary` →
+// `MessageTurnPayloadSchema` / `SystemEventTurnPayloadSchema`). The Zod
+// type-level signature is `z.ZodString`, which masks the `.uuid()`
+// refinement — historical fixtures used opaque ids ('t-001', 'scen-abc')
+// that pass typecheck but fail `safeParse`. UUID-shaped defaults make
+// the factories runtime-valid by construction.
+const DEFAULT_TURN_ID = '00000000-0000-4000-8000-000000000001';
+const DEFAULT_SCENARIO_ID = '00000000-0000-4000-8000-0000000000a1';
 
 /**
  * Build a fully-populated `MessageTurnPayload` with sensible defaults.
