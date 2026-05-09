@@ -48,6 +48,7 @@ import {
   runExtraction,
   type CqeExtractionSummary,
 } from './cqe/extract-quantities.js';
+import { ContextPackSchema } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
@@ -366,6 +367,38 @@ export function assembleContextPackWithSummary(
     compound.detected && compound.segments
       ? { ...base, compound_segments: compound.segments }
       : base;
+  // Non-production contract gate. Production assembly path stays cost-free
+  // — `safeParse` is only invoked when `NODE_ENV !== 'production'`, so live
+  // traffic pays the price of a single env-var branch and nothing more. See
+  // `context-pack-schema.ts` header for the schema's role and constraints.
+  //
+  // Behaviour ladder:
+  //   - test       → throw (CI catches drift loudly, no risk of silent ship)
+  //   - everything else non-prod → log.warn (developer-visible, non-fatal)
+  //   - production → no parse, no log (dead code under `NODE_ENV=production`)
+  //
+  // Error format (developer-safe — structural-only):
+  //   `[ContextPack validation] <field path>: <zod message>`
+  // Capped at five issues; carries no field values, no graph/analysis
+  // payload, no conversation/user text.
+  if (process.env.NODE_ENV !== 'production') {
+    const parsed = ContextPackSchema.safeParse(contextPack);
+    if (!parsed.success) {
+      const issues = parsed.error.issues
+        .slice(0, 5)
+        .map(
+          (i) =>
+            `[ContextPack validation] ${i.path.join('.') || '<root>'}: ${i.message}`,
+        );
+      if (process.env.NODE_ENV === 'test') {
+        throw new Error(issues.join('\n'));
+      }
+      log.warn(
+        { event: 'context_pack_schema_drift', issues },
+        'ContextPack failed schema validation',
+      );
+    }
+  }
   return { contextPack, cqeSummary: extraction.summary };
 }
 

@@ -45,7 +45,23 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [
       // build-turn-context filters by turn_class === 'handler' and uses the row id.
-      { id: 'mock-prior-handler-row', turn_class: 'handler', turn_id: 'prior-turn' },
+      // Production-shape `SessionTurn`: every field the
+      // `ContextPackConversationTurnSchema` projection reads is populated.
+      // Real Supabase rows always carry these — partial shapes here would
+      // mask schema regressions in the assembler's non-prod runtime gate.
+      {
+        id: 'mock-prior-handler-row',
+        scenario_id: SCENARIO_ID,
+        user_id: null,
+        turn_id: 'prior-turn',
+        turn_class: 'handler',
+        handler_id: 'run_analysis',
+        request_hash: 'sha256:mock-prior',
+        response_emitted: true,
+        llm_calls_used: 1,
+        duration_ms: 100,
+        created_at: '2026-04-17T11:00:00.000Z',
+      },
     ],
     readFactsFor: async () => mockedPriorFacts,
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
