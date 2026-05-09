@@ -6,7 +6,28 @@
  * prior_turns (not just the five-turn window).
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
+
+// Mock the env predicates the assembler reads. Other config exports remain
+// real via the actual passthrough — only the gate's two helpers are
+// programmable per-test. Defaults are reset in `beforeEach` below.
+const { isProductionMock, isTestMock } = vi.hoisted(() => ({
+  isProductionMock: vi.fn<() => boolean>(),
+  isTestMock: vi.fn<() => boolean>(),
+}));
+
+vi.mock('../../../config/index.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../../../config/index.js')>(
+      '../../../config/index.js',
+    );
+  return {
+    ...actual,
+    isProduction: isProductionMock,
+    isTest: isTestMock,
+  };
+});
 
 import type { SessionTurn } from '@talchain/schemas/orchestrator';
 
@@ -424,6 +445,128 @@ describe('ContextPackSchema (canonical contract)', () => {
     expect(pack.parsed_quantities).toEqual([]);
     const result = ContextPackSchema.safeParse(pack);
     expect(result.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Non-production runtime gate
+// ---------------------------------------------------------------------------
+//
+// The assembler invokes `ContextPackSchema.safeParse` on its return value
+// when `isProduction()` is false. Behaviour ladder:
+//   - test       → throw (CI catches drift loudly)
+//   - other      → log.warn (developer-visible, non-fatal)
+//   - production → no parse, no log (dead code)
+//
+// We program the env predicates via the hoisted mocks at the top of this
+// file; defaults below match the "test" branch so the rest of the suite
+// inherits the gate-enabled, throw-on-failure mode it implicitly relied on
+// before the runtime gate was added. To force a failure, we spy on
+// `ContextPackSchema.safeParse` and synthesise a `success: false` result.
+// This keeps tests independent of any specific schema invariant, so they
+// don't drift if the schema is later tightened or relaxed.
+describe('non-production runtime gate', () => {
+  function makeIssue(path: readonly (string | number)[], message: string): z.ZodIssue {
+    return { code: 'custom', path: [...path], message } as z.ZodIssue;
+  }
+
+  function failureWith(issues: readonly z.ZodIssue[]): z.SafeParseError<unknown> {
+    return {
+      success: false,
+      error: new z.ZodError([...issues]),
+    };
+  }
+
+  beforeEach(() => {
+    isProductionMock.mockReset().mockReturnValue(false);
+    isTestMock.mockReset().mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('throws under test env on schema failure with the documented prefix', () => {
+    vi.spyOn(ContextPackSchema, 'safeParse').mockReturnValue(
+      failureWith([makeIssue(['version'], 'Required')]),
+    );
+
+    expect(() =>
+      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] }),
+    ).toThrowError(/^\[ContextPack validation\] version: Required$/);
+  });
+
+  it('caps the thrown error at five issues even when many fields fail', () => {
+    const issues = Array.from({ length: 12 }, (_, i) =>
+      makeIssue([`field_${i}`], `bad_${i}`),
+    );
+    vi.spyOn(ContextPackSchema, 'safeParse').mockReturnValue(failureWith(issues));
+
+    let caught: Error | null = null;
+    try {
+      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).not.toBeNull();
+    const lines = caught!.message.split('\n');
+    expect(lines).toHaveLength(5);
+    for (const line of lines) {
+      expect(line).toMatch(/^\[ContextPack validation\] field_\d+: bad_\d+$/);
+    }
+  });
+
+  it('renders root-level path as <root> in the error prefix', () => {
+    vi.spyOn(ContextPackSchema, 'safeParse').mockReturnValue(
+      failureWith([makeIssue([], 'Expected object, received null')]),
+    );
+
+    expect(() =>
+      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] }),
+    ).toThrowError(/^\[ContextPack validation\] <root>: Expected object, received null$/);
+  });
+
+  it('warns (not throws) under non-test, non-production environments on failure', () => {
+    isTestMock.mockReturnValue(false);
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(ContextPackSchema, 'safeParse').mockReturnValue(
+      failureWith([makeIssue(['version'], 'Required')]),
+    );
+
+    expect(() =>
+      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] }),
+    ).not.toThrow();
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [payload, msg] = warnSpy.mock.calls[0]!;
+    expect((payload as { event: string }).event).toBe('context_pack_schema_drift');
+    expect((payload as { issues: readonly string[] }).issues[0]).toBe(
+      '[ContextPack validation] version: Required',
+    );
+    expect(msg).toBe('ContextPack failed schema validation');
+  });
+
+  it('skips safeParse entirely under production', () => {
+    isProductionMock.mockReturnValue(true);
+    const parseSpy = vi.spyOn(ContextPackSchema, 'safeParse');
+
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(pack.version).toBe(CONTEXT_PACK_VERSION);
+  });
+
+  it('does not throw or warn when the assembled pack is valid', () => {
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+
+    expect(() =>
+      assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] }),
+    ).not.toThrow();
+
+    // No drift event fired.
+    for (const call of warnSpy.mock.calls) {
+      expect((call[0] as { event?: string }).event).not.toBe('context_pack_schema_drift');
+    }
   });
 });
 
