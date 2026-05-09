@@ -491,8 +491,6 @@ describe('edit_graph v9 Phase 1 — bare-array safe-envelope (parser level)', ()
   //                     surfaces in one search).
   // -------------------------------------------------------------------------
   it('A8 empty bare-array gets coaching=null so the empty-ops fallback fires', () => {
-    parseEditGraphResponse(JSON.stringify([]));
-    // Parser-level assertion via separate call so we don't mix spy state.
     const result = parseEditGraphResponse(JSON.stringify([]));
     expect(result.operations).toHaveLength(0);
     expect(result.removed_edges).toEqual([]);
