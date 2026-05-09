@@ -157,7 +157,16 @@ describe("handleEditGraph", () => {
     expect(data.base_graph_hash!.length).toBe(16);
   });
 
-  it("returns null assistantText on clean success (no repairs)", async () => {
+  // Phase 2A contract change (deliberate, called out in Phase 2A report):
+  // The previous assertion was `expect(result.assistantText).toBeNull()`,
+  // which pinned a downstream consequence of coaching=null on the
+  // bare-array path. As of Phase 2A, the bare-array branch populates
+  // safe coaching defaults, so the success-path text builder renders a
+  // non-null assistantText containing "Proposed graph edit." See
+  // edit-graph-bare-array-safe-envelope.test.ts (D1) for the canonical
+  // assertion and Docs/edit_graph_v9_deferred_items.md (DL-5b) for the
+  // wider workstream context.
+  it("returns safe-default assistantText on clean success (no repairs)", async () => {
     const adapter = makeAdapter([VALID_UPDATE_OP]);
 
     const result = await handleEditGraph(
@@ -168,7 +177,8 @@ describe("handleEditGraph", () => {
       "turn-1",
     );
 
-    expect(result.assistantText).toBeNull();
+    expect(result.assistantText).not.toBeNull();
+    expect(result.assistantText).toContain("Proposed graph edit.");
   });
 
   it("reports latencyMs", async () => {
