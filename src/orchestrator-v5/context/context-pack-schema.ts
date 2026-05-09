@@ -20,10 +20,13 @@
  *     The assembler's TypeScript interfaces remain authoritative for those
  *     internals; this schema's job is to guard the contract boundary, not
  *     to re-validate every nested invariant.
- *   - **No runtime parse in the assembler hot path.** This schema is
- *     intentionally not invoked in production assembly. Callers that want
- *     a runtime guard (tests, harness, optional later non-prod gate) call
- *     `ContextPackSchema.safeParse` themselves.
+ *   - **Production hot path stays cost-free.** The assembler's non-prod
+ *     runtime gate (see `assembleContextPackWithSummary` in
+ *     `./context-pack-assembler.ts`) calls `ContextPackSchema.safeParse`
+ *     only when `process.env.NODE_ENV !== 'production'`. Under prod the
+ *     gate is dead code: a single env-var branch and no schema work.
+ *     External callers (replay/golden-journey harness, ad-hoc validation)
+ *     can still call `ContextPackSchema.safeParse` themselves.
  *
  * Spec & state-trust references:
  *   - Spec §10 (lines 390–467) of
