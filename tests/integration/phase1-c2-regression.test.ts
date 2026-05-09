@@ -9,7 +9,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import type {
@@ -41,13 +42,13 @@ import type { PLoTClient } from '../../src/orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../src/orchestrator/types.js';
 import type { RunAnalysisScenarioSnapshot } from '../../src/orchestrator-v5/tools/handlers/run-analysis.js';
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: '77777777-7777-4777-8777-777777777777',
   scenario_id: '88888888-8888-4888-8888-888888888888',
   message: 'run the analysis',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 function toolResult(input: unknown): ChatWithToolsResult {
   return {

@@ -35,6 +35,7 @@ import {
 import happyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json' with { type: 'json' };
 import largerFixture from '../../../../../tests/fixtures/plot/v2-run-golden-larger.json' with { type: 'json' };
+import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -98,13 +99,13 @@ function makeInvocation(overrides?: Partial<HandlerInvocation>): HandlerInvocati
       scenarioBriefText: null,
       persistedGraph: null,
     } as unknown as HandlerInvocation['context'],
-    payload: {
+    payload: makeMessagePayload({
       turn_id: 't1',
       scenario_id: TEST_SCENARIO_ID,
       message: 'run analysis',
       turn_class: 'decide',
       stage: 'analyse',
-    },
+    }),
     requestId: TEST_REQUEST_ID,
     signal: new AbortController().signal,
     orientationText: '',
@@ -727,13 +728,13 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
     // would reject non-string at the wire boundary; we're testing the
     // handler's defensive re-parse here.
     const invocation = makeInvocation({
-      payload: {
+      payload: makeMessagePayload({
         turn_id: 't1',
         scenario_id: 42 as unknown as string,
         message: 'x',
         turn_class: 'decide',
         stage: 'analyse',
-      },
+      }),
     });
     await expect(handler(invocation)).rejects.toMatchObject({
       kind: 'HANDLER_INVOCATION_FAILED',

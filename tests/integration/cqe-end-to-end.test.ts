@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { assembleContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import { routeWithToolUse } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
 } from '../../src/adapters/llm/types.js';
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 
 // End-to-end integration: confirm parsed_quantities populated by CQE
 // reaches the ContextPack produced by assembleContextPack(), traverses
@@ -14,13 +14,13 @@ import type {
 // hop. Covers brief §6 Gate 10 (liveness) and §7 acceptance criterion
 // for the assembleContextPack → routeWithToolUse → JSON.stringify chain.
 
-const basePayload: OrchestratorTurnPayload = {
+const basePayload = makeMessagePayload({
   turn_id: '11111111-1111-4111-8111-111111111111',
   scenario_id: '22222222-2222-4222-8222-222222222222',
   message: 'placeholder',
-  turn_class: 'handler',
-  stage: 'evaluate',
-};
+  turn_class: 'decide',
+  stage: 'analyse',
+});
 
 describe('CQE end-to-end via assembleContextPack', () => {
   it('populates parsed_quantities for a quantity-bearing message', () => {
@@ -58,7 +58,7 @@ describe('CQE end-to-end via assembleContextPack', () => {
 
   it('runs for non-action turns (coach / converse) just as for action turns', () => {
     const coachPack = assembleContextPack({
-      payload: { ...basePayload, message: 'at least 3 developers', turn_class: 'direct_answer' as const },
+      payload: { ...basePayload, message: 'at least 3 developers', turn_class: 'review' as const },
       priorTurns: [],
     });
     expect(coachPack.parsed_quantities.length).toBeGreaterThan(0);

@@ -19,14 +19,13 @@ vi.mock('../session/index.js', () => ({
 
 import { buildTurnContext } from '../build-turn-context.js';
 import { setTestSink } from '../../utils/telemetry.js';
+import { makeMessagePayload } from './fixtures.js';
 
-const BASE = {
+const BASE = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   message: 'hello',
-  turn_class: 'frame' as const,
-  stage: 'frame' as const,
-};
+});
 
 describe('buildTurnContext — getSessionStore() factory failure (R-003)', () => {
   const prevEnv = { ...process.env };

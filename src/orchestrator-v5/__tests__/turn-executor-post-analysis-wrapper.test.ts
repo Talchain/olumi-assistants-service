@@ -11,30 +11,31 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { makeMessagePayload } from './fixtures.js';
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const TURN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-const ANALYSE_PAYLOAD: OrchestratorTurnPayload = {
+const ANALYSE_PAYLOAD = makeMessagePayload({
   turn_id: TURN_ID,
   scenario_id: SCENARIO_ID,
   message: 'What should I do?',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
-const FRAME_PAYLOAD: OrchestratorTurnPayload = {
-  ...ANALYSE_PAYLOAD,
+const FRAME_PAYLOAD = makeMessagePayload({
+  turn_id: TURN_ID,
+  scenario_id: SCENARIO_ID,
   message: 'Tell me about my decision.',
   turn_class: 'frame',
   stage: 'frame',
-};
+});
 
 let mockedPriorFacts: HandlerFact[] = [];
 

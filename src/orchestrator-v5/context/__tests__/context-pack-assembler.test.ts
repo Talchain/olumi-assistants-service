@@ -8,8 +8,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { SessionTurn } from '@talchain/schemas/orchestrator';
+
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 import { log } from '../../../utils/telemetry.js';
 
@@ -22,13 +23,7 @@ import {
 } from '../context-pack-assembler.js';
 import { ContextPackSchema } from '../context-pack-schema.js';
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = Object.freeze({
-  turn_id: 't-001',
-  scenario_id: 'scen-abc',
-  message: 'What should I do?',
-  turn_class: 'frame',
-  stage: 'frame',
-});
+const BASE_PAYLOAD = Object.freeze(makeMessagePayload());
 
 function makeSessionTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
   return {
@@ -299,15 +294,17 @@ describe('assembleContextPack', () => {
   it('projects scenario_id from the payload onto the assembled pack', () => {
     const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
     expect(pack.scenario_id).toBe(BASE_PAYLOAD.scenario_id);
-    expect(pack.scenario_id).toBe('scen-abc');
   });
 
   it('projects scenario_id verbatim for a different payload', () => {
+    // Use a UUID-shaped value: `OrchestratorTurnPayloadSchema` enforces
+    // `.uuid()` on `scenario_id` at runtime even though the Zod type
+    // appears as `z.ZodString`.
     const pack = assembleContextPack({
-      payload: { ...BASE_PAYLOAD, scenario_id: 'scen-xyz-123' },
+      payload: { ...BASE_PAYLOAD, scenario_id: '00000000-0000-4000-8000-0000000000c5' },
       priorTurns: [],
     });
-    expect(pack.scenario_id).toBe('scen-xyz-123');
+    expect(pack.scenario_id).toBe('00000000-0000-4000-8000-0000000000c5');
   });
 
   // Empty-array semantics for parsed_quantities — explicit `[]` not undefined.

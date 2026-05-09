@@ -17,8 +17,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
+import { makeMessagePayload } from './fixtures.js';
 import type { PendingAction } from '../session/pending-action.js';
 import type { HandlerRegistry } from '../tools/registry.js';
 
@@ -58,14 +59,14 @@ vi.mock('../session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 
-function payload(message: string): OrchestratorTurnPayload {
-  return {
+function payload(message: string): MessageTurnPayload {
+  return makeMessagePayload({
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
     message,
-    turn_class: 'analyse',
+    turn_class: 'decide',
     stage: 'analyse',
-  };
+  });
 }
 
 function throwingRoutingAdapter() {

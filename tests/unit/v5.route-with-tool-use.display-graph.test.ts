@@ -28,6 +28,7 @@ import type {
 } from '../../src/adapters/llm/types.js';
 import type { ContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import { assembleContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 import { sanitiseAssistantTextProse } from '../../src/orchestrator-v5/format/numeric-prose-formatter.js';
 import type { GraphV3Compact } from '../../src/orchestrator/context/graph-compact.js';
 
@@ -116,14 +117,13 @@ function makePackWithGraph(): ContextPack {
     _edge_count: 3,
   };
   return assembleContextPack({
-    payload: {
-      kind: 'message',
+    payload: makeMessagePayload({
       stage: 'analyse',
       message: 'run analysis',
       scenario_id: 'scen-1',
       turn_id: 'turn-1',
-      created_at: new Date().toISOString(),
-    } as Parameters<typeof assembleContextPack>[0]['payload'],
+      turn_class: 'decide',
+    }),
     priorTurns: [],
     compactedGraph,
   });
@@ -270,14 +270,13 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
     // that shape too — otherwise the public API silently degrades to
     // "negligible link" on every edge when callers don't pre-compact.
     const rawPack = assembleContextPack({
-      payload: {
-        kind: 'message',
+      payload: makeMessagePayload({
         stage: 'analyse',
         message: 'run analysis',
         scenario_id: 'scen-2',
         turn_id: 'turn-2',
-        created_at: new Date().toISOString(),
-      } as Parameters<typeof assembleContextPack>[0]['payload'],
+        turn_class: 'decide',
+      }),
       priorTurns: [],
       graph: {
         nodes: [
@@ -360,14 +359,13 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
     // remain stripped per A3.1 Task 6 — Sonnet sees the formatted prose
     // only. Raw `ContextPack.graph` retains the floats for handlers.
     const rawPack = assembleContextPack({
-      payload: {
-        kind: 'message',
+      payload: makeMessagePayload({
         stage: 'analyse',
         message: 'what is the current churn rate?',
         scenario_id: 'scen-3',
         turn_id: 'turn-3',
-        created_at: new Date().toISOString(),
-      } as Parameters<typeof assembleContextPack>[0]['payload'],
+        turn_class: 'decide',
+      }),
       priorTurns: [],
       graph: {
         nodes: [
