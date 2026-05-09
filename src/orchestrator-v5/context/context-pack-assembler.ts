@@ -116,6 +116,10 @@ export interface ContextPackAnalysis {
   // context with a misleading caveat. Telemetry retains the legacy
   // `analysis_state_source` / `analysis_staleness_reason` fields for
   // operator continuity in turn-executor's log payloads.
+  //
+  // This is a deliberate divergence from spec §10:436 of
+  // `Docs/v5/olumi-v5-architecture-design-specification-v3_2.md`. See
+  // `Docs/v5-state-trust-phase0.md` for the design record.
 }
 
 export interface ContextPackConversationTurn {
@@ -129,11 +133,32 @@ export interface ContextPackConversation {
   readonly recent_turns: readonly ContextPackConversationTurn[];
   readonly turn_count: number;
   readonly last_tool_used: string | null;
+  /**
+   * Boolean flag indicating that the next user turn is expected to confirm
+   * or dismiss a pending change. Diverges from spec §10:444, which defines
+   * the field as `{ patch_id, description } | null`. The structured
+   * carriage now lives off-pack on the wire as `pending_actions[]` /
+   * `proposed_actions[]` (see `src/orchestrator-v5/session/pending-action.ts`),
+   * which carry `proposal_ref`, `inline_patch`, `public_label`, and
+   * `public_message`. The boolean here remains for routing/log signal
+   * only. No state-trust decision record could be located for this
+   * specific simplification — flagged as an undocumented spec divergence;
+   * consider a Decision Log entry that supersedes §10:444.
+   */
   readonly pending_confirmation: boolean;
 }
 
 export interface ContextPack {
   readonly version: typeof CONTEXT_PACK_VERSION;
+  /**
+   * Scenario identifier from the boundary turn payload. Surfaced on the
+   * pack itself (not just buried in `payload`) so downstream consumers —
+   * replay/journey harnesses, debug logs, future audit trails — have a
+   * single canonical key for the assembled context. Spec §10:414 lists
+   * this as a required ContextPack field; this projection closes that
+   * compliance gap. Additive: existing consumers do not need to change.
+   */
+  readonly scenario_id: string;
   readonly stage: string;
   readonly graph: ContextPackGraph;
   /**
@@ -315,6 +340,7 @@ export function assembleContextPackWithSummary(
     : projectGraph(input.graph ?? null);
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
+    scenario_id: input.payload.scenario_id,
     stage: input.payload.stage,
     graph: projectedGraph,
     analysis: rawAnalysis,
