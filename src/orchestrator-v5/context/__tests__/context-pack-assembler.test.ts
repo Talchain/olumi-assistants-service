@@ -20,6 +20,7 @@ import {
   CONTEXT_PACK_VERSION,
   type GraphWithOptions,
 } from '../context-pack-assembler.js';
+import { ContextPackSchema } from '../context-pack-schema.js';
 
 const BASE_PAYLOAD: OrchestratorTurnPayload = Object.freeze({
   turn_id: 't-001',
@@ -292,6 +293,140 @@ describe('assembleContextPack', () => {
     });
 
     expect(pack.conversation.pending_confirmation).toBe(true);
+  });
+
+  // V5 ContextPack §10 compliance — `scenario_id` projection.
+  it('projects scenario_id from the payload onto the assembled pack', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    expect(pack.scenario_id).toBe(BASE_PAYLOAD.scenario_id);
+    expect(pack.scenario_id).toBe('scen-abc');
+  });
+
+  it('projects scenario_id verbatim for a different payload', () => {
+    const pack = assembleContextPack({
+      payload: { ...BASE_PAYLOAD, scenario_id: 'scen-xyz-123' },
+      priorTurns: [],
+    });
+    expect(pack.scenario_id).toBe('scen-xyz-123');
+  });
+
+  // Empty-array semantics for parsed_quantities — explicit `[]` not undefined.
+  it('parsed_quantities is [] (not undefined) when message has no parseable quantities', () => {
+    const pack = assembleContextPack({
+      payload: { ...BASE_PAYLOAD, message: 'hello there how are you today' },
+      priorTurns: [],
+    });
+    expect(pack.parsed_quantities).toBeDefined();
+    expect(Array.isArray(pack.parsed_quantities)).toBe(true);
+    expect(pack.parsed_quantities).toEqual([]);
+  });
+
+  // Empty-array semantics for recent_changes — explicit `[]` not undefined,
+  // including when caller omits priorFacts entirely.
+  it('recent_changes is [] (not undefined) when no prior facts are supplied', () => {
+    const packNoFacts = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    expect(packNoFacts.recent_changes).toBeDefined();
+    expect(Array.isArray(packNoFacts.recent_changes)).toBe(true);
+    expect(packNoFacts.recent_changes).toEqual([]);
+
+    const packEmptyFacts = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [],
+      priorFacts: [],
+    });
+    expect(packEmptyFacts.recent_changes).toEqual([]);
+  });
+});
+
+describe('ContextPackSchema (canonical contract)', () => {
+  it('accepts a freshly-assembled minimal pack', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    const result = ContextPackSchema.safeParse(pack);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a fully-populated pack with analysis, graph, and prior turns', () => {
+    const graph: GraphWithOptions = {
+      nodes: [
+        { id: 'g-1', kind: 'goal', label: 'Maximise NPV' },
+        { id: 'f-1', kind: 'factor', label: 'Cost' },
+        { id: 'o-1', kind: 'option', label: 'Launch Now' },
+      ] as unknown as GraphWithOptions['nodes'],
+      edges: [{ from: 'f-1', to: 'g-1' }] as unknown as GraphWithOptions['edges'],
+      options: [{ id: 'o-1' }],
+      goal_constraints: [{ id: 'c-1' }],
+    };
+    const pack = assembleContextPack({
+      payload: BASE_PAYLOAD,
+      priorTurns: [makeSessionTurn({ turn_class: 'handler', handler_id: 'run_analysis' })],
+      analysis: makeAnalysis(),
+      graph,
+      systemEvent: { kind: 'analysis_completed' },
+    });
+    const result = ContextPackSchema.safeParse(pack);
+    if (!result.success) {
+      // Surfacing zod errors makes a regression diagnosable in CI.
+      throw new Error(`schema rejected fully-populated pack: ${JSON.stringify(result.error.issues)}`);
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a pack with missing version', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    // Strip `version` to simulate contract drift.
+    const { version: _omit, ...rest } = pack;
+    void _omit;
+    const result = ContextPackSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((i) => i.path.join('.'));
+      expect(paths).toContain('version');
+    }
+  });
+
+  it('rejects a pack with the wrong version literal (anything other than "2.0")', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    const drifted = { ...pack, version: '2.1' };
+    const result = ContextPackSchema.safeParse(drifted);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a pack with missing scenario_id', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    const { scenario_id: _omit, ...rest } = pack;
+    void _omit;
+    const result = ContextPackSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((i) => i.path.join('.'));
+      expect(paths).toContain('scenario_id');
+    }
+  });
+
+  it('rejects a pack with empty-string scenario_id', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    const drifted = { ...pack, scenario_id: '' };
+    const result = ContextPackSchema.safeParse(drifted);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a pack where parsed_quantities has been silently dropped to undefined', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    const { parsed_quantities: _omit, ...rest } = pack;
+    void _omit;
+    const result = ContextPackSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((i) => i.path.join('.'));
+      expect(paths).toContain('parsed_quantities');
+    }
+  });
+
+  it('accepts a pack where parsed_quantities is the empty array', () => {
+    const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
+    expect(pack.parsed_quantities).toEqual([]);
+    const result = ContextPackSchema.safeParse(pack);
+    expect(result.success).toBe(true);
   });
 });
 
