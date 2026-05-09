@@ -192,6 +192,18 @@ describe("parseEditGraphResponse", () => {
   });
 
   // Test 2: Legacy array response — detected and logged
+  //
+  // Phase 2A contract change (deliberate, called out in Phase 2A report):
+  // the bare-array branch of parseEditGraphResponse previously set
+  // coaching=null. As of Phase 2A it populates safe defaults
+  // ({ summary: "Proposed graph edit.", rerun_recommended: false }) so
+  // that the success-path text builder produces a non-null assistantText.
+  // The previous `expect(result.coaching).toBeNull()` assertion was
+  // updated to assert the safe-default shape. See
+  // Docs/edit_graph_v9_deferred_items.md (DL-5, DL-5b) for the wider
+  // workstream context and
+  // tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts
+  // (A5) for the canonical Phase 2A contract.
   it("detects and parses legacy array response", () => {
     const legacyOps = [
       { op: "add_node", path: "nodes/new", value: { id: "new", kind: "factor", label: "X" } },
@@ -201,7 +213,10 @@ describe("parseEditGraphResponse", () => {
     expect(result.operations).toHaveLength(1);
     expect(result.removed_edges).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
-    expect(result.coaching).toBeNull();
+    // Phase 2A: safe defaults instead of null.
+    expect(result.coaching).not.toBeNull();
+    expect(result.coaching!.summary).toBe("Proposed graph edit.");
+    expect(result.coaching!.rerun_recommended).toBe(false);
   });
 
   // Test 3: Malformed JSON — graceful error
