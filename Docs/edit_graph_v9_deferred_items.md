@@ -782,7 +782,7 @@ diffs.
    any staging that isn't `git add <named-file>` — never use
    `git add .` or `git add -A` after running an install in a
    worktree.
-2. Accidental path noise should be cleared before committing via
+2. Accidental path noise can be cleared before committing via
    `git restore -- node_modules/`. The actual installed package
    contents on disk are not affected (pnpm's content-addressed
    store keeps the real files); only path-baked text reverts to
@@ -791,6 +791,40 @@ diffs.
    `git diff --cached --name-only` before committing. PR A's
    final pre-commit state had **0** unstaged tracked changes
    after restore.
+
+**SHARP EDGE — observed during the PR A post-merge assessment
+(2026-05-09):** the `git restore -- node_modules/` step in
+mitigation #2 reverts the *tracked* `node_modules` files to
+HEAD's content. Those tracked files include `.bin/` shims and
+`.pnpm/` metadata baked at install time on whichever working tree
+last committed them (typically the main repo root). After the
+restore, the tracked files mismatch what's actually on disk under
+`node_modules/.pnpm/<pkg>/node_modules/<pkg>` (which pnpm
+preserved). Subsequent `pnpm install` is a no-op because the
+top-level `package.json` and `pnpm-lock.yaml` haven't changed —
+so pnpm doesn't fix the inconsistency. The result: TypeScript
+typechecks fail with `Module '"undici"' has no exported member …`
+errors and several `vitest` runs error out at module-load time,
+because the type-stubs pnpm installed don't match the runtime
+behaviour the .bin shims point at.
+
+**Recovery procedure when this happens:**
+
+```bash
+rm -rf node_modules        # nuke the inconsistent tree
+pnpm install               # fresh install reconstructs from
+                           # pnpm-lock.yaml + the shared store
+```
+
+This is reproducible. Origin/staging is fine — the pre-push hook's
+typecheck step ran on a clean install and passed all 15 checks.
+The breakage is local-workspace-only.
+
+**Strict-form mitigation (recommended):** if you need a clean
+unstaged tree for a commit, prefer the rm+reinstall sequence to
+`git restore -- node_modules/`. The restore approach saves time
+when the install state is already consistent with HEAD; once it
+diverges, restore makes things worse.
 
 **Owner:** _unassigned_ (devex / repo maintainer). Related to
 DL-1 (broken worktree pnpm/vitest resolution), but distinct: DL-1
