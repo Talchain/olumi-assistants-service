@@ -285,13 +285,13 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
         scenarioBriefText: null,
         persistedGraph: null,
       } as never,
-      payload: {
-        kind: 'message',
+      payload: makeMessagePayload({
         scenario_id: SCN_UUID,
         turn_id: TURN_UUID,
         stage: 'analyse',
+        turn_class: 'decide',
         message: 'run the analysis',
-      } as never,
+      }) as never,
       requestId: 'req-rg',
       signal: new AbortController().signal,
       orientationText: '',

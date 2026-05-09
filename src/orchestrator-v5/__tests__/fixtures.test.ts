@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   MessageTurnPayloadSchema,
+  OrchestratorTurnPayloadSchema,
   SystemEventTurnPayloadSchema,
 } from '@talchain/schemas/boundary';
 
@@ -28,5 +29,13 @@ describe('turn-payload fixture factories', () => {
   it('makeSystemEventPayload() defaults satisfy SystemEventTurnPayloadSchema at runtime', () => {
     const result = SystemEventTurnPayloadSchema.safeParse(makeSystemEventPayload());
     expect(result.success).toBe(true);
+  });
+
+  // Belt-and-braces: also parse through the discriminated union so any
+  // union-level refinement (e.g. cross-branch `superRefine` rules) is
+  // covered by the self-test.
+  it('both factory defaults satisfy the OrchestratorTurnPayloadSchema union', () => {
+    expect(OrchestratorTurnPayloadSchema.safeParse(makeMessagePayload()).success).toBe(true);
+    expect(OrchestratorTurnPayloadSchema.safeParse(makeSystemEventPayload()).success).toBe(true);
   });
 });
