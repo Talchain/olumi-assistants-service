@@ -41,57 +41,73 @@
  * edit_graph v9 — Phase 1 failing tests + Phase 2A safe-defaults landed.
  * Bare-array safe-envelope wrapping and malformed-operation Zod behaviour.
  *
- * Scope (per Paul's Phase 1 brief):
- *  - Production-pattern gold case: top-level operations array with otherwise
- *    well-formed operations.
+ * Scope:
+ *  - Production-pattern gold case: top-level operations array with
+ *    otherwise well-formed operations.
  *
- *    CURRENT TRUTH (verified by running this file): the synthetic gold case
- *    parses successfully, validates through Zod, and PLoT accepts the patch
- *    on the first attempt — so the MUTATION succeeds. However, the
- *    user-facing success contract FAILS today: because the bare-array branch
- *    of parseEditGraphResponse sets coaching=null, the success-path text
- *    builder at edit-graph.ts:2341 has nothing to render and assistantText
- *    ends up null. D1 is RED on that gap; Phase 2's safe-coaching-defaults
- *    fix (covered by A5/A6) resolves both surfaces.
+ *    Phase 2A landed (commit `13dd9b4d`, deployed 2026-05-09). The
+ *    bare-array branch of parseEditGraphResponse now populates safe
+ *    coaching defaults (when length > 0) and emits the additive
+ *    `legacy_array_wrapped` telemetry alongside the preserved
+ *    `legacy_array_response`. The synthetic gold case mutates
+ *    successfully end-to-end with a non-null assistantText
+ *    containing "Proposed graph edit." (D1 + D2). For an EMPTY
+ *    bare-array (`[]`), Phase 2A polish (added in response to a
+ *    review finding) gates coaching=null so the existing empty-ops
+ *    fallback at edit-graph.ts:1637 fires the literal "No changes
+ *    were needed for this request." instead of the safe coaching
+ *    string (A8 / A8b / D3-no-op).
  *
- *    KNOWN GAP: exact production parse/validation failure payload is NOT
- *    AVAILABLE. The synthetic case reproduces the user-visible coaching gap
- *    but does NOT exercise whatever hard parse or structural failure was
- *    seen in production. Before Phase 2 is considered complete, a sanitised
- *    captured payload should replace GOLD_BARE_ARRAY_PAYLOAD and D1 must
- *    re-pass against it. Tracked as a separate work item.
+ *    KNOWN GAP — DL-5: exact production parse/validation failure
+ *    payload is NOT AVAILABLE. The synthetic case reproduces the
+ *    user-facing coaching gap that Phase 2A fixed, but does NOT
+ *    exercise whatever hard parse or structural failure was seen in
+ *    production. A7 below remains `it.todo` until a captured payload
+ *    arrives; that is the DL-5 incident-closure gate.
  *
  *  - Markdown-wrapped JSON: assertions encode CURRENT parser policy
- *    (extractJson at src/orchestrator/tools/edit-graph.ts:2576), not desired
- *    future policy. Sharp edges (greedy {[\s\S]*}, single-fence-only) are
- *    documented as findings; not patched here.
+ *    (extractJson at src/orchestrator/tools/edit-graph.ts:2576), not
+ *    desired future policy. Sharp edges (greedy {[\s\S]*},
+ *    single-fence-only) are documented as DL-3 findings.
  *
- *  - old_value: tests assert CURRENT validator behaviour (optional on every
- *    op in src/orchestrator/patch-validation.ts:74,81,88,95,102,109).
- *    Stricter enforcement is a separate proposal.
+ *  - old_value: tests assert CURRENT validator behaviour (optional on
+ *    every op in src/orchestrator/patch-validation.ts:74,81,88,95,
+ *    102,109). Stricter enforcement is a separate proposal.
  *
- * Phase 1 deliverable: failing tests written first; implementation in Phase 2
- * after explicit authorisation. The file should be staged for review/CI
- * visibility once Paul approves — it is the intended artefact.
+ * Status of `.fails` markers: ALL Phase 2A `.fails` markers were
+ * removed in the Phase 2A diff per the per-test removal checklist.
+ * No test in this file currently uses `.fails`. Two paired *-green
+ * tests (A4-green, A6-green) were also removed in that diff because
+ * their pre-Phase-2A invariants flipped and the assertions were
+ * subsumed by their post-Phase-2A siblings (A4 and A5/A6
+ * respectively).
  *
- * PHASE 2 ENTRY GATE — DO NOT BEGIN PHASE 2 CODE CHANGES UNTIL EITHER:
+ * FULL-PHASE-2 ENTRY GATE (still open) — Phase 2A landed but does NOT
+ * close the captured-payload incident. DO NOT begin full Phase 2 code
+ * changes (V5 receipt emission, recent_changes wiring, prior_facts
+ * contract test, etc.) until either:
  *   (a) a captured production payload is available (turn_id, sanitised
  *       Render/Datadog log, or raw LLM output with sensitive content
  *       removed) and A7 below is fleshed out and run; OR
- *   (b) Paul explicitly authorises a narrower Phase 2A framed only as
- *       safe-defaults and telemetry hardening (NOT incident closure).
+ *   (b) Paul explicitly authorises a narrower DL-7 V5-integration
+ *       tranche per Docs/edit_graph_v9_dl7_v5_integration_design.md.
  *
- * The current synthetic gold case proves the user-facing coaching/defaults
- * gap (A5/A6/D1/D2). It does NOT reproduce the original hard parse or
+ * The synthetic gold case proves the user-facing coaching/defaults gap
+ * that Phase 2A fixed. It does NOT reproduce the original hard parse or
  * structural-validation failure observed in production. The production
- * incident must remain "not fully reproduced" until a captured payload is
- * tested against this file and A7 passes (or fails safely).
+ * incident remains "not fully reproduced" — see DL-5 in
+ * Docs/edit_graph_v9_deferred_items.md.
  */
 
 /**
- * Phase 2 expected user-facing default for the bare-array safe wrapper.
- * Pinned here so any change to the default surfaces as a test diff rather
- * than a silent copy edit.
+ * Phase 2A safe-default user-facing coaching summary for non-empty
+ * bare-array responses. Pinned here so any change to the default
+ * surfaces as a test diff rather than a silent copy edit.
+ *
+ * Empty bare-arrays (`[]`) deliberately do NOT receive this default —
+ * they fall through to the existing empty-ops fallback ("No changes
+ * were needed for this request.") at edit-graph.ts:1637. See A8 / A8b
+ * / D3-no-op for the empty-case contract.
  */
 const SAFE_COACHING_SUMMARY = 'Proposed graph edit.';
 
@@ -383,35 +399,35 @@ describe('edit_graph v9 Phase 1 — bare-array safe-envelope (parser level)', ()
   });
 
   // -------------------------------------------------------------------------
-  // A5. RED — safe wrapper defaults for the parameter-update gold case.
-  //     Phase 2 must populate:
-  //       removed_edges: []                (pinned)
-  //       warnings:      []                (pinned)
+  // A5 (Phase 2A green): safe wrapper defaults for the parameter-update
+  //     gold case. The bare-array wrap path produces:
+  //       removed_edges: []                (pinned by A5-green)
+  //       warnings:      []                (pinned by A5-green)
   //       coaching.summary: SAFE_COACHING_SUMMARY
-  //       coaching.rerun_recommended: false (CONSERVATIVE INVARIANT pinned)
-  //     Currently the parser sets coaching: null (edit-graph.ts:2626).
+  //       coaching.rerun_recommended: false  (conservative invariant)
   //
   //     Conservative-invariant rationale: this gold case is a single
-  //     parameter update on one factor — a re-run is not warranted. Pinning
-  //     `false` for THIS case does NOT prohibit Phase 2 from deriving
-  //     `rerun_recommended` from operation impact for higher-impact bare-
-  //     array shapes (e.g. add_node + add_edge). The wider rerun-derivation
-  //     contract is a Phase 2 design choice — to be covered by additional
-  //     tests when that scope is in flight. Today A5 narrowly pins the
-  //     conservative invariant for the gold case; a high-impact
-  //     counterpart can be added before any derivation lands.
+  //     parameter update on one factor — a re-run is not warranted.
+  //     Pinning `false` for THIS case does NOT prohibit a future tranche
+  //     from deriving `rerun_recommended` from operation impact for
+  //     higher-impact bare-array shapes (e.g. add_node + add_edge).
+  //     A high-impact counterpart test should be added before any
+  //     derivation logic lands.
+  //
+  //     Empty bare-arrays do NOT receive these defaults (coaching stays
+  //     null) — see A8 / A8b for the empty-case contract.
   // -------------------------------------------------------------------------
-  // A5-green: removed_edges and warnings are already [] today on the
-  //           bare-array wrap path. Pinned as a normal green test so an
-  //           accidental change to those defaults surfaces immediately
-  //           rather than hiding under .fails.
+  // A5-green: removed_edges and warnings are [] on the bare-array wrap
+  //           path. Pinned as a normal green test so an accidental
+  //           change to those defaults surfaces immediately.
   it('A5-green bare-array wrap defaults removed_edges and warnings to []', () => {
     const result = parseEditGraphResponse(JSON.stringify(GOLD_BARE_ARRAY_PAYLOAD));
     expect(result.removed_edges).toEqual([]);
     expect(result.warnings).toEqual([]);
   });
 
-  // A5: coaching is the part Phase 2 must change. Today coaching = null.
+  // A5: coaching shape pinned by Phase 2A. Empty bare-arrays excluded
+  //     by parser gate — see A8.
   it('A5 bare-array wrap populates coaching with safe defaults', () => {
     const result = parseEditGraphResponse(JSON.stringify(GOLD_BARE_ARRAY_PAYLOAD));
     expect(result.coaching).not.toBeNull();
@@ -420,15 +436,6 @@ describe('edit_graph v9 Phase 1 — bare-array safe-envelope (parser level)', ()
     expect(result.coaching!.rerun_recommended).toBe(false);
   });
 
-  // -------------------------------------------------------------------------
-  // A6. User-facing-text guard. Phase 2 must produce non-empty user-facing
-  //     coaching text on the bare-array wrap path AND that text must NOT leak
-  //     technical jargon ("legacy", "repair", "normalise", "envelope",
-  //     "wrapped") or model-routing details. Telemetry is operator-only.
-  //
-  //     Note: the precondition `coaching.summary is non-empty` is what makes
-  //     this test fail today — without it, the jargon check would pass
-  //     vacuously against an empty string. (Fix per review feedback.)
   // -------------------------------------------------------------------------
   // A6 (Phase 2A green): coaching is non-null with non-empty user-facing
   //     summary AND that summary contains no technical jargon ("legacy",
@@ -439,11 +446,13 @@ describe('edit_graph v9 Phase 1 — bare-array safe-envelope (parser level)', ()
   //     with an `A6-green` invariant pinning the pre-Phase-2A contract
   //     ("coaching === null"). Phase 2A made both flip; the pre-Phase-2A
   //     invariant is now subsumed by A5 (which asserts the populated
-  //     coaching shape directly), so A6-green has been removed.
+  //     coaching shape directly), so A6-green was removed.
+  // -------------------------------------------------------------------------
   it('A6 returns non-null coaching with no technical jargon', () => {
     const result = parseEditGraphResponse(JSON.stringify(GOLD_BARE_ARRAY_PAYLOAD));
     // Precondition: coaching must be populated for the jargon check to be
-    // meaningful. This precondition is what currently makes A6 RED.
+    // meaningful. Phase 2A populates it for non-empty bare-arrays
+    // (compare A8: empty bare-arrays keep coaching=null).
     expect(result.coaching).not.toBeNull();
     expect(result.coaching!.summary).toBeTruthy();
 
@@ -459,6 +468,48 @@ describe('edit_graph v9 Phase 1 — bare-array safe-envelope (parser level)', ()
     expect(userFacing).not.toContain('wrapped');
     expect(userFacing).not.toContain('gpt-');
     expect(userFacing).not.toContain('claude');
+  });
+
+  // -------------------------------------------------------------------------
+  // A8. Phase 2A polish — empty bare-array MUST NOT receive the safe
+  //     coaching default. Rationale: the empty-ops branch in
+  //     handleEditGraph at edit-graph.ts:1625 has its own correct
+  //     no-op fallback ("No changes were needed for this request.").
+  //     Populating coaching for parsed.length === 0 leaks
+  //     "Proposed graph edit." into a response that proposed nothing —
+  //     misleading to the user.
+  //
+  //     Asserts at three layers:
+  //       - parser: coaching === null on empty bare-array
+  //       - telemetry: both events still emit with operations_count: 0
+  //                    (an empty bare-array IS still a bare-array shape;
+  //                    operators want the signal regardless of length)
+  //       - end-to-end: assistantText falls back to "No changes were
+  //                     needed for this request." (handled in Group D
+  //                     via D3-no-op below — kept here close to the
+  //                     parser assertion so the reviewer can find both
+  //                     surfaces in one search).
+  // -------------------------------------------------------------------------
+  it('A8 empty bare-array gets coaching=null so the empty-ops fallback fires', () => {
+    parseEditGraphResponse(JSON.stringify([]));
+    // Parser-level assertion via separate call so we don't mix spy state.
+    const result = parseEditGraphResponse(JSON.stringify([]));
+    expect(result.operations).toHaveLength(0);
+    expect(result.removed_edges).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.coaching).toBeNull();
+  });
+
+  it('A8b empty bare-array still emits both telemetry events with operations_count: 0', () => {
+    parseEditGraphResponse(JSON.stringify([]));
+    const responseCall = infoSpy.mock.calls.find((c) => c[1] === 'edit_graph.legacy_array_response');
+    const wrappedCall = infoSpy.mock.calls.find((c) => c[1] === 'edit_graph.legacy_array_wrapped');
+    expect(responseCall).toBeDefined();
+    expect(wrappedCall).toBeDefined();
+    expect((responseCall![0] as Record<string, unknown>).format).toBe('legacy_array');
+    expect((responseCall![0] as Record<string, unknown>).operations_count).toBe(0);
+    expect((wrappedCall![0] as Record<string, unknown>).format).toBe('legacy_array');
+    expect((wrappedCall![0] as Record<string, unknown>).operations_count).toBe(0);
   });
 });
 
@@ -652,30 +703,29 @@ describe('edit_graph v9 Phase 1 — end-to-end gold case (bare-array LLM output)
   });
 
   // -------------------------------------------------------------------------
-  // D1. Production-pattern gold case: LLM returns a bare top-level array of
-  //     well-formed update_node ops, PLoT mocked as accepted.
+  // D1 (Phase 2A green): production-pattern gold case. LLM returns a bare
+  //     top-level array of well-formed update_node ops; PLoT mocked as
+  //     accepted.
   //
-  //     CURRENT TRUTH: mutation succeeds first-attempt (chatMock.calls === 1,
-  //     wasRejected === false, appliedGraph populated), BUT the user-facing
-  //     contract fails — assistantText is null because the bare-array branch
-  //     produces coaching=null and the success-path text builder
-  //     (edit-graph.ts:2341) has nothing to render. D1 is RED on that gap.
+  //     Phase 2A's safe coaching defaults make the success-path text
+  //     builder (edit-graph.ts:2341) render the populated coaching.summary,
+  //     so assistantText is non-null and contains SAFE_COACHING_SUMMARY.
   //
-  //     Phase 2 success contract asserted here:
+  //     Success contract asserted here:
   //       - exactly one LLM call (no repair)
   //       - wasRejected === false
   //       - appliedGraph populated
-  //       - assistantText contains SAFE_COACHING_SUMMARY (concrete, not just
-  //         "truthy" — protects against vague Phase 2 copy)
+  //       - assistantText contains SAFE_COACHING_SUMMARY (concrete, not
+  //         just "truthy" — protects against vague copy edits)
   //
-  //     CAVEAT: synthetic payload, not captured production. Passing D1 does
-  //     NOT prove the real production parse/validation failure is fixed.
+  //     CAVEAT: synthetic payload, not captured production. Passing D1
+  //     does NOT prove the original production parse/validation failure
+  //     is fixed. See DL-5 / A7.
   // -------------------------------------------------------------------------
-  // D1-green: handler mechanics are already correct today. These invariants
-  //           protect against unrelated regressions in the bare-array
-  //           success path (parser → Zod → PLoT) that .fails would mask.
-  //           Per reviewer guidance: the only RED part of the contract is
-  //           the assistantText fallback copy.
+  // D1-green: handler mechanics. These invariants protect against
+  //           unrelated regressions in the bare-array success path
+  //           (parser → Zod → PLoT). Pinned as a normal green test so
+  //           regressions surface immediately.
   it('D1-green bare-array gold case: handler succeeds first-attempt with success-shape result', async () => {
     const adapter = makeAdapter(JSON.stringify(GOLD_BARE_ARRAY_PAYLOAD));
 
@@ -716,14 +766,14 @@ describe('edit_graph v9 Phase 1 — end-to-end gold case (bare-array LLM output)
   });
 
   // -------------------------------------------------------------------------
-  // D2. RED — operator-visibility check (per review Imp.3). The completion
-  //     log line at edit-graph.ts:2290 emits `has_coaching: !!llmResult.coaching`.
-  //     Today the bare-array path makes this `false` (coaching=null), which
-  //     hides the success-path quality gap from anyone watching telemetry.
-  //     After Phase 2's safe-defaults fix this MUST become `true`.
-  //
-  //     This test directly validates the operator-visibility surface that
-  //     A5/A6 fix at the parser layer.
+  // D2 (Phase 2A green) — operator-visibility check. The completion log
+  //     line at edit-graph.ts:2290 emits `has_coaching: !!llmResult.coaching`.
+  //     Pre-Phase-2A the bare-array path made this `false` (coaching=null),
+  //     hiding the success-path quality gap from anyone watching telemetry.
+  //     Phase 2A's safe-defaults fix makes coaching non-null for non-empty
+  //     bare-arrays so `has_coaching` is `true` here. The empty-bare-array
+  //     no-op path (D3-no-op) keeps `has_coaching: false` because coaching
+  //     is intentionally null on that branch.
   // -------------------------------------------------------------------------
   // D2-green: the completion log line is emitted with the has_coaching
   //           field today. Pinning this as a normal green test means an
@@ -750,7 +800,7 @@ describe('edit_graph v9 Phase 1 — end-to-end gold case (bare-array LLM output)
     expect(typeof fields.has_coaching).toBe('boolean');
   });
 
-  // D2: the value of has_coaching is what Phase 2 must flip from false to
+  // D2: the value of has_coaching is what Phase 2A flipped from false to
   //     true (because coaching becomes non-null per A5).
   it('D2 success-path completion telemetry has has_coaching=true on bare-array path', async () => {
     const adapter = makeAdapter(JSON.stringify(GOLD_BARE_ARRAY_PAYLOAD));
@@ -768,5 +818,40 @@ describe('edit_graph v9 Phase 1 — end-to-end gold case (bare-array LLM output)
     expect(completionCall).toBeDefined();
     const completionFields = completionCall![0] as Record<string, unknown>;
     expect(completionFields.has_coaching).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // D3-no-op. Phase 2A polish — empty bare-array (`[]`) must produce the
+  //     existing no-op fallback "No changes were needed for this request."
+  //     and NOT the safe coaching default. This is the end-to-end pair
+  //     to A8 / A8b.
+  //
+  //     The fix lives in parseEditGraphResponse: coaching is gated on
+  //     `parsed.length > 0`. With coaching=null, the empty-ops branch
+  //     at edit-graph.ts:1637 falls through to its existing literal
+  //     fallback string.
+  // -------------------------------------------------------------------------
+  it('D3-no-op empty bare-array yields the no-op fallback, not "Proposed graph edit."', async () => {
+    const adapter = makeAdapter(JSON.stringify([]));
+
+    const result = await handleEditGraph(
+      makeContext(),
+      'Maybe change something',
+      adapter,
+      'req-noop-1',
+      'turn-1',
+      { plotClient: makePlotClientSuccess(), maxRetries: 1 },
+    );
+
+    expect(result.assistantText).toBe('No changes were needed for this request.');
+    expect(result.assistantText).not.toContain('Proposed graph edit.');
+    expect(result.appliedGraph).toBeNull();
+    expect(result.wasRejected).toBe(false);
+
+    // Completion telemetry should NOT report has_coaching=true on the
+    // no-op path (coaching is null per the gated parser).
+    const completionCall = infoSpy.mock.calls.find((c) => c[1] === 'edit_graph returned empty operations (no-op)');
+    expect(completionCall).toBeDefined();
+    expect((completionCall![0] as Record<string, unknown>).has_coaching).toBe(false);
   });
 });

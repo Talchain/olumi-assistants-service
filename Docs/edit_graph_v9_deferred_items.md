@@ -54,13 +54,17 @@ not until the following are explicitly audited and confirmed clean:
 **Trigger to close:** all four checks above are signed off by the ops owner,
 AND a follow-up PR removes the old emission and updates A4b accordingly.
 
-**Earliest review date:** `<Phase-2A-staging-deploy-date> + 14 days`.
+**Phase 2A staging deploy date:** **2026-05-09** (visually confirmed
+by Paul on the same date; merge commit `13dd9b4d` on `origin/staging`).
 
-**Anchor (explicit):** the 14-day clock starts from the **Phase 2A
-staging deploy date** — i.e. the date the change in
+**Earliest telemetry sunset review date:** **2026-05-23**
+(2026-05-09 + 14 days).
+
+**Anchor (explicit):** the 14-day clock started from the **Phase 2A
+staging deploy date** — i.e. when the change in
 [src/orchestrator/tools/edit-graph.ts](../src/orchestrator/tools/edit-graph.ts)
 that adds the dual emission (`legacy_array_response` +
-`legacy_array_wrapped`) reaches the staging environment. **NOT** from:
+`legacy_array_wrapped`) reached the staging environment. **NOT** from:
 
 - the implementation date (when the parser change was authored locally),
 - the merge date (when the PR landed on `main` or another branch),
@@ -71,10 +75,6 @@ event when staging is serving the dual emission. Before that, ops
 operators have no opportunity to migrate their queries even if they
 wanted to. The 14-day window is a migration-and-verification budget for
 the people downstream, not a code-freeze countdown.
-
-Stored as a formula, not a fixed date, until the actual Phase 2A staging
-deploy exists. When Phase 2A reaches staging, replace the formula with
-the resolved date here so the sunset window doesn't drift silently.
 
 ---
 
@@ -299,6 +299,36 @@ parse/structural failure observed in production.
     `not.toBeNull()` and `toContain("Proposed graph edit.")`. Test
     title also updated from "returns null assistantText" to "returns
     safe-default assistantText" to reflect the new contract.
+
+### Phase 2A polish (post-deploy review fix)
+
+After Phase 2A deployed (commit `13dd9b4d` on 2026-05-09), the
+post-deploy review surfaced a P1 semantic issue:
+
+- **Symptom:** the safe coaching default applied to ALL bare-arrays
+  including `[]`. The empty-ops branch in `handleEditGraph` then
+  rendered `assistantText = "Proposed graph edit."` for empty
+  responses, overriding the existing literal fallback "No changes
+  were needed for this request." Misleading: the response proposed
+  nothing.
+- **Fix:** gated the safe coaching default on `parsed.length > 0` in
+  `parseEditGraphResponse`. Empty bare-arrays now keep `coaching=null`
+  so the existing empty-ops fallback at
+  [edit-graph.ts:1637](../src/orchestrator/tools/edit-graph.ts:1637)
+  fires. Telemetry still emits both events (`legacy_array_response`
+  + `legacy_array_wrapped`) for empty bare-arrays — the array shape
+  is the operator-relevant signal regardless of length.
+- **Tests added:** A8 (parser-level coaching=null on empty),
+  A8b (telemetry still dual-emits with `operations_count: 0`),
+  D3-no-op (end-to-end "No changes were needed for this request."
+  assertion).
+- Same review pass also flagged stale "RED" / "Phase 2 must" comments
+  in the test-file header that were authored pre-Phase-2A and not
+  refreshed when `.fails` markers were removed. All such wording
+  updated to reflect the post-Phase-2A state.
+
+This polish is in-scope for Phase 2A as a small follow-up; it does
+NOT broaden the workstream and does NOT touch any DL-7 surface.
 
 ### What Phase 2A did NOT land
 
