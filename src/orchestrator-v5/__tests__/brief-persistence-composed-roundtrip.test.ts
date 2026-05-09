@@ -37,6 +37,7 @@ import { buildTurnContext } from '../build-turn-context.js';
 import type { SessionStore, SessionTurnWrite } from '../session/store.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { composeDirectAnswerResponse } from '../compose.js';
+import { makeMessagePayload } from './fixtures.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -119,15 +120,13 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
 
     // Step 2: a follow-up turn calls buildTurnContext; it must surface
     // the persisted brief from the same store.
-    const followUpPayload = {
-      kind: 'message' as const,
+    const followUpPayload = makeMessagePayload({
       scenario_id: SCENARIO_ID,
       turn_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-      stage: 'analyse' as const,
+      stage: 'analyse',
       message: 'run the analysis',
-      turn_class: 'decide' as const,
-      source: 'composer' as const,
-    };
+      turn_class: 'decide',
+    });
     const ctx = await buildTurnContext(followUpPayload, REQUEST_ID, {
       sessionStore: store,
     });
@@ -192,15 +191,13 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
 
     // The retry's brief is the one that lives in canonical state —
     // the graphless attempt did not lock it out.
-    const followUpPayload = {
-      kind: 'message' as const,
+    const followUpPayload = makeMessagePayload({
       scenario_id: SCENARIO_ID,
       turn_id: 'follow-up',
-      stage: 'analyse' as const,
+      stage: 'analyse',
       message: 'run analysis',
-      turn_class: 'decide' as const,
-      source: 'composer' as const,
-    };
+      turn_class: 'decide',
+    });
     const ctx = await buildTurnContext(followUpPayload, REQUEST_ID, {
       sessionStore: store,
     });
@@ -255,15 +252,13 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
     // The composed read returns the ORIGINAL brief — the canonical-state
     // contract surfaces first-write-wins all the way through to
     // EnrichedTurnContext.
-    const followUpPayload = {
-      kind: 'message' as const,
+    const followUpPayload = makeMessagePayload({
       scenario_id: SCENARIO_ID,
       turn_id: 'follow-up',
-      stage: 'analyse' as const,
+      stage: 'analyse',
       message: 'run analysis',
-      turn_class: 'decide' as const,
-      source: 'composer' as const,
-    };
+      turn_class: 'decide',
+    });
     const ctx = await buildTurnContext(followUpPayload, REQUEST_ID, {
       sessionStore: store,
     });
@@ -431,13 +426,13 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
         ),
     };
 
-    const followUpPayload = {
+    const followUpPayload = makeMessagePayload({
       turn_id: 'follow-up-turn',
       scenario_id: SCENARIO_ID,
       message: 'run the analysis',
-      turn_class: 'decide' as const,
-      stage: 'analyse' as const,
-    };
+      turn_class: 'decide',
+      stage: 'analyse',
+    });
 
     const result = await runTurnExecutor(followUpPayload, 'req-defect-b-composed', {
       routingAdapter,
@@ -513,13 +508,13 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
     };
 
     await runTurnExecutor(
-      {
+      makeMessagePayload({
         turn_id: 'follow-up-no-brief',
         scenario_id: SCENARIO_ID,
         message: 'run analysis',
-        turn_class: 'decide' as const,
-        stage: 'analyse' as const,
-      },
+        turn_class: 'decide',
+        stage: 'analyse',
+      }),
       'req-no-brief-composed',
       {
         routingAdapter,

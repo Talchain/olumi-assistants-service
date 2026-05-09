@@ -22,9 +22,8 @@ import type {
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
-
 import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
+import { makeMessagePayload } from './fixtures.js';
 import { normaliseFactorValue } from '../tools/handlers/d1-shared/normalise-factor-value.js';
 import { AdjustEdgeStrengthStdSchema } from '../tools/handlers/adjust-edge-strength.js';
 import { buildD1Fixture } from '../tools/handlers/d1-shared/__tests__/fixtures.js';
@@ -349,13 +348,11 @@ const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   scenario_id: TEST_SCENARIO_ID,
   message: 'update the customer churn factor',
-  turn_class: 'frame',
-  stage: 'frame',
-};
+});
 
 const SET_FACTOR_VALUE_TOOL_CALL = {
   intent_class: 'execute',

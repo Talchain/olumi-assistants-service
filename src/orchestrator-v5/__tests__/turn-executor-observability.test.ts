@@ -19,7 +19,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from './fixtures.js';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import type {
@@ -54,13 +55,13 @@ const {
 } = await import('../routing/route-with-tool-use.js');
 
 const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
   scenario_id: SCENARIO_ID,
   message: 'run the analysis',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 function mkToolUseResult(input: unknown): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [

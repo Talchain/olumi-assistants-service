@@ -24,6 +24,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
+
 const {
   loadScenarioSnapshotForRunAnalysisMock,
   commitDirectAnswerMock,
@@ -109,16 +111,15 @@ const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 function payload() {
-  return {
-    kind: 'message' as const,
+  return makeMessagePayload({
     scenario_id: SCENARIO_ID,
     turn_id: TURN_ID,
-    stage: 'analyse' as const,
+    stage: 'analyse',
     message: 'Run the analysis.',
-    turn_class: 'handler' as const,
-    source: 'chip_click' as const,
-    chip: { id: 'chip_action_run_analysis', action_type: 'run_analysis' as const },
-  };
+    turn_class: 'decide',
+    source: 'chip_click',
+    chip: { action_type: 'run_analysis' },
+  });
 }
 
 // Real schema-valid GraphV3T fixture (mirrors `analysis-ready-helper.test.ts`'s

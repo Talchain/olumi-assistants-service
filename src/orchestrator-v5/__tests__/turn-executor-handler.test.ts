@@ -22,7 +22,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { z } from 'zod';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+
+import { makeMessagePayload } from './fixtures.js';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import type {
@@ -64,13 +65,13 @@ const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = {
+const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   scenario_id: TEST_SCENARIO_ID,
   message: 'run the analysis',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 const RUN_ANALYSIS_TOOL_CALL_INPUT = {
   intent_class: 'execute',

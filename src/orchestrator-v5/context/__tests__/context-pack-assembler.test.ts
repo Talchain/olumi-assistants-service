@@ -8,8 +8,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import type { SessionTurn } from '@talchain/schemas/orchestrator';
+
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 import { log } from '../../../utils/telemetry.js';
 
@@ -22,13 +23,7 @@ import {
 } from '../context-pack-assembler.js';
 import { ContextPackSchema } from '../context-pack-schema.js';
 
-const BASE_PAYLOAD: OrchestratorTurnPayload = Object.freeze({
-  turn_id: 't-001',
-  scenario_id: 'scen-abc',
-  message: 'What should I do?',
-  turn_class: 'frame',
-  stage: 'frame',
-});
+const BASE_PAYLOAD = Object.freeze(makeMessagePayload());
 
 function makeSessionTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
   return {

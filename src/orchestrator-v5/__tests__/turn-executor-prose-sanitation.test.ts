@@ -15,22 +15,22 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { makeMessagePayload } from './fixtures.js';
 
 const SCENARIO_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-const PAYLOAD: OrchestratorTurnPayload = {
+const PAYLOAD = makeMessagePayload({
   turn_id: TURN_ID,
   scenario_id: SCENARIO_ID,
   message: 'How does Option A look?',
   turn_class: 'decide',
   stage: 'analyse',
-};
+});
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({

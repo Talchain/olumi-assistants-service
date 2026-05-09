@@ -28,6 +28,7 @@ import {
   assertAnthropicMessageProtocol,
 } from '../route-with-tool-use.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../tool-schema.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 // -----------------------------------------------------------------------
 // Fixture builders
@@ -35,13 +36,11 @@ import { OLUMI_ACTION_TOOL_NAME } from '../tool-schema.js';
 
 function minimalContextPack(): ContextPack {
   return assembleContextPack({
-    payload: {
+    payload: makeMessagePayload({
       turn_id: 't-01',
       scenario_id: 'scen-abc',
       message: 'What now?',
-      turn_class: 'frame',
-      stage: 'frame',
-    },
+    }),
     priorTurns: [],
   });
 }
@@ -183,15 +182,13 @@ describe('routeWithToolUse — happy paths', () => {
     };
 
     const pack = assembleContextPack({
-      payload: {
-        kind: 'message',
-        source: 'composer',
+      payload: makeMessagePayload({
         turn_id: 't-rc',
         scenario_id: 'scen-rc',
         message: 'placeholder',
         turn_class: 'frame',
         stage: 'analyse',
-      },
+      }),
       priorTurns: [],
       priorFacts: [
         {

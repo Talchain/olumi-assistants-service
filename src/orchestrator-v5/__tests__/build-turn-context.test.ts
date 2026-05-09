@@ -5,14 +5,13 @@ import { setTestSink } from '../../utils/telemetry.js';
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { SessionReadError } from '../session/store.js';
+import { makeMessagePayload } from './fixtures.js';
 
-const BASE = {
+const BASE = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   message: 'hello',
-  turn_class: 'frame' as const,
-  stage: 'frame' as const,
-};
+});
 
 // Slice B: buildTurnContext is async + reads from SessionStore. These legacy
 // tests focus on the shape of the base TurnContext — inject a noop store so
