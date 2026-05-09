@@ -587,6 +587,69 @@ workstream owner).
 
 ---
 
+### PR B emitter-side safety test contract (paired with DL-7)
+
+PR A (`@talchain/schemas` 0.12.0, vendored at
+[vendor/talchain-schemas-0.12.0.tgz](../vendor/talchain-schemas-0.12.0.tgz))
+defines `EditGraphHandlerFactSchema` with an intentionally narrow
+contract: shape only, no content-form checks, no cross-field
+lifecycle invariants. Every test case in the schemas package's
+"PERMITS …" boundary tests is a behaviour PR B's emitter MUST guard
+against. PR B (CEE wiring) MUST add emitter-side tests asserting:
+
+#### Display-safe text invariants
+
+- [ ] **Long labels capped/truncated before fact emission.** Schema
+      permits any non-empty `affected_entities[].label` (no
+      `.max()`); emitter must truncate to a sensible cap before
+      constructing the fact. Suggested cap mirrors the
+      `formatFactorChange` / `formatConstraintAdded` truncation
+      patterns in
+      [src/orchestrator-v5/tools/handlers/d1-shared/format-confirmation.ts](../src/orchestrator-v5/tools/handlers/d1-shared/format-confirmation.ts).
+- [ ] **Raw-ID-looking labels replaced with display-safe labels or
+      a generic fallback before fact emission.** Schema permits any
+      non-empty string in `label`; emitter must run
+      `sanitiseUserFacingText` /
+      `resolveLabel`
+      ([src/orchestrator/shared/output-safety.ts:214](../src/orchestrator/shared/output-safety.ts:214))
+      over each label, replacing entity IDs (e.g. `fac_delivery_cost`)
+      with their display label or the prefix-aware generic fallback.
+- [ ] **`safe_summary` sanitised before fact emission, including the
+      Phase 2A jargon guard.** The 80-char schema bound only
+      protects token budget; the emitter must additionally run
+      `sanitiseUserFacingText` over `safe_summary` AND the Phase 2A
+      jargon list (`legacy`, `repair`, `normalise` / `normalize`,
+      `envelope`, `wrapped`, `gpt-`, `claude` — see test A6 in
+      [tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts](../tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts))
+      before fact construction. Emitter rejects (or down-converts to
+      the safe Phase 2A default `"Proposed graph edit."`) any string
+      that fails the guard.
+
+#### Cross-field lifecycle invariants
+
+- [ ] **`status='applied'` implies `operations_count >= 1`.** Schema
+      explicitly permits `applied + operations_count: 0` (per War
+      Room refinement #1 — keep cross-field semantics out of Zod);
+      emitter must guard at construction time.
+- [ ] **`noop=false` for successful applied mutations.** Schema
+      permits `noop=true + status='applied'` (same War Room
+      decision); emitter must couple them.
+- [ ] **`noop=true` facts, if ever emitted, are not surfaced as
+      successful `recent_changes` without explicit handling.** The
+      `recent_changes` projector
+      ([src/orchestrator-v5/context/recent-changes.ts:131-150](../src/orchestrator-v5/context/recent-changes.ts:131))
+      already filters `noop === true` for the existing variants;
+      PR B's `summariseEditGraph` branch must do the same. Emitter
+      may also choose to never emit `noop=true` facts at all, in
+      which case the projector branch is straightforwardly
+      `noop=false` only.
+
+These six checks constitute the emitter-side closure of the PR A
+schema's deliberate permissive boundaries. PR B is incomplete
+without all six tests passing.
+
+---
+
 ## Cross-workstream alignment note
 
 - **ContextPack implementation remains owned by the V5 Context
@@ -677,6 +740,87 @@ prerequisite.
 [Docs/TEST-DEBT.md](TEST-DEBT.md) and
 [Docs/known-test-failures.md](known-test-failures.md). Neither
 mentions this OpenAPI generated-types issue, hence this DL entry.
+
+---
+
+## DL-9 — pnpm install absolute-path diffs across worktrees
+
+**Status:** open — environmental; observed during PR A vendor refresh.
+
+**Symptom:** running `pnpm install` from a git worktree produces
+diff noise in tracked `node_modules/` files. The diff content is
+absolute paths flipping between the main-repo root and the
+worktree root — e.g.:
+
+```
+- /Users/paulslee/Documents/GitHub/olumi-assistants-service/node_modules/.pnpm/...
++ /Users/paulslee/Documents/GitHub/olumi-assistants-service/.claude/worktrees/<name>/node_modules/.pnpm/...
+```
+
+Concretely observed: PR A's vendor-refresh `pnpm install` produced
+**911 unstaged tracked changes** in `node_modules/`, none of which
+were real dependency churn. All were path-baked text in pnpm shims
+(`node_modules/.bin/<tool>`), pnpm metadata
+(`node_modules/.modules.yaml`,
+`node_modules/.pnpm-workspace-state-v1.json`), and per-package
+metadata under `node_modules/.pnpm/`.
+
+**Root cause:** the repo intentionally tracks ~4,360 files under
+`node_modules/` (despite `.gitignore` line 1 saying `node_modules`
+— `.gitignore` doesn't apply to already-tracked files). Tracked
+files contain absolute paths baked at install time. A `pnpm install`
+from a different working directory rewrites those paths.
+
+**Risk:** a broad `git add .` after a worktree install would
+silently include hundreds of meaningless path-string changes
+alongside the intended commit, polluting history and bloating PR
+diffs.
+
+**Mitigation (operational, until fixed at the repo level):**
+
+1. Agents must inspect `git status` and `git diff --stat` before
+   any staging that isn't `git add <named-file>` — never use
+   `git add .` or `git add -A` after running an install in a
+   worktree.
+2. Accidental path noise should be cleared before committing via
+   `git restore -- node_modules/`. The actual installed package
+   contents on disk are not affected (pnpm's content-addressed
+   store keeps the real files); only path-baked text reverts to
+   match HEAD.
+3. Verify zero `node_modules/` entries in
+   `git diff --cached --name-only` before committing. PR A's
+   final pre-commit state had **0** unstaged tracked changes
+   after restore.
+
+**Owner:** _unassigned_ (devex / repo maintainer). Related to
+DL-1 (broken worktree pnpm/vitest resolution), but distinct: DL-1
+is about install failure; DL-9 is about install-induced diff
+noise.
+
+**Suggested fixes (any one closes this entry):**
+
+1. **Stop tracking `node_modules/`.** `git rm -r --cached
+   node_modules/` then commit; future installs no longer produce
+   tracked diffs (and the original `.gitignore` line takes effect
+   for new files). High-impact change; needs review of what (if
+   anything) currently relies on the tracked install (CI cache?
+   pre-push hook smoke step?).
+2. **Make pnpm path-bake relative.** pnpm has had an `embed-path`
+   / similar option in some versions; investigating the current
+   pnpm 10.18.0 behaviour might offer a config-only fix.
+3. **Document a worktree-aware install convention.** Each
+   worktree that needs a working `node_modules/` either points
+   `PNPM_HOME` at a worktree-specific store, or operators do all
+   installs from the main repo and use the worktree only for
+   reads/writes that don't trigger pnpm.
+
+**Trigger to close:** running `pnpm install` in a fresh worktree
+produces zero unstaged tracked changes by default.
+
+**Cross-reference:** during PR A this manifested as a reviewer
+flagging "911 unstaged tracked node_modules changes" — see commit
+of vendor refresh (`chore(deps): bump @talchain/schemas to 0.12.0`)
+for the reference cleanup pattern.
 
 ---
 
