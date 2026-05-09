@@ -48,6 +48,7 @@ import {
   runExtraction,
   type CqeExtractionSummary,
 } from './cqe/extract-quantities.js';
+import { isProduction, isTest } from '../../config/index.js';
 import { ContextPackSchema } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 
@@ -368,20 +369,25 @@ export function assembleContextPackWithSummary(
       ? { ...base, compound_segments: compound.segments }
       : base;
   // Non-production contract gate. Production assembly path stays cost-free
-  // — `safeParse` is only invoked when `NODE_ENV !== 'production'`, so live
-  // traffic pays the price of a single env-var branch and nothing more. See
+  // — `safeParse` is only invoked when `isProduction()` is false, so live
+  // traffic pays the price of a single config read and nothing more. See
   // `context-pack-schema.ts` header for the schema's role and constraints.
   //
   // Behaviour ladder:
   //   - test       → throw (CI catches drift loudly, no risk of silent ship)
   //   - everything else non-prod → log.warn (developer-visible, non-fatal)
-  //   - production → no parse, no log (dead code under `NODE_ENV=production`)
+  //   - production → no parse, no log (dead code under prod)
   //
   // Error format (developer-safe — structural-only):
   //   `[ContextPack validation] <field path>: <zod message>`
   // Capped at five issues; carries no field values, no graph/analysis
   // payload, no conversation/user text.
-  if (process.env.NODE_ENV !== 'production') {
+  //
+  // Env predicates come from `src/config/index.ts` (the centralised, Zod-
+  // validated config) rather than direct `process.env` reads — keeps
+  // dispatch consistent with the rest of the service and matches the
+  // `no-restricted-syntax` lint policy.
+  if (!isProduction()) {
     const parsed = ContextPackSchema.safeParse(contextPack);
     if (!parsed.success) {
       const issues = parsed.error.issues
@@ -390,7 +396,7 @@ export function assembleContextPackWithSummary(
           (i) =>
             `[ContextPack validation] ${i.path.join('.') || '<root>'}: ${i.message}`,
         );
-      if (process.env.NODE_ENV === 'test') {
+      if (isTest()) {
         throw new Error(issues.join('\n'));
       }
       log.warn(

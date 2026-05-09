@@ -9,6 +9,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+// Mock the env predicates the assembler reads. Other config exports remain
+// real via the actual passthrough — only the gate's two helpers are
+// programmable per-test. Defaults are reset in `beforeEach` below.
+const { isProductionMock, isTestMock } = vi.hoisted(() => ({
+  isProductionMock: vi.fn<() => boolean>(),
+  isTestMock: vi.fn<() => boolean>(),
+}));
+
+vi.mock('../../../config/index.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../../../config/index.js')>(
+      '../../../config/index.js',
+    );
+  return {
+    ...actual,
+    isProduction: isProductionMock,
+    isTest: isTestMock,
+  };
+});
+
 import type { SessionTurn } from '@talchain/schemas/orchestrator';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -433,18 +453,19 @@ describe('ContextPackSchema (canonical contract)', () => {
 // ---------------------------------------------------------------------------
 //
 // The assembler invokes `ContextPackSchema.safeParse` on its return value
-// when `NODE_ENV !== 'production'`. Behaviour ladder:
+// when `isProduction()` is false. Behaviour ladder:
 //   - test       → throw (CI catches drift loudly)
 //   - other      → log.warn (developer-visible, non-fatal)
 //   - production → no parse, no log (dead code)
 //
-// To force a failure, we spy on `ContextPackSchema.safeParse` and synthesise
-// a `success: false` result. This keeps tests independent of any specific
-// schema invariant, so they don't drift if the schema is later tightened
-// or relaxed.
+// We program the env predicates via the hoisted mocks at the top of this
+// file; defaults below match the "test" branch so the rest of the suite
+// inherits the gate-enabled, throw-on-failure mode it implicitly relied on
+// before the runtime gate was added. To force a failure, we spy on
+// `ContextPackSchema.safeParse` and synthesise a `success: false` result.
+// This keeps tests independent of any specific schema invariant, so they
+// don't drift if the schema is later tightened or relaxed.
 describe('non-production runtime gate', () => {
-  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
-
   function makeIssue(path: readonly (string | number)[], message: string): z.ZodIssue {
     return { code: 'custom', path: [...path], message } as z.ZodIssue;
   }
@@ -456,13 +477,16 @@ describe('non-production runtime gate', () => {
     };
   }
 
+  beforeEach(() => {
+    isProductionMock.mockReset().mockReturnValue(false);
+    isTestMock.mockReset().mockReturnValue(true);
+  });
+
   afterEach(() => {
-    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
     vi.restoreAllMocks();
   });
 
-  it('throws under NODE_ENV=test on schema failure with the documented prefix', () => {
-    process.env.NODE_ENV = 'test';
+  it('throws under test env on schema failure with the documented prefix', () => {
     vi.spyOn(ContextPackSchema, 'safeParse').mockReturnValue(
       failureWith([makeIssue(['version'], 'Required')]),
     );
@@ -473,7 +497,6 @@ describe('non-production runtime gate', () => {
   });
 
   it('caps the thrown error at five issues even when many fields fail', () => {
-    process.env.NODE_ENV = 'test';
     const issues = Array.from({ length: 12 }, (_, i) =>
       makeIssue([`field_${i}`], `bad_${i}`),
     );
@@ -494,7 +517,6 @@ describe('non-production runtime gate', () => {
   });
 
   it('renders root-level path as <root> in the error prefix', () => {
-    process.env.NODE_ENV = 'test';
     vi.spyOn(ContextPackSchema, 'safeParse').mockReturnValue(
       failureWith([makeIssue([], 'Expected object, received null')]),
     );
@@ -505,7 +527,7 @@ describe('non-production runtime gate', () => {
   });
 
   it('warns (not throws) under non-test, non-production environments on failure', () => {
-    process.env.NODE_ENV = 'development';
+    isTestMock.mockReturnValue(false);
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
     vi.spyOn(ContextPackSchema, 'safeParse').mockReturnValue(
       failureWith([makeIssue(['version'], 'Required')]),
@@ -524,8 +546,8 @@ describe('non-production runtime gate', () => {
     expect(msg).toBe('ContextPack failed schema validation');
   });
 
-  it('skips safeParse entirely under NODE_ENV=production', () => {
-    process.env.NODE_ENV = 'production';
+  it('skips safeParse entirely under production', () => {
+    isProductionMock.mockReturnValue(true);
     const parseSpy = vi.spyOn(ContextPackSchema, 'safeParse');
 
     const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [] });
@@ -535,7 +557,6 @@ describe('non-production runtime gate', () => {
   });
 
   it('does not throw or warn when the assembled pack is valid', () => {
-    process.env.NODE_ENV = 'test';
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
 
     expect(() =>
