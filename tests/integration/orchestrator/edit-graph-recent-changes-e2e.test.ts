@@ -30,7 +30,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   EditGraphHandlerFactSchema,
-  type EditGraphHandlerFact,
   type HandlerFact,
   type RunAnalysisHandlerFact,
 } from '@talchain/schemas/orchestrator';
@@ -55,7 +54,6 @@ import type { SessionTurn } from '@talchain/schemas/orchestrator';
 // ----------------------------------------------------------------------------
 
 const SCENARIO_ID = '99999999-9999-4999-8999-999999999999';
-const PRE_EDIT_HASH = 'aaaaaaaaaaaaaaaa';
 const COMPUTED_AT = '2026-05-09T10:00:00.000Z';
 
 function makePreEditGraph(): GraphV3T {
