@@ -768,10 +768,9 @@ without all six tests passing.
 
 ## DL-8 — Inherited OpenAPI generated-types typecheck drift
 
-**Status:** covered, pending merge (2026-05-10) — fix implemented on
-branch `claude/stupefied-volhard-15c245`. Will move to **closed** once
-the branch merges; replace this header with `**Status:** closed by
-<merge-SHA>` at that point.
+**Status:** closed by `39a57a8f` (merged to `staging` 2026-05-10 from
+branch `claude/stupefied-volhard-15c245`; source commits `911c0296`
+chore + `fb8d6a72` docs).
 
 **Resolution implemented:**
 - Added `pretypecheck` npm lifecycle hook in `package.json`:
