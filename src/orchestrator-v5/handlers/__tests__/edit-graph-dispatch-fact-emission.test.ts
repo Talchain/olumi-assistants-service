@@ -476,6 +476,55 @@ describe('dispatchEditGraph — DL-7 PR B fact emission', () => {
       expect(result.commitPerformed).toBe(false);
     });
 
+    it('B13 rich throws AND generic RETURNS NULL on applied mutation → NO commit (deepest fallback gate, null-return path)', async () => {
+      // Sibling to B12: B12 covers the throw-path for the generic
+      // builder. The generic builder can also return null (for example
+      // when its constructed fact fails schema validation deep
+      // inside `EditGraphHandlerFactSchema.safeParse`). The deepest
+      // fallback gate must fire for BOTH failure shapes — throw and
+      // null-return — otherwise the null-return path would slip
+      // through and commit with handler_facts: [].
+
+      const mockedRich = buildEditGraphHandlerFact as MockedFunction<typeof buildEditGraphHandlerFact>;
+      const mockedGeneric =
+        buildGenericEditGraphHandlerFact as MockedFunction<typeof buildGenericEditGraphHandlerFact>;
+      mockedRich.mockImplementationOnce(() => {
+        throw new Error('Simulated rich-builder failure');
+      });
+      // Generic returns null (schema-validation failure) — NOT a throw.
+      mockedGeneric.mockImplementationOnce(() => null);
+
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+        .mockResolvedValue(makeAppliedEditResult());
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const result = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-edit-fact-rich-throw-generic-null',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      // (1) Both builders were exercised.
+      expect(mockedRich).toHaveBeenCalledTimes(1);
+      expect(mockedGeneric).toHaveBeenCalledTimes(1);
+      // (2) Generic returned null without throwing — confirm the test
+      //     actually exercised the null-return path, not the throw
+      //     path again.
+      expect(mockedGeneric.mock.results[0]!.type).toBe('return');
+      expect(mockedGeneric.mock.results[0]!.value).toBeNull();
+
+      // (3) commitDirectAnswer was NOT called — same gate behaviour
+      //     as B12, regardless of whether the generic builder threw
+      //     or returned null.
+      expect(commitDirectAnswer).not.toHaveBeenCalled();
+
+      // (4) Dispatch surfaces the failure to the caller.
+      expect(result.commitPerformed).toBe(false);
+    });
+
     it('B9 turn_class stays direct_answer even when fact emission fails (defensive)', async () => {
       // If buildEditGraphHandlerFact throws (e.g. schema violation
       // discovered late), dispatch should NOT fall back to
