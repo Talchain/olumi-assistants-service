@@ -63,6 +63,16 @@ check_branch_guard() {
 # ---------------------------------------------------------------------------
 check_typecheck() {
   local output
+  # Ensure OpenAPI generated types exist before tsc — fresh worktrees lack
+  # src/generated/openapi.d.ts (gitignored), and ~40 source files import it.
+  # Without this, tsc reports a wall of TS2307 errors that mask real issues.
+  # Mirrors the CI flow (`pnpm openapi:generate` then typecheck).
+  if ! output=$(pnpm openapi:generate 2>&1); then
+    print_check "typecheck" "FAIL (openapi:generate failed)"
+    echo "$output" | tail -20
+    FAILURES=$((FAILURES + 1))
+    return 0
+  fi
   # Use build config (source only, excludes test files with pre-existing type errors)
   if output=$(tsc -p tsconfig.build.json --noEmit 2>&1); then
     print_check "typecheck" "OK"

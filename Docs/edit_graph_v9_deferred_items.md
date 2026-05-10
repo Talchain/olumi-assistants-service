@@ -20,14 +20,28 @@ worktree-local `node_modules/.pnpm/...` that doesn't exist). Main-repo
 
 **Owner:** _unassigned_ (devex / repo maintainer)
 
-**Trigger to close:** worktree `pnpm install` produces a working
-`node_modules/.bin/vitest`, OR a documented procedure exists for running
-tests from a worktree.
+**Trigger to close (sharpened 2026-05-10):** EITHER
+(a) `Docs/CLAUDE.md` documents the explicit worktree procedure for
+running `vitest` / `tsc` / `pnpm` scripts (e.g. "use the main repo's
+`node_modules/.bin/<tool>` on PATH" or "run `pnpm install` in the
+worktree first"), AND that procedure is verified to work end-to-end
+from a fresh worktree;
+OR
+(b) a fix lands so that `pnpm install` from a worktree produces a
+working `node_modules/.bin/vitest` (and other dev binaries) without
+manual PATH adjustments.
+
+The `validate-prepush.sh` PATH adjustment
+(`export PATH=...${REPO_ROOT}/node_modules/.bin:$PATH` where
+`REPO_ROOT` is the worktree root) does NOT close this — pnpm-managed
+scripts still resolve binaries via the project's own
+`node_modules/.bin`, which is missing in fresh worktrees.
 
 **Notes:** the worktree was created with the standard tooling; broken
 pnpm resolution there is plausibly a project-wide issue affecting any
 worktree-based workflow. Worth checking before more agents run in
-worktrees.
+worktrees. Related: DL-9 (worktree pnpm path-bake), DL-12 / DL-13
+(devex friction).
 
 ---
 
@@ -754,7 +768,49 @@ without all six tests passing.
 
 ## DL-8 — Inherited OpenAPI generated-types typecheck drift
 
-**Status:** open — environmental, not workstream-introduced.
+**Status:** covered, pending merge (2026-05-10) — fix implemented on
+branch `claude/stupefied-volhard-15c245`. Will move to **closed** once
+the branch merges; replace this header with `**Status:** closed by
+<merge-SHA>` at that point.
+
+**Resolution implemented:**
+- Added `pretypecheck` npm lifecycle hook in `package.json`:
+  `"pretypecheck": "pnpm openapi:generate"` — makes `pnpm typecheck`
+  self-sufficient on a fresh worktree.
+- Updated `scripts/validate-prepush.sh` `check_typecheck()` to run
+  `pnpm openapi:generate` before invoking `tsc -p tsconfig.build.json
+  --noEmit` directly (the hook calls `tsc` directly rather than via
+  `pnpm typecheck`, so the npm lifecycle hook alone is insufficient
+  for the pre-push path).
+
+**Verified:** with `src/generated/openapi.d.ts` deleted, both
+`pnpm typecheck` and the pre-push `check_typecheck()` flow regenerate
+the file and proceed to `tsc`. The wall of TS2307 "Cannot find module
+'../../generated/openapi.d.ts'" errors is gone.
+
+**Initial false alarm (resolved 2026-05-10):** when first verified, the
+OpenAPI fix appeared to unmask 4 semantic errors in
+`src/orchestrator-v5/context/recent-changes.ts` (TS2367 / TS2339) and
+`src/orchestrator-v5/handlers/edit-graph-fact-builder.ts` (TS2305:
+"no exported member `EditGraphHandlerFactSchema` /
+`EditGraphHandlerFact`"). After running the DL-9 clean-recovery path
+(`rm -rf node_modules && pnpm install`) all four errors disappeared.
+Confirmed root cause: stale `@talchain/schemas` extraction in main
+repo's `node_modules` from a prior install — an older drop missing
+the edit_graph fact exports. The vendored
+`vendor/talchain-schemas-0.12.0.tgz` (resolved as `@talchain/schemas
+0.12.0`) is correct and DOES export both
+`EditGraphHandlerFactSchema` and `EditGraphHandlerFact` (verified in
+`node_modules/@talchain/schemas/dist/orchestrator/index.d.ts` after
+clean install). Classified as **DL-9 / stale node_modules drift**, not
+an edit_graph source issue. DL-8 stays focused on OpenAPI/generated-
+types self-sufficiency.
+
+---
+
+**Original entry retained below for reference until merge SHA exists.**
+
+**Status (original):** open — environmental, not workstream-introduced.
 
 **Symptom:** `pnpm exec tsc -p tsconfig.build.json --noEmit` reports
 **44 errors** in this worktree. The vast majority (≈40+) are TS2307:
