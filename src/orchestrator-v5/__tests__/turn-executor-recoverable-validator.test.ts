@@ -384,11 +384,11 @@ describe('TurnExecutor — recoverable validator outcomes (Phase 2.2)', () => {
       const warnCalls = warnSpy!.mock.calls;
       const errorCalls = errorSpy!.mock.calls;
 
-      const preCommitOutcome = warnCalls.find((c) => {
+      const preCommitOutcome = warnCalls.find((c: unknown[]) => {
         const payload = c[0] as Record<string, unknown>;
         return payload?.event === 'v5.recoverable_outcome_pre_commit_failure';
       });
-      const commitFailed = errorCalls.find((c) => {
+      const commitFailed = errorCalls.find((c: unknown[]) => {
         const payload = c[0] as Record<string, unknown>;
         return payload?.event === 'v5.state_commit_failed';
       });

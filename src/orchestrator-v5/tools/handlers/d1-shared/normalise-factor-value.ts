@@ -18,6 +18,7 @@
 
 import { D1HandlerError } from './errors.js';
 import { formatValueWithUnit } from './format-confirmation.js';
+import { SET_FACTOR_VALUE_USER_GUIDANCE } from './user-guidance.js';
 
 export interface NormaliseInput {
   /** The numeric value as the user states it (post operator application). */
@@ -61,6 +62,7 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
   if (!Number.isFinite(rawInput)) {
     throw new D1HandlerError('PARAMETER_INVALID', 'Value must be a finite number.', {
       details: { value: rawInput },
+      userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
     });
   }
 
@@ -76,8 +78,12 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
       `Value ${rawInput} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
       {
         details: { rawInput, cap, unit: effectiveUnit ?? null },
-        userGuidance:
-          'Specify the unit (e.g. "5%" or "0.05") so the value can be normalised correctly.',
+        // P1.2 follow-up — replaced unit-clarification guidance with the
+        // canonical handler-level phrase. The "specify the unit" hint
+        // mentioned engine vocabulary ("normalised") that should not
+        // reach the user; the canonical phrase keeps the recovery
+        // message product-voice and unit-agnostic.
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
       },
     );
   }
@@ -94,7 +100,7 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     throw new D1HandlerError(
       'PARAMETER_INVALID',
       `Cap must be positive (received ${cap}).`,
-      { details: { cap } },
+      { details: { cap }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE },
     );
   }
 
@@ -116,10 +122,10 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
       `Value ${formattedInput} exceeds the factor's cap of ${formattedCap}.`,
       {
         details: { rawInput, cap, unit: effectiveUnit ?? null },
-        userGuidance:
-          rawInput > cap
-            ? `${formattedInput} exceeds the ${formattedCap} cap on this factor — pick a value within range.`
-            : `Negative values aren't allowed on this factor (cap is ${formattedCap}).`,
+        // P1.2 follow-up — replaced cap-specific guidance with the
+        // canonical handler-level phrase. The cap details remain in
+        // `details` for log triage.
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
       },
     );
   }
@@ -134,7 +140,7 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     throw new D1HandlerError(
       'PARAMETER_INVALID',
       'Normalised value is not finite.',
-      { details: { rawInput, cap } },
+      { details: { rawInput, cap }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE },
     );
   }
 

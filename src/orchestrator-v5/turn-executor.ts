@@ -2915,6 +2915,11 @@ export async function runTurnExecutor(
             session_id: context.session_id,
             stage: context.stage,
             failure_origin: 'validator',
+            // P1.1 follow-up — `outcome` discriminator. Impossible-state
+            // safety net composes a fatal envelope (INTERNAL_ERROR block,
+            // 500); record as fatal so dashboards joining on this field
+            // don't conflate it with the recoverable Phase 2.2 path.
+            outcome: 'fatal',
             error_code: recoverableCode,
             template_used: composed.template_id,
             chip_attached: composed.response.suggested_actions.length > 0,
@@ -2935,6 +2940,11 @@ export async function runTurnExecutor(
           session_id: context.session_id,
           stage: context.stage,
           failure_origin: 'validator',
+          // P1.1 follow-up — `outcome: 'recovered'` for the validator
+          // Phase 2.2 clean-body 200 path. Pairs with the
+          // `v5.recovery_response` lifecycle event for queries that
+          // want a single-event recovery filter.
+          outcome: 'recovered',
           error_code: recoverableCode,
           template_used: recoveredTemplateId,
           chip_attached: recoveredResponse.suggested_actions.length > 0,
@@ -3145,10 +3155,24 @@ export async function runTurnExecutor(
         // falls through to translateExecuteError → 500. See
         // Docs/v5/v5-p1-1-handler-failure-scope.md and
         // src/orchestrator-v5/compose/recoverable-handler-causes.ts.
+        //
+        // P1.1 follow-up — budget precedence (Paul's constraint 7): if the
+        // outer turn budget has fired, BUDGET_EXCEEDED must win regardless
+        // of the cause-kind. Route through translateExecuteError BEFORE
+        // any logging, composition, telemetry emission, or commit so a
+        // budget-exceeded turn cannot masquerade as a recovered 200 and
+        // does not produce a recovery telemetry trail. Keeping this check
+        // outside the recoverable predicate also means a fatal cause-kind
+        // hit during an aborted turn is still classified as
+        // BUDGET_EXCEEDED, matching the existing translateExecuteError
+        // precedence at L4104.
         if (
           error instanceof HandlerInvocationFailedError &&
           isRecoverableHandlerCause(error.cause_kind)
         ) {
+          if (turnAbort.signal.aborted) {
+            return translateExecuteError(error);
+          }
           log.warn(
             {
               request_id: requestId,
@@ -3200,6 +3224,11 @@ export async function runTurnExecutor(
             session_id: context.session_id,
             stage: context.stage,
             failure_origin: 'handler',
+            // P1.1 follow-up — `outcome: 'recovered'` for the handler
+            // Phase 2.6 clean-body 200 path. The legacy `recoverable: true`
+            // boolean is retained for one release as a deprecation
+            // grace period; `outcome` is the canonical discriminator.
+            outcome: 'recovered',
             error_code: error.cause_kind,
             template_used: recovered.template_id,
             chip_attached: recovered.response.suggested_actions.length > 0,
@@ -4176,6 +4205,12 @@ export async function runTurnExecutor(
         session_id: context.session_id,
         stage: context.stage,
         failure_origin: 'handler',
+        // P1.1 follow-up — fatal handler path: `outcome: 'fatal'`. This
+        // emit fires only for cause-kinds OUTSIDE
+        // `RECOVERABLE_HANDLER_CAUSES` (commit, plot_*, scenario,
+        // contract-mismatch, handler-result-invalid). Recoverable
+        // cause-kinds short-circuit at the recoverable branch above.
+        outcome: 'fatal',
         error_code: error.cause_kind,
         template_used: composed.template_id,
         chip_attached: composed.response.suggested_actions.length > 0,

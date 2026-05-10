@@ -82,26 +82,67 @@ The two paths share the same registered `run_analysis` handler and commit logic 
 
 ## Summary by classification
 
-- **user-recoverable (should be 200 with composed coaching response, currently 500):**
+> **Update — 2026-05-10 (post P1.1 + P1.1 follow-up):** the canonical
+> recoverable handler cause-kind list is now the seven causes below.
+> The earlier four-cause summary in this section (which proposed
+> `args_validation_failed`, `options_not_configured`, `analysis_blocked`,
+> `handler_not_registered (Sonnet-proposed sub-case)`) was superseded
+> by the War-Room locked seven-cause contract shipped in P1.1 commit
+> `23ec3016` and refined by the P1.1 follow-up. See
+> [`recoverable-handler-causes.ts`](../../src/orchestrator-v5/compose/recoverable-handler-causes.ts)
+> for the runtime source of truth. The classification table at the top
+> of this document (rows tagged "user-recoverable" / "retryable
+> infrastructure" / "contract mismatch" / "fatal infrastructure")
+> remains the authoritative *cause-kind* taxonomy; only the summary
+> below has been updated to reflect what landed.
+
+- **user-recoverable — clean direct_answer 200 with coaching chip (canonical contract since P1.1):**
   - `args_validation_failed`
   - `options_not_configured`
   - `analysis_blocked`
-  - `handler_not_registered` (Sonnet-proposed sub-case)
+  - `parameter_invalid_at_execute` *(D1 mutation handler, P1.1 follow-up: text-prompt chip, no chip-derived pending action)*
+  - `entity_not_found_in_graph` *(D1 mutation handler, same)*
+  - `entity_kind_mismatch_at_execute` *(D1 mutation handler, same)*
+  - `precondition_unmet_at_execute` *(D1 mutation handler, same)*
 - **retryable infrastructure (500 acceptable if genuinely transient):**
   - `scenario_read_failed`
   - `plot_timeout`
   - `plot_error`
   - `plot_unknown`
   - `analysis_failed`
-- **contract mismatch:**
+- **contract mismatch (500 — fatal, not user-recoverable):**
   - `plot_payload_invalid`
   - `analysis_not_completed` (unknown PLoT status, no usable fields)
-- **fatal infrastructure:**
+- **fatal infrastructure (500 — must NOT be disguised as recovered 200):**
   - `HandlerResultInvalidError` (code bug)
-  - `handler_not_registered` (dispatch-invariant sub-case)
-  - **`chip_click_run_analysis_commit_failed`** — the Phase 3 golden-path blocker
-- **already correct (200):**
-  - `BUDGET_EXCEEDED`
+  - `handler_not_registered` — fatal in this tranche. The runtime data
+    cannot distinguish "Sonnet proposed an unavailable action"
+    (recoverable in spirit) from "registry tampered / dispatch
+    invariant broken" (genuinely fatal). Splitting / enriching the
+    cause-kind so the runtime can tell them apart is a follow-up;
+    until then, the safer default is to surface the fatal envelope
+    rather than risk masking a real invariant breach as a coaching turn.
+  - `graph_invariant_violated` — fatal until a validator/D1 audit says
+    otherwise. A post-mutation invariant breach signals the proposed
+    change would have left the graph in an invalid state; coaching the
+    user as if the change "didn't apply" risks confusing them about
+    whether their input was at fault. Stays on the fatal path with the
+    canonical handler-level user-safe phrase set via `userGuidance`.
+  - **commit failures** (e.g. `chip_click_run_analysis_commit_failed`,
+    Supabase `append_turn_atomic` write failure) — fatal infrastructure
+    regardless of `retryable: true` framing. P1.1 keeps commit failures
+    on the fatal path and emits two distinct log records
+    (`v5.recoverable_outcome_pre_commit_failure` +
+    `v5.state_commit_failed`) when commit fails on a recoverable
+    cause-kind so infrastructure issues are not hidden behind
+    resilience.
+- **already correct (200) — budget always wins:**
+  - `BUDGET_EXCEEDED` — outer `turnAbort` precedence is enforced as
+    the first statement of the recoverable handler branch (P1.1
+    follow-up). A budget-exceeded turn cannot masquerade as a
+    recovered 200; no `v5.recovery_response` /
+    `turn_executor.failure_response{outcome:'recovered'}` /
+    `store.append(...)` runs on a budget-exhausted turn.
 
 ## Flagged row (golden-path 500)
 

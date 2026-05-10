@@ -39,6 +39,7 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import { formatFactorChange } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
+import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
 
 /**
@@ -117,7 +118,7 @@ function parseProposalValue(raw: unknown): ParsedValue {
   throw new D1HandlerError(
     'PARAMETER_INVALID',
     'set_factor_value: value must be a number or { value, unit?, cap? }.',
-    { details: { received: raw } },
+    { details: { received: raw }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE },
   );
 }
 
@@ -179,7 +180,10 @@ export function createSetFactorValueHandler(): HandlerFn {
       throw new D1HandlerError(
         'PRECONDITION_UNMET',
         'set_factor_value requires a graph — none was supplied for this turn.',
-        { details: { handler_id: 'set_factor_value' } },
+        {
+          details: { handler_id: 'set_factor_value' },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
       );
     }
     const graphParse = GraphV3.safeParse(rawGraph);
@@ -192,6 +196,7 @@ export function createSetFactorValueHandler(): HandlerFn {
             handler_id: 'set_factor_value',
             first_issue: graphParse.error.issues[0]?.message,
           },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
         },
       );
     }
@@ -203,7 +208,10 @@ export function createSetFactorValueHandler(): HandlerFn {
       throw new D1HandlerError(
         'ENTITY_NOT_FOUND',
         `Factor "${targetId}" was not found in the graph.`,
-        { details: { handler_id: 'set_factor_value', target_id: targetId } },
+        {
+          details: { handler_id: 'set_factor_value', target_id: targetId },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
       );
     }
     if (targetNode.kind !== 'factor') {
@@ -216,6 +224,7 @@ export function createSetFactorValueHandler(): HandlerFn {
             target_id: targetId,
             actual_kind: targetNode.kind,
           },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
         },
       );
     }
@@ -225,7 +234,10 @@ export function createSetFactorValueHandler(): HandlerFn {
       throw new D1HandlerError(
         'PARAMETER_INVALID',
         'set_factor_value requires a "value" parameter.',
-        { details: { handler_id: 'set_factor_value' } },
+        {
+          details: { handler_id: 'set_factor_value' },
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
       );
     }
 
@@ -281,7 +293,9 @@ export function createSetFactorValueHandler(): HandlerFn {
       if (!node) {
         // Should be impossible — we found it on `graph` and clone is a deep
         // copy. Defensive throw for completeness.
-        throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${targetId} disappeared during clone.`);
+        throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${targetId} disappeared during clone.`, {
+          userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        });
       }
       const merged = {
         ...(node.observed_state ?? {}),

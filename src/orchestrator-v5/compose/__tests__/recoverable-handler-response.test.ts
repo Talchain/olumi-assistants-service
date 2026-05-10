@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import { HandlerInvocationFailedError } from '../../tools/handler-errors.js';
 import type { HandlerInvocationFailedCause } from '../../tools/handler-errors.js';
+import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import type { ComposeContext } from '../types.js';
 import {
   RECOVERABLE_HANDLER_CAUSES,
@@ -23,7 +24,7 @@ import { composeRecoverableHandlerResponse } from '../recoverable-handler-respon
 const STAGE = 'analyse' as const;
 const COMPOSE_CTX: ComposeContext = {
   graph: undefined,
-  handlerRegistry: undefined,
+  handlerRegistry: HANDLER_VALIDATION_REGISTRY,
 };
 
 function makeError(
