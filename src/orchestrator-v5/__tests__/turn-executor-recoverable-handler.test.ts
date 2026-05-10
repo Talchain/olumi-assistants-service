@@ -452,7 +452,23 @@ describe('TurnExecutor — budget precedence over recoverable handler causes', (
         `${cause}: turn_executor.failure_response{outcome:'recovered'} must not fire on aborted turn`,
       ).toBeUndefined();
 
-      // 4. No commit / append call on a budget-exhausted turn.
+      // 4. No `v5.handler_invocation{outcome:'error'}` was emitted —
+      //    Codex review tightening. The post-merge review required the
+      //    budget gate to win BEFORE every observable side effect on
+      //    the recoverable path, including the lifecycle handler-
+      //    invocation emit. A budget-aborted recoverable turn must
+      //    leave no recovery telemetry trail at all.
+      const handlerInvocationError = events.find(
+        (e) =>
+          e.event === 'v5.handler_invocation' &&
+          (e.data as Record<string, unknown>).outcome === 'error',
+      );
+      expect(
+        handlerInvocationError,
+        `${cause}: v5.handler_invocation{outcome:'error'} must not fire when budget fired before recovery`,
+      ).toBeUndefined();
+
+      // 5. No commit / append call on a budget-exhausted turn.
       expect(appendCalls.length, cause).toBe(0);
     },
   );

@@ -3133,6 +3133,30 @@ export async function runTurnExecutor(
           }),
         );
       } catch (error) {
+        // P1.1 follow-up — budget precedence (Paul's constraint 7) for the
+        // recoverable handler path. If the outer turn budget has fired
+        // AND the error is a recoverable HandlerInvocationFailedError,
+        // route to translateExecuteError BEFORE the v5.handler_invocation
+        // emit below — so a budget-aborted recoverable turn produces NO
+        // observable side effect on the recovery telemetry trail
+        // (no v5.handler_invocation{outcome:'error'},
+        // no v5.recovery_response,
+        // no turn_executor.failure_response{outcome:'recovered'},
+        // no commit/append). BUDGET_EXCEEDED wins.
+        //
+        // Fatal cause-kinds still emit the handler_invocation telemetry
+        // because their fatal-path classification (and infrastructure
+        // diagnostics) genuinely benefits from the cause_kind record.
+        // The budget check inside translateExecuteError still classifies
+        // them as BUDGET_EXCEEDED on the wire.
+        if (
+          turnAbort.signal.aborted &&
+          error instanceof HandlerInvocationFailedError &&
+          isRecoverableHandlerCause(error.cause_kind)
+        ) {
+          return translateExecuteError(error);
+        }
+
         // Primary lifecycle event on handler failure. `outcome: 'error'`
         // paired with the cause_kind where known so log queries can
         // differentiate infrastructure faults from upstream errors.
@@ -3155,24 +3179,10 @@ export async function runTurnExecutor(
         // falls through to translateExecuteError → 500. See
         // Docs/v5/v5-p1-1-handler-failure-scope.md and
         // src/orchestrator-v5/compose/recoverable-handler-causes.ts.
-        //
-        // P1.1 follow-up — budget precedence (Paul's constraint 7): if the
-        // outer turn budget has fired, BUDGET_EXCEEDED must win regardless
-        // of the cause-kind. Route through translateExecuteError BEFORE
-        // any logging, composition, telemetry emission, or commit so a
-        // budget-exceeded turn cannot masquerade as a recovered 200 and
-        // does not produce a recovery telemetry trail. Keeping this check
-        // outside the recoverable predicate also means a fatal cause-kind
-        // hit during an aborted turn is still classified as
-        // BUDGET_EXCEEDED, matching the existing translateExecuteError
-        // precedence at L4104.
         if (
           error instanceof HandlerInvocationFailedError &&
           isRecoverableHandlerCause(error.cause_kind)
         ) {
-          if (turnAbort.signal.aborted) {
-            return translateExecuteError(error);
-          }
           log.warn(
             {
               request_id: requestId,
