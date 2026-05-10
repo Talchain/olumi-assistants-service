@@ -97,6 +97,22 @@ export interface EditGraphResult {
   routeMetadata?: RouteMetadata;
   /** Structured receipt for successful edits. Absent on rejected edits. */
   appliedChanges?: AppliedChanges;
+  /**
+   * Canonical PatchOperation[] applied on the success path. Exposed for
+   * downstream consumers (V5 edit-graph fact builder — DL-7 PR B) that
+   * need to derive entity-kind classification per-operation against the
+   * post-edit graph. Absent on rejected edits. Mirrors `operations` as
+   * passed to PLoT validation (post-normalisation).
+   */
+  operations?: PatchOperation[];
+  /**
+   * Per-operation metadata captured by the v2 prompt — `{ impact,
+   * rationale }` per op, parallel-indexed to `operations`. Exposed so
+   * the V5 fact builder can derive an aggregate `impact` for the
+   * accepted-edit fact (highest of per-op impacts, with a structural
+   * fallback). Absent on rejected edits.
+   */
+  operation_meta?: EditGraphOperationMeta[];
 }
 
 export interface EditGraphOpts {
@@ -2429,6 +2445,11 @@ export async function handleEditGraph(
       appliedGraph: appliedGraph ?? null,
       wasRejected: false,
       appliedChanges: appliedChangesReceipt,
+      // Pass-through for the V5 edit-graph fact builder (DL-7 PR B).
+      // Both fields are computed earlier in the success path; this just
+      // surfaces them on the public result for downstream projection.
+      operations,
+      operation_meta: operationMeta,
       ...(suggestedActions.length > 0 && { suggestedActions }),
       diagnostics: diagnostics(),
       routeMetadata: routeMetadata(),

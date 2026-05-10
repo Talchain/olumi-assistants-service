@@ -26,6 +26,11 @@ import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import {
+  buildEditGraphHandlerFact,
+  buildGenericEditGraphHandlerFact,
+  isSuccessfulAppliedMutation,
+} from './edit-graph-fact-builder.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
   ConversationContext,
@@ -717,10 +722,106 @@ export async function dispatchEditGraph(
     // — `null ?? undefined` resolves to undefined, the RPC receives p_graph =
     // null, and scenarios.graph is left unchanged. Mirror of the pattern in
     // draft-graph-dispatch.ts.
+    // DL-7 PR B: emit a canonical EditGraphHandlerFact for every
+    // successful applied mutation. Two-tier construction:
+    //
+    //   1. Rich path (buildEditGraphHandlerFact) — uses
+    //      appliedChanges + operations + operation_meta to construct
+    //      a fact with display-safe `safe_summary`, projected
+    //      `affected_entities`, and accurate `impact`.
+    //   2. Generic fallback (buildGenericEditGraphHandlerFact) —
+    //      kicks in when the rich path returns null (e.g. missing
+    //      appliedChanges) OR throws. Emits a minimal-but-valid fact
+    //      with safe_summary='Updated the decision model.' and
+    //      affected_entities=[]. War-room correction: a successful
+    //      applied mutation MUST NOT commit with handler_facts: [].
+    //
+    // No-fact path (rejected, noop, zero-ops, no appliedGraph) is
+    // gated by `isSuccessfulAppliedMutation` — those legitimately
+    // commit with handler_facts: [] and handler_id: null.
+    //
+    // turn_class STAYS 'direct_answer' per War Room correction. The
+    // append_turn_atomic RPC accepts handler_facts non-empty alongside
+    // turn_class='direct_answer' (verified via SQL inspection).
+    //
+    // turn-row handler_id ALSO STAYS null. Setting it to 'edit_graph'
+    // would require expanding `V5ActionType` in @talchain/schemas
+    // (schemas-vendor change like PR A — out of PR B scope). The
+    // fact-level `fact_type === 'edit_graph'` is the canonical
+    // discriminator for downstream consumers (recent_changes
+    // projector, state-query guard, prior_facts readers).
+    const factBuilderInput = {
+      editResult,
+      preEditGraph: parsedGraph,
+      hasExistingAnalysis: context.analysis_response !== null,
+    };
+    let editGraphFact: ReturnType<typeof buildEditGraphHandlerFact> = null;
+    let richBuilderThrew = false;
+    let richBuilderError: Error | undefined;
+    try {
+      editGraphFact = buildEditGraphHandlerFact(factBuilderInput);
+    } catch (err) {
+      richBuilderThrew = true;
+      richBuilderError = err instanceof Error ? err : new Error(String(err));
+      editGraphFact = null;
+    }
+
+    // Generic fallback: only kicks in for successful applied mutations
+    // where the rich path didn't produce a fact. Legitimate no-fact
+    // outcomes (rejected, noop, zero-ops) skip this entirely.
+    if (!editGraphFact && isSuccessfulAppliedMutation(editResult)) {
+      try {
+        editGraphFact = buildGenericEditGraphHandlerFact(factBuilderInput);
+      } catch (fallbackErr) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            event: 'v5.edit_graph.fact_fallback_threw',
+            rich_builder_threw: richBuilderThrew,
+            rich_err: richBuilderError && {
+              name: richBuilderError.name,
+              message: richBuilderError.message,
+            },
+            fallback_err:
+              fallbackErr instanceof Error
+                ? { name: fallbackErr.name, message: fallbackErr.message }
+                : { message: String(fallbackErr) },
+          },
+          'V5 edit_graph dispatch — generic fallback fact builder threw; committing with no fact',
+        );
+        editGraphFact = null;
+      }
+      if (editGraphFact) {
+        // Telemetry: clear, distinct event for the generic-fallback
+        // path so dashboards can attribute "rich rate vs fallback rate"
+        // and operators can see when the rich path is degrading.
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            event: 'v5.edit_graph.fact_generic_fallback',
+            rich_builder_threw: richBuilderThrew,
+            rich_err: richBuilderError && {
+              name: richBuilderError.name,
+              message: richBuilderError.message,
+            },
+            applied_changes_present: editResult.appliedChanges !== undefined,
+            operations_count: editResult.operations?.length ?? 0,
+          },
+          richBuilderThrew
+            ? 'V5 edit_graph dispatch — rich fact builder threw; emitting generic fallback fact'
+            : 'V5 edit_graph dispatch — rich fact builder unavailable (no appliedChanges); emitting generic fallback fact',
+        );
+      }
+    }
+
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'direct_answer',
+      // handler_id stays null even on successful fact emission — see
+      // the long comment above for the V5ActionType-expansion rationale.
       handler_id: null,
       request_hash: computeRequestHash(payload),
       // Deterministic clarification path makes zero LLM calls; LLM path
@@ -728,7 +829,7 @@ export async function dispatchEditGraph(
       // repair loop). Distinguish so dashboards can attribute cost honestly.
       llm_calls_used: deterministicAddRiskAttempted ? 0 : 1,
       duration_ms: Date.now() - startedAt,
-      handler_facts: [],
+      handler_facts: editGraphFact ? [editGraphFact] : [],
       graph: editResult.appliedGraph ?? undefined,
     });
     log.info(

@@ -166,6 +166,13 @@ describe('dispatchEditGraph', () => {
       expect(metadata.scenario_id).toBe(SCENARIO_ID);
       expect(metadata.turn_id).toBe(TURN_ID);
       expect(metadata.handler_id).toBeNull();
+      // DL-7 PR B contract change: this fixture omits operations / appliedChanges,
+      // so the fact builder's emission gates fail and handler_facts stays []. The
+      // fact-emission contract for FULLY-populated EditGraphResult fixtures is
+      // pinned in edit-graph-dispatch-fact-emission.test.ts (B1-B9). This test
+      // continues to assert the R-001 graph-persistence contract; the
+      // handler_facts assertion here only proves the no-fact baseline path
+      // (no operations passed) still works.
       expect(metadata.handler_facts).toEqual([]);
     });
   });
