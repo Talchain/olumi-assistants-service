@@ -33,12 +33,15 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 
 // Default behaviour: pass through to the real fact-builder module.
 // Individual tests that need to force a rich-builder throw replace
-// `buildEditGraphHandlerFact` via the mock instance below.
+// `buildEditGraphHandlerFact` via the mock instance below; tests that
+// need to force the generic-fallback builder to throw replace
+// `buildGenericEditGraphHandlerFact` similarly.
 vi.mock('../edit-graph-fact-builder.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../edit-graph-fact-builder.js')>();
   return {
     ...actual,
     buildEditGraphHandlerFact: vi.fn(actual.buildEditGraphHandlerFact),
+    buildGenericEditGraphHandlerFact: vi.fn(actual.buildGenericEditGraphHandlerFact),
   };
 });
 
@@ -47,7 +50,10 @@ vi.mock('../edit-graph-fact-builder.js', async (importOriginal) => {
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
-import { buildEditGraphHandlerFact } from '../edit-graph-fact-builder.js';
+import {
+  buildEditGraphHandlerFact,
+  buildGenericEditGraphHandlerFact,
+} from '../edit-graph-fact-builder.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -418,6 +424,56 @@ describe('dispatchEditGraph — DL-7 PR B fact emission', () => {
       // Other invariants preserved:
       expect(metadata.turn_class).toBe('direct_answer');
       expect(metadata.handler_id).toBeNull();
+    });
+
+    it('B12 BOTH builders fail on applied mutation → NO commit, dispatch surfaces failure (deepest fallback gate)', async () => {
+      // DL-7 invariant: a successful applied mutation must never be
+      // committed with handler_facts: []. If both the rich AND generic
+      // builders fail, dispatch must REFUSE to commit the graph
+      // mutation rather than persist a receipt-less mutation that
+      // would be downstream-invisible to recent_changes / state-query
+      // / prior_facts.
+      //
+      // Pre-fix behaviour: generic-fallback throw → log warn → commit
+      // with handler_facts: []. That is the gap this test pins.
+
+      const mockedRich = buildEditGraphHandlerFact as MockedFunction<typeof buildEditGraphHandlerFact>;
+      const mockedGeneric =
+        buildGenericEditGraphHandlerFact as MockedFunction<typeof buildGenericEditGraphHandlerFact>;
+      mockedRich.mockImplementationOnce(() => {
+        throw new Error('Simulated rich-builder failure');
+      });
+      mockedGeneric.mockImplementationOnce(() => {
+        throw new Error('Simulated generic-builder failure');
+      });
+
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+        .mockResolvedValue(makeAppliedEditResult());
+      // commitDirectAnswer would normally succeed; we must prove it is
+      // NEVER called, so any return shape would be unreachable.
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      const result = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-edit-fact-both-throw',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      // (1) Both builders were exercised.
+      expect(mockedRich).toHaveBeenCalledTimes(1);
+      expect(mockedGeneric).toHaveBeenCalledTimes(1);
+
+      // (2) commitDirectAnswer was NOT called — no graph mutation was
+      //     persisted, so no receipt-less mutation can leak downstream.
+      expect(commitDirectAnswer).not.toHaveBeenCalled();
+
+      // (3) The dispatch returns commitPerformed=false so the caller
+      //     can route to safe recovery rather than treat this as a
+      //     successful applied mutation.
+      expect(result.commitPerformed).toBe(false);
     });
 
     it('B9 turn_class stays direct_answer even when fact emission fails (defensive)', async () => {

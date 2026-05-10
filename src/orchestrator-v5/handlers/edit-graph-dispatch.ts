@@ -769,27 +769,15 @@ export async function dispatchEditGraph(
     // Generic fallback: only kicks in for successful applied mutations
     // where the rich path didn't produce a fact. Legitimate no-fact
     // outcomes (rejected, noop, zero-ops) skip this entirely.
+    let genericBuilderThrew = false;
+    let genericBuilderError: Error | undefined;
     if (!editGraphFact && isSuccessfulAppliedMutation(editResult)) {
       try {
         editGraphFact = buildGenericEditGraphHandlerFact(factBuilderInput);
       } catch (fallbackErr) {
-        log.warn(
-          {
-            request_id: requestId,
-            scenario_id: payload.scenario_id,
-            event: 'v5.edit_graph.fact_fallback_threw',
-            rich_builder_threw: richBuilderThrew,
-            rich_err: richBuilderError && {
-              name: richBuilderError.name,
-              message: richBuilderError.message,
-            },
-            fallback_err:
-              fallbackErr instanceof Error
-                ? { name: fallbackErr.name, message: fallbackErr.message }
-                : { message: String(fallbackErr) },
-          },
-          'V5 edit_graph dispatch — generic fallback fact builder threw; committing with no fact',
-        );
+        genericBuilderThrew = true;
+        genericBuilderError =
+          fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr));
         editGraphFact = null;
       }
       if (editGraphFact) {
@@ -814,6 +802,56 @@ export async function dispatchEditGraph(
             : 'V5 edit_graph dispatch — rich fact builder unavailable (no appliedChanges); emitting generic fallback fact',
         );
       }
+    }
+
+    // ── DEEPEST FALLBACK GATE (DL-7 invariant) ────────────────────────
+    // For a successful applied mutation, BOTH the rich AND the generic
+    // builder must produce a fact. If both fail, refuse to commit the
+    // graph mutation rather than persisting a receipt-less mutation.
+    //
+    // Rationale: a graph mutation persisted without `handler_facts`
+    // becomes downstream-invisible — `recent_changes`, the state-query
+    // guard, and `prior_facts` would all silently miss it. An applied
+    // mutation that produces no readable receipt violates DL-7 War
+    // Room Decision 1 ("successful mutations must be turn-linked and
+    // surfaced"). Better to surface the failure loudly via the
+    // dispatcher's outer catch (`v5.edit_graph.dispatch_failed` →
+    // FailureKind.HANDLER_INVOCATION_FAILED → safe recovery chip) than
+    // to commit a silently-broken state.
+    //
+    // Invariant: if `isSuccessfulAppliedMutation(editResult)` is true,
+    // we either commit with a non-empty `handler_facts` array or we
+    // throw before reaching `commitDirectAnswer`. We never commit the
+    // pair {graph: appliedGraph, handler_facts: []} for an applied
+    // mutation.
+    if (!editGraphFact && isSuccessfulAppliedMutation(editResult)) {
+      log.error(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          event: 'v5.edit_graph.fact_emission_failed',
+          rich_builder_threw: richBuilderThrew,
+          rich_err: richBuilderError && {
+            name: richBuilderError.name,
+            message: richBuilderError.message,
+          },
+          generic_builder_threw: genericBuilderThrew,
+          generic_err: genericBuilderError && {
+            name: genericBuilderError.name,
+            message: genericBuilderError.message,
+          },
+          applied_changes_present: editResult.appliedChanges !== undefined,
+          operations_count: editResult.operations?.length ?? 0,
+        },
+        'V5 edit_graph dispatch — BOTH rich and generic fact builders failed for an applied mutation; refusing to commit receipt-less graph mutation',
+      );
+      throw new Error(
+        'edit_graph: applied mutation cannot be committed — both rich and generic fact builders failed (rich threw=' +
+          String(richBuilderThrew) +
+          ', generic threw=' +
+          String(genericBuilderThrew) +
+          ').',
+      );
     }
 
     await commitDirectAnswer(response, {
