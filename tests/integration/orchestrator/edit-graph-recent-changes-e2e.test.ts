@@ -227,11 +227,22 @@ describe('edit_graph recent_changes acceptance E2E (DL-7)', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('E2E2 emitted fact has graph_hash_before that matches the prior analysis run', () => {
-    // Real chain: a prior run_analysis was committed with graph_hash_at_run
-    // = hash(preEditGraph). Our edit produces graph_hash_before identical
-    // to that hash. Asserting the equality proves the fact's
-    // `graph_hash_before` is the right anchor for staleness.
+  it('E2E2 emitted fact carries diagnostic graph_hash_before/after (NOT the freshness source of truth)', () => {
+    // The fact's `graph_hash_before` and `graph_hash_after` are the
+    // 16-char SHA-256 of the full graph (including labels). They are
+    // DIAGNOSTIC ONLY and are NOT used by `deriveAnalysisFreshness` —
+    // the production freshness path uses
+    // `computeAnalysisAffectingGraphHash`, which explicitly EXCLUDES
+    // labels and other display fields. Their presence on the fact
+    // serves debugging / audit, not the staleness comparison. The
+    // real freshness chain is exercised end-to-end in E2E5
+    // (substantive edit → stale) and E2E5b (cosmetic rename →
+    // freshness stays fresh), both of which use the analysis-affecting
+    // hash on both sides of the comparison.
+    //
+    // This test pins only the structural contract: both fields are
+    // populated for an applied mutation, and they differ when the
+    // graph differs (which is the trivial diagnostic property).
     const fact = buildEditGraphHandlerFact({
       editResult: makeAppliedEditResult(),
       preEditGraph: makePreEditGraph(),
