@@ -42,7 +42,7 @@ export function composeHandlerFailure(
   _ctx: ComposeContext,
   stage: StageType,
 ): ComposedHandlerFailure {
-  const body = composeBody(error);
+  const body = composeHandlerFailureBody(error);
   return {
     response: wrapResponse(error, body.body, stage),
     template_id: body.template_id,
@@ -50,13 +50,24 @@ export function composeHandlerFailure(
   };
 }
 
-interface BranchResult {
+export interface HandlerFailureBranchResult {
   readonly body: FailureComposeResult;
   readonly template_id: string;
   readonly chip_type: ChipType | null;
 }
 
-function composeBody(error: HandlerInvocationFailedError): BranchResult {
+/**
+ * Per-cause composer body — exported so the V5 Phase 2.6 recoverable
+ * wrapper (`composeRecoverableHandlerResponse`) can reuse the per-code
+ * copy/chip switch without duplicating it. Keeping the switch in one
+ * place means new cause-kinds added here automatically flow through both
+ * the fatal 500 path and the recoverable 200 path; the recoverable
+ * decision is made by `RECOVERABLE_HANDLER_CAUSES` in
+ * `recoverable-handler-causes.ts`.
+ */
+export function composeHandlerFailureBody(
+  error: HandlerInvocationFailedError,
+): HandlerFailureBranchResult {
   const details = error.details;
   switch (error.cause_kind) {
     case 'args_validation_failed':
