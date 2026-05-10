@@ -558,6 +558,12 @@ present locally; awaiting push, deploy and War Room acceptance);
 merged to staging at the time these checks are ticked. Final closure
 flips to `[x]` after deploy + acceptance.
 
+**Accepted build:** staging `812dbb4ab9768c8e6657d19102dcdf14a58c7f58`
+(landed 2026-05-10 via PR #157 + lint follow-up PR #158). Live
+deploy confirmed via `x-olumi-service-build: 812dbb4` on
+`cee-staging.onrender.com`. Six closure criteria flipped from `[~]`
+to `[x]` post-War-Room acceptance.
+
 **Loader-fix amendment (DL-7 PR B P0):** an earlier review pass
 flagged that criteria 2, 3, and 5 below were not actually covered
 by the initial PR B implementation because
@@ -576,7 +582,7 @@ fix is pinned by:
   direct_answer turn → next-turn buildTurnContext loads it →
   `recent_changes` surfaces it as `graph_edited`.
 
-- [~] **1. Documented source of truth for `edit_graph` recent-change /
+- [x] **1. Documented source of truth for `edit_graph` recent-change /
       receipt behaviour.** Where the user-facing "what changed?" string
       comes from, where the structured fact is written, where it is
       consumed by `recent_changes`, and which fields are display-safe.
@@ -589,7 +595,7 @@ fix is pinned by:
       `src/orchestrator-v5/routing/state-query-guard.ts`. All display-
       safe-text fields enumerated in DL-7 PR B's `### PR B emitter-side
       safety test contract` subsection.
-- [~] **2. Successful `edit_graph` mutation creates or is associated
+- [x] **2. Successful `edit_graph` mutation creates or is associated
       with a V5 turn-linked mutation fact / receipt.** Per Decision 1
       above. → Implemented in DL-7 PR B (commit pending push). The
       builder at
@@ -599,7 +605,7 @@ fix is pinned by:
       to `commitDirectAnswer`. Turn linkage flows via the
       `HandlerFactWithTurn` wrapper at session-store read time
       (unchanged from the existing D1 mutation-fact pattern).
-- [~] **3. `recent_changes` can surface the accepted edit in a safe
+- [x] **3. `recent_changes` can surface the accepted edit in a safe
       user-facing form.** No raw entity IDs, no internal vocabulary
       ("repair", "wrapped", "envelope", model-routing details), no
       jargon from the A6 list in
@@ -614,7 +620,7 @@ fix is pinned by:
         (R1-R7)
       - `tests/integration/orchestrator/edit-graph-recent-changes-e2e.test.ts`
         (E2E4 raw-ID scrub end-to-end)
-- [~] **4. Graph hash / graph diff is used only as supporting
+- [x] **4. Graph hash / graph diff is used only as supporting
       evidence, not the sole user-facing source.** Per Decision 1.
       → `graph_hash_before` / `graph_hash_after` on the fact are
       diagnostic-only; `safe_summary` is the user-facing source.
@@ -622,7 +628,7 @@ fix is pinned by:
       `src/orchestrator/handler-results.ts` (schema comment line ~273-279)
       and `Docs/edit_graph_v9_dl7_v5_integration_design.md` § 3.2.
       `recent_changes` projector reads `safe_summary`, not the hashes.
-- [~] **5. `prior_facts` / `HandlerFactWithTurn` stability is covered
+- [x] **5. `prior_facts` / `HandlerFactWithTurn` stability is covered
       by a targeted contract test.** Per Decision 2 above. → Test lands
       at
       `tests/unit/orchestrator-v5/handlers/edit-graph-prior-facts-contract.test.ts`
@@ -632,7 +638,7 @@ fix is pinned by:
       `recent-changes` / `build-turn-context` imports — the
       forbidden-imports list is enforced by the file's import
       statements as the canonical contract surface.
-- [~] **6. No `ContextPack` assembler/schema files are touched in the
+- [x] **6. No `ContextPack` assembler/schema files are touched in the
       `edit_graph` branch unless the War Room explicitly authorises a
       cross-workstream integration tranche.** The "must NOT edit" list
       in the Workstream-status declarations section above is the
@@ -665,6 +671,79 @@ fix is pinned by:
 workstream owner).
 
 **Trigger to close:** all six closure criteria above are signed off.
+
+**Acceptance log (2026-05-10):** all six criteria flipped from `[~]`
+to `[x]` after War Room acceptance of staging build `812dbb4a`.
+Acceptance evidence threaded against the eight-point check:
+
+1. **Successful applied `edit_graph` mutation emits
+   `EditGraphHandlerFact`** — pinned by
+   `tests/unit/orchestrator-v5/handlers/edit-graph-fact-builder.test.ts`
+   (56 tests including emission gates A1-A6, schema B1-B11,
+   safe-text D1-D6 + D5d, summary E1-E6 + E5b) and
+   `src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch-fact-emission.test.ts`
+   (13 tests including B1-B11, B12 deepest-fallback throw, B13
+   deepest-fallback null-return).
+2. **`buildTurnContext` exposes it through `prior_facts` /
+   `HandlerFactWithTurn`** — pinned by the loader-fix amendment at
+   [src/orchestrator-v5/build-turn-context.ts:362](../src/orchestrator-v5/build-turn-context.ts:362)
+   and
+   `src/orchestrator-v5/__tests__/build-turn-context-direct-answer-facts.test.ts`
+   (FL1-FL6, 6 tests). FL1 has a real call-shape assertion
+   capturing both `readFactsFor` and `readFactsWithTurnFor` paths;
+   FL3 confirms `prior_facts_with_turn` carries the parent turn id.
+3. **`recent_changes` surfaces the edit safely** — pinned by
+   `summariseEditGraph` in
+   [src/orchestrator-v5/context/recent-changes.ts](../src/orchestrator-v5/context/recent-changes.ts)
+   plus
+   `src/orchestrator-v5/context/__tests__/recent-changes-edit-graph.test.ts`
+   (R1-R7, 7 tests). Display-safety enforced at the emitter:
+   `sanitiseUserFacingText` + Phase 2A jargon-guard +
+   post-substitution raw-id-shape gate (`containsConfirmedRawIdShape`).
+4. **"What changed?" after an edit uses the accepted-edit fact** —
+   pinned by `tests/integration/orchestrator/edit-graph-recent-changes-e2e.test.ts`
+   E2E-loader, which runs the full two-turn flow: dispatch commits
+   the fact on a `direct_answer` turn → next turn's
+   `buildTurnContext` loads it → `projectRecentChanges` reads
+   `safe_summary` verbatim. Any future state-query guard quoting
+   `recent_changes[0].summary` therefore quotes the canonical
+   `safe_summary` directly.
+5. **Staleness / rerun recommendation remains correct** — pinned
+   by E2E5 (substantive edit produces `freshness === 'stale'` via
+   real `computeAnalysisAffectingGraphHash` path) and E2E5b
+   (cosmetic label-only rename produces `freshness === 'fresh'`,
+   reason `'graph_hash_match'` — proving labels are excluded from
+   the analysis-affecting hash). The fact's
+   `rerun_recommended` flag pass-through is pinned by H2.
+6. **Graph hash / graph diff remains diagnostic only** — pinned by
+   E2E2 (renamed and re-worded to assert the fact's
+   `graph_hash_before/after` are diagnostic-only and explicitly NOT
+   the freshness source of truth) and E2E5b's contrast (the
+   diagnostic SHA-256 hashes DIFFER across a label-only rename
+   while the analysis-affecting hash STAYS EQUAL — proving the two
+   hash machineries are independent).
+7. **No `ContextPack` assembler/schema ownership conflict
+   introduced** — verified at merge time:
+   `git diff origin/staging~3...origin/staging --name-only |
+   grep -E 'context-pack-assembler|context-pack-schema|ContextPack'`
+   → empty. Authorised in-scope exception: the
+   `build-turn-context.ts` loader-filter widening, documented in
+   the **Authorised in-scope exception** sub-block of criterion 6
+   above.
+8. **Tests cover schema, CEE wiring, `recent_changes` and V5 E2E
+   acceptance** — final test counts on staging build `812dbb4a`:
+   - schema (fact-builder unit): 56 tests
+   - CEE wiring (dispatch fact-emission): 13 tests
+   - dispatch + recent_changes regression: 11 + 7 + 36 tests
+   - `prior_facts` contract: 6 tests
+   - direct_answer fact-loader: 6 tests
+   - V5 E2E acceptance (recent_changes-e2e): 10 tests including
+     E2E-loader + E2E5b
+   Total: 145+ new/extended PR B-specific tests, all green on the
+   merged tree.
+
+**Outstanding (out of DL-7 scope):** DL-5 and DL-5b remain open —
+captured-payload incident closure is a separate workstream.
 
 ---
 
@@ -1037,6 +1116,158 @@ resolved in baseline cleanup.
   template's own coaching vocabulary in adjacent helpers).
 Then the two failing tests pass and the V5 unit suite is fully
 green.
+
+---
+
+## DL-12 — Auto-merge before first CI pass on V5 contract / new-file PRs
+
+**Status:** open process gate — captured 2026-05-10 during DL-7 PR B
+acceptance.
+
+**Symptom.** PR #157 (DL-7 PR B) was opened and queued with
+`gh pr merge --auto --merge`. The repo's branch protection does not
+enforce required CI status, so the PR merged 14 seconds after open
+— BEFORE the `Lint, TypeCheck, Unit Tests` job had time to start.
+CI subsequently failed on five ESLint errors that the local
+pre-push `lint-changed` hook had reported as "no changed src files"
+(see DL-13). Staging therefore briefly carried the lint errors,
+requiring follow-up PR #158 to clear them. No production impact —
+Render auto-deploy succeeded for both commits — but the gap is
+real: a PR with new source files can land on staging before any
+CI signal exists for that commit.
+
+**Lesson.** *Auto-merge MUST NOT be enabled before the first CI
+pass on PRs that introduce V5 contract surfaces or new files.* The
+risk is highest on:
+- new `src/orchestrator-v5/**` files (V5 contract),
+- new `src/orchestrator-v5/handlers/**` files,
+- new `tests/integration/**` files,
+- any change to `src/orchestrator-v5/build-turn-context.ts`,
+  `recent-changes.ts`, `freshness.ts`, or
+  `context-pack-{assembler,schema}.ts`.
+
+For these PRs, the workflow is:
+
+1. Open the PR.
+2. **Wait for the first CI run to complete.** Do NOT call
+   `gh pr merge --auto --merge` until at least
+   `Lint, TypeCheck, Unit Tests` has reported.
+3. If CI is green, then merge — auto-merge is fine from this point.
+4. If CI is red, fix on the same branch and re-run before merging.
+
+The pre-push hook is a fast feedback loop, not a replacement for
+CI. It runs locally on the laptop's view of changed files only;
+CI runs against the integrated merge commit on a clean tree, and
+catches different errors (cross-file lint, full-tree
+typecheck-with-tests, etc.).
+
+**Owner.** _unassigned_ — V5 platform / DX.
+
+**Trigger to close.** Either:
+- branch protection on `staging` is updated to require
+  `Lint, TypeCheck, Unit Tests` to pass before merge (preferred —
+  enforces the rule mechanically), OR
+- a documented checklist item is added to the V5 PR template that
+  reviewers must tick before approving auto-merge on contract /
+  new-file PRs.
+
+---
+
+## DL-13 — `lint-changed` pre-push hook misses changed source files
+
+**Status:** open hook hardening — captured 2026-05-10 during DL-7
+PR B acceptance.
+
+**Symptom.** Across both PR B pushes (the feature branch push and
+the staging-merge push), the pre-push hook's `lint-changed` stage
+reported `OK (no changed src files)` despite the push containing
+six new files under `src/orchestrator-v5/handlers/`,
+`src/orchestrator-v5/__tests__/`, and
+`src/orchestrator-v5/context/__tests__/` plus modifications to two
+existing source files. CI then surfaced five ESLint errors on
+those exact files — `'vi' is defined but never used`,
+`'AppliedChanges' is defined but never used`,
+`Expected a 'const' assertion`, etc.
+
+**Root cause hypothesis.** The hook's "changed src files"
+detection probably uses `git diff` against a base ref that doesn't
+include the new commits (e.g. comparing HEAD against
+`HEAD~1` after a fresh commit, or comparing against `origin/main`
+when the local branch has never been pushed). Either:
+- the diff range is wrong for new branches / forced pushes, OR
+- the file-extension filter excludes `.ts` files in
+  `src/orchestrator-v5/__tests__/` (test files under `src/` ARE
+  source files for ESLint purposes), OR
+- the hook silently treats "no diff output" as success rather than
+  failing-closed.
+
+**Lesson.** *The local `lint-changed` hook is not a reliable proxy
+for CI lint.* Until DL-13 closes:
+- treat a green pre-push hook as necessary-but-insufficient,
+- always wait for CI's `Lint, TypeCheck, Unit Tests` to pass
+  before merging V5 PRs (the same workflow that DL-12 mandates),
+- run `pnpm lint <changed-paths>` manually before push when
+  introducing new files.
+
+**Owner.** _unassigned_ — V5 platform / DX.
+
+**Trigger to close.** Either:
+- audit `scripts/validate-prepush.sh`'s `lint-changed` stage,
+  identify the diff-range or filter bug, and fix so it reports
+  the same set of files CI does for any push shape (new branch,
+  amended commit, new files, renames, etc.), OR
+- replace the changed-files filter with a fail-closed full-tree
+  ESLint run on push (slower but reliable; can be cached against
+  the previous commit's lint output).
+
+The hook should NEVER report "no changed src files" when
+`git diff --name-only $(git merge-base HEAD origin/main)..HEAD`
+lists new `src/` files.
+
+---
+
+## DL-14 — Render check-suite lags actual deploy state
+
+**Status:** open process note — observed 2026-05-10 during DL-7 PR
+B deploy verification.
+
+**Symptom.** After PR #158 merged to staging at `812dbb4a`, the
+Render check-suite on the merge commit reported `queued:null` for
+several minutes. Polling for `completed:*` to confirm deploy would
+have stalled the verification indefinitely. In reality, Render's
+auto-deploy had already succeeded — confirmed via the live HTTP
+response header `x-olumi-service-build: 812dbb4` on
+`cee-staging.onrender.com`. The Render → GitHub check-reporting
+webhook updates its status independently of (and after) the
+actual deploy completion.
+
+**Lesson.** *The `x-olumi-service-build` HTTP header is the
+authoritative truth source for which commit is currently serving
+on staging.* The GitHub check-suite reported state for Render is a
+secondary indicator and can lag the deploy by minutes. Workflow
+implications:
+
+1. To confirm a deploy has landed, prefer:
+   ```
+   curl -sS -I https://cee-staging.onrender.com/ | grep -i x-olumi-service-build
+   ```
+   The 7-character SHA in the header value matches the staging
+   `git rev-parse origin/staging | head -c 7` when the deploy is
+   live.
+2. The GitHub Render check-suite is fine for retrospective audit
+   (did Render eventually report success?) but should NOT be used
+   as a synchronous "is it deployed yet?" gate.
+3. If the build header SHA matches the staging HEAD SHA, the
+   deploy is live regardless of what the check-suite says.
+
+**Owner.** _unassigned_ — DX / observability.
+
+**Trigger to close.** Either:
+- file an issue with Render about the check-suite lag (low
+  priority — the workaround above is reliable), OR
+- document the `x-olumi-service-build` header as the canonical
+  staging-deploy verification path in `Docs/CLAUDE.md` so future
+  sessions don't waste time waiting on the check-suite.
 
 ---
 
