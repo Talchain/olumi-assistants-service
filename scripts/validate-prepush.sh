@@ -84,21 +84,115 @@ check_typecheck() {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Lint changed .ts/.tsx files only
+# 3. Lint changed lintable files (matches CI lint scope)
+#
+# CI runs `pnpm lint` = `eslint .` over the whole repo. The local hook lints
+# only changed files for speed, but must include every category CI would
+# (src/ AND tests/), and must fail closed when it can't determine the diff
+# base — silent skips here let lint regressions slip through to CI.
+#
+# Operator override: `SKIP_LINT_CHANGED=1 git push` bypasses with a loud
+# warning. Use only for offline/emergency push.
 # ---------------------------------------------------------------------------
 check_lint_changed() {
-  local files
-  # Lint source files only (test files have pre-existing lint issues)
-  files=$(git diff --name-only HEAD -- 'src/**/*.ts' 'src/**/*.tsx' 2>/dev/null || true)
-  if [ -z "$files" ]; then
-    print_check "lint-changed" "OK (no changed src files)"
+  if [ "${SKIP_LINT_CHANGED:-0}" = "1" ]; then
+    print_check "lint-changed" "SKIPPED"
+    echo "    WARNING: SKIP_LINT_CHANGED=1 — bypassing lint-changed."
+    echo "    Operator override only. Do not use in CI or routine pushes."
     return 0
   fi
+
+  # Resolve diff base via merge-base. Prefer origin/staging because this
+  # repo's CLAUDE.md "Always push to staging" makes staging the active
+  # trunk; origin/main has historically diverged. Fall back through
+  # origin/main and local refs in case the remote ref isn't fetched.
+  # Fail closed if none resolve to a non-empty merge-base.
+  local base="" base_ref=""
+  for ref in origin/staging origin/main staging main; do
+    if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null 2>&1; then
+      base=$(git merge-base "$ref" HEAD 2>/dev/null || true)
+      if [ -n "$base" ]; then
+        base_ref="$ref"
+        break
+      fi
+    fi
+  done
+
+  if [ -z "$base" ]; then
+    print_check "lint-changed" "FAIL"
+    echo "    Could not resolve diff base. Tried: origin/staging, origin/main, staging, main."
+    echo "    Fix:   git fetch origin staging   (or main)"
+    echo "    Or bypass for offline/emergency push: SKIP_LINT_CHANGED=1 git push"
+    FAILURES=$((FAILURES + 1))
+    return 0
+  fi
+
+  # NUL-delimited diff handles paths with spaces / special chars safely.
+  local -a candidate=()
+  while IFS= read -r -d '' f; do
+    [ -n "$f" ] && candidate+=("$f")
+  done < <(git diff --name-only -z "$base" HEAD 2>/dev/null || true)
+
+  # Filter to ESLint-eligible files. Must mirror eslint.config.js `ignores`
+  # (dist/**, node_modules/**, tests/perf/**/*.js, examples/**, scripts/**,
+  # tests/types/**, perf/**, qa-smoke.mjs, sdk/typescript/dist/**,
+  # sdk/typescript/vitest.config.ts, "** *  2.ts" / "** *  3.ts" stale
+  # shadows). If eslint.config.js ignore list changes, update here.
+  local -a selected=()
+  local f
+  if [ "${#candidate[@]}" -gt 0 ]; then
+    for f in "${candidate[@]}"; do
+      case "$f" in
+        *.ts|*.tsx|*.js|*.mjs|*.cjs) ;;
+        *) continue ;;
+      esac
+      case "$f" in
+        dist/*|node_modules/*|examples/*|scripts/*|perf/*) continue ;;
+        tests/types/*) continue ;;
+        tests/perf/*.js|tests/perf/*/*.js|tests/perf/*/*/*.js) continue ;;
+        sdk/typescript/dist/*) continue ;;
+        sdk/typescript/vitest.config.ts) continue ;;
+        qa-smoke.mjs) continue ;;
+        *" 2.ts"|*" 2.tsx"|*" 3.ts"|*" 3.tsx") continue ;;
+      esac
+      selected+=("$f")
+    done
+  fi
+
+  # Visible no-op: print base + counts so a true zero-change push is
+  # distinguishable from a silent skip (the bug this hook hardening fixes).
+  if [ "${#selected[@]}" -eq 0 ]; then
+    print_check "lint-changed" "OK (no lintable changed files)"
+    echo "    base:                    $base_ref ($base)"
+    echo "    candidate changed files: ${#candidate[@]}"
+    echo "    selected lint files:     0"
+    return 0
+  fi
+
+  # Drop deletions — eslint can't lint missing files.
+  local -a existing=()
+  for f in "${selected[@]}"; do
+    if [ -f "$f" ]; then
+      existing+=("$f")
+    fi
+  done
+
+  if [ "${#existing[@]}" -eq 0 ]; then
+    print_check "lint-changed" "OK (selected files all deleted)"
+    echo "    base:                    $base_ref ($base)"
+    echo "    candidate changed files: ${#candidate[@]}"
+    echo "    selected lint files:     ${#selected[@]} (all deleted)"
+    return 0
+  fi
+
   local output
-  if output=$(echo "$files" | xargs eslint --no-error-on-unmatched-pattern 2>&1); then
-    print_check "lint-changed" "OK"
+  if output=$(eslint --no-error-on-unmatched-pattern "${existing[@]}" 2>&1); then
+    print_check "lint-changed" "OK (${#existing[@]} file(s) linted vs $base_ref)"
   else
     print_check "lint-changed" "FAIL"
+    echo "    base:                    $base_ref ($base)"
+    echo "    candidate changed files: ${#candidate[@]}"
+    echo "    selected lint files:     ${#existing[@]}"
     echo "$output" | tail -40
     FAILURES=$((FAILURES + 1))
   fi
