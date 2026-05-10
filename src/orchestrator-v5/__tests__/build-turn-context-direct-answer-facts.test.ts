@@ -26,7 +26,7 @@
  *    turns all contribute their facts.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type {
   HandlerFact,
   SessionTurn,
