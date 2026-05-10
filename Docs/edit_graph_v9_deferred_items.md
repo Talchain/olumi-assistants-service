@@ -1112,10 +1112,9 @@ green.
 
 ## DL-13 — `lint-changed` pre-push hook misses changed source files
 
-**Status:** covered, pending merge (2026-05-10) — fix implemented on
-branch `claude/stupefied-volhard-15c245`. Will move to **closed** once
-the branch merges; replace this header with `**Status:** closed by
-<merge-SHA>` at that point.
+**Status:** closed by `736508a5` (merged to `staging` 2026-05-10 from
+branch `claude/stupefied-volhard-15c245`; source commit `67fba975`
+chore).
 
 **Note on entry origin.** This entry was originally drafted on
 `claude/dl7-acceptance-doc` (commit `1a1aac9f`, also adds DL-12 and
