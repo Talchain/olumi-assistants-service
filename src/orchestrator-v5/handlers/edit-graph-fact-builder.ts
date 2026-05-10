@@ -62,7 +62,6 @@ import {
 
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import type {
-  AppliedChanges,
   AppliedChangeItem,
   PatchOperation,
 } from '../../orchestrator/types.js';
@@ -213,7 +212,7 @@ export function buildEditGraphHandlerFact(
   // Both are guaranteed here by the emission gates (operations is
   // non-empty and we don't construct noop=true facts), so this is a
   // sanity assertion rather than a runtime branch.
-  const status: 'applied' = 'applied';
+  const status = 'applied' as const;
   const noop = false;
 
   // ── Construct + validate ───────────────────────────────────────────
