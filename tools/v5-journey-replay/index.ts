@@ -50,7 +50,6 @@ import {
   type DL7AssertionContext,
 } from './assertions.js';
 import {
-  CANONICAL_STEPS,
   JOURNEY_IDS,
   JOURNEY_REGISTRY,
   JourneyPreconditionError,
