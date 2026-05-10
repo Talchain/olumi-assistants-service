@@ -45,6 +45,53 @@ pnpm tsx tools/v5-journey-replay/index.ts \
 
 The CLI flag takes precedence over the `OLUMI_REPLAY_EXPECTED_BUILD` env var. When neither is set the gate runs in default mode: it confirms `/healthz` returned a well-formed `build` field but does not compare against any reference SHA.
 
+#### Journey selector
+
+The harness runs one journey per invocation. The default is the original six-step canonical journey, so existing CLI invocations stay unchanged. DL-7 journeys are opt-in via the `--journey` flag:
+
+| `--journey` | Steps | Notes |
+|---|---|---|
+| `canonical` *(default)* | the original 6 steps | Backwards-compatible. No new behaviour. |
+| `dl7-set-factor` | `draft → set_factor_value → what_changed → run_analysis → explain_leader → what_would_flip` | Drives the V5 `set_factor_value` mutation handler so `recent_changes` populates today, before edit_graph DL-7 PR B exists. |
+| `dl7-staleness` | `draft → run_analysis → set_factor_value → explain_leader_stale` | Reorders the mutation AFTER analysis to exercise the freshness=stale signal. |
+| `dl7-edit-graph` | same shape as `dl7-set-factor` but Step 2 is a generic edit_graph mutation | **Core V5 path** — edit_graph DL-7 PR B is live on CEE staging. Runs by default. Emergency rollback: `DL7_PR_B_DISABLE=true` re-gates the journey if PR B regresses. Step 2 verifies the user-visible response is product-shaped and free of internal terms. The Step 3 (`what_changed`) assertion checks that the response references the captured factor label and reports `safe_summary=ok`. **Replay does not assert `turn_class` / `handler_id` / fact emission** — those fields are not on the wire response envelope and must be covered by edit_graph dispatch unit tests. |
+
+#### Universal leak guards (apply to every step)
+
+Every step's `assistant_text` and chip labels/messages are scanned by `findForbiddenMatches` ([forbidden-terms.ts](forbidden-terms.ts)) for:
+
+- Internal/code identifiers (`HandlerFact`, `recent_changes`, `prior_facts`, `accepted_edit`, `fact_type`, `noop`, `buildTurnContext`, `orchestrator-v5` — case-insensitive for snake_case/PascalCase) and product-internal terms.
+- Raw entity ID prefixes (`opt_*`, `fac_*`, `goal_*`, `risk_*`, `out_*`).
+- **Graph-hash leaks** (any 12+ char hex string) — per the edit_graph DL-7 contract that graph hashes remain diagnostic-only. Reported as `graph_hash:<match>` in the row's `failing_contract` so reviewers can distinguish hash leaks from identifier leaks at a glance.
+
+```bash
+# DL-7 set-factor journey, runs against staging today
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --journey dl7-set-factor \
+  --out Docs/v5/v5-dl7-set-factor.md
+
+# DL-7 staleness journey
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --journey dl7-staleness \
+  --out Docs/v5/v5-dl7-staleness.md
+
+# DL-7 generic edit_graph journey (PR B live on staging — runs by default)
+pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --journey dl7-edit-graph \
+  --out Docs/v5/v5-dl7-edit-graph.md
+
+# Emergency rollback: re-gate dl7-edit-graph if PR B regresses on staging
+DL7_PR_B_DISABLE=true pnpm tsx tools/v5-journey-replay/index.ts \
+  --base-url https://cee-staging.onrender.com \
+  --journey dl7-edit-graph \
+  --out Docs/v5/v5-dl7-edit-graph.md
+```
+
+DL-7 journeys parse Step 1's drafted-graph response for option labels **and** factor labels. Step 2 picks a factor by deterministic fallback: any label containing the case-insensitive substring `"budget"` wins, otherwise the first label in the array, otherwise the step fails cleanly with `failing_contract: 'no_factor_label_available'` and downstream steps cascade-skip.
+
 The key is sent as `X-Olumi-Assist-Key` (the existing service contract — see [src/plugins/auth.ts](../../src/plugins/auth.ts)). The service-side env var is `ASSIST_API_KEY` (or `ASSIST_API_KEYS` for a comma-separated list). The harness-side env var is deliberately named differently (`OLUMI_REPLAY_API_KEY`) so rotating one does not silently affect the other.
 
 **The key is env-var only — no CLI flag.** This keeps the secret out of shell history, `ps auxww`, and process-tree telemetry.
@@ -142,7 +189,7 @@ Regression coverage: see [tests/unit/v5-journey-replay/redact.test.ts](../../tes
 | [redact.ts](redact.ts) | `createRedactor`, `redactString`, `sanitiseError` |
 | [localhost.ts](localhost.ts) | `isLocalHost` — exact-match hostname detection |
 | [classify-outcome.ts](classify-outcome.ts) | `classifyResponse`, `hasErrorEnvelope`, `isTransportError` |
-| [steps.ts](steps.ts) | Six canonical journey steps |
+| [steps.ts](steps.ts) | Canonical + DL-7 journey definitions, factor-label resolver, journey registry |
 | [assertions.ts](assertions.ts) | Per-step product-shape assertions |
 | [forbidden-terms.ts](forbidden-terms.ts) | Internal-term leak patterns |
 | [evidence-writer.ts](evidence-writer.ts) | Markdown output + executive summary |

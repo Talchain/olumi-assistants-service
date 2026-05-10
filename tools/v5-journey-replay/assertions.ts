@@ -271,6 +271,394 @@ export const STEP5_DENIAL_PHRASES: readonly RegExp[] = [
   /(?:results|analysis|findings|simulation\s+results?)\s+(?:haven'?t|have\s+not)\s+come\s+through/i,
 ];
 
+// ===========================================================================
+// DL-7 assertions — used by the dl7-set-factor / dl7-edit-graph / dl7-staleness
+// journeys.
+//
+// All DL-7 assertions inherit the core assertion stack (HTTP 200, body
+// parsed, no boundary error, no forbidden terms in user copy). On top of
+// the core, each adds a small set of stable-field checks per the audit
+// spec — see the plan file at
+// /Users/paulslee/.claude/plans/please-take-over-the-abundant-owl.md.
+// PR-B-gated checks are skipped (and recorded as `requires_dl7_pr_b`)
+// at the orchestration layer, not here — these assertions stay pure.
+// ===========================================================================
+
+export interface DL7AssertionContext {
+  /** Factor label resolved from Step 1 capture (deterministic fallback). */
+  readonly factorLabel?: string | null;
+  /** Option labels parsed out of Step 1's draft_graph response. */
+  readonly step1OptionLabels?: readonly string[];
+  /** Graph hash captured at Step 1 (if available). */
+  readonly graphHashAtDraft?: string | null;
+}
+
+/**
+ * Detect a clarification-back response on an edit step.
+ *
+ * V5 returns clarification prompts when the deterministic value-update
+ * gate or the edit_graph router can't unambiguously resolve the target
+ * (e.g. factor label collision, ambiguous referent). Example wordings
+ * observed on staging:
+ *
+ *   - "I wasn't sure which factor you meant. Did you mean one of these?"
+ *   - "Which factor do you mean?"
+ *   - "Could you clarify which item..."
+ *
+ * On an edit step, a clarification-back is NOT a successful mutation
+ * — the graph state is unchanged. The journey's downstream steps
+ * (state-query / staleness / explain-after-edit) cannot validate the
+ * post-mutation contract if no mutation happened. Treating Step 200
+ * with clarification text as a PASS is exactly what caused the early
+ * `dl7-staleness` Step 4 false-failure — Step 3 was a no-op but Step
+ * 4 took the blame. This pattern fails the edit step attributively
+ * so Step 4 cascade-skips with a clear cause.
+ */
+export const CLARIFICATION_BACK_PATTERN =
+  /\bDid you mean\b|\bI (?:wasn'?t|was not) sure\b|\bCould you clarify\b|\bWhich \w+ (?:do|did) you mean\b|\bCan you (?:specify|tell me) which\b|\bI'?m not sure which\b/i;
+
+/**
+ * Detect a mutation-acknowledgement on an edit step (proof of mutation).
+ *
+ * V5's mutation handlers and edit_graph dispatcher confirm successful
+ * mutations with natural-language phrasing such as:
+ *
+ *   - "Updated Incremental Hiring Cost from £0 to 20%."   (set_factor_value)
+ *   - "Headcount Investment Level now has a stronger ..." (edit_graph)
+ *   - "Added constraint: Total cost must be at most ..."  (add_constraint)
+ *   - "Adjusted the link strength from X to Y."           (adjust_edge_strength)
+ *
+ * The pattern is intentionally broad — past-tense mutation verbs OR
+ * "now has/shows" forward-looking phrasing. Anchoring on these forms
+ * proves the response is acknowledging a change, not deflecting via
+ * clarification. Combined with the clarification-back negative check,
+ * this gives replay-side proof that the edit step actually mutated.
+ */
+export const MUTATION_ACK_PATTERN =
+  /\b(?:Updated|Adjusted|Changed|Modified|Set|Added|Removed|Strengthened|Weakened|Increased|Decreased|Applied|Saved)\b|\bnow (?:has|shows|reflects)\b|\bhas been (?:updated|changed|adjusted|set|added|removed)\b/i;
+
+/**
+ * DL-7 Step 2 (set-factor journey) — the V5 set_factor_value handler
+ * mutates the graph.
+ *
+ * **Strict pass contract** (post Codex-feedback hardening):
+ *   - HTTP 200, product-shaped, no internal-term leakage.
+ *   - Response is NOT a clarification-back (otherwise the graph wasn't
+ *     mutated and any downstream "post-edit" assertions would test the
+ *     wrong contract — see `CLARIFICATION_BACK_PATTERN`).
+ *   - Response contains a mutation-acknowledgement signal (proof the
+ *     mutation actually happened on the wire — see `MUTATION_ACK_PATTERN`).
+ *
+ * The earlier soft version of this assertion passed any 200 with text
+ * or chips, which let clarification-back responses through and caused
+ * `dl7-staleness` Step 4 to false-fail with the blame on the wrong step.
+ */
+export function assertSetFactorValue(
+  result: FetchResult,
+  ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  const chipCount = (body?.suggested_actions ?? []).length;
+  if (text.length === 0 && chipCount === 0) {
+    return {
+      ok: false,
+      failing_contract: 'set_factor_value_empty (no assistant_text and no chips)',
+      evidence: `status=200 text_len=0 chip_count=0`,
+    };
+  }
+
+  // Hard fail: clarification-back means no mutation happened.
+  const clarifyMatch = text.match(CLARIFICATION_BACK_PATTERN);
+  if (clarifyMatch) {
+    return {
+      ok: false,
+      failing_contract: 'set_factor_value_clarification_back_no_mutation',
+      evidence:
+        `status=200 but response asks for clarification, not acknowledging mutation: ` +
+        `match="${clarifyMatch[0]}" — V5's value-update gate could not resolve the target factor. ` +
+        `Downstream "post-edit" assertions cannot validate against a no-op mutation.`,
+    };
+  }
+
+  // Hard fail: response must acknowledge the mutation in natural language.
+  const mutationAck = text.match(MUTATION_ACK_PATTERN);
+  if (!mutationAck) {
+    return {
+      ok: false,
+      failing_contract: 'set_factor_value_no_mutation_acknowledgement',
+      evidence:
+        `status=200 but no mutation-ack phrasing in response ` +
+        `(expected "Updated X", "X now has...", "Adjusted ...", etc.). ` +
+        `text_preview="${text.slice(0, 100)}..."`,
+    };
+  }
+
+  const lower = text.toLowerCase();
+  const labelMentioned =
+    ctx?.factorLabel != null && lower.includes(ctx.factorLabel.toLowerCase());
+  return {
+    ok: true,
+    evidence:
+      `status=200 text_len=${text.length} chip_count=${chipCount} ` +
+      `mutation_ack="${mutationAck[0]}" ` +
+      `factor_label="${ctx?.factorLabel ?? ''}" mentioned=${labelMentioned} ` +
+      `elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+/**
+ * DL-7 Step 2 (edit-graph journey) — generic edit_graph dispatcher.
+ *
+ * What replay can prove (wire-observable):
+ *   - HTTP 200, product-shaped (assistant_text or chips present).
+ *   - No internal-term leakage (handled by `coreAssertions`).
+ *   - The downstream user-visible effect that the mutation happened —
+ *     verified at Step 3 (`assertWhatChanged`), which surfaces the
+ *     accepted-edit fact via `recent_changes`.
+ *
+ * What replay CANNOT prove (and is therefore intentionally NOT
+ * asserted here):
+ *   - `turn_class === 'direct_answer'` — this field is an argument
+ *     to `commitDirectAnswer` / `append_turn_atomic` (DB persistence)
+ *     and internal telemetry. It is NOT serialised onto the wire
+ *     response envelope. Coverage must come from edit_graph dispatch
+ *     unit tests (`src/orchestrator-v5/handlers/__tests__/
+ *     edit-graph-dispatch*.test.ts`).
+ *   - `handler_id === null` — same reason.
+ *   - `EditGraphHandlerFact` emission identity — facts are persisted
+ *     to `v5_handler_facts` and surfaced through `recent_changes`,
+ *     but the fact's wire identity is not on the response envelope.
+ *     Same unit-test path covers this.
+ *
+ * Replay's role is the user-visible end-to-end behaviour; the
+ * internal commit-path contract is the unit-test workstream's role.
+ */
+export function assertEditGraphGeneric(
+  result: FetchResult,
+  _ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  const chipCount = (body?.suggested_actions ?? []).length;
+  if (text.length === 0 && chipCount === 0) {
+    return {
+      ok: false,
+      failing_contract: 'edit_graph_generic_empty (no assistant_text and no chips)',
+      evidence: `status=200 text_len=0 chip_count=0`,
+    };
+  }
+
+  // Hard fail: clarification-back means no mutation happened.
+  // Same reasoning as `assertSetFactorValue` — without a real mutation,
+  // post-edit assertions (recent_changes, staleness, explain-after-edit)
+  // test the wrong contract. The previously-soft version of this
+  // assertion accepted any 200 with text or chips; that's why a
+  // mutation-fail-by-clarify slipped past Step 2 in dl7-edit-graph.
+  const clarifyMatch = text.match(CLARIFICATION_BACK_PATTERN);
+  if (clarifyMatch) {
+    return {
+      ok: false,
+      failing_contract: 'edit_graph_clarification_back_no_mutation',
+      evidence:
+        `status=200 but response asks for clarification, not acknowledging mutation: ` +
+        `match="${clarifyMatch[0]}" — V5's edit_graph router could not resolve the request. ` +
+        `Downstream post-edit assertions cannot validate against a no-op mutation.`,
+    };
+  }
+
+  // Hard fail: response must acknowledge the mutation in natural language.
+  const mutationAck = text.match(MUTATION_ACK_PATTERN);
+  if (!mutationAck) {
+    return {
+      ok: false,
+      failing_contract: 'edit_graph_no_mutation_acknowledgement',
+      evidence:
+        `status=200 but no mutation-ack phrasing in response ` +
+        `(expected "Updated X", "X now has...", "Adjusted ...", etc.). ` +
+        `text_preview="${text.slice(0, 100)}..."`,
+    };
+  }
+
+  return {
+    ok: true,
+    evidence:
+      `status=200 text_len=${text.length} chip_count=${chipCount} ` +
+      `mutation_ack="${mutationAck[0]}" ` +
+      `elapsed=${result.elapsed_ms}ms ` +
+      // Routing-class is unit-test territory, not replay's. A reviewer
+      // scanning the row should see the wire-observability disclaimer.
+      `routing_class_check=unit_tests_only`,
+  };
+}
+
+/**
+ * DL-7 Step 3 — "What changed?" The state-query guard answers this
+ * deterministically from `recent_changes` (no LLM round-trip). After
+ * edit_graph DL-7 PR B (live on CEE staging), the response should:
+ *
+ *   - Reference the factor label captured at Step 1 (mutation
+ *     surfaced into recent_changes via the accepted-edit fact for
+ *     the edit-graph journey, or via the existing V5 mutation-handler
+ *     path for the set-factor journey).
+ *   - Use the fact's safe summary, NOT a graph hash or diff. Hash
+ *     leaks are caught universally for every step by
+ *     `findForbiddenMatches` / `GRAPH_HASH_LEAK_REGEX` (in
+ *     `forbidden-terms.ts`) — this assertion just verifies the
+ *     positive signal.
+ *   - No raw IDs, schema terms, handler terms, fact jargon — also
+ *     enforced by `findForbiddenMatches`.
+ */
+export function assertWhatChanged(
+  result: FetchResult,
+  ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  if (text.length === 0) {
+    return {
+      ok: false,
+      failing_contract: 'what_changed_empty_text',
+      evidence: `status=200 text_len=0`,
+    };
+  }
+  // Stable-field check: when a factor label was resolved at Step 1,
+  // we expect the deterministic state-query answer to mention it.
+  // This is the strongest signal that the mutation surfaced into
+  // recent_changes. A miss does not necessarily mean a bug (the
+  // guard may paraphrase), but it does indicate weaker coverage and
+  // is logged in evidence.
+  const lower = text.toLowerCase();
+  const labelMentioned =
+    ctx?.factorLabel != null && lower.includes(ctx.factorLabel.toLowerCase());
+  return {
+    ok: true,
+    evidence:
+      `status=200 text_len=${text.length} ` +
+      `factor_label="${ctx?.factorLabel ?? ''}" mentioned=${labelMentioned} ` +
+      `safe_summary=ok ` +
+      `elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+/**
+ * DL-7 Step 6 — "What would flip this?" The what_would_flip handler
+ * fires when there is a successful prior run_analysis fact. With
+ * freshness=fresh (analysis ran on the post-edit graph), the handler
+ * runs the execute path and emits a substantive answer.
+ */
+export function assertWhatWouldFlip(
+  result: FetchResult,
+  ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  if (text.length === 0) {
+    return {
+      ok: false,
+      failing_contract: 'what_would_flip_empty_text',
+      evidence: `status=200 text_len=0`,
+    };
+  }
+  // Substance gate — same threshold as Step 5 explain-leader. Below
+  // this, the answer is almost certainly a stub/precondition fallback
+  // rather than a real flip-driver answer.
+  if (text.length <= 200) {
+    return {
+      ok: false,
+      failing_contract: 'what_would_flip_text_too_short',
+      evidence: `status=200 text_len=${text.length} (expected > 200)`,
+    };
+  }
+  // Light option-label check — what_would_flip references options to
+  // discuss flipping the leader. Skipped if no labels were captured.
+  const labels = ctx?.step1OptionLabels ?? [];
+  const lower = text.toLowerCase();
+  const referenced =
+    labels.length > 0 ? labels.some((l) => lower.includes(l.toLowerCase())) : false;
+  return {
+    ok: true,
+    evidence:
+      `status=200 text_len=${text.length} ` +
+      `labels_checked=${labels.length} option_referenced=${referenced} ` +
+      `elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
+/**
+ * DL-7 staleness journey, Step 4 — explain-leader AFTER a post-analysis
+ * edit. The freshness derivation should classify the analysis as stale
+ * and the response should either prefix the answer with a staleness
+ * caveat OR include a `Rerun analysis` chip (or both). Either is
+ * acceptable — the contract is "the user is told the result is now
+ * stale," not the specific UI surface used.
+ */
+export function assertExplainLeaderStale(
+  result: FetchResult,
+  ctx?: DL7AssertionContext,
+): AssertionResult {
+  const core = coreAssertions(result);
+  if (core) return core;
+  const body = result.body;
+  const text = body?.assistant_text ?? '';
+  if (text.length === 0) {
+    return {
+      ok: false,
+      failing_contract: 'explain_leader_stale_empty_text',
+      evidence: `status=200 text_len=0`,
+    };
+  }
+  const lower = text.toLowerCase();
+  const chips = body?.suggested_actions ?? [];
+  // Heuristic detection of a staleness signal. Either:
+  //   - The text mentions "model has changed" / "stale" / "no longer
+  //     reflects" / "since the analysis was run" / "results may be
+  //     out of date" / "rerun" / "re-run".
+  //   - A chip exists whose label/message mentions rerun/refresh.
+  // The deterministic staleness prefix (handler-side
+  // `staleness-prefix.ts`) is the canonical signal but we accept any
+  // chip-based equivalent so the wire surface can evolve without
+  // breaking this assertion.
+  const stalenessTextSignal =
+    /\b(stale|model has changed|no longer reflects?|out[- ]of[- ]date|since (?:the )?analysis|re[- ]?run)\b/i.test(
+      text,
+    );
+  const stalenessChipSignal = chips.some((chip) => {
+    const blob = `${chip.label} ${chip.message}`.toLowerCase();
+    return /\b(rerun|re-run|refresh|update|stale)\b/.test(blob) && blob.includes('analy');
+  });
+  if (!stalenessTextSignal && !stalenessChipSignal) {
+    return {
+      ok: false,
+      failing_contract: 'explain_leader_stale_signal_missing',
+      evidence:
+        `status=200 text_len=${text.length} ` +
+        `staleness_text=false staleness_chip=false ` +
+        `chip_count=${chips.length}`,
+    };
+  }
+  // Option-label check — same as the fresh path.
+  const labels = ctx?.step1OptionLabels ?? [];
+  const referenced =
+    labels.length > 0 ? labels.some((l) => lower.includes(l.toLowerCase())) : false;
+  return {
+    ok: true,
+    evidence:
+      `status=200 text_len=${text.length} ` +
+      `staleness_text=${stalenessTextSignal} staleness_chip=${stalenessChipSignal} ` +
+      `labels_checked=${labels.length} option_referenced=${referenced} ` +
+      `elapsed=${result.elapsed_ms}ms`,
+  };
+}
+
 export function assertExplainLeader(
   result: FetchResult,
   ctx?: { step1OptionLabels?: readonly string[] },

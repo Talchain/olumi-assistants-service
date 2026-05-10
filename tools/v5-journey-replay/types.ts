@@ -3,6 +3,7 @@
  */
 
 import type { OutcomeClass } from './classify-outcome.js';
+import type { JourneyId } from './steps.js';
 
 export type StepStatus = 'passed' | 'failed' | 'skipped';
 
@@ -27,6 +28,37 @@ export interface EvidenceRow {
    * blind spot. Always redacted via `redactString` before write.
    */
   readonly assistant_text?: string;
+  /**
+   * Journey identifier the row was produced under. Optional and additive
+   * — pre-DL-7 evidence packs render rows without this field; DL-7
+   * journeys stamp it so multi-journey runs (or downstream tooling) can
+   * group rows by journey. Optional to preserve backwards-compat with
+   * existing harness self-tests.
+   */
+  readonly journey_id?: JourneyId;
+  /**
+   * Marks an evidence row as a deliberately skipped PR-B-gated assertion
+   * or a `not_applicable` journey enqueue. Distinct from the
+   * `status: 'skipped'` cascade-skip — used so downstream tooling can
+   * report PR-B-gated counts without conflating with prerequisite
+   * cascade misses.
+   */
+  readonly requires_dl7_pr_b?: true;
+  /**
+   * Redacted chip details captured per-step. Phase 2.6.4 — added to
+   * support triage of staleness-signal-missing failures where the
+   * signal may live in a chip's action_type / label / message rather
+   * than in the assistant_text. The DL-7 audit specifically asks
+   * whether the "rerun analysis" chip is present, and the row table
+   * alone shows only `chip_count` — making chip content invisible.
+   * Always redacted via `redactString` before write.
+   */
+  readonly chips?: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly message: string;
+    readonly action_type?: string;
+  }>;
 }
 
 export interface TurnResponse {
@@ -41,6 +73,13 @@ export interface TurnResponse {
   }>;
   readonly insights?: ReadonlyArray<unknown>;
   readonly stage_indicator?: string;
+  // Note: `turn_class` and `handler_id` were probed during the DL-7
+  // audit but are NOT on the wire response envelope — they are
+  // arguments to `commitDirectAnswer` / `append_turn_atomic` (DB
+  // persistence) and internal telemetry events only. Replay therefore
+  // cannot assert them; coverage lives in edit_graph dispatch unit
+  // tests. Do not re-add these fields without first confirming wire
+  // serialisation in the boundary schema.
   // BoundaryError shape (4xx/5xx). All optional — present only on the
   // error envelope path.
   readonly error?: string;
@@ -110,4 +149,11 @@ export interface HarnessConfig {
    * well-formed.
    */
   readonly expectedBuild?: string;
+  /**
+   * Journey selector. Defaults to `canonical` so existing invocations
+   * (and existing harness self-tests) stay backwards-compatible. DL-7
+   * journeys are opted in via the `--journey` CLI flag — see
+   * `JOURNEY_REGISTRY` in `./steps.ts` for available ids.
+   */
+  readonly journey: JourneyId;
 }

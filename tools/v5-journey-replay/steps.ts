@@ -1,5 +1,5 @@
 /**
- * V5 alpha hardening Phase 3 — six canonical journey steps from Paul's brief.
+ * V5 alpha hardening Phase 3 — journey step definitions.
  *
  * Each step defines a request payload + per-step assertion (via
  * `./assertions.ts`). The CLI threads outputs through the evidence writer.
@@ -15,6 +15,20 @@
  * and cannot be exercised through the HTTP boundary without injecting a
  * mock PLoT response. The evidence pack references that unit test as
  * authoritative coverage.
+ *
+ * DL-7 expansion — three additional journeys exercise the accepted-edit
+ * fact path that edit_graph DL-7 PR B unlocks:
+ *   - `dl7-set-factor`   — drives the existing V5 set_factor_value handler
+ *                          so `recent_changes` is populated today, before
+ *                          PR B exists.
+ *   - `dl7-staleness`    — reorders the edit AFTER analysis to exercise
+ *                          the freshness=stale signal.
+ *   - `dl7-edit-graph`   — drives the generic edit_graph dispatcher.
+ *                          Now a core V5 path: edit_graph DL-7 PR B is
+ *                          live on staging (PR #159 docs merge pending).
+ *                          The earlier `DL7_PR_B_LANDED` env gate has
+ *                          been replaced with `DL7_PR_B_DISABLE` (an
+ *                          emergency rollback switch, default off).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -29,9 +43,83 @@ export interface JourneyStep {
   readonly depends_on?: string;
 }
 
+/**
+ * Capture parsed out of the draft_graph response on Step 1. DL-7 journeys
+ * use `factorLabels` (deterministic factor-label fallback) and
+ * `graphHashAtDraft` (later compared against post-edit hash) downstream.
+ *
+ * Optional and additive — pre-DL-7 journeys do not populate or read it.
+ */
+export interface Step1Capture {
+  readonly optionLabels: readonly string[];
+  readonly factorLabels: readonly string[];
+  readonly graphHashAtDraft: string | null;
+  /**
+   * Deterministic factor-label resolution result, computed once after
+   * Step 1 succeeds. Threaded into Step 2's `buildPayload` so DL-7
+   * journeys substitute a real label rather than improvising.
+   */
+  readonly resolvedFactorLabel: string | null;
+  readonly factorLabelReason: 'budget_match' | 'first_label' | 'no_factor_labels';
+}
+
 export interface JourneyContext {
   readonly scenario_id: string;
   readonly turn_counter: { value: number };
+  /** Populated by the harness after Step 1 succeeds. */
+  step1Capture?: Step1Capture;
+}
+
+/**
+ * Thrown by a step's `buildPayload` when the journey context lacks data
+ * required to construct the request. The harness catches this, marks the
+ * step `failed` with the carried `failingContract`, and continues.
+ *
+ * Used by DL-7 journeys when `step1Capture.resolvedFactorLabel` is null
+ * (no factor labels parsed out of Step 1's draft_graph response).
+ */
+export class JourneyPreconditionError extends Error {
+  public readonly failingContract: string;
+  constructor(failingContract: string, message: string) {
+    super(message);
+    this.name = 'JourneyPreconditionError';
+    this.failingContract = failingContract;
+  }
+}
+
+/**
+ * Deterministic factor-label fallback, per DL-7 audit §3:
+ *   1. Any label containing case-insensitive substring "budget" → use it.
+ *   2. Otherwise → first label in the array.
+ *   3. Empty array → null + `no_factor_labels` reason (caller fails the
+ *      step cleanly via JourneyPreconditionError).
+ *
+ * Pure function — exposed for unit-test access.
+ */
+export function selectFactorLabel(
+  factorLabels: readonly string[] | undefined,
+): { label: string | null; reason: 'budget_match' | 'first_label' | 'no_factor_labels' } {
+  if (!factorLabels || factorLabels.length === 0) {
+    return { label: null, reason: 'no_factor_labels' };
+  }
+  const budget = factorLabels.find((l) => l.toLowerCase().includes('budget'));
+  if (budget !== undefined) return { label: budget, reason: 'budget_match' };
+  return { label: factorLabels[0]!, reason: 'first_label' };
+}
+
+/**
+ * Read the resolved factor label from Step 1 capture or throw a precondition
+ * error. Used inside DL-7 journey `buildPayload` callbacks.
+ */
+function requireFactorLabel(ctx: JourneyContext): string {
+  const label = ctx.step1Capture?.resolvedFactorLabel;
+  if (label === null || label === undefined) {
+    throw new JourneyPreconditionError(
+      'no_factor_label_available',
+      'Step 1 did not produce a usable factor label for downstream DL-7 steps.',
+    );
+  }
+  return label;
 }
 
 export function mkTurnId(): string {
@@ -138,3 +226,326 @@ export const CANONICAL_STEPS: readonly JourneyStep[] = [
     }),
   },
 ];
+
+// ---------------------------------------------------------------------------
+// DL-7 Journey 1A — `dl7-set-factor`
+//
+// draft → set_factor_value → what-changed → analyse → explain → what-would-flip
+//
+// Step 2 deliberately drives the existing V5 `set_factor_value` mutation
+// handler. This produces a `RecentMutation` entry in the Context Reliability
+// path TODAY, before edit_graph DL-7 PR B exists, so Step 3 ("what changed?")
+// can be asserted against `recent_changes` deterministically.
+// ---------------------------------------------------------------------------
+
+export const SET_FACTOR_STEPS: readonly JourneyStep[] = [
+  {
+    name: '1_draft_graph',
+    description:
+      'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: DECISION_BRIEF,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '2_set_factor_value',
+    description:
+      'Set the resolved factor to 20% — drives the V5 set_factor_value mutation handler so recent_changes populates.',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: `Set ${requireFactorLabel(ctx)} to 20%.`,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '3_what_changed',
+    description:
+      '"What changed?" → state-query guard answers deterministically from recent_changes.',
+    depends_on: '2_set_factor_value',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: 'What changed?',
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '4_run_analysis',
+    description:
+      'chip_click run_analysis on the post-edit graph → 200, PLoT completes, handler fact persisted.',
+    depends_on: '2_set_factor_value',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'analyse',
+      message: 'Run analysis.',
+      turn_class: 'decide',
+      source: 'chip_click',
+      chip: { action_type: 'run_analysis' },
+    }),
+  },
+  {
+    name: '5_explain_leader',
+    description:
+      '"Why does the leading option win?" → 200, references option labels, freshness=fresh.',
+    depends_on: '4_run_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'Why does the leading option win?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '6_what_would_flip',
+    description:
+      '"What would flip this?" → 200, what_would_flip handler with execute precondition.',
+    depends_on: '4_run_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'What would flip this?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// DL-7 Journey 1B — `dl7-edit-graph`  (PR-B-gated, optional)
+//
+// Identical shape to 1A but Step 2 uses generic edit_graph phrasing so the
+// request lands in the generic edit_graph dispatcher (not the narrow
+// set_factor_value handler). Only enqueued when DL7_PR_B_LANDED === 'true'.
+// ---------------------------------------------------------------------------
+
+export const EDIT_GRAPH_STEPS: readonly JourneyStep[] = [
+  {
+    name: '1_draft_graph',
+    description:
+      'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: DECISION_BRIEF,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '2_edit_graph_generic',
+    description:
+      'Generic edit_graph mutation — drives the dispatcher path that PR B annotates with an accepted_edit fact.',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: `Edit the model: make ${requireFactorLabel(ctx)} more important.`,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '3_what_changed',
+    description:
+      '"What changed?" → recent_changes surfaces the accepted-edit fact (PR B path).',
+    depends_on: '2_edit_graph_generic',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: 'What changed?',
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '4_run_analysis',
+    description:
+      'chip_click run_analysis on the post-edit graph → 200, PLoT completes.',
+    depends_on: '2_edit_graph_generic',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'analyse',
+      message: 'Run analysis.',
+      turn_class: 'decide',
+      source: 'chip_click',
+      chip: { action_type: 'run_analysis' },
+    }),
+  },
+  {
+    name: '5_explain_leader',
+    description:
+      '"Why does the leading option win?" → 200, references option labels, freshness=fresh.',
+    depends_on: '4_run_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'Why does the leading option win?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '6_what_would_flip',
+    description:
+      '"What would flip this?" → 200, what_would_flip handler with execute precondition.',
+    depends_on: '4_run_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'What would flip this?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// DL-7 Journey 1C — `dl7-staleness`
+//
+// draft → analyse → set_factor_value → explain
+//
+// Reorders the edit AFTER analysis, so the explain handler observes
+// freshness=stale and surfaces the staleness caveat / rerun chip.
+// Locks in DL-7 acceptance criterion 5.
+// ---------------------------------------------------------------------------
+
+export const STALENESS_STEPS: readonly JourneyStep[] = [
+  {
+    name: '1_draft_graph',
+    description:
+      'POST fresh scenario + decision brief → expect draft_graph response with post-draft chips.',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: DECISION_BRIEF,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '2_run_analysis',
+    description:
+      'chip_click run_analysis on fresh draft graph → 200, PLoT completes, handler fact persisted.',
+    depends_on: '1_draft_graph',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'analyse',
+      message: 'Run analysis.',
+      turn_class: 'decide',
+      source: 'chip_click',
+      chip: { action_type: 'run_analysis' },
+    }),
+  },
+  {
+    // Phase 2.6.4 (post-Codex feedback) — switched from `set_factor_value`
+    // to `edit_graph_generic`. The set_factor_value path is label-fragile:
+    // when the deterministic value-update gate can't resolve the factor
+    // unambiguously (which happens when the LLM-drafted graph uses a
+    // factor name the gate doesn't recognise), V5 returns a clarification
+    // request and no mutation happens. The edit_graph path is the proven
+    // determinstic mutation route per the dl7-edit-graph journey, so
+    // using it here makes the staleness loop reliable. The strict-mode
+    // `assertEditGraphGeneric` (clarification-back + mutation-ack checks)
+    // fails Step 3 attributively if the mutation still doesn't fire,
+    // so Step 4 cascade-skips with a clear cause.
+    name: '3_edit_graph_generic',
+    description:
+      'Mutate the graph AFTER analysis via edit_graph (the proven path) — should set freshness=stale on subsequent explain turns.',
+    depends_on: '2_run_analysis',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame',
+      message: `Edit the model: make ${requireFactorLabel(ctx)} more important.`,
+      turn_class: 'frame',
+      source: 'composer',
+    }),
+  },
+  {
+    name: '4_explain_leader_stale',
+    description:
+      '"Why does the leading option win?" — explain after a post-analysis edit. Expect stale caveat or rerun chip.',
+    depends_on: '3_edit_graph_generic',
+    buildPayload: (ctx) => ({
+      kind: 'message',
+      turn_id: mkTurnId(),
+      scenario_id: ctx.scenario_id,
+      stage: 'decide',
+      message: 'Why does the leading option win?',
+      turn_class: 'decide',
+      source: 'composer',
+    }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Journey registry — keys are the values accepted by the `--journey` CLI
+// flag. The default is `canonical` so existing invocations stay
+// backwards-compatible. The harness skips `dl7-edit-graph` when
+// `DL7_PR_B_LANDED !== 'true'` (gating logic lives in index.ts).
+// ---------------------------------------------------------------------------
+
+export type JourneyId = 'canonical' | 'dl7-set-factor' | 'dl7-edit-graph' | 'dl7-staleness';
+
+export const JOURNEY_IDS: readonly JourneyId[] = [
+  'canonical',
+  'dl7-set-factor',
+  'dl7-edit-graph',
+  'dl7-staleness',
+];
+
+export const JOURNEY_REGISTRY: Readonly<Record<JourneyId, readonly JourneyStep[]>> = {
+  canonical: CANONICAL_STEPS,
+  'dl7-set-factor': SET_FACTOR_STEPS,
+  'dl7-edit-graph': EDIT_GRAPH_STEPS,
+  'dl7-staleness': STALENESS_STEPS,
+};
+
+/**
+ * Journeys whose execution is gated until edit_graph DL-7 PR B is
+ * accepted. PR B is now live on staging (PR #159 docs merge pending),
+ * so this set is empty by default — `dl7-edit-graph` runs as a core
+ * V5 path. The env flag `DL7_PR_B_DISABLE` (note: inverted from the
+ * pre-merge `DL7_PR_B_LANDED`) is preserved as an emergency disable
+ * switch: setting it to `true` re-gates the journey if PR B regresses
+ * on staging. Most operators should never need it.
+ */
+export const PR_B_GATED_JOURNEYS: ReadonlySet<JourneyId> = new Set();
