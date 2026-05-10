@@ -1111,6 +1111,80 @@ green.
 
 ---
 
+## DL-13 — `lint-changed` pre-push hook misses changed source files
+
+**Status:** covered, pending merge (2026-05-10) — fix implemented on
+branch `claude/stupefied-volhard-15c245`. Will move to **closed** once
+the branch merges; replace this header with `**Status:** closed by
+<merge-SHA>` at that point.
+
+**Note on entry origin.** This entry was originally drafted on
+`claude/dl7-acceptance-doc` (commit `1a1aac9f`, also adds DL-12 and
+DL-14). That branch had not merged when this Step 3 fix landed, so
+the entry is reproduced here together with its closure record. When
+`dl7-acceptance-doc` merges, the duplicate-add will surface as a
+clean conflict on this entry — keep the closure-noted version.
+
+**Symptom.** Across the DL-7 PR B pushes, the pre-push hook's
+`lint-changed` stage reported `OK (no changed src files)` despite
+the push containing six new files under `src/orchestrator-v5/**`
+plus modifications to two existing source files. CI then surfaced
+five ESLint errors on those exact files (`'vi' is defined but
+never used`, `'AppliedChanges' is defined but never used`,
+`Expected a 'const' assertion`, etc.). PR #158 had to clean them
+up after the fact.
+
+**Root cause confirmed.** Two compounding bugs in
+`scripts/validate-prepush.sh:82` (the original
+`check_lint_changed`):
+1. **Wrong diff base.** `git diff --name-only HEAD -- ...` compares
+   working-tree against last commit, so committed-but-unpushed
+   changes were invisible.
+2. **Glob pathspec swallowed.** `'src/**/*.ts'` was passed quoted
+   to `git diff` as a literal pathspec; git's pathspec engine does
+   not expand `**` like a shell glob, so the result was empty even
+   when src/ files HAD changed.
+Empty result hit `print_check "lint-changed" "OK (no changed src
+files)"` (line 84) and returned 0 — silent skip.
+
+**Resolution implemented:**
+- Replaced `check_lint_changed()` with a base-vs-HEAD merge-base
+  diff (`origin/staging` primary, fallback to `origin/main` and
+  local refs), NUL-delimited file collection, ESLint-config-aware
+  filtering, deletion-aware file existence check, and visible
+  no-op output (prints resolved base + candidate count + selected
+  count when no lintable changes are found).
+- **Lint scope now matches CI.** CI runs `pnpm lint` = `eslint .`
+  over the whole repo, covering `**/*.ts` + `**/*.{js,mjs,cjs}` in
+  both `src/` and `tests/`. The hook now selects changed `*.ts`,
+  `*.tsx`, `*.js`, `*.mjs`, `*.cjs` files under both, honouring
+  `eslint.config.js`'s `ignores` block (`dist/`, `node_modules/`,
+  `examples/`, `scripts/`, `perf/`, `tests/types/`,
+  `tests/perf/**/*.js`, `sdk/typescript/dist/`,
+  `sdk/typescript/vitest.config.ts`, `qa-smoke.mjs`, `* 2.ts` /
+  `* 3.ts` stale shadows).
+- **Fail-closed base resolution.** If neither `origin/staging`,
+  `origin/main`, nor local fallbacks yield a non-empty merge-base,
+  the hook returns non-zero with an actionable error message
+  (suggests `git fetch origin staging` and notes the bypass env var).
+- **Operator escape hatch.** `SKIP_LINT_CHANGED=1 git push` skips
+  the check with a loud warning identifying it as an operator
+  override. Not a default path; not for CI use.
+
+**Files changed:**
+- `scripts/validate-prepush.sh` — `check_lint_changed()` rewritten
+  (~100 line diff). No other functions touched, no CI workflow
+  changes, no runtime/source code changes.
+
+**Trigger to close (final):** the hook's `lint-changed` stage
+reports the same set of files CI's `pnpm lint` would lint, for any
+push shape (new branch, amended commit, new files, renames),
+AND fails closed when the diff base cannot be resolved. Confirmed
+via three local tests on `claude/stupefied-volhard-15c245` and
+end-to-end pre-push on push.
+
+---
+
 ## How to add a new DL entry
 
 1. Number sequentially (DL-N).
