@@ -359,11 +359,26 @@ async function fetchPriorFacts(
   // and made `prior_facts` always empty in production, breaking both the
   // analysis-fallback feature (Task 1.4) and the coaching-cache decision
   // review / signal lookups. Use `t.id` so the FK lookup resolves.
-  const handlerRowIds = priorTurns
-    .filter((t) => t.turn_class === 'handler')
-    .map((t) => t.id);
+  //
+  // DL-7 PR B (2026-05-10): widened from
+  // `priorTurns.filter((t) => t.turn_class === 'handler')` to all
+  // prior turns. Historically only `turn_class === 'handler'` turns
+  // emitted facts; PR B's edit_graph dispatch deliberately preserves
+  // `turn_class: 'direct_answer'` while emitting an
+  // `EditGraphHandlerFact`, so the historical filter would silently
+  // exclude the new fact's parent turn and PR B's emission would be
+  // downstream-invisible. The actual gate is the FK in
+  // `readFactsFor` — turns without associated `v5_handler_facts` rows
+  // contribute nothing to the result, so passing all prior-turn row
+  // IDs is harmless. This is also more future-proof: any subsequent
+  // turn class that emits facts works without further loader changes.
+  // The variable name was historically `handlerRowIds`; renamed to
+  // `priorTurnRowIds` post-widening so the wording matches what the
+  // value now is — every prior turn's row id, not just the
+  // `handler`-class ones.
+  const priorTurnRowIds = priorTurns.map((t) => t.id);
   // Lean info row: counts and presence flags only. Verbose arrays moved to
-  // debug — set LOG_LEVEL=debug to recover handler_row_ids / per-turn
+  // debug — set LOG_LEVEL=debug to recover prior_turn_row_ids / per-turn
   // class+handler arrays when investigating fact-chain issues.
   log.info(
     {
@@ -372,7 +387,7 @@ async function fetchPriorFacts(
       scenario_id: scenarioId,
       session_store_present: store !== undefined,
       prior_turn_count: priorTurns.length,
-      handler_row_id_count: handlerRowIds.length,
+      prior_turn_row_id_count: priorTurnRowIds.length,
     },
     'V5 buildTurnContext: fact chain trace',
   );
@@ -383,14 +398,14 @@ async function fetchPriorFacts(
       scenario_id: scenarioId,
       prior_turn_classes: priorTurns.map((t) => t.turn_class),
       prior_turn_handler_ids: priorTurns.map((t) => t.handler_id ?? null),
-      handler_row_ids: handlerRowIds,
+      prior_turn_row_ids: priorTurnRowIds,
     },
     'V5 buildTurnContext: fact chain trace (verbose)',
   );
   const empty = { facts: [] as readonly HandlerFact[], factsWithTurn: [] as readonly HandlerFactWithTurn[] };
   if (!store) return empty;
   if (priorTurns.length === 0) return empty;
-  if (handlerRowIds.length === 0) return empty;
+  if (priorTurnRowIds.length === 0) return empty;
   try {
     // Prefer the with-turn variant when the store implements it
     // (production SupabaseSessionStore always does). Test mocks
@@ -399,19 +414,19 @@ async function fetchPriorFacts(
     // disabled in that case (it never triggers without facts), but
     // every other consumer keeps working.
     const factsWithTurn = store.readFactsWithTurnFor
-      ? await store.readFactsWithTurnFor(handlerRowIds)
+      ? await store.readFactsWithTurnFor(priorTurnRowIds)
       : ([] as readonly HandlerFactWithTurn[]);
     const facts =
       factsWithTurn.length > 0
         ? factsWithTurn.map((w) => w.fact)
-        : await store.readFactsFor(handlerRowIds);
+        : await store.readFactsFor(priorTurnRowIds);
     log.info(
       {
         event: 'v5_turn_context_facts',
         request_id: requestId,
         scenario_id: scenarioId,
         prior_turn_count: priorTurns.length,
-        handler_row_id_count: handlerRowIds.length,
+        prior_turn_row_id_count: priorTurnRowIds.length,
         fact_count: facts.length,
         fact_types: facts.map((f) => f.fact_type),
         has_run_analysis_fact: facts.some((f) => f.fact_type === 'run_analysis'),

@@ -552,33 +552,114 @@ These supersede the previous five-item list. War Room Decisions 1 and
 locks the file-overlap rule from DL-7's "Workstream-status
 declarations" section.
 
-- [ ] **1. Documented source of truth for `edit_graph` recent-change /
+**Status convention:** `[~]` = covered by PR B implementation (commit
+present locally; awaiting push, deploy and War Room acceptance);
+`[x]` = finally closed. PR B's branch is built and tested but not yet
+merged to staging at the time these checks are ticked. Final closure
+flips to `[x]` after deploy + acceptance.
+
+**Loader-fix amendment (DL-7 PR B P0):** an earlier review pass
+flagged that criteria 2, 3, and 5 below were not actually covered
+by the initial PR B implementation because
+`buildTurnContext.fetchPriorFacts` filtered prior turns by
+`turn_class === 'handler'`, dropping the `direct_answer` turns on
+which PR B emits the `edit_graph` fact. The loader fix at
+[src/orchestrator-v5/build-turn-context.ts:362](../src/orchestrator-v5/build-turn-context.ts:362)
+widens the filter to all prior turns (the FK in `readFactsFor` is
+the actual gate). Criteria 2, 3, 5 are now genuinely covered. The
+fix is pinned by:
+
+- `src/orchestrator-v5/__tests__/build-turn-context-direct-answer-facts.test.ts`
+  (FL1-FL6, 6 tests) — direct_answer turn → fact in prior_facts.
+- `tests/integration/orchestrator/edit-graph-recent-changes-e2e.test.ts`
+  (E2E-loader test) — full two-turn flow: dispatch commit on
+  direct_answer turn → next-turn buildTurnContext loads it →
+  `recent_changes` surfaces it as `graph_edited`.
+
+- [~] **1. Documented source of truth for `edit_graph` recent-change /
       receipt behaviour.** Where the user-facing "what changed?" string
       comes from, where the structured fact is written, where it is
       consumed by `recent_changes`, and which fields are display-safe.
-- [ ] **2. Successful `edit_graph` mutation creates or is associated
-      with a V5 turn-linked mutation fact / receipt.** Per
-      Decision 1 above; implemented in the V5 integration tranche, not
-      in the current branch.
-- [ ] **3. `recent_changes` can surface the accepted edit in a safe
+      → `EditGraphHandlerFact.result.safe_summary` is the canonical
+      user-facing string; constructed by
+      `src/orchestrator-v5/handlers/edit-graph-fact-builder.ts`;
+      consumed by
+      `src/orchestrator-v5/context/recent-changes.ts:summariseEditGraph`;
+      surfaced verbatim by
+      `src/orchestrator-v5/routing/state-query-guard.ts`. All display-
+      safe-text fields enumerated in DL-7 PR B's `### PR B emitter-side
+      safety test contract` subsection.
+- [~] **2. Successful `edit_graph` mutation creates or is associated
+      with a V5 turn-linked mutation fact / receipt.** Per Decision 1
+      above. → Implemented in DL-7 PR B (commit pending push). The
+      builder at
+      `src/orchestrator-v5/handlers/edit-graph-fact-builder.ts:buildEditGraphHandlerFact`
+      produces an `EditGraphHandlerFact` for every successful applied
+      mutation; `dispatchEditGraph` passes it as `handler_facts: [<fact>]`
+      to `commitDirectAnswer`. Turn linkage flows via the
+      `HandlerFactWithTurn` wrapper at session-store read time
+      (unchanged from the existing D1 mutation-fact pattern).
+- [~] **3. `recent_changes` can surface the accepted edit in a safe
       user-facing form.** No raw entity IDs, no internal vocabulary
       ("repair", "wrapped", "envelope", model-routing details), no
       jargon from the A6 list in
       [tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts](../tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts).
-- [ ] **4. Graph hash / graph diff is used only as supporting
+      → `summariseEditGraph` reads `safe_summary` verbatim. Display-
+      safety is enforced at the emitter (the builder runs
+      `sanitiseUserFacingText` and the Phase 2A jargon-guard before
+      construction). Pinned by:
+      - `tests/unit/orchestrator-v5/handlers/edit-graph-fact-builder.test.ts`
+        (E1-E5 raw-ID + jargon tests)
+      - `src/orchestrator-v5/context/__tests__/recent-changes-edit-graph.test.ts`
+        (R1-R7)
+      - `tests/integration/orchestrator/edit-graph-recent-changes-e2e.test.ts`
+        (E2E4 raw-ID scrub end-to-end)
+- [~] **4. Graph hash / graph diff is used only as supporting
       evidence, not the sole user-facing source.** Per Decision 1.
-      Hash drives staleness verification; meaning + rationale + safe
-      summary come from the structured receipt.
-- [ ] **5. `prior_facts` / `HandlerFactWithTurn` stability is covered
-      by a targeted contract test.** Per Decision 2 above. Test lives
-      with the V5 integration tranche.
-- [ ] **6. No `ContextPack` assembler/schema files are touched in the
+      → `graph_hash_before` / `graph_hash_after` on the fact are
+      diagnostic-only; `safe_summary` is the user-facing source.
+      Documented in
+      `src/orchestrator/handler-results.ts` (schema comment line ~273-279)
+      and `Docs/edit_graph_v9_dl7_v5_integration_design.md` § 3.2.
+      `recent_changes` projector reads `safe_summary`, not the hashes.
+- [~] **5. `prior_facts` / `HandlerFactWithTurn` stability is covered
+      by a targeted contract test.** Per Decision 2 above. → Test lands
+      at
+      `tests/unit/orchestrator-v5/handlers/edit-graph-prior-facts-contract.test.ts`
+      (PF1-PF6, 6 tests). Asserts `deriveAnalysisFreshness` reads
+      `prior_facts: readonly HandlerFact[]` plus a current graph hash
+      and produces the correct verdict, with NO `ContextPack` /
+      `recent-changes` / `build-turn-context` imports — the
+      forbidden-imports list is enforced by the file's import
+      statements as the canonical contract surface.
+- [~] **6. No `ContextPack` assembler/schema files are touched in the
       `edit_graph` branch unless the War Room explicitly authorises a
       cross-workstream integration tranche.** The "must NOT edit" list
       in the Workstream-status declarations section above is the
       enforcement surface; reviewers should bounce any `edit_graph` PR
       whose diff includes those paths without a recorded War Room
-      authorisation.
+      authorisation. → Verified for PR B at branch
+      `claude/xenodochial-goldberg-0f13db` via
+      `git diff origin/staging..HEAD --name-only | grep -E
+      'context-pack-assembler|context-pack-schema|ContextPack'` →
+      empty. PR B touches no `ContextPack` surface. Final `[x]` flips
+      after merge / deploy / acceptance.
+
+      **Authorised in-scope exception (build-turn-context):** the
+      single edit at
+      [src/orchestrator-v5/build-turn-context.ts:362](../src/orchestrator-v5/build-turn-context.ts:362)
+      (loader-filter widening from `turn_class === 'handler'` to all
+      prior turns) was an authorised hard-dependency fix for DL-7 PR
+      B — without it, `direct_answer` turn-linked facts would have
+      been silently dropped between commit and downstream load,
+      negating PR B's emit-side correctness. This is NOT a general
+      ContextPack ownership change: the file lives in
+      `src/orchestrator-v5/` (V5-owned), and the change is a one-line
+      filter relaxation pinned by FL1–FL6 +
+      `edit-graph-recent-changes-e2e.test.ts:E2E-loader`. The
+      Workstream-status "must NOT edit" list remains in force for
+      all `context-pack-assembler*`, `context-pack-schema*`, and
+      `ContextPack`-named files.
 
 **Owner (acceptance):** the War Room (Paul + V5 Context Management
 workstream owner).
@@ -855,6 +936,107 @@ produces zero unstaged tracked changes by default.
 flagging "911 unstaged tracked node_modules changes" — see commit
 of vendor refresh (`chore(deps): bump @talchain/schemas to 0.12.0`)
 for the reference cleanup pattern.
+
+---
+
+## DL-10 — Loader-side filters can silently negate emit-side correctness (DL-7 PR B retrospective)
+
+**Status:** retrospective — captured 2026-05-10 during DL-7 PR B
+review; informs future fact-emission work.
+
+**Symptom.** During DL-7 PR B implementation, the `edit_graph`
+dispatcher emitted a valid `EditGraphHandlerFact` and the
+`append_turn_atomic` RPC committed it correctly to
+`v5_handler_facts`. End-to-end behaviour was nonetheless broken:
+nothing surfaced in `recent_changes`, nothing reached the state-
+query guard, and the next turn's `prior_facts` array contained no
+`edit_graph` entry. The fact was being persisted and then silently
+discarded at load time.
+
+**Root cause.** `buildTurnContext.fetchPriorFacts`
+([src/orchestrator-v5/build-turn-context.ts:362](../src/orchestrator-v5/build-turn-context.ts:362))
+filtered prior turns by `turn_class === 'handler'` before mapping
+to row IDs for `readFactsFor` / `readFactsWithTurnFor`. The filter
+predated PR B and matched the historical convention that only
+`handler`-class turns emit facts. PR B intentionally preserves
+`turn_class: 'direct_answer'` for `edit_graph` mutations (per War
+Room — `V5ActionType` does not include `edit_graph`, and the
+response-finaliser path is unchanged), so the loader filter
+silently dropped every PR B fact's parent turn before
+`readFactsFor` was even called. Emit-side correctness was real;
+load-side correctness negated it.
+
+**Lesson.** *Loader-side filters can silently negate emit-side
+correctness.* In PR B, `edit_graph` emitted a valid
+`EditGraphHandlerFact`, but `buildTurnContext` originally loaded
+facts only from turns where `turn_class === 'handler'`. Since
+`edit_graph` intentionally preserves `turn_class: 'direct_answer'`,
+emitted facts would have been invisible to `recent_changes` and
+state-query flows. **Future fact-emission work must verify
+end-to-end visibility through `buildTurnContext` / `prior_facts`,
+not just emission.** A unit test that asserts
+`commitDirectAnswer` was called with a non-empty `handler_facts`
+array is necessary but not sufficient; the same payload must be
+shown to round-trip through `buildTurnContext` and reach the
+projector.
+
+**Concrete recommendations for the next fact variant.**
+
+1. Pair every emit-side test with a loader-side test that calls
+   `buildTurnContext` with a mock store and asserts the new fact
+   appears in `prior_facts` and `prior_facts_with_turn`.
+2. If the emitting handler does NOT use `turn_class === 'handler'`
+   (i.e. preserves `direct_answer`), explicitly enumerate that in
+   the design doc so reviewers spot the load-path question.
+3. Treat the prior-turn filter in `fetchPriorFacts` as fact-
+   emission infrastructure: any narrowing of it must be paired
+   with a check that no current emit site relies on the broader
+   shape.
+
+**Pinned by.** FL1–FL6 in
+[src/orchestrator-v5/__tests__/build-turn-context-direct-answer-facts.test.ts](../src/orchestrator-v5/__tests__/build-turn-context-direct-answer-facts.test.ts)
+and the E2E-loader test in
+[tests/integration/orchestrator/edit-graph-recent-changes-e2e.test.ts](../tests/integration/orchestrator/edit-graph-recent-changes-e2e.test.ts).
+
+**Trigger to close (retrospective entries).** This DL is reference
+material; it does not "close" in the same sense as a defect. It
+retires only when the next fact-emission workstream lands and its
+review has explicitly cited this entry, or when its lesson is
+absorbed into a higher-level checklist (e.g. a "new fact variant"
+ADR template).
+
+---
+
+## DL-11 — Inherited `no-op-helpers.test.ts` failures (test baseline)
+
+**Status:** open — pre-existing on staging baseline; unrelated to
+DL-7 PR B.
+
+**Symptom.** Two failures persist in
+[src/orchestrator-v5/tools/handlers/__tests__/no-op-helpers.test.ts](../src/orchestrator-v5/tools/handlers/__tests__/no-op-helpers.test.ts):
+
+- `buildAnalysisAbsentTemplate › uses singular "option" wording when option_count === 1`
+- `buildAnalysisAbsentTemplate › uses plural "options" wording when option_count !== 1`
+
+Both fail with the same shape: the test asserts the rendered
+template contains the substring `"<N> option(s) configured"`, but
+the implementation renders `"<N> option(s) set up"` (different
+verb phrase, same semantics). Wording mismatch only.
+
+**Confirmed unrelated to DL-7 PR B.** Reproduction on the
+unmodified tree (PR B changes stashed) shows the same two
+failures, identical error output. PR B does not modify
+`no-op-helpers.ts` or its test file. Not blocking PR B; should be
+resolved in baseline cleanup.
+
+**Owner.** _unassigned_ — V5 baseline maintainer.
+
+**Trigger to close.** Either:
+- align the assertion strings to `"set up"` (simpler), or
+- align the template strings to `"configured"` (matches the
+  template's own coaching vocabulary in adjacent helpers).
+Then the two failing tests pass and the V5 unit suite is fully
+green.
 
 ---
 

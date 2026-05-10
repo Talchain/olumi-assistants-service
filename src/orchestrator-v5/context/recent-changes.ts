@@ -79,7 +79,16 @@ export const RECENT_CHANGES_SUMMARY_MAX_CHARS = 80;
 export type RecentChangeAction =
   | 'constraint_added'
   | 'factor_value_updated'
-  | 'link_strength_updated';
+  | 'link_strength_updated'
+  // 0.12.0 — DL-7 PR B: LLM-driven graph edits via the `edit_graph`
+  // dispatcher. Companion to the three D1 mutation actions above.
+  // Mapping: `'graph_edited'` ← `EditGraphHandlerFact` (any
+  // `edit_kind`). The fact's `safe_summary` is quoted verbatim as
+  // the projection's `summary`; `affected_entities[0].label` becomes
+  // the `target_label`. The schema-side `noop=true` filter at
+  // `summariseMutation` line 134 already covers the emitter-safety
+  // contract for "noop facts not surfaced as successful changes".
+  | 'graph_edited';
 
 export interface RecentMutation {
   /** Discriminator. Used by Sonnet and the deterministic state-query guard. */
@@ -149,7 +158,46 @@ function summariseMutation(fact: HandlerFact): RecentMutation | null {
       target_label: 'a link in the decision model',
     };
   }
+  if (fact.fact_type === 'edit_graph') {
+    return summariseEditGraph(fact.result);
+  }
   return null;
+}
+
+/**
+ * Project a successful `EditGraphHandlerFact` (DL-7 PR B) into a
+ * `RecentMutation`. Reads `safe_summary` verbatim — it has already
+ * been sanitised at the emitter (raw-ID scrub + Phase 2A jargon
+ * guard + 80-char cap) — so no further sanitisation here, and the
+ * `cap()` wrapper is just a defence-in-depth re-application.
+ *
+ * `target_label` is taken from the first affected entity. The
+ * fact's schema requires `safe_summary.min(1)` and each entity's
+ * `label.min(1)`, so both are non-empty when the fact arrives here;
+ * the `?? 'the decision model'` fallback handles the rare case of
+ * an empty `affected_entities` array (allowed by the schema for
+ * structural-without-target edits).
+ */
+function summariseEditGraph(
+  result: Record<string, unknown> | undefined,
+): RecentMutation | null {
+  if (!result || typeof result !== 'object') return null;
+  // Defence in depth: schema rejects status='noop' downstream of the
+  // top-level noop=true filter, but a future variant might separate
+  // them. Treat 'noop' status as not-surface-able.
+  if ((result as { status?: unknown }).status === 'noop') return null;
+  const safeSummary = (result as { safe_summary?: unknown }).safe_summary;
+  if (typeof safeSummary !== 'string' || safeSummary.length === 0) return null;
+  const entities = (result as { affected_entities?: unknown }).affected_entities;
+  const firstLabel =
+    Array.isArray(entities) && entities.length > 0 && typeof entities[0]?.label === 'string'
+      ? entities[0].label
+      : 'the decision model';
+  return {
+    action: 'graph_edited',
+    summary: cap(safeSummary),
+    target_label: firstLabel,
+  };
 }
 
 function summariseAddConstraint(
