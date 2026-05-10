@@ -775,18 +775,33 @@ the branch merges; replace this header with `**Status:** closed by
 
 **Resolution implemented:**
 - Added `pretypecheck` npm lifecycle hook in `package.json`:
-  `"pretypecheck": "pnpm openapi:generate"` — makes `pnpm typecheck`
-  self-sufficient on a fresh worktree.
+  `"pretypecheck": "pnpm openapi:generate"` — `pnpm typecheck` now
+  regenerates `src/generated/openapi.d.ts` before invoking `tsc`, so
+  fresh worktrees no longer fail with the wall of TS2307 "Cannot find
+  module '../../generated/openapi.d.ts'" errors.
 - Updated `scripts/validate-prepush.sh` `check_typecheck()` to run
   `pnpm openapi:generate` before invoking `tsc -p tsconfig.build.json
   --noEmit` directly (the hook calls `tsc` directly rather than via
   `pnpm typecheck`, so the npm lifecycle hook alone is insufficient
   for the pre-push path).
 
-**Verified:** with `src/generated/openapi.d.ts` deleted, both
-`pnpm typecheck` and the pre-push `check_typecheck()` flow regenerate
-the file and proceed to `tsc`. The wall of TS2307 "Cannot find module
-'../../generated/openapi.d.ts'" errors is gone.
+**Scope of the fix:** this closes only the OpenAPI/generated-types
+blocker — it does NOT make the broad `pnpm typecheck` command exit
+clean on a fresh worktree. `tsc --noEmit` (the full config) still
+surfaces documented pre-existing type errors in `tests/**` and
+`tools/**` (CLAUDE.md: "Source code (src/) compiles cleanly"). The
+pre-push hook uses `tsc -p tsconfig.build.json --noEmit` (source-only)
+which DOES exit 0 from a fresh state after this fix.
+
+**Verified:** with `src/generated/openapi.d.ts` deleted (clean
+disposable worktree after `pnpm install`):
+- `pnpm typecheck` — `pretypecheck` fires, generator regenerates the
+  file (~130ms), `tsc` proceeds; exit nonzero, but only on the
+  documented pre-existing `tests/` + `tools/` errors.
+- `pnpm exec tsc -p tsconfig.build.json --noEmit` (the pre-push
+  source-only config) — exit 0.
+- Pre-push hook end-to-end on this branch — all 15 checks OK including
+  the modified `typecheck` step.
 
 **Initial false alarm (resolved 2026-05-10):** when first verified, the
 OpenAPI fix appeared to unmask 4 semantic errors in
