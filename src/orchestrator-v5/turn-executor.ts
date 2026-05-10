@@ -60,6 +60,8 @@ import {
 import { composeValidationFailure } from './compose/validation-failure-responses.js';
 import { composeUnsupportedActionResponse } from './compose/unsupported-action-response.js';
 import { composeRecoverableValidationResponse } from './compose/recoverable-validation-response.js';
+import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
+import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
@@ -3134,6 +3136,147 @@ export async function runTurnExecutor(
             cause_kind: causeKind,
           }),
         );
+
+        // V5 alpha hardening Phase 2.6 — handler-recoverable 200 path.
+        // Locked recoverable causes (RECOVERABLE_HANDLER_CAUSES) compose
+        // a clean direct_answer 200 with coaching text + chip, mirroring
+        // the Phase 2.2 validator-recoverable pattern. Everything else
+        // (commit/PLoT/scenario/contract-mismatch/handler-result-invalid)
+        // falls through to translateExecuteError → 500. See
+        // Docs/v5/v5-p1-1-handler-failure-scope.md and
+        // src/orchestrator-v5/compose/recoverable-handler-causes.ts.
+        if (
+          error instanceof HandlerInvocationFailedError &&
+          isRecoverableHandlerCause(error.cause_kind)
+        ) {
+          log.warn(
+            {
+              request_id: requestId,
+              kind: error.kind,
+              cause_kind: error.cause_kind,
+              retryable: error.retryable,
+              handler_id: proposedHandlerId,
+              recoverable: true,
+            },
+            'V5 TurnExecutor handler invocation failed — recoverable',
+          );
+
+          const recoveryComposeCtx: ComposeContext = {
+            graph: graphLookupForValidate,
+            handlerRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+          };
+          const recovered = composeRecoverableHandlerResponse(
+            error,
+            recoveryComposeCtx,
+            context.stage,
+          );
+
+          // Impossible-state guard — mirrors the validator-recoverable
+          // safety net. If the per-cause switch hits the `default`
+          // (template_id === 'fallback'), the cause-kind is on the
+          // recoverable list but the composer has no branch — that is
+          // a code bug, not a runtime fault. Fail loudly via the
+          // existing fatal path so the gap surfaces in deploys.
+          if (recovered.template_id === 'fallback') {
+            log.error(
+              {
+                event: 'assert_recoverable_handler_fallback',
+                request_id: requestId,
+                cause_kind: error.cause_kind,
+              },
+              'V5 TurnExecutor hit recoverable composer fallback — cause-kind on recoverable list but no template; returning 500',
+            );
+            return translateExecuteError(error);
+          }
+
+          response = recovered.response;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          stagesCompleted.push('handler_recovery');
+
+          emit(TelemetryEvents.TurnExecutorFailureResponse, {
+            request_id: requestId,
+            session_id: context.session_id,
+            stage: context.stage,
+            failure_origin: 'handler',
+            error_code: error.cause_kind,
+            template_used: recovered.template_id,
+            chip_attached: recovered.response.suggested_actions.length > 0,
+            chip_type: recovered.chip_type,
+            chip_count: recovered.response.suggested_actions.length,
+            retryable: error.retryable,
+            recoverable: true,
+          });
+          // V5 alpha hardening Phase 2.5: primary lifecycle event for
+          // recovered handler outcomes. Mirrors the validator-recovery
+          // emit so a single query (`v5.recovery_response`) finds every
+          // recovery across both layers.
+          emit(
+            TelemetryEvents.RecoveryResponse,
+            obsPayload({
+              failure_origin: 'handler',
+              handler_cause_kind: error.cause_kind,
+              template_used: recovered.template_id,
+              chip_type: recovered.chip_type,
+              chip_count: recovered.response.suggested_actions.length,
+              retryable: error.retryable,
+            }),
+          );
+
+          // Commit as a direct_answer so route-v2 sees commit_performed
+          // and returns 200. Commit failure on the recoverable path is
+          // still fatal, but the original recoverable outcome and the
+          // commit failure are logged as two distinct records so
+          // infrastructure issues are not hidden behind resilience.
+          try {
+            const committed = await commitDirectAnswer(response, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: llmCallsUsed,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (commitError) {
+            log.warn(
+              {
+                event: 'v5.recoverable_outcome_pre_commit_failure',
+                request_id: requestId,
+                session_id: context.session_id,
+                failure_origin: 'handler',
+                handler_cause_kind: error.cause_kind,
+                template_used: recovered.template_id,
+              },
+              'V5 TurnExecutor recoverable handler outcome before commit failure',
+            );
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                failure_origin: 'handler',
+                handler_cause_kind: error.cause_kind,
+                err: serialiseError(commitError),
+              },
+              'V5 TurnExecutor commit failure on recoverable handler path',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+
         return translateExecuteError(error);
       }
 
