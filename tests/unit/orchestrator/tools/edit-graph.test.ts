@@ -1874,9 +1874,10 @@ describe("V5 H5 follow-up — handleEditGraph appliedGraph synthesis", () => {
     expect(data.rejection?.code).toBe("PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS");
   });
 
-  it("Rule C — plotClient configured + PLoT omits applied_graph + NO repairs: candidate fallback is allowed", async () => {
+  it("Rule B — plotClient configured + PLoT omits applied_graph + NO repairs: candidate fallback is allowed", async () => {
     // When PLoT validates but reports no repairs, the candidate IS
-    // equivalent to what PLoT would have returned. Synthesis is safe.
+    // equivalent to what PLoT would have returned. Rule B in the
+    // synthesis-block comment lettering: synthesis is safe.
     const adapter = makeAdapter([VALID_UPDATE_OP]);
     const plotClient: PLoTClient = {
       run: vi.fn().mockResolvedValue({}),

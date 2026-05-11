@@ -662,10 +662,12 @@ export const TelemetryEvents = {
   // pair is working as designed.
   // Payload: { request_id, scenario_id, operations_count, plot_configured }.
   // `plot_configured` distinguishes Rule A (PLoT not wired — V5 dispatch
-  // default) from Rule C-safe (PLoT wired but omitted applied_graph
-  // with no repairs reported). The `applied_graph_hash` value is in the
-  // companion structured log line ("edit_graph appliedGraph synthesized
-  // from local candidateGraph") rather than this event payload.
+  // default) from Rule B (PLoT wired but omitted applied_graph with no
+  // repairs reported). Rule lettering matches the synthesis block
+  // comment in src/orchestrator/tools/edit-graph.ts. The
+  // `applied_graph_hash` value is in the companion structured log line
+  // ("edit_graph appliedGraph synthesized from local candidateGraph")
+  // rather than this event payload.
   V5EditGraphAppliedGraphSynthesizedLocally: "v5.edit_graph.applied_graph_synthesized_locally",
 
   // V5 recovery chips — fired when the egress safety layer
