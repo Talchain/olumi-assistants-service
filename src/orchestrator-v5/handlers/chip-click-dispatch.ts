@@ -31,7 +31,8 @@
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { composeToolCallResponse } from '../compose.js';
 import {
@@ -338,13 +339,32 @@ export async function dispatchChipClickRunAnalysis(
     const confirmationText = typeof decl?.confirmation_template === 'function'
       ? decl.confirmation_template(outcome)
       : (decl?.confirmation_template ?? outcome.assistant_text);
-    const response = composeToolCallResponse({
+    let response = composeToolCallResponse({
       orientation: '',  // no Sonnet orientation on chip clicks.
       confirmation: confirmationText,
       coaching: null,
       stage: payload.stage,
       handlerFacts: enrichedFacts,
     });
+
+    // V5 stale-aware explain recovery — finaliser-level egress guard.
+    // Runs as the LAST step before the chip-click response is
+    // committed, so it backstops the confirmation template + any
+    // future fallback copy. An upstream hook would miss new emit
+    // paths added later; the finaliser hook cannot. See
+    // FORBIDDEN_USER_FACING_PHRASES for the contradiction list.
+    {
+      const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
+      if (guarded.rewritten) {
+        emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          phrase: guarded.hit,
+          dispatch_path: 'chip_click_finalise',
+        });
+        response = { ...response, assistant_text: guarded.text };
+      }
+    }
 
     log.info(
       {

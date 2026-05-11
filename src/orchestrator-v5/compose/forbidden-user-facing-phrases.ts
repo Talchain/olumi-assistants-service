@@ -67,3 +67,44 @@ export function findForbiddenPhraseHit(text: string): string | null {
   }
   return null;
 }
+
+/**
+ * Neutral fallback assistant_text used when the egress guard fires.
+ *
+ * Property: contains no token from `FORBIDDEN_USER_FACING_PHRASES`. The
+ * helper is responsibility-light — it does not name what was wrong with
+ * the original text, only invites the user to direct the next action.
+ * The chip set and blocks survive the rewrite so the user retains a
+ * recovery affordance.
+ */
+export const EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT =
+  "Let me know what you'd like me to do next, and I'll take it from there.";
+
+/**
+ * Apply the finaliser-level egress guard to a candidate `assistant_text`
+ * value. Pure function — returns either the original text unchanged
+ * (when clean) or the neutral fallback (when a forbidden phrase fires).
+ *
+ * Callers MUST emit `v5.egress.forbidden_phrase_detected` telemetry on
+ * a rewritten result, tagging the per-emit-path `dispatch_path`. The
+ * helper itself is telemetry-free so it stays usable from any module
+ * without coupling to the telemetry registry.
+ *
+ * Idempotent: a second call on a rewritten result is a no-op because
+ * the fallback contains no forbidden phrase.
+ */
+export interface EgressGuardResult {
+  readonly rewritten: boolean;
+  readonly text: string;
+  readonly hit: string | null;
+}
+
+export function applyEgressForbiddenPhraseGuard(text: string): EgressGuardResult {
+  const hit = findForbiddenPhraseHit(text);
+  if (hit === null) return { rewritten: false, text, hit: null };
+  return {
+    rewritten: true,
+    text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+    hit,
+  };
+}

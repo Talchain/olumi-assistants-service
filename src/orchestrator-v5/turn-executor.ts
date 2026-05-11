@@ -62,6 +62,7 @@ import { composeUnsupportedActionResponse } from './compose/unsupported-action-r
 import { composeRecoverableValidationResponse } from './compose/recoverable-validation-response.js';
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
+import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
@@ -4018,6 +4019,39 @@ export async function runTurnExecutor(
     };
   }
 
+  /**
+   * V5 stale-aware explain recovery — finaliser-level egress guard.
+   *
+   * Scans `response.assistant_text` for any forbidden phrase (per
+   * `FORBIDDEN_USER_FACING_PHRASES`) and, on a hit, replaces the
+   * assistant text with a neutral fallback and emits the
+   * `v5.egress.forbidden_phrase_detected` telemetry event. The chip
+   * set + blocks are preserved so the user retains a recovery
+   * affordance.
+   *
+   * Idempotent: a second call on the rewritten response is a no-op
+   * because the neutral fallback contains no forbidden phrase.
+   */
+  function enforceEgressForbiddenPhraseGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    const guarded = applyEgressForbiddenPhraseGuard(assistantText);
+    if (!guarded.rewritten) return;
+    emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      phrase: guarded.hit,
+      dispatch_path: dispatchPath,
+    });
+    response = {
+      ...response,
+      assistant_text: guarded.text,
+    };
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
@@ -4029,6 +4063,15 @@ export async function runTurnExecutor(
     // V5 state-trust: surface the per-turn outcome alongside the
     // freshness derivation so the response-finaliser can thread freshness
     // onto the analysis_ready wire fields without re-deriving.
+    //
+    // V5 stale-aware explain recovery — finaliser-level egress guard.
+    // Runs as the LAST step before the response leaves this function,
+    // so it backstops EVERY emit path: deterministic templates, LLM
+    // output, fallback copy, recoverable-handler recovery, state-query
+    // guard. An upstream hook would miss new emit paths added later;
+    // a finaliser hook cannot. See FORBIDDEN_USER_FACING_PHRASES for
+    // the contradiction list this enforces.
+    enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     return {
       response,

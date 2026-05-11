@@ -268,9 +268,21 @@ describe('V5 state-query guard — route-level multi-turn proof', () => {
   });
 
   describe('without prior mutations', () => {
-    it('a state-query phrase is still intercepted but yields the curated "no changes" copy (not a denial)', async () => {
+    it('a state-query phrase is still intercepted and yields honest no-recent-edits copy (not a forbidden denial)', async () => {
       // priorTurns and priorFacts are empty — fresh scenario.
+      // V5 stale-aware explain recovery: the runtime must NOT emit any
+      // phrase from FORBIDDEN_USER_FACING_PHRASES (e.g. "I haven't
+      // applied any changes") even on this no-prior-mutations path —
+      // either the state-query guard's NO_RECENT_CHANGES_TEXT uses
+      // neutral copy (C4 lands the rewrite) or the finaliser-level
+      // egress guard rewrites it to a neutral fallback (C3 lands the
+      // guard). Either way, the principle the user sees is the same:
+      // the dispatch is `no_recent_changes`, no LLM call, and no
+      // forbidden contradiction phrase reaches the wire.
       const adapter = throwingRoutingAdapter();
+      const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+      setTestSink((eventName, data) => events.push({ event: eventName, data }));
+
       const result = await runTurnExecutor(
         payload('What update did you make?'),
         'req-no-prior-state-query',
@@ -278,10 +290,18 @@ describe('V5 state-query guard — route-level multi-turn proof', () => {
       );
       // Adapter still not called — guard owns the turn.
       expect(adapter.chatWithTools).not.toHaveBeenCalled();
-      const text = result.response.assistant_text;
-      expect(text.toLowerCase()).toContain("haven't applied");
+      const text = result.response.assistant_text ?? '';
+      // The deterministic guard dispatched as `no_recent_changes`.
+      const guardEvent = events.find((e) => e.event === 'v5.state_query_guard');
+      expect(guardEvent?.data.matched).toBe(true);
+      expect(guardEvent?.data.dispatch).toBe('no_recent_changes');
       // No legacy denial copy.
       expect(text).not.toMatch(/no changes were needed/i);
+      // No forbidden user-facing phrase reaches the wire (either the
+      // state-query guard already uses neutral copy after C4, or the
+      // finaliser-level egress guard rewrote it).
+      expect(text.toLowerCase()).not.toMatch(/i\s+haven['’]t\s+applied\s+any\s+changes/);
+      expect(text.toLowerCase()).not.toMatch(/i\s+have\s+not\s+applied\s+any\s+changes/);
     });
   });
 

@@ -31,6 +31,7 @@ import {
   buildGenericEditGraphHandlerFact,
   isSuccessfulAppliedMutation,
 } from './edit-graph-fact-builder.js';
+import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
   ConversationContext,
@@ -624,7 +625,26 @@ export async function dispatchEditGraph(
     throw err;
   }
 
-  const response = editResultToOlumiResponse(editResult, payload);
+  let response = editResultToOlumiResponse(editResult, payload);
+
+  // V5 stale-aware explain recovery — finaliser-level egress guard.
+  // Runs as the LAST step before the response is committed and
+  // returned, so it backstops EVERY edit_graph emit path: V4
+  // confirmation text, clarification copy, recovery copy, the
+  // generic "Proposed graph edit." fallback. An upstream hook would
+  // miss new emit paths added later; the finaliser hook cannot.
+  {
+    const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
+    if (guarded.rewritten) {
+      emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        phrase: guarded.hit,
+        dispatch_path: 'edit_graph_finalise',
+      });
+      response = { ...response, assistant_text: guarded.text };
+    }
+  }
 
   // V5 finaliser contract: compute structural readiness from the post-edit
   // graph here so route-v2.ts can stamp it onto the wire envelope.
