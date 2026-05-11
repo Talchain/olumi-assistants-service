@@ -2331,11 +2331,12 @@ export async function handleEditGraph(
     // → recent_changes empty → stale/rerun blind to graph diffs.
     //
     // The fix synthesises `appliedGraph` from the locally-computed
-    // `candidateGraph` (produced by `applyPatchOperations` at line 1936
-    // when `config.cee.patchPreValidationEnabled` is true; default-on).
-    // This graph is the deterministic post-op state and is semantically
-    // equivalent to what PLoT's `applied_graph` would be ONLY when PLoT
-    // did not apply repairs.
+    // `candidateGraph` (produced unconditionally by
+    // `applyPatchOperations` at the apply block above; decoupled from
+    // `config.cee.patchPreValidationEnabled`, which now gates only the
+    // structural-validation step). The candidate is the deterministic
+    // post-op graph and is semantically equivalent to what PLoT's
+    // `applied_graph` would be ONLY when PLoT did not apply repairs.
     //
     // Safety rules (in order):
     //   A. plotClient null  → PLoT didn't run, no repairs possible →
@@ -2347,11 +2348,12 @@ export async function handleEditGraph(
     //      so substituting it would silently persist an unrepaired graph
     //      → REFUSE (return rejection). Operator should chase the PLoT
     //      contract violation rather than the system silently downgrading.
-    //   D. appliedGraph is STILL null after the synthesis step (no
-    //      candidateGraph available because pre-validation is disabled,
-    //      OR rule C above didn't fire because the function is at this
-    //      point) → also REFUSE (return rejection). Cannot truthfully
-    //      claim success without a graph to commit.
+    //   D. appliedGraph is STILL null after the synthesis step (i.e.
+    //      candidateGraph itself is missing because applyPatchOperations
+    //      threw — though that path returns rejection earlier — or rule
+    //      C above didn't fire to return rejection) → also REFUSE
+    //      (return rejection). Cannot truthfully claim success without
+    //      a graph to commit.
     if (!appliedGraph && candidateGraph) {
       const plotConfigured = plotClient !== null;
       const repairsReported = repairsApplied !== undefined && repairsApplied.length > 0;
@@ -2416,15 +2418,15 @@ export async function handleEditGraph(
     }
 
     // Rule D — refuse to enter the success branch without a graph to
-    // commit. If `appliedGraph` is STILL undefined here, PLoT didn't
-    // supply one AND `candidateGraph` wasn't computed
-    // (`config.cee.patchPreValidationEnabled === false`). Returning
-    // through the success branch in this state was the bug staging
-    // replay surfaced: V4 returned operations + appliedChanges +
-    // success-style assistant_text with `appliedGraph: null` and the
-    // V5 dispatcher's persistence chain silently dropped everything.
-    // Honest non-commit copy via `buildRejectionResult` is the
-    // correct outcome.
+    // commit. If `appliedGraph` is STILL undefined here, neither PLoT
+    // nor the local synthesis above (Rules A/B/C) produced one. This
+    // should not happen in normal operation post-fix — `candidateGraph`
+    // is computed unconditionally and the synthesis block uses it — but
+    // a future regression in the apply step (e.g., PatchApplyError
+    // path returning success-shaped result by mistake) would land here.
+    // Returning through the success branch with `appliedGraph: null`
+    // was the bug staging replay surfaced; honest non-commit copy via
+    // `buildRejectionResult` is the correct outcome.
     if (!appliedGraph) {
       log.error(
         {
