@@ -344,11 +344,11 @@ describe('TurnExecutor — recoverable handler outcomes (Phase 2.6)', () => {
       const warnCalls = warnSpy!.mock.calls;
       const errorCalls = errorSpy!.mock.calls;
 
-      const preCommitOutcome = warnCalls.find((c) => {
+      const preCommitOutcome = warnCalls.find((c: unknown[]) => {
         const payload = c[0] as Record<string, unknown>;
         return payload?.event === 'v5.recoverable_outcome_pre_commit_failure';
       });
-      const commitFailed = errorCalls.find((c) => {
+      const commitFailed = errorCalls.find((c: unknown[]) => {
         const payload = c[0] as Record<string, unknown>;
         return payload?.event === 'v5.state_commit_failed';
       });
@@ -368,6 +368,183 @@ describe('TurnExecutor — recoverable handler outcomes (Phase 2.6)', () => {
       expect((commitFailed![0] as Record<string, unknown>).handler_cause_kind).toBe(cause);
       expect((preCommitOutcome![0] as Record<string, unknown>).failure_origin).toBe('handler');
       expect((commitFailed![0] as Record<string, unknown>).failure_origin).toBe('handler');
+    },
+  );
+});
+
+// ===========================================================================
+// P1.1 follow-up — budget precedence regression
+// ===========================================================================
+//
+// If the outer turn budget fires before the recoverable handler branch
+// runs, the turn must classify as BUDGET_EXCEEDED, NOT compose a clean
+// 200. The budget check must happen as the **first** statement of the
+// recoverable branch — before any logging, composing, telemetry
+// emission, or commit attempt — so a budget-exceeded turn cannot
+// masquerade as a recovered 200 and leaves no recovery telemetry trail.
+describe('TurnExecutor — budget precedence over recoverable handler causes', () => {
+  // Save original env so we can restore between cases.
+  let originalTurnBudget: string | undefined;
+
+  beforeEach(() => {
+    originalTurnBudget = process.env.TURN_BUDGET_MS;
+    // Force a 1ms turn budget so a handler that awaits even a single
+    // setTimeout(..., 5) tick guarantees the abort signal fires before
+    // its throw is observed by the catch ladder.
+    process.env.TURN_BUDGET_MS = '1';
+  });
+
+  afterEach(() => {
+    if (originalTurnBudget === undefined) delete process.env.TURN_BUDGET_MS;
+    else process.env.TURN_BUDGET_MS = originalTurnBudget;
+  });
+
+  it.each(RECOVERABLE_CAUSES)(
+    'aborted turn budget before recoverable cause %s → BUDGET_EXCEEDED, no recovery side effects',
+    async (cause) => {
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(PROPOSAL_RUN_ANALYSIS, ''),
+      );
+
+      // Handler that yields long enough for the 1ms budget timer to fire,
+      // then throws the recoverable cause. By the time the catch ladder
+      // observes the throw, `turnAbort.signal.aborted` is true.
+      const handler: HandlerFn = async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        throw new HandlerInvocationFailedError('test-induced failure', {
+          cause_kind: cause,
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            specific_issue: 'simulated',
+          },
+        });
+      };
+      const handlerRegistry: HandlerRegistry = new Map([['run_analysis', handler]]);
+
+      const result = await runTurnExecutor(BASE_PAYLOAD, `req-budget-${cause}`, {
+        routingAdapter,
+        handlerRegistry,
+        graphState: GRAPH_WITH_OPTIONS,
+      });
+
+      // 1. Budget wins — turn is fatal with BUDGET_EXCEEDED, not recovered.
+      expect(result.telemetry.failure_type, cause).toBe('TURN_BUDGET_EXCEEDED');
+      expect(result.telemetry.commit_performed, cause).toBe(false);
+
+      // 2. No `v5.recovery_response` event was emitted on this turn.
+      const recovery = events.find((e) => e.event === 'v5.recovery_response');
+      expect(
+        recovery,
+        `${cause}: v5.recovery_response must not fire when budget fired before recovery`,
+      ).toBeUndefined();
+
+      // 3. No `turn_executor.failure_response{outcome:'recovered'}` event
+      //    was emitted. A `failure_response` with `outcome:'fatal'` may
+      //    fire from the budget-exceeded path; that is acceptable.
+      const recoveredFailure = events.find(
+        (e) =>
+          e.event === 'turn_executor.failure_response' &&
+          (e.data as Record<string, unknown>).outcome === 'recovered',
+      );
+      expect(
+        recoveredFailure,
+        `${cause}: turn_executor.failure_response{outcome:'recovered'} must not fire on aborted turn`,
+      ).toBeUndefined();
+
+      // 4. No `v5.handler_invocation{outcome:'error'}` was emitted —
+      //    Codex review tightening. The post-merge review required the
+      //    budget gate to win BEFORE every observable side effect on
+      //    the recoverable path, including the lifecycle handler-
+      //    invocation emit. A budget-aborted recoverable turn must
+      //    leave no recovery telemetry trail at all.
+      const handlerInvocationError = events.find(
+        (e) =>
+          e.event === 'v5.handler_invocation' &&
+          (e.data as Record<string, unknown>).outcome === 'error',
+      );
+      expect(
+        handlerInvocationError,
+        `${cause}: v5.handler_invocation{outcome:'error'} must not fire when budget fired before recovery`,
+      ).toBeUndefined();
+
+      // 5. No commit / append call on a budget-exhausted turn.
+      expect(appendCalls.length, cause).toBe(0);
+    },
+  );
+});
+
+// ===========================================================================
+// P1.1 follow-up — D1 recoverable chips do not derive pending run_analysis
+// ===========================================================================
+//
+// `commitDirectAnswer` calls `derivePendingActionsFromChips` when the
+// caller did not pre-supply pending actions. The deriver projects any
+// chip whose `action_type` is in `CHIP_DERIVABLE_ACTION_TYPES` (which
+// includes `'run_analysis'`) into a persisted pending action. Pre-fix,
+// the four D1 execute-time recoverable causes used `retryActionChip()`
+// (action_type: 'run_analysis'), so a mutation failure would persist a
+// stale pending `run_analysis` and have it auto-resolve on the next
+// chip-resolved turn — wrong UX and state pollution. The fix swaps to
+// text-prompt chips with no `action_type`, so `mapChipKind` returns
+// null and no pending action is derived.
+const D1_EXECUTE_TIME_RECOVERABLE_CAUSES: readonly HandlerInvocationFailedCause[] = [
+  'parameter_invalid_at_execute',
+  'entity_not_found_in_graph',
+  'entity_kind_mismatch_at_execute',
+  'precondition_unmet_at_execute',
+];
+
+describe('TurnExecutor — D1 recoverable causes do not derive pending run_analysis', () => {
+  it.each(D1_EXECUTE_TIME_RECOVERABLE_CAUSES)(
+    'recoverable D1 cause %s → committed turn has no pending run_analysis action',
+    async (cause) => {
+      const routingAdapter = mockRoutingAdapter(async () =>
+        mkToolUseResult(PROPOSAL_RUN_ANALYSIS, ''),
+      );
+      const handlerRegistry = makeThrowingRegistry(cause);
+
+      const result = await runTurnExecutor(BASE_PAYLOAD, `req-pa-${cause}`, {
+        routingAdapter,
+        handlerRegistry,
+        graphState: GRAPH_WITH_OPTIONS,
+      });
+
+      // Sanity: the turn committed as a recovered direct_answer 200.
+      expect(result.telemetry.commit_performed, cause).toBe(true);
+      expect(result.telemetry.failure_type, cause).toBeNull();
+
+      // Inspect the persisted append payload directly. `appendCalls`
+      // captures every `store.append(...)` call — for a recovered turn
+      // there should be exactly one. The `pending_actions` field on
+      // the write must NOT contain a `run_analysis` entry.
+      expect(appendCalls.length, cause).toBe(1);
+      const write = appendCalls[0] as { pending_actions?: ReadonlyArray<unknown> };
+      const pending = write.pending_actions ?? [];
+      const runAnalysisPending = pending.filter(
+        (p): p is { action: { kind?: string } } =>
+          typeof p === 'object' &&
+          p !== null &&
+          'action' in p &&
+          typeof (p as { action: unknown }).action === 'object',
+      ).filter((p) => p.action?.kind === 'run_analysis');
+      expect(
+        runAnalysisPending.length,
+        `${cause}: must not derive a pending run_analysis from the recovery chip`,
+      ).toBe(0);
+
+      // Sanity: a chip is still attached so the user has a recovery
+      // affordance — the cure for state pollution must not be "remove
+      // the chip entirely."
+      expect(result.response.suggested_actions.length, cause).toBeGreaterThan(0);
+      // And the chip is genuinely a text-prompt (no action_type) — the
+      // structural property that prevents pending-action derivation.
+      for (const chip of result.response.suggested_actions) {
+        expect(
+          chip.action_type,
+          `${cause}: D1 recovery chip must be a text-prompt (no action_type)`,
+        ).toBeUndefined();
+      }
     },
   );
 });

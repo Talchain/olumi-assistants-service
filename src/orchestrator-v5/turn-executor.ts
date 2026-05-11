@@ -2915,6 +2915,11 @@ export async function runTurnExecutor(
             session_id: context.session_id,
             stage: context.stage,
             failure_origin: 'validator',
+            // P1.1 follow-up — `outcome` discriminator. Impossible-state
+            // safety net composes a fatal envelope (INTERNAL_ERROR block,
+            // 500); record as fatal so dashboards joining on this field
+            // don't conflate it with the recoverable Phase 2.2 path.
+            outcome: 'fatal',
             error_code: recoverableCode,
             template_used: composed.template_id,
             chip_attached: composed.response.suggested_actions.length > 0,
@@ -2935,6 +2940,11 @@ export async function runTurnExecutor(
           session_id: context.session_id,
           stage: context.stage,
           failure_origin: 'validator',
+          // P1.1 follow-up — `outcome: 'recovered'` for the validator
+          // Phase 2.2 clean-body 200 path. Pairs with the
+          // `v5.recovery_response` lifecycle event for queries that
+          // want a single-event recovery filter.
+          outcome: 'recovered',
           error_code: recoverableCode,
           template_used: recoveredTemplateId,
           chip_attached: recoveredResponse.suggested_actions.length > 0,
@@ -3123,6 +3133,30 @@ export async function runTurnExecutor(
           }),
         );
       } catch (error) {
+        // P1.1 follow-up — budget precedence (Paul's constraint 7) for the
+        // recoverable handler path. If the outer turn budget has fired
+        // AND the error is a recoverable HandlerInvocationFailedError,
+        // route to translateExecuteError BEFORE the v5.handler_invocation
+        // emit below — so a budget-aborted recoverable turn produces NO
+        // observable side effect on the recovery telemetry trail
+        // (no v5.handler_invocation{outcome:'error'},
+        // no v5.recovery_response,
+        // no turn_executor.failure_response{outcome:'recovered'},
+        // no commit/append). BUDGET_EXCEEDED wins.
+        //
+        // Fatal cause-kinds still emit the handler_invocation telemetry
+        // because their fatal-path classification (and infrastructure
+        // diagnostics) genuinely benefits from the cause_kind record.
+        // The budget check inside translateExecuteError still classifies
+        // them as BUDGET_EXCEEDED on the wire.
+        if (
+          turnAbort.signal.aborted &&
+          error instanceof HandlerInvocationFailedError &&
+          isRecoverableHandlerCause(error.cause_kind)
+        ) {
+          return translateExecuteError(error);
+        }
+
         // Primary lifecycle event on handler failure. `outcome: 'error'`
         // paired with the cause_kind where known so log queries can
         // differentiate infrastructure faults from upstream errors.
@@ -3200,6 +3234,11 @@ export async function runTurnExecutor(
             session_id: context.session_id,
             stage: context.stage,
             failure_origin: 'handler',
+            // P1.1 follow-up — `outcome: 'recovered'` for the handler
+            // Phase 2.6 clean-body 200 path. The legacy `recoverable: true`
+            // boolean is retained for one release as a deprecation
+            // grace period; `outcome` is the canonical discriminator.
+            outcome: 'recovered',
             error_code: error.cause_kind,
             template_used: recovered.template_id,
             chip_attached: recovered.response.suggested_actions.length > 0,
@@ -4176,6 +4215,12 @@ export async function runTurnExecutor(
         session_id: context.session_id,
         stage: context.stage,
         failure_origin: 'handler',
+        // P1.1 follow-up — fatal handler path: `outcome: 'fatal'`. This
+        // emit fires only for cause-kinds OUTSIDE
+        // `RECOVERABLE_HANDLER_CAUSES` (commit, plot_*, scenario,
+        // contract-mismatch, handler-result-invalid). Recoverable
+        // cause-kinds short-circuit at the recoverable branch above.
+        outcome: 'fatal',
         error_code: error.cause_kind,
         template_used: composed.template_id,
         chip_attached: composed.response.suggested_actions.length > 0,

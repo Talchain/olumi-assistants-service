@@ -30,6 +30,7 @@ import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import { formatEdgeAdjustment } from './d1-shared/format-confirmation.js';
+import { ADJUST_EDGE_STRENGTH_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
 // V5 D1 (P1-6 follow-up): EdgeStrengthV3.std requires `.positive()`,
@@ -103,7 +104,10 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         throw new D1HandlerError(
           'PRECONDITION_UNMET',
           'adjust_edge_strength requires a graph — none was supplied for this turn.',
-          { details: { handler_id: 'adjust_edge_strength' } },
+          {
+            details: { handler_id: 'adjust_edge_strength' },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
         );
       }
       const graphParse = GraphV3.safeParse(rawGraph);
@@ -116,6 +120,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
               handler_id: 'adjust_edge_strength',
               first_issue: graphParse.error.issues[0]?.message,
             },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
           },
         );
       }
@@ -134,7 +139,10 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
               handler_id: 'adjust_edge_strength',
               entity_id: proposal.entity.id,
             },
-            userGuidance: 'Edge ID should be in format "source→target" (or "source->target").',
+            // P1.2 follow-up — replaced jargon-heavy guidance ("Edge ID
+            // should be in format ...") with the canonical handler-level
+            // phrase. Format details belong in internal logs, not user copy.
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
           },
         );
       }
@@ -152,6 +160,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
               from: parsed.from,
               to: parsed.to,
             },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
           },
         );
       }
@@ -165,7 +174,10 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         throw new D1HandlerError(
           'PARAMETER_INVALID',
           'adjust_edge_strength requires a "strength" parameter.',
-          { details: { handler_id: 'adjust_edge_strength' } },
+          {
+            details: { handler_id: 'adjust_edge_strength' },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
         );
       }
       const strengthParse = AdjustEdgeStrengthSchema.safeParse(strengthParam.value);
@@ -178,6 +190,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
               handler_id: 'adjust_edge_strength',
               received: strengthParam.value,
             },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
           },
         );
       }
@@ -196,6 +209,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             'adjust_edge_strength: std must be a number in [0, 0.5].',
             {
               details: { handler_id: 'adjust_edge_strength', received: stdParam.value },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
             },
           );
         }
@@ -227,6 +241,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           throw new D1HandlerError(
             'ENTITY_NOT_FOUND',
             `Edge ${parsed.from}→${parsed.to} disappeared during clone.`,
+            { userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE },
           );
         }
         edge.strength = { mean: newMean, std: finalStd };

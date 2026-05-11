@@ -227,49 +227,80 @@ export function composeHandlerFailureBody(
 
     // V5 D1 mutation handlers — typed recovery for execute-time failures
     // the structural validator could not catch.
+    //
+    // P1.1 follow-up — these four execute-time D1 causes use **text-prompt**
+    // chips (no `action_type`), not `retryActionChip()`. Reason:
+    // `retryActionChip()` carries `action_type: 'run_analysis'`, and
+    // `commitDirectAnswer` derives a pending `run_analysis` action from
+    // any chip whose `action_type` is in `CHIP_DERIVABLE_ACTION_TYPES`.
+    // For a mutation failure (e.g. an invalid `set_factor_value`), running
+    // analysis is the wrong recovery — the user needs to restate the
+    // change, not re-run analysis on stale state. Persisting a pending
+    // `run_analysis` would also leak into the next-turn ContextPack as a
+    // stale chip-derived action. Text-prompt chips bypass
+    // `derivePendingActionsFromChips` (it filters via `mapChipKind` which
+    // returns null for chips without an `action_type`).
+    //
+    // P1.2 follow-up — when the D1 handler attached a canonical per-handler
+    // user-safe phrase via `D1HandlerError.userGuidance` (surfaced as
+    // `details.specific_issue` by error-boundary.ts), the composer uses
+    // that phrase as the full assistant_text. The fallback per-cause
+    // copy is retained for throws that did not set `userGuidance` and
+    // for non-D1 invocations of these cause-kinds.
     case 'parameter_invalid_at_execute': {
-      const issue = sanitiseForUser(details.specific_issue ?? 'The value is ambiguous.');
+      const guidance = readUserGuidance(details);
       return {
         body: {
-          assistant_text: `I couldn't apply that change. ${issue}`,
-          suggested_actions: [retryActionChip()],
+          assistant_text:
+            guidance ??
+            `I couldn't apply that change. ${sanitiseForUser(details.specific_issue ?? 'The value is ambiguous.')}`,
+          suggested_actions: [restateChangePrompt()],
         },
         template_id: 'parameter_invalid_at_execute',
-        chip_type: 'action',
+        chip_type: 'text_prompt',
       };
     }
 
-    case 'entity_not_found_in_graph':
+    case 'entity_not_found_in_graph': {
+      const guidance = readUserGuidance(details);
       return {
         body: {
           assistant_text:
+            guidance ??
             "I couldn't find that item in the model. It may have been renamed or removed.",
-          suggested_actions: [retryActionChip()],
+          suggested_actions: [restateTargetPrompt()],
         },
         template_id: 'entity_not_found_in_graph',
-        chip_type: 'action',
+        chip_type: 'text_prompt',
       };
+    }
 
-    case 'entity_kind_mismatch_at_execute':
+    case 'entity_kind_mismatch_at_execute': {
+      const guidance = readUserGuidance(details);
       return {
         body: {
           assistant_text:
+            guidance ??
             "That change can't be applied to that kind of item. Try targeting a different entity.",
-          suggested_actions: [retryActionChip()],
+          suggested_actions: [restateTargetPrompt()],
         },
         template_id: 'entity_kind_mismatch_at_execute',
-        chip_type: 'action',
+        chip_type: 'text_prompt',
       };
+    }
 
-    case 'precondition_unmet_at_execute':
+    case 'precondition_unmet_at_execute': {
+      const guidance = readUserGuidance(details);
       return {
         body: {
-          assistant_text: "I can't make that change yet — the model isn't ready for it.",
-          suggested_actions: [retryActionChip()],
+          assistant_text:
+            guidance ?? "I can't make that change yet — the model isn't ready for it.",
+          suggested_actions: [scenarioStatusChip()],
         },
         template_id: 'precondition_unmet_at_execute',
-        chip_type: 'action',
+        chip_type: 'text_prompt',
       };
+    }
 
     case 'graph_invariant_violated':
       return {
@@ -324,6 +355,43 @@ function scenarioStatusChip(): SuggestedAction {
     label: 'Show scenario status',
     message: 'Show me the current status of my scenario.',
   };
+}
+
+// P1.1 follow-up — text-prompt chips for D1 execute-time recoverable
+// causes. Deliberately omit `action_type` so
+// `derivePendingActionsFromChips` (compose/derive-pending-actions.ts)
+// filters them out via `mapChipKind`, preventing a stale pending
+// `run_analysis` from being persisted on a mutation failure.
+function restateChangePrompt(): SuggestedAction {
+  return {
+    id: 'chip_prompt_restate_change',
+    label: 'Tell me what to change',
+    message: "Tell me what you'd like to change.",
+  };
+}
+
+function restateTargetPrompt(): SuggestedAction {
+  return {
+    id: 'chip_prompt_restate_target',
+    label: "Show what's in my model",
+    message: "Show me what's in my model.",
+  };
+}
+
+// P1.2 follow-up — read the canonical per-handler user-safe phrase set by
+// a D1 handler via `D1HandlerError.userGuidance` (surfaced through
+// `error-boundary.ts` as `details.specific_issue`). Returns the
+// sanitised phrase when set; `null` so the caller falls back to its
+// per-cause hardcoded copy. The sanitiser strips stack-trace fragments
+// and truncates; callers must still ensure the source phrase contains
+// no handler IDs / parameter names / enum literals (see
+// `handler_user_guidance.ts` constants).
+function readUserGuidance(
+  details: { readonly specific_issue?: string } & Record<string, unknown>,
+): string | null {
+  const raw = details.specific_issue;
+  if (typeof raw !== 'string' || raw.trim().length === 0) return null;
+  return sanitiseForUser(raw);
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ import {
   formatConstraintAdded,
   formatConstraintUpdated,
 } from './d1-shared/format-confirmation.js';
+import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 /**
  * Parameter Zod schema. The brief originally listed
@@ -95,6 +96,7 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
     throw new D1HandlerError(
       'PARAMETER_INVALID',
       'add_constraint requires a "constraint_type" parameter (at_least | at_most).',
+      { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
     );
   }
   const typeParse = AddConstraintTypeSchema.safeParse(typeParam.value);
@@ -102,7 +104,7 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
     throw new D1HandlerError(
       'PARAMETER_INVALID',
       'add_constraint: constraint_type must be "at_least" or "at_most".',
-      { details: { received: typeParam.value } },
+      { details: { received: typeParam.value }, userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
     );
   }
 
@@ -111,6 +113,7 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
     throw new D1HandlerError(
       'PARAMETER_INVALID',
       'add_constraint requires a "value" parameter.',
+      { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
     );
   }
   const valueParse = AddConstraintValueSchema.safeParse(valueParam.value);
@@ -118,7 +121,7 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
     throw new D1HandlerError(
       'PARAMETER_INVALID',
       'add_constraint: value must be a number.',
-      { details: { received: valueParam.value } },
+      { details: { received: valueParam.value }, userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
     );
   }
 
@@ -127,7 +130,11 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
   if (labelParam !== undefined) {
     const labelParse = AddConstraintLabelSchema.safeParse(labelParam.value);
     if (!labelParse.success) {
-      throw new D1HandlerError('PARAMETER_INVALID', 'add_constraint: label must be a non-empty string.');
+      throw new D1HandlerError(
+        'PARAMETER_INVALID',
+        'add_constraint: label must be a non-empty string.',
+        { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+      );
     }
     label = labelParse.data;
   }
@@ -137,7 +144,11 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
   if (unitParam !== undefined) {
     const unitParse = AddConstraintUnitSchema.safeParse(unitParam.value);
     if (!unitParse.success) {
-      throw new D1HandlerError('PARAMETER_INVALID', 'add_constraint: unit must be a non-empty string.');
+      throw new D1HandlerError(
+        'PARAMETER_INVALID',
+        'add_constraint: unit must be a non-empty string.',
+        { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+      );
     }
     unit = unitParse.data;
   }
@@ -172,7 +183,10 @@ export function createAddConstraintHandler(): HandlerFn {
         throw new D1HandlerError(
           'PRECONDITION_UNMET',
           'add_constraint requires a graph — none was supplied for this turn.',
-          { details: { handler_id: 'add_constraint' } },
+          {
+            details: { handler_id: 'add_constraint' },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
         );
       }
       const graphParse = GraphV3.safeParse(rawGraph);
@@ -185,6 +199,7 @@ export function createAddConstraintHandler(): HandlerFn {
               handler_id: 'add_constraint',
               first_issue: graphParse.error.issues[0]?.message,
             },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
           },
         );
       }
@@ -196,7 +211,10 @@ export function createAddConstraintHandler(): HandlerFn {
         throw new D1HandlerError(
           'ENTITY_NOT_FOUND',
           `Cannot add constraint: "${targetId}" is not in the graph.`,
-          { details: { handler_id: 'add_constraint', target_id: targetId } },
+          {
+            details: { handler_id: 'add_constraint', target_id: targetId },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
         );
       }
       // Allowlist + rejection metadata are sourced from the same
@@ -216,6 +234,7 @@ export function createAddConstraintHandler(): HandlerFn {
               // behaviour.
               accepted_kinds: [...ALLOWED_TARGET_KINDS],
             },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
           },
         );
       }
@@ -262,6 +281,7 @@ export function createAddConstraintHandler(): HandlerFn {
               handler_id: 'add_constraint',
               first_issue: constraintParse.error.issues[0]?.message,
             },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
           },
         );
       }
