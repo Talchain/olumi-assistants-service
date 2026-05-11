@@ -20,6 +20,14 @@ describe('FORBIDDEN_USER_FACING_PHRASES — phrase matches', () => {
     ["I haven't applied any changes in this session yet.", "haven't applied any changes (straight apostrophe)"],
     ['I haven’t applied any changes in this session yet.', "haven't applied any changes (curly apostrophe)"],
     ['I have not applied any changes yet.', 'have not applied any changes'],
+    // Codex round-3 denial variants — simple past, alternative verbs,
+    // singular noun, "updates" instead of "changes".
+    ["I didn't apply any changes.", "didn't apply any changes (simple past)"],
+    ['I did not apply any changes.', 'did not apply any changes (formal)'],
+    ['I did not make any changes.', 'did not make any changes (alternative verb)'],
+    ['No change was made.', 'singular "no change was made"'],
+    ['No updates were made.', 'plural "no updates were made"'],
+    ['No updates have been applied.', '"no updates have been applied"'],
     ['Nothing changed in the model after that edit.', 'nothing changed'],
     // "no changes" — contextual denial patterns (post-Codex P1 fix).
     // The bare `\bno\s+changes\b` regex was over-broad; replaced with
@@ -155,5 +163,27 @@ describe('findForbiddenPhraseHit — boundary cases', () => {
     // lower bound stays as a smoke check rather than an exact-count
     // pin so future additions don't trip this invariant.
     expect(FORBIDDEN_USER_FACING_PHRASES.length).toBeGreaterThanOrEqual(9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 stale-aware explain recovery — Codex round-3 Improvement 4.
+//
+// Pin route-v2.ts's EDIT_GRAPH_RECOVERY_TEXT against the shared
+// FORBIDDEN_USER_FACING_PHRASES list. The constant is audit-only
+// today (it ships through sendFinalised200, which bypasses the
+// per-dispatch egress hooks landed in this workstream); a follow-up
+// task will fold this through the route-level chokepoint. Until
+// then, this test is the contract that the recovery text contains
+// no contradiction phrase, so a future edit to the constant cannot
+// silently re-introduce one.
+// ---------------------------------------------------------------------------
+
+describe('audited recovery constants — no forbidden phrase', () => {
+  it('route-v2.ts EDIT_GRAPH_RECOVERY_TEXT is clean', async () => {
+    const { EDIT_GRAPH_RECOVERY_TEXT } = await import(
+      '../../../orchestrator/route-v2.js'
+    );
+    expect(findForbiddenPhraseHit(EDIT_GRAPH_RECOVERY_TEXT)).toBeNull();
   });
 });

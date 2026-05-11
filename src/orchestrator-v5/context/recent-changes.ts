@@ -182,10 +182,16 @@ function summariseEditGraph(
   result: Record<string, unknown> | undefined,
 ): RecentMutation | null {
   if (!result || typeof result !== 'object') return null;
-  // Defence in depth: schema rejects status='noop' downstream of the
-  // top-level noop=true filter, but a future variant might separate
-  // them. Treat 'noop' status as not-surface-able.
-  if ((result as { status?: unknown }).status === 'noop') return null;
+  // Defence in depth: the schema's `status` enum is `'applied' | 'noop'`
+  // today and the dispatcher's `isSuccessfulAppliedMutation` gate
+  // already excludes rejected edits from emitting a fact at all.
+  // Filtering on 'noop' AND 'rejected' here is belt-and-braces: if a
+  // future schema bump adds a 'rejected' literal (or any non-applied
+  // status), the projection treats it as not-surface-able. The
+  // top-level `fact.noop === true` filter at line 143 is the
+  // primary gate; this is the secondary.
+  const status = (result as { status?: unknown }).status;
+  if (status === 'noop' || status === 'rejected') return null;
   const safeSummary = (result as { safe_summary?: unknown }).safe_summary;
   if (typeof safeSummary !== 'string' || safeSummary.length === 0) return null;
   const entities = (result as { affected_entities?: unknown }).affected_entities;

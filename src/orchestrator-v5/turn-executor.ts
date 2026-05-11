@@ -655,13 +655,37 @@ export async function runTurnExecutor(
     // the request graph as the only available signal.
     currentAnalysisGraphHashForTurn = ((): string | null => {
       const persistedGraph = context.persistedGraph;
-      if (persistedGraph !== undefined && persistedGraph !== null) {
-        const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
-        if (parsed.success) {
-          return computeAnalysisAffectingGraphHash(parsed.data);
-        }
+      if (persistedGraph === undefined || persistedGraph === null) {
+        // Cold-start / first-draft path: no canonical state has been
+        // persisted yet, so the request graph is the only signal
+        // available. Hashing it is correct here.
+        return computeAnalysisAffectingGraphHash(graphStateForTurn);
       }
-      return computeAnalysisAffectingGraphHash(graphStateForTurn);
+      const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
+      if (parsed.success) {
+        return computeAnalysisAffectingGraphHash(parsed.data);
+      }
+      // V5 stale-aware explain recovery (Codex round-3 P1): persisted
+      // graph exists but failed ingress parse. Do NOT fall back to
+      // `graphStateForTurn` here — if the client is ALSO lagging
+      // behind a persisted edit, the request graph could match the
+      // prior `graph_hash_at_run` and produce a false-fresh verdict
+      // (silently corrupt freshness instead of admitting we don't
+      // know the canonical state). Returning null routes the
+      // derivation to `'unknown' / current_graph_hash_unavailable`
+      // which honestly signals the situation to the wire envelope,
+      // telemetry, and downstream chip rules.
+      log.warn(
+        {
+          event: 'v5.persisted_graph.parse_failed',
+          request_id: requestId,
+          scenario_id: context.session_id,
+          issue_count: parsed.error.issues.length,
+          first_issue_path: parsed.error.issues[0]?.path.join('.') ?? null,
+        },
+        'V5 TurnExecutor persisted graph failed ingress parse; freshness will resolve as unknown to avoid a false-fresh verdict',
+      );
+      return null;
     })();
     routingFreshness = deriveAnalysisFreshness(
       context.prior_facts,

@@ -37,6 +37,14 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // trailing punctuation ("any changes.", "any changes in this session").
   /\bI\s+haven['’]t\s+applied\s+any\s+changes\b/i,
   /\bI\s+have\s+not\s+applied\s+any\s+changes\b/i,
+  // Codex round-3 denial variants — simple past, alternative verbs,
+  // singular noun form, "updates" instead of "changes". Each
+  // expresses the same contradiction sense as the "I haven't applied
+  // any changes" canonical entry.
+  /\bI\s+didn['’]t\s+apply\s+any\s+changes\b/i,
+  /\bI\s+did\s+not\s+(?:apply|make)\s+any\s+changes\b/i,
+  /\bno\s+change\s+was\s+made\b/i,
+  /\bno\s+updates?\s+(?:were|are|have\s+been)\s+(?:made|applied)\b/i,
   // "nothing changed" — denial of state mutation.
   /\bnothing\s+changed\b/i,
   // "no changes" — contextual denial. The previous bare `\bno\s+changes\b`

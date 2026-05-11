@@ -67,6 +67,25 @@ describe('projectRecentChanges — edit_graph branch', () => {
     expect(out).toHaveLength(0);
   });
 
+  it("R3' status='rejected' edit_graph fact is filtered (defence-in-depth, Codex round-3 Improvement 3)", () => {
+    // EditGraphHandlerFactSchema's status enum is `'applied' | 'noop'`
+    // today, AND isSuccessfulAppliedMutation upstream excludes
+    // rejected results from emitting a fact at all — so this code
+    // path is unreachable in practice. The defence-in-depth filter
+    // is here so that if a future schema bump adds 'rejected' (or
+    // any non-applied status), the projector continues to refuse
+    // to surface it as a recent change. The TypeScript cast widens
+    // the typed `status` field to accept the test value.
+    const facts = [
+      makeEditGraphFact({
+        noop: false,
+        status: 'rejected' as unknown as 'applied' | 'noop',
+      }),
+    ];
+    const out = projectRecentChanges(facts);
+    expect(out).toHaveLength(0);
+  });
+
   it('R4 empty affected_entities falls back to generic target_label', () => {
     const facts = [makeEditGraphFact({ affected_entities: [] })];
     const out = projectRecentChanges(facts);

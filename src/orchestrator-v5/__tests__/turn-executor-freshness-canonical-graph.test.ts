@@ -293,14 +293,24 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
   });
 
-  it('falls back to request graphState when persisted graph fails ingress parse (Codex Improvement 1)', async () => {
-    // The H3 fix safe-parses `context.persistedGraph` via
-    // GraphStateIngressSchema before hashing. If the persisted graph is
-    // present BUT malformed (corrupt JSON shape after a partial write,
-    // legacy schema version, or test fixture drift), the parse fails
-    // and the code falls back to hashing the request graphState. This
-    // test exercises that branch — without it, the malformed-persisted
-    // case is reachable only by inspection.
+  it('returns UNKNOWN (not fresh) when persisted graph exists but fails ingress parse (Codex round-3 P1)', async () => {
+    // V5 stale-aware explain recovery — Codex round-3 P1.
+    //
+    // Earlier behaviour: when persistedGraph existed but failed
+    // GraphStateIngressSchema parse, the code silently fell back to
+    // hashing the request graphState. If the client was also lagging
+    // (stale pre-edit graph) the hash matched the prior fact's
+    // graph_hash_at_run and produced a false-fresh verdict —
+    // misleading the wire envelope and the chip-generator stale rule.
+    //
+    // Post-fix: parse-failure on a present persistedGraph is a real
+    // safety case. The runtime emits the `v5.persisted_graph.
+    // parse_failed` log signal and returns null hash, routing the
+    // freshness derivation to `'unknown' / current_graph_hash_
+    // unavailable`. The user-facing chip rules treat unknown as
+    // non-stale (no Rerun-analysis chip surface), but the wire
+    // envelope's analysis_ready.freshness reports the verdict
+    // honestly instead of lying about freshness.
     installPriorRunAnalysisFact(PRE_EDIT_HASH);
     // Malformed: `nodes` must be an array per GraphStateIngressSchema;
     // a string-typed nodes field forces safeParse to fail.
@@ -309,7 +319,7 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
       edges: [],
     };
     const routingAdapter = mockRoutingAdapter(async () =>
-      mkTextResult('fallback after parse failure'),
+      mkTextResult('explanation after parse failure'),
     );
 
     await runTurnExecutor(
@@ -323,17 +333,9 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
 
     const evt = findPreHandlerFreshnessEvent();
     expect(evt, 'pre-handler freshness telemetry event should fire').toBeDefined();
-    // Persisted-graph parse failed → fallback hashed the request graph
-    // → matches the prior fact's hash → freshness is `'fresh'`. The
-    // critical assertion is `current_graph_hash === PRE_EDIT_HASH`,
-    // proving the request-graph fallback executed. (The persisted-
-    // graph branch with a malformed payload couldn't have produced
-    // any hash value at all — `computeAnalysisAffectingGraphHash`
-    // returns null when given a non-graph shape — so the only way
-    // to observe a non-null `current_graph_hash` here is via the
-    // fallback path.)
-    expect(evt!.data.freshness).toBe('fresh');
-    expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
+    expect(evt!.data.freshness).toBe('unknown');
+    expect(evt!.data.reason).toBe('current_graph_hash_unavailable');
+    expect(evt!.data.current_graph_hash).toBeNull();
   });
 
   it('falls back to request graphState when persisted graph is absent (first-draft turn)', async () => {
