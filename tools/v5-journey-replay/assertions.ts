@@ -331,33 +331,41 @@ export const CLARIFICATION_BACK_PATTERN =
  * evidence strings elsewhere in this file show only a few sample verbs
  * for brevity, NOT the full vocabulary):
  *
- *   - Past-tense mutation verbs:
+ *   - Mutation verbs (case-insensitive; mostly past-tense, but the
+ *     `Set` token is tense-neutral and also matches present-tense
+ *     "set" — see the matched-but-Step-3-caught edge case below):
  *       Strengthened / Increased / Decreased / Adjusted / Modified /
  *       Weakened / Updated / Changed / Set / Added / Removed /
  *       Applied / Saved
  *   - Forward-looking: "now has" / "now shows" / "now reflects"
  *   - Passive: "has been updated/changed/adjusted/set/added/removed"
  *
- * Rejected classes (these MUST keep failing — they indicate no
- * mutation happened on the wire):
+ * Rejected at Step 2 (these MUST keep failing the regex — they
+ * indicate no mutation happened on the wire):
  *
- *   - Mode A draft / proposal copy:
+ *   - Mode A draft / proposal copy that contains no accepted verb:
  *       "I have changes in mind ..."
  *       "I've drafted a change ..."
- *       "I can set X to Y. Reply with ..."
  *   - Step-1 graph-echo prose:
  *       "Your decision model ... is ready, with N options, M factors ..."
  *   - Generic descriptive prose with no mutation verb.
  *
- * Known matched-but-Step-3-caught edge case — "Updated Price.":
- * a bare past-tense verb sentence DOES match this regex on its own.
- * That is intentional. The regex is the prose half of a layered
- * defence; the structural backstop is Step 3 (`assertWhatChanged`),
- * which fails the journey if the next turn cannot surface the change
- * via `recent_changes`. Do NOT "fix" this by narrowing the regex —
- * narrowing would also drop genuine mutations like "Strengthened the
- * X edge from 0.15 to 0.32." Coverage for both classes is locked in
- * by `tests/unit/v5-journey-replay/mutation-ack-pattern.test.ts`.
+ * Matched at Step 2 but caught by Step 3 — bare verb sentences and
+ * Mode A copy that happens to contain an accepted verb DO match this
+ * regex. That is intentional. The regex is the prose half of a
+ * layered defence; the structural backstop is Step 3
+ * (`assertWhatChanged`), which fails the journey if the next turn
+ * cannot surface the change via `recent_changes`. Do NOT "fix" these
+ * cases by narrowing the regex — narrowing the `Updated` token would
+ * drop the canonical set_factor_value acknowledgement
+ * ("Updated Incremental Hiring Cost from £0 to 20%."), and narrowing
+ * the `Set` token would drop legitimate forms like "Set X to 20."
+ * Examples (locked in by
+ * `tests/unit/v5-journey-replay/mutation-ack-pattern.test.ts`):
+ *
+ *   - "Updated Price."                                  (matches `Updated`)
+ *   - "I can set X to Y. Reply with the value ..."      (matches `Set`,
+ *     case-insensitive — Mode A offer phrased with present-tense "set")
  */
 export const MUTATION_ACK_PATTERN =
   /\b(?:Updated|Adjusted|Changed|Modified|Set|Added|Removed|Strengthened|Weakened|Increased|Decreased|Applied|Saved)\b|\bnow (?:has|shows|reflects)\b|\bhas been (?:updated|changed|adjusted|set|added|removed)\b/i;
