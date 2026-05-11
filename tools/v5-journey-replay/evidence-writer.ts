@@ -15,6 +15,7 @@
 import { writeFileSync } from 'node:fs';
 
 import { createRedactor } from './redact.js';
+import type { JourneyId, Step1Capture } from './steps.js';
 import type { EvidenceRow, HealthzResult } from './types.js';
 
 export interface EvidenceHeader {
@@ -33,6 +34,27 @@ export interface EvidenceHeader {
    * row reports "well-formed build observed, no strict comparison".
    */
   readonly expected_build?: string;
+  /**
+   * Journey identifier this run executed. Optional and additive — the
+   * field is rendered when present and elided when absent so existing
+   * harness self-tests (which build headers without it) stay green.
+   */
+  readonly journey?: JourneyId;
+  /**
+   * DL7 PR-B feature flag observed at run time. Threaded into the
+   * header so reviewers can see at a glance which gated assertions
+   * were active. Optional for backwards-compat.
+   */
+  readonly dl7_pr_b_landed?: boolean;
+  /**
+   * Optional Step 1 capture surface. When present, the renderer adds a
+   * "Step 1 capture" subsection to the journey block listing the
+   * parsed option/factor labels, the resolved factor (with fallback
+   * reason), and the captured graph hash. Reviewers use this to
+   * verify the deterministic factor fallback (per the audit §3) and
+   * cross-reference graph hashes across turns.
+   */
+  readonly step1_capture?: Step1Capture;
 }
 
 type Redactor = (v: unknown) => string;
@@ -168,8 +190,10 @@ export function renderEvidencePack(
   lines.push('');
   lines.push(`- **Branch:** \`${escapePipes(redact(header.branch))}\``);
   lines.push(
-    `- **Pack generated from commit SHA:** \`${escapePipes(redact(header.commit_sha))}\` ` +
-      `(if this does not match HEAD, regenerate with the harness)`,
+    `- **Harness code SHA at run time:** \`${escapePipes(redact(header.commit_sha))}\` ` +
+      `(the SHA the replay harness was built from when this pack was produced; ` +
+      `the commit that lands this pack into git history is typically one commit ahead — ` +
+      `see the committed-by SHA in \`git log\` for that)`,
   );
   lines.push(`- **Base URL:** ${escapePipes(redact(header.base_url))}`);
   lines.push(`- **Started at:** ${header.started_at}`);
@@ -183,6 +207,28 @@ export function renderEvidencePack(
         : `\`${escapePipes(redact(header.expected_build))}\``
     }`,
   );
+  if (header.journey !== undefined) {
+    lines.push(`- **Journey:** \`${header.journey}\``);
+  }
+  if (header.dl7_pr_b_landed !== undefined) {
+    // Historical name: `DL7_PR_B_LANDED`. The journey is no longer
+    // PR-B-gated by default — DL-7 PR B merged on staging — but the
+    // harness still honours an `DL7_PR_B_DISABLE=true` emergency
+    // rollback switch. The semantic surfaced to readers is "is the
+    // edit_graph journey currently active on this run?" not "did
+    // PR B land?", so the label is renamed accordingly.
+    const editGraphActive = header.dl7_pr_b_landed
+      ? 'yes (edit_graph dispatch live on staging; assertions active)'
+      : 'no (DL7_PR_B_DISABLE=true engaged — emergency rollback path)';
+    lines.push(`- **edit_graph_journey_active:** ${editGraphActive}`);
+    const gatedRows = rows.filter((r) => r.requires_dl7_pr_b === true);
+    if (gatedRows.length > 0) {
+      lines.push(
+        `- **edit_graph-gated rows:** ${gatedRows.length} ` +
+          '(skipped or marked `not_applicable` when DL7_PR_B_DISABLE=true)',
+      );
+    }
+  }
   lines.push('');
 
   // ---- Deploy confirmation ----
@@ -293,20 +339,80 @@ export function renderEvidencePack(
       lines.push('```');
       lines.push(redact(row.assistant_text ?? ''));
       lines.push('```');
+      // Phase 2.6.4: render chip details inline so reviewers can see
+      // chip-based signals (e.g. "rerun analysis" prompts that satisfy
+      // a staleness contract via chip rather than text). Empty chip
+      // array prints nothing.
+      if (row.chips && row.chips.length > 0) {
+        lines.push('Chips:');
+        for (const chip of row.chips) {
+          const action = chip.action_type ? ` action_type=\`${escapePipes(redact(chip.action_type))}\`` : '';
+          lines.push(`- \`${escapePipes(redact(chip.id))}\` — **${escapePipes(redact(chip.label))}** — "${escapePipes(redact(chip.message))}"${action}`);
+        }
+      }
       lines.push('');
     }
   }
 
-  // ---- Canonical steps brief ----
-  lines.push('## Canonical steps (from brief)');
-  lines.push('');
-  lines.push('1. POST fresh scenario + decision brief → draft_graph response with post-draft chips');
-  lines.push('2. "Which option looks weakest?" → references actual option/factor labels');
-  lines.push('3. "Add another option" → product-shaped: 200, no BoundaryError, no internal terms');
-  lines.push('4. chip_click payload for Run analysis → 200, PLoT completes, fact persisted');
-  lines.push('5. "Why does the leading option win?" → names leading option + probability + driver + caveat');
-  lines.push('6. "Increase the budget factor" → edit proposal or clarifying question');
-  lines.push('');
+  // ---- Canonical steps brief (canonical journey only) ----
+  // For DL-7 journeys, the step descriptions live in `steps.ts`
+  // alongside each `JourneyStep.description`; the table above already
+  // captures the per-step verdict. Suppress the canonical brief here
+  // when the run was a DL-7 journey to avoid misleading readers.
+  if (header.journey === undefined || header.journey === 'canonical') {
+    lines.push('## Canonical steps (from brief)');
+    lines.push('');
+    lines.push('1. POST fresh scenario + decision brief → draft_graph response with post-draft chips');
+    lines.push('2. "Which option looks weakest?" → references actual option/factor labels');
+    lines.push('3. "Add another option" → product-shaped: 200, no BoundaryError, no internal terms');
+    lines.push('4. chip_click payload for Run analysis → 200, PLoT completes, fact persisted');
+    lines.push('5. "Why does the leading option win?" → names leading option + probability + driver + caveat');
+    lines.push('6. "Increase the budget factor" → edit proposal or clarifying question');
+    lines.push('');
+  } else {
+    lines.push(`## DL-7 journey: \`${header.journey}\``);
+    lines.push('');
+    lines.push(
+      'See per-step `description` fields in [tools/v5-journey-replay/steps.ts]' +
+        '(../../tools/v5-journey-replay/steps.ts) for the canonical narrative of this journey. ' +
+        'The replay table above is the authoritative pass/fail record.',
+    );
+    lines.push('');
+    if (header.step1_capture !== undefined) {
+      const cap = header.step1_capture;
+      lines.push('### Step 1 capture');
+      lines.push('');
+      lines.push(
+        `- **Option labels parsed:** ${
+          cap.optionLabels.length === 0
+            ? '_none_'
+            : cap.optionLabels.map((l) => `\`${escapePipes(redact(l))}\``).join(', ')
+        }`,
+      );
+      lines.push(
+        `- **Factor labels parsed:** ${
+          cap.factorLabels.length === 0
+            ? '_none_'
+            : cap.factorLabels.map((l) => `\`${escapePipes(redact(l))}\``).join(', ')
+        }`,
+      );
+      lines.push(
+        `- **Resolved factor for Step 2:** ${
+          cap.resolvedFactorLabel === null
+            ? '_none — Step 2 fails with `no_factor_label_available`_'
+            : `\`${escapePipes(redact(cap.resolvedFactorLabel))}\``
+        } _(fallback reason: \`${cap.factorLabelReason}\`)_`,
+      );
+      lines.push(
+        `- **Graph hash at draft (post-Step 1):** ${
+          cap.graphHashAtDraft === null
+            ? '_not surfaced on wire envelope_'
+            : `\`${escapePipes(redact(cap.graphHashAtDraft))}\``
+        }`,
+      );
+      lines.push('');
+    }
+  }
   lines.push('### 4b — pinned unit regression (handler-level)');
   lines.push('');
   lines.push(
