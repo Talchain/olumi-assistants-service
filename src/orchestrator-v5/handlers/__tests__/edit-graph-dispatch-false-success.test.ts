@@ -431,3 +431,147 @@ describe('dispatchEditGraph — V5 H5 graph-persistence backstop', () => {
     expect(metadata.graph).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// V5 H5 — unified mutation predicate (Codex round-2 P1).
+//
+// `isSuccessfulAppliedMutation()` is now the single source of truth
+// for "did the mutation truly apply?". Previously it was applied
+// only at the commit boundary; other code paths (false-success
+// rewrite, analysisReady, freshness, returned graph) still inspected
+// `editResult.appliedGraph` directly. This left the impossible shape
+// (`appliedGraph + empty operations`) able to:
+//   - return success prose via the rewrite check,
+//   - stamp analysis_ready from an unpersisted graph,
+//   - derive freshness against an unpersisted graph,
+//   - return the unpersisted graph to route-v2.
+//
+// These tests pin that the impossible shape now blocks ALL of those
+// effects, not just commit-time graph persistence.
+// ---------------------------------------------------------------------------
+
+describe('dispatchEditGraph — V5 H5 unified mutation predicate (Codex round-2 P1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function makeImpossibleShapeResult(assistantText: string): EditGraphResult {
+    return {
+      blocks: [],
+      assistantText,
+      latencyMs: 500,
+      // Non-null appliedGraph WITHOUT operations — impossible shape.
+      appliedGraph: {
+        nodes: [{ id: 'goal_revenue', kind: 'goal', label: 'Revenue' }],
+        edges: [],
+      } as unknown as EditGraphResult['appliedGraph'],
+      wasRejected: false,
+      operations: [],
+    };
+  }
+
+  it('false-success rewrite FIRES on impossible shape with success-claim text', async () => {
+    // Previously: rewrite did NOT fire because `!editResult.appliedGraph`
+    // was false (appliedGraph is set). The unified predicate now
+    // correctly classifies this as no-commit and the rewrite fires.
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeImpossibleShapeResult("I've successfully updated the Price factor."),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-impossible-rewrite',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.response.assistant_text).toBe(
+      "Let me know what you'd like me to do next, and I'll take it from there.",
+    );
+    const emitMock = emit as MockedFunction<typeof emit>;
+    const falseSuccessCalls = emitMock.mock.calls.filter(
+      ([eventName]) => eventName === TelemetryEvents.V5EditGraphFalseSuccessRewritten,
+    );
+    expect(falseSuccessCalls.length).toBe(1);
+  });
+
+  it('analysisReady is undefined on impossible shape (no stamping from unpersisted graph)', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(makeImpossibleShapeResult('Some honest copy.'));
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-impossible-analysisready',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.analysisReady).toBeUndefined();
+  });
+
+  it('returned graph is null on impossible shape (no leak to route-v2 / wire envelope)', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(makeImpossibleShapeResult('Some honest copy.'));
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-impossible-returned-graph',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.graph).toBeNull();
+  });
+
+  it('returned graph is the appliedGraph on a true successful applied mutation', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeAppliedSuccessResult("I've updated Price to 'Price (revised)'."),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-true-success-returned-graph',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.graph).not.toBeNull();
+    expect(out.analysisReady).toBeDefined();
+  });
+
+  it('returned graph is null on a true no-op (no false leak via the return value)', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeNoOpFalseSuccessResult(
+          'I couldn’t see a concrete change to make from that description.',
+        ),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-noop-returned-graph',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.graph).toBeNull();
+    expect(out.analysisReady).toBeUndefined();
+  });
+});

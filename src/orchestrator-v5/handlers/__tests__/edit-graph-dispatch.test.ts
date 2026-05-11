@@ -709,6 +709,13 @@ describe('dispatchEditGraph', () => {
         latencyMs: 1100,
         appliedGraph: POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
         wasRejected: false,
+        // V5 H5 (Codex round-2 P1) — a "successful applied edit"
+        // requires non-empty operations per
+        // `isSuccessfulAppliedMutation()`. The previous fixture
+        // omitted them, which was the impossible shape the unified
+        // mutation predicate now blocks. Add a representative op so
+        // `analysisReady` and other downstream effects fire.
+        operations: [{ op: 'update_edge', path: 'fac_price->goal_revenue', value: 0.7 }],
       };
       (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
