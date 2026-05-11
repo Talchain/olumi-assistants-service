@@ -503,7 +503,14 @@ describe('explain_results — P0 combined precondition (missing / degraded / sta
         analysisFreshness: makeFreshness('stale', 'graph_hash_diverged'),
       }),
     );
-    expect(outcome.assistant_text).toMatch(/model has changed since the last analysis/);
+    // V5 stale-aware explain recovery: the leading sentence must match
+    // the brief's required wording verbatim. Pinned here so future
+    // copy-polish cannot drift the runtime out of brief compliance
+    // without flipping this assertion (which the replay harness
+    // mirrors).
+    expect(outcome.assistant_text).toMatch(
+      /^These results may be out of date because the model has changed since the last analysis\./,
+    );
     expect(outcome.assistant_text).not.toContain('Hire Senior Engineer');
     expect(outcome.suppress_orientation).toBe(true);
   });

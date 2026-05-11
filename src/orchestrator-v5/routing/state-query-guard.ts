@@ -307,8 +307,18 @@ function composeRecentChangeAnswer(head: RecentMutation, totalCount: number): st
   return `${head.summary}${tail}`;
 }
 
+// V5 stale-aware explain recovery — neutral honest copy that contains
+// no FORBIDDEN_USER_FACING_PHRASES entry. The previous wording
+// ("I haven't applied any changes in this session yet…") matched the
+// brief's hard-fail phrase verbatim and surfaced as the V5 Golden
+// Journey dl7-edit-graph denial-of-edit symptom whenever recent_changes
+// was empty (whether from an H5 missed commit or a legitimate
+// no-edits state). The replacement is honest about the absence of
+// recorded edits without contradicting an upstream mutation the
+// runtime might have missed.
 const NO_RECENT_CHANGES_TEXT =
-  "I haven't applied any changes in this session yet. Tell me what you'd like to update and I'll do it directly.";
+  "I don't have a record of recent edits in this conversation. " +
+  "If you'd like to make a change, tell me what to update and I'll do it directly.";
 
 /**
  * Compose the state-query continuity chip INLINE for the

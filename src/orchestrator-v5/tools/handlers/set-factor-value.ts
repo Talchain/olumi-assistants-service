@@ -56,8 +56,14 @@ import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
  * when no prior analysis existed (the model is being built; nothing to
  * stale yet).
  */
+// V5 stale-aware explain recovery — the phrase "previous analysis"
+// is on the brief's hard-fail list. Rewritten to use "last analysis"
+// (not on the forbidden list) so the deterministic narrative emits
+// brief-aligned copy at source. The finaliser-level egress guard
+// would otherwise rewrite this to a neutral fallback and emit a
+// telemetry signal — better to use clean wording at source.
 const STALENESS_NARRATIVE =
-  ' This makes the previous analysis stale. Re-run analysis to see how this affects the recommendation.';
+  ' This makes the last analysis stale. Re-run analysis to see how this affects the recommendation.';
 
 /**
  * Parameter Zod schema registered with the validator. Exported so the

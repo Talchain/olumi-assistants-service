@@ -308,8 +308,15 @@ describe('set_factor_value — Wave 2 receipt: staleness narrative + redaction',
       ),
     );
     expect(outcome.assistant_text).toMatch(/Updated/);
-    expect(outcome.assistant_text).toMatch(/previous analysis is now stale|previous analysis stale|This makes the previous analysis stale/);
+    // V5 stale-aware explain recovery: "previous analysis" is on the
+    // brief's hard-fail list. The narrative now uses "the last analysis"
+    // (not forbidden). The test asserts the staleness signal is present
+    // without coupling to the previous-wording variant.
+    expect(outcome.assistant_text).toMatch(/the last analysis (?:is now |stale|.*stale)/i);
     expect(outcome.assistant_text).toMatch(/Re-run analysis/);
+    // Hard-fail prose check: no forbidden phrase reaches the wire.
+    expect(outcome.assistant_text.toLowerCase()).not.toMatch(/previous analysis/);
+    expect(outcome.assistant_text.toLowerCase()).not.toMatch(/prior analysis/);
   });
 
   it('non-noop apply WITH prior DEGRADED analysis (status partial) → no staleness narrative (no successful prior)', async () => {

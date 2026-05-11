@@ -193,17 +193,37 @@ describe('tryStateQueryGuard', () => {
   });
 
   describe('no_recent_changes dispatch', () => {
-    it('returns the curated "I haven\'t applied any changes" copy when recent_changes is empty', () => {
+    it('returns the neutral honest copy (no FORBIDDEN_USER_FACING_PHRASES entry) when recent_changes is empty', () => {
+      // V5 stale-aware explain recovery: the previous wording
+      // ("I haven't applied any changes in this session yet…")
+      // matched the brief's hard-fail phrase verbatim and surfaced
+      // as the V5 Golden Journey dl7-edit-graph denial-of-edit
+      // symptom whenever recent_changes was empty. The replacement
+      // is honest about the absence of recorded edits without
+      // contradicting an upstream mutation the runtime might have
+      // missed (e.g. H5 missed-commit case).
       const outcome = tryStateQueryGuard({
         message: 'what update did you make?',
         contextPack: ctxWith([]),
       });
       if (!outcome.matched) throw new Error('expected matched=true');
       expect(outcome.dispatch).toBe('no_recent_changes');
-      expect(outcome.assistant_text.toLowerCase()).toContain("haven't applied");
+      // No forbidden phrase reaches the wire from this deterministic
+      // dispatch path.
+      expect(outcome.assistant_text.toLowerCase()).not.toMatch(
+        /i\s+haven['’]t\s+applied\s+any\s+changes/,
+      );
+      expect(outcome.assistant_text.toLowerCase()).not.toMatch(
+        /i\s+have\s+not\s+applied\s+any\s+changes/,
+      );
+      expect(outcome.assistant_text.toLowerCase()).not.toMatch(/no\s+changes/);
+      // The user gets an honest "no recorded edits" + invitation to
+      // make one. Wording-tolerant check: just assert the
+      // recovery-affordance phrasing is present.
+      expect(outcome.assistant_text.toLowerCase()).toMatch(/record of recent edits|like to make a change/);
       // Asserts the deterministic dispatch never returns the legacy
-      // edit_graph denial copy. This is the regression guard against
-      // the original misroute.
+      // edit_graph denial copy. Regression guard against the
+      // original misroute.
       expect(outcome.assistant_text).not.toMatch(/no changes were needed/i);
       expect(outcome.assistant_text).not.toMatch(/no update has been made/i);
     });
@@ -273,9 +293,10 @@ describe('tryStateQueryGuard', () => {
     });
 
     it('legacy state-query patterns still fire on empty recent_changes (no_recent_changes dispatch)', () => {
-      // Regression guard: post-mutation gating must NOT regress existing
-      // named-follow-up behaviour. "what changed?" with no recent change
-      // still returns the honest "haven't applied" copy.
+      // Regression guard: post-mutation gating must NOT regress
+      // existing named-follow-up behaviour. "what changed?" with no
+      // recent change still returns the neutral honest copy (no
+      // forbidden phrase per FORBIDDEN_USER_FACING_PHRASES).
       const outcome = tryStateQueryGuard({
         message: 'what changed?',
         contextPack: ctxWith([]),

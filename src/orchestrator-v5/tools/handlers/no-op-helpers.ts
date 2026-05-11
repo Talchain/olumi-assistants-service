@@ -157,16 +157,25 @@ export function buildPreconditionAssistantText(
 /**
  * Stale-analysis template. Used by the V5 explanation handlers when a
  * successful prior analysis exists but the current graph hash differs
- * from the hash at the time of that run. Tells the user the model has
- * changed and offers a re-run, without leaking internal terms (no graph
- * hash, no fact_type, no analysis_status). The chip-generator pairs this
- * with a "Re-run analysis" suggested action.
+ * from the hash at the time of that run.
+ *
+ * V5 stale-aware explain recovery — the opening sentence matches the
+ * brief's required wording verbatim ("These results may be out of date
+ * because the model has changed since the last analysis."). The
+ * recovery offer follows so the user has a one-click path forward; the
+ * chip-generator pairs this with a "Rerun analysis" suggested action.
+ *
+ * Hard-fail prose: the template contains no FORBIDDEN_USER_FACING_PHRASES
+ * entry. The phrase "the last analysis" is intentional (not in the
+ * forbidden list, distinct from the forbidden "previous analysis" /
+ * "prior analysis"). Without internal terms (no graph hash, no
+ * fact_type, no analysis_status).
  */
 export function buildAnalysisStaleTemplate(): string {
   return (
-    `The model has changed since the last analysis, so I can't be sure ` +
-    `the previous result still applies. Would you like to re-run analysis ` +
-    `to see how your changes affect the recommendation?`
+    `These results may be out of date because the model has changed ` +
+    `since the last analysis. Would you like to re-run analysis to see ` +
+    `how your changes affect the recommendation?`
   );
 }
 
