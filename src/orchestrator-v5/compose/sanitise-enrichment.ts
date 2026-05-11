@@ -123,8 +123,15 @@ export const S_BUCKET_REPLACEMENTS: Readonly<
   GRAPH_DISCONNECTED: (_ctx, _vars) =>
     `Some parts of the model are not connected to your goal.`,
 
+  // V5 stale-aware explain recovery: "no changes" is on the brief's
+  // forbidden-phrase list (see FORBIDDEN_USER_FACING_PHRASES). The
+  // template's intent — "this baseline option leaves the model
+  // untouched" — is preserved with "makes no adjustments" which is
+  // honest descriptive prose, is NOT in the forbidden list, and
+  // avoids the CEE jargon word "interventions" (banned by the
+  // sanitise-enrichment plain-language vocabulary guard).
   OPTION_NO_INTERVENTIONS: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' represents the current state, with no changes applied.`,
+    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' represents the status quo and makes no adjustments to the model.`,
 
   LOW_EFFECTIVE_SAMPLES: (_ctx, _vars) =>
     `This analysis is less reliable than usual, so treat the result as a signal to check rather than a settled answer.`,

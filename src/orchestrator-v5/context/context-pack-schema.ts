@@ -125,13 +125,31 @@ const ContextPackConversationSchema = z
   })
   .strict();
 
-/** RecentMutation shape — see `./recent-changes.ts`. */
-const RecentMutationSchema = z
+/**
+ * RecentMutation shape — see `./recent-changes.ts`.
+ *
+ * Exported so the projection ↔ schema drift guard (see
+ * `__tests__/recent-changes-edit-graph.test.ts`) can validate the
+ * projector's output against the same schema the ContextPack uses,
+ * without having to assemble a complete ContextPack probe.
+ */
+export const RecentMutationSchema = z
   .object({
     action: z.enum([
       'constraint_added',
       'factor_value_updated',
       'link_strength_updated',
+      // V5 stale-aware explain recovery — DL-7 PR B added `'graph_edited'`
+      // to `RecentChangeAction` in `recent-changes.ts` but the
+      // ContextPack schema's enum was never updated to match. Result: a
+      // successful edit_graph fact projected to `action: 'graph_edited'`
+      // would fail ContextPack validation at orient, surface as
+      // "ContextPack validation" in the unexpected-routing-error path,
+      // and prevent the state-query guard from seeing the mutation on
+      // the next turn — exactly the V5 Golden Journey dl7-edit-graph
+      // failure. This entry brings the schema in line with what the
+      // projection emits. Internal schema only; not on the wire.
+      'graph_edited',
     ]),
     summary: z.string(),
     target_label: z.string(),

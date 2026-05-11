@@ -752,6 +752,31 @@ export const TelemetryEvents = {
   //     missing-field regression case).
   V5RecentChangesPreLlm: "v5.recent_changes.pre_llm",
 
+  // V5 stale-aware explain recovery — finaliser-level egress guard
+  // detected a forbidden user-facing phrase in `response.assistant_text`
+  // (per `FORBIDDEN_USER_FACING_PHRASES` in
+  // `src/orchestrator-v5/compose/forbidden-user-facing-phrases.ts`).
+  // Fires from turn-executor's `finalizeRun()` and the terminal compose
+  // points of `edit-graph-dispatch.ts` / `chip-click-dispatch.ts` so
+  // EVERY emit path (deterministic templates, LLM output, fallback
+  // copy, recoverable-handler recovery) is covered uniformly.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - phrase: string — the matched substring verbatim (NOT the
+  //     regex source) so dashboards group by user-visible text.
+  //   - dispatch_path: string — one of 'turn_executor_finalise',
+  //     'edit_graph_finalise', 'chip_click_finalise' so the on-call
+  //     can attribute hits to the producing surface without grepping.
+  //
+  // On hit, the runtime ALSO replaces `assistant_text` with a neutral
+  // fallback that does not contain any forbidden phrase, so the user
+  // never sees the contradictory wording even when an upstream emit
+  // path produces it. The chip set + blocks are preserved so the
+  // user retains a recovery affordance.
+  V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
+
   // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
   // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
   // so any new PLoT field is covered automatically. Payload:

@@ -21,8 +21,17 @@
  * `staleness_reason` field.
  */
 
+// V5 stale-aware explain recovery — brief-mandated stale-copy opener.
+// Single source of truth for the stale assistant_text caveat. Used by:
+//   - buildAnalysisStaleTemplate (no-op-helpers.ts) as the leading
+//     sentence of the precondition-stale template
+//   - applyStalenessPrefix below as the idempotent prefix for any
+//     legacy call path that still relies on the prefix helper
+// Aligns with the brief's required wording verbatim. Contains no
+// FORBIDDEN_USER_FACING_PHRASES entry (no "previous analysis",
+// "prior analysis", "loaded from a prior run", etc.).
 export const STALENESS_PREFIX =
-  'These results are from a prior run and may not reflect recent changes to the decision model. Treat any figures below as directional rather than definitive.';
+  'These results may be out of date because the model has changed since the last analysis.';
 
 /**
  * Approved openings that suppress prefixing. The text must literally
@@ -31,21 +40,21 @@ export const STALENESS_PREFIX =
  * trust contract requires the user reads the caveat first, top-down.
  *
  * Pattern selection deliberately tight: only the canonical STALENESS_PREFIX
- * opening and the legacy deterministic-fallback phrasing match. A more
- * lenient pattern like "These results may not reflect…" would suppress
- * prefixing on legitimate non-staleness prose that happens to share that
- * opener (e.g. "These results may not reflect every nuance"), breaking
- * the trust contract.
+ * opening matches. The legacy "loaded from a prior run" opener has been
+ * pruned (V5 stale-aware explain recovery brief forbids that phrase in
+ * user-facing prose); any cached pre-prefixed prose using it will be
+ * re-prefixed, but the finaliser-level egress guard then strips/replaces
+ * the forbidden phrase, so the user never sees both.
  */
 const APPROVED_OPENINGS: readonly RegExp[] = [
   // Canonical STALENESS_PREFIX opening — guarantees this helper is idempotent
   // when called twice on the same text.
-  /^\s*these results are from a prior run and may not reflect\b/i,
-  // Legacy deterministic-fallback opening from the previous build, kept so
-  // any cached pre-prefixed prose does not get double-prefixed during the
-  // transition.
+  /^\s*these results may be out of date because the model has changed\b/i,
+  // Legacy directional-figures opening retained for back-compat: prose
+  // produced by the previous build's deterministic fallback opens with
+  // this clause. Keeping it suppresses double-prefixing during the
+  // transition window. The phrase contains no forbidden token.
   /^\s*treat (?:the |any )?figures below as directional rather than definitive\b/i,
-  /^\s*the analysis (?:is |was )?loaded from a prior run\b/i,
 ];
 
 export interface StalenessPrefixResult {

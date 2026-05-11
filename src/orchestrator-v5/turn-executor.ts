@@ -62,6 +62,7 @@ import { composeUnsupportedActionResponse } from './compose/unsupported-action-r
 import { composeRecoverableValidationResponse } from './compose/recoverable-validation-response.js';
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
+import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
@@ -634,7 +635,67 @@ export async function runTurnExecutor(
     // freshness is re-derived POST-dispatch below (see
     // `re-derive freshness post-dispatch` block) so a just-produced
     // run_analysis fact is selected on the same turn.
-    currentAnalysisGraphHashForTurn = computeAnalysisAffectingGraphHash(graphStateForTurn);
+    //
+    // V5 stale-aware explain recovery (H3 fix): the hash MUST come from
+    // the canonical persisted graph (scenarios.graph, loaded into
+    // context.persistedGraph by buildTurnContext) — NOT the
+    // request-supplied `graphStateForTurn`. The two diverge when the
+    // client lags behind a persisted edit: a follow-up explain turn
+    // that re-sends the pre-edit graph would otherwise hash to the
+    // same value as the prior run_analysis fact's `graph_hash_at_run`,
+    // produce a false-fresh verdict, and skip the stale recovery
+    // template + Rerun-analysis chip. Mirrors the canonical-hash logic
+    // already used by chip-click-dispatch.ts (which hashes
+    // cachedSnapshot.rawPersistedGraph for the same reason).
+    //
+    // Two non-canonical paths are handled differently per the V5
+    // stale-aware explain recovery brief (Codex round-3 P1):
+    //   - persistedGraph is null/undefined (cold-start / first-draft):
+    //     no canonical state exists yet; fall back to hashing the
+    //     request graph. That's the only signal available.
+    //   - persistedGraph exists but fails ingress parse (corrupt
+    //     write, legacy shape, schema-version drift): canonical state
+    //     is genuinely unknown. Do NOT fall back to the request graph
+    //     here — if the client is also lagging behind a persisted
+    //     edit, the request graph could match the prior
+    //     `graph_hash_at_run` and silently produce a false-fresh
+    //     verdict. Instead return null, route the derivation to
+    //     `'unknown' / current_graph_hash_unavailable`, and emit the
+    //     `v5.persisted_graph.parse_failed` log signal.
+    currentAnalysisGraphHashForTurn = ((): string | null => {
+      const persistedGraph = context.persistedGraph;
+      if (persistedGraph === undefined || persistedGraph === null) {
+        // Cold-start / first-draft path: no canonical state has been
+        // persisted yet, so the request graph is the only signal
+        // available. Hashing it is correct here.
+        return computeAnalysisAffectingGraphHash(graphStateForTurn);
+      }
+      const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
+      if (parsed.success) {
+        return computeAnalysisAffectingGraphHash(parsed.data);
+      }
+      // V5 stale-aware explain recovery (Codex round-3 P1): persisted
+      // graph exists but failed ingress parse. Do NOT fall back to
+      // `graphStateForTurn` here — if the client is ALSO lagging
+      // behind a persisted edit, the request graph could match the
+      // prior `graph_hash_at_run` and produce a false-fresh verdict
+      // (silently corrupt freshness instead of admitting we don't
+      // know the canonical state). Returning null routes the
+      // derivation to `'unknown' / current_graph_hash_unavailable`
+      // which honestly signals the situation to the wire envelope,
+      // telemetry, and downstream chip rules.
+      log.warn(
+        {
+          event: 'v5.persisted_graph.parse_failed',
+          request_id: requestId,
+          scenario_id: context.session_id,
+          issue_count: parsed.error.issues.length,
+          first_issue_path: parsed.error.issues[0]?.path.join('.') ?? null,
+        },
+        'V5 TurnExecutor persisted graph failed ingress parse; freshness will resolve as unknown to avoid a false-fresh verdict',
+      );
+      return null;
+    })();
     routingFreshness = deriveAnalysisFreshness(
       context.prior_facts,
       currentAnalysisGraphHashForTurn,
@@ -3991,6 +4052,39 @@ export async function runTurnExecutor(
     };
   }
 
+  /**
+   * V5 stale-aware explain recovery — finaliser-level egress guard.
+   *
+   * Scans `response.assistant_text` for any forbidden phrase (per
+   * `FORBIDDEN_USER_FACING_PHRASES`) and, on a hit, replaces the
+   * assistant text with a neutral fallback and emits the
+   * `v5.egress.forbidden_phrase_detected` telemetry event. The chip
+   * set + blocks are preserved so the user retains a recovery
+   * affordance.
+   *
+   * Idempotent: a second call on the rewritten response is a no-op
+   * because the neutral fallback contains no forbidden phrase.
+   */
+  function enforceEgressForbiddenPhraseGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    const guarded = applyEgressForbiddenPhraseGuard(assistantText);
+    if (!guarded.rewritten) return;
+    emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      phrase: guarded.hit,
+      dispatch_path: dispatchPath,
+    });
+    response = {
+      ...response,
+      assistant_text: guarded.text,
+    };
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
@@ -4002,6 +4096,15 @@ export async function runTurnExecutor(
     // V5 state-trust: surface the per-turn outcome alongside the
     // freshness derivation so the response-finaliser can thread freshness
     // onto the analysis_ready wire fields without re-deriving.
+    //
+    // V5 stale-aware explain recovery — finaliser-level egress guard.
+    // Runs as the LAST step before the response leaves this function,
+    // so it backstops EVERY emit path: deterministic templates, LLM
+    // output, fallback copy, recoverable-handler recovery, state-query
+    // guard. An upstream hook would miss new emit paths added later;
+    // a finaliser hook cannot. See FORBIDDEN_USER_FACING_PHRASES for
+    // the contradiction list this enforces.
+    enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     return {
       response,

@@ -331,7 +331,15 @@ export function buildCommitFailureBoundaryError(params: {
 // recoveries within the edit_graph telemetry stream rather than mixed in
 // with TurnExecutor fallthroughs.
 
-const EDIT_GRAPH_RECOVERY_TEXT =
+// Exported so the V5 stale-aware explain recovery shared forbidden-
+// phrase test (compose/__tests__/forbidden-user-facing-phrases.test.ts)
+// can pin this constant against FORBIDDEN_USER_FACING_PHRASES. The
+// hardcoded recovery copy is audit-only and currently lives outside
+// the per-dispatch egress hook surface; the follow-up route-level
+// chokepoint workstream will add dynamic guarding. Until then, the
+// shared test is the contract that this string contains no
+// forbidden phrase.
+export const EDIT_GRAPH_RECOVERY_TEXT =
   "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.";
 
 type EditGraphRecoveryReason =

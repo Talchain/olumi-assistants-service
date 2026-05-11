@@ -132,8 +132,11 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
     const out = S_BUCKET_REPLACEMENTS.OPTION_NO_INTERVENTIONS!(CTX, {
       affected_option_ids: ['opt_offshore'],
     });
+    // V5 stale-aware explain recovery: wording avoids the brief's
+    // forbidden "no changes" token AND the legacy "interventions"
+    // jargon ban. "Makes no adjustments" carries the same semantic.
     expect(out).toBe(
-      "Option 'Engage Offshore Partner' represents the current state, with no changes applied.",
+      "Option 'Engage Offshore Partner' represents the status quo and makes no adjustments to the model.",
     );
   });
 
@@ -181,6 +184,32 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
     for (const fn of Object.values(S_BUCKET_REPLACEMENTS)) {
       const out = fn(CTX, { affected_option_ids: ['opt_hire_local', 'opt_offshore'] });
       checkAgainstForbidden(out);
+    }
+  });
+
+  // V5 stale-aware explain recovery — drift guard.
+  // Every replacement template must also be free of the brief's
+  // "hard-fail prose" list (FORBIDDEN_USER_FACING_PHRASES). Without
+  // this check, a future template addition could re-introduce a
+  // contradiction phrase that the finaliser-level egress guard would
+  // then have to rewrite — which both loses the informative prose AND
+  // emits a noisy `v5.egress.forbidden_phrase_detected` event on
+  // every analysis turn. The drift guard catches it at unit-test
+  // time, where the fix is to change the template.
+  it('no replacement contains any FORBIDDEN_USER_FACING_PHRASES entry', async () => {
+    const { findForbiddenPhraseHit } = await import(
+      '../forbidden-user-facing-phrases.js'
+    );
+    for (const [code, fn] of Object.entries(S_BUCKET_REPLACEMENTS)) {
+      const out = fn(CTX, { affected_option_ids: ['opt_hire_local', 'opt_offshore'] });
+      const hit = findForbiddenPhraseHit(out);
+      if (hit !== null) {
+        throw new Error(
+          `S_BUCKET_REPLACEMENTS.${code} contains forbidden phrase ` +
+            `${JSON.stringify(hit)}: ${JSON.stringify(out)}`,
+        );
+      }
+      expect(hit).toBeNull();
     }
   });
 });

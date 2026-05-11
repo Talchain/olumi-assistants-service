@@ -124,14 +124,17 @@ export function createExplainResultsHandler(): HandlerFn {
       ? explanation!.answer_text
       : composeExplainResultsFallback(invocation.analysisProjection);
 
-    // V5 state-trust: CEE no longer prefixes assistant_text with the
-    // staleness caveat. The wire field analysis_ready.freshness drives UI
-    // staleness display in a separate brief; the chip-generator emits a
-    // "Rerun analysis" chip when freshness === 'stale' (retargeted from
-    // staleness_reason in the same commit). The applyStalenessPrefix
-    // function is preserved for now (removal is a follow-up); call sites
-    // are removed here. `staleness_prefixed` stays on the fact as `false`
-    // for backwards compat with telemetry consumers.
+    // V5 stale-aware explain recovery: the staleness signal travels via
+    // the precondition branch above — `decideExplanationPrecondition`
+    // returns `'stale'` when `invocation.analysisFreshness?.freshness ===
+    // 'stale'` and that branch emits `buildAnalysisStaleTemplate` whose
+    // leading sentence is the brief's required wording ("These results
+    // may be out of date because the model has changed since the last
+    // analysis."). When we reach THIS branch — verdict === 'execute' —
+    // freshness is `'fresh'` (or 'unknown' / 'none' with usable legacy
+    // data), so no caveat prefix is appropriate. The applyStalenessPrefix
+    // helper remains for legacy call sites; `staleness_prefixed` stays on
+    // the fact as `false` for backwards compat with telemetry consumers.
     const assistantText = rawText;
 
     const fact: ExplainResultsHandlerFact = {

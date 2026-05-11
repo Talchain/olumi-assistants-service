@@ -10,10 +10,17 @@
  *     state_commit, validator, kind_mismatch
  *   - Real staging PLoT capture (2d2aab36...) contains raw ID prefixes:
  *     opt_1, fac_churn_rate_2, goal_1, risk_1, out_1, out_2
+ *   - V5 stale-aware explain recovery brief — runtime defines a regex
+ *     array of "contradiction phrases" (e.g. "I haven't applied any
+ *     changes", "previous analysis", "cached result") that must never
+ *     reach the user. The harness imports the same constant so brief
+ *     and harness cannot drift.
  *
  * The id-prefix regex allows the underscored literal `analysis_status`
  * inside log JSON but blocks raw entity ids leaking into user text.
  */
+
+import { FORBIDDEN_USER_FACING_PHRASES } from '../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 
 export const FORBIDDEN_STRINGS: readonly string[] = [
   'ContextPack',
@@ -137,6 +144,15 @@ export function findForbiddenMatches(text: string): readonly string[] {
   for (const re of DEVELOPER_PHRASES) {
     const m = text.match(re);
     if (m) matches.push(`dev_phrase:${m[0]}`);
+  }
+  // V5 stale-aware explain recovery brief — shared "contradiction
+  // phrases" list (runtime is the source of truth; this harness
+  // imports it so brief and harness cannot drift). Reported with the
+  // `user_facing_phrase:` prefix so reviewers can distinguish from
+  // identifier leaks / hash leaks / dev phrases at a glance.
+  for (const re of FORBIDDEN_USER_FACING_PHRASES) {
+    const m = text.match(re);
+    if (m) matches.push(`user_facing_phrase:${m[0]}`);
   }
   return matches;
 }

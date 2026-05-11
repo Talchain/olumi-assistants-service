@@ -46,28 +46,32 @@ describe('applyStalenessPrefix', () => {
   });
 
   it('idempotent: text opening with "Treat the figures below as directional…" is not re-prepended', () => {
+    // Back-compat: prose produced by the legacy deterministic fallback
+    // opens with this clause. Keeping it suppresses double-prefixing
+    // during the transition window. The fixture body avoids forbidden
+    // phrases (FORBIDDEN_USER_FACING_PHRASES) so the finaliser-level
+    // egress guard would not rewrite it.
     const already =
-      'Treat the figures below as directional rather than definitive, since the analysis is loaded from a prior run with unknown freshness. ' +
+      'Treat the figures below as directional rather than definitive. ' +
       SAMPLE_TEXT;
     const out = applyStalenessPrefix(already, 'loaded_from_prior_run_freshness_unknown');
     expect(out.text).toBe(already);
     expect(out.prefixed).toBe(false);
   });
 
-  it('idempotent: text opening with the legacy "loaded from a prior run" phrasing is not re-prepended', () => {
-    const already =
-      'The analysis is loaded from a prior run with unknown freshness. ' + SAMPLE_TEXT;
-    const out = applyStalenessPrefix(already, 'loaded_from_prior_run_freshness_unknown');
-    expect(out.text).toBe(already);
-    expect(out.prefixed).toBe(false);
-  });
+  // V5 stale-aware explain recovery: the legacy "loaded from a prior
+  // run" idempotency check was removed because the brief now forbids
+  // that exact phrase in user-facing prose. Re-prefixing with the new
+  // STALENESS_PREFIX in front of legacy text leaves a forbidden phrase
+  // downstream, which the finaliser-level egress guard then rewrites.
+  // The prefix-helper itself no longer needs to recognise the legacy
+  // opener as "already-prefixed".
 
   it('NOT idempotent on lenient "may not reflect…" prose (avoids false-positive suppression)', () => {
     // Tightening guard: the approved-openings list deliberately requires
-    // "These results are from a prior run AND may not reflect" — a bare
-    // "These results may not reflect <something else>" must still trigger
-    // prepending so a non-staleness disclaimer cannot suppress the
-    // canonical caveat.
+    // the canonical STALENESS_PREFIX opener — a bare "These results may
+    // not reflect <something else>" must still trigger prepending so a
+    // non-staleness disclaimer cannot suppress the canonical caveat.
     const lenient =
       'These results may not reflect every nuance of the decision. ' + SAMPLE_TEXT;
     const out = applyStalenessPrefix(lenient, 'loaded_from_prior_run_freshness_unknown');
@@ -114,5 +118,16 @@ describe('applyStalenessPrefix', () => {
   it('STALENESS_PREFIX is a single sentence, not empty, and ends with a full stop', () => {
     expect(STALENESS_PREFIX.length).toBeGreaterThan(40);
     expect(STALENESS_PREFIX.endsWith('.')).toBe(true);
+  });
+
+  it('STALENESS_PREFIX matches the V5 stale-aware explain recovery brief wording verbatim', () => {
+    // The brief mandates the exact opening sentence on stale-explain
+    // turns. Pinning the wording here so future copy-polish cannot
+    // drift the runtime out of brief compliance without flipping this
+    // test. Drift here MUST be coordinated with the replay harness's
+    // assertion for the same phrase.
+    expect(STALENESS_PREFIX).toBe(
+      'These results may be out of date because the model has changed since the last analysis.',
+    );
   });
 });

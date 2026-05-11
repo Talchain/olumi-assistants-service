@@ -14,10 +14,13 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import type { HandlerInvocation } from '../../registry.js';
 import {
   buildAnalysisAbsentTemplate,
+  buildAnalysisDegradedTemplate,
+  buildAnalysisStaleTemplate,
   buildPreconditionAssistantText,
   decideExplanationPrecondition,
   resolveOptionCount,
 } from '../no-op-helpers.js';
+import { findForbiddenPhraseHit } from '../../../compose/forbidden-user-facing-phrases.js';
 
 function makeInvocation(overrides: {
   optionIds?: readonly string[];
@@ -190,6 +193,34 @@ function makePreconditionInvocation(
       : undefined,
   };
 }
+
+describe('buildAnalysisStaleTemplate (V5 stale-aware explain recovery)', () => {
+  it('opens with the brief\'s exact required wording', () => {
+    // The V5 stale-aware explain recovery brief mandates this exact
+    // opening sentence on stale-explain turns. Pinned verbatim so
+    // future copy-polish cannot drift the runtime out of brief
+    // compliance without flipping this test. Coordinate the replay
+    // harness assertion with this constant.
+    const text = buildAnalysisStaleTemplate();
+    expect(text).toMatch(
+      /^These results may be out of date because the model has changed since the last analysis\./,
+    );
+  });
+
+  it('contains no FORBIDDEN_USER_FACING_PHRASES entry', () => {
+    expect(findForbiddenPhraseHit(buildAnalysisStaleTemplate())).toBeNull();
+  });
+
+  it('offers a re-run recovery affordance so the user has a path forward', () => {
+    expect(buildAnalysisStaleTemplate()).toMatch(/re-run analysis/i);
+  });
+});
+
+describe('buildAnalysisDegradedTemplate', () => {
+  it('contains no FORBIDDEN_USER_FACING_PHRASES entry', () => {
+    expect(findForbiddenPhraseHit(buildAnalysisDegradedTemplate())).toBeNull();
+  });
+});
 
 describe('decideExplanationPrecondition', () => {
   it('no run_analysis fact at all → missing', () => {
