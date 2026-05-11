@@ -35,6 +35,19 @@ describe('FORBIDDEN_USER_FACING_PHRASES — phrase matches', () => {
     ['There were no changes in the model.', 'there were no changes (existential)'],
     ['No changes happened on the model.', 'no changes happened'],
     ['No changes occurred since the last analysis.', 'no changes occurred'],
+    // Standalone denial (Codex P1 follow-up): the contextual patterns
+    // above don't catch a terse LLM utterance like "No changes." on
+    // its own. The line-anchored pattern restores brief coverage of
+    // the bare "no changes" entry without re-introducing the label-
+    // quote false-positive risk.
+    ['No changes.', 'standalone "No changes." utterance'],
+    ['No changes', 'standalone "No changes" without punctuation'],
+    ['No changes!', 'standalone "No changes!" exclamation'],
+    ['no changes', 'standalone lowercase'],
+    [
+      "Here's the summary:\n\nNo changes.\n\nLet me know if you'd like to try something.",
+      'standalone "No changes." as a paragraph within multi-line prose',
+    ],
     ['The wire reports unknown freshness.', 'unknown freshness'],
     ['This explanation was loaded from a prior run.', 'loaded from a prior run'],
     ['Showing a cached result for the same query.', 'cached result'],

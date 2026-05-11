@@ -326,8 +326,12 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     // Persisted-graph parse failed → fallback hashed the request graph
     // → matches the prior fact's hash → freshness is `'fresh'`. The
     // critical assertion is `current_graph_hash === PRE_EDIT_HASH`,
-    // proving the fallback path executed (not the persisted-graph
-    // hash path which would have produced a different value).
+    // proving the request-graph fallback executed. (The persisted-
+    // graph branch with a malformed payload couldn't have produced
+    // any hash value at all — `computeAnalysisAffectingGraphHash`
+    // returns null when given a non-graph shape — so the only way
+    // to observe a non-null `current_graph_hash` here is via the
+    // fallback path.)
     expect(evt!.data.freshness).toBe('fresh');
     expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
   });

@@ -18,9 +18,17 @@
  * The single source of truth is what prevents replay assertions and
  * runtime checks from diverging.
  *
- * British English where relevant. Word-boundary anchored so common
- * sub-string mishits are avoided ("no changes" matches at word boundaries
- * only — "innocuous changes" does not trip).
+ * British English where relevant. Each pattern is case-insensitive
+ * and uses word boundaries (or line anchors with /m) so common
+ * sub-string mishits are avoided. The "no changes" class is the
+ * delicate one: a bare `\bno\s+changes\b` was over-broad (false-
+ * positive on legitimate quoted labels like "No Changes Required"
+ * embedded in safe_summary) and an under-narrow contextual-only set
+ * missed the standalone denial case ("No changes."). The current
+ * mix is the compromise — three contextual denial patterns AND a
+ * line-anchored standalone pattern, with regression-test coverage
+ * for both label-quote false-positive avoidance and standalone
+ * denial detection.
  */
 
 export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
@@ -47,6 +55,15 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   /\bno\s+changes\s+(?:were|are|have\s+been)\s+(?:made|applied|necessary|needed|required)\b/i,
   /\bthere\s+(?:are|were|have\s+been)\s+no\s+changes\b/i,
   /\bno\s+changes\s+(?:happened|occurred|emerged|appeared|reflected|to\s+report)\b/i,
+  // Standalone denial — "No changes." / "No changes" as the entire
+  // line/utterance. The /m flag makes ^/$ match line boundaries so
+  // a terse LLM paragraph carrying just "No changes." is caught
+  // even when wrapped in a longer multi-paragraph response.
+  // Optional terminal punctuation covers full-stop / exclamation /
+  // question variants. Label-quotes (e.g. "Updated the 'No Changes'
+  // factor.") do NOT match because the line is not solely the
+  // standalone phrase.
+  /^\s*no\s+changes[.!?]?\s*$/im,
   // "unknown freshness" — internal/telemetry term that must never reach
   // user prose; the wire envelope's `analysis_ready.freshness: 'unknown'`
   // is separate, and the UI renders it without verbatim quoting.
