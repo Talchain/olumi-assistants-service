@@ -634,7 +634,34 @@ export async function runTurnExecutor(
     // freshness is re-derived POST-dispatch below (see
     // `re-derive freshness post-dispatch` block) so a just-produced
     // run_analysis fact is selected on the same turn.
-    currentAnalysisGraphHashForTurn = computeAnalysisAffectingGraphHash(graphStateForTurn);
+    //
+    // V5 stale-aware explain recovery (H3 fix): the hash MUST come from
+    // the canonical persisted graph (scenarios.graph, loaded into
+    // context.persistedGraph by buildTurnContext) — NOT the
+    // request-supplied `graphStateForTurn`. The two diverge when the
+    // client lags behind a persisted edit: a follow-up explain turn
+    // that re-sends the pre-edit graph would otherwise hash to the
+    // same value as the prior run_analysis fact's `graph_hash_at_run`,
+    // produce a false-fresh verdict, and skip the stale recovery
+    // template + Rerun-analysis chip. Mirrors the canonical-hash logic
+    // already used by chip-click-dispatch.ts (which hashes
+    // cachedSnapshot.rawPersistedGraph for the same reason).
+    //
+    // Fallback to `graphStateForTurn` covers the first-draft case
+    // where no graph has been persisted yet. The fallback is
+    // structurally indistinguishable from a follow-up turn whose
+    // persisted graph fails to parse (rare); both legitimately use
+    // the request graph as the only available signal.
+    currentAnalysisGraphHashForTurn = ((): string | null => {
+      const persistedGraph = context.persistedGraph;
+      if (persistedGraph !== undefined && persistedGraph !== null) {
+        const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
+        if (parsed.success) {
+          return computeAnalysisAffectingGraphHash(parsed.data);
+        }
+      }
+      return computeAnalysisAffectingGraphHash(graphStateForTurn);
+    })();
     routingFreshness = deriveAnalysisFreshness(
       context.prior_facts,
       currentAnalysisGraphHashForTurn,
