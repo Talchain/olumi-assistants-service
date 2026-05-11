@@ -2,6 +2,11 @@
 
 Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools/v5-journey-replay/). This pack is the V5 replay gate.
 
+> **Reader notes (post-rerun clarification):**
+>
+> 1. The "Pack generated from commit SHA" field below is the **harness code SHA at the moment this pack was produced** — not the git SHA the pack itself lands at. Field wording in `evidence-writer.ts` was updated after this pack was generated; future packs will read "Harness code SHA at run time" explicitly.
+> 2. The executive-summary table immediately below has a **known journey-awareness gap**: the rows "run_analysis passed end-to-end" and "Analysis persisted into follow-up context" are computed from the canonical journey's step names (`4_run_analysis`, `5_explain_leader`). The `dl7-staleness` journey runs `run_analysis` at Step 2 and has no Step 5, so those rows read "not externally verified" even though Step 2 PASSed. The **authoritative pass/fail signal for this pack is the per-step replay table in §6** and the Product gap section at the bottom — both correctly show Step 4 FAIL. Fix tracked as a follow-up to `evidence-writer.ts` (journey-aware summary).
+
 ## Executive summary
 
 | signal | value |

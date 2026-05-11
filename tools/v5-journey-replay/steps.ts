@@ -435,11 +435,14 @@ export const EDIT_GRAPH_STEPS: readonly JourneyStep[] = [
 // ---------------------------------------------------------------------------
 // DL-7 Journey 1C — `dl7-staleness`
 //
-// draft → analyse → set_factor_value → explain
+// draft → analyse → edit_graph_generic → explain
 //
 // Reorders the edit AFTER analysis, so the explain handler observes
 // freshness=stale and surfaces the staleness caveat / rerun chip.
-// Locks in DL-7 acceptance criterion 5.
+// Step 3 was switched from `set_factor_value` to the generic
+// `edit_graph` dispatcher in Phase 2.6.4 — see the inline comment on
+// the Step 3 message below for the rationale. Locks in DL-7
+// acceptance criterion 5.
 // ---------------------------------------------------------------------------
 
 export const STALENESS_STEPS: readonly JourneyStep[] = [

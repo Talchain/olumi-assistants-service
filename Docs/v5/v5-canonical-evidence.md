@@ -2,6 +2,8 @@
 
 Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools/v5-journey-replay/). This pack is the V5 replay gate.
 
+> **Reader note (post-rerun clarification):** the "Pack generated from commit SHA" field below is the **harness code SHA at the moment this pack was produced** — not the git SHA the pack itself lands at. The commit that lands this pack into git history is typically one commit ahead, since the pack is generated, reviewed, then committed. See `git log` for the lander SHA. Field wording in `evidence-writer.ts` was updated after this pack was generated; future packs will read "Harness code SHA at run time" explicitly.
+
 ## Executive summary
 
 | signal | value |

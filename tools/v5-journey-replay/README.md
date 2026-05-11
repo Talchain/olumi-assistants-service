@@ -53,7 +53,7 @@ The harness runs one journey per invocation. The default is the original six-ste
 |---|---|---|
 | `canonical` *(default)* | the original 6 steps | Backwards-compatible. No new behaviour. |
 | `dl7-set-factor` | `draft → set_factor_value → what_changed → run_analysis → explain_leader → what_would_flip` | Drives the V5 `set_factor_value` mutation handler so `recent_changes` populates today, before edit_graph DL-7 PR B exists. |
-| `dl7-staleness` | `draft → run_analysis → set_factor_value → explain_leader_stale` | Reorders the mutation AFTER analysis to exercise the freshness=stale signal. |
+| `dl7-staleness` | `draft → run_analysis → edit_graph_generic → explain_leader_stale` | Reorders the mutation AFTER analysis to exercise the freshness=stale signal. Step 3 was switched from `set_factor_value` to the generic `edit_graph` dispatcher in Phase 2.6.4 because the set_factor_value path was label-fragile — see `STALENESS_STEPS` in [steps.ts](./steps.ts) for the rationale comment. |
 | `dl7-edit-graph` | same shape as `dl7-set-factor` but Step 2 is a generic edit_graph mutation | **Core V5 path** — edit_graph DL-7 PR B is live on CEE staging. Runs by default. Emergency rollback: `DL7_PR_B_DISABLE=true` re-gates the journey if PR B regresses. Step 2 verifies the user-visible response is product-shaped and free of internal terms. The Step 3 (`what_changed`) assertion checks that the response references the captured factor label and reports `safe_summary=ok`. **Replay does not assert `turn_class` / `handler_id` / fact emission** — those fields are not on the wire response envelope and must be covered by edit_graph dispatch unit tests. |
 
 #### Universal leak guards (apply to every step)

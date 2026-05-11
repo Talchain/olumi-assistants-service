@@ -190,8 +190,10 @@ export function renderEvidencePack(
   lines.push('');
   lines.push(`- **Branch:** \`${escapePipes(redact(header.branch))}\``);
   lines.push(
-    `- **Pack generated from commit SHA:** \`${escapePipes(redact(header.commit_sha))}\` ` +
-      `(if this does not match HEAD, regenerate with the harness)`,
+    `- **Harness code SHA at run time:** \`${escapePipes(redact(header.commit_sha))}\` ` +
+      `(the SHA the replay harness was built from when this pack was produced; ` +
+      `the commit that lands this pack into git history is typically one commit ahead — ` +
+      `see the committed-by SHA in \`git log\` for that)`,
   );
   lines.push(`- **Base URL:** ${escapePipes(redact(header.base_url))}`);
   lines.push(`- **Started at:** ${header.started_at}`);
@@ -209,15 +211,21 @@ export function renderEvidencePack(
     lines.push(`- **Journey:** \`${header.journey}\``);
   }
   if (header.dl7_pr_b_landed !== undefined) {
-    const prBState = header.dl7_pr_b_landed
-      ? 'true (PR-B-gated assertions active)'
-      : 'false (PR-B-gated assertions skipped)';
-    lines.push(`- **DL7_PR_B_LANDED:** ${prBState}`);
+    // Historical name: `DL7_PR_B_LANDED`. The journey is no longer
+    // PR-B-gated by default — DL-7 PR B merged on staging — but the
+    // harness still honours an `DL7_PR_B_DISABLE=true` emergency
+    // rollback switch. The semantic surfaced to readers is "is the
+    // edit_graph journey currently active on this run?" not "did
+    // PR B land?", so the label is renamed accordingly.
+    const editGraphActive = header.dl7_pr_b_landed
+      ? 'yes (edit_graph dispatch live on staging; assertions active)'
+      : 'no (DL7_PR_B_DISABLE=true engaged — emergency rollback path)';
+    lines.push(`- **edit_graph_journey_active:** ${editGraphActive}`);
     const gatedRows = rows.filter((r) => r.requires_dl7_pr_b === true);
     if (gatedRows.length > 0) {
       lines.push(
-        `- **PR-B-gated rows:** ${gatedRows.length} ` +
-          '(skipped or marked `not_applicable` until DL7_PR_B_LANDED=true)',
+        `- **edit_graph-gated rows:** ${gatedRows.length} ` +
+          '(skipped or marked `not_applicable` when DL7_PR_B_DISABLE=true)',
       );
     }
   }

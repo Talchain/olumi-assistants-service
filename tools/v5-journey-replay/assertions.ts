@@ -529,11 +529,15 @@ export function assertWhatChanged(
   // like "I haven't applied any changes in this session yet" — the
   // exact text observed on staging build `6211789` (2026-05-10) that
   // produced a false-PASS under the looser predecessor of this check.
+  // Match both contracted ("haven't", "don't") and uncontracted ("have
+  // not", "do not", "did not") forms — LLM output uses both
+  // interchangeably and a regex that only catches contractions has a
+  // 50% false-negative rate on denial responses.
   const denialPatterns: ReadonlyArray<RegExp> = [
-    /haven'?t\s+(?:yet\s+)?(?:applied|made|done|recorded|made any)\s+(?:any\s+)?(?:changes|edits|updates|modifications)/,
-    /no\s+(?:changes|edits|updates|modifications)\s+(?:have\s+been\s+|were\s+|so\s+far)?(?:applied|made|done|recorded)?/,
+    /(?:haven'?t|have\s+not|didn'?t|did\s+not)\s+(?:yet\s+)?(?:applied|made|done|recorded)\s+(?:any\s+)?(?:changes|edits|updates|modifications)/,
+    /no\s+(?:changes|edits|updates|modifications)\s+(?:have\s+been\s+|were\s+|so\s+far\s*)?(?:applied|made|done|recorded)?/,
     /nothing\s+(?:has\s+been\s+)?(?:changed|edited|updated|modified|applied)/,
-    /(?:i\s+)?don'?t\s+see\s+any\s+(?:recent\s+)?(?:changes|edits|updates)/,
+    /(?:i\s+)?(?:don'?t|do\s+not)\s+see\s+any\s+(?:recent\s+)?(?:changes|edits|updates)/,
   ];
   const denialMatch = denialPatterns.find((rx) => rx.test(lower));
   if (denialMatch !== undefined) {
