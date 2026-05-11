@@ -913,6 +913,19 @@ export async function dispatchEditGraph(
       );
     }
 
+    // V5 H5 — graph persistence backstop. Match the persistence gate
+    // to the fact-emission gate: graph state is only committed when
+    // `isSuccessfulAppliedMutation()` says the mutation truly applied
+    // (wasRejected=false + operations.length > 0 + appliedGraph present).
+    // The rich/generic fact-builders use the same predicate, so the
+    // pair is now symmetric: a graph cannot persist without a receipt
+    // fact, and a receipt fact cannot exist without persistable graph
+    // state. Prevents an impossible-but-not-enforced shape
+    // (appliedGraph + empty operations) from leaving graph state in
+    // place with no receipt to explain it.
+    const graphForCommit = isSuccessfulAppliedMutation(editResult)
+      ? editResult.appliedGraph ?? undefined
+      : undefined;
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -927,7 +940,7 @@ export async function dispatchEditGraph(
       llm_calls_used: deterministicAddRiskAttempted ? 0 : 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
-      graph: editResult.appliedGraph ?? undefined,
+      graph: graphForCommit,
     });
     log.info(
       {

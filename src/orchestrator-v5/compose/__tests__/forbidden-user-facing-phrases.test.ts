@@ -278,6 +278,24 @@ describe('SUCCESS_CLAIM_PATTERNS — false-success detector', () => {
     ["Has been updated to reflect your change.", 'has been updated'],
     ["The factor has been added.", 'has been added'],
     ['I’ve applied the change.', "curly-apostrophe I've applied"],
+    // Codex round-1 P1 — terse commit acknowledgements (defence-in-
+    // depth; the V4 source fix already drops warnings/coaching on
+    // no-op paths so these mostly back-stop future regressions).
+    ['Done.', 'standalone "Done." commit acknowledgement'],
+    ['Done!', 'standalone "Done!" exclamation'],
+    ['Done — Price is now 120k.', '"Done —" prefix with detail'],
+    ['Done - value set.', '"Done -" prefix with hyphen'],
+    ['All set.', '"All set." standalone'],
+    ['All set to 0.7.', '"All set" with target value'],
+    ['Updated Price.', 'bare past-tense "Updated X" sentence'],
+    ['Added a new constraint.', 'bare past-tense "Added X" sentence'],
+    ['Set Staffing Cost to 120k.', 'bare past-tense "Set X to N" sentence'],
+    ['Removed Outdated Factor.', 'bare past-tense "Removed X" sentence'],
+    ['Changed Cost.', 'bare past-tense "Changed X" sentence'],
+    [
+      "Here's what I did:\n\nUpdated Price.\n\nLet me know if you need more.",
+      'bare past-tense "Updated X" as a paragraph within multi-line prose',
+    ],
   ];
 
   for (const [text, label] of successPositive) {
@@ -308,6 +326,22 @@ describe('SUCCESS_CLAIM_PATTERNS — does NOT flag legitimate non-commit prose',
     [
       'Strengthened the Incremental Hiring Cost to Budget Overrun Risk edge from 0.5 to 0.7.',
       'edit_graph safe_summary (verb without success qualifier)',
+    ],
+    // Codex round-1 P1 — negative coverage for the new terse-commit
+    // regexes. These must NOT fire on:
+    //   1. "Done" as a non-leading word ("I am done", "almost done").
+    //   2. Mid-sentence verb forms ("I've already updated this").
+    //   3. Question-phrased commit verbs ("Should I update this?").
+    //   4. The Mode A copy itself (contains "I have a change in mind…",
+    //      not a sentence-leading "Updated/Added/Set X").
+    ['I am done reviewing the options.', '"done" as non-leading word'],
+    ['Almost done analyzing the data.', '"done" mid-clause'],
+    ['Should I update this factor?', 'question framing (not a commit)'],
+    ['Tell me if I should add a constraint.', 'conditional advice (not a commit)'],
+    ['The leader leads by a wide margin.', 'unrelated factor-comparison prose'],
+    [
+      "I have a change in mind for **Staffing Cost**, but I need the specifics to apply it directly. Tell me the specific value or direction (e.g. \"set to N\" or \"lower by N\") and I'll make it.",
+      'Mode A v2 builder output (concrete + abstract example)',
     ],
   ];
 

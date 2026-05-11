@@ -304,3 +304,130 @@ describe('dispatchEditGraph — V5 H5 false-success invariant', () => {
     expect(falseSuccessCalls.length).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// V5 H5 — graph-persistence backstop (Codex round-1 P1).
+//
+// `commitDirectAnswer` previously received
+// `graph: editResult.appliedGraph ?? undefined` unconditionally. The
+// fact-emission gate uses `isSuccessfulAppliedMutation()` which
+// requires `wasRejected=false + operations.length > 0 + appliedGraph
+// present`. The two gates were asymmetric: a future impossible-but-
+// not-enforced shape (`appliedGraph` populated, `operations` empty)
+// would persist graph state with no receipt fact. The backstop binds
+// both gates so the invariant is symmetric.
+// ---------------------------------------------------------------------------
+
+describe('dispatchEditGraph — V5 H5 graph-persistence backstop', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('persists graph state on a true successful applied mutation', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeAppliedSuccessResult("I've updated Price to 'Price (revised)'."),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-graph-persist-yes',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
+    const [, metadata] = commitMock.mock.calls[0]!;
+    expect(metadata.graph).toBeDefined();
+    expect(metadata.graph).not.toBeNull();
+  });
+
+  it('does NOT persist graph state when wasRejected=false but operations are empty', async () => {
+    // The impossible-but-not-enforced shape: handler returns
+    // appliedGraph WITHOUT operations. This should never happen in
+    // production today, but the persistence gate now matches the
+    // fact-emission gate so a future regression cannot leak graph
+    // state without a receipt.
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue({
+        blocks: [],
+        assistantText:
+          'I couldn’t see a concrete change to make from that description. Tell me the specific factor and value you’d like, and I’ll apply it directly.',
+        latencyMs: 500,
+        appliedGraph: {
+          nodes: [{ id: 'goal_revenue', kind: 'goal', label: 'Revenue' }],
+          edges: [],
+        } as unknown as EditGraphResult['appliedGraph'],
+        wasRejected: false,
+        operations: [], // empty
+      });
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-graph-persist-no',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
+    const [, metadata] = commitMock.mock.calls[0]!;
+    expect(metadata.graph).toBeUndefined();
+    expect(metadata.handler_facts).toEqual([]);
+  });
+
+  it('does NOT persist graph state on a true no-op (appliedGraph null, operations empty)', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeNoOpFalseSuccessResult(
+          'I couldn’t see a concrete change to make from that description. Tell me the specific factor and value you’d like, and I’ll apply it directly.',
+        ),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-true-noop',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
+    const [, metadata] = commitMock.mock.calls[0]!;
+    expect(metadata.graph).toBeUndefined();
+    expect(metadata.handler_facts).toEqual([]);
+  });
+
+  it('does NOT persist graph state on a rejection (wasRejected=true)', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue({
+        blocks: [],
+        assistantText: 'The proposed edit was rejected.',
+        latencyMs: 500,
+        appliedGraph: null,
+        wasRejected: true,
+        operations: [],
+      });
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-rejected-graph',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
+    const [, metadata] = commitMock.mock.calls[0]!;
+    expect(metadata.graph).toBeUndefined();
+  });
+});

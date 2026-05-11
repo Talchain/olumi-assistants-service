@@ -270,15 +270,22 @@ function buildProposeAndConfirmText(
 
   const label = resolvedTarget.label;
   if (changes.length === 1) {
-    const example =
+    // Abstract phrasing only — no fabricated example values. The
+    // previous version interpolated hardcoded scales like "120k" and
+    // "20%" which were nonsensical for non-cost factors (e.g.
+    // probabilities, durations, ratings). The structured
+    // `proposedChanges` payload doesn't carry a concrete target value,
+    // so the safest copy describes the *action type* against the
+    // resolved label and asks the user to supply the value.
+    const action =
       first.action_type === 'value_update'
-        ? `e.g. "Set ${label} to 120k" or "Lower ${label} by 20%"`
+        ? `Tell me the specific value or direction (e.g. "set to N" or "lower by N")`
         : first.action_type === 'option_config'
-        ? `e.g. "Set ${label}'s cost to 100k"`
+        ? `Tell me which option parameter to change and its target value`
         : first.action_type === 'structural_add'
-        ? `e.g. "Add a ${label} factor"`
-        : `e.g. "Remove ${label}"`;
-    return `I have a change in mind for **${label}**, but I need the specifics to apply it directly. Reply with the exact change you'd like (${example}) and I'll make it.`;
+        ? `Confirm the new element's label and how it connects`
+        : `Confirm the element to remove`;
+    return `I have a change in mind for **${label}**, but I need the specifics to apply it directly. ${action} and I'll make it.`;
   }
 
   const labels: string[] = [];
@@ -1704,17 +1711,22 @@ export async function handleEditGraph(
     if (llmResult.operations.length === 0) {
       const latencyMs = Date.now() - startTime;
 
-      // Determinism gap closed: previously, `llmResult.coaching.summary`
-      // (LLM-authored prose) was forwarded to `assistantText` on the
-      // no-op path. The LLM can claim "I've successfully updated X" in
-      // that summary while emitting zero operations, producing the
-      // false-success narration observed in dl7-edit-graph run 3. It
-      // can also use internal terms ("validator") it sees in the
-      // edit_graph system prompt. The no-op path must construct prose
-      // deterministically from structured signals only — warnings are
-      // structured codes (safe), coaching is free LLM prose (not safe
-      // when operations is empty, because the narration cannot align
-      // with deterministic state).
+      // Determinism gap closed: previously, BOTH `coaching.summary`
+      // AND `warnings.join(' ')` were forwarded to `assistantText` on
+      // the empty-operations path. Both are LLM-authored strings (the
+      // `EditGraphLLMResult` types `warnings: string[]` and
+      // `coaching.summary: string` — neither is a structured code).
+      // The LLM can put "Updated Price." or "Done — value set."
+      // (terse commit claims a regex set will struggle to fully cover)
+      // into either field while emitting zero operations.
+      //
+      // The fix is to drop BOTH sources on no-op paths and always emit
+      // the deterministic forward-looking NO_OP_FALLBACK_TEXT. Useful
+      // warning content (e.g. "edge already exists") is information we
+      // would like to preserve, but cannot safely while warnings is
+      // free prose. A follow-up workstream may introduce a
+      // warning-code allowlist + deterministic mapping; until then,
+      // safety beats UX richness.
       //
       // The default text is forward-looking ("Tell me…") rather than a
       // denial ("No changes were needed…"). Denial phrasing matches
@@ -1723,15 +1735,14 @@ export async function handleEditGraph(
       // the chance to know what to do next. Forward-looking copy is
       // consistent with the Mode A propose-and-confirm fallback and
       // gives the user an obvious next action.
-      const assistantText = llmResult.warnings.length > 0
-        ? llmResult.warnings.join(' ')
-        : NO_OP_FALLBACK_TEXT;
+      const assistantText = NO_OP_FALLBACK_TEXT;
 
       log.info(
         {
           request_id: requestId,
           attempt,
           warnings: llmResult.warnings.length,
+          warnings_dropped: llmResult.warnings.length > 0,
           has_coaching: !!llmResult.coaching,
           coaching_dropped: !!llmResult.coaching?.summary,
           preceded_by_plot_rejection: !!lastPlotErrors,

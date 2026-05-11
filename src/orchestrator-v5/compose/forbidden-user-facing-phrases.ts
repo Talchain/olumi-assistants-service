@@ -206,6 +206,24 @@ export const SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
   /\bthe\s+(?:change|edit|update|mutation|adjustment)\s+(?:has\s+been|is\s+now|was)\s+(?:applied|made|saved|committed)\b/i,
   // "has been + commit verb" — passive completion
   /\bhas\s+been\s+(?:applied|updated|set|added|removed|changed|saved|committed)\b/i,
+  // Terse commit acknowledgements (Codex P1 follow-up). These are
+  // colloquial confirmations the LLM may emit in a coaching summary
+  // or warning string. The V4 Mode B fix already drops both fields
+  // on no-op paths, so reaching the wire with these requires a
+  // future emit-path regression — this set is defence-in-depth for
+  // that scenario.
+  /^\s*Done\b[.!\s—-]/m,         // line-anchored "Done.", "Done —", "Done!"
+  /\bAll\s+set\b/i,              // "All set." or "All set to N."
+  // Sentence-leading bare past-tense commit verbs: "Updated Price.",
+  // "Added a constraint.", "Set X to N.". Line-anchored with /m so
+  // a successful narration starting any line fires; mid-sentence
+  // legitimate prose like "I've already updated this" does NOT match
+  // because the verb is not sentence-leading. Requires at least one
+  // non-whitespace character after the verb so trailing "Updated"
+  // (incomplete sentence) doesn't fire, but accepts both
+  // capitalised noun phrases ("Updated Price.") and articled
+  // phrases ("Added a constraint.").
+  /^\s*(?:Updated|Set|Added|Removed|Changed|Edited|Applied|Adjusted|Modified|Created)\s+\S/m,
 ];
 
 /**

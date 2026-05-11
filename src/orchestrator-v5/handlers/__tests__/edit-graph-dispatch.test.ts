@@ -103,12 +103,21 @@ const POST_EDIT_GRAPH = {
 };
 
 function makeAppliedEditResult(overrides: Partial<EditGraphResult> = {}): EditGraphResult {
+  // V5 H5 (Codex round-1 P1): a real "applied mutation" returns
+  // wasRejected=false + appliedGraph + non-empty operations. The
+  // V5 dispatcher gates graph persistence on
+  // `isSuccessfulAppliedMutation(editResult)` which requires all
+  // three. Previously this fixture omitted `operations` and the test
+  // still passed because the dispatcher persisted graph state
+  // unconditionally on `wasRejected=false`. With the fixed gate,
+  // the fixture must include operations to match production shape.
   return {
     blocks: [],
     assistantText: 'Edge strength increased.',
     latencyMs: 1200,
     appliedGraph: POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
     wasRejected: false,
+    operations: [{ op: 'update_edge', path: 'fac_price->goal_revenue', value: 0.7 }],
     ...overrides,
   };
 }
@@ -166,14 +175,19 @@ describe('dispatchEditGraph', () => {
       expect(metadata.scenario_id).toBe(SCENARIO_ID);
       expect(metadata.turn_id).toBe(TURN_ID);
       expect(metadata.handler_id).toBeNull();
-      // DL-7 PR B contract change: this fixture omits operations / appliedChanges,
-      // so the fact builder's emission gates fail and handler_facts stays []. The
-      // fact-emission contract for FULLY-populated EditGraphResult fixtures is
-      // pinned in edit-graph-dispatch-fact-emission.test.ts (B1-B9). This test
-      // continues to assert the R-001 graph-persistence contract; the
-      // handler_facts assertion here only proves the no-fact baseline path
-      // (no operations passed) still works.
-      expect(metadata.handler_facts).toEqual([]);
+      // V5 H5 (Codex round-1 P1) contract update: the fixture now
+      // includes `operations` to match the "successful applied
+      // mutation" shape that `isSuccessfulAppliedMutation()`
+      // requires for graph persistence. The fact-builder still
+      // emits null here because `appliedChanges` is missing — the
+      // generic fallback emits a minimal fact instead. The
+      // fact-emission contract for FULLY-populated
+      // EditGraphResult fixtures is pinned in
+      // edit-graph-dispatch-fact-emission.test.ts (B1-B9). This
+      // test continues to assert the R-001 graph-persistence
+      // contract: a true successful applied mutation persists
+      // graph state via metadata.graph.
+      expect(metadata.handler_facts.length).toBe(1);
     });
   });
 
