@@ -293,6 +293,45 @@ describe('turn-executor freshness — canonical persisted graph (H3 fix)', () =>
     expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
   });
 
+  it('falls back to request graphState when persisted graph fails ingress parse (Codex Improvement 1)', async () => {
+    // The H3 fix safe-parses `context.persistedGraph` via
+    // GraphStateIngressSchema before hashing. If the persisted graph is
+    // present BUT malformed (corrupt JSON shape after a partial write,
+    // legacy schema version, or test fixture drift), the parse fails
+    // and the code falls back to hashing the request graphState. This
+    // test exercises that branch — without it, the malformed-persisted
+    // case is reachable only by inspection.
+    installPriorRunAnalysisFact(PRE_EDIT_HASH);
+    // Malformed: `nodes` must be an array per GraphStateIngressSchema;
+    // a string-typed nodes field forces safeParse to fail.
+    (global as Record<string, unknown>).__test_persisted_graph = {
+      nodes: 'not-an-array',
+      edges: [],
+    };
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkTextResult('fallback after parse failure'),
+    );
+
+    await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'why did that lead?' },
+      'req-malformed-persisted-h3',
+      {
+        routingAdapter,
+        graphState: PRE_EDIT_GRAPH as never,
+      },
+    );
+
+    const evt = findPreHandlerFreshnessEvent();
+    expect(evt, 'pre-handler freshness telemetry event should fire').toBeDefined();
+    // Persisted-graph parse failed → fallback hashed the request graph
+    // → matches the prior fact's hash → freshness is `'fresh'`. The
+    // critical assertion is `current_graph_hash === PRE_EDIT_HASH`,
+    // proving the fallback path executed (not the persisted-graph
+    // hash path which would have produced a different value).
+    expect(evt!.data.freshness).toBe('fresh');
+    expect(evt!.data.current_graph_hash).toBe(PRE_EDIT_HASH);
+  });
+
   it('falls back to request graphState when persisted graph is absent (first-draft turn)', async () => {
     // No persisted graph: this is a first-draft turn or the persisted
     // read degraded. Request graphState is the only signal available.

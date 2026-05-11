@@ -21,7 +21,20 @@ describe('FORBIDDEN_USER_FACING_PHRASES — phrase matches', () => {
     ['I haven’t applied any changes in this session yet.', "haven't applied any changes (curly apostrophe)"],
     ['I have not applied any changes yet.', 'have not applied any changes'],
     ['Nothing changed in the model after that edit.', 'nothing changed'],
-    ['No changes were made.', 'no changes'],
+    // "no changes" — contextual denial patterns (post-Codex P1 fix).
+    // The bare `\bno\s+changes\b` regex was over-broad; replaced with
+    // three narrower patterns covering: "no changes [were|are|have been]
+    // [made|applied|necessary|needed|required]", "there [are|were|have
+    // been] no changes", and "no changes [happened|occurred|emerged|
+    // appeared|reflected|to report]". Negative coverage for legitimate
+    // label-quote scenarios lives in the next describe block.
+    ['No changes were made.', 'no changes were made'],
+    ['No changes are applied.', 'no changes are applied'],
+    ['No changes have been needed.', 'no changes have been needed'],
+    ['There are no changes worth reporting.', 'there are no changes (existential)'],
+    ['There were no changes in the model.', 'there were no changes (existential)'],
+    ['No changes happened on the model.', 'no changes happened'],
+    ['No changes occurred since the last analysis.', 'no changes occurred'],
     ['The wire reports unknown freshness.', 'unknown freshness'],
     ['This explanation was loaded from a prior run.', 'loaded from a prior run'],
     ['Showing a cached result for the same query.', 'cached result'],
@@ -65,6 +78,31 @@ describe('FORBIDDEN_USER_FACING_PHRASES — clean text passes', () => {
     ['The analysis is ready to run on your current model.', 'forward-looking analysis copy'],
     ['Several innocuous changes occurred to the wording.', 'no changes word-boundary negative (NOT a state denial)'],
     ['That option produced no_changes_required (an internal status).', 'underscored token NOT matched'],
+    // P1 regression guard (Codex review): the bare `\bno\s+changes\b`
+    // regex used to false-positive on legitimate label-quotes that
+    // appear in EditGraphHandlerFact.safe_summary and get quoted
+    // verbatim by the state-query guard. The contextual denial
+    // patterns must NOT trigger on these label-shaped strings.
+    [
+      "Updated the 'No Changes' factor from 0.5 to 0.7.",
+      'safe_summary quoting a user-named "No Changes" factor',
+    ],
+    [
+      "Strengthened the No Changes Required edge from 0.5 to 0.8.",
+      'safe_summary quoting a "No Changes Required" label',
+    ],
+    [
+      "Renamed 'No Changes Required' option to 'Status Quo'.",
+      'safe_summary quoting a rename of a "No Changes" option',
+    ],
+    [
+      "The No Changes Required factor now sits at 30%.",
+      'analysis prose mentioning a "No Changes Required" factor',
+    ],
+    [
+      "Hire Two Senior Engineers wins probability vs Status Quo (No Changes) baseline at 72%.",
+      'leader prose comparing against a "No Changes" baseline option',
+    ],
   ];
 
   for (const [text, label] of negativeCases) {
@@ -99,6 +137,10 @@ describe('findForbiddenPhraseHit — boundary cases', () => {
   });
 
   it('exposes a non-empty regex array', () => {
+    // After Codex P1 fix: the bare `\bno\s+changes\b` regex was replaced
+    // with three contextual denial patterns, so the array grew. The
+    // lower bound stays as a smoke check rather than an exact-count
+    // pin so future additions don't trip this invariant.
     expect(FORBIDDEN_USER_FACING_PHRASES.length).toBeGreaterThanOrEqual(9);
   });
 });

@@ -31,10 +31,22 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   /\bI\s+have\s+not\s+applied\s+any\s+changes\b/i,
   // "nothing changed" — denial of state mutation.
   /\bnothing\s+changed\b/i,
-  // "no changes" — generic denial when used as a state assertion. The
-  // word-boundary anchors keep this from tripping on "innocuous changes"
-  // or "no changes were necessary" sub-strings nested in benign prose.
-  /\bno\s+changes\b/i,
+  // "no changes" — contextual denial. The previous bare `\bno\s+changes\b`
+  // pattern false-positived on legitimate label-quotes in
+  // recent_changes[0].summary — e.g. a user-named option "No Changes
+  // Required" embedded in a safe_summary string the state-query guard
+  // quotes verbatim would erase the entire response via the egress
+  // fallback. The three contextual patterns below catch denial framing
+  // without catching quoted labels:
+  //   1. "no changes [were/are/have been] [made|applied|necessary|needed|required]"
+  //   2. "there [are/were/have been] no changes" (existential denial)
+  //   3. "no changes [happened|occurred|emerged|appeared|reflected|to report]"
+  // The original "I haven't applied any changes" / "nothing changed"
+  // patterns still cover the strongest denial classes; these three are
+  // the narrowing of the broader "no changes" rule.
+  /\bno\s+changes\s+(?:were|are|have\s+been)\s+(?:made|applied|necessary|needed|required)\b/i,
+  /\bthere\s+(?:are|were|have\s+been)\s+no\s+changes\b/i,
+  /\bno\s+changes\s+(?:happened|occurred|emerged|appeared|reflected|to\s+report)\b/i,
   // "unknown freshness" — internal/telemetry term that must never reach
   // user prose; the wire envelope's `analysis_ready.freshness: 'unknown'`
   // is separate, and the UI renders it without verbatim quoting.
