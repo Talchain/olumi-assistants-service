@@ -326,6 +326,38 @@ export const CLARIFICATION_BACK_PATTERN =
  * proves the response is acknowledging a change, not deflecting via
  * clarification. Combined with the clarification-back negative check,
  * this gives replay-side proof that the edit step actually mutated.
+ *
+ * Accepted classes (the regex below is the source of truth — failure
+ * evidence strings elsewhere in this file show only a few sample verbs
+ * for brevity, NOT the full vocabulary):
+ *
+ *   - Past-tense mutation verbs:
+ *       Strengthened / Increased / Decreased / Adjusted / Modified /
+ *       Weakened / Updated / Changed / Set / Added / Removed /
+ *       Applied / Saved
+ *   - Forward-looking: "now has" / "now shows" / "now reflects"
+ *   - Passive: "has been updated/changed/adjusted/set/added/removed"
+ *
+ * Rejected classes (these MUST keep failing — they indicate no
+ * mutation happened on the wire):
+ *
+ *   - Mode A draft / proposal copy:
+ *       "I have changes in mind ..."
+ *       "I've drafted a change ..."
+ *       "I can set X to Y. Reply with ..."
+ *   - Step-1 graph-echo prose:
+ *       "Your decision model ... is ready, with N options, M factors ..."
+ *   - Generic descriptive prose with no mutation verb.
+ *
+ * Known matched-but-Step-3-caught edge case — "Updated Price.":
+ * a bare past-tense verb sentence DOES match this regex on its own.
+ * That is intentional. The regex is the prose half of a layered
+ * defence; the structural backstop is Step 3 (`assertWhatChanged`),
+ * which fails the journey if the next turn cannot surface the change
+ * via `recent_changes`. Do NOT "fix" this by narrowing the regex —
+ * narrowing would also drop genuine mutations like "Strengthened the
+ * X edge from 0.15 to 0.32." Coverage for both classes is locked in
+ * by `tests/unit/v5-journey-replay/mutation-ack-pattern.test.ts`.
  */
 export const MUTATION_ACK_PATTERN =
   /\b(?:Updated|Adjusted|Changed|Modified|Set|Added|Removed|Strengthened|Weakened|Increased|Decreased|Applied|Saved)\b|\bnow (?:has|shows|reflects)\b|\bhas been (?:updated|changed|adjusted|set|added|removed)\b/i;
@@ -383,8 +415,12 @@ export function assertSetFactorValue(
       ok: false,
       failing_contract: 'set_factor_value_no_mutation_acknowledgement',
       evidence:
-        `status=200 but no mutation-ack phrasing in response ` +
-        `(expected "Updated X", "X now has...", "Adjusted ...", etc.). ` +
+        `status=200 but no mutation-ack phrasing in response. ` +
+        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any past-tense ` +
+        `mutation verb (Strengthened/Increased/Decreased/Adjusted/Modified/` +
+        `Weakened/Updated/Changed/Set/Added/Removed/Applied/Saved), ` +
+        `forward-looking "now has/shows/reflects", or passive ` +
+        `"has been updated/changed/adjusted/set/added/removed". ` +
         `text_preview="${text.slice(0, 100)}..."`,
     };
   }
@@ -471,8 +507,12 @@ export function assertEditGraphGeneric(
       ok: false,
       failing_contract: 'edit_graph_no_mutation_acknowledgement',
       evidence:
-        `status=200 but no mutation-ack phrasing in response ` +
-        `(expected "Updated X", "X now has...", "Adjusted ...", etc.). ` +
+        `status=200 but no mutation-ack phrasing in response. ` +
+        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any past-tense ` +
+        `mutation verb (Strengthened/Increased/Decreased/Adjusted/Modified/` +
+        `Weakened/Updated/Changed/Set/Added/Removed/Applied/Saved), ` +
+        `forward-looking "now has/shows/reflects", or passive ` +
+        `"has been updated/changed/adjusted/set/added/removed". ` +
         `text_preview="${text.slice(0, 100)}..."`,
     };
   }
