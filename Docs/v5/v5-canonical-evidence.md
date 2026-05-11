@@ -16,9 +16,9 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 ## Run metadata
 
 - **Branch:** `claude/v5-golden-journey-dl7-replay`
-- **Pack generated from commit SHA:** `6211789bf6a9781df7e2be7e7cc3df96c29a2082` (if this does not match HEAD, regenerate with the harness)
+- **Pack generated from commit SHA:** `2cea5eb22de2cde5750e0ad27aa95c6873215013` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-05-10T20:52:30.261Z
+- **Started at:** 2026-05-10T23:58:56.753Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
@@ -33,7 +33,7 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 886ms
+- **elapsed:** 902ms
 
 Deploy confirmed: `/healthz` build `6211789` matches `--expected-build 6211789`.
 
@@ -49,19 +49,19 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=49197ms | — |
-| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1627 chip_count=1 elapsed=10880ms stage=analyse | — |
-| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=109 chip_count=1 elapsed=16682ms stage=frame | — |
-| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=4971ms | — |
-| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1046 labels_checked=4 chip_count=1 | — |
-| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=455 chip_count=0 elapsed=5446ms stage=frame | — |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=59333ms | — |
+| `2_weakest_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1484 chip_count=1 elapsed=10799ms stage=analyse | — |
+| `3_add_option` | [PASS] passed | v5-runtime | 200 | status=200 text_len=109 chip_count=1 elapsed=11035ms stage=frame | — |
+| `4_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=6136ms | — |
+| `5_explain_leader` | [PASS] passed | v5-runtime | 200 | status=200 text_len=1684 labels_checked=4 chip_count=1 | — |
+| `6_edit_budget` | [PASS] passed | v5-runtime | 200 | status=200 text_len=333 chip_count=0 elapsed=8119ms stage=frame | — |
 
 ### assistant_text per step (redacted)
 
 #### `1_draft_graph`
 
 ```
-Your decision model for "Meet Q3 Roadmap Commitments with Scaled Delivery" is ready, with 4 options, 5 factors, and 3 risks to consider.
+Your decision model for "Deliver Q3 Roadmap Commitments at Scale" is ready, with 4 options, 5 factors, and 3 risks to consider.
 ```
 Chips:
 - `chip_action_run_analysis` — **Run analysis** — "Run analysis." action_type=`run_analysis`
@@ -69,15 +69,13 @@ Chips:
 #### `2_weakest_option`
 
 ```
-Looking at the causal structure, **Continue with Current Team (Status Quo)** appears weakest against your goal of meeting Q3 roadmap commitments.
+Looking at the model structure, **Continue with Current Team (Status Quo)** appears weakest against your goal of delivering Q3 roadmap commitments at scale.
 
-Here is why the structure points that way. The goal is primarily reached through Q3 Delivery Capacity, which has a moderate positive link to the goal. Status quo contributes to Headcount and Scaling Spend (which has only a weak positive link to delivery capacity) but does not activate either the Local Senior Hire Indicator or the Offshore Partnership Indicator in any meaningful way that adds capacity. In other words, it adds cost signals without adding the capacity or knowledge levers that the other options engage.
+Here is why the structure points that way. The goal is reached primarily through two outcome pathways: Engineering Delivery Capacity and Q3 Roadmap Commitment Confidence. Status quo has a causal link to Local Senior Headcount Added and Offshore Partner Engaged, but those links represent the absence of change rather than a positive contribution, so it adds nothing to either outcome pathway. It also avoids Budget Strain and Coordination Overhead, which is a genuine structural advantage, but that benefit is passive: it does not offset the lack of capacity growth.
 
-The other three options each activate at least one additional pathway. Local hiring engages the Local Senior Hire Indicator, which carries moderate positive links to both delivery capacity and knowledge retention. Offshore engages the Offshore Partnership Indicator for delivery capacity, though it introduces coordination overhead with a moderate negative link to the goal. Tiered pricing at least funds gradual hiring, keeping the spend lever active with a forward-looking intent.
+By contrast, Hire Two Senior Engineers Locally has very strong positive links into both Local Senior Headcount Added and Hiring and Scaling Budget Allocated, feeding delivery capacity and roadmap confidence directly. Engage Offshore Partner activates the offshore engagement pathway quickly. Even Introduce Tiered Pricing to Fund Gradual Hiring, the slowest of the active options, at least drives budget allocation toward future capacity.
 
-Status quo, by contrast, activates no new capacity pathway and leaves the two biggest risks, Time to Productive Contribution and Coordination Overhead, unaddressed while also not resolving the delivery gap.
-
-No analysis has been run yet, so this is structural reasoning rather than a computed ranking. Running the simulation would give you probability scores across all four options and show which structural weaknesses matter most quantitatively. Would you like to do that?
+Status quo is structurally the only option with no mechanism to increase delivery capacity or roadmap confidence. That said, this is a structural reading only. Running the analysis would give you computed probabilities across all four options and show whether the margin is decisive or close. Would you like to run it?
 ```
 Chips:
 - `chip_action_run_analysis` — **Run analysis** — "Run analysis." action_type=`run_analysis`
@@ -99,7 +97,15 @@ Ran analysis on your current scenario.
 #### `5_explain_leader`
 
 ```
-Hire Two Senior Engineers Locally leads at 79% probability, 70 percentage points ahead of the runner-up, Engage Offshore Partner at 9%. Three factors carry the result. The Local Senior Hire Indicator has a very strong positive influence: choosing this option activates that indicator directly, which in turn drives Q3 Delivery Capacity and Team Knowledge and Code Quality Retention, both of which feed positively into your goal. Senior Engineering Talent Availability adds a moderate positive influence, meaning the current market conditions are working in this option's favour rather than against it. The Offshore Partnership Indicator, by contrast, carries a moderate negative influence on the goal, and because the local hiring option does not activate that pathway, it avoids the coordination and integration overhead and the drag on knowledge retention that offshore brings. The combination of a strong direct mechanism, a supportive external factor, and the absence of the offshore risk pathway is what separates this option from the field.
+Hire Two Senior Engineers Locally leads at 70% win probability, 52 percentage points ahead of the runner-up, Continue with Current Team (Status Quo), at 19%. The result is moderate in robustness, so it is a meaningful lead but not an unassailable one.
+
+Three factors carry the result. Local Senior Headcount Added has a very strong positive influence: choosing this option directly activates that factor via a very strong causal link, which then drives both Engineering Delivery Capacity and Q3 Roadmap Commitment Confidence, both of which connect to the goal with moderate positive links. That is the core of why this option performs best.
+
+Offshore Partner Engaged works in the opposite direction, with a strong negative influence on the goal. The offshore option activates that factor, which in turn drives Coordination and Integration Overhead with a moderate positive link, and Coordination and Integration Overhead carries a moderate negative link to the goal. By not engaging an offshore partner, the local hiring option avoids that drag entirely.
+
+Local Senior Talent Availability adds a moderate positive influence. It is an external factor, so it introduces uncertainty, but on balance it supports the local hiring path through its weak positive link to Engineering Delivery Capacity and its weak negative link to Time to Full Productivity (meaning better availability reduces ramp-up risk).
+
+The main vulnerability is that the result is moderate rather than stable. If talent availability turns out to be worse than modelled, or if the time-to-productivity risk materialises, the margin could narrow. Would you like to explore what would need to change to flip this result?
 ```
 Chips:
 - `chip_action_what_would_flip` — **Explore what would change this** — "Explore what would change the result." action_type=`what_would_flip`
@@ -107,9 +113,9 @@ Chips:
 #### `6_edit_budget`
 
 ```
-There is no node labelled 'budget factor' in the current graph. The closest related factor is 'Headcount and Scaling Spend' (the relevant factor), which represents scaling budget.
+Strengthened the hiring spend factor's effect on delivery capacity and budget strain risk to reflect a more impactful budget role in the model.
 
-I could not find a 'budget factor' in the current graph. Did you mean 'Headcount and Scaling Spend' (the relevant factor)? If so, please confirm and let me know what value or parameter you'd like to increase — for example, its raw_value, or the strength of one of its edges.
+Note: Increasing hiring spend influence also amplifies budget strain risk. The net effect on the goal depends on how the simulation balances delivery capacity gains against increased risk.
 ```
 
 ## Canonical steps (from brief)

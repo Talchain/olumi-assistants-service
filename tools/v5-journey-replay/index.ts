@@ -214,7 +214,16 @@ function parseJourneyArg(raw: string): JourneyId {
   );
 }
 
-function parseArgs(): HarnessConfig {
+/**
+ * `HarnessConfig` keeps `journey` optional so legacy unit-test fixtures
+ * (which omit it) typecheck. `ResolvedHarnessConfig` is the internal
+ * shape produced by `parseArgs()`: every CLI run resolves `journey` to
+ * a concrete `JourneyId` (defaulting to `canonical`). Downstream `run()`
+ * code reads `cfg.journey` as a required value.
+ */
+type ResolvedHarnessConfig = Omit<HarnessConfig, 'journey'> & { readonly journey: JourneyId };
+
+function parseArgs(): ResolvedHarnessConfig {
   const args = process.argv.slice(2);
   let baseUrl = 'http://localhost:3000';
   let outPath = 'Docs/v5/v5-golden-path-evidence-cee.md';

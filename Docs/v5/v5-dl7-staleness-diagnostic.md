@@ -16,9 +16,9 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 ## Run metadata
 
 - **Branch:** `claude/v5-golden-journey-dl7-replay`
-- **Pack generated from commit SHA:** `6211789bf6a9781df7e2be7e7cc3df96c29a2082` (if this does not match HEAD, regenerate with the harness)
+- **Pack generated from commit SHA:** `2cea5eb22de2cde5750e0ad27aa95c6873215013` (if this does not match HEAD, regenerate with the harness)
 - **Base URL:** https://cee-staging.onrender.com
-- **Started at:** 2026-05-10T20:50:53.198Z
+- **Started at:** 2026-05-10T23:55:04.233Z
 - **Expected prompt version:** `v38.2`
 - **Expected prompt hash:** `2e25001a025e288c`
 - **Auth mode:** authenticated
@@ -33,7 +33,7 @@ Phase 3 of V5 alpha hardening. Produced by [tools/v5-journey-replay](../../tools
 - **version:** `1.12.0`
 - **service:** `assistants`
 - **degraded:** false
-- **elapsed:** 1051ms
+- **elapsed:** 228ms
 
 Deploy confirmed: `/healthz` build `6211789` matches `--expected-build 6211789`.
 
@@ -49,17 +49,17 @@ Two-stage probe before the six canonical steps: (a) public `/healthz` for reacha
 
 | step | status | outcome class | http | evidence | failing_contract |
 |---|---|---|---|---|---|
-| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=53276ms | — |
-| `2_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=5145ms | — |
-| `3_edit_graph_generic` | [PASS] passed | v5-runtime | 200 | status=200 text_len=544 chip_count=0 mutation_ack="now has" elapsed=10419ms routing_class_check=unit_tests_only | — |
-| `4_explain_leader_stale` | [FAIL] failed | v5-runtime | 200 | status=200 text_len=970 staleness_text=false staleness_chip=false chip_count=1 | explain_leader_stale_signal_missing |
+| `1_draft_graph` | [PASS] passed | v5-runtime | 200 | status=200 chip_count=1 first_chip_label="Run analysis" elapsed=62217ms | — |
+| `2_run_analysis` | [PASS] passed | v5-runtime | 200 | status=200 text_len=38 chip_count=0 analysis_ready=ready options=4 elapsed=4744ms | — |
+| `3_edit_graph_generic` | [PASS] passed | v5-runtime | 200 | status=200 text_len=649 chip_count=0 mutation_ack="Strengthened" elapsed=10904ms routing_class_check=unit_tests_only | — |
+| `4_explain_leader_stale` | [FAIL] failed | v5-runtime | 200 | status=200 text_len=1252 staleness_text=false staleness_chip=false chip_count=1 | explain_leader_stale_signal_missing |
 
 ### assistant_text per step (redacted)
 
 #### `1_draft_graph`
 
 ```
-Your decision model for "Deliver Q3 Roadmap Commitments on Time" is ready, with 4 options, 5 factors, and 3 risks to consider.
+Your decision model for "Deliver Q3 Roadmap Commitments at Sustainable Cost" is ready, with 4 options, 4 factors, and 3 risks to consider.
 ```
 Chips:
 - `chip_action_run_analysis` — **Run analysis** — "Run analysis." action_type=`run_analysis`
@@ -73,15 +73,15 @@ Ran analysis on your current scenario.
 #### `3_edit_graph_generic`
 
 ```
-Headcount Investment Level now has a stronger and more certain effect on Q3 Delivery Capacity, making it a more influential driver in the model.
+Strengthened the staffing cost to budget overrun risk edge (mean 0.6 → 0.75, exists_probability 0.9 → 0.95), making Incremental Staffing Cost more consequential in the simulation. Note that this factor currently only drives cost overrun risk — if you want it to influence delivery or team quality outcomes as well, let me know.
 
-Note: The [REDACTED] absolute strength total on Q3 Roadmap Delivery Capacity should be checked. With this update, Headcount Investment Level, Local Senior Hire Activated, Offshore Partnership Activated, Current Engineering Team Size, and Senior Engineering Talent Availability together approach the 1.0 limit. No existing edge was weakened, but a rerun will confirm the total remains within bounds.
+Note: Incremental Staffing Cost currently has only one outbound causal edge (to Budget Overrun Risk). Making that edge stronger increases the factor's influence, but the factor has no path to outcomes or other risks. If staffing cost should also affect roadmap delivery or team quality, additional edges would be needed.
 ```
 
 #### `4_explain_leader_stale`
 
 ```
-Hire Two Senior Engineers Locally leads at 59% win probability, 42 percentage points ahead of the runner-up, Continue with Current Team (Status Quo), at 16%. Three factors carry the result. Senior Engineering Talent Availability is the top driver with very strong negative influence, meaning the model sees tight talent markets as a significant headwind across all options, but the local hire path is best positioned to navigate it by directly activating the Local Senior Hire factor. Offshore Partnership Activated carries strong negative influence, which drags down the Engage Offshore Partner option through the moderate negative causal link from Coordination and Integration Overhead to your goal. Local Senior Hire Activated itself has moderate positive influence, flowing through Q3 Roadmap Delivery Capacity and Team Knowledge and Code Quality into your goal. The result is fragile, though, so that 59% reflects meaningful uncertainty rather than a clear verdict.
+Hire Two Senior Engineers Locally leads at 63% win probability, 27 percentage points ahead of Engage Offshore Partner at 36%. Three factors carry the result. Effective Engineering Capacity has a very strong positive influence: local hires add directly to your team's throughput via a very strong causal link, and that capacity then flows through to Q3 Roadmap Delivery Confidence and reduces Q3 Commitment Slip Risk. Speed to Full Productivity contributes a moderate positive influence, reflecting that local senior engineers are expected to integrate and contribute faster than an offshore partner, which also reduces Coordination and Integration Overhead. Incremental Staffing Cost works against the option with a moderate negative influence, feeding Budget Overrun Risk, which in turn has a moderate negative link to your goal. The local hire option wins because its capacity and productivity gains outweigh its cost drag, whereas the offshore option carries higher coordination overhead and slower ramp-up that erode its advantage on cost. That said, the result is fragile, meaning relatively small shifts in any of these three drivers could close the gap. Effective Engineering Capacity is the factor most worth pressure-testing before committing.
 ```
 Chips:
 - `chip_action_what_would_flip` — **Explore what would change this** — "Explore what would change the result." action_type=`what_would_flip`
@@ -93,8 +93,8 @@ See per-step `description` fields in [tools/v5-journey-replay/steps.ts](../../to
 ### Step 1 capture
 
 - **Option labels parsed:** `Hire Two Senior Engineers Locally`, `Engage Offshore Partner`, `Continue with Current Team (Status Quo)`, `Introduce Tiered Pricing to Fund Gradual Hiring`
-- **Factor labels parsed:** `Headcount Investment Level`, `Local Senior Hire Activated`, `Senior Engineering Talent Availability`, `Offshore Partnership Activated`, `Current Engineering Team Size`
-- **Resolved factor for Step 2:** `Headcount Investment Level` _(fallback reason: `first_label`)_
+- **Factor labels parsed:** `Incremental Staffing Cost`, `Local Senior Engineering Talent Availability`, `Effective Engineering Capacity`, `Speed to Full Productivity`
+- **Resolved factor for Step 2:** `Incremental Staffing Cost` _(fallback reason: `first_label`)_
 - **Graph hash at draft (post-Step 1):** _not surfaced on wire envelope_
 
 ### 4b — pinned unit regression (handler-level)
@@ -117,16 +117,15 @@ If the harness uncovers a systemic blocker outside the approved Phase 2 scope, t
 
 ## Product gap (this pack is the diagnostic)
 
-This pack is **not** completion evidence for the V5 Golden Journey. It is the diagnostic record of a runtime gap surfaced by the `dl7-staleness` journey on staging build `6211789` (rerun `20260510T205052Z`).
+This pack is **not** completion evidence for the V5 Golden Journey. It is the diagnostic record of a runtime gap surfaced by the `dl7-staleness` journey on staging build `6211789` (rerun `20260510T235503Z`).
 
-**V5 product gap (surfaced by `dl7-staleness`, staging build `6211789`, rerun `20260510T205052Z`):** Post-analysis `edit_graph` mutation does not propagate stale/rerun state into the `explain_result` flow. After a successful structural edit between a completed `run_analysis` and a follow-up explain turn, the assistant explains the *old* analysis without a staleness warning, and the chip surfaced is `what_would_flip` rather than `run_analysis` / `rerun`. This is a runtime gap, not a harness gap. Recommended follow-up workstream: a runtime PR that marks the prior analysis stale on any post-analysis graph-mutating fact and routes the next explain turn through a stale-aware composer.
+**V5 product gap (surfaced by `dl7-staleness`, staging build `6211789`, rerun `20260510T235503Z`):** Post-analysis `edit_graph` mutation does not propagate stale/rerun state into the `explain_result` flow. After a successful structural edit between a completed `run_analysis` and a follow-up explain turn, the assistant explains the *old* analysis without a staleness warning, and the chip surfaced is `what_would_flip` rather than `run_analysis` / `rerun`. This is a runtime gap, not a harness gap. The fix is shared with the recent-changes gap recorded in `v5-dl7-edit-graph-diagnostic.md` — see "Recommended next product-code workstream" below.
 
 ### Observed evidence for the gap
 
 | artefact | observation |
 |---|---|
-| Step 3 result | `edit_graph_generic` PASS, `mutation_ack="now has"` — mutation accepted by runtime |
-| Step 3 assistant text | "Headcount Investment Level now has a stronger and more certain effect on Q3 Delivery Capacity, making it a more influential driver in the model." |
+| Step 3 result | `edit_graph_generic` PASS, `mutation_ack="Strengthened"` — mutation accepted by runtime ("Strengthened the staffing cost to budget overrun risk edge…") |
 | Step 4 result | `explain_leader_stale` FAIL, `failing_contract = explain_leader_stale_signal_missing` |
 | Step 4 staleness in text | `staleness_text = false` — assistant explains the prior analysis with no caveat |
 | Step 4 chip set | one chip only: `chip_action_what_would_flip` (action_type `what_would_flip`); no `run_analysis` / `rerun` chip |
@@ -134,13 +133,14 @@ This pack is **not** completion evidence for the V5 Golden Journey. It is the di
 
 ### 9-step Golden Journey verdict
 
-**Partially proven; blocked at Step 8 (stale/rerun).** Steps 1–7 are covered by the green canonical and `dl7-edit-graph` packs in this same commit. Step 8 cannot pass until the runtime gap above is resolved, so Step 9 (updated result after stale rerun) is unreachable.
+**Partially proven; blocked at Step 4 (`what_changed` denies recent edit — see `v5-dl7-edit-graph-diagnostic.md`) and Step 8 (stale/rerun, this pack).** Steps 1–3 are covered by the green canonical pack in the same commit. Both runtime gaps share the same root cause: post-mutation facts do not surface in the next explain or state-query turn, so the assistant either fabricates a denial (Step 4) or explains the old analysis as if it were still fresh (Step 8). Step 9 (updated result after rerun) is therefore unreachable.
 
 ### Recommended next product-code workstream
 
-**`V5 stale-aware explain and rerun recovery`** — runtime PR that:
-1. On commit of any post-`run_analysis` graph-mutating fact (`edit_graph`, `set_factor_value`, structural changes), marks the prior analysis result as stale in orchestrator state.
-2. Routes the next `explain_result` turn through a composer that prepends a staleness caveat to the assistant text.
-3. Replaces the chip set on that turn — `what_would_flip` → `run_analysis` (label "Rerun analysis") — so the user has the recovery path one click away.
+**`V5 recent-changes-aware and stale-aware explain composer`** — single runtime PR covering both gaps:
+1. On commit of any post-`run_analysis` graph-mutating fact (`edit_graph`, `set_factor_value`, structural changes), mark the prior analysis result as stale **and** persist a `recent_changes` fact whose `summary` is short and human-readable.
+2. Route the next `state_query` turn (e.g. "what changed?") through a deterministic composer that quotes the most recent `recent_changes` entries, not the LLM denial path.
+3. Route the next `explain_result` turn through a composer that prepends a staleness caveat to the assistant text.
+4. Replace the chip set on that turn — `what_would_flip` → `run_analysis` (label "Rerun analysis") — so the user has the recovery path one click away.
 
-This pack proves the gap. The fix is out of scope for this workstream.
+This pack proves Step 8 of the gap. The Step 4 part is proved by `v5-dl7-edit-graph-diagnostic.md`. The fix is out of scope for this workstream.

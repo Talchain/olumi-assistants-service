@@ -164,14 +164,7 @@ export function assertAnalysisRun(result: FetchResult): AssertionResult {
   // `assertAnalysisRun` while Step 4's wire body lacked the field —
   // replay rows looked green but the chain was broken. Hard-fail here.
   const body = result.body;
-  const ar = body?.analysis_ready as
-    | {
-        readonly status?: unknown;
-        readonly options?: unknown;
-        readonly goal_node_id?: unknown;
-        readonly computed_at?: unknown;
-      }
-    | undefined;
+  const ar = body?.analysis_ready;
   if (ar == null) {
     return {
       ok: false,
@@ -528,20 +521,56 @@ export function assertWhatChanged(
       evidence: `status=200 text_len=0`,
     };
   }
+  const lower = text.toLowerCase();
+  // Hard fail: the assistant claims no recent edits exist. The journey
+  // hits this step *after* a successful `edit_graph` mutation (Step 2
+  // returns `mutation_ack="now has"`), so a denial here is a real
+  // recent_changes surfacing gap, not a paraphrase. Catches phrasings
+  // like "I haven't applied any changes in this session yet" — the
+  // exact text observed on staging build `6211789` (2026-05-10) that
+  // produced a false-PASS under the looser predecessor of this check.
+  const denialPatterns: ReadonlyArray<RegExp> = [
+    /haven'?t\s+(?:yet\s+)?(?:applied|made|done|recorded|made any)\s+(?:any\s+)?(?:changes|edits|updates|modifications)/,
+    /no\s+(?:changes|edits|updates|modifications)\s+(?:have\s+been\s+|were\s+|so\s+far)?(?:applied|made|done|recorded)?/,
+    /nothing\s+(?:has\s+been\s+)?(?:changed|edited|updated|modified|applied)/,
+    /(?:i\s+)?don'?t\s+see\s+any\s+(?:recent\s+)?(?:changes|edits|updates)/,
+  ];
+  const denialMatch = denialPatterns.find((rx) => rx.test(lower));
+  if (denialMatch !== undefined) {
+    return {
+      ok: false,
+      failing_contract: 'what_changed_denies_recent_edit',
+      evidence:
+        `status=200 text_len=${text.length} ` +
+        `denial_pattern=${denialMatch.source.slice(0, 48)} ` +
+        `factor_label="${ctx?.factorLabel ?? ''}" mentioned=false ` +
+        `elapsed=${result.elapsed_ms}ms`,
+    };
+  }
   // Stable-field check: when a factor label was resolved at Step 1,
   // we expect the deterministic state-query answer to mention it.
   // This is the strongest signal that the mutation surfaced into
-  // recent_changes. A miss does not necessarily mean a bug (the
-  // guard may paraphrase), but it does indicate weaker coverage and
-  // is logged in evidence.
-  const lower = text.toLowerCase();
-  const labelMentioned =
-    ctx?.factorLabel != null && lower.includes(ctx.factorLabel.toLowerCase());
+  // recent_changes. A miss after the denial gate is suspicious and
+  // also fails — recent_changes that does not reference the just-
+  // edited factor is functionally indistinguishable from a generic
+  // affirmative paraphrase.
+  const factorLabel = ctx?.factorLabel ?? null;
+  const labelMentioned = factorLabel != null && lower.includes(factorLabel.toLowerCase());
+  if (factorLabel != null && !labelMentioned) {
+    return {
+      ok: false,
+      failing_contract: 'what_changed_factor_label_not_referenced',
+      evidence:
+        `status=200 text_len=${text.length} ` +
+        `factor_label="${factorLabel}" mentioned=false ` +
+        `elapsed=${result.elapsed_ms}ms`,
+    };
+  }
   return {
     ok: true,
     evidence:
       `status=200 text_len=${text.length} ` +
-      `factor_label="${ctx?.factorLabel ?? ''}" mentioned=${labelMentioned} ` +
+      `factor_label="${factorLabel ?? ''}" mentioned=${labelMentioned} ` +
       `safe_summary=ok ` +
       `elapsed=${result.elapsed_ms}ms`,
   };

@@ -73,6 +73,12 @@ export interface TurnResponse {
   }>;
   readonly insights?: ReadonlyArray<unknown>;
   readonly stage_indicator?: string;
+  readonly analysis_ready?: {
+    readonly status?: unknown;
+    readonly options?: unknown;
+    readonly goal_node_id?: unknown;
+    readonly computed_at?: unknown;
+  };
   // Note: `turn_class` and `handler_id` were probed during the DL-7
   // audit but are NOT on the wire response envelope — they are
   // arguments to `commitDirectAnswer` / `append_turn_atomic` (DB
@@ -150,10 +156,13 @@ export interface HarnessConfig {
    */
   readonly expectedBuild?: string;
   /**
-   * Journey selector. Defaults to `canonical` so existing invocations
-   * (and existing harness self-tests) stay backwards-compatible. DL-7
-   * journeys are opted in via the `--journey` CLI flag — see
-   * `JOURNEY_REGISTRY` in `./steps.ts` for available ids.
+   * Journey selector. Optional in the type to keep pre-existing unit-
+   * test fixtures (which only need `baseUrl` / `outPath` / `scenarioPrefix`)
+   * compiling. The runtime resolves `undefined` to `'canonical'` in
+   * `parseConfig()`, so consumers that read `cfg.journey` after CLI
+   * parsing observe a concrete `JourneyId`. DL-7 journeys are opted in
+   * via the `--journey` CLI flag — see `JOURNEY_REGISTRY` in `./steps.ts`
+   * for available ids.
    */
-  readonly journey: JourneyId;
+  readonly journey?: JourneyId;
 }
