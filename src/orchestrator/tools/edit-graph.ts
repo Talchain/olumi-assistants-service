@@ -235,7 +235,69 @@ function getMaxPatchOperations(): number {
 // cannot offer a one-click apply step. The copy must therefore promise
 // only what the system can actually execute — which is to apply the
 // change directly when the user restates the specific factor and value.
-const PROPOSE_AND_CONFIRM_ASSISTANT_TEXT = 'I’ve drafted a change that fits your description, but I can’t apply a draft proposal automatically yet. Tell me the specific factor and value you’d like, and I’ll make the change directly.';
+//
+// Fallback used when we don't have a resolved target to anchor on
+// (low-confidence resolution). Inventing concrete detail here would be
+// dishonest — the user should restate their request more specifically.
+const PROPOSE_AND_CONFIRM_FALLBACK_TEXT = 'I’ve drafted a change that fits your description, but I need the specifics to apply it directly. Tell me the specific factor and value you’d like, and I’ll make the change directly.';
+
+// No-op path fallback. Forward-looking by design — see the comment at
+// the no-op branch on why a denial-shaped default ("No changes were
+// needed") would be rewritten by the V5 egress forbidden-phrase guard.
+const NO_OP_FALLBACK_TEXT = 'I couldn’t see a concrete change to make from that description. Tell me the specific factor and value you’d like, and I’ll apply it directly.';
+
+/**
+ * Build the propose-and-confirm assistant text. Surfaces the concrete
+ * resolved target and an example of the exact phrasing that would
+ * commit the change deterministically. Never promises an "Apply" chip
+ * (the V5 dispatcher does not wire pendingProposal round-trip — see
+ * edit-graph-dispatch.ts:160–179).
+ *
+ * Stop-conditions (fall back to the generic stub):
+ *  - No resolved target (low-confidence resolution).
+ *  - Empty proposed-changes payload.
+ *  - First change has no usable element_label.
+ */
+function buildProposeAndConfirmText(
+  proposedChanges: ProposedChangesPayload,
+  resolvedTarget: ResolvedEditTarget | null,
+): string {
+  if (!resolvedTarget) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+  const changes = proposedChanges.changes ?? [];
+  if (changes.length === 0) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+  const first = changes[0];
+  if (!first || !first.element_label) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+
+  const label = resolvedTarget.label;
+  if (changes.length === 1) {
+    const example =
+      first.action_type === 'value_update'
+        ? `e.g. "Set ${label} to 120k" or "Lower ${label} by 20%"`
+        : first.action_type === 'option_config'
+        ? `e.g. "Set ${label}'s cost to 100k"`
+        : first.action_type === 'structural_add'
+        ? `e.g. "Add a ${label} factor"`
+        : `e.g. "Remove ${label}"`;
+    return `I have a change in mind for **${label}**, but I need the specifics to apply it directly. Reply with the exact change you'd like (${example}) and I'll make it.`;
+  }
+
+  const labels: string[] = [];
+  for (const change of changes.slice(0, 3)) {
+    if (change.element_label && !labels.includes(change.element_label)) {
+      labels.push(change.element_label);
+    }
+  }
+  if (labels.length === 0) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+
+  const list =
+    labels.length === 1
+      ? `**${labels[0]}**`
+      : labels.length === 2
+      ? `**${labels[0]}** and **${labels[1]}**`
+      : `**${labels.slice(0, -1).join('**, **')}** and **${labels[labels.length - 1]}**`;
+  const more = changes.length > 3 ? ` (and ${changes.length - 3} more)` : '';
+  return `I have changes in mind for ${list}${more}, but I need the specifics to apply them directly. Reply with the exact changes you'd like and I'll make them one at a time.`;
+}
 
 export function classifyEditIntent(editDescription: string): EditIntentCategory {
   const message = editDescription.toLowerCase();
@@ -1462,7 +1524,7 @@ export async function handleEditGraph(
       ?? [...new Set(proposedChanges.changes.map((change) => change.element_label))];
     return {
       blocks: [],
-      assistantText: PROPOSE_AND_CONFIRM_ASSISTANT_TEXT,
+      assistantText: buildProposeAndConfirmText(proposedChanges, targetResolution.resolved_target),
       latencyMs: Date.now() - startTime,
       appliedGraph: null,
       wasRejected: false,
@@ -1642,15 +1704,28 @@ export async function handleEditGraph(
     if (llmResult.operations.length === 0) {
       const latencyMs = Date.now() - startTime;
 
-      // Build assistant text: warnings first, then coaching.summary
-      const parts: string[] = [];
-      if (llmResult.warnings.length > 0) {
-        parts.push(llmResult.warnings.join(' '));
-      }
-      if (llmResult.coaching?.summary) {
-        parts.push(llmResult.coaching.summary);
-      }
-      const assistantText = parts.join('\n\n') || 'No changes were needed for this request.';
+      // Determinism gap closed: previously, `llmResult.coaching.summary`
+      // (LLM-authored prose) was forwarded to `assistantText` on the
+      // no-op path. The LLM can claim "I've successfully updated X" in
+      // that summary while emitting zero operations, producing the
+      // false-success narration observed in dl7-edit-graph run 3. It
+      // can also use internal terms ("validator") it sees in the
+      // edit_graph system prompt. The no-op path must construct prose
+      // deterministically from structured signals only — warnings are
+      // structured codes (safe), coaching is free LLM prose (not safe
+      // when operations is empty, because the narration cannot align
+      // with deterministic state).
+      //
+      // The default text is forward-looking ("Tell me…") rather than a
+      // denial ("No changes were needed…"). Denial phrasing matches
+      // FORBIDDEN_USER_FACING_PHRASES at the V5 egress and would be
+      // rewritten to the generic neutral fallback — costing the user
+      // the chance to know what to do next. Forward-looking copy is
+      // consistent with the Mode A propose-and-confirm fallback and
+      // gives the user an obvious next action.
+      const assistantText = llmResult.warnings.length > 0
+        ? llmResult.warnings.join(' ')
+        : NO_OP_FALLBACK_TEXT;
 
       log.info(
         {
@@ -1658,6 +1733,7 @@ export async function handleEditGraph(
           attempt,
           warnings: llmResult.warnings.length,
           has_coaching: !!llmResult.coaching,
+          coaching_dropped: !!llmResult.coaching?.summary,
           preceded_by_plot_rejection: !!lastPlotErrors,
           preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
         },

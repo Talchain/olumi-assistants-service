@@ -820,16 +820,19 @@ describe('edit_graph v9 Phase 1 — end-to-end gold case (bare-array LLM output)
 
   // -------------------------------------------------------------------------
   // D3-no-op. Phase 2A polish — empty bare-array (`[]`) must produce the
-  //     existing no-op fallback "No changes were needed for this request."
-  //     and NOT the safe coaching default. This is the end-to-end pair
-  //     to A8 / A8b.
+  //     forward-looking no-op fallback and NOT the safe coaching default.
+  //     This is the end-to-end pair to A8 / A8b.
   //
   //     The fix lives in parseEditGraphResponse: coaching is gated on
   //     `parsed.length > 0`. With coaching=null, the empty-ops branch
-  //     at edit-graph.ts:1637 falls through to its existing literal
-  //     fallback string.
+  //     at edit-graph.ts:1637 falls through to its forward-looking
+  //     NO_OP_FALLBACK_TEXT (V5 H5 update: was "No changes were needed
+  //     for this request.", but that phrasing matched the egress
+  //     forbidden-phrase denial regex and was being rewritten to the
+  //     generic neutral fallback. Forward-looking text passes both
+  //     guards intact).
   // -------------------------------------------------------------------------
-  it('D3-no-op empty bare-array yields the no-op fallback, not "Proposed graph edit."', async () => {
+  it('D3-no-op empty bare-array yields the forward-looking no-op fallback, not "Proposed graph edit."', async () => {
     const adapter = makeAdapter(JSON.stringify([]));
 
     const result = await handleEditGraph(
@@ -841,8 +844,9 @@ describe('edit_graph v9 Phase 1 — end-to-end gold case (bare-array LLM output)
       { plotClient: makePlotClientSuccess(), maxRetries: 1 },
     );
 
-    expect(result.assistantText).toBe('No changes were needed for this request.');
+    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
     expect(result.assistantText).not.toContain('Proposed graph edit.');
+    expect(result.assistantText).not.toMatch(/\bno changes were\b/i);
     expect(result.appliedGraph).toBeNull();
     expect(result.wasRejected).toBe(false);
 

@@ -12,6 +12,8 @@ import { describe, expect, it } from 'vitest';
 import {
   FORBIDDEN_USER_FACING_PHRASES,
   findForbiddenPhraseHit,
+  findSuccessClaimHit,
+  SUCCESS_CLAIM_PATTERNS,
 } from '../forbidden-user-facing-phrases.js';
 
 describe('FORBIDDEN_USER_FACING_PHRASES — phrase matches', () => {
@@ -186,5 +188,147 @@ describe('audited recovery constants — no forbidden phrase', () => {
       '../../../orchestrator/route-v2.js'
     );
     expect(findForbiddenPhraseHit(EDIT_GRAPH_RECOVERY_TEXT)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5 H5 — internal-jargon defence (forbidden phrases additions).
+//
+// `validator` was observed leaking through user-facing prose on the
+// dl7-staleness staging replay (the edit_graph LLM coaching summary
+// includes the term because the system prompts teach it). The V4 Mode
+// B fix drops `coaching.summary` from the no-op path, but Mode C
+// success copy can still include LLM-authored prose; this wire-level
+// defence is the backstop. Each new entry was false-positive-swept
+// against existing user-facing test fixtures before adding.
+// ---------------------------------------------------------------------------
+
+describe('FORBIDDEN_USER_FACING_PHRASES — jargon defence (H5)', () => {
+  const jargonPositive: ReadonlyArray<readonly [string, string]> = [
+    ['The validator rejected this edge.', 'bare validator (the observed dl7-staleness leak)'],
+    ['Multiple validators ran on the model.', 'plural validators'],
+    ['Zod parsed the response.', 'Zod (library name)'],
+    ['The dispatcher routed this turn.', 'bare dispatcher'],
+    ['A tool call returned an error.', 'tool call (singular)'],
+    ['Three tool calls were retried.', 'tool calls (plural)'],
+    ['The response envelope was malformed.', 'response envelope (narrowed)'],
+    ['The wire envelope contained the payload.', 'wire envelope (narrowed)'],
+    ['The XML envelope was parsed.', 'XML envelope (narrowed)'],
+    ['A code validator runs after generation.', 'code validator (prompt-lifted)'],
+    // Case variants
+    ['The VALIDATOR rejected this.', 'shout-cased validator'],
+    ['The Dispatcher routed this.', 'title-cased dispatcher'],
+  ];
+
+  for (const [text, label] of jargonPositive) {
+    it(`flags ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).not.toBeNull();
+    });
+  }
+});
+
+describe('FORBIDDEN_USER_FACING_PHRASES — jargon defence does NOT false-positive', () => {
+  const jargonNegative: ReadonlyArray<readonly [string, string]> = [
+    // Bare `envelope` is intentionally NOT in the list — business prose
+    // can legitimately reference "envelope of options" or similar.
+    ['Hire Two Senior Engineers fits within the envelope of options.', 'business "envelope of options" not flagged'],
+    ['The marketing envelope was sent yesterday.', 'business "marketing envelope" not flagged'],
+    // "zod" (lowercase) is case-sensitive in the regex — if a user names
+    // a label "Zod" the case-sensitive match would still hit, which is
+    // acceptable (extremely unlikely user label) but lowercase common-
+    // language must pass.
+    ['The zoo had unusual exhibits.', 'lowercase "zoo" near-miss does not match Zod'],
+    // Coverage that the existing user-named "No Changes" patterns still pass
+    [
+      "Updated the 'No Changes' factor from 0.5 to 0.7.",
+      'pre-existing safe_summary still passes (regression guard)',
+    ],
+  ];
+
+  for (const [text, label] of jargonNegative) {
+    it(`does NOT flag ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// V5 H5 — success-claim language detector (counterpart to the denial
+// regex set). Used by the V5 edit_graph dispatcher's false-success
+// invariant: when `handleEditGraph` returns wasRejected=false + zero
+// operations + no applied graph, any success-claim language in
+// `assistantText` is by definition false.
+// ---------------------------------------------------------------------------
+
+describe('SUCCESS_CLAIM_PATTERNS — false-success detector', () => {
+  const successPositive: ReadonlyArray<readonly [string, string]> = [
+    ["I've successfully applied the change.", "I've successfully applied"],
+    ["I have successfully updated the model.", 'I have successfully updated'],
+    ["Successfully set Staffing Cost to 120k.", 'Successfully set'],
+    ["Successfully added the new factor.", 'Successfully added'],
+    ["Successfully removed the constraint.", 'Successfully removed'],
+    ["I've updated the Staffing Cost factor.", "I've updated"],
+    ["I have applied your change.", 'I have applied'],
+    ["I've added a new factor.", "I've added"],
+    ["The change has been applied to the model.", 'the change has been applied'],
+    ["The edit is now applied.", 'the edit is now applied'],
+    ["The update was applied successfully.", 'the update was applied'],
+    ["The mutation has been saved.", 'the mutation has been saved'],
+    ["The adjustment was committed.", 'the adjustment was committed'],
+    ["Has been updated to reflect your change.", 'has been updated'],
+    ["The factor has been added.", 'has been added'],
+    ['I’ve applied the change.', "curly-apostrophe I've applied"],
+  ];
+
+  for (const [text, label] of successPositive) {
+    it(`flags ${label}`, () => {
+      expect(findSuccessClaimHit(text)).not.toBeNull();
+    });
+  }
+});
+
+describe('SUCCESS_CLAIM_PATTERNS — does NOT flag legitimate non-commit prose', () => {
+  const successNegative: ReadonlyArray<readonly [string, string]> = [
+    ["I can apply this change if you confirm.", 'conditional offer (not commit claim)'],
+    ["I'd like to apply this once you specify a value.", 'desire to apply (not commit claim)'],
+    ["I'll update the value when you tell me what to use.", 'future commitment (not done)'],
+    ["Would you like me to apply this change?", 'question (not commit claim)'],
+    [
+      "I have a change in mind for **Staffing Cost**, but I need the specifics to apply it directly.",
+      'Mode A copy (must not false-positive)',
+    ],
+    [
+      'No changes were needed for this request.',
+      'Mode B deterministic copy (must not false-positive)',
+    ],
+    [
+      "Let me know what you'd like me to do next, and I'll take it from there.",
+      'EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT (idempotent neutral)',
+    ],
+    [
+      'Strengthened the Incremental Hiring Cost to Budget Overrun Risk edge from 0.5 to 0.7.',
+      'edit_graph safe_summary (verb without success qualifier)',
+    ],
+  ];
+
+  for (const [text, label] of successNegative) {
+    it(`does NOT flag ${label}`, () => {
+      expect(findSuccessClaimHit(text)).toBeNull();
+    });
+  }
+});
+
+describe('findSuccessClaimHit — boundary cases', () => {
+  it('returns null on empty string', () => {
+    expect(findSuccessClaimHit('')).toBeNull();
+  });
+
+  it('returns the matched substring', () => {
+    const hit = findSuccessClaimHit("Done — I've successfully applied the change to Staffing Cost.");
+    expect(hit).toMatch(/successfully\s+applied/i);
+  });
+
+  it('exposes a non-empty pattern array', () => {
+    expect(SUCCESS_CLAIM_PATTERNS.length).toBeGreaterThanOrEqual(3);
   });
 });

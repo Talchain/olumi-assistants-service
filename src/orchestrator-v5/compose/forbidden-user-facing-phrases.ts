@@ -90,6 +90,27 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // "the model has changed since the last analysis" instead.
   /\bprevious\s+analysis\b/i,
   /\bprior\s+analysis\b/i,
+  // V5 H5 — internal-jargon defence. The edit_graph and draft_graph
+  // system prompts teach the LLM the word "validator" (and "code
+  // validator"), which then surfaces in coaching summaries and was
+  // observed leaking through user-facing prose on a staging replay
+  // (dl7-staleness). The V4 Mode B fix drops `coaching.summary`
+  // passthrough at the no-op path, but the LLM-authored success
+  // narration on Mode C can still include internal terms, so this
+  // wire-level defence catches any future emit path that hasn't
+  // sanitised. Each entry was false-positive-swept against
+  // user-facing tests/fixtures before adding — see notes below.
+  //
+  // Bare-word entries (no plausible user-domain meaning in CEE):
+  /\bvalidator(s)?\b/i,           // observed leak; tests use it only in internal `details.failure_origin`
+  /\bdispatcher\b/i,              // no user-facing hits in codebase prose
+  /\bZod\b/,                       // library name; case-sensitive — "zod" is not a common word
+  /\btool\s+calls?\b/i,           // internal term — Sonnet tool call, LLM tool call
+  // Narrow contextual entries (bare form would false-positive on
+  // legitimate business prose like "envelope of options" or "code
+  // validator's report"; narrowed to the exact internal phrasings):
+  /\b(response|wire|XML)\s+envelope\b/i,
+  /\bcode\s+validator\b/i,        // exact phrasing from draft_graph prompts
 ];
 
 /**
@@ -146,4 +167,57 @@ export function applyEgressForbiddenPhraseGuard(text: string): EgressGuardResult
     text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
     hit,
   };
+}
+
+/**
+ * Success-claim language detector. Counterpart to
+ * `FORBIDDEN_USER_FACING_PHRASES`: that list catches lexical denial
+ * ("I haven't applied any changes") which contradicts a real commit;
+ * this list catches lexical success ("I've successfully updated") which
+ * contradicts a real *non*-commit.
+ *
+ * Used by the V5 edit_graph dispatcher's structural-mismatch invariant
+ * (V5 H5): when `handleEditGraph` returns wasRejected=false + zero
+ * operations + no applied graph, ANY success-claim language in
+ * `assistantText` is by definition false — there is no persisted state
+ * to back the claim. The invariant rewrites `assistant_text` to the
+ * neutral fallback and emits V5EditGraphFalseSuccessRewritten so ops
+ * can chase the upstream emit path.
+ *
+ * Each regex is intentionally narrow: it matches lexical success
+ * patterns that imply a commit happened, NOT general affirmative
+ * language ("yes", "ok", "I can help"). Examples that SHOULD hit:
+ *   - "I've successfully updated the model."
+ *   - "I have applied the change."
+ *   - "The edit has been applied."
+ *   - "Successfully changed X."
+ * Examples that should NOT hit (general affirmation, not commit claim):
+ *   - "I can apply this if you confirm."
+ *   - "I'd like to apply this change."
+ *   - "I'll update the value once you specify it."
+ */
+export const SUCCESS_CLAIM_PATTERNS: readonly RegExp[] = [
+  // "successfully" qualifier paired with a commit verb
+  /\bsuccessfully\s+(?:applied|updated|set|added|removed|changed|edited|adjusted|modified|created)\b/i,
+  // "I've / I have + commit verb" — perfective claim of completed mutation
+  /\bI['’]ve\s+(?:applied|updated|set|added|removed|changed|edited|adjusted|modified|created)\b/i,
+  /\bI\s+have\s+(?:applied|updated|set|added|removed|changed|edited|adjusted|modified|created)\b/i,
+  // "the (change|edit|update|mutation) (has been|is now|was) applied/made"
+  /\bthe\s+(?:change|edit|update|mutation|adjustment)\s+(?:has\s+been|is\s+now|was)\s+(?:applied|made|saved|committed)\b/i,
+  // "has been + commit verb" — passive completion
+  /\bhas\s+been\s+(?:applied|updated|set|added|removed|changed|saved|committed)\b/i,
+];
+
+/**
+ * Return the first success-claim pattern that hits in `text`, or null
+ * when clean. Mirrors `findForbiddenPhraseHit`'s shape so the
+ * dispatcher's rewrite path can treat both signals uniformly.
+ */
+export function findSuccessClaimHit(text: string): string | null {
+  if (!text || text.length === 0) return null;
+  for (const re of SUCCESS_CLAIM_PATTERNS) {
+    const m = re.exec(text);
+    if (m) return m[0];
+  }
+  return null;
 }

@@ -31,7 +31,11 @@ import {
   buildGenericEditGraphHandlerFact,
   isSuccessfulAppliedMutation,
 } from './edit-graph-fact-builder.js';
-import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
+import {
+  applyEgressForbiddenPhraseGuard,
+  EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+  findSuccessClaimHit,
+} from '../compose/forbidden-user-facing-phrases.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
   ConversationContext,
@@ -626,6 +630,41 @@ export async function dispatchEditGraph(
   }
 
   let response = editResultToOlumiResponse(editResult, payload);
+
+  // V5 H5 — false-success invariant (defence-in-depth).
+  // Runs BEFORE the forbidden-phrase guard. The V4 Mode B fix closes
+  // the LLM-coaching passthrough at the source, but a structural
+  // mismatch check at the wire catches any future emit path that
+  // narrates success without committing state. Structural signature:
+  //   wasRejected === false
+  //   AND operations is empty/missing
+  //   AND appliedGraph is null
+  //   AND assistantText contains success-claim language
+  // Under this signature, the claim cannot be true — nothing committed
+  // — so we replace the text with the same neutral fallback the
+  // forbidden-phrase guard uses (no jargon, invites the user to direct
+  // the next action). `isSuccessfulAppliedMutation()` already prevents
+  // an EditGraphHandlerFact from being persisted here, so this rewrite
+  // does not affect recent_changes / freshness derivation — both are
+  // already correctly gated to the no-commit path.
+  {
+    const noCommit =
+      editResult.wasRejected === false
+      && (!editResult.operations || editResult.operations.length === 0)
+      && !editResult.appliedGraph;
+    if (noCommit) {
+      const successHit = findSuccessClaimHit(response.assistant_text ?? '');
+      if (successHit !== null) {
+        emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          original_phrase: successHit,
+          dispatch_path: 'edit_graph_finalise',
+        });
+        response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+      }
+    }
+  }
 
   // V5 stale-aware explain recovery — finaliser-level egress guard.
   // Runs as the LAST step before the response is committed and

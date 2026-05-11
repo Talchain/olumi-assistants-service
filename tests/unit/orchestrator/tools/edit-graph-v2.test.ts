@@ -636,8 +636,13 @@ describe("envelope and coaching wiring", () => {
     expect(result.assistantText).not.toContain("fac_competitor");
   });
 
-  // Test 10: Empty operations → assistant_text is warnings + coaching
-  it("sets assistant_text to warnings then coaching.summary for empty ops", async () => {
+  // Test 10: Empty operations → assistant_text uses warnings only.
+  // V5 H5 update: `coaching.summary` is no longer forwarded to the user
+  // on the no-op path (it was the false-success vector observed in
+  // dl7-edit-graph run 3 — the LLM could claim success while emitting
+  // zero operations). Warnings remain because they are structured
+  // codes, not free LLM prose.
+  it("sets assistant_text to warnings on empty ops (coaching is dropped — V5 H5 Mode B fix)", async () => {
     const adapter = makeAdapter(V2_EMPTY_OPS_RESPONSE);
     const result = await handleEditGraph(
       makeContext(),
@@ -649,7 +654,11 @@ describe("envelope and coaching wiring", () => {
 
     expect(result.assistantText).not.toBeNull();
     expect(result.assistantText).toContain("already exists");
-    expect(result.assistantText).toContain("already in your model");
+    // V5 H5: coaching.summary ("already in your model. Want me to adjust…")
+    // is intentionally dropped from the no-op path — see edit-graph.ts
+    // comment at the no-op branch.
+    expect(result.assistantText).not.toContain("already in your model");
+    expect(result.assistantText).not.toContain("Want me to adjust");
   });
 
   // Test 11: substantive ops (add_node/add_edge) + prior analysis → suggested action chip

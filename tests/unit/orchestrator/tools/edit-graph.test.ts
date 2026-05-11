@@ -1366,3 +1366,194 @@ describe("mapOpsForPlot", () => {
     expect((mapped[0] as Record<string, unknown>).old_value).toBeUndefined();
   });
 });
+
+// ============================================================================
+// V5 H5 — Mode B no-op determinism (false-success at the source)
+//
+// Previously, `llmResult.coaching.summary` (LLM-authored prose) was
+// forwarded to `assistantText` on the empty-operations path. The LLM
+// could claim "I've successfully updated X" while emitting zero
+// operations, producing the false-success narration observed in
+// dl7-edit-graph run 3. The fix drops the coaching passthrough on the
+// no-op path so prose is constructed deterministically from
+// structured signals only.
+// ============================================================================
+
+describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("LLM emits operations=[] with success-claiming coaching → deterministic neutral text (no false success)", async () => {
+    const adapter = makeAdapter({
+      operations: [],
+      removed_edges: [],
+      warnings: [],
+      coaching: {
+        summary: "I've successfully updated the Price factor to reflect your request.",
+      },
+    });
+    const result = await handleEditGraph(
+      makeContext(),
+      "Make Price more important",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const text = result.assistantText ?? "";
+    // The LLM's success-claim prose must NOT reach the user.
+    expect(text).not.toMatch(/successfully\s+updated/i);
+    expect(text).not.toMatch(/I['’]ve\s+(?:applied|updated|set|added|removed|changed)/i);
+    // Deterministic forward-looking default must fire when no warnings either.
+    // Forward-looking (not a denial) so it passes the V5 egress forbidden-
+    // phrase guard intact — see edit-graph.ts NO_OP_FALLBACK_TEXT comment.
+    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).not.toMatch(/\bno changes were\b/i);
+    // No-commit contract preserved.
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).toBeNull();
+  });
+
+  it("LLM emits operations=[] containing 'validator' in coaching → leak does not reach assistant_text", async () => {
+    const adapter = makeAdapter({
+      operations: [],
+      removed_edges: [],
+      warnings: [],
+      coaching: {
+        summary: "The validator rejected the edge type you proposed.",
+      },
+    });
+    const result = await handleEditGraph(
+      makeContext(),
+      "Make Price more important",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+    const text = result.assistantText ?? "";
+    expect(text).not.toMatch(/\bvalidator\b/i);
+  });
+
+  it("LLM emits operations=[] with structured warnings → warnings drive prose (coaching dropped)", async () => {
+    const adapter = makeAdapter({
+      operations: [],
+      removed_edges: [],
+      warnings: ["No matching factor found for the requested update."],
+      coaching: { summary: "I've applied the change." }, // would have leaked
+    });
+    const result = await handleEditGraph(
+      makeContext(),
+      "Make NonExistent more important",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+    const text = result.assistantText ?? "";
+    expect(text).toBe("No matching factor found for the requested update.");
+    expect(text).not.toMatch(/I['’]ve\s+applied/i);
+  });
+
+  it("LLM emits operations=[] with no warnings and no coaching → safe default", async () => {
+    const adapter = makeAdapter({
+      operations: [],
+      removed_edges: [],
+      warnings: [],
+      coaching: null,
+    });
+    const result = await handleEditGraph(
+      makeContext(),
+      "Make Price more important",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
+    expect(result.assistantText).not.toMatch(/\bno changes were\b/i);
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).toBeNull();
+  });
+});
+
+// ============================================================================
+// V5 H5 — Mode A copy improvement (propose_and_confirm)
+//
+// The previous stub text ("I've drafted a change… but I can't apply a
+// draft proposal automatically yet") was a dead-end. The new builder
+// uses the already-computed `proposedChanges` payload to surface a
+// concrete target and example phrasing so the user knows exactly what
+// to restate. No "Apply this change" chip is invented — the V5
+// pendingProposal round-trip isn't wired in dispatch.
+// ============================================================================
+
+describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("compound parameter_update with resolved target → concrete copy referencing the target label", async () => {
+    // Compound ("and") + low-impact + parameter_update with a
+    // high-confidence resolved target → propose_and_confirm path
+    // (line 617 fallthrough).
+    const adapter = makeAdapter({ operations: [], removed_edges: [], warnings: [], coaching: null });
+    const result = await handleEditGraph(
+      makeContext(),
+      "Make Price more important and adjust its weight",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+    const text = result.assistantText ?? "";
+    // Concrete element_label surfaces (Price is the only factor in
+    // makeContext's graph and is mentioned in the message).
+    expect(text).toMatch(/\bPrice\b/);
+    // Honest non-commit framing.
+    expect(text).toMatch(/need the specifics|need.*specific|tell me/i);
+    // No invented "Apply this change" chip language.
+    expect(text).not.toMatch(/apply this change|click apply|tap apply/i);
+    // No-commit contract.
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).toBeNull();
+    expect(result.pendingProposal).toBeDefined();
+  });
+
+  it("low-confidence resolution (no target) → falls back to generic stub copy", async () => {
+    // parameter_update with no resolvable target → confidence=low →
+    // line 598-604 routes to propose_and_confirm. proposedChanges
+    // will still build but with clause-derived element_label (no
+    // resolved_target). Builder must fall back to generic stub
+    // rather than invent target detail.
+    //
+    // Test graph deliberately has TWO factors so `selectGraphLocalTarget`
+    // returns no single-factor fallback (it only auto-picks when there's
+    // exactly one factor in the graph). This forces confidence=low.
+    const adapter = makeAdapter({ operations: [], removed_edges: [], warnings: [], coaching: null });
+    const twoFactorContext = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "factor_1", kind: "factor", label: "Price" },
+          { id: "factor_2", kind: "factor", label: "Cost" },
+        ],
+        edges: [
+          { from: "factor_1", to: "goal_1", strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: "positive" },
+          { from: "factor_2", to: "goal_1", strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: "positive" },
+        ],
+      } as unknown as ConversationContext["graph"],
+    });
+    const result = await handleEditGraph(
+      twoFactorContext,
+      "Make Nonexistent more important",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+    const text = result.assistantText ?? "";
+    expect(text).toMatch(/I['’]ve\s+drafted\s+a\s+change/i);
+    expect(text).toMatch(/specifics|specific factor|specific value/i);
+    // No fabricated label that wasn't in the graph.
+    expect(text).not.toMatch(/\bNonexistent\b/);
+    expect(result.wasRejected).toBe(false);
+    expect(result.pendingProposal).toBeDefined();
+  });
+});
