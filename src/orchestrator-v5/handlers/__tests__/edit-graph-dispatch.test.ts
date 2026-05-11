@@ -254,6 +254,30 @@ describe('dispatchEditGraph', () => {
       // path maps commitPerformed=false to a wire-level retryable error.
       expect(result.response.assistant_text).toBeDefined();
     });
+
+    it('returns graph: null on commit failure even for a successful applied mutation (Codex round-3 self-consistency)', async () => {
+      // The mutation appeared successful upstream
+      // (`isSuccessfulAppliedMutation()` returns true) but
+      // `commitDirectAnswer` threw — the post-edit graph was NOT
+      // persisted. Returning `editResult.appliedGraph` here would
+      // imply a persistence outcome that didn't happen. The dispatch
+      // result must be self-consistent with `commitPerformed=false`.
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+        .mockResolvedValue(makeAppliedEditResult());
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockRejectedValue(new Error('StateCommitFailedError: RPC timeout'));
+
+      const result = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-edit-commit-fail-graph-null',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(result.commitPerformed).toBe(false);
+      expect(result.graph).toBeNull();
+    });
   });
 
   // ── recovery surface — composer forwards rejection blocks + chips ─────────

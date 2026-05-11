@@ -786,13 +786,17 @@ export async function dispatchEditGraph(
     // llm_calls_used: handleEditGraph makes at least one LLM call for the
     // edit classification + repair loop. Using 1 as an honest minimum.
     //
-    // graph: when the edit was actually applied, EditGraphResult.appliedGraph
-    // carries the post-edit GraphV3T. Pass it as p_graph so append_turn_atomic
-    // writes scenarios.graph in the same transaction as the turn row. When the
-    // edit was rejected (or otherwise produced no graph), appliedGraph is null
-    // — `null ?? undefined` resolves to undefined, the RPC receives p_graph =
-    // null, and scenarios.graph is left unchanged. Mirror of the pattern in
-    // draft-graph-dispatch.ts.
+    // graph: when a true successful applied mutation occurred
+    // (`successfulAppliedMutation`), EditGraphResult.appliedGraph carries
+    // the post-edit GraphV3T and is passed as p_graph so
+    // append_turn_atomic writes scenarios.graph in the same transaction
+    // as the turn row. When NOT a successful applied mutation (rejected,
+    // noop, zero-ops, no appliedGraph, OR the impossible-but-not-enforced
+    // shape appliedGraph+operations=[]), `graphForCommit` resolves to
+    // undefined, the RPC receives p_graph = null, and scenarios.graph is
+    // left unchanged. The gate matches every other downstream check that
+    // depends on "did a mutation truly apply" (false-success rewrite,
+    // analysisReady, freshness postEditGraph, returned graph).
     // DL-7 PR B: emit a canonical EditGraphHandlerFact for every
     // successful applied mutation. Two-tier construction:
     //
@@ -985,11 +989,15 @@ export async function dispatchEditGraph(
       response,
       commitPerformed: false,
       analysisReady,
-      // V5 H5 (Codex round-2 P1): returned `graph` matches what
-      // was actually persisted. Null when no successful applied
-      // mutation, so route-v2 doesn't stamp a non-persisted graph
-      // onto the wire envelope.
-      graph: successfulAppliedMutation ? editResult.appliedGraph ?? null : null,
+      // V5 H5 (Codex round-3 cleanup): commit failure means
+      // `commitDirectAnswer` threw — the post-edit graph was NOT
+      // persisted to storage regardless of `successfulAppliedMutation`.
+      // Returning `editResult.appliedGraph` here would imply a
+      // persistence outcome that didn't happen. Route-v2 returns a 500
+      // before consuming this field today, so this is not user-facing,
+      // but the object should be self-consistent with
+      // `commitPerformed=false`.
+      graph: null,
       freshness,
     };
   }

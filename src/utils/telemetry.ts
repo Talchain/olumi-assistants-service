@@ -618,10 +618,14 @@ export const TelemetryEvents = {
   V5EditGraphAddRiskClarified: "v5.edit_graph.add_risk_clarified",
 
   // V5 H5 defence-in-depth — the dispatcher's false-success invariant
-  // fired: `handleEditGraph` returned `wasRejected: false` with empty
-  // operations / no applied graph, yet `assistantText` contained
+  // fired: `handleEditGraph` returned `wasRejected: false` AND
+  // `isSuccessfulAppliedMutation()` returned false (i.e. NOT a true
+  // applied mutation: any combination of empty/missing operations,
+  // absent appliedGraph, or the impossible-but-not-enforced shape
+  // appliedGraph + operations=[]), yet `assistantText` contained
   // success-claim language ("successfully", "I've applied/updated/…",
-  // etc.). The runtime rewrites `assistant_text` to the neutral
+  // bare past-tense "Updated Price.", terse "Done.", etc.). The
+  // runtime rewrites `assistant_text` to the neutral
   // EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT before commit so the user
   // never sees a success claim that wasn't backed by persisted state.
   // Payload: { request_id, scenario_id, original_phrase, dispatch_path }.
