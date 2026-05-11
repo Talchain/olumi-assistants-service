@@ -575,3 +575,213 @@ describe('dispatchEditGraph — V5 H5 unified mutation predicate (Codex round-2 
     expect(out.analysisReady).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// V5 appliedGraph-persistence fix — structural-invariant backstop.
+//
+// Post-H5 follow-up. The staging Layer-B replay surfaced the EXACT shape
+// the V4 source fix targets: V4 returns `wasRejected: false` AND
+// `operations.length > 0` AND `appliedGraph == null`. Under that
+// signature, the LLM-authored prose ("Strengthened the headcount
+// investment to delivery capacity edge from ~0.15 to 0.32...") is
+// SAFE-LOOKING but not backed by any persisted state. The
+// `findSuccessClaimHit` regex set doesn't enumerate every variant
+// Sonnet produces — "Strengthened the X edge" does NOT match the
+// existing regex set. The structural backstop fires UNCONDITIONALLY
+// (no regex check) for this shape so the prose can never reach the
+// wire regardless of how it's phrased.
+//
+// After the V4 source fix lands, V4 should never return this shape
+// from the success branch — but the backstop remains live to catch
+// future regressions in the V4 success-branch's appliedGraph plumbing.
+// ---------------------------------------------------------------------------
+
+describe('dispatchEditGraph — V5 structural-invariant backstop (ops + !appliedGraph)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function makeOpsButNoAppliedGraph(assistantText: string): EditGraphResult {
+    // The exact shape the staging replay surfaced: V4 returns operations
+    // and appliedChanges and LLM coaching prose, but PLoT didn't supply
+    // applied_graph and the V4 success branch left it null.
+    return {
+      blocks: [],
+      assistantText,
+      latencyMs: 9500,
+      appliedGraph: null,
+      wasRejected: false,
+      operations: [
+        { op: 'update_edge', path: 'fac_price->goal_revenue', value: 0.32 },
+      ],
+    };
+  }
+
+  it('rewrites assistant_text UNCONDITIONALLY when ops > 0 and appliedGraph null (no regex check)', async () => {
+    // The staging replay text. It does NOT match findSuccessClaimHit
+    // (no "I've"/"successfully"/"has been"/etc. + line-leading
+    // "Strengthened" is not in the regex's verb set). Pre-fix this
+    // text would reach the user; with the structural backstop it
+    // must be rewritten.
+    const stagingProse =
+      'Strengthened the headcount investment to delivery capacity edge from ~0.15 to 0.32 ' +
+      'and raised its existence probability to 0.88. This makes the factor more influential in the model.';
+
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(makeOpsButNoAppliedGraph(stagingProse));
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-structural-backstop',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.response.assistant_text).toBe(
+      "Let me know what you'd like me to do next, and I'll take it from there.",
+    );
+    // No success-shaped prose can leak.
+    expect(out.response.assistant_text).not.toMatch(/Strengthened/);
+    expect(out.response.assistant_text).not.toMatch(/edge from/);
+    // No false claim that anything was applied.
+    expect(out.response.assistant_text).not.toMatch(/applied|updated/i);
+  });
+
+  it('emits V5EditGraphAppliedGraphMissingWithOperations telemetry (not the regex-based event)', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeOpsButNoAppliedGraph(
+          'Strengthened the X to Y edge from 0.5 to 0.7.',
+        ),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-structural-telemetry',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const emitMock = emit as MockedFunction<typeof emit>;
+    const structuralCalls = emitMock.mock.calls.filter(
+      ([eventName]) =>
+        eventName === TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations,
+    );
+    const regexCalls = emitMock.mock.calls.filter(
+      ([eventName]) => eventName === TelemetryEvents.V5EditGraphFalseSuccessRewritten,
+    );
+    expect(structuralCalls.length).toBe(1);
+    // The regex-based event must NOT also fire — the structural backstop
+    // takes the rewrite responsibility and the two events serve distinct
+    // diagnostic purposes (regression dashboards).
+    expect(regexCalls.length).toBe(0);
+
+    const [, payload] = structuralCalls[0];
+    const data = payload as Record<string, unknown>;
+    expect(data.request_id).toBe('req-structural-telemetry');
+    expect(data.scenario_id).toBe(SCENARIO_ID);
+    expect(data.operations_count).toBe(1);
+    expect(data.dispatch_path).toBe('edit_graph_finalise');
+  });
+
+  it('does NOT persist graph or emit fact under the structural-mismatch shape', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeOpsButNoAppliedGraph('Strengthened the X edge.'),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-structural-no-persist',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const commitMock = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
+    const [, metadata] = commitMock.mock.calls[0]!;
+    expect(metadata.graph).toBeUndefined();
+    expect(metadata.handler_facts).toEqual([]);
+  });
+
+  it('still rewrites via regex backstop when operations=[] AND text matches success-claim regex (Mode B regression backstop)', async () => {
+    // Sub-case B: operations is empty, but text matches regex. The
+    // existing regex-based backstop must keep firing for this case.
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue({
+        blocks: [],
+        assistantText: "I've successfully updated the value.",
+        latencyMs: 500,
+        appliedGraph: null,
+        wasRejected: false,
+        operations: [],
+      });
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-regex-backstop-still-fires',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.response.assistant_text).toBe(
+      "Let me know what you'd like me to do next, and I'll take it from there.",
+    );
+
+    const emitMock = emit as MockedFunction<typeof emit>;
+    // Regex-based event fires (operations=[] subcase), structural does NOT.
+    const regexCalls = emitMock.mock.calls.filter(
+      ([eventName]) => eventName === TelemetryEvents.V5EditGraphFalseSuccessRewritten,
+    );
+    const structuralCalls = emitMock.mock.calls.filter(
+      ([eventName]) =>
+        eventName === TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations,
+    );
+    expect(regexCalls.length).toBe(1);
+    expect(structuralCalls.length).toBe(0);
+  });
+
+  it('does NOT fire structural backstop on a true successful applied mutation', async () => {
+    // operations > 0 AND appliedGraph present → successfulAppliedMutation
+    // is true → neither backstop fires.
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValue(
+        makeAppliedSuccessResult("I've updated Price to 'Price (revised)'."),
+      );
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(),
+      requestId: 'req-happy-no-backstop',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    expect(out.response.assistant_text).toMatch(/I['’]ve updated/);
+    const emitMock = emit as MockedFunction<typeof emit>;
+    expect(
+      emitMock.mock.calls.filter(
+        ([eventName]) =>
+          eventName === TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations,
+      ).length,
+    ).toBe(0);
+    expect(
+      emitMock.mock.calls.filter(
+        ([eventName]) => eventName === TelemetryEvents.V5EditGraphFalseSuccessRewritten,
+      ).length,
+    ).toBe(0);
+  });
+});

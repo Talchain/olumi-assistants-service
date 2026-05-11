@@ -25,7 +25,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { log } from "../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
@@ -1928,73 +1928,87 @@ export async function handleEditGraph(
       }
     }
 
-    // Step 1.6: Pre-validation — apply patch to candidate graph and validate structure
+    // Step 1.6: Pre-validation — apply patch to candidate graph and validate structure.
+    //
+    // V5 H5 follow-up: the candidate-graph COMPUTATION is now decoupled
+    // from the patchPreValidationEnabled gate. The candidate is the
+    // deterministic post-op graph produced by `applyPatchOperations`
+    // (pure function, six PatchOperation kinds). It is the safe
+    // fallback that the V4 success branch uses as `appliedGraph` when
+    // PLoT did not supply one (see the synthesis block before "Success:
+    // build block"). Always computing it lets the V5 edit_graph
+    // dispatch path commit a real graph even when pre-validation is
+    // disabled by config — the validation step below stays gated.
+    //
+    // `applyPatchOperations` throwing `PatchApplyError` IS a real
+    // failure (NODE_NOT_FOUND, EDGE_NOT_FOUND, etc.) and must be
+    // surfaced regardless of validation config. The existing error
+    // handler stays in place.
     let candidateGraph: GraphV3T | undefined;
-
-    if (config.cee.patchPreValidationEnabled) {
-      try {
-        candidateGraph = applyPatchOperations(context.graph as GraphV3T, operations);
-      } catch (applyErr) {
-        if (applyErr instanceof PatchApplyError) {
-          if (intentCategory !== 'structural') {
-            consecutiveNarrowStructuralFailures++;
-            validationOutcome = 'patch_apply_error';
-            setViolationCodes([applyErr.code]);
-            recoveryPathChosen = 'repair_retry';
-            lastValidationResult = {
-              valid: false,
-              operations: operations as unknown as import('../patch-validation.js').ValidatedPatchOperation[],
-              referentialErrors: [{ index: 0, op: applyErr.code, path: '', message: applyErr.message }],
-            };
-            if (consecutiveNarrowStructuralFailures >= 2) {
-              recoveryPathChosen = 'narrow_intent_recovery_question';
-              branchTaken = 'recovery_question';
-              branchReason = 'repeated_narrow_patch_apply_error';
-              failureBranch = 'patch_apply_error';
-              failureCode = applyErr.code;
-              failureMessage = applyErr.message;
-              return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
-            }
-            continue;
-          }
-          log.warn(
-            { request_id: requestId, attempt, code: applyErr.code, error: applyErr.message },
-            'edit_graph rejected — patch apply error',
-          );
-          const rejectionCtx: PatchRejectionContext = {
-            reason: 'structural_violation',
-            detail: 'Try a different approach to the change.',
-            violations: [applyErr.message],
-            suggested_actions: [
-              { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
-            ],
-          };
-          const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+    try {
+      candidateGraph = applyPatchOperations(context.graph as GraphV3T, operations);
+    } catch (applyErr) {
+      if (applyErr instanceof PatchApplyError) {
+        if (intentCategory !== 'structural') {
+          consecutiveNarrowStructuralFailures++;
           validationOutcome = 'patch_apply_error';
           setViolationCodes([applyErr.code]);
-          recoveryPathChosen = 'patch_rejection_envelope';
-          branchTaken = 'rejection';
-          branchReason = 'structural_patch_apply_error';
-          failureBranch = 'patch_apply_error';
-          failureCode = applyErr.code;
-          failureMessage = applyErr.message;
-          return {
-            blocks: [],
-            assistantText: envelope.assistant_text,
-            latencyMs: Date.now() - startTime,
-            appliedGraph: null,
-            wasRejected: true,
-            suggestedActions: envelope.suggested_actions?.map((action: SuggestedAction) => ({
-              label: action.label,
-              prompt: action.prompt,
-              role: action.role,
-            })),
-            diagnostics: diagnostics(),
+          recoveryPathChosen = 'repair_retry';
+          lastValidationResult = {
+            valid: false,
+            operations: operations as unknown as import('../patch-validation.js').ValidatedPatchOperation[],
+            referentialErrors: [{ index: 0, op: applyErr.code, path: '', message: applyErr.message }],
           };
+          if (consecutiveNarrowStructuralFailures >= 2) {
+            recoveryPathChosen = 'narrow_intent_recovery_question';
+            branchTaken = 'recovery_question';
+            branchReason = 'repeated_narrow_patch_apply_error';
+            failureBranch = 'patch_apply_error';
+            failureCode = applyErr.code;
+            failureMessage = applyErr.message;
+            return buildIntentRecoveryResult(intentCategory, editDescription, context, startTime, diagnostics());
+          }
+          continue;
         }
-        throw applyErr;
+        log.warn(
+          { request_id: requestId, attempt, code: applyErr.code, error: applyErr.message },
+          'edit_graph rejected — patch apply error',
+        );
+        const rejectionCtx: PatchRejectionContext = {
+          reason: 'structural_violation',
+          detail: 'Try a different approach to the change.',
+          violations: [applyErr.message],
+          suggested_actions: [
+            { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
+          ],
+        };
+        const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+        validationOutcome = 'patch_apply_error';
+        setViolationCodes([applyErr.code]);
+        recoveryPathChosen = 'patch_rejection_envelope';
+        branchTaken = 'rejection';
+        branchReason = 'structural_patch_apply_error';
+        failureBranch = 'patch_apply_error';
+        failureCode = applyErr.code;
+        failureMessage = applyErr.message;
+        return {
+          blocks: [],
+          assistantText: envelope.assistant_text,
+          latencyMs: Date.now() - startTime,
+          appliedGraph: null,
+          wasRejected: true,
+          suggestedActions: envelope.suggested_actions?.map((action: SuggestedAction) => ({
+            label: action.label,
+            prompt: action.prompt,
+            role: action.role,
+          })),
+          diagnostics: diagnostics(),
+        };
       }
+      throw applyErr;
+    }
 
+    if (config.cee.patchPreValidationEnabled) {
       const structResultRaw = validateGraphStructure(candidateGraph);
       // Filter out violations that already existed in the input graph — edits should
       // not be rejected for pre-existing structural incompleteness (e.g. no options yet).
@@ -2301,6 +2315,148 @@ export async function handleEditGraph(
         lastValidationResult = { valid: false, operations: validationResult.operations, referentialErrors: [{ index: 0, op: 'plot', path: '', message: `PLoT unavailable: ${errorMessage}` }] };
         continue;
       }
+    }
+
+    // V5 H5 follow-up — appliedGraph synthesis from local candidateGraph.
+    //
+    // Before this block, `appliedGraph` is set only when PLoT supplied
+    // `applied_graph` in its response (line 2243-2253 above). When the
+    // V5 edit_graph dispatcher invokes this handler, no `plotClient` is
+    // passed (intentional — V5 dispatch does not couple to PLoT
+    // infrastructure), so PLoT never runs and `appliedGraph` stays
+    // undefined. Staging Layer-B replay confirmed this: V4 returned
+    // operations + appliedChanges + LLM coaching prose, but `appliedGraph:
+    // null` cascaded through V5 dispatch as `successfulAppliedMutation =
+    // false` → no edit_graph fact emitted → scenarios.graph not advanced
+    // → recent_changes empty → stale/rerun blind to graph diffs.
+    //
+    // The fix synthesises `appliedGraph` from the locally-computed
+    // `candidateGraph` (produced unconditionally by
+    // `applyPatchOperations` at the apply block above; decoupled from
+    // `config.cee.patchPreValidationEnabled`, which now gates only the
+    // structural-validation step). The candidate is the deterministic
+    // post-op graph and is semantically equivalent to what PLoT's
+    // `applied_graph` would be ONLY when PLoT did not apply repairs.
+    //
+    // Safety rules (in order):
+    //   A. plotClient null  → PLoT didn't run, no repairs possible →
+    //      candidate is safe → synthesise.
+    //   B. plotClient configured AND PLoT omitted applied_graph AND no
+    //      repairs reported → candidate is safe → synthesise.
+    //   C. plotClient configured AND PLoT omitted applied_graph AND
+    //      repairs WERE reported → candidate does NOT carry the repairs,
+    //      so substituting it would silently persist an unrepaired graph
+    //      → REFUSE (return rejection). Operator should chase the PLoT
+    //      contract violation rather than the system silently downgrading.
+    //   D. appliedGraph is STILL null after the synthesis step (i.e.
+    //      candidateGraph itself is missing because applyPatchOperations
+    //      threw — though that path returns rejection earlier — or rule
+    //      C above didn't fire to return rejection) → also REFUSE
+    //      (return rejection). Cannot truthfully claim success without
+    //      a graph to commit.
+    if (!appliedGraph && candidateGraph) {
+      const plotConfigured = plotClient !== null;
+      const repairsReported = repairsApplied !== undefined && repairsApplied.length > 0;
+
+      if (plotConfigured && repairsReported) {
+        // Rule C — refuse to substitute candidateGraph silently. PLoT
+        // applied repairs but did not echo the repaired graph back;
+        // the candidate lacks the repairs so committing it would
+        // persist a pre-repair shape that the LLM and downstream
+        // assertions don't know about.
+        log.error(
+          {
+            request_id: requestId,
+            attempt,
+            repairs_count: repairsApplied?.length ?? 0,
+          },
+          'edit_graph PLoT reported repairs but omitted applied_graph — refusing to persist unrepaired candidateGraph',
+        );
+        validationOutcome = 'plot_applied_graph_omitted_with_repairs';
+        setViolationCodes(['plot_applied_graph_omitted_with_repairs']);
+        recoveryPathChosen = 'rejection_block';
+        branchTaken = 'rejection';
+        branchReason = 'plot_applied_graph_omitted_with_repairs';
+        failureBranch = 'plot_applied_graph_omitted_with_repairs';
+        failureCode = 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS';
+        failureMessage = 'PLoT reported repairs without echoing applied_graph; cannot persist unrepaired candidate';
+        return buildRejectionResult(
+          'The change was validated but the system could not capture the final applied state. Try the change again.',
+          operations,
+          baseGraphHash,
+          turnId,
+          startTime,
+          'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS',
+          undefined,
+          attempt,
+          diagnostics(),
+        );
+      }
+
+      // Rules A and B — safe to synthesise. The candidate is the
+      // deterministic result of applying `operations` to
+      // `context.graph` via `applyPatchOperations` (pure function,
+      // covers all six PatchOperation kinds). When PLoT did not run
+      // OR ran with no repairs, this is what PLoT would have returned.
+      appliedGraph = candidateGraph;
+      appliedGraphHash = computeGraphHash(candidateGraph);
+      log.info(
+        {
+          request_id: requestId,
+          applied_graph_hash: appliedGraphHash,
+          hash_source: 'local',
+          plot_configured: plotConfigured,
+        },
+        'edit_graph appliedGraph synthesized from local candidateGraph',
+      );
+      emit(TelemetryEvents.V5EditGraphAppliedGraphSynthesizedLocally, {
+        request_id: requestId,
+        scenario_id: context.scenario_id ?? null,
+        operations_count: operations.length,
+        plot_configured: plotConfigured,
+      });
+    }
+
+    // Rule D — refuse to enter the success branch without a graph to
+    // commit. If `appliedGraph` is STILL undefined here, neither PLoT
+    // nor the local synthesis above (Rules A/B/C) produced one. This
+    // should not happen in normal operation post-fix — `candidateGraph`
+    // is computed unconditionally and the synthesis block uses it — but
+    // a future regression in the apply step (e.g., PatchApplyError
+    // path returning success-shaped result by mistake) would land here.
+    // Returning through the success branch with `appliedGraph: null`
+    // was the bug staging replay surfaced; honest non-commit copy via
+    // `buildRejectionResult` is the correct outcome.
+    if (!appliedGraph) {
+      log.error(
+        {
+          request_id: requestId,
+          attempt,
+          has_candidate: candidateGraph !== undefined,
+          plot_configured: plotClient !== null,
+          patch_pre_validation_enabled: config.cee.patchPreValidationEnabled,
+        },
+        'edit_graph cannot reach success branch without appliedGraph — refusing to commit',
+      );
+      validationOutcome = 'applied_graph_unavailable';
+      setViolationCodes(['applied_graph_unavailable']);
+      recoveryPathChosen = 'rejection_block';
+      branchTaken = 'rejection';
+      branchReason = 'applied_graph_unavailable';
+      failureBranch = 'applied_graph_unavailable';
+      failureCode = 'APPLIED_GRAPH_UNAVAILABLE';
+      failureMessage = 'No applied graph available: PLoT did not supply one and no local candidate was computed';
+      return buildRejectionResult(
+        'Could not capture the final state of that edit. Try a simpler change or try again.',
+        operations,
+        baseGraphHash,
+        turnId,
+        startTime,
+        'APPLIED_GRAPH_UNAVAILABLE',
+        undefined,
+        attempt,
+        diagnostics(),
+      );
     }
 
     // ---- Success: build block ----

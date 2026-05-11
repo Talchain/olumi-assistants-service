@@ -647,25 +647,57 @@ export async function dispatchEditGraph(
   const successfulAppliedMutation = isSuccessfulAppliedMutation(editResult);
 
   // V5 H5 — false-success invariant (defence-in-depth).
-  // Runs BEFORE the forbidden-phrase guard. The V4 Mode B fix closes
-  // the LLM-coaching passthrough at the source, but a structural
-  // mismatch check at the wire catches any future emit path that
-  // narrates success without committing state. Structural signature:
-  // `wasRejected === false` AND NOT a successful applied mutation.
-  // This catches BOTH the original no-op case (operations=[], no
-  // appliedGraph) AND the impossible-shape case (appliedGraph
-  // present but operations=[]) — the latter was missed by the
-  // previous `!editResult.appliedGraph` check.
+  // Runs BEFORE the forbidden-phrase guard. Two distinct sub-cases
+  // both gated on `!wasRejected && !successfulAppliedMutation`:
+  //
+  //   A. Structural mismatch — operations exist but appliedGraph is
+  //      missing. The prose cannot be trusted regardless of phrasing
+  //      because no graph state was persisted to commit. This is the
+  //      shape the staging Layer-B replay surfaced (PR #164 round-3
+  //      follow-up): V4 returns operations + appliedChanges + LLM-
+  //      authored success-style coaching prose, but `appliedGraph`
+  //      stayed null because PLoT wasn't wired into V5 dispatch. The
+  //      regex-based `findSuccessClaimHit` can't enumerate every
+  //      phrasing the LLM produces ("Strengthened the X edge from Y
+  //      to Z..." doesn't match the existing pattern set). Rewrite
+  //      UNCONDITIONALLY whenever the structural signature fires.
+  //      The V4 source fix below (Step 2) makes this case impossible
+  //      in normal operation; this backstop catches future
+  //      regressions in the source.
+  //
+  //   B. No-operations no-op with success-claim language. Mode B
+  //      regression backstop — V4 already drops both warnings and
+  //      coaching on no-op paths (PR #164 round-1 P0), so this only
+  //      fires if a future emit path re-introduces LLM prose on the
+  //      no-op branch. Uses the regex set because operations=[] is
+  //      the legitimate no-op shape and the prose IS the only signal
+  //      that something inappropriate slipped through.
   if (!editResult.wasRejected && !successfulAppliedMutation) {
-    const successHit = findSuccessClaimHit(response.assistant_text ?? '');
-    if (successHit !== null) {
-      emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+    const operationsCount = editResult.operations?.length ?? 0;
+    const hasAppliedGraph = editResult.appliedGraph !== null
+      && editResult.appliedGraph !== undefined;
+
+    if (operationsCount > 0 && !hasAppliedGraph) {
+      // Sub-case A — structural mismatch. Unconditional rewrite.
+      emit(TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations, {
         request_id: requestId,
         scenario_id: payload.scenario_id,
-        original_phrase: successHit,
+        operations_count: operationsCount,
         dispatch_path: 'edit_graph_finalise',
       });
       response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+    } else {
+      // Sub-case B — regex-based no-op + success-claim backstop.
+      const successHit = findSuccessClaimHit(response.assistant_text ?? '');
+      if (successHit !== null) {
+        emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          original_phrase: successHit,
+          dispatch_path: 'edit_graph_finalise',
+        });
+        response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+      }
     }
   }
 

@@ -633,6 +633,43 @@ export const TelemetryEvents = {
   // structural-mismatch trigger, that one is the lexical-denial trigger.
   V5EditGraphFalseSuccessRewritten: "v5.edit_graph.false_success_rewritten",
 
+  // V5 appliedGraph-persistence fix (post-H5 follow-up). The
+  // structural-invariant backstop in the V5 edit_graph dispatcher
+  // fired: V4 returned `wasRejected: false` AND `operations.length > 0`
+  // AND `appliedGraph == null`. This shape proves the LLM-authored
+  // prose cannot be backed by persisted state regardless of phrasing
+  // — `findSuccessClaimHit` can't enumerate every variant Sonnet
+  // produces ("Strengthened the X edge from Y to Z..." is a real
+  // observed miss). The runtime rewrites `assistant_text` to the
+  // neutral EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT unconditionally
+  // when this signature fires. After the V4 source fix (synthesize
+  // appliedGraph from candidateGraph when PLoT didn't supply one),
+  // this event should be at-or-near zero in normal operation; a
+  // non-zero rate signals a regression in the V4 success branch's
+  // appliedGraph plumbing.
+  // Payload: { request_id, scenario_id, operations_count, dispatch_path }.
+  V5EditGraphAppliedGraphMissingWithOperations: "v5.edit_graph.applied_graph_missing_with_operations",
+
+  // V5 appliedGraph-persistence fix (post-H5 follow-up). V4's
+  // `handleEditGraph` success branch synthesized appliedGraph from
+  // the locally-computed `candidateGraph` (via
+  // `applyPatchOperations`) because PLoT did not supply one — either
+  // `plotClient` was null (V5 dispatch path's default) or PLoT
+  // validated but omitted `applied_graph` in its response. This is
+  // the expected steady-state path on the V5 dispatch route until
+  // the V4-residue retirement lands. A healthy `synthesized_locally`
+  // rate with near-zero `missing_with_operations` rate means the
+  // pair is working as designed.
+  // Payload: { request_id, scenario_id, operations_count, plot_configured }.
+  // `plot_configured` distinguishes Rule A (PLoT not wired — V5 dispatch
+  // default) from Rule B (PLoT wired but omitted applied_graph with no
+  // repairs reported). Rule lettering matches the synthesis block
+  // comment in src/orchestrator/tools/edit-graph.ts. The
+  // `applied_graph_hash` value is in the companion structured log line
+  // ("edit_graph appliedGraph synthesized from local candidateGraph")
+  // rather than this event payload.
+  V5EditGraphAppliedGraphSynthesizedLocally: "v5.edit_graph.applied_graph_synthesized_locally",
+
   // V5 recovery chips — fired when the egress safety layer
   // (failure-response.ts) attaches one or more recovery chips to a failure
   // response. Distinct from V5DecisionReviewFailed: this event is about the

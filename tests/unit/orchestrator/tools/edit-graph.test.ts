@@ -18,7 +18,11 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(ceeTarget, ceeProp) {
               if (ceeProp === "maxRepairRetries") return 1;
-              // Disable cf-v11.1 pre-validation for legacy tests (tested separately in patch-budget/validator tests)
+              // Disable cf-v11.1 pre-validation for legacy tests (tested separately in patch-budget/validator tests).
+              // V5 H5 follow-up decoupled `candidateGraph` computation
+              // from `patchPreValidationEnabled`, so the V4 success
+              // branch can still synthesise `appliedGraph` from the
+              // candidate even when validation is disabled here.
               if (ceeProp === "patchPreValidationEnabled") return false;
               if (ceeProp === "patchBudgetEnabled") return false;
               return Reflect.get(ceeTarget, ceeProp);
@@ -32,6 +36,7 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
 });
 
 import { handleEditGraph, mapOpsForPlot } from "../../../../src/orchestrator/tools/edit-graph.js";
+import { applyPatchOperations } from "../../../../src/orchestrator/patch-applier.js";
 import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
 import type { PLoTClient, ValidatePatchResult } from "../../../../src/orchestrator/plot-client.js";
@@ -83,9 +88,40 @@ function makeAdapter(responseJson: unknown): LLMAdapter {
 }
 
 function makePlotClientSuccess(data?: Record<string, unknown>): PLoTClient {
+  // V5 H5 follow-up: default the PLoT mock to include `applied_graph`
+  // and `graph_hash` to mirror the production PLoT contract. Real PLoT
+  // returns the repaired graph alongside `repairs_applied`; the V4
+  // success branch (post-fix) requires this pairing — if PLoT reports
+  // repairs but omits `applied_graph`, V4 returns rejection (Rule C).
+  // The default applied_graph is a minimal accepted graph; individual
+  // tests can override (e.g. set applied_graph: undefined to test the
+  // omitted-with-repairs rejection path explicitly).
+  const defaultAppliedGraph = {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Revenue' },
+      { id: 'factor_1', kind: 'factor', label: 'Price' },
+    ],
+    edges: [
+      {
+        from: 'factor_1',
+        to: 'goal_1',
+        strength: { mean: 0.5, std: 0.1 },
+        exists_probability: 0.9,
+        effect_direction: 'positive',
+      },
+    ],
+  };
   const result: ValidatePatchResult = {
     kind: 'success',
-    data: { verdict: 'accepted', ...data },
+    data: {
+      verdict: 'accepted',
+      applied_graph: defaultAppliedGraph,
+      // 16-char hex matches production `computeGraphHash` output shape.
+      // Tests that assert hash.length === 16 read THIS value when not
+      // overridden by individual test fixtures.
+      graph_hash: 'a1b2c3d4e5f60718',
+      ...data,
+    },
   };
   return {
     run: vi.fn().mockResolvedValue({}),
@@ -1693,5 +1729,197 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
     expect(text).not.toMatch(/\bNonexistent\b/);
     expect(result.wasRejected).toBe(false);
     expect(result.pendingProposal).toBeDefined();
+  });
+});
+
+
+// ============================================================================
+// V5 H5 follow-up — appliedGraph persistence fix
+//
+// V4 success branch must return a non-null `appliedGraph` so the V5
+// dispatcher's `isSuccessfulAppliedMutation()` gate accepts the result
+// and persists graph + edit_graph fact. When PLoT supplies `applied_graph`
+// V4 keeps using it; when PLoT doesn't (no plotClient, OR PLoT validated
+// but omitted applied_graph), V4 synthesises appliedGraph from the
+// locally-computed `candidateGraph` (Rules A and B). When PLoT reports
+// repairs but omits applied_graph, V4 refuses to substitute the
+// unrepaired candidate (Rule C). When neither PLoT nor candidate is
+// available, V4 returns honest non-commit rejection (Rule D).
+// ============================================================================
+
+describe("V5 H5 follow-up — handleEditGraph appliedGraph synthesis", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("Rule A — no plotClient: synthesises appliedGraph from candidateGraph", async () => {
+    // The exact V5 dispatch path: handleEditGraph called without a
+    // plotClient. With the source fix, appliedGraph must come from
+    // applyPatchOperations(context.graph, operations).
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update the price label",
+      adapter,
+      "req-rule-a",
+      "turn-rule-a",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    expect(result.appliedGraph).toEqual(
+      applyPatchOperations(makeContext().graph!, [VALID_UPDATE_OP] as PatchOperation[]),
+    );
+    expect(result.operations).toBeDefined();
+    expect(result.operations!.length).toBeGreaterThan(0);
+  });
+
+  it("Rule A — synthesised appliedGraph reflects update_node mutation deterministically", async () => {
+    // Sanity: the synthesis isn't just returning the input graph — it
+    // applies the operation. update_node on factor_1 must change the
+    // node's label in the returned appliedGraph.
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update price",
+      adapter,
+      "req-rule-a-deterministic",
+      "turn-rule-a-deterministic",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    const updatedNode = result.appliedGraph!.nodes.find((n) => (n as { id?: string }).id === "factor_1");
+    expect(updatedNode).toBeDefined();
+    // VALID_UPDATE_OP sets label to "Updated Price"; deterministic
+    // application via applyPatchOperations must reflect that.
+    expect((updatedNode as { label?: string }).label).toBe("Updated Price");
+  });
+
+  it("Rule B — plotClient configured + PLoT returns applied_graph: PLoT wins, candidate is NOT substituted", async () => {
+    // PLoT's applied_graph carries any repairs PLoT may have applied.
+    // V4 must preserve PLoT's graph rather than overwriting with the
+    // local candidate.
+    const plotAppliedGraph = {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue (PLoT-repaired)" },
+        { id: "factor_1", kind: "factor", label: "Price" },
+      ],
+      edges: [
+        { from: "factor_1", to: "goal_1", strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: "positive" },
+      ],
+    };
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+    const plotClient = makePlotClient({
+      verdict: "accepted",
+      applied_graph: plotAppliedGraph,
+      graph_hash: "plotsuppliedhash",
+    });
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update price",
+      adapter,
+      "req-rule-b",
+      "turn-rule-b",
+      { plotClient },
+    );
+
+    expect(result.appliedGraph).toEqual(plotAppliedGraph);
+    // PLoT's hash wins over local computation.
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.applied_graph_hash).toBe("plotsuppliedhash");
+  });
+
+  it("Rule C — plotClient configured + PLoT reports repairs + omits applied_graph: REFUSES to substitute candidate (returns rejection)", async () => {
+    // The unsafe scenario the user explicitly called out: PLoT
+    // applied repairs (so the candidate is stale relative to PLoT's
+    // result) but omitted applied_graph. V4 must refuse rather than
+    // silently persist the unrepaired candidate.
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+    // Override the default mock's applied_graph (which the helper sets
+    // to a default minimal graph) so the test exercises the omitted case.
+    const plotClient: PLoTClient = {
+      run: vi.fn().mockResolvedValue({}),
+      validatePatch: vi.fn().mockResolvedValue({
+        kind: "success",
+        data: {
+          verdict: "accepted",
+          repairs_applied: [
+            { code: "STRENGTH_CLAMPED", message: "Clamped strength to [-1,1]" },
+          ],
+          // applied_graph: deliberately omitted
+        },
+      } as ValidatePatchResult),
+    };
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update price",
+      adapter,
+      "req-rule-c",
+      "turn-rule-c",
+      { plotClient, maxRetries: 0 },
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.appliedGraph).toBeNull();
+    // The user-facing assistant_text is the safe rejection copy from
+    // buildEditRejectionResponse — never a success claim, never an
+    // operator-grade detail.
+    const text = result.assistantText ?? "";
+    expect(text).not.toMatch(/successfully|I['’]ve\s+(?:applied|updated)|Strengthened/i);
+    // The rejection block on the wire carries the diagnostic code so
+    // operators can see what fired.
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.code).toBe("PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS");
+  });
+
+  it("Rule B — plotClient configured + PLoT omits applied_graph + NO repairs: candidate fallback is allowed", async () => {
+    // When PLoT validates but reports no repairs, the candidate IS
+    // equivalent to what PLoT would have returned. Rule B in the
+    // synthesis-block comment lettering: synthesis is safe.
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+    const plotClient: PLoTClient = {
+      run: vi.fn().mockResolvedValue({}),
+      validatePatch: vi.fn().mockResolvedValue({
+        kind: "success",
+        data: {
+          verdict: "accepted",
+          // no repairs_applied, no applied_graph
+        },
+      } as ValidatePatchResult),
+    };
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update price",
+      adapter,
+      "req-rule-c-no-repairs",
+      "turn-rule-c-no-repairs",
+      { plotClient },
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    expect(result.appliedGraph).toEqual(
+      applyPatchOperations(makeContext().graph!, [VALID_UPDATE_OP] as PatchOperation[]),
+    );
+  });
+
+  it("appliedGraphHash is the local 16-char hash when synthesised", async () => {
+    // Verifies the hash field is populated when the synthesis path
+    // fires (some downstream consumers depend on it).
+    const adapter = makeAdapter([VALID_UPDATE_OP]);
+    const result = await handleEditGraph(
+      makeContext(),
+      "Update price",
+      adapter,
+      "req-hash-shape",
+      "turn-hash-shape",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.applied_graph_hash).toBeDefined();
+    expect(data.applied_graph_hash!.length).toBe(16);
   });
 });
