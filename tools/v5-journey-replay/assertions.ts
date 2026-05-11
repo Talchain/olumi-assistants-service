@@ -664,9 +664,16 @@ export function assertExplainLeaderStale(
     /\b(stale|model has changed|no longer reflects?|out[- ]of[- ]date|since (?:the )?analysis|re[- ]?run)\b/i.test(
       text,
     );
+  // Robust pattern: `re[- ]?run` matches all three spellings —
+  // `rerun`, `re-run`, `re run` — so the chip detector mirrors the
+  // text detector above. Real chip labels mix spellings (the UI uses
+  // "Rerun analysis", LLM coaching prose sometimes emits "re-run the
+  // analysis", and "Run analysis again" can phrase the same intent
+  // with a leading space variant). Additional verbs `refresh`,
+  // `update`, `stale` cover the equivalent recovery affordances.
   const stalenessChipSignal = chips.some((chip) => {
     const blob = `${chip.label} ${chip.message}`.toLowerCase();
-    return /\b(rerun|re-run|refresh|update|stale)\b/.test(blob) && blob.includes('analy');
+    return /\b(?:re[- ]?run|refresh|update|stale)\b/.test(blob) && blob.includes('analy');
   });
   if (!stalenessTextSignal && !stalenessChipSignal) {
     return {
