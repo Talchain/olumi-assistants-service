@@ -648,11 +648,20 @@ export async function runTurnExecutor(
     // already used by chip-click-dispatch.ts (which hashes
     // cachedSnapshot.rawPersistedGraph for the same reason).
     //
-    // Fallback to `graphStateForTurn` covers the first-draft case
-    // where no graph has been persisted yet. The fallback is
-    // structurally indistinguishable from a follow-up turn whose
-    // persisted graph fails to parse (rare); both legitimately use
-    // the request graph as the only available signal.
+    // Two non-canonical paths are handled differently per the V5
+    // stale-aware explain recovery brief (Codex round-3 P1):
+    //   - persistedGraph is null/undefined (cold-start / first-draft):
+    //     no canonical state exists yet; fall back to hashing the
+    //     request graph. That's the only signal available.
+    //   - persistedGraph exists but fails ingress parse (corrupt
+    //     write, legacy shape, schema-version drift): canonical state
+    //     is genuinely unknown. Do NOT fall back to the request graph
+    //     here — if the client is also lagging behind a persisted
+    //     edit, the request graph could match the prior
+    //     `graph_hash_at_run` and silently produce a false-fresh
+    //     verdict. Instead return null, route the derivation to
+    //     `'unknown' / current_graph_hash_unavailable`, and emit the
+    //     `v5.persisted_graph.parse_failed` log signal.
     currentAnalysisGraphHashForTurn = ((): string | null => {
       const persistedGraph = context.persistedGraph;
       if (persistedGraph === undefined || persistedGraph === null) {

@@ -40,8 +40,10 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // Codex round-3 denial variants — simple past, alternative verbs,
   // singular noun form, "updates" instead of "changes". Each
   // expresses the same contradiction sense as the "I haven't applied
-  // any changes" canonical entry.
-  /\bI\s+didn['’]t\s+apply\s+any\s+changes\b/i,
+  // any changes" canonical entry. The contracted-form regex covers
+  // both `apply` and `make` (Codex round-4: "I didn't make any
+  // changes" was the missing variant the round-3 patch left out).
+  /\bI\s+didn['’]t\s+(?:apply|make)\s+any\s+changes\b/i,
   /\bI\s+did\s+not\s+(?:apply|make)\s+any\s+changes\b/i,
   /\bno\s+change\s+was\s+made\b/i,
   /\bno\s+updates?\s+(?:were|are|have\s+been)\s+(?:made|applied)\b/i,

@@ -23,6 +23,7 @@ describe('FORBIDDEN_USER_FACING_PHRASES — phrase matches', () => {
     // Codex round-3 denial variants — simple past, alternative verbs,
     // singular noun, "updates" instead of "changes".
     ["I didn't apply any changes.", "didn't apply any changes (simple past)"],
+    ["I didn't make any changes.", "didn't make any changes (Codex round-4 missing variant)"],
     ['I did not apply any changes.', 'did not apply any changes (formal)'],
     ['I did not make any changes.', 'did not make any changes (alternative verb)'],
     ['No change was made.', 'singular "no change was made"'],
