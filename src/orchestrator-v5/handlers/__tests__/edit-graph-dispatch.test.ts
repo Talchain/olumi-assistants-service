@@ -103,12 +103,21 @@ const POST_EDIT_GRAPH = {
 };
 
 function makeAppliedEditResult(overrides: Partial<EditGraphResult> = {}): EditGraphResult {
+  // V5 H5 (Codex round-1 P1): a real "applied mutation" returns
+  // wasRejected=false + appliedGraph + non-empty operations. The
+  // V5 dispatcher gates graph persistence on
+  // `isSuccessfulAppliedMutation(editResult)` which requires all
+  // three. Previously this fixture omitted `operations` and the test
+  // still passed because the dispatcher persisted graph state
+  // unconditionally on `wasRejected=false`. With the fixed gate,
+  // the fixture must include operations to match production shape.
   return {
     blocks: [],
     assistantText: 'Edge strength increased.',
     latencyMs: 1200,
     appliedGraph: POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
     wasRejected: false,
+    operations: [{ op: 'update_edge', path: 'fac_price->goal_revenue', value: 0.7 }],
     ...overrides,
   };
 }
@@ -166,14 +175,19 @@ describe('dispatchEditGraph', () => {
       expect(metadata.scenario_id).toBe(SCENARIO_ID);
       expect(metadata.turn_id).toBe(TURN_ID);
       expect(metadata.handler_id).toBeNull();
-      // DL-7 PR B contract change: this fixture omits operations / appliedChanges,
-      // so the fact builder's emission gates fail and handler_facts stays []. The
-      // fact-emission contract for FULLY-populated EditGraphResult fixtures is
-      // pinned in edit-graph-dispatch-fact-emission.test.ts (B1-B9). This test
-      // continues to assert the R-001 graph-persistence contract; the
-      // handler_facts assertion here only proves the no-fact baseline path
-      // (no operations passed) still works.
-      expect(metadata.handler_facts).toEqual([]);
+      // V5 H5 (Codex round-1 P1) contract update: the fixture now
+      // includes `operations` to match the "successful applied
+      // mutation" shape that `isSuccessfulAppliedMutation()`
+      // requires for graph persistence. The fact-builder still
+      // emits null here because `appliedChanges` is missing — the
+      // generic fallback emits a minimal fact instead. The
+      // fact-emission contract for FULLY-populated
+      // EditGraphResult fixtures is pinned in
+      // edit-graph-dispatch-fact-emission.test.ts (B1-B9). This
+      // test continues to assert the R-001 graph-persistence
+      // contract: a true successful applied mutation persists
+      // graph state via metadata.graph.
+      expect(metadata.handler_facts.length).toBe(1);
     });
   });
 
@@ -239,6 +253,30 @@ describe('dispatchEditGraph', () => {
       // Response is still returned for server-side logging — the route-v2
       // path maps commitPerformed=false to a wire-level retryable error.
       expect(result.response.assistant_text).toBeDefined();
+    });
+
+    it('returns graph: null on commit failure even for a successful applied mutation (Codex round-3 self-consistency)', async () => {
+      // The mutation appeared successful upstream
+      // (`isSuccessfulAppliedMutation()` returns true) but
+      // `commitDirectAnswer` threw — the post-edit graph was NOT
+      // persisted. Returning `editResult.appliedGraph` here would
+      // imply a persistence outcome that didn't happen. The dispatch
+      // result must be self-consistent with `commitPerformed=false`.
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+        .mockResolvedValue(makeAppliedEditResult());
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockRejectedValue(new Error('StateCommitFailedError: RPC timeout'));
+
+      const result = await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-edit-commit-fail-graph-null',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      expect(result.commitPerformed).toBe(false);
+      expect(result.graph).toBeNull();
     });
   });
 
@@ -695,6 +733,13 @@ describe('dispatchEditGraph', () => {
         latencyMs: 1100,
         appliedGraph: POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
         wasRejected: false,
+        // V5 H5 (Codex round-2 P1) — a "successful applied edit"
+        // requires non-empty operations per
+        // `isSuccessfulAppliedMutation()`. The previous fixture
+        // omitted them, which was the impossible shape the unified
+        // mutation predicate now blocks. Add a representative op so
+        // `analysisReady` and other downstream effects fire.
+        operations: [{ op: 'update_edge', path: 'fac_price->goal_revenue', value: 0.7 }],
       };
       (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)

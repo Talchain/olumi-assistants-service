@@ -235,7 +235,76 @@ function getMaxPatchOperations(): number {
 // cannot offer a one-click apply step. The copy must therefore promise
 // only what the system can actually execute — which is to apply the
 // change directly when the user restates the specific factor and value.
-const PROPOSE_AND_CONFIRM_ASSISTANT_TEXT = 'I’ve drafted a change that fits your description, but I can’t apply a draft proposal automatically yet. Tell me the specific factor and value you’d like, and I’ll make the change directly.';
+//
+// Fallback used when we don't have a resolved target to anchor on
+// (low-confidence resolution). Inventing concrete detail here would be
+// dishonest — the user should restate their request more specifically.
+const PROPOSE_AND_CONFIRM_FALLBACK_TEXT = 'I’ve drafted a change that fits your description, but I need the specifics to apply it directly. Tell me the specific factor and value you’d like, and I’ll make the change directly.';
+
+// No-op path fallback. Forward-looking by design — see the comment at
+// the no-op branch on why a denial-shaped default ("No changes were
+// needed") would be rewritten by the V5 egress forbidden-phrase guard.
+const NO_OP_FALLBACK_TEXT = 'I couldn’t see a concrete change to make from that description. Tell me the specific factor and value you’d like, and I’ll apply it directly.';
+
+/**
+ * Build the propose-and-confirm assistant text. Surfaces the concrete
+ * resolved target and an example of the exact phrasing that would
+ * commit the change deterministically. Never promises an "Apply" chip
+ * (the V5 dispatcher does not wire pendingProposal round-trip — see
+ * edit-graph-dispatch.ts:160–179).
+ *
+ * Stop-conditions (fall back to the generic stub):
+ *  - No resolved target (low-confidence resolution).
+ *  - Empty proposed-changes payload.
+ *  - First change has no usable element_label.
+ */
+function buildProposeAndConfirmText(
+  proposedChanges: ProposedChangesPayload,
+  resolvedTarget: ResolvedEditTarget | null,
+): string {
+  if (!resolvedTarget) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+  const changes = proposedChanges.changes ?? [];
+  if (changes.length === 0) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+  const first = changes[0];
+  if (!first || !first.element_label) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+
+  const label = resolvedTarget.label;
+  if (changes.length === 1) {
+    // Abstract phrasing only — no fabricated example values. The
+    // previous version interpolated hardcoded scales like "120k" and
+    // "20%" which were nonsensical for non-cost factors (e.g.
+    // probabilities, durations, ratings). The structured
+    // `proposedChanges` payload doesn't carry a concrete target value,
+    // so the safest copy describes the *action type* against the
+    // resolved label and asks the user to supply the value.
+    const action =
+      first.action_type === 'value_update'
+        ? `Tell me the specific value or direction (e.g. "set to N" or "lower by N")`
+        : first.action_type === 'option_config'
+        ? `Tell me which option parameter to change and its target value`
+        : first.action_type === 'structural_add'
+        ? `Confirm the new element's label and how it connects`
+        : `Confirm the element to remove`;
+    return `I have a change in mind for **${label}**, but I need the specifics to apply it directly. ${action} and I'll make it.`;
+  }
+
+  const labels: string[] = [];
+  for (const change of changes.slice(0, 3)) {
+    if (change.element_label && !labels.includes(change.element_label)) {
+      labels.push(change.element_label);
+    }
+  }
+  if (labels.length === 0) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+
+  const list =
+    labels.length === 1
+      ? `**${labels[0]}**`
+      : labels.length === 2
+      ? `**${labels[0]}** and **${labels[1]}**`
+      : `**${labels.slice(0, -1).join('**, **')}** and **${labels[labels.length - 1]}**`;
+  const more = changes.length > 3 ? ` (and ${changes.length - 3} more)` : '';
+  return `I have changes in mind for ${list}${more}, but I need the specifics to apply them directly. Reply with the exact changes you'd like and I'll make them one at a time.`;
+}
 
 export function classifyEditIntent(editDescription: string): EditIntentCategory {
   const message = editDescription.toLowerCase();
@@ -1462,7 +1531,7 @@ export async function handleEditGraph(
       ?? [...new Set(proposedChanges.changes.map((change) => change.element_label))];
     return {
       blocks: [],
-      assistantText: PROPOSE_AND_CONFIRM_ASSISTANT_TEXT,
+      assistantText: buildProposeAndConfirmText(proposedChanges, targetResolution.resolved_target),
       latencyMs: Date.now() - startTime,
       appliedGraph: null,
       wasRejected: false,
@@ -1642,22 +1711,40 @@ export async function handleEditGraph(
     if (llmResult.operations.length === 0) {
       const latencyMs = Date.now() - startTime;
 
-      // Build assistant text: warnings first, then coaching.summary
-      const parts: string[] = [];
-      if (llmResult.warnings.length > 0) {
-        parts.push(llmResult.warnings.join(' '));
-      }
-      if (llmResult.coaching?.summary) {
-        parts.push(llmResult.coaching.summary);
-      }
-      const assistantText = parts.join('\n\n') || 'No changes were needed for this request.';
+      // Determinism gap closed: previously, BOTH `coaching.summary`
+      // AND `warnings.join(' ')` were forwarded to `assistantText` on
+      // the empty-operations path. Both are LLM-authored strings (the
+      // `EditGraphLLMResult` types `warnings: string[]` and
+      // `coaching.summary: string` — neither is a structured code).
+      // The LLM can put "Updated Price." or "Done — value set."
+      // (terse commit claims a regex set will struggle to fully cover)
+      // into either field while emitting zero operations.
+      //
+      // The fix is to drop BOTH sources on no-op paths and always emit
+      // the deterministic forward-looking NO_OP_FALLBACK_TEXT. Useful
+      // warning content (e.g. "edge already exists") is information we
+      // would like to preserve, but cannot safely while warnings is
+      // free prose. A follow-up workstream may introduce a
+      // warning-code allowlist + deterministic mapping; until then,
+      // safety beats UX richness.
+      //
+      // The default text is forward-looking ("Tell me…") rather than a
+      // denial ("No changes were needed…"). Denial phrasing matches
+      // FORBIDDEN_USER_FACING_PHRASES at the V5 egress and would be
+      // rewritten to the generic neutral fallback — costing the user
+      // the chance to know what to do next. Forward-looking copy is
+      // consistent with the Mode A propose-and-confirm fallback and
+      // gives the user an obvious next action.
+      const assistantText = NO_OP_FALLBACK_TEXT;
 
       log.info(
         {
           request_id: requestId,
           attempt,
           warnings: llmResult.warnings.length,
+          warnings_dropped: llmResult.warnings.length > 0,
           has_coaching: !!llmResult.coaching,
+          coaching_dropped: !!llmResult.coaching?.summary,
           preceded_by_plot_rejection: !!lastPlotErrors,
           preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
         },

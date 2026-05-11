@@ -137,9 +137,24 @@ function makeRejectedEditResult(): EditGraphResult {
 function makeNoopEditResult(): EditGraphResult {
   return {
     blocks: [],
-    assistantText: 'No changes were needed for this request.',
+    // V5 H5 — `handleEditGraph` no-op path now emits forward-looking
+    // copy ("Tell me the specific factor and value…") rather than a
+    // denial ("No changes were needed…"). Denial phrasing matches the
+    // FORBIDDEN_USER_FACING_PHRASES list and would be rewritten to the
+    // generic neutral fallback at the dispatcher egress. The fixture
+    // here mirrors production so this test exercises the same string
+    // the dispatcher actually receives.
+    assistantText:
+      'I couldn’t see a concrete change to make from that description. Tell me the specific factor and value you’d like, and I’ll apply it directly.',
     latencyMs: 500,
-    appliedGraph: POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
+    // Codex round-1 improvement: a real no-op result has
+    // `appliedGraph: null`. The previous fixture used POST_EDIT_GRAPH
+    // which is impossible — the handler never returns `appliedGraph`
+    // without `operations` — and masked the V5 H5 graph-persistence
+    // backstop in the dispatcher. With this fixture corrected,
+    // `isSuccessfulAppliedMutation()` rejects the shape and the
+    // dispatcher passes `graph: undefined` to `commitDirectAnswer`.
+    appliedGraph: null,
     wasRejected: false,
     operations: [],
     appliedChanges: undefined,

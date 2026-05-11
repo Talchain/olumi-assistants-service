@@ -88,12 +88,19 @@ const POST_EDIT_GRAPH = {
 };
 
 function appliedResult(): EditGraphResult {
+  // V5 H5 (Codex round-2 P1) — a real "applied" edit requires
+  // non-empty operations per the unified mutation predicate
+  // (`isSuccessfulAppliedMutation`). The previous fixture omitted
+  // them; that was the impossible shape now blocked by the
+  // unified predicate, and made this test pass for the wrong
+  // reason (analysisReady was stamped from an unpersisted graph).
   return {
     blocks: [],
     assistantText: 'Edge updated.',
     latencyMs: 100,
     appliedGraph: POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
     wasRejected: false,
+    operations: [{ op: 'update_edge', path: 'fac_price->goal_revenue', value: 0.7 }],
   };
 }
 

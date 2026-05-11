@@ -636,8 +636,16 @@ describe("envelope and coaching wiring", () => {
     expect(result.assistantText).not.toContain("fac_competitor");
   });
 
-  // Test 10: Empty operations → assistant_text is warnings + coaching
-  it("sets assistant_text to warnings then coaching.summary for empty ops", async () => {
+  // Test 10: Empty operations → assistant_text is deterministic
+  // NO_OP_FALLBACK_TEXT only. V5 H5 update (Codex round-1 P0): both
+  // `coaching.summary` AND `warnings.join(' ')` are dropped on the
+  // no-op path. Both are LLM-authored strings — `warnings` is typed
+  // `string[]`, not structured codes — and the LLM could put terse
+  // commit claims ("Updated Price.", "Done — value set.") into
+  // either field. The success-claim detector at the V5 dispatcher
+  // helps but cannot enumerate every variant, so the safety
+  // invariant is enforced at the source instead.
+  it("sets assistant_text to deterministic NO_OP_FALLBACK_TEXT on empty ops (V5 H5 Mode B fix; Codex P0)", async () => {
     const adapter = makeAdapter(V2_EMPTY_OPS_RESPONSE);
     const result = await handleEditGraph(
       makeContext(),
@@ -648,8 +656,14 @@ describe("envelope and coaching wiring", () => {
     );
 
     expect(result.assistantText).not.toBeNull();
-    expect(result.assistantText).toContain("already exists");
-    expect(result.assistantText).toContain("already in your model");
+    // Warnings content ("already exists (mean=0.5...)") is dropped —
+    // was free LLM prose, not structured codes.
+    expect(result.assistantText).not.toContain("already exists");
+    // Coaching content also dropped.
+    expect(result.assistantText).not.toContain("already in your model");
+    expect(result.assistantText).not.toContain("Want me to adjust");
+    // Deterministic forward-looking copy used instead.
+    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
   });
 
   // Test 11: substantive ops (add_node/add_edge) + prior analysis → suggested action chip

@@ -31,7 +31,11 @@ import {
   buildGenericEditGraphHandlerFact,
   isSuccessfulAppliedMutation,
 } from './edit-graph-fact-builder.js';
-import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
+import {
+  applyEgressForbiddenPhraseGuard,
+  EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+  findSuccessClaimHit,
+} from '../compose/forbidden-user-facing-phrases.js';
 import { getAdapter } from '../../adapters/llm/router.js';
 import type {
   ConversationContext,
@@ -627,6 +631,44 @@ export async function dispatchEditGraph(
 
   let response = editResultToOlumiResponse(editResult, payload);
 
+  // V5 H5 (Codex round-2 P1) — unified mutation predicate.
+  // `isSuccessfulAppliedMutation()` is the single source of truth
+  // for "did the mutation truly apply?". It requires
+  // wasRejected=false + operations.length > 0 + appliedGraph present.
+  // Computed ONCE here and threaded through every downstream check
+  // that previously inspected `editResult.appliedGraph` directly
+  // (false-success rewrite, analysisReady, freshness postEditGraph,
+  // graphForCommit, returned graph). Closes the asymmetry where
+  // `appliedGraph + empty operations` (impossible-but-not-enforced
+  // shape) would block fact persistence but still produce wire-side
+  // success effects (analysis_ready stamped, freshness derived
+  // against the unpersisted graph, response.graph returned to
+  // route-v2).
+  const successfulAppliedMutation = isSuccessfulAppliedMutation(editResult);
+
+  // V5 H5 — false-success invariant (defence-in-depth).
+  // Runs BEFORE the forbidden-phrase guard. The V4 Mode B fix closes
+  // the LLM-coaching passthrough at the source, but a structural
+  // mismatch check at the wire catches any future emit path that
+  // narrates success without committing state. Structural signature:
+  // `wasRejected === false` AND NOT a successful applied mutation.
+  // This catches BOTH the original no-op case (operations=[], no
+  // appliedGraph) AND the impossible-shape case (appliedGraph
+  // present but operations=[]) — the latter was missed by the
+  // previous `!editResult.appliedGraph` check.
+  if (!editResult.wasRejected && !successfulAppliedMutation) {
+    const successHit = findSuccessClaimHit(response.assistant_text ?? '');
+    if (successHit !== null) {
+      emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        original_phrase: successHit,
+        dispatch_path: 'edit_graph_finalise',
+      });
+      response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+    }
+  }
+
   // V5 stale-aware explain recovery — finaliser-level egress guard.
   // Runs as the LAST step before the response is committed and
   // returned, so it backstops EVERY edit_graph emit path: V4
@@ -650,10 +692,12 @@ export async function dispatchEditGraph(
   // graph here so route-v2.ts can stamp it onto the wire envelope.
   // computeStructuralReadiness is intervention-shape-tolerant
   // (mergeInterventionSources handles the V3 shape that the UI legacy
-  // fallback could not read). Undefined when no graph was applied — the
-  // canvas is unchanged so the UI's prior store value remains correct.
-  const analysisReady: AnalysisReadyPayload | undefined = editResult.appliedGraph
-    ? computeStructuralReadiness(editResult.appliedGraph)
+  // fallback could not read). Undefined when no successful mutation
+  // committed — gated by `successfulAppliedMutation` (Codex round-2
+  // P1) so an impossible appliedGraph+empty-operations shape cannot
+  // stamp analysis_ready from an unpersisted graph.
+  const analysisReady: AnalysisReadyPayload | undefined = successfulAppliedMutation
+    ? computeStructuralReadiness(editResult.appliedGraph!)
     : undefined;
 
   // V5 state-trust: load the prior fact chain and derive freshness against
@@ -667,12 +711,20 @@ export async function dispatchEditGraph(
   // brief's "every CEE dispatch path emits freshness" contract and
   // surfaces the failure as observable wire data rather than silent
   // absence.
+  // V5 H5 (Codex round-2 P1) — freshness must derive against the
+  // graph that was actually persisted, not whatever `editResult`
+  // claims. If `successfulAppliedMutation` is true the new graph
+  // committed and freshness uses it; otherwise the pre-edit graph
+  // (graphState) is what the user's storage still holds.
+  const persistedPostEditGraph = successfulAppliedMutation
+    ? editResult.appliedGraph
+    : graphState;
+
   let freshness: FreshnessDerivation;
   try {
     const turnContext = await buildTurnContext(payload, requestId);
-    const postEditGraph = editResult.appliedGraph ?? graphState;
     const currentGraphHash = computeAnalysisAffectingGraphHash(
-      postEditGraph as GraphStateIngress | null | undefined,
+      persistedPostEditGraph as GraphStateIngress | null | undefined,
     );
     freshness = deriveAnalysisFreshness(turnContext.prior_facts, currentGraphHash);
     emitFreshnessTelemetry(
@@ -697,11 +749,10 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph dispatch — freshness derivation failed; emitting derivation_failed verdict',
     );
-    const postEditGraph = editResult.appliedGraph ?? graphState;
     let currentGraphHash: string | null = null;
     try {
       currentGraphHash = computeAnalysisAffectingGraphHash(
-        postEditGraph as GraphStateIngress | null | undefined,
+        persistedPostEditGraph as GraphStateIngress | null | undefined,
       );
     } catch {
       // Hash computation failure is rare (input validation upstream)
@@ -735,13 +786,17 @@ export async function dispatchEditGraph(
     // llm_calls_used: handleEditGraph makes at least one LLM call for the
     // edit classification + repair loop. Using 1 as an honest minimum.
     //
-    // graph: when the edit was actually applied, EditGraphResult.appliedGraph
-    // carries the post-edit GraphV3T. Pass it as p_graph so append_turn_atomic
-    // writes scenarios.graph in the same transaction as the turn row. When the
-    // edit was rejected (or otherwise produced no graph), appliedGraph is null
-    // — `null ?? undefined` resolves to undefined, the RPC receives p_graph =
-    // null, and scenarios.graph is left unchanged. Mirror of the pattern in
-    // draft-graph-dispatch.ts.
+    // graph: when a true successful applied mutation occurred
+    // (`successfulAppliedMutation`), EditGraphResult.appliedGraph carries
+    // the post-edit GraphV3T and is passed as p_graph so
+    // append_turn_atomic writes scenarios.graph in the same transaction
+    // as the turn row. When NOT a successful applied mutation (rejected,
+    // noop, zero-ops, no appliedGraph, OR the impossible-but-not-enforced
+    // shape appliedGraph+operations=[]), `graphForCommit` resolves to
+    // undefined, the RPC receives p_graph = null, and scenarios.graph is
+    // left unchanged. The gate matches every other downstream check that
+    // depends on "did a mutation truly apply" (false-success rewrite,
+    // analysisReady, freshness postEditGraph, returned graph).
     // DL-7 PR B: emit a canonical EditGraphHandlerFact for every
     // successful applied mutation. Two-tier construction:
     //
@@ -791,7 +846,7 @@ export async function dispatchEditGraph(
     // outcomes (rejected, noop, zero-ops) skip this entirely.
     let genericBuilderThrew = false;
     let genericBuilderError: Error | undefined;
-    if (!editGraphFact && isSuccessfulAppliedMutation(editResult)) {
+    if (!editGraphFact && successfulAppliedMutation) {
       try {
         editGraphFact = buildGenericEditGraphHandlerFact(factBuilderInput);
       } catch (fallbackErr) {
@@ -839,12 +894,12 @@ export async function dispatchEditGraph(
     // FailureKind.HANDLER_INVOCATION_FAILED → safe recovery chip) than
     // to commit a silently-broken state.
     //
-    // Invariant: if `isSuccessfulAppliedMutation(editResult)` is true,
-    // we either commit with a non-empty `handler_facts` array or we
-    // throw before reaching `commitDirectAnswer`. We never commit the
+    // Invariant: if `successfulAppliedMutation` is true, we either
+    // commit with a non-empty `handler_facts` array or we throw
+    // before reaching `commitDirectAnswer`. We never commit the
     // pair {graph: appliedGraph, handler_facts: []} for an applied
     // mutation.
-    if (!editGraphFact && isSuccessfulAppliedMutation(editResult)) {
+    if (!editGraphFact && successfulAppliedMutation) {
       log.error(
         {
           request_id: requestId,
@@ -874,6 +929,17 @@ export async function dispatchEditGraph(
       );
     }
 
+    // V5 H5 — graph persistence backstop. Uses the unified
+    // `successfulAppliedMutation` predicate (Codex round-2 P1) so
+    // the gate is identical across the false-success rewrite, the
+    // analysisReady computation, the freshness postEditGraph
+    // selection, this commit, and the function's returned `graph`.
+    // The rich/generic fact-builders use the same predicate, so a
+    // graph cannot persist without a receipt fact and a receipt
+    // fact cannot exist without persistable graph state.
+    const graphForCommit = successfulAppliedMutation
+      ? editResult.appliedGraph ?? undefined
+      : undefined;
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -888,7 +954,7 @@ export async function dispatchEditGraph(
       llm_calls_used: deterministicAddRiskAttempted ? 0 : 1,
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
-      graph: editResult.appliedGraph ?? undefined,
+      graph: graphForCommit,
     });
     log.info(
       {
@@ -903,7 +969,11 @@ export async function dispatchEditGraph(
       response,
       commitPerformed: true,
       analysisReady,
-      graph: editResult.appliedGraph ?? null,
+      // V5 H5 (Codex round-2 P1): returned `graph` matches what
+      // was actually persisted. Null when no successful applied
+      // mutation, so route-v2 doesn't stamp a non-persisted graph
+      // onto the wire envelope.
+      graph: successfulAppliedMutation ? editResult.appliedGraph ?? null : null,
       freshness,
     };
   } catch (err) {
@@ -919,7 +989,15 @@ export async function dispatchEditGraph(
       response,
       commitPerformed: false,
       analysisReady,
-      graph: editResult.appliedGraph ?? null,
+      // V5 H5 (Codex round-3 cleanup): commit failure means
+      // `commitDirectAnswer` threw — the post-edit graph was NOT
+      // persisted to storage regardless of `successfulAppliedMutation`.
+      // Returning `editResult.appliedGraph` here would imply a
+      // persistence outcome that didn't happen. Route-v2 returns a 500
+      // before consuming this field today, so this is not user-facing,
+      // but the object should be self-consistent with
+      // `commitPerformed=false`.
+      graph: null,
       freshness,
     };
   }
