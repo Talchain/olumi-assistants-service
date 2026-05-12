@@ -35,7 +35,8 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
   };
 });
 
-import { handleEditGraph, mapOpsForPlot } from "../../../../src/orchestrator/tools/edit-graph.js";
+import { handleEditGraph, mapOpsForPlot, determineEditResolutionMode } from "../../../../src/orchestrator/tools/edit-graph.js";
+import type { EditTargetResolutionResult } from "../../../../src/orchestrator/tools/edit-graph.js";
 import { applyPatchOperations } from "../../../../src/orchestrator/patch-applier.js";
 import type { ConversationContext, PatchOperation, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
 import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
@@ -2056,5 +2057,295 @@ describe("V5 H5 follow-up — handleEditGraph appliedGraph synthesis", () => {
     // No false-success narration on the user-facing surface.
     const text = result.assistantText ?? "";
     expect(text).not.toMatch(/successfully|I['’]ve\s+(?:applied|updated|added)|Strengthened|Added\b/i);
+  });
+});
+
+// ============================================================================
+// H6 — label-aware compound-edit detection
+//
+// Failure shape on staging (PR #167 follow-up, 5/8 replays):
+//   Step 1's LLM-drafted graph sometimes contains a factor whose label
+//   includes "and", "also", "then", or a comma (e.g. "Headcount and
+//   Scaling Spend"). The replay harness injects that label into Step 2's
+//   message: "Edit the model: make Headcount and Scaling Spend more
+//   important." `resolveEditTarget` correctly returns
+//   confidence='high' + single resolved_target, but the old
+//   `isCompoundEditRequest` returned true because the description
+//   contained "and" — and the deciding gate at line 678-684 routed to
+//   `propose_and_confirm` (Mode A), producing
+//   "I have changes in mind for **Headcount and Scaling Spend** and
+//   **Scaling Spend more important.**"
+//
+// Fix: strip the resolved label from the description before testing for
+// compound-edit separators. Only applies when confidence='high' AND
+// resolved_target is non-null (non-ambiguous match_type is already
+// routed at line 664).
+// ============================================================================
+
+describe("H6 — determineEditResolutionMode label-aware compound detection", () => {
+  function makeResolution(overrides: Partial<EditTargetResolutionResult> = {}): EditTargetResolutionResult {
+    return {
+      match_type: 'exact_label',
+      resolved_target: { id: 'fac_test', label: 'Test Factor', type: 'factor' },
+      confidence: 'high',
+      alternatives: [],
+      candidate_labels: ['Test Factor'],
+      ...overrides,
+    };
+  }
+
+  it("single-target label with 'and' → auto_apply", () => {
+    const mode = determineEditResolutionMode(
+      "make Headcount and Scaling Spend more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_h', label: 'Headcount and Scaling Spend', type: 'factor' },
+        candidate_labels: ['Headcount and Scaling Spend'],
+      }),
+    );
+    expect(mode).toBe('auto_apply');
+  });
+
+  it("single-target label with comma → auto_apply", () => {
+    const mode = determineEditResolutionMode(
+      "make Capacity, Quality more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_cq', label: 'Capacity, Quality', type: 'factor' },
+        candidate_labels: ['Capacity, Quality'],
+      }),
+    );
+    expect(mode).toBe('auto_apply');
+  });
+
+  it("single-target label with 'also' → auto_apply", () => {
+    const mode = determineEditResolutionMode(
+      "make Hiring also Scaling more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_hs', label: 'Hiring also Scaling', type: 'factor' },
+        candidate_labels: ['Hiring also Scaling'],
+      }),
+    );
+    expect(mode).toBe('auto_apply');
+  });
+
+  it("single-target label with 'then' → auto_apply", () => {
+    const mode = determineEditResolutionMode(
+      "make Capacity then Quality more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_cq', label: 'Capacity then Quality', type: 'factor' },
+        candidate_labels: ['Capacity then Quality'],
+      }),
+    );
+    expect(mode).toBe('auto_apply');
+  });
+
+  it("label with regex metacharacters does not corrupt the strip", () => {
+    // Defensive: a factor named with regex specials must be escaped before
+    // being plugged into a literal-strip RegExp.
+    const mode = determineEditResolutionMode(
+      "make Throughput (per hour) more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_t', label: 'Throughput (per hour)', type: 'factor' },
+        candidate_labels: ['Throughput (per hour)'],
+      }),
+    );
+    expect(mode).toBe('auto_apply');
+  });
+
+  it("case-insensitive label strip", () => {
+    // User typed the label in different case than the canonical label.
+    const mode = determineEditResolutionMode(
+      "make HEADCOUNT AND SCALING SPEND more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_h', label: 'Headcount and Scaling Spend', type: 'factor' },
+        candidate_labels: ['Headcount and Scaling Spend'],
+      }),
+    );
+    expect(mode).toBe('auto_apply');
+  });
+
+  it("genuine compound edit preserved (and outside the resolved label) → propose_and_confirm", () => {
+    // The resolved label is `Headcount and Scaling Spend`, but the
+    // description also asks to edit a second target after the label.
+    // Stripping the label leaves "make  more important and Hiring Pace
+    // less important" — still contains a real "and" → compound → Mode A.
+    const mode = determineEditResolutionMode(
+      "make Headcount and Scaling Spend more important and Hiring Pace less important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_h', label: 'Headcount and Scaling Spend', type: 'factor' },
+        candidate_labels: ['Headcount and Scaling Spend'],
+      }),
+    );
+    expect(mode).toBe('propose_and_confirm');
+  });
+
+  it("genuine compound edit preserved with 'also' connector outside label", () => {
+    const mode = determineEditResolutionMode(
+      "make Hiring also Scaling more important and Delivery Capacity less risky",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        resolved_target: { id: 'fac_hs', label: 'Hiring also Scaling', type: 'factor' },
+        candidate_labels: ['Hiring also Scaling'],
+      }),
+    );
+    expect(mode).toBe('propose_and_confirm');
+  });
+
+  it("low-confidence + parameter_update → propose_and_confirm (unchanged)", () => {
+    const mode = determineEditResolutionMode(
+      "make X more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        match_type: 'none',
+        resolved_target: null,
+        confidence: 'low',
+        candidate_labels: [],
+      }),
+    );
+    expect(mode).toBe('propose_and_confirm');
+  });
+
+  it("ambiguous match → clarify (unchanged; routed before compound check)", () => {
+    const mode = determineEditResolutionMode(
+      "make Headcount more important",
+      makeContext(),
+      'parameter_update',
+      makeResolution({
+        match_type: 'ambiguous',
+        resolved_target: null,
+        confidence: 'medium',
+        candidate_labels: ['Headcount Investment', 'Headcount Cost'],
+        alternatives: [
+          { id: 'fac_hi', label: 'Headcount Investment' },
+          { id: 'fac_hc', label: 'Headcount Cost' },
+        ],
+      }),
+    );
+    expect(mode).toBe('clarify');
+  });
+
+  it("integration: handleEditGraph commits when factor label contains 'and'", async () => {
+    // Pin the full Mode B path end-to-end on the exact staging shape: base
+    // graph carries a factor whose label contains "and", LLM emits a valid
+    // update_edge op on that factor, dispatcher should NOT route to Mode A.
+    const adapter = makeAdapter([
+      {
+        op: "update_edge",
+        path: "fac_h::goal_1",
+        value: { strength: { mean: 0.8 } },
+      },
+    ]);
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Q3 Delivery" },
+          { id: "fac_h", kind: "factor", label: "Headcount and Scaling Spend" },
+        ],
+        edges: [
+          {
+            from: "fac_h",
+            to: "goal_1",
+            strength: { mean: 0.5, std: 0.1 },
+            exists_probability: 0.9,
+            effect_direction: "positive",
+          },
+        ],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    const result = await handleEditGraph(
+      ctx,
+      "make Headcount and Scaling Spend more important",
+      adapter,
+      "req-h6-int",
+      "turn-h6-int",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    // Must not be the Mode A propose-and-confirm copy.
+    const text = result.assistantText ?? "";
+    expect(text).not.toMatch(/I have (a )?change[s]? in mind|drafted a change/i);
+  });
+
+  // High-impact verb on a resolved label that contains a compound separator:
+  // routing intentionally falls to Mode A because `isLowImpactEditRequest`
+  // returns false (high-impact word present). Pins the
+  // `buildProposedChanges` defence-in-depth — even on the Mode A path,
+  // the resolved label must NOT be torn into two fake clauses
+  // ("Headcount" + "Scaling Spend"). One coherent proposed change should
+  // emerge with `element_label` set to the full resolved label.
+  //
+  // Phrasing chosen: "make … more important entirely" — "make" + "more"
+  // classify as parameter_update (value-update verb + value target);
+  // "entirely" is a high-impact marker, so `isLowImpactEditRequest`
+  // returns false and the auto-apply gate at line 678-684 fails. The
+  // simpler "double Headcount and Scaling Spend" would classify as
+  // `structural` (no value-update verb) and short-circuit to auto_apply
+  // before reaching the Mode A path that this test exercises.
+  it("high-impact Mode A on label with separator emits one coherent change (no torn labels)", async () => {
+    const adapter = makeAdapter({
+      operations: [],
+      coaching: { summary: '', rerun_recommended: false },
+      warnings: [],
+    });
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Q3 Delivery" },
+          { id: "fac_h", kind: "factor", label: "Headcount and Scaling Spend" },
+        ],
+        edges: [
+          {
+            from: "fac_h",
+            to: "goal_1",
+            strength: { mean: 0.5, std: 0.1 },
+            exists_probability: 0.9,
+            effect_direction: "positive",
+          },
+        ],
+      } as unknown as ConversationContext["graph"],
+    });
+
+    const result = await handleEditGraph(
+      ctx,
+      "make Headcount and Scaling Spend more important entirely",
+      adapter,
+      "req-h6-highimpact",
+      "turn-h6-highimpact",
+    );
+
+    // parameter_update + high-impact ("entirely") + resolved label with
+    // separator → Mode A. The defence-in-depth in buildProposedChanges
+    // must strip the resolved label before splitting so the label is not
+    // torn into two fake clauses.
+    expect(result.wasRejected).toBe(false);
+    expect(result.diagnostics?.resolution_mode).toBe("propose_and_confirm");
+    expect(result.proposedChanges).toBeDefined();
+    expect(result.proposedChanges!.changes).toHaveLength(1);
+    expect(result.proposedChanges!.changes[0]!.element_label).toBe("Headcount and Scaling Spend");
+    // The user-visible Mode A copy must NOT contain a torn "Scaling Spend"
+    // fragment as a fake label.
+    const text = result.assistantText ?? "";
+    expect(text).not.toContain("**Scaling Spend**");
+    expect(text).not.toContain("**Scaling Spend more important**");
+    expect(text).not.toContain("**Headcount**");
   });
 });
