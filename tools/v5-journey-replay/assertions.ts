@@ -321,7 +321,8 @@ export const CLARIFICATION_BACK_PATTERN =
  *   - "Added constraint: Total cost must be at most ..."  (add_constraint)
  *   - "Adjusted the link strength from X to Y."           (adjust_edge_strength)
  *
- * The pattern is intentionally broad — past-tense mutation verbs OR
+ * The pattern is intentionally broad — mutation verb tokens (mostly
+ * past-tense, plus tense-neutral `Set`; see Accepted classes below) OR
  * "now has/shows" forward-looking phrasing. Anchoring on these forms
  * proves the response is acknowledging a change, not deflecting via
  * clarification. Combined with the clarification-back negative check,
@@ -424,10 +425,11 @@ export function assertSetFactorValue(
       failing_contract: 'set_factor_value_no_mutation_acknowledgement',
       evidence:
         `status=200 but no mutation-ack phrasing in response. ` +
-        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any past-tense ` +
-        `mutation verb (Strengthened/Increased/Decreased/Adjusted/Modified/` +
-        `Weakened/Updated/Changed/Set/Added/Removed/Applied/Saved), ` +
-        `forward-looking "now has/shows/reflects", or passive ` +
+        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any mutation ` +
+        `verb token — mostly past-tense, plus tense-neutral \`Set\` — ` +
+        `(Strengthened/Increased/Decreased/Adjusted/Modified/Weakened/` +
+        `Updated/Changed/Set/Added/Removed/Applied/Saved), forward-` +
+        `looking "now has/shows/reflects", or passive ` +
         `"has been updated/changed/adjusted/set/added/removed". ` +
         `text_preview="${text.slice(0, 100)}..."`,
     };
@@ -516,10 +518,11 @@ export function assertEditGraphGeneric(
       failing_contract: 'edit_graph_no_mutation_acknowledgement',
       evidence:
         `status=200 but no mutation-ack phrasing in response. ` +
-        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any past-tense ` +
-        `mutation verb (Strengthened/Increased/Decreased/Adjusted/Modified/` +
-        `Weakened/Updated/Changed/Set/Added/Removed/Applied/Saved), ` +
-        `forward-looking "now has/shows/reflects", or passive ` +
+        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any mutation ` +
+        `verb token — mostly past-tense, plus tense-neutral \`Set\` — ` +
+        `(Strengthened/Increased/Decreased/Adjusted/Modified/Weakened/` +
+        `Updated/Changed/Set/Added/Removed/Applied/Saved), forward-` +
+        `looking "now has/shows/reflects", or passive ` +
         `"has been updated/changed/adjusted/set/added/removed". ` +
         `text_preview="${text.slice(0, 100)}..."`,
     };

@@ -23,11 +23,14 @@
  *      prose, and "no change" denial. These MUST keep failing on the
  *      regex itself.
  *
- *   3. Documented matched-but-Step-3-caught — bare past-tense verbs
- *      that match the regex on their own. Layered defence: Step 3
- *      (`assertWhatChanged`) fails the journey if `recent_changes`
- *      cannot surface the change. Do NOT narrow the regex to drop
- *      these cases — narrowing would also drop genuine mutations.
+ *   3. Documented matched-but-Step-3-caught — bare or ambiguous
+ *      accepted-verb phrases that match the regex on their own
+ *      (e.g. a bare past-tense "Updated Price.", or a present-tense
+ *      "I can set ..." that matches the case-insensitive `Set` token).
+ *      Layered defence: Step 3 (`assertWhatChanged`) fails the journey
+ *      if `recent_changes` cannot surface the change. Do NOT narrow
+ *      the regex to drop these cases — narrowing would also drop
+ *      genuine mutations.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -67,8 +70,11 @@ describe('MUTATION_ACK_PATTERN — rejects Mode A / draft / Step-1 echo', () => 
 });
 
 describe('MUTATION_ACK_PATTERN — known matched-but-Step-3-caught (do not narrow)', () => {
-  // These cases match MUTATION_ACK_PATTERN on a bare past-tense verb.
-  // That is intentional and is the prose half of a layered defence:
+  // These cases match MUTATION_ACK_PATTERN on a bare or ambiguous
+  // accepted-verb token — a bare past-tense verb ("Updated Price.")
+  // or a present-tense match against the case-insensitive `Set` token
+  // ("I can set X to Y. Reply with ..."). That is intentional and is
+  // the prose half of a layered defence:
   // the structural backstop is Step 3 (`assertWhatChanged`), which
   // fails the journey if the next turn cannot surface the change via
   // `recent_changes`.
