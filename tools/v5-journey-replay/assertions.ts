@@ -321,11 +321,52 @@ export const CLARIFICATION_BACK_PATTERN =
  *   - "Added constraint: Total cost must be at most ..."  (add_constraint)
  *   - "Adjusted the link strength from X to Y."           (adjust_edge_strength)
  *
- * The pattern is intentionally broad — past-tense mutation verbs OR
+ * The pattern is intentionally broad — mutation verb tokens (mostly
+ * past-tense, plus tense-neutral `Set`; see Accepted classes below) OR
  * "now has/shows" forward-looking phrasing. Anchoring on these forms
  * proves the response is acknowledging a change, not deflecting via
  * clarification. Combined with the clarification-back negative check,
  * this gives replay-side proof that the edit step actually mutated.
+ *
+ * Accepted classes (the regex below is the source of truth — failure
+ * evidence strings elsewhere in this file show only a few sample verbs
+ * for brevity, NOT the full vocabulary):
+ *
+ *   - Mutation verbs (case-insensitive; mostly past-tense, but the
+ *     `Set` token is tense-neutral and also matches present-tense
+ *     "set" — see the matched-but-Step-3-caught edge case below):
+ *       Strengthened / Increased / Decreased / Adjusted / Modified /
+ *       Weakened / Updated / Changed / Set / Added / Removed /
+ *       Applied / Saved
+ *   - Forward-looking: "now has" / "now shows" / "now reflects"
+ *   - Passive: "has been updated/changed/adjusted/set/added/removed"
+ *
+ * Rejected at Step 2 (these MUST keep failing the regex — they
+ * indicate no mutation happened on the wire):
+ *
+ *   - Mode A draft / proposal copy that contains no accepted verb:
+ *       "I have changes in mind ..."
+ *       "I've drafted a change ..."
+ *   - Step-1 graph-echo prose:
+ *       "Your decision model ... is ready, with N options, M factors ..."
+ *   - Generic descriptive prose with no mutation verb.
+ *
+ * Matched at Step 2 but caught by Step 3 — bare verb sentences and
+ * Mode A copy that happens to contain an accepted verb DO match this
+ * regex. That is intentional. The regex is the prose half of a
+ * layered defence; the structural backstop is Step 3
+ * (`assertWhatChanged`), which fails the journey if the next turn
+ * cannot surface the change via `recent_changes`. Do NOT "fix" these
+ * cases by narrowing the regex — narrowing the `Updated` token would
+ * drop the canonical set_factor_value acknowledgement
+ * ("Updated Incremental Hiring Cost from £0 to 20%."), and narrowing
+ * the `Set` token would drop legitimate forms like "Set X to 20."
+ * Examples (locked in by
+ * `tests/unit/v5-journey-replay/mutation-ack-pattern.test.ts`):
+ *
+ *   - "Updated Price."                                  (matches `Updated`)
+ *   - "I can set X to Y. Reply with the value ..."      (matches `Set`,
+ *     case-insensitive — Mode A offer phrased with present-tense "set")
  */
 export const MUTATION_ACK_PATTERN =
   /\b(?:Updated|Adjusted|Changed|Modified|Set|Added|Removed|Strengthened|Weakened|Increased|Decreased|Applied|Saved)\b|\bnow (?:has|shows|reflects)\b|\bhas been (?:updated|changed|adjusted|set|added|removed)\b/i;
@@ -383,8 +424,13 @@ export function assertSetFactorValue(
       ok: false,
       failing_contract: 'set_factor_value_no_mutation_acknowledgement',
       evidence:
-        `status=200 but no mutation-ack phrasing in response ` +
-        `(expected "Updated X", "X now has...", "Adjusted ...", etc.). ` +
+        `status=200 but no mutation-ack phrasing in response. ` +
+        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any mutation ` +
+        `verb token — mostly past-tense, plus tense-neutral \`Set\` — ` +
+        `(Strengthened/Increased/Decreased/Adjusted/Modified/Weakened/` +
+        `Updated/Changed/Set/Added/Removed/Applied/Saved), forward-` +
+        `looking "now has/shows/reflects", or passive ` +
+        `"has been updated/changed/adjusted/set/added/removed". ` +
         `text_preview="${text.slice(0, 100)}..."`,
     };
   }
@@ -471,8 +517,13 @@ export function assertEditGraphGeneric(
       ok: false,
       failing_contract: 'edit_graph_no_mutation_acknowledgement',
       evidence:
-        `status=200 but no mutation-ack phrasing in response ` +
-        `(expected "Updated X", "X now has...", "Adjusted ...", etc.). ` +
+        `status=200 but no mutation-ack phrasing in response. ` +
+        `MUTATION_ACK_PATTERN (see assertions.ts) accepts any mutation ` +
+        `verb token — mostly past-tense, plus tense-neutral \`Set\` — ` +
+        `(Strengthened/Increased/Decreased/Adjusted/Modified/Weakened/` +
+        `Updated/Changed/Set/Added/Removed/Applied/Saved), forward-` +
+        `looking "now has/shows/reflects", or passive ` +
+        `"has been updated/changed/adjusted/set/added/removed". ` +
         `text_preview="${text.slice(0, 100)}..."`,
     };
   }
