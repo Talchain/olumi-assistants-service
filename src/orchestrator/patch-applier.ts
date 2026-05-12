@@ -167,9 +167,43 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
   }
 
   const updates = op.value as Record<string, unknown>;
-  // Guard: prevent overwriting edge identity fields
-  const { from: _from, to: _to, ...safeUpdates } = updates;
-  Object.assign(edge, safeUpdates);
+  // Guard: prevent overwriting edge identity fields. `strength` is pulled out
+  // separately because it is a REQUIRED nested object on EdgeV3 with required
+  // {mean, std} members — a shallow Object.assign would drop members the patch
+  // does not mention (a patch carrying only {mean} would silently strip the
+  // existing std, producing an edge that fails GraphV3.safeParse downstream).
+  const { from: _from, to: _to, strength: strengthUpdate, ...scalarUpdates } = updates;
+  Object.assign(edge, scalarUpdates);
+  if (strengthUpdate !== undefined) {
+    // `strength: undefined` is treated as "no change to strength" — a
+    // legitimate partial update touching other fields only. Any other
+    // non-plain-object value (`null`, array, primitive) is incoherent: the
+    // patch claims to update strength but cannot. UpdateEdgeValue in
+    // patch-validation.ts is permissive (`z.record(z.string(), z.unknown())`),
+    // so these shapes survive patch-validation. Refusing here avoids a
+    // false-success path where the candidate matches the base graph
+    // unchanged but the assistant narrates "Updated edge…".
+    if (strengthUpdate === null || typeof strengthUpdate !== 'object' || Array.isArray(strengthUpdate)) {
+      const got = strengthUpdate === null ? 'null' : Array.isArray(strengthUpdate) ? 'array' : typeof strengthUpdate;
+      throw new PatchApplyError(
+        'INVALID_OPERATION',
+        `update_edge "${from}" → "${to}" requires strength to be an object with mean and/or std; got ${got}`,
+      );
+    }
+    const existing = (edge.strength ?? {}) as Record<string, unknown>;
+    // Filter out explicit `undefined` subfields. JSON parsing cannot produce
+    // an `undefined` own property — the production root-cause path is
+    // unaffected — but the applier is also reachable from direct JS callers
+    // (tests, future internal use). Treating an explicit `{ std: undefined }`
+    // as a wipe would silently re-introduce the staging defect; treating it
+    // as a no-op preserves the existing nested value.
+    const incoming = strengthUpdate as Record<string, unknown>;
+    const filtered: Record<string, unknown> = {};
+    for (const key of Object.keys(incoming)) {
+      if (incoming[key] !== undefined) filtered[key] = incoming[key];
+    }
+    edge.strength = { ...existing, ...filtered } as typeof edge.strength;
+  }
 }
 
 // ============================================================================

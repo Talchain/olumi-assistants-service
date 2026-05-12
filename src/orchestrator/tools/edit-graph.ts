@@ -33,6 +33,7 @@ import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 // (operations[].value carries arbitrary patch payloads incompatible with closed schemas)
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
+import { GraphV3 } from "../../schemas/cee-v3.js";
 import type {
   TypedConversationBlock,
   ConversationContext,
@@ -2398,6 +2399,59 @@ export async function handleEditGraph(
       // `context.graph` via `applyPatchOperations` (pure function,
       // covers all six PatchOperation kinds). When PLoT did not run
       // OR ran with no repairs, this is what PLoT would have returned.
+      //
+      // Safety backstop: strict-validate the candidate before promoting,
+      // but ONLY when the base graph was already V3-valid. If the patch
+      // took a valid graph and made it invalid, refuse — that is the
+      // production failure mode (staging Step 1 draft was V3-valid; the
+      // partial-strength patch in Step 2 dropped strength.std and the
+      // resulting graph failed `GraphV3.safeParse` inside
+      // `loadScenarioSnapshotForRunAnalysis` on the next chip-click).
+      //
+      // If the base was already V3-invalid (legacy persisted graph,
+      // migration window, malformed test fixture), the patch is not the
+      // cause of the defect and refusing here would block legitimate
+      // edits without actually closing the failure window — the next
+      // read of the base graph would have failed regardless. The narrow
+      // conditional preserves the bug fix without scope-creeping into a
+      // graph-wide canonicalisation gate.
+      const baseValid = GraphV3.safeParse(context.graph as unknown).success;
+      const candidateParse = baseValid ? GraphV3.safeParse(candidateGraph) : { success: true as const };
+      if (!candidateParse.success) {
+        const firstIssue = candidateParse.error.issues[0];
+        log.error(
+          {
+            request_id: requestId,
+            attempt,
+            plot_configured: plotConfigured,
+            issue_path: firstIssue?.path,
+            issue_code: firstIssue?.code,
+            issue_message: firstIssue?.message,
+            issues_count: candidateParse.error.issues.length,
+          },
+          'edit_graph synthesised candidateGraph fails GraphV3 strict parse — refusing to persist',
+        );
+        validationOutcome = 'synthesized_graph_invalid';
+        setViolationCodes(['synthesized_graph_invalid']);
+        recoveryPathChosen = 'rejection_block';
+        branchTaken = 'rejection';
+        branchReason = 'synthesized_graph_invalid';
+        failureBranch = 'synthesized_graph_invalid';
+        failureCode = 'SYNTHESIZED_GRAPH_INVALID';
+        failureMessage = 'Synthesised candidateGraph failed GraphV3 strict parse; cannot persist a graph that would break subsequent reads';
+        return buildRejectionResult(
+          'The change was validated but the system could not capture the final applied state. Try the change again.',
+          operations,
+          baseGraphHash,
+          turnId,
+          startTime,
+          'SYNTHESIZED_GRAPH_INVALID',
+          undefined,
+          attempt,
+          diagnostics(),
+        );
+      }
+
       appliedGraph = candidateGraph;
       appliedGraphHash = computeGraphHash(candidateGraph);
       log.info(

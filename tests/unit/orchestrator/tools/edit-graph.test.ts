@@ -134,8 +134,15 @@ function makePlotClient(overrides?: Partial<Record<string, unknown>>): PLoTClien
 }
 
 const VALID_ADD_NODE_OP = {
+  // `path` is the canonical node id used by applyAddNode — must match
+  // CANONICAL_ID_REGEX in src/schemas/cee-v3.ts (lowercase alphanumeric,
+  // underscores, colons, hyphens). The previous fixture value
+  // "nodes/new_factor" included a slash that failed GraphV3 strict parse
+  // when the Layer 2 backstop landed (PR adding GraphV3.safeParse before
+  // appliedGraph synthesis). The fixture had been "passing for the wrong
+  // reason" — the synthesis path never strict-parsed the result before.
   op: "add_node",
-  path: "nodes/new_factor",
+  path: "new_factor",
   value: { id: "new_factor", kind: "factor", label: "Cost" },
 };
 
@@ -946,7 +953,7 @@ describe("handleEditGraph", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     // Operations should be the original CEE-validated ones, not PLoT's rewritten version
     expect(data.operations[0].op).toBe("add_node");
-    expect(data.operations[0].path).toBe("nodes/new_factor");
+    expect(data.operations[0].path).toBe("new_factor");
     // Repairs should be surfaced as repairs_applied, not merged into operations
     expect(data.repairs_applied).toHaveLength(1);
     expect(data.repairs_applied![0].code).toBe("LABEL_FIXED");
@@ -1263,13 +1270,16 @@ describe("handleEditGraph", () => {
   });
 
   it("populates old_value on update_edge from graph context", async () => {
+    // Uses canonical V3 nested strength shape. The previous fixture used
+    // legacy flat strength_mean/strength_std fields, which fail GraphV3
+    // strict parse and were silently surviving only because the synthesis
+    // path never strict-parsed the result before the Layer 2 backstop.
     const adapter = makeAdapter([{
       op: "update_edge",
       path: "factor_1::goal_1",
-      value: { strength_mean: 0.8, strength_std: 0.05 },
+      value: { strength: { mean: 0.8, std: 0.05 } },
     }]);
 
-    // Use a context where edge has the canonical fields at top level
     const ctx = makeContext({
       graph: {
         nodes: [
@@ -1280,8 +1290,7 @@ describe("handleEditGraph", () => {
           {
             from: "factor_1",
             to: "goal_1",
-            strength_mean: 0.5,
-            strength_std: 0.1,
+            strength: { mean: 0.5, std: 0.1 },
             exists_probability: 0.9,
             effect_direction: "positive",
           },
@@ -1301,7 +1310,7 @@ describe("handleEditGraph", () => {
     expect(data.status).toBe("proposed");
     const updateOp = data.operations.find(o => o.op === "update_edge");
     expect(updateOp).toBeDefined();
-    expect(updateOp!.old_value).toEqual({ strength_mean: 0.5, strength_std: 0.1 });
+    expect(updateOp!.old_value).toEqual({ strength: { mean: 0.5, std: 0.1 } });
   });
 
   it("does not overwrite old_value when LLM already provides it", async () => {
@@ -1921,5 +1930,131 @@ describe("V5 H5 follow-up — handleEditGraph appliedGraph synthesis", () => {
     const data = result.blocks[0].data as GraphPatchBlockData;
     expect(data.applied_graph_hash).toBeDefined();
     expect(data.applied_graph_hash!.length).toBe(16);
+  });
+
+  // End-to-end success on the exact staging op shape. Proves Layer 1's
+  // nested-strength merge composes correctly with the synthesis path and
+  // (with V3-valid base) survives the Layer 2 backstop. The pure
+  // applier tests cover the merge in isolation; this integration test
+  // pins the V5 no-PLoT dispatch invariant ("appliedGraph synthesized
+  // locally" → persistable graph) for the exact production shape.
+  it("staging-shape update_edge with partial strength succeeds end-to-end (V5 no-PLoT path)", async () => {
+    const adapter = makeAdapter([
+      {
+        op: "update_edge",
+        path: "factor_1::goal_1",
+        value: { strength: { mean: 0.28 }, exists_probability: 0.88 },
+      },
+    ]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Strengthen the edge",
+      adapter,
+      "req-staging-shape",
+      "turn-staging-shape",
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    const persistedEdge = result.appliedGraph!.edges.find(
+      (e) => (e as { from?: string }).from === "factor_1" && (e as { to?: string }).to === "goal_1",
+    ) as { strength?: { mean?: unknown; std?: unknown }; exists_probability?: unknown };
+    // Layer 1 merges into existing { mean: 0.5, std: 0.1 } → new mean,
+    // existing std preserved.
+    expect(persistedEdge.strength?.mean).toBe(0.28);
+    expect(persistedEdge.strength?.std).toBe(0.1);
+    expect(persistedEdge.exists_probability).toBe(0.88);
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+  });
+
+  // Pins the narrowed backstop contract: when the base graph is already
+  // V3-invalid (legacy fixture / migration window), the backstop is
+  // intentionally skipped — the patch is not the cause of the defect
+  // and refusing here would block legitimate edits without closing the
+  // failure window. The next read of the persisted graph would have
+  // failed regardless.
+  it("backstop skips strict-parse when base graph is V3-invalid (narrowed contract)", async () => {
+    // Base graph uses legacy flat strength_mean/strength_std — fails
+    // GraphV3 strict parse before any patch is applied.
+    const ctx = makeContext({
+      graph: {
+        nodes: [
+          { id: "goal_1", kind: "goal", label: "Revenue" },
+          { id: "factor_1", kind: "factor", label: "Price" },
+        ],
+        edges: [
+          {
+            from: "factor_1",
+            to: "goal_1",
+            strength_mean: 0.5,
+            strength_std: 0.1,
+            exists_probability: 0.9,
+            effect_direction: "positive",
+          },
+        ],
+      } as unknown as ConversationContext["graph"],
+    });
+    // A patch that itself is well-formed, so the only thing that could
+    // trip the backstop is the pre-existing legacy edge in the base.
+    const adapter = makeAdapter([
+      {
+        op: "update_node",
+        path: "factor_1",
+        value: { label: "Updated Price" },
+      },
+    ]);
+
+    const result = await handleEditGraph(
+      ctx,
+      "Rename the factor",
+      adapter,
+      "req-legacy-base",
+      "turn-legacy-base",
+    );
+
+    // Backstop must NOT fire — the patch did not introduce new invalidity.
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+  });
+
+  // Backstop for the staging failure on PR #165. Patch-validation
+  // (src/orchestrator/patch-validation.ts) accepts UpdateEdgeValue as
+  // `z.record(z.string(), z.unknown())` so any shape passes structural
+  // validation. EdgeStrengthV3 requires `std: z.number().positive()`,
+  // so an update setting `std: 0` produces a candidate that passes
+  // patch-validation and applyPatchOperations but fails GraphV3 strict
+  // parse — the exact gap the Layer 2 backstop is for.
+  it("refuses to persist candidateGraph that fails GraphV3 strict parse (SYNTHESIZED_GRAPH_INVALID)", async () => {
+    const adapter = makeAdapter([
+      {
+        op: "update_edge",
+        path: "factor_1::goal_1",
+        // Layer 1 merges into existing { mean: 0.5, std: 0.1 } so the
+        // resulting strength is { mean: 0.5, std: 0 }. GraphV3 requires
+        // std > 0; safeParse rejects; the backstop must catch it.
+        value: { strength: { std: 0 } },
+      },
+    ]);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Tighten an edge's uncertainty too far",
+      adapter,
+      "req-synth-invalid",
+      "turn-synth-invalid",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    expect(result.appliedGraph).toBeNull();
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.code).toBe("SYNTHESIZED_GRAPH_INVALID");
+    // No false-success narration on the user-facing surface.
+    const text = result.assistantText ?? "";
+    expect(text).not.toMatch(/successfully|I['’]ve\s+(?:applied|updated|added)|Strengthened|Added\b/i);
   });
 });
