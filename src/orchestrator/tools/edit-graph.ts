@@ -517,8 +517,54 @@ function containsCoreferenceReference(message: string): boolean {
   return /\b(it|this|that|them|those)\b/i.test(message);
 }
 
-function isCompoundEditRequest(editDescription: string): boolean {
-  return /\b(and|also|then)\b|,/.test(editDescription.toLowerCase());
+/**
+ * Compound-edit separator pattern. Treats `and`, `also`, `then`, and `,` as
+ * indicators that the user requested independent edits across multiple
+ * targets. Used for the *detection* (true/false) sites in this file.
+ *
+ * Note: the *splitting* regex inside `buildProposedChanges` is intentionally
+ * narrower — it splits on `and`/`,` only, not `also`/`then`. The narrower
+ * splitter preserves existing Mode A clause output (e.g. the pre-existing
+ * "Update Price and also lower Price" test, which produces clauses
+ * "Update Price" and "Also lower Price" rather than splitting on `also`).
+ * The defence-in-depth label strip in `buildProposedChanges` only fires
+ * when the resolved label itself trips this broader detection regex.
+ */
+const COMPOUND_EDIT_SEPARATOR_RE = /\b(and|also|then)\b|,/;
+
+/** Escape a literal string for safe use inside a `RegExp` source. */
+function escapeForRegex(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Return `description` with case-insensitive literal occurrences of
+ * `resolvedLabel` removed. No fuzzy matching, no token expansion, no
+ * substring approximation — only the exact label characters are stripped.
+ *
+ * Callers MUST gate this on a high-confidence single-target resolution.
+ * Using a low-confidence or null label to suppress compound detection would
+ * silently broaden the heuristic in ways the resolver did not justify.
+ */
+function descriptionResidualAfterStrippingLabel(description: string, resolvedLabel: string): string {
+  if (!resolvedLabel) return description;
+  return description.replace(new RegExp(escapeForRegex(resolvedLabel), 'gi'), ' ');
+}
+
+/**
+ * Detect compound-edit phrasing. When `resolvedLabel` is supplied (caller
+ * has a high-confidence single-target resolution), the label is stripped
+ * from `editDescription` before the test runs — so connector tokens
+ * (`and`, `also`, `then`, comma) that are part of the resolved target's
+ * own label (e.g. a factor named `Headcount and Scaling Spend`) do not
+ * register as compound separators. Connector tokens OUTSIDE the resolved
+ * label still trip the check.
+ */
+function isCompoundEditRequest(editDescription: string, resolvedLabel?: string): boolean {
+  const target = resolvedLabel && resolvedLabel.length > 0
+    ? descriptionResidualAfterStrippingLabel(editDescription, resolvedLabel)
+    : editDescription;
+  return COMPOUND_EDIT_SEPARATOR_RE.test(target.toLowerCase());
 }
 
 function isHighImpactEditRequest(editDescription: string, intentCategory: EditIntentCategory): boolean {
@@ -526,10 +572,14 @@ function isHighImpactEditRequest(editDescription: string, intentCategory: EditIn
   return /\b(remove|delete|rebuild|replace|entirely|all|every|double|halve|major)\b/i.test(editDescription);
 }
 
-function isLowImpactEditRequest(editDescription: string, intentCategory: EditIntentCategory): boolean {
+function isLowImpactEditRequest(
+  editDescription: string,
+  intentCategory: EditIntentCategory,
+  resolvedLabel?: string,
+): boolean {
   if (intentCategory === 'structural') return false;
   return /\b(set|update|change|make|adjust|lower|raise|increase|decrease)\b/i.test(editDescription)
-    && !isCompoundEditRequest(editDescription)
+    && !isCompoundEditRequest(editDescription, resolvedLabel)
     && !isHighImpactEditRequest(editDescription, intentCategory);
 }
 
@@ -678,8 +728,13 @@ export function determineEditResolutionMode(
   if (
     resolution.confidence === 'high'
     && resolution.resolved_target
-    && !isCompoundEditRequest(editDescription)
-    && isLowImpactEditRequest(editDescription, intentCategory)
+    // Label-aware compound detection: connector tokens inside the resolved
+    // target's own label (e.g. a factor named "Headcount and Scaling Spend")
+    // do not count as compound-edit separators. Only `confidence === 'high'`
+    // + non-null `resolved_target` + non-ambiguous `match_type` (already
+    // routed at line 664) justify stripping the label.
+    && !isCompoundEditRequest(editDescription, resolution.resolved_target.label)
+    && isLowImpactEditRequest(editDescription, intentCategory, resolution.resolved_target.label)
   ) {
     return 'auto_apply';
   }
@@ -718,7 +773,26 @@ function buildProposedChanges(
   resolution: EditTargetResolutionResult,
   intentCategory: EditIntentCategory,
 ): ProposedChangesPayload {
-  const clauses = editDescription
+  // Defence-in-depth: when a high-confidence single target is resolved AND
+  // its label itself contains a compound-edit separator (`and`, `also`,
+  // `then`, comma), strip the label from the description before splitting
+  // on `\band\b|,`. This prevents a label such as `Headcount and Scaling
+  // Spend` from being torn into two fake clauses (`Headcount` + `Scaling
+  // Spend`) when Mode A is taken for non-routing reasons (e.g. high-impact
+  // edits on a resolved target).
+  //
+  // The label-itself-has-separators gate keeps the existing multi-target
+  // Mode A behaviour: a description like "Update Price and also lower
+  // Price" with a clean label `Price` still splits into two clauses with
+  // `Price` retained in each clause's description — the original behaviour
+  // that the test at edit-graph-v2.test.ts pins.
+  const resolvedLabel = resolution.confidence === 'high' ? resolution.resolved_target?.label ?? '' : '';
+  const labelNeedsProtection = resolvedLabel.length > 0
+    && COMPOUND_EDIT_SEPARATOR_RE.test(resolvedLabel.toLowerCase());
+  const splitInput = labelNeedsProtection
+    ? descriptionResidualAfterStrippingLabel(editDescription, resolvedLabel)
+    : editDescription;
+  const clauses = splitInput
     .split(/\band\b|,/i)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
