@@ -56,6 +56,13 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type {
+  AddConstraintHandlerFact,
+  AdjustEdgeStrengthHandlerFact,
+  HandlerFact,
+  SetFactorValueHandlerFact,
+} from '@talchain/schemas/orchestrator';
+
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { ProposalAction } from '../../../routing/types.js';
@@ -65,6 +72,20 @@ import { createSetFactorValueHandler } from '../set-factor-value.js';
 import { createAddConstraintHandler } from '../add-constraint.js';
 import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
 import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
+
+/**
+ * Discriminated-union narrow for the three D1 fact types. The raw
+ * `HandlerFact` union includes `RunAnalysisHandlerFact` whose
+ * `.result` shape has no `status` field, so accessing `.result.status`
+ * on the raw union does not typecheck. The per-handler test files
+ * inherit the same pattern and the same TS2339s — kept inline cast
+ * here so this new file does not add to the baseline error count.
+ */
+function asD1Fact(
+  fact: HandlerFact,
+): SetFactorValueHandlerFact | AddConstraintHandlerFact | AdjustEdgeStrengthHandlerFact {
+  return fact as SetFactorValueHandlerFact | AddConstraintHandlerFact | AdjustEdgeStrengthHandlerFact;
+}
 
 function buildInvocation(graph: GraphV3T, proposal: ProposalAction): HandlerInvocation {
   return {
@@ -211,7 +232,7 @@ describe('D1 cross-handler family invariants', () => {
       buildInvocation(buildD1Fixture(), noopSetFactorValueProposal()),
     );
     expect(setOutcome.handler_facts[0].noop).toBe(true);
-    expect(setOutcome.handler_facts[0].result.status).toBe('noop');
+    expect(asD1Fact(setOutcome.handler_facts[0]).result.status).toBe('noop');
     expect(computeAnalysisAffectingGraphHash(setOutcome.mutated_graph as GraphV3T)).toBe(
       baseHash,
     );
@@ -227,7 +248,7 @@ describe('D1 cross-handler family invariants', () => {
       buildInvocation(firstAddGraph, addConstraintProposal(5)),
     );
     expect(secondAdd.handler_facts[0].noop).toBe(true);
-    expect(secondAdd.handler_facts[0].result.status).toBe('noop');
+    expect(asD1Fact(secondAdd.handler_facts[0]).result.status).toBe('noop');
     expect(computeAnalysisAffectingGraphHash(secondAdd.mutated_graph as GraphV3T)).toBe(
       computeAnalysisAffectingGraphHash(firstAddGraph),
     );
@@ -237,7 +258,7 @@ describe('D1 cross-handler family invariants', () => {
       buildInvocation(buildD1Fixture(), noopAdjustEdgeStrengthProposal()),
     );
     expect(adjustOutcome.handler_facts[0].noop).toBe(true);
-    expect(adjustOutcome.handler_facts[0].result.status).toBe('noop');
+    expect(asD1Fact(adjustOutcome.handler_facts[0]).result.status).toBe('noop');
     expect(
       computeAnalysisAffectingGraphHash(adjustOutcome.mutated_graph as GraphV3T),
     ).toBe(baseHash);
@@ -306,7 +327,7 @@ describe('D1 cross-handler family invariants', () => {
       buildInvocation(buildD1Fixture(), mutateSetFactorValueProposal()),
     );
     expect(setOutcome.handler_facts[0].noop).toBe(false);
-    expect(setOutcome.handler_facts[0].result.status).toBe('applied');
+    expect(asD1Fact(setOutcome.handler_facts[0]).result.status).toBe('applied');
     expect(computeAnalysisAffectingGraphHash(setOutcome.mutated_graph as GraphV3T)).not.toBe(
       baseHash,
     );
@@ -315,7 +336,7 @@ describe('D1 cross-handler family invariants', () => {
       buildInvocation(buildD1Fixture(), addConstraintProposal(5)),
     );
     expect(addOutcome.handler_facts[0].noop).toBe(false);
-    expect(addOutcome.handler_facts[0].result.status).toBe('applied');
+    expect(asD1Fact(addOutcome.handler_facts[0]).result.status).toBe('applied');
     expect(computeAnalysisAffectingGraphHash(addOutcome.mutated_graph as GraphV3T)).not.toBe(
       baseHash,
     );
@@ -324,7 +345,7 @@ describe('D1 cross-handler family invariants', () => {
       buildInvocation(buildD1Fixture(), mutateAdjustEdgeStrengthProposal()),
     );
     expect(adjustOutcome.handler_facts[0].noop).toBe(false);
-    expect(adjustOutcome.handler_facts[0].result.status).toBe('applied');
+    expect(asD1Fact(adjustOutcome.handler_facts[0]).result.status).toBe('applied');
     expect(
       computeAnalysisAffectingGraphHash(adjustOutcome.mutated_graph as GraphV3T),
     ).not.toBe(baseHash);
@@ -366,7 +387,7 @@ describe('D1 cross-handler family invariants', () => {
       // Fact status / noop flag must agree on every path. Drift between
       // these two would mean a downstream consumer reading one signal
       // could disagree with one reading the other.
-      const fact = outcome.handler_facts[0];
+      const fact = asD1Fact(outcome.handler_facts[0]);
       expect(fact.result.status === 'noop').toBe(fact.noop === true);
     }
   });
