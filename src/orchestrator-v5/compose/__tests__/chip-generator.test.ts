@@ -59,7 +59,14 @@ describe('generateChips', () => {
     expect(chips).toEqual([]);
   });
 
-  it('after run_analysis → emits explain prompt + what_would_flip action chip', () => {
+  it('after run_analysis → emits TWO executable action chips (explain_results + what_would_flip)', () => {
+    // Phase 2b round-2 reviewer finding: previously the "Explain the
+    // result" chip had no `action_type`, so chip-clicks silently routed
+    // through Sonnet (ORIENT, ~12s) even though the deterministic
+    // `explain_results` dispatcher exists in
+    // `chip-click-dispatch.ts`'s whitelist. The chip now emits
+    // `action_type: 'explain_results'` (plural — matches the registered
+    // handler) so the click hits the bypass and saves the latency.
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [runAnalysisFact()],
@@ -67,15 +74,13 @@ describe('generateChips', () => {
       validationRegistry: REGISTRY,
     });
     expect(chips).toHaveLength(2);
+    // Both chips now executable.
     expect(chips[0].label).toBe('Explain the result');
-    expect(chips[0].action_type).toBeUndefined();
-    // The "What could change the outcome?" chip carries
-    // action_type='what_would_flip' so a chip click invokes the
-    // handler deterministically AND a pending action lands so a
-    // typed "yes" on the next turn can resume via the short-confirm
-    // pre-route.
+    expect(chips[0].action_type).toBe('explain_results');
+    expect(chips[0].id).toBe('chip_action_explain_results');
     expect(chips[1].label).toBe('What could change the outcome?');
     expect(chips[1].action_type).toBe('what_would_flip');
+    expect(chips[1].id).toBe('chip_action_what_would_flip');
   });
 
   it('analyse stage with analysisReady=ready → executable run_analysis chip', () => {

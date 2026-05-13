@@ -28,6 +28,7 @@ const {
   whatWouldFlipHandlerMock,
   routeWithToolUseSpy,
   getDefaultRegistryMock,
+  buildTurnContextMock,
 } = vi.hoisted(() => ({
   loadScenarioSnapshotForRunAnalysisMock: vi.fn(),
   commitDirectAnswerMock: vi.fn(),
@@ -37,6 +38,11 @@ const {
   whatWouldFlipHandlerMock: vi.fn(),
   routeWithToolUseSpy: vi.fn(),
   getDefaultRegistryMock: vi.fn(),
+  // Hoisted so per-test happy-path overrides can call
+  // `buildTurnContextMock.mockResolvedValueOnce(...)`. Default is the
+  // empty-prior-facts / no-persisted-graph shape used by precondition-
+  // fail tests; happy-path tests override at call site.
+  buildTurnContextMock: vi.fn(),
 }));
 
 vi.mock('../../build-turn-context.js', async () => {
@@ -48,36 +54,9 @@ vi.mock('../../build-turn-context.js', async () => {
     loadScenarioSnapshotForRunAnalysis: loadScenarioSnapshotForRunAnalysisMock,
     // Minimal stub — the dispatcher only reads scenarioBriefText, prior_facts,
     // persistedGraph, budgets, and session_id from the context. Other fields
-    // are not consulted by the deterministic dispatch path.
-    buildTurnContext: vi.fn(async () => ({
-      stage: 'analyse',
-      entity_registry: { option_ids: [], goal_id: null },
-      capabilities: {
-        can_run_analysis: false,
-        can_edit_graph: false,
-        can_run_decision_review: false,
-        can_generate_coaching: false,
-        can_invoke_tools: false,
-        can_commit_session_state: false,
-      },
-      messages: [{ role: 'user', content: 'Please explain the result.' }],
-      session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      request_id: 'req-test',
-      budgets: {
-        turn_ms: 30000,
-        handler_ms: 20000,
-        plot_ms: 15000,
-        anthropic_ms: 15000,
-        openai_ms: 15000,
-      },
-      prior_turns: [],
-      prior_facts: [],
-      scenarioBriefText: null,
-      // No persisted graph — the projection-input builder falls through to
-      // undefined readiness, freshness='none', null projection. Sufficient
-      // for the dispatch wiring assertions in this suite.
-      persistedGraph: null,
-    })),
+    // are not consulted by the deterministic dispatch path. Hoisted so
+    // happy-path tests can override via mockResolvedValueOnce.
+    buildTurnContext: buildTurnContextMock,
   };
 });
 
@@ -137,9 +116,43 @@ function payloadFor(actionType: 'run_analysis' | 'explain_results' | 'what_would
   });
 }
 
+/**
+ * Default `buildTurnContext` mock implementation — empty prior_facts,
+ * no persisted graph. Per-test overrides via
+ * `buildTurnContextMock.mockResolvedValueOnce({...})` for happy-path
+ * scenarios that need real prior_facts / persisted graph.
+ */
+const DEFAULT_TURN_CONTEXT = {
+  stage: 'analyse' as const,
+  entity_registry: { option_ids: [], goal_id: null },
+  capabilities: {
+    can_run_analysis: false,
+    can_edit_graph: false,
+    can_run_decision_review: false,
+    can_generate_coaching: false,
+    can_invoke_tools: false,
+    can_commit_session_state: false,
+  },
+  messages: [{ role: 'user' as const, content: 'Please explain the result.' }],
+  session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  request_id: 'req-test',
+  budgets: {
+    turn_ms: 30000,
+    handler_ms: 20000,
+    plot_ms: 15000,
+    anthropic_ms: 15000,
+    openai_ms: 15000,
+  },
+  prior_turns: [],
+  prior_facts: [] as unknown[],
+  scenarioBriefText: null,
+  persistedGraph: null,
+};
+
 describe('dispatchDeterministicChipClick — whitelist enforcement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
     getDefaultRegistryMock.mockImplementation(
       () =>
         new Map<string, unknown>([
@@ -200,6 +213,7 @@ describe('dispatchDeterministicChipClick — whitelist enforcement', () => {
 describe('dispatchDeterministicChipClick — explain_results path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
     getDefaultRegistryMock.mockImplementation(
       () =>
         new Map<string, unknown>([
@@ -279,6 +293,7 @@ describe('dispatchDeterministicChipClick — explain_results path', () => {
 describe('dispatchDeterministicChipClick — what_would_flip path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
     getDefaultRegistryMock.mockImplementation(
       () =>
         new Map<string, unknown>([
@@ -358,9 +373,252 @@ describe('dispatchDeterministicChipClick — what_would_flip path', () => {
   });
 });
 
+/**
+ * Phase 2b round-2 reviewer finding: the new `route-v2-chip-click-explain.test.ts`
+ * integration suite only exercised precondition-fail cases (empty
+ * prior_facts → handler returns "No analysis has been run"). The
+ * dispatcher's deterministic-projection path — `buildAnalysisFromPriorFacts`
+ * +  `computeStructuralReadiness` + `deriveAnalysisFreshness` — was
+ * unproven. These two tests close that gap by supplying a non-empty
+ * `prior_facts` (successful `run_analysis` fact with `graph_hash_at_run`
+ * + `enrichment`) and a `persistedGraph` that hashes to the same value,
+ * then asserting the explanation handler receives a fully-hydrated
+ * `{ analysisProjection, analysisFreshness: 'fresh', analysisReady }`
+ * context — the input the deterministic-fallback prose composer relies
+ * on to produce sensible output rather than the precondition-unmet
+ * template.
+ */
+describe('dispatchDeterministicChipClick — happy-path prior-fact reconstruction (round-2 reviewer)', () => {
+  // Minimal real GraphV3T shape — mirrors `chip-click-dispatch-analysis-ready.test.ts`
+  // READY_GRAPH (decision + goal + factor + 2 options + edges) so
+  // `computeStructuralReadiness` returns a non-undefined readiness.
+  const READY_GRAPH = {
+    nodes: [
+      { id: 'dec_launch', kind: 'decision' as const, label: 'Launch?' },
+      { id: 'goal_revenue', kind: 'goal' as const, label: 'Revenue', goal_threshold: 0.8 },
+      { id: 'fac_marketing', kind: 'factor' as const, label: 'Marketing spend' },
+      {
+        id: 'opt_launch',
+        kind: 'option' as const,
+        label: 'Launch now',
+        interventions: { fac_marketing: 0.7 },
+      },
+      {
+        id: 'opt_status_quo',
+        kind: 'option' as const,
+        label: 'Status quo',
+        interventions: { fac_marketing: 0.3 },
+      },
+    ],
+    edges: [
+      { from: 'dec_launch', to: 'opt_launch', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'dec_launch', to: 'opt_status_quo', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'opt_launch', to: 'fac_marketing', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' as const },
+      { from: 'opt_status_quo', to: 'fac_marketing', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' as const },
+      { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getDefaultRegistryMock.mockImplementation(
+      () =>
+        new Map<string, unknown>([
+          ['run_analysis', runAnalysisHandlerMock],
+          ['explain_results', explainResultsHandlerMock],
+          ['what_would_flip', whatWouldFlipHandlerMock],
+        ]),
+    );
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
+    );
+    commitDirectAnswerMock.mockResolvedValue({
+      response: {},
+      performed: true,
+      persisted_row_id: 'row-1',
+      graphPersisted: false,
+    });
+  });
+
+  it("explain_results with a prior successful run_analysis fact AND a fresh-hash persisted graph → handler receives hydrated { analysisProjection, analysisFreshness: 'fresh', analysisReady }", async () => {
+    // Step 1 — compute the analysis-affecting graph hash so the fact's
+    // graph_hash_at_run matches and the dispatcher's
+    // deriveAnalysisFreshness lands on 'fresh'.
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../context/graph-hash.js'
+    );
+    const { GraphStateIngressSchema } = await import('../../boundary/request-extensions.js');
+    const parsed = GraphStateIngressSchema.safeParse(READY_GRAPH);
+    if (!parsed.success) throw new Error('test setup: graph parse failed');
+    const expectedHash = computeAnalysisAffectingGraphHash(parsed.data)!;
+
+    // Step 2 — prior_facts carries a successful run_analysis fact stamped
+    // with that hash AND an enrichment payload (V2RunResponseEnvelope-like
+    // shape) so `buildAnalysisFromPriorFacts` produces a non-null
+    // AnalysisResponseSummary.
+    const priorRunAnalysisFact = {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_launch',
+        win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+        summary: 'Ran analysis on your current scenario.',
+        enrichment: {
+          // Minimum compactAnalysis-readable shape: option_comparison with
+          // option_id + win_probability so the projection lands non-null.
+          option_comparison: [
+            { option_id: 'opt_launch', option_label: 'Launch now', win_probability: 0.62 },
+            { option_id: 'opt_status_quo', option_label: 'Status quo', win_probability: 0.38 },
+          ],
+          analysis_status: 'computed',
+        },
+        graph_hash_at_run: expectedHash,
+        computed_at: '2026-04-30T12:00:00.000Z',
+      },
+    };
+
+    buildTurnContextMock.mockResolvedValueOnce({
+      ...DEFAULT_TURN_CONTEXT,
+      prior_facts: [priorRunAnalysisFact],
+      persistedGraph: READY_GRAPH,
+    });
+
+    // Handler simply records what context it was invoked with — we
+    // assert against that.
+    explainResultsHandlerMock.mockResolvedValueOnce({
+      assistant_text: 'Explanation prose.',
+      handler_facts: [
+        {
+          fact_type: 'explain_results' as const,
+          fact_version: 1,
+          noop: true,
+          result: {
+            precondition_unmet: false,
+            option_count: 2,
+            answer_source: 'deterministic_fallback' as const,
+            fallback_reason: null,
+            answer_text_length: 18,
+          },
+        },
+      ],
+      llm_calls_used: 0,
+      suppress_orientation: true,
+    });
+
+    const out = await dispatchDeterministicChipClick('explain_results', {
+      payload: payloadFor('explain_results'),
+      requestId: 'req-explain-happy',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(explainResultsHandlerMock).toHaveBeenCalledTimes(1);
+    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
+
+    // The CORE assertion: the handler's invocation context carries
+    // properly-reconstructed analysisProjection / analysisFreshness /
+    // analysisReady — NOT the precondition-fail null/undefined shape.
+    const invocation = explainResultsHandlerMock.mock.calls[0]![0];
+
+    // analysisProjection — built from prior fact's enrichment.option_comparison
+    // via buildAnalysisFromPriorFacts → buildAnalysisProjectionSummary.
+    expect(invocation.analysisProjection).toBeDefined();
+    expect(invocation.analysisProjection).not.toBeNull();
+
+    // analysisFreshness — derived from the run_analysis fact's
+    // graph_hash_at_run vs the persisted graph hash. Both match → 'fresh'.
+    expect(invocation.analysisFreshness).toBeDefined();
+    expect(invocation.analysisFreshness.freshness).toBe('fresh');
+    expect(invocation.analysisFreshness.reason).toBe('graph_hash_match');
+
+    // analysisReady — computed from the persisted graph via
+    // computeStructuralReadiness. Graph is ready (goal threshold + 2
+    // options + factor + edges) so status === 'ready'.
+    expect(invocation.analysisReady).toBeDefined();
+    expect(invocation.analysisReady.status).toBe('ready');
+    expect(invocation.analysisReady.options).toBeDefined();
+    expect(invocation.analysisReady.options.length).toBeGreaterThan(0);
+  });
+
+  it("what_would_flip with a prior successful run_analysis fact AND a fresh-hash persisted graph → same hydrated context shape", async () => {
+    const { computeAnalysisAffectingGraphHash } = await import(
+      '../../context/graph-hash.js'
+    );
+    const { GraphStateIngressSchema } = await import('../../boundary/request-extensions.js');
+    const parsed = GraphStateIngressSchema.safeParse(READY_GRAPH);
+    if (!parsed.success) throw new Error('test setup: graph parse failed');
+    const expectedHash = computeAnalysisAffectingGraphHash(parsed.data)!;
+
+    const priorRunAnalysisFact = {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_launch',
+        win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+        summary: 'Ran analysis.',
+        enrichment: {
+          option_comparison: [
+            { option_id: 'opt_launch', option_label: 'Launch now', win_probability: 0.62 },
+            { option_id: 'opt_status_quo', option_label: 'Status quo', win_probability: 0.38 },
+          ],
+          analysis_status: 'computed',
+        },
+        graph_hash_at_run: expectedHash,
+        computed_at: '2026-04-30T12:00:00.000Z',
+      },
+    };
+
+    buildTurnContextMock.mockResolvedValueOnce({
+      ...DEFAULT_TURN_CONTEXT,
+      prior_facts: [priorRunAnalysisFact],
+      persistedGraph: READY_GRAPH,
+    });
+
+    whatWouldFlipHandlerMock.mockResolvedValueOnce({
+      assistant_text: 'Flip narrative.',
+      handler_facts: [
+        {
+          fact_type: 'what_would_flip' as const,
+          fact_version: 1,
+          noop: true,
+          result: {
+            precondition_unmet: false,
+            option_count: 2,
+            answer_source: 'deterministic_fallback' as const,
+            fallback_reason: null,
+            answer_text_length: 15,
+          },
+        },
+      ],
+      llm_calls_used: 0,
+      suppress_orientation: true,
+    });
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor('what_would_flip'),
+      requestId: 'req-flip-happy',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(whatWouldFlipHandlerMock).toHaveBeenCalledTimes(1);
+    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
+
+    const invocation = whatWouldFlipHandlerMock.mock.calls[0]![0];
+    expect(invocation.analysisProjection).toBeDefined();
+    expect(invocation.analysisProjection).not.toBeNull();
+    expect(invocation.analysisFreshness.freshness).toBe('fresh');
+    expect(invocation.analysisFreshness.reason).toBe('graph_hash_match');
+    expect(invocation.analysisReady.status).toBe('ready');
+  });
+});
+
 describe('dispatchDeterministicChipClick — run_analysis regression', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
     // run_analysis takes its existing heavyweight code path: scenario
     // snapshot pre-load + decision_review enrichment + analysis_ready
     // derivation from the cached snapshot graph. Mock the scenario read

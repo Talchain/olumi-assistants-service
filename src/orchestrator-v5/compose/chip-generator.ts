@@ -214,19 +214,22 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   );
 
   // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
-  // require a new handler. "Explain the result" stays a conversational
-  // prompt chip (the explain_results handler dispatch is reached via
-  // Sonnet routing on the next turn). "What could change the outcome?"
-  // emits a what_would_flip action chip so the chip-click path resolves
-  // deterministically AND a pending action lands so a typed "yes" on
-  // the next turn can resume via the short-confirm pre-route.
+  // require a new handler. Both chips emit executable `action_type` so the
+  // chip-click path resolves deterministically via `dispatchDeterministicChipClick`
+  // (saves ~12s ORIENT Sonnet call per click — see Phase 2b round-2 reviewer
+  // finding: the prior `promptChip` for "Explain the result" had no
+  // `action_type`, so the chip click silently routed through Sonnet and
+  // never hit the deterministic bypass). Both also seed a pending action
+  // so a typed "yes" on the next turn can resume via the short-confirm
+  // pre-route.
   if (handlerJustRan === 'run_analysis') {
     return cap([
-      promptChip(
-        'explain_result',
-        'Explain the result',
-        'Please explain the analysis result in plain language.',
-      ),
+      {
+        id: 'chip_action_explain_results',
+        label: 'Explain the result',
+        message: 'Please explain the analysis result in plain language.',
+        action_type: 'explain_results',
+      },
       {
         id: 'chip_action_what_would_flip',
         label: 'What could change the outcome?',
@@ -494,16 +497,19 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   }
 
   // Rule: decide stage with fragile robustness → prompt for pre-mortem + flip.
-  // "What would make this flip" is a self-contained question — works without
-  // conversation history because the graph + analysis in the ContextPack
-  // give Sonnet enough to answer.
+  // "What would make this flip" emits an executable `action_type: 'what_would_flip'`
+  // chip so the click hits the deterministic dispatcher (Phase 2b round-2
+  // reviewer finding — prior `promptChip` had no `action_type` and the
+  // bypass never fired). "Run a pre-mortem" stays a prompt chip because
+  // there is no registered handler for it; it still routes through Sonnet.
   if (input.stage === 'decide' && robustnessIsFragile) {
     return cap([
-      promptChip(
-        'what_would_flip',
-        'What would make this flip?',
-        'What would make the leading option flip to another option?',
-      ),
+      {
+        id: 'chip_action_what_would_flip_decide',
+        label: 'What would make this flip?',
+        message: 'What would make the leading option flip to another option?',
+        action_type: 'what_would_flip',
+      },
       promptChip(
         'run_pre_mortem',
         'Run a pre-mortem',

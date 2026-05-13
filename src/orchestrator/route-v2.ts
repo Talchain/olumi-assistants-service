@@ -674,10 +674,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // rerun-analysis-required recovery instead of bare-yes-LLM-
     // passthrough.
     //
-    // No new dispatcher: the run_analysis chip-click takes a separate
-    // shortcut because that handler is heavyweight (PLoT call,
-    // scenario snapshot load). what_would_flip is a no-op explanation
-    // handler so TurnExecutor's existing short-confirm path covers it.
+    // STALE-COMMENT FIX (Phase 2b round-2): the prior comment here said
+    // "No new dispatcher: the run_analysis chip-click takes a separate
+    // shortcut … what_would_flip is a no-op explanation handler so
+    // TurnExecutor's existing short-confirm path covers it." That is no
+    // longer accurate. As of Phase 2b, `what_would_flip` (and
+    // `explain_results`) ARE in the deterministic-chip-click whitelist
+    // (`DETERMINISTIC_CHIP_ACTION_TYPES`) and route via
+    // `dispatchDeterministicChipClick` upstream of this resume-intent
+    // detection. The `chipClickResumeIntent` path below now applies
+    // only to short-confirm "yes" resumptions of pending actions —
+    // chip clicks themselves no longer reach this point for whitelisted
+    // action_types.
     const chipClickResumeIntent = detectChipClickResumeIntent(ingress);
 
     // ────────────────────────────────────────────────────────────────────
