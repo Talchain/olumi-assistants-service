@@ -221,6 +221,13 @@ describe('set_factor_value handler', () => {
     const fact = outcome.handler_facts[0];
     expect(fact.noop).toBe(true);
     expect(fact.result.status).toBe('noop');
+    // No LLM was called and the analysis-affecting hash is unchanged,
+    // so post-dispatch freshness re-derivation will keep the verdict
+    // at `fresh` (no spurious "Re-run analysis" chip emission).
+    expect(outcome.llm_calls_used).toBe(0);
+    expect(computeAnalysisAffectingGraphHash(graph)).toBe(
+      computeAnalysisAffectingGraphHash(outcome.mutated_graph as GraphV3T),
+    );
   });
 
   it('confirmation text contains no raw decimals or stray spaces before %', async () => {
@@ -367,6 +374,17 @@ describe('set_factor_value — Wave 2 receipt: staleness narrative + redaction',
       /\bfact_type\b/i,
       /\bBUDGET_TARGET\b/i,
       /\bedit_graph\b/i,
+    ]) {
+      expect(text, text).not.toMatch(pat);
+    }
+    // Prescription-shaped nouns banned by the foamy-bee UI handoff.
+    // Pins the post-audit copy fix so the noun form `recommendation`
+    // cannot drift back into the staleness narrative.
+    for (const pat of [
+      /\brecommendation\b/i,
+      /\brecommended\b/i,
+      /\bwinner\b/i,
+      /\bwinning\b/i,
     ]) {
       expect(text, text).not.toMatch(pat);
     }

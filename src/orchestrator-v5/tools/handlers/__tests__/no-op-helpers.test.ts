@@ -107,14 +107,16 @@ describe('resolveOptionCount', () => {
 describe('buildAnalysisAbsentTemplate', () => {
   it('uses singular "option" wording when option_count === 1', () => {
     const text = buildAnalysisAbsentTemplate(1, 'ready');
-    expect(text).toContain('1 option configured');
+    // Source wording is "X option set up" — the prior "configured"
+    // assertion was test/source drift from an earlier wording revision.
+    expect(text).toContain('1 option set up');
     expect(text).not.toContain('1 options');
   });
 
   it('uses plural "options" wording when option_count !== 1', () => {
-    expect(buildAnalysisAbsentTemplate(0, 'ready')).toContain('0 options configured');
-    expect(buildAnalysisAbsentTemplate(2, 'ready')).toContain('2 options configured');
-    expect(buildAnalysisAbsentTemplate(7, 'ready')).toContain('7 options configured');
+    expect(buildAnalysisAbsentTemplate(0, 'ready')).toContain('0 options set up');
+    expect(buildAnalysisAbsentTemplate(2, 'ready')).toContain('2 options set up');
+    expect(buildAnalysisAbsentTemplate(7, 'ready')).toContain('7 options set up');
   });
 
   it('uses "ready to analyse" copy when readinessStatus === "ready"', () => {
@@ -213,6 +215,17 @@ describe('buildAnalysisStaleTemplate (V5 stale-aware explain recovery)', () => {
 
   it('offers a re-run recovery affordance so the user has a path forward', () => {
     expect(buildAnalysisStaleTemplate()).toMatch(/re-run analysis/i);
+  });
+
+  it('contains no prescription-shaped nouns (recommendation, winner, etc.)', () => {
+    // Pins the post-audit copy fix: the foamy-bee UI handoff brief bans
+    // `recommended` / `winner` / `winning` from user-facing copy and the
+    // noun form `recommendation` is treated in scope by the same rule.
+    const text = buildAnalysisStaleTemplate();
+    expect(text).not.toMatch(/\brecommendation\b/i);
+    expect(text).not.toMatch(/\brecommended\b/i);
+    expect(text).not.toMatch(/\bwinner\b/i);
+    expect(text).not.toMatch(/\bwinning\b/i);
   });
 });
 

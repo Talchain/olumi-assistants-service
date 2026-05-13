@@ -96,7 +96,7 @@ describe('FORBIDDEN_USER_FACING_PHRASES — clean text passes', () => {
       'leader explanation prose (fresh path)',
     ],
     [
-      'Would you like to re-run analysis to see how your changes affect the recommendation?',
+      'Would you like to re-run analysis to see how your changes affect the results?',
       'recovery offer (no forbidden phrase)',
     ],
     ['The analysis is ready to run on your current model.', 'forward-looking analysis copy'],

@@ -254,4 +254,43 @@ describe('adjust_edge_strength handler', () => {
     );
     expect(outcome.assistant_text).not.toMatch(/[0-9]+\.[0-9]+/);
   });
+
+  it('emits noop status when strength is set to its current value', async () => {
+    // Fixture: f-budget→g-revenue has strength.mean = 0.4. Setting it
+    // to the same value via `set` must produce `status: 'noop'`,
+    // `noop: true`, and must not change the analysis-affecting graph
+    // hash (so post-dispatch freshness re-derivation keeps `fresh`).
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.4, operator: 'set' }),
+      ),
+    );
+    const fact = outcome.handler_facts[0];
+    expect(fact.noop).toBe(true);
+    expect(fact.result.status).toBe('noop');
+    expect(outcome.llm_calls_used).toBe(0);
+    expect(computeAnalysisAffectingGraphHash(graph)).toBe(
+      computeAnalysisAffectingGraphHash(outcome.mutated_graph as GraphV3T),
+    );
+  });
+
+  it('emits noop status when increase resolves to current strength', async () => {
+    // Idempotency on a non-set operator: increasing by 0 against the
+    // current value also produces noop. Pins that the noop predicate
+    // tracks the final (clamped) result, not the operator type.
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({ entityId: 'f-budget→g-revenue', strength: 0, operator: 'increase' }),
+      ),
+    );
+    const fact = outcome.handler_facts[0];
+    expect(fact.noop).toBe(true);
+    expect(fact.result.status).toBe('noop');
+  });
 });
