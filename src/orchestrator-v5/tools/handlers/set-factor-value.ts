@@ -57,13 +57,18 @@ import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
  * stale yet).
  */
 // V5 stale-aware explain recovery — the phrase "previous analysis"
-// is on the brief's hard-fail list. Rewritten to use "last analysis"
+// is on the brief's hard-fail list. The narrative uses "last analysis"
 // (not on the forbidden list) so the deterministic narrative emits
 // brief-aligned copy at source. The finaliser-level egress guard
 // would otherwise rewrite this to a neutral fallback and emit a
 // telemetry signal — better to use clean wording at source.
+//
+// "results" is used in place of any prescription-shaped noun (the
+// foamy-bee UI handoff brief bans `recommended`, `winner`, `winning`
+// from user-facing copy; the noun form `recommendation` is treated
+// in scope by the same rule).
 const STALENESS_NARRATIVE =
-  ' This makes the last analysis stale. Re-run analysis to see how this affects the recommendation.';
+  ' This makes the last analysis stale. Re-run analysis to see how this affects the results.';
 
 /**
  * Parameter Zod schema registered with the validator. Exported so the

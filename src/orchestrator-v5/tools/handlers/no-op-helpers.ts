@@ -170,12 +170,17 @@ export function buildPreconditionAssistantText(
  * forbidden list, distinct from the forbidden "previous analysis" /
  * "prior analysis"). Without internal terms (no graph hash, no
  * fact_type, no analysis_status).
+ *
+ * "the results" is used in place of any prescription-shaped noun. The
+ * foamy-bee UI handoff brief bans `recommended`, `winner`, `winning`
+ * from user-facing copy; the noun form `recommendation` is treated in
+ * scope by the same rule.
  */
 export function buildAnalysisStaleTemplate(): string {
   return (
     `These results may be out of date because the model has changed ` +
     `since the last analysis. Would you like to re-run analysis to see ` +
-    `how your changes affect the recommendation?`
+    `how your changes affect the results?`
   );
 }
 

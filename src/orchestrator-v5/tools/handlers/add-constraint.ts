@@ -10,8 +10,11 @@
  *
  * Per correction #8: constraint values are stored in USER UNITS — do
  * NOT run normaliseFactorValue. "churn at most 5%" stores
- * `{ value: 5, unit: '%', operator: '<=' }`, NOT 0.05. PLoT does the
- * normalisation against the factor's cap downstream.
+ * `{ value: 5, unit: '%', operator: '<=' }`, NOT 0.05. The downstream
+ * `run_analysis` handler reads `graph.goal_constraints` and forwards
+ * them in its PLoT payload, where PLoT performs the unit
+ * normalisation against the factor's cap. `add_constraint` itself
+ * never calls PLoT (per V5 architecture spec §12 D1 contract).
  *
  * Idempotent collision rule: when a constraint with the same
  * `(node_id, operator)` already exists, its `value`/`label`/`unit` are
@@ -69,8 +72,10 @@ const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
  *   - risk     ("keep churn risk below 5%") — added in A3.1 Task 5.
  *
  * decision / option / action remain rejected (no threshold semantics).
- * GoalConstraintSchema's `node_id` is kind-agnostic and PLoT forwards
- * constraints regardless of the constrained-node kind.
+ * GoalConstraintSchema's `node_id` is kind-agnostic; the downstream
+ * `run_analysis` handler forwards constraints to PLoT regardless of
+ * the constrained-node kind. `add_constraint` itself does not call
+ * PLoT — see file header.
  */
 const ALLOWED_TARGET_KINDS: readonly string[] = [
   'factor',
