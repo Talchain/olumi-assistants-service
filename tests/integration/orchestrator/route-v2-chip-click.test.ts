@@ -16,8 +16,28 @@ import type { FastifyInstance } from 'fastify';
 
 const dispatchChipClickRunAnalysisMock = vi.fn();
 
+// Phase 2b — route-v2 now calls the generalised `dispatchDeterministicChipClick`
+// entry point and gates on `isDeterministicChipClickActionType`. The integration
+// suite still asserts the run_analysis dispatch contract end-to-end, so we wire
+// the mock to forward run_analysis chip-clicks to the legacy mock and keep the
+// gate predicate exposed for the whitelist check.
+const dispatchDeterministicChipClickMock = vi.fn(
+  async (actionType: string, params: unknown) => {
+    if (actionType === 'run_analysis') {
+      return dispatchChipClickRunAnalysisMock(params);
+    }
+    throw new Error(`unexpected action_type in test mock: ${actionType}`);
+  },
+);
+
 vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', () => ({
   dispatchChipClickRunAnalysis: dispatchChipClickRunAnalysisMock,
+  dispatchDeterministicChipClick: dispatchDeterministicChipClickMock,
+  isDeterministicChipClickActionType: (actionType: string) =>
+    actionType === 'run_analysis' ||
+    actionType === 'explain_results' ||
+    actionType === 'what_would_flip',
+  DETERMINISTIC_CHIP_ACTION_TYPES: new Set(['run_analysis', 'explain_results', 'what_would_flip']),
 }));
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });

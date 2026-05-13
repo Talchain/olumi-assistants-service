@@ -59,8 +59,20 @@ vi.mock('../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js', () => (
 vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
   dispatchEditGraph: dispatchEditGraphSpy,
 }));
+// Phase 2b — route-v2 calls `dispatchDeterministicChipClick` and gates on
+// `isDeterministicChipClickActionType`. Forward run_analysis through the
+// existing spy so this test's contract is preserved.
 vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', () => ({
   dispatchChipClickRunAnalysis: dispatchChipClickRunAnalysisSpy,
+  dispatchDeterministicChipClick: async (actionType: string, params: unknown) => {
+    if (actionType === 'run_analysis') return dispatchChipClickRunAnalysisSpy(params);
+    throw new Error(`unexpected action_type in test mock: ${actionType}`);
+  },
+  isDeterministicChipClickActionType: (actionType: string) =>
+    actionType === 'run_analysis' ||
+    actionType === 'explain_results' ||
+    actionType === 'what_would_flip',
+  DETERMINISTIC_CHIP_ACTION_TYPES: new Set(['run_analysis', 'explain_results', 'what_would_flip']),
 }));
 
 // LLM adapter: permissive so the TurnExecutor fallthrough returns 200.

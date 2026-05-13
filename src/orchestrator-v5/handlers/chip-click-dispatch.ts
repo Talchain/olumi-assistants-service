@@ -1,35 +1,53 @@
 /**
- * V5 deterministic chip-click dispatch for run_analysis.
+ * V5 deterministic chip-click dispatch.
  *
- * When the UI sends a chip_click with action_type 'run_analysis', we bypass
- * Sonnet routing entirely — the user explicitly asked for analysis, there's
- * no classification ambiguity. Route-v2.ts detects this shape BEFORE
- * TurnExecutor and calls this dispatcher.
+ * When the UI sends a chip_click whose `action_type` is in the
+ * `DETERMINISTIC_CHIP_ACTION_TYPES` whitelist, we bypass Sonnet routing
+ * entirely — the user explicitly asked for the action, there's no
+ * classification ambiguity. Route-v2.ts detects this shape BEFORE
+ * TurnExecutor and calls `dispatchDeterministicChipClick`.
  *
- * Scope (per v5-handler-surface brief Task 4):
- *   - ONLY source === 'chip_click' + chip.action_type === 'run_analysis'.
- *   - source === 'chip' (inline chip metadata on a regular message) falls
- *     through to TurnExecutor normally.
- *   - Other chip.action_type values (set_factor_value, explain_result,
- *     etc.) fall through to TurnExecutor, which already returns a typed
- *     FEATURE_NOT_ENABLED via the existing UNSUPPORTED_ACTION path
- *     (v5-exclusive-cee P0 follow-up).
+ * Whitelisted action_types (Phase 2b):
+ *   - `run_analysis`     — heavyweight handler, scenario-snapshot pre-load
+ *   - `explain_results`  — V5 no-op explanation handler (deterministic
+ *                          fallback prose composed from prior analysis fact)
+ *   - `what_would_flip`  — V5 no-op explanation handler (deterministic
+ *                          fallback prose composed from prior analysis fact)
+ *
+ * Other chip.action_type values (set_factor_value, explain_result alias,
+ * compare_options, etc.) fall through to TurnExecutor, which either routes
+ * via Sonnet ORIENT or returns a typed FEATURE_NOT_ENABLED via the
+ * existing UNSUPPORTED_ACTION path.
  *
  * Why reinvoke the registered handler rather than TurnExecutor? TurnExecutor
- * runs ORIENT (1 Sonnet call) even for an already-classified chip click.
- * That's wasted latency and tokens when the action is known. The handler
- * registry entry is the same one TurnExecutor would dispatch to post-
- * routing — we just skip steps 1-2 of the seven-step assembly and go
+ * runs ORIENT (1 Sonnet call, ~12s) even for an already-classified chip
+ * click. That's wasted latency and tokens when the action is known. The
+ * handler registry entry is the same one TurnExecutor would dispatch to
+ * post-routing — we just skip steps 1-2 of the seven-step assembly and go
  * straight to EXECUTE. COMMIT and COMPOSE still fire below.
+ *
+ * Trade-off for the V5 explanation handlers (`explain_results`,
+ * `what_would_flip`): on the chip-click path the handler does NOT receive
+ * Sonnet's `explanation.answer_text`, so it always uses the deterministic
+ * fallback (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`)
+ * sourced from the prior `run_analysis` handler-fact projection. We
+ * pre-populate `analysisProjection` from prior facts, plus
+ * `analysisFreshness` and `analysisReady`, so the precondition decision
+ * tree (`decideExplanationPrecondition`) reads the same signals it would
+ * have seen on the routed path. Net effect: faster, deterministic prose
+ * instead of Sonnet's per-turn answer text — acceptable per the Phase 2b
+ * brief because chip clicks are explicit user signals.
  *
  * LLM semantics: this path makes NO Sonnet classification call. The
  * `run_analysis` handler itself does NOT call Sonnet either, but its
  * decision_review enricher (V5 Group 1 Task B) MAY make one LLM call.
+ * The explanation handlers make zero LLM calls on the chip-click path.
  * Tests that assert "no Sonnet routing" should spy on routeWithToolUse
  * (not on the LLM adapter globally).
  */
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
+import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
@@ -38,18 +56,28 @@ import { composeToolCallResponse } from '../compose.js';
 import {
   buildTurnContext,
   loadScenarioSnapshotForRunAnalysis,
+  type EnrichedTurnContext,
 } from '../build-turn-context.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { GraphV3 } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { deriveAnalysisFreshness, emitFreshnessTelemetry } from '../context/freshness.js';
+import {
+  deriveAnalysisFreshness,
+  emitFreshnessTelemetry,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
+import { buildAnalysisProjectionSummary } from '../context/projection-summaries.js';
+import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 import {
   createRegistry,
   getDefaultPlotClient,
+  getDefaultRegistry,
   resolveHandler,
+  type HandlerFn,
   type HandlerRegistry,
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
@@ -78,6 +106,47 @@ export interface DispatchChipClickRunAnalysisParams {
   readonly requestId: string;
   /** Injectable registry for tests. Production uses the default singleton. */
   readonly handlerRegistry?: HandlerRegistry;
+}
+
+/**
+ * Phase 2b — set of chip `action_type` values that bypass LLM routing.
+ *
+ * Membership criteria for inclusion:
+ *   1. The `action_type` is a registered V5 handler ID (see
+ *      `tools/registry.ts`'s `createRegistry`). Aliases like the
+ *      singular `'explain_result'` are NOT included — chip-emitter
+ *      surfaces the registered ID directly.
+ *   2. The handler can produce a useful answer without Sonnet's
+ *      pre-classified `explanation.answer_text`. The V5 explanation
+ *      handlers fall back to a deterministic projection-based composer
+ *      when `invocation.explanation` is absent — so they qualify.
+ *      Mutation handlers (set_factor_value, etc.) require validated
+ *      proposal parameters from the routing layer and must NOT be
+ *      whitelisted here.
+ *   3. The required handler input context (prior_facts, projection,
+ *      freshness, readiness) can be reconstructed from the scenario
+ *      snapshot + persisted facts WITHOUT a Sonnet call.
+ *
+ * If a future handler is whitelisted, validate per the brief's stop
+ * conditions: re-check that the routing-layer fields it consumes
+ * (`analysisProjection`, `analysisFreshness`, `analysisReady`,
+ * `explanation`) are EITHER unused OR can be pre-populated honestly
+ * from local state — otherwise the chip-click path will silently
+ * degrade UX.
+ */
+export const DETERMINISTIC_CHIP_ACTION_TYPES: ReadonlySet<V5ActionType> = new Set<V5ActionType>([
+  'run_analysis',
+  'explain_results',
+  'what_would_flip',
+]);
+
+/**
+ * Predicate guard: is the supplied chip `action_type` whitelisted for
+ * deterministic dispatch? Used by route-v2's gate so a single source of
+ * truth governs which chip clicks bypass TurnExecutor.
+ */
+export function isDeterministicChipClickActionType(actionType: string): boolean {
+  return DETERMINISTIC_CHIP_ACTION_TYPES.has(actionType as V5ActionType);
 }
 
 /**
@@ -136,6 +205,46 @@ export type DispatchChipClickRunAnalysisResult =
       readonly analysisReady?: undefined;
       readonly graph: GraphV3T | null;
     };
+
+/**
+ * Phase 2b — top-level dispatch entry point.
+ *
+ * Resolves the whitelisted handler from the registry and invokes it. Throws
+ * synchronously when `actionType` is not in the whitelist — callers (route-v2)
+ * gate on `isDeterministicChipClickActionType` first, so reaching this with
+ * an unwhitelisted value is a programming error rather than a runtime drift.
+ *
+ * Branching: `run_analysis` keeps its existing heavyweight code path
+ * (scenario-snapshot pre-load, decision_review enrichment, single-source-of-
+ * truth analysisReady derivation). The V5 no-op explanation handlers
+ * (`explain_results`, `what_would_flip`) flow through a lightweight path
+ * that pre-populates `analysisProjection` / `analysisFreshness` /
+ * `analysisReady` from prior facts so the handler's precondition decision
+ * tree reads the same signals it would have seen on the routed path.
+ */
+export async function dispatchDeterministicChipClick(
+  actionType: string,
+  params: DispatchChipClickRunAnalysisParams,
+): Promise<DispatchChipClickRunAnalysisResult> {
+  if (!DETERMINISTIC_CHIP_ACTION_TYPES.has(actionType as V5ActionType)) {
+    throw new Error(
+      `dispatchDeterministicChipClick: action_type '${actionType}' is not whitelisted ` +
+        `(allowed: ${Array.from(DETERMINISTIC_CHIP_ACTION_TYPES).join(', ')})`,
+    );
+  }
+  if (actionType === 'run_analysis') {
+    return dispatchChipClickRunAnalysis(params);
+  }
+  // Whitelist invariant: the only remaining action types here are the V5
+  // no-op explanation handlers. The cast is tightened against the static
+  // whitelist; an unhandled future addition will fail the dispatch path's
+  // exhaustiveness inside `dispatchChipClickNoopExplanation` rather than
+  // silently falling through.
+  return dispatchChipClickNoopExplanation(
+    actionType as 'explain_results' | 'what_would_flip',
+    params,
+  );
+}
 
 export async function dispatchChipClickRunAnalysis(
   params: DispatchChipClickRunAnalysisParams,
@@ -374,6 +483,7 @@ export async function dispatchChipClickRunAnalysis(
         turn_id: payload.turn_id,
         turn_class: 'handler',
         handler_id: 'run_analysis',
+        action_type: 'run_analysis',
         raw_handler_fact_count: outcome.handler_facts.length,
         enriched_handler_fact_count: enrichedFacts.length,
         has_raw_run_analysis_fact: outcome.handler_facts.some(
@@ -391,6 +501,7 @@ export async function dispatchChipClickRunAnalysis(
         request_id: requestId,
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
+        action_type: 'run_analysis',
         raw_fact_types: outcome.handler_facts.map((f) => f.fact_type),
         enriched_fact_types: enrichedFacts.map((f) => f.fact_type),
       },
@@ -500,4 +611,363 @@ function deriveAnalysisReadyFromSnapshot(
     );
   }
   return readiness;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2b — V5 no-op explanation chip-click dispatch
+// ---------------------------------------------------------------------------
+//
+// `explain_results` and `what_would_flip` are deterministic no-op handlers:
+// they templated their output from prior `run_analysis` facts (precondition-
+// fail templates when no analysis exists, deterministic prose otherwise).
+// On the routed path the handler additionally consumes Sonnet's
+// `explanation.answer_text` when valid — but the chip-click path does not
+// produce one (no LLM call). The handler's existing `composeExplain*Fallback`
+// composers consume `analysisProjection` directly, so we pre-populate that
+// (plus `analysisFreshness` and `analysisReady`) and the precondition decision
+// tree behaves identically to the routed path.
+//
+// What we do NOT replicate from TurnExecutor:
+//   - Sonnet's `explanation.answer_text` (the whole point of the bypass)
+//   - `structureProjection` (only `explain_from_structure` reads it; not
+//     in the whitelist)
+//   - `proposal` (no LLM proposal — handler ignores when absent)
+//   - `graphForTurn` / `mutated_graph` (explanation handlers don't mutate)
+//   - `enrichRunAnalysisWithDecisionReview` (only run_analysis facts get
+//     enriched; the explanation handlers produce their own fact type)
+
+const NOOP_EXPLANATION_DISPATCH_PATH = {
+  explain_results: 'chip_click_explain_results',
+  what_would_flip: 'chip_click_what_would_flip',
+} as const;
+
+const NOOP_EXPLANATION_FAILURE_TEXT = {
+  explain_results: 'I could not produce an explanation.',
+  what_would_flip: 'I could not produce a sensitivity summary.',
+} as const;
+
+async function dispatchChipClickNoopExplanation(
+  actionType: 'explain_results' | 'what_would_flip',
+  params: DispatchChipClickRunAnalysisParams,
+): Promise<DispatchChipClickRunAnalysisResult> {
+  const { payload, requestId, handlerRegistry } = params;
+  const startedAt = Date.now();
+
+  // Same builder TurnExecutor uses — gives prior_facts (the precondition's
+  // input), persistedGraph (for the freshness hash), and budgets.turn_ms
+  // (for the abort signal).
+  const context = await buildTurnContext(payload, requestId);
+
+  // Pick the handler from the registry. Production uses the singleton; tests
+  // inject their own mocked registry via `params.handlerRegistry`.
+  const registry = handlerRegistry ?? getDefaultRegistry();
+  const handlerFn: HandlerFn | null = resolveHandler(registry, actionType);
+  if (!handlerFn) {
+    log.error(
+      { request_id: requestId, action_type: actionType },
+      'V5 chip_click dispatch — explanation handler missing from registry',
+    );
+    return {
+      outcome: 'commit_failed',
+      response: composeToolCallResponse({
+        orientation: '',
+        confirmation: NOOP_EXPLANATION_FAILURE_TEXT[actionType],
+        coaching: null,
+        stage: payload.stage,
+        handlerFacts: [],
+      }),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  // Reconstruct the routing-layer fields the handler expects so its
+  // precondition decision tree behaves identically to the routed path.
+  // None of these calls hits the network or makes an LLM call.
+  const projectionInputs = buildProjectionInputs(context, payload, requestId);
+
+  const turnAbort = new AbortController();
+  const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
+
+  const failureResponse = composeToolCallResponse({
+    orientation: '',
+    confirmation: NOOP_EXPLANATION_FAILURE_TEXT[actionType],
+    coaching: null,
+    stage: payload.stage,
+    handlerFacts: [],
+  });
+
+  try {
+    let outcome;
+    try {
+      outcome = await handlerFn({
+        context,
+        payload,
+        requestId,
+        signal: turnAbort.signal,
+        orientationText: '',
+        // No Sonnet `explanation.answer_text` on this path — the handler's
+        // deterministic fallback composer kicks in. See handler impl.
+        analysisReady: projectionInputs.analysisReady,
+        analysisProjection: projectionInputs.analysisProjection,
+        analysisFreshness: projectionInputs.analysisFreshness,
+      });
+    } catch (err) {
+      if (err instanceof HandlerInvocationFailedError) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            action_type: actionType,
+            cause_kind: err.cause_kind,
+            retryable: err.retryable,
+            message: err.message,
+          },
+          'V5 chip_click explanation — handler invocation failed (typed)',
+        );
+        return {
+          outcome: 'handler_failure',
+          response: failureResponse,
+          commitPerformed: false,
+          causeKind: err.cause_kind,
+          retryable: err.retryable,
+          graph: projectionInputs.graph,
+        };
+      }
+      if (err instanceof HandlerResultInvalidError) {
+        log.error(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            action_type: actionType,
+            message: err.message,
+          },
+          'V5 chip_click explanation — handler result invalid',
+        );
+        return {
+          outcome: 'handler_result_invalid',
+          response: failureResponse,
+          commitPerformed: false,
+          graph: projectionInputs.graph,
+        };
+      }
+      throw err;
+    }
+
+    const decl = HANDLER_VALIDATION_REGISTRY[actionType];
+    const confirmationText = typeof decl?.confirmation_template === 'function'
+      ? decl.confirmation_template(outcome)
+      : (decl?.confirmation_template ?? outcome.assistant_text);
+
+    let response = composeToolCallResponse({
+      orientation: '',
+      confirmation: confirmationText,
+      coaching: null,
+      stage: payload.stage,
+      handlerFacts: outcome.handler_facts,
+    });
+
+    // Same finaliser-level egress guard as the run_analysis path.
+    {
+      const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
+      if (guarded.rewritten) {
+        emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          phrase: guarded.hit,
+          dispatch_path: 'chip_click_finalise',
+        });
+        response = { ...response, assistant_text: guarded.text };
+      }
+    }
+
+    log.info(
+      {
+        event: 'v5_fact_chain_commit',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: actionType,
+        action_type: actionType,
+        raw_handler_fact_count: outcome.handler_facts.length,
+        enriched_handler_fact_count: outcome.handler_facts.length,
+        has_raw_run_analysis_fact: outcome.handler_facts.some(
+          (f) => f.fact_type === 'run_analysis',
+        ),
+        has_enriched_run_analysis_fact: outcome.handler_facts.some(
+          (f) => f.fact_type === 'run_analysis',
+        ),
+      },
+      'V5 chip-click: explanation fact persistence pre-commit',
+    );
+
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'handler',
+        handler_id: actionType,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: outcome.llm_calls_used,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: outcome.handler_facts,
+      });
+
+      // Telemetry parity with run_analysis: emit freshness so dashboards
+      // continue to disaggregate by dispatch_path. Reuses the precondition's
+      // freshness derivation (no second hash compute).
+      emitFreshnessTelemetry(
+        projectionInputs.analysisFreshness,
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          dispatch_path: NOOP_EXPLANATION_DISPATCH_PATH[actionType],
+        },
+        {
+          prior_fact_count: context.prior_facts.length,
+          current_turn_fact_count: outcome.handler_facts.length,
+        },
+      );
+
+      return {
+        outcome: 'ok',
+        response,
+        commitPerformed: true,
+        analysisReady: projectionInputs.analysisReady,
+        graph: projectionInputs.graph,
+        freshness: projectionInputs.analysisFreshness,
+      };
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          action_type: actionType,
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'V5 chip_click explanation dispatch — commit failed',
+      );
+      return { outcome: 'commit_failed', response, commitPerformed: false, graph: projectionInputs.graph };
+    }
+  } finally {
+    clearTimeout(turnTimer);
+  }
+}
+
+interface ProjectionInputs {
+  readonly analysisReady: AnalysisReadyPayload | undefined;
+  // `buildAnalysisProjectionSummary` returns `AnalysisProjectionSummary | null`;
+  // the HandlerInvocation contract takes `AnalysisProjectionSummary | undefined`.
+  // We normalise null→undefined in the caller so handlers don't have to.
+  readonly analysisProjection:
+    | NonNullable<ReturnType<typeof buildAnalysisProjectionSummary>>
+    | undefined;
+  readonly analysisFreshness: FreshnessDerivation;
+  readonly graph: GraphV3T | null;
+}
+
+/**
+ * Reconstruct the routing-layer fields the V5 explanation handlers expect,
+ * using only local context (prior_facts + persistedGraph). No LLM call,
+ * no PLoT call, no scenario read beyond what `buildTurnContext` already
+ * performed.
+ */
+function buildProjectionInputs(
+  context: EnrichedTurnContext,
+  payload: MessageTurnPayload,
+  requestId: string,
+): ProjectionInputs {
+  // Step 1: parse the persisted graph for readiness derivation. Fall back
+  // to undefined readiness when the graph is missing or fails parse —
+  // mirrors TurnExecutor's behaviour and the precondition tree's defensive
+  // null-projection guard.
+  let graph: GraphV3T | null = null;
+  let analysisReady: AnalysisReadyPayload | undefined;
+  if (context.persistedGraph !== undefined && context.persistedGraph !== null) {
+    const parsed = GraphV3.safeParse(context.persistedGraph);
+    if (parsed.success) {
+      graph = parsed.data as GraphV3T;
+      analysisReady = computeStructuralReadiness(graph);
+    } else {
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          analysis_ready_missing_reason: 'graph_parse_failed',
+          issue_count: parsed.error.issues.length,
+        },
+        'V5 chip_click explanation — persisted graph failed GraphV3 parse; analysis_ready omitted',
+      );
+    }
+  }
+
+  // Step 2: build the analysis projection from the most recent successful
+  // (or legacy / degraded) run_analysis fact in prior_facts. The handler's
+  // `decideExplanationPrecondition` reads `invocation.context.prior_facts`
+  // directly to make the missing-vs-degraded distinction, so this projection
+  // only needs to populate the `'execute'` branch's input.
+  const optionLabelSource = graph
+    ? graph.nodes
+        .filter((n) => n.kind === 'option')
+        .map((n) => ({ id: n.id, label: n.label ?? null }))
+    : undefined;
+  const analysisFromPrior: AnalysisResponseSummary | null = buildAnalysisFromPriorFacts(
+    context.prior_facts,
+    optionLabelSource,
+  );
+  // `buildAnalysisProjectionSummary` consumes `ContextPackAnalysis` (the
+  // post-projection shape used inside the context-pack). On the routed
+  // path that comes from `projectAnalysis` after compactAnalysis. Here
+  // we map AnalysisResponseSummary → AnalysisProjectionSummary directly
+  // by going through a thin contextPack-shaped intermediate, so the
+  // handler reads the same field shape.
+  const analysisProjection = analysisFromPrior
+    ? buildAnalysisProjectionSummary({
+        status: analysisFromPrior.analysis_status,
+        leading_option:
+          analysisFromPrior.options[0] != null
+            ? {
+                label: analysisFromPrior.options[0].option_label,
+                probability: analysisFromPrior.options[0].win_probability,
+              }
+            : null,
+        runner_up:
+          analysisFromPrior.options[1] != null
+            ? {
+                label: analysisFromPrior.options[1].option_label,
+                probability: analysisFromPrior.options[1].win_probability,
+              }
+            : null,
+        margin_pp: analysisFromPrior.margin_pp ?? null,
+        robustness_band:
+          analysisFromPrior.robustness_level &&
+          analysisFromPrior.robustness_level !== 'unknown'
+            ? analysisFromPrior.robustness_level
+            : null,
+        top_drivers: analysisFromPrior.top_drivers.map((d) => ({
+          factor_label: d.factor_label,
+          sensitivity_value: d.direction === 'negative' ? -d.sensitivity : d.sensitivity,
+        })),
+        fragile_edges: (analysisFromPrior.top_fragile_edges ?? []).map((e) => ({
+          from_label: e.from_label,
+          to_label: e.to_label,
+        })),
+      }) ?? undefined
+    : undefined;
+
+  // Step 3: derive freshness from prior_facts + persisted-graph hash. The
+  // chip-click path does not produce a new run_analysis fact, so the
+  // routing-layer derivation IS the wire-bound view (no need to re-derive
+  // post-dispatch the way run_analysis does).
+  let currentGraphHash: string | null = null;
+  if (context.persistedGraph !== undefined && context.persistedGraph !== null) {
+    const parsed = GraphStateIngressSchema.safeParse(context.persistedGraph);
+    if (parsed.success) {
+      currentGraphHash = computeAnalysisAffectingGraphHash(parsed.data);
+    }
+  }
+  const analysisFreshness = deriveAnalysisFreshness(context.prior_facts, currentGraphHash);
+
+  return { analysisReady, analysisProjection, analysisFreshness, graph };
 }
