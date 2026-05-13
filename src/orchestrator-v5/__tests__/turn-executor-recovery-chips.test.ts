@@ -186,8 +186,14 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
     expect(parsed.suggested_actions[0]?.label).toBe('Try again');
   });
 
-  it('schema_repair_failed (router cause) — friendly text + retry chip', async () => {
-    // Two bad tool-use responses → RoutingError(schema_repair_failed).
+  it('schema_repair_failed (router cause) — bounded fallback to 200 direct_answer (V5 P0)', async () => {
+    // V5 P0 stabilisation: model-output failures (schema_repair_failed /
+    // empty_response / unexpected_stop_reason) used to surface as a 500
+    // BoundaryError. They now degrade to a deterministic direct_answer
+    // envelope so the user's session and prior analysis survive. The
+    // assistant_text differs from the legacy recovery-chip wording, no
+    // error block is emitted, and chips are conditional on freshness
+    // (none here — fresh-frame turn has no prior analysis).
     const routingAdapter = mockRoutingAdapter(
       vi
         .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
@@ -195,19 +201,26 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
         .mockResolvedValueOnce(mkToolUseResult({ intent_class: 'clarify' })) as unknown as ChatWithToolsMock,
     );
 
-    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-rt5', {
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-rt5', {
       routingAdapter,
     });
 
     const parsed = OlumiResponseSchema.parse(response);
-    expect(parsed.assistant_text).toBe("I couldn't structure that response correctly.");
-    expect(parsed.suggested_actions[0]?.label).toBe('Try again');
-    expect(parsed.suggested_actions[0]?.action_type).toBeUndefined();
-    expect(parsed.suggested_actions[0]?.message).toBe(PREVIOUS_USER_MESSAGE);
+    expect(parsed.assistant_text).toBe(
+      "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.",
+    );
+    // No analysis in the fresh-frame fixture → no action chips.
+    expect(parsed.suggested_actions).toHaveLength(0);
+    // No error block — the turn is a successful direct_answer envelope.
+    expect(parsed.blocks.some((b) => b.type === 'error')).toBe(false);
+    // Telemetry still records the underlying cause for ops dashboards.
+    expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+    expect(telemetry.commit_performed).toBe(true);
 
-    const ev = recoveryEvent();
-    expect(ev).toBeDefined();
-    expect(ev!.data.failure_type).toBe('ZOD_REPAIR_FAILED');
+    const bf = events.find((e) => e.event === 'v5.routing_bounded_fallback');
+    expect(bf).toBeDefined();
+    expect(bf!.data.routing_error_cause).toBe('schema_repair_failed');
+    expect(bf!.data.analysis_ready).toBe(false);
   });
 
   it('split-assertion: assistant_text is friendly preface AND blocks[0].error_code is wire code', async () => {

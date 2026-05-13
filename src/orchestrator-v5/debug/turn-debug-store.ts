@@ -59,6 +59,22 @@ export interface ModelResolutionRecord {
   readonly timestamp: number;
 }
 
+/**
+ * Optional freshness summary recorded on the failure path so a degraded
+ * turn still exposes what state the orchestrator saw at routing time.
+ * Mirrors the existing freshness fields populated by turn-executor's
+ * success path (analysis_freshness, analysis_state_source, etc.) but
+ * scoped to the safe subset that contains no raw prompt or user-content.
+ */
+export interface TurnDebugFreshnessSummary {
+  readonly freshness?: string;
+  readonly freshness_reason?: string;
+  readonly analysis_state_source?: string;
+  readonly analysis_staleness_reason?: string;
+  readonly analysis_status?: string;
+  readonly leading_option_present?: boolean;
+}
+
 /** A single stored debug entry. */
 export interface TurnDebugEntry {
   readonly turn_id: string;
@@ -72,6 +88,25 @@ export interface TurnDebugEntry {
    * cleared. Append via recordModelResolution.
    */
   readonly model_resolutions?: readonly ModelResolutionRecord[];
+  /**
+   * V5 P0 stabilisation — failure-path observability. Populated by
+   * `recordFailureContext` from the turn-executor's routing-error
+   * branches so a debug bundle for a degraded turn carries enough
+   * signal to diagnose the failure without leaking user content.
+   *
+   * `route_failure_type` is the routing-error cause name (e.g.
+   * `unexpected_stop_reason`, `timeout`, `schema_repair_failed`).
+   * `freshness_summary` carries the analysis-freshness verdicts the
+   * orchestrator computed at ORIENT, when available.
+   */
+  readonly route_failure_type?: string;
+  readonly freshness_summary?: TurnDebugFreshnessSummary;
+}
+
+/** Failure-context payload accepted by `recordFailureContext`. */
+export interface TurnDebugFailureContext {
+  readonly route_failure_type?: string;
+  readonly freshness_summary?: TurnDebugFreshnessSummary;
 }
 
 class TurnDebugStore {
@@ -103,6 +138,53 @@ class TurnDebugStore {
         }
       : entry;
     this.store.set(entry.turn_id, merged);
+  }
+
+  appendFailureContext(
+    turn_id: string,
+    session_id: string,
+    fields: TurnDebugFailureContext,
+  ): void {
+    this.cleanup();
+    const existing = this.store.get(turn_id);
+    if (existing) {
+      this.store.set(turn_id, {
+        ...existing,
+        ...(fields.route_failure_type !== undefined
+          ? { route_failure_type: fields.route_failure_type }
+          : {}),
+        ...(fields.freshness_summary !== undefined
+          ? { freshness_summary: fields.freshness_summary }
+          : {}),
+      });
+      return;
+    }
+    if (this.store.size >= this.maxEntries) {
+      const oldestKey = this.store.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.store.delete(oldestKey);
+      }
+    }
+    this.store.set(turn_id, {
+      turn_id,
+      session_id,
+      stored_at: Date.now(),
+      cqe: {
+        parsed_quantities: [],
+        patterns_matched: [],
+        timeout: false,
+        compromise_match_count: 0,
+        duration_ms: 0,
+        message_too_long: false,
+        word_range_missed: false,
+      },
+      ...(fields.route_failure_type !== undefined
+        ? { route_failure_type: fields.route_failure_type }
+        : {}),
+      ...(fields.freshness_summary !== undefined
+        ? { freshness_summary: fields.freshness_summary }
+        : {}),
+    });
   }
 
   appendModelResolution(
@@ -205,6 +287,21 @@ export function recordModelResolution(
     timestamp: resolution.timestamp ?? Date.now(),
   };
   turnDebugStore.appendModelResolution(turn_id, session_id, record);
+}
+
+/**
+ * Record failure-path context on the turn-debug entry (V5 P0 stabilisation).
+ * No-op when CEE_TURN_DEBUG_ENABLED is false. Safe to call before the CQE
+ * writer has run — a minimal entry is created if needed so the failure
+ * record survives even when context-pack assembly itself failed.
+ */
+export function recordFailureContext(
+  turn_id: string,
+  session_id: string,
+  fields: TurnDebugFailureContext,
+): void {
+  if (!config.cee.turnDebugEnabled) return;
+  turnDebugStore.appendFailureContext(turn_id, session_id, fields);
 }
 
 /**

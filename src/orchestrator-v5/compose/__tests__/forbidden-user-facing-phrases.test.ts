@@ -68,6 +68,16 @@ describe('FORBIDDEN_USER_FACING_PHRASES — phrase matches', () => {
     ['I HAVEN’T APPLIED ANY CHANGES.', 'shout-cased haven’t applied'],
     ['NOTHING CHANGED.', 'shout-cased nothing changed'],
     ['Previous Analysis Was Run.', 'title-cased previous analysis'],
+    // V5 P0 stabilisation — prescriptive-language defence-in-depth.
+    ['Here is the recommendation.', 'prescriptive "recommendation"'],
+    ['These recommendations may shift.', 'plural "recommendations"'],
+    ['Recommended next step: re-run the analysis.', 'leading "Recommended"'],
+    ['The recommended option is X.', 'mid-sentence "recommended"'],
+    ['The winner is Option A.', 'prescriptive "the winner"'],
+    ['These are the winners after re-analysis.', 'plural "the winners"'],
+    ['Option A has the winning probability.', '"winning probability"'],
+    ['The winning option leads at 72%.', '"winning option"'],
+    ['Robust analysis points to the winning side.', '"winning side"'],
   ];
 
   for (const [text, label] of positiveCases) {
@@ -126,6 +136,21 @@ describe('FORBIDDEN_USER_FACING_PHRASES — clean text passes', () => {
     [
       "Hire Two Senior Engineers wins probability vs Status Quo (No Changes) baseline at 72%.",
       'leader prose comparing against a "No Changes" baseline option',
+    ],
+    // V5 P0 stabilisation — prescriptive-language negatives. The bare
+    // "winner" / "winning" patterns are narrowed to prescriptive
+    // phrasings only so user-authored option labels still pass.
+    [
+      "Strengthened the 'Winner Take All' edge from 0.5 to 0.7.",
+      'safe_summary quoting a user-named "Winner Take All" option label',
+    ],
+    [
+      "Renamed the option 'Big Winner' to 'Top Performer'.",
+      'safe_summary quoting a user-named "Big Winner" label',
+    ],
+    [
+      "The Winning Strategy factor now sits at 30%.",
+      'analysis prose quoting a user-named "Winning Strategy" factor label',
     ],
   ];
 

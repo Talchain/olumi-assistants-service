@@ -111,6 +111,29 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // validator's report"; narrowed to the exact internal phrasings):
   /\b(response|wire|XML)\s+envelope\b/i,
   /\bcode\s+validator\b/i,        // exact phrasing from draft_graph prompts
+  // V5 P0 stabilisation — prescriptive-language defence-in-depth.
+  // PR #171 dropped "recommendation" from CEE templates by construction;
+  // these regexes prevent a future emit path (deterministic template or
+  // LLM authorship) from re-introducing prescriptive copy the brief
+  // bans as user-facing. Brief: treat "recommendation" / "recommended"
+  // / "winner" / "winning" as banned user-facing wording.
+  //
+  // "recommendation(s)" and "recommended" are banned broadly — they
+  // have no legitimate user-domain use in V5 prose (CEE never quotes
+  // user-authored content containing these terms; decision-domain
+  // labels are factor/option names, not advice verbs).
+  //
+  // "winner" / "winning" are NARROWED to prescriptive phrasings only —
+  // a user-authored option label like "Winner Take All" would
+  // legitimately appear inside a quoted safe_summary, and a bare
+  // `\bwinner\b` would erase the entire response via the egress
+  // fallback. The narrowed forms target the prescriptive uses
+  // ("the winner", "winning option / probability / side / choice")
+  // without catching label-quotes.
+  /\brecommendations?\b/i,
+  /\brecommended\b/i,
+  /\bthe\s+winners?\b/i,
+  /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
 ];
 
 /**

@@ -24,7 +24,13 @@ const TURN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ANALYSE_PAYLOAD = makeMessagePayload({
   turn_id: TURN_ID,
   scenario_id: SCENARIO_ID,
-  message: 'What should I do?',
+  // V5 P0 stabilisation: the post-analysis advice gate now short-
+  // circuits messages like "What should I do?" to a deterministic
+  // direct_answer when prior analysis exists. The wrapper test
+  // exercises the LLM-call path that follows when the user asks a
+  // non-advice post-analysis question — use a phrasing that bypasses
+  // the advice gate.
+  message: 'Tell me more about the analysis result.',
   turn_class: 'decide',
   stage: 'analyse',
 });
