@@ -97,7 +97,10 @@ import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/outpu
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
-import { dispatchChipClickRunAnalysis } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
+import {
+  dispatchDeterministicChipClick,
+  isDeterministicChipClickActionType,
+} from '../orchestrator-v5/handlers/chip-click-dispatch.js';
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
 import {
@@ -550,7 +553,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
 
     // ────────────────────────────────────────────────────────────────────
-    // Chip-click run_analysis dispatch (v5-handler-surface brief Task 4)
+    // Chip-click deterministic dispatch (Phase 2b: v5-handler-surface brief
+    // Task 4 + chip-click router bypass workstream)
     // ────────────────────────────────────────────────────────────────────
     //
     // This branch runs BEFORE the heuristic-based draft_graph and edit_graph
@@ -561,17 +565,24 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // future refactor that changed dispatch order must keep chip-click
     // first.
     //
-    // Scope: ONLY source='chip_click' + chip.action_type='run_analysis'.
-    // source='chip' (inline chip metadata on a normal message) falls
-    // through to TurnExecutor. Other chip action types fall through to
-    // TurnExecutor which returns a typed FEATURE_NOT_ENABLED via the
-    // existing UNSUPPORTED_ACTION path (v5-exclusive-cee P0 follow-up).
-    const isChipClickRunAnalysis =
+    // Scope: source='chip_click' + chip.action_type ∈ whitelist
+    // (`DETERMINISTIC_CHIP_ACTION_TYPES` in chip-click-dispatch.ts). Each
+    // entry must be a registered V5 handler ID that can produce a useful
+    // answer without ORIENT context (validated per-handler before
+    // inclusion). source='chip' (inline chip metadata on a normal message)
+    // falls through to TurnExecutor. Other chip action types — including
+    // mutation handlers (set_factor_value, etc.) that need validated
+    // proposal parameters — fall through to TurnExecutor which routes via
+    // Sonnet ORIENT or returns a typed FEATURE_NOT_ENABLED via the
+    // existing UNSUPPORTED_ACTION path.
+    const chipActionType = ingress.chip?.action_type;
+    const isDeterministicChipClick =
       ingress.source === 'chip_click' &&
-      ingress.chip?.action_type === 'run_analysis';
-    if (isChipClickRunAnalysis) {
+      chipActionType !== undefined &&
+      isDeterministicChipClickActionType(chipActionType);
+    if (isDeterministicChipClick && chipActionType) {
       try {
-        const cc = await dispatchChipClickRunAnalysis({
+        const cc = await dispatchDeterministicChipClick(chipActionType, {
           payload: ingress,
           requestId,
         });
@@ -581,11 +592,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_failure') {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'chip_click_dispatch',
-            reason: 'chip_click_run_analysis_handler_failed',
+            reason: `chip_click_${chipActionType}_handler_failed`,
             retryable: cc.retryable,
             requestId,
             stage: ingress.stage,
-            preStageExtras: { cause_kind: cc.causeKind },
+            preStageExtras: { cause_kind: cc.causeKind, action_type: chipActionType },
           });
           // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
@@ -593,10 +604,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_result_invalid') {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'chip_click_dispatch',
-            reason: 'chip_click_run_analysis_handler_result_invalid',
+            reason: `chip_click_${chipActionType}_handler_result_invalid`,
             retryable: false,
             requestId,
             stage: ingress.stage,
+            preStageExtras: { action_type: chipActionType },
           });
           // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
@@ -604,10 +616,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'commit_failed') {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
-            reason: 'chip_click_run_analysis_commit_failed',
+            reason: `chip_click_${chipActionType}_commit_failed`,
             retryable: true,
             requestId,
             stage: ingress.stage,
+            preStageExtras: { action_type: chipActionType },
           });
           // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
@@ -622,16 +635,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         log.error(
           {
             request_id: requestId,
+            action_type: chipActionType,
             err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
           },
-          'V5 chip_click run_analysis handler threw — returning 500 BoundaryError',
+          'V5 chip_click deterministic dispatch threw — returning 500 BoundaryError',
         );
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'chip_click_dispatch',
-          reason: 'chip_click_run_analysis_handler_threw',
+          reason: `chip_click_${chipActionType}_handler_threw`,
           retryable: true,
           requestId,
           stage: ingress.stage,
+          preStageExtras: { action_type: chipActionType },
         });
         // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
