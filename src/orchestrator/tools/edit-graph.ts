@@ -2702,12 +2702,19 @@ export async function handleEditGraph(
     // and whether prior analysis exists — not from LLM coaching output.
     const hasExistingAnalysis = !!context.analysis_response;
     // Phase 2a step 3: thread BOTH pre- and post-edit graphs into label
-    // resolution. The primary lookup uses the pre-edit graph (which has the
-    // canonical labels for every entity, including those a remove_node op
-    // about to drop); the post-edit graph (`appliedGraph` if PLoT supplied
-    // one, otherwise the local `candidateGraph`) is the secondary fallback
-    // for entities introduced by add_* ops that didn't exist pre-edit.
-    // Either source may be missing in degenerate paths — null-safe.
+    // resolution. The PRIMARY lookup uses the **post-edit** graph
+    // (`appliedGraph` if PLoT supplied one, otherwise the local
+    // `candidateGraph`). The post-edit graph is right for the dominant
+    // case (add / update / edge ops where the entity is in the post-edit
+    // graph and post-edit labels are the canonical user-facing strings
+    // including renames). The **pre-edit** graph (`context.graph`) is the
+    // FALLBACK consulted by `resolveElementLabel` when the post-edit
+    // lookup misses — the specific shape that fixes `remove_node`:
+    // the removed entity is no longer in the post-edit graph, so without
+    // the pre-edit fallback the label resolution drops to the raw path
+    // and the downstream sanitiser collapses it to "the relevant
+    // factor". Either source may be missing in degenerate paths —
+    // null-safe.
     const preGraphForReceipt = (context.graph ?? null) as GraphV3T | null;
     const postGraphForReceipt = (appliedGraph ?? candidateGraph ?? context.graph) as GraphV3T;
     const appliedChangesReceipt = buildAppliedChanges(
