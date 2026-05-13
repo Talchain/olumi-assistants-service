@@ -1304,12 +1304,36 @@ function isSubstantiveOperation(op: PatchOperation): boolean {
 
 /**
  * Resolve a human-readable label for a node path from the graph.
- * Falls back to the path if the node is not found.
+ *
+ * Looks up the node by id in the post-edit `graph` first; on miss, falls back
+ * to the pre-edit `preGraph` if supplied (covers `remove_node` ops where the
+ * target no longer exists in the post-edit graph). Final fallback uses the
+ * `opValue.label` if present (covers `add_node` whose target may not yet
+ * exist in the graph snapshot under inspection). Returns the raw path only
+ * when all three lookups miss — that fallthrough is the input the
+ * downstream sanitiser would map to `'the relevant <kind>'`.
+ *
+ * Phase 2a step 3 (`claude/v5-step2a-step3-label-resolution`): added
+ * `preGraph` parameter so callers thread BOTH graphs through. The companion
+ * widening in `sanitiseAffectedEntityLabel` ensures a recovered pre-edit
+ * label is not re-blanked by the egress sanitiser.
  */
-function resolveElementLabel(path: string, graph: GraphV3T, opValue?: unknown): string {
+function resolveElementLabel(
+  path: string,
+  graph: GraphV3T,
+  preGraph: GraphV3T | null,
+  opValue?: unknown,
+): string {
   const nodes = (graph.nodes ?? []) as Array<{ id: string; label?: string }>;
   const node = nodes.find(n => n.id === path);
   if (node?.label) return node.label;
+  // Pre-edit fallback — covers remove_node (and any path whose target
+  // existed before but not after the mutation).
+  if (preGraph) {
+    const preNodes = (preGraph.nodes ?? []) as Array<{ id: string; label?: string }>;
+    const preNode = preNodes.find(n => n.id === path);
+    if (preNode?.label) return preNode.label;
+  }
   // For add_node, the label is in the value
   if (opValue && typeof opValue === 'object') {
     const v = opValue as Record<string, unknown>;
@@ -1321,9 +1345,16 @@ function resolveElementLabel(path: string, graph: GraphV3T, opValue?: unknown): 
 /**
  * Build a human-readable description for a single patch operation.
  * Never contains internal node IDs.
+ *
+ * `preGraph` (when supplied) is consulted as a fallback for any element
+ * whose post-edit `graph` lookup misses — see `resolveElementLabel`.
  */
-function buildOperationDescription(op: PatchOperation, graph: GraphV3T): string {
-  const label = resolveElementLabel(op.path, graph, op.value);
+function buildOperationDescription(
+  op: PatchOperation,
+  graph: GraphV3T,
+  preGraph: GraphV3T | null,
+): string {
+  const label = resolveElementLabel(op.path, graph, preGraph, op.value);
 
   switch (op.op) {
     case 'add_node':
@@ -1332,20 +1363,20 @@ function buildOperationDescription(op: PatchOperation, graph: GraphV3T): string 
       return `Removed ${label}`;
     case 'add_edge': {
       const val = op.value as Record<string, unknown> | undefined;
-      const fromLabel = val?.from ? resolveElementLabel(String(val.from), graph) : op.path;
-      const toLabel = val?.to ? resolveElementLabel(String(val.to), graph) : '';
+      const fromLabel = val?.from ? resolveElementLabel(String(val.from), graph, preGraph) : op.path;
+      const toLabel = val?.to ? resolveElementLabel(String(val.to), graph, preGraph) : '';
       return toLabel ? `Added edge from ${fromLabel} to ${toLabel}` : `Added edge on ${fromLabel}`;
     }
     case 'remove_edge': {
       const parts = op.path.split('::');
-      const fromLabel = resolveElementLabel(parts[0] ?? op.path, graph);
-      const toLabel = parts[1] ? resolveElementLabel(parts[1], graph) : '';
+      const fromLabel = resolveElementLabel(parts[0] ?? op.path, graph, preGraph);
+      const toLabel = parts[1] ? resolveElementLabel(parts[1], graph, preGraph) : '';
       return toLabel ? `Removed edge from ${fromLabel} to ${toLabel}` : `Removed edge on ${fromLabel}`;
     }
     case 'update_edge': {
       const parts = op.path.split('::');
-      const fromLabel = resolveElementLabel(parts[0] ?? op.path, graph);
-      const toLabel = parts[1] ? resolveElementLabel(parts[1], graph) : '';
+      const fromLabel = resolveElementLabel(parts[0] ?? op.path, graph, preGraph);
+      const toLabel = parts[1] ? resolveElementLabel(parts[1], graph, preGraph) : '';
       return toLabel ? `Updated edge from ${fromLabel} to ${toLabel}` : `Updated edge on ${fromLabel}`;
     }
     case 'update_node': {
@@ -1377,15 +1408,23 @@ function buildOperationDescription(op: PatchOperation, graph: GraphV3T): string 
  * - Uses node labels (not internal IDs) in all user-facing fields.
  * - rerun_recommended: true when hasExistingAnalysis AND at least one substantive op.
  *   Edge/value/structural changes are substantive; label-only renames are not.
+ *
+ * `graph` should be the canonical post-edit (or, in V4 single-graph callers,
+ * the pre-edit) graph used as the primary label source. `preGraph` (optional,
+ * defaults to null) is consulted as a fallback when an op references an
+ * entity absent from `graph` — most importantly `remove_node`, where the
+ * target is gone from the post-edit graph by definition. Threading both
+ * graphs is the Phase 2a step-3 contract.
  */
 export function buildAppliedChanges(
   operations: PatchOperation[],
   graph: GraphV3T,
   hasExistingAnalysis: boolean,
+  preGraph: GraphV3T | null = null,
 ): AppliedChanges {
   const changes: AppliedChangeItem[] = operations.map(op => {
-    const label = resolveElementLabel(op.path, graph, op.value);
-    const description = buildOperationDescription(op, graph);
+    const label = resolveElementLabel(op.path, graph, preGraph, op.value);
+    const description = buildOperationDescription(op, graph, preGraph);
     return { label, description, element_ref: op.path };
   });
 
@@ -2662,9 +2701,21 @@ export async function handleEditGraph(
     // rerun_recommended is derived from ops (edge/value/structural = true, label-only = false)
     // and whether prior analysis exists — not from LLM coaching output.
     const hasExistingAnalysis = !!context.analysis_response;
-    // Use the original graph (pre-edit) for label resolution — it has the canonical labels.
-    const graphForReceipt = (context.graph ?? candidateGraph) as GraphV3T;
-    const appliedChangesReceipt = buildAppliedChanges(operations, graphForReceipt, hasExistingAnalysis);
+    // Phase 2a step 3: thread BOTH pre- and post-edit graphs into label
+    // resolution. The primary lookup uses the pre-edit graph (which has the
+    // canonical labels for every entity, including those a remove_node op
+    // about to drop); the post-edit graph (`appliedGraph` if PLoT supplied
+    // one, otherwise the local `candidateGraph`) is the secondary fallback
+    // for entities introduced by add_* ops that didn't exist pre-edit.
+    // Either source may be missing in degenerate paths — null-safe.
+    const preGraphForReceipt = (context.graph ?? null) as GraphV3T | null;
+    const postGraphForReceipt = (appliedGraph ?? candidateGraph ?? context.graph) as GraphV3T;
+    const appliedChangesReceipt = buildAppliedChanges(
+      operations,
+      postGraphForReceipt,
+      hasExistingAnalysis,
+      preGraphForReceipt,
+    );
 
     log.info(
       {
