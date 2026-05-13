@@ -993,3 +993,222 @@ describe('buildGenericEditGraphHandlerFact — generic fallback path', () => {
     expect(fact!.result.graph_hash_after).not.toBeNull();
   });
 });
+
+// ============================================================================
+// Group K — Phase 2a step 3: preGraph fallback through the sanitiser
+// ============================================================================
+//
+// `sanitiseAffectedEntityLabel` and `deriveSafeSummary` use the post-edit
+// graph as their primary label-lookup source. Without the Phase 2a step 3
+// fix, an entity present only in the pre-edit graph (the typical
+// remove_node case) cannot be resolved by `sanitiseUserFacingText` — the
+// raw id falls through to the `PREFIX_GENERIC` mapping and surfaces as
+// "the relevant <kind>".
+//
+// The fix unions post-edit + pre-edit nodes for label-lookup purposes
+// before invoking the sanitiser, so a recovered pre-edit label survives
+// end-to-end. Both the affected_entities[] entry AND the safe_summary
+// must reflect the real label.
+
+describe('buildEditGraphHandlerFact — Phase 2a step 3 preGraph fallback', () => {
+  function makePreEditGraphWithRemovedFactor(): GraphV3T {
+    return {
+      nodes: [
+        { id: 'goal_y', kind: 'goal', label: 'Yield' },
+        { id: 'fac_team_morale', kind: 'factor', label: 'Team morale' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+  }
+
+  function makePostEditGraphAfterRemoveFactor(): GraphV3T {
+    return {
+      nodes: [{ id: 'goal_y', kind: 'goal', label: 'Yield' }],
+      edges: [],
+    } as unknown as GraphV3T;
+  }
+
+  it('K1 affected_entities label survives sanitiser when entity exists only in preGraph', () => {
+    // Simulate the realistic upstream-recovered shape: the
+    // appliedChanges.changes[].label is already the recovered pre-edit
+    // label "Team morale" (because resolveElementLabel was threaded
+    // with preGraph). The sanitiser must NOT re-blank this label even
+    // though the post-edit graph alone cannot resolve "fac_team_morale".
+    const upstreamChanges: AppliedChanges = {
+      summary: 'Removed Team morale',
+      changes: [
+        {
+          label: 'Team morale',
+          description: 'Removed Team morale',
+          element_ref: 'fac_team_morale',
+        },
+      ],
+      rerun_recommended: false,
+    };
+
+    const editResult: EditGraphResult = {
+      blocks: [],
+      assistantText: 'Removed Team morale',
+      latencyMs: 100,
+      appliedGraph: makePostEditGraphAfterRemoveFactor(),
+      wasRejected: false,
+      appliedChanges: upstreamChanges,
+      operations: [{ op: 'remove_node', path: 'fac_team_morale' }],
+      operation_meta: [{ impact: 'moderate', rationale: 'Removed factor.' }],
+    };
+
+    const fact = buildEditGraphHandlerFact({
+      editResult,
+      preEditGraph: makePreEditGraphWithRemovedFactor(),
+      hasExistingAnalysis: false,
+    });
+
+    expect(fact).not.toBeNull();
+    expect(fact!.result.affected_entities).toHaveLength(1);
+    // Real label survives — does NOT collapse to "the relevant factor".
+    expect(fact!.result.affected_entities[0].label).toBe('Team morale');
+    expect(fact!.result.affected_entities[0].label).not.toBe('the relevant factor');
+    expect(fact!.result.affected_entities[0].kind).toBe('factor');
+  });
+
+  it('K2 safe_summary preserves the pre-only label across the sanitiser path', () => {
+    // The summary itself contains the raw id form (covers the case
+    // where an upstream component composed the summary with id rather
+    // than label). The union-graph lookup in deriveSafeSummary must
+    // resolve "fac_team_morale" to "Team morale" via the pre-edit
+    // graph instead of falling back to the prefix-generic.
+    const upstreamChanges: AppliedChanges = {
+      summary: 'Removed fac_team_morale from the model.',
+      changes: [
+        {
+          label: 'Team morale',
+          description: 'Removed Team morale',
+          element_ref: 'fac_team_morale',
+        },
+      ],
+      rerun_recommended: false,
+    };
+
+    const editResult: EditGraphResult = {
+      blocks: [],
+      assistantText: upstreamChanges.summary,
+      latencyMs: 100,
+      appliedGraph: makePostEditGraphAfterRemoveFactor(),
+      wasRejected: false,
+      appliedChanges: upstreamChanges,
+      operations: [{ op: 'remove_node', path: 'fac_team_morale' }],
+      operation_meta: [{ impact: 'moderate', rationale: 'Removed factor.' }],
+    };
+
+    const fact = buildEditGraphHandlerFact({
+      editResult,
+      preEditGraph: makePreEditGraphWithRemovedFactor(),
+      hasExistingAnalysis: false,
+    });
+
+    expect(fact).not.toBeNull();
+    // Sanitiser substituted the id with the pre-edit label.
+    expect(fact!.result.safe_summary).toContain('Team morale');
+    // No raw id leak.
+    expect(fact!.result.safe_summary).not.toContain('fac_team_morale');
+    // No prefix-generic placeholder.
+    expect(fact!.result.safe_summary).not.toContain('the relevant factor');
+    expect(fact!.result.safe_summary).not.toContain('the relevant element');
+  });
+
+  it('K3 preGraph=null still produces a safe summary (back-compat with no recovery info)', () => {
+    // Regression guard: when preGraph is null (legacy callers, or paths
+    // where the dispatcher has no pre-edit capture), the sanitiser
+    // path must continue to work — falling back to the prefix-generic
+    // for unresolvable ids is still acceptable behaviour, the new
+    // codepath must just not crash on null preGraph.
+    const upstreamChanges: AppliedChanges = {
+      summary: 'Removed fac_team_morale from the model.',
+      changes: [
+        {
+          label: 'fac_team_morale',
+          description: 'Removed fac_team_morale',
+          element_ref: 'fac_team_morale',
+        },
+      ],
+      rerun_recommended: false,
+    };
+
+    const editResult: EditGraphResult = {
+      blocks: [],
+      assistantText: upstreamChanges.summary,
+      latencyMs: 100,
+      appliedGraph: makePostEditGraphAfterRemoveFactor(),
+      wasRejected: false,
+      appliedChanges: upstreamChanges,
+      operations: [{ op: 'remove_node', path: 'fac_team_morale' }],
+      operation_meta: [{ impact: 'moderate', rationale: 'Removed factor.' }],
+    };
+
+    const fact = buildEditGraphHandlerFact({
+      editResult,
+      preEditGraph: null, // no recovery info available
+      hasExistingAnalysis: false,
+    });
+
+    expect(fact).not.toBeNull();
+    // Without preGraph, the sanitiser falls back to the prefix-generic
+    // for unresolvable ids. This is the legacy behaviour and remains
+    // correct (we never leak the raw id).
+    expect(fact!.result.affected_entities[0].label).toBe('the relevant factor');
+    expect(fact!.result.safe_summary).not.toContain('fac_team_morale');
+  });
+
+  it('K4 post-edit label wins on id collision (post-edit is the canonical current state)', () => {
+    // If an id exists in BOTH pre and post graphs but with different
+    // labels (e.g. a rename occurred), the post-edit label is the
+    // authoritative current display. The merge helper must NOT shadow
+    // a post-edit label with a stale pre-edit one.
+    const preGraph: GraphV3T = {
+      nodes: [
+        { id: 'fac_x', kind: 'factor', label: 'OLD label' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+
+    const postGraph: GraphV3T = {
+      nodes: [
+        { id: 'fac_x', kind: 'factor', label: 'NEW label' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+
+    const upstreamChanges: AppliedChanges = {
+      summary: 'Updated fac_x.',
+      changes: [
+        { label: 'NEW label', description: 'Updated NEW label', element_ref: 'fac_x' },
+      ],
+      rerun_recommended: false,
+    };
+
+    const editResult: EditGraphResult = {
+      blocks: [],
+      assistantText: upstreamChanges.summary,
+      latencyMs: 100,
+      appliedGraph: postGraph,
+      wasRejected: false,
+      appliedChanges: upstreamChanges,
+      operations: [
+        { op: 'update_node', path: 'fac_x', value: { label: 'NEW label' } },
+      ],
+      operation_meta: [{ impact: 'low', rationale: 'Rename.' }],
+    };
+
+    const fact = buildEditGraphHandlerFact({
+      editResult,
+      preEditGraph: preGraph,
+      hasExistingAnalysis: false,
+    });
+
+    expect(fact).not.toBeNull();
+    // Sanitiser substituted "fac_x" → post-edit "NEW label", NOT
+    // pre-edit "OLD label".
+    expect(fact!.result.safe_summary).toContain('NEW label');
+    expect(fact!.result.safe_summary).not.toContain('OLD label');
+  });
+});

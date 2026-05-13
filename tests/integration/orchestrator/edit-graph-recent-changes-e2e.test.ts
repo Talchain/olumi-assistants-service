@@ -40,7 +40,8 @@ import { deriveAnalysisFreshness } from '../../../src/orchestrator-v5/context/fr
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { buildTurnContext } from '../../../src/orchestrator-v5/build-turn-context.js';
 import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
-import type { EditGraphResult } from '../../../src/orchestrator/tools/edit-graph.js';
+import { buildAppliedChanges, type EditGraphResult } from '../../../src/orchestrator/tools/edit-graph.js';
+import type { PatchOperation } from '../../../src/orchestrator/types.js';
 import type { GraphV3T } from '../../../src/schemas/cee-v3.js';
 import type { SessionStore, SessionTurnWrite } from '../../../src/orchestrator-v5/session/store.js';
 import type {
@@ -544,5 +545,242 @@ describe('edit_graph recent_changes acceptance E2E (DL-7)', () => {
     expect(recent[1].action).toBe('factor_value_updated');
     // State-query guard would quote recent[0].summary verbatim.
     expect(recent[0].summary).toBeTruthy();
+  });
+
+  // --------------------------------------------------------------------
+  // Phase 2a step 3 — label resolution survives remove_node ops.
+  // --------------------------------------------------------------------
+  //
+  // Pre-fix behaviour: `resolveElementLabel` consulted only one graph;
+  // for `remove_node` ops the target was absent from the post-edit
+  // graph, the lookup fell through to the raw path, and the downstream
+  // `sanitiseAffectedEntityLabel` re-stripped to "the relevant <kind>".
+  //
+  // Post-fix behaviour: `buildAppliedChanges` accepts a `preGraph`
+  // argument and falls back to it when the post-edit graph misses; the
+  // V5 fact-builder's `sanitiseAffectedEntityLabel` and
+  // `deriveSafeSummary` consult a union (post + pre-only) graph so a
+  // recovered pre-edit label is preserved through the egress sanitiser.
+  //
+  // Both tests below exercise the full chain (operations →
+  // buildAppliedChanges → buildEditGraphHandlerFact → projectRecentChanges)
+  // with realistic remove_node fixtures. They assert the canonical
+  // labels survive AND the prefix-generic strings never appear.
+
+  function makePreEditGraphWithMorale(): GraphV3T {
+    return {
+      nodes: [
+        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        { id: 'fac_team_morale', kind: 'factor', label: 'Team morale' },
+      ],
+      edges: [
+        {
+          from: 'fac_team_morale',
+          to: 'goal_revenue',
+          strength: { mean: 0.4, std: 0.1 },
+          exists_probability: 0.9,
+          effect_direction: 'positive',
+        },
+      ],
+    } as unknown as GraphV3T;
+  }
+
+  function makePostEditGraphAfterRemoveMorale(): GraphV3T {
+    // fac_team_morale and its incident edge have been removed.
+    return {
+      nodes: [{ id: 'goal_revenue', kind: 'goal', label: 'Revenue' }],
+      edges: [],
+    } as unknown as GraphV3T;
+  }
+
+  it('E2E9 single remove_node: real label "Team morale" survives end-to-end', () => {
+    // Smallest representative case: a single-op remove_node on a node
+    // present only in the pre-edit graph.
+    const preGraph = makePreEditGraphWithMorale();
+    const postGraph = makePostEditGraphAfterRemoveMorale();
+
+    const operations: PatchOperation[] = [
+      { op: 'remove_node', path: 'fac_team_morale' },
+    ];
+
+    // Drive the receipt through the production helper so we exercise the
+    // real label-resolution path the V4 dispatch site uses post-fix
+    // (post-edit graph as primary source, pre-edit as fallback).
+    const appliedChanges = buildAppliedChanges(operations, postGraph, false, preGraph);
+    expect(appliedChanges.changes[0].label).toBe('Team morale');
+    expect(appliedChanges.summary).toContain('Team morale');
+    expect(appliedChanges.summary).not.toContain('fac_team_morale');
+
+    const editResult: EditGraphResult = {
+      blocks: [],
+      assistantText: appliedChanges.summary,
+      latencyMs: 100,
+      appliedGraph: postGraph,
+      wasRejected: false,
+      appliedChanges,
+      operations,
+      operation_meta: [{ impact: 'moderate', rationale: 'Removed factor.' }],
+    };
+
+    const fact = buildEditGraphHandlerFact({
+      editResult,
+      preEditGraph: preGraph,
+      hasExistingAnalysis: false,
+    });
+    expect(fact).not.toBeNull();
+    expect(fact!.fact_type).toBe('edit_graph');
+
+    // affected_entities label must be the real label, NOT the generic.
+    expect(fact!.result.affected_entities).toHaveLength(1);
+    expect(fact!.result.affected_entities[0].label).toBe('Team morale');
+    expect(fact!.result.affected_entities[0].kind).toBe('factor');
+
+    // safe_summary must contain the real label, never the generic OR
+    // the raw id.
+    expect(fact!.result.safe_summary).toContain('Team morale');
+    expect(fact!.result.safe_summary).not.toContain('the relevant factor');
+    expect(fact!.result.safe_summary).not.toContain('the relevant element');
+    expect(fact!.result.safe_summary).not.toContain('fac_team_morale');
+
+    // recent_changes projector surfaces the same display-safe summary.
+    const recent = projectRecentChanges([fact as unknown as HandlerFact]);
+    expect(recent).toHaveLength(1);
+    expect(recent[0].summary).toBe(fact!.result.safe_summary);
+    expect(recent[0].summary).not.toContain('the relevant factor');
+    expect(recent[0].summary).not.toContain('fac_team_morale');
+  });
+
+  it('E2E10 multi-op compound (add + remove + update_node): every label is real', () => {
+    // Compound edit covering three NODE label-resolution paths to
+    // exercise the Phase 2a step 3 contract end-to-end:
+    //  - add_node fac_c → label resolved from the op value (post-edit
+    //    graph also has the new node).
+    //  - remove_node fac_a → label only in pre-edit graph (Phase 2a
+    //    step 3 fix path — preGraph fallback in resolveElementLabel
+    //    AND in sanitiseAffectedEntityLabel).
+    //  - update_node fac_b → label resolvable from both graphs.
+    //
+    // The test deliberately avoids `update_edge` here. The
+    // `change.label` field for an edge op is the edge path (`from::to`)
+    // — pre-existing behaviour from buildAppliedChanges that pre-dates
+    // Phase 2a step 3. The downstream sanitiser then maps that slug
+    // shape to the prefix-generic `'the relevant factor'`. Asserting
+    // a clean multi-op summary including an edge would require an
+    // edge-label improvement that's out of scope for this PR (the
+    // brief restricts scope to label resolution for nodes).
+    const preGraph: GraphV3T = {
+      nodes: [
+        { id: 'fac_a', kind: 'factor', label: 'Alpha factor' },
+        { id: 'fac_b', kind: 'factor', label: 'Beta factor' },
+        { id: 'goal_y', kind: 'goal', label: 'Yield goal' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+
+    const postGraph: GraphV3T = {
+      nodes: [
+        // fac_a removed.
+        { id: 'fac_b', kind: 'factor', label: 'Beta factor (revised)' },
+        { id: 'goal_y', kind: 'goal', label: 'Yield goal' },
+        // fac_c added.
+        { id: 'fac_c', kind: 'factor', label: 'Gamma factor' },
+      ],
+      edges: [],
+    } as unknown as GraphV3T;
+
+    const operations: PatchOperation[] = [
+      {
+        op: 'add_node',
+        path: 'fac_c',
+        value: { id: 'fac_c', kind: 'factor', label: 'Gamma factor' },
+      },
+      { op: 'remove_node', path: 'fac_a' },
+      {
+        op: 'update_node',
+        path: 'fac_b',
+        value: { label: 'Beta factor (revised)' },
+        old_value: { label: 'Beta factor' },
+      },
+    ];
+
+    // Drive the receipt through the production helper.
+    const appliedChanges = buildAppliedChanges(operations, postGraph, true, preGraph);
+    expect(appliedChanges.changes).toHaveLength(3);
+
+    // Every change.label must be a real label string, never a raw id
+    // or the prefix-generic placeholder.
+    for (const change of appliedChanges.changes) {
+      expect(change.label).toBeTruthy();
+      expect(change.label).not.toContain('the relevant');
+      expect(change.label).not.toMatch(/^(fac|goal|opt|edge|risk|out|dec|con)_/);
+    }
+
+    // Per-row descriptions surface friendly labels for every op.
+    const descriptionsJoined = appliedChanges.changes.map((c) => c.description).join(' ');
+    expect(descriptionsJoined).toContain('Alpha factor');
+    expect(descriptionsJoined).toContain('Gamma factor');
+    expect(descriptionsJoined).toContain('Beta factor');
+
+    // Multi-op summary format is "N model parameters updated: ...".
+    expect(appliedChanges.summary).toMatch(/^3 model parameters updated:/);
+    // All three real labels appear in the summary in some order.
+    expect(appliedChanges.summary).toContain('Alpha factor');
+    expect(appliedChanges.summary).toContain('Gamma factor');
+    expect(appliedChanges.summary).toMatch(/Beta factor/);
+    expect(appliedChanges.summary).not.toContain('the relevant factor');
+    expect(appliedChanges.summary).not.toContain('the relevant element');
+    expect(appliedChanges.summary).not.toMatch(/\bfac_/);
+    expect(appliedChanges.summary).not.toMatch(/\bgoal_/);
+
+    const editResult: EditGraphResult = {
+      blocks: [],
+      assistantText: appliedChanges.summary,
+      latencyMs: 200,
+      appliedGraph: postGraph,
+      wasRejected: false,
+      appliedChanges,
+      operations,
+      operation_meta: [
+        { impact: 'moderate', rationale: 'Added factor.' },
+        { impact: 'moderate', rationale: 'Removed factor.' },
+        { impact: 'low', rationale: 'Renamed factor.' },
+      ],
+    };
+
+    const fact = buildEditGraphHandlerFact({
+      editResult,
+      preEditGraph: preGraph,
+      hasExistingAnalysis: true,
+    });
+    expect(fact).not.toBeNull();
+    expect(fact!.result.operations_count).toBe(3);
+
+    // Every affected_entities label is the real label for all three
+    // ops — this is the Phase 2a step 3 contract. The remove_node
+    // entry (Alpha factor) recovers via the preGraph fallback in
+    // BOTH `resolveElementLabel` AND `sanitiseAffectedEntityLabel`.
+    expect(fact!.result.affected_entities).toHaveLength(3);
+    for (const entity of fact!.result.affected_entities) {
+      expect(entity.label).toBeTruthy();
+      expect(entity.label).not.toContain('the relevant');
+      expect(entity.label).not.toMatch(/^(fac|goal|opt|risk|out|dec|con)_/);
+    }
+    const labels = fact!.result.affected_entities.map((e) => e.label);
+    expect(labels).toContain('Alpha factor');
+    expect(labels).toContain('Gamma factor');
+
+    // safe_summary contains real labels, never the prefix-generic
+    // placeholders or raw entity ids. (80-char cap may truncate the
+    // tail; assert presence of at least one of the node labels and
+    // assert no generic / id leaks anywhere.)
+    expect(
+      fact!.result.safe_summary.includes('Alpha factor') ||
+        fact!.result.safe_summary.includes('Gamma factor') ||
+        fact!.result.safe_summary.includes('Beta factor'),
+    ).toBe(true);
+    expect(fact!.result.safe_summary).not.toContain('the relevant factor');
+    expect(fact!.result.safe_summary).not.toContain('the relevant element');
+    expect(fact!.result.safe_summary).not.toMatch(/\bfac_/);
+    expect(fact!.result.safe_summary).not.toMatch(/\bgoal_/);
   });
 });

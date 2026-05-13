@@ -201,9 +201,12 @@ export function buildEditGraphHandlerFact(
     appliedGraph,
     preEditGraph,
   );
+  // Phase 2a step 3: pre-edit graph also threaded into the safe-summary
+  // path so a recovered pre-edit label (e.g. for remove_node) survives the
+  // sanitiser without being collapsed to the prefix-generic fallback.
   const graph_hash_before = preEditGraph ? hashGraph(preEditGraph) : null;
   const graph_hash_after = appliedGraph ? hashGraph(appliedGraph) : null;
-  const safe_summary = deriveSafeSummary(appliedChanges.summary, appliedGraph);
+  const safe_summary = deriveSafeSummary(appliedChanges.summary, appliedGraph, preEditGraph);
   const impact = deriveImpact(operations, editResult.operation_meta);
   const rerun_recommended = appliedChanges.rerun_recommended === true;
 
@@ -299,7 +302,10 @@ function projectAffectedEntities(
     const change = changes[i];
     const op = operations[i];
     const kind = deriveEntityKind(change, op, postGraph, preGraph);
-    const label = sanitiseAffectedEntityLabel(change.label, kind, postGraph);
+    // Phase 2a step 3: pass preGraph so a label that the upstream resolver
+    // recovered from the pre-edit graph (e.g. for remove_node) survives
+    // the sanitiser instead of being collapsed to "the relevant <kind>".
+    const label = sanitiseAffectedEntityLabel(change.label, kind, postGraph, preGraph);
     out.push({ kind, label });
   }
   return out;
@@ -315,10 +321,21 @@ function projectAffectedEntities(
  * entity-id pattern (`fac_delivery_cost` accidentally used as a label)
  * would all surface raw IDs through to the fact. Defence in depth.
  *
+ * Phase 2a step 3: also accepts `preGraph` so any entity present only in
+ * the pre-edit graph (most importantly the target of a `remove_node` op)
+ * can still resolve to its real label. Without this, a recovered pre-edit
+ * label like `"fac_team_morale"` (raw id form) would be re-stripped to
+ * `"the relevant factor"` because `sanitiseUserFacingText` against the
+ * post-edit graph alone cannot find a label for an entity that no longer
+ * exists. The companion `resolveElementLabel` widening in
+ * `src/orchestrator/tools/edit-graph.ts` and the union-graph used here
+ * are the two halves of the contract — both must consult `preGraph` for
+ * the recovery path to survive end-to-end.
+ *
  * Steps (parallel to `deriveSafeSummary` for `safe_summary`):
  *  1. Trim whitespace; if empty, fall back to `'the relevant <kind>'`.
- *  2. Run `sanitiseUserFacingText` against the post-edit graph
- *     (entity-ID scrub).
+ *  2. Run `sanitiseUserFacingText` against a graph that unions post-edit
+ *     and pre-edit nodes (entity-ID scrub with full label coverage).
  *  3. If the sanitiser stripped to empty or the result contains a
  *     forbidden Phase 2A jargon token, fall back to
  *     `'the relevant <kind>'`.
@@ -330,12 +347,14 @@ function sanitiseAffectedEntityLabel(
   rawLabel: string | undefined,
   kind: EditGraphHandlerFact['result']['affected_entities'][number]['kind'],
   postGraph: GraphV3T,
+  preGraph: GraphV3T | null,
 ): string {
   const fallback = `the relevant ${kind}`;
   const trimmed = (rawLabel ?? '').trim();
   if (trimmed.length === 0) return fallback;
 
-  const sanitised = sanitiseUserFacingText(trimmed, postGraph);
+  const lookupGraph = mergeGraphsForLabelLookup(postGraph, preGraph);
+  const sanitised = sanitiseUserFacingText(trimmed, lookupGraph);
   const text = sanitised.text;
   if (!text || text.trim().length === 0) return fallback;
 
@@ -348,6 +367,47 @@ function sanitiseAffectedEntityLabel(
   // fall back rather than leak the ID through to the fact.
   if (containsConfirmedRawIdShape(text)) return fallback;
   return text;
+}
+
+/**
+ * Build a label-lookup graph that unions post-edit and pre-edit nodes.
+ *
+ * Used by the sanitiser path so that an entity present only in `preGraph`
+ * (e.g. the target of a `remove_node` op) still resolves to its real
+ * label rather than falling back to the prefix-generic `'the relevant
+ * <kind>'`. Post-edit nodes win on id collision (the post-edit graph is
+ * the canonical current state for any id that exists in both).
+ *
+ * Returns the post-edit graph unchanged when `preGraph` is null OR when
+ * pre-edit contributes no new ids — avoids unnecessary allocation on the
+ * common single-graph path. The returned shape only needs to be readable
+ * by `resolveLabel` (id + label fields), so we cast through `GraphV3T`
+ * even though we don't reproduce edges or any other GraphV3 fields.
+ */
+function mergeGraphsForLabelLookup(postGraph: GraphV3T, preGraph: GraphV3T | null): GraphV3T {
+  if (!preGraph) return postGraph;
+  const postNodes = ((postGraph as { nodes?: Array<{ id?: string }> }).nodes ?? []) as Array<{
+    id?: string;
+  }>;
+  const preNodes = ((preGraph as { nodes?: Array<{ id?: string }> }).nodes ?? []) as Array<{
+    id?: string;
+  }>;
+  if (preNodes.length === 0) return postGraph;
+  const knownIds = new Set<string>();
+  for (const n of postNodes) {
+    if (typeof n.id === 'string') knownIds.add(n.id);
+  }
+  const additions: Array<{ id?: string }> = [];
+  for (const n of preNodes) {
+    if (typeof n.id !== 'string') continue;
+    if (knownIds.has(n.id)) continue;
+    additions.push(n);
+  }
+  if (additions.length === 0) return postGraph;
+  return {
+    ...(postGraph as object),
+    nodes: [...postNodes, ...additions],
+  } as unknown as GraphV3T;
 }
 
 /**
@@ -411,17 +471,19 @@ function normaliseKind(
  * Derive `safe_summary` from `appliedChanges.summary` per the contract:
  *
  * 1. Run `sanitiseUserFacingText` over the input (entity-ID scrub
- *    against the post-edit graph).
+ *    against a graph that unions post-edit + pre-edit nodes — Phase 2a
+ *    step 3, so a remove_node target's label still resolves).
  * 2. Apply the Phase 2A jargon-guard — if any forbidden token is
  *    present after sanitisation, fall back to `SAFE_SUMMARY_FALLBACK`.
  * 3. If empty after trim, fall back.
  * 4. Truncate to `SAFE_SUMMARY_MAX_CHARS` with an ellipsis suffix when
  *    the source exceeded the cap.
  */
-function deriveSafeSummary(rawSummary: string, postGraph: GraphV3T): string {
+function deriveSafeSummary(rawSummary: string, postGraph: GraphV3T, preGraph: GraphV3T | null): string {
   if (!rawSummary || rawSummary.trim().length === 0) return SAFE_SUMMARY_FALLBACK;
 
-  const sanitised = sanitiseUserFacingText(rawSummary, postGraph);
+  const lookupGraph = mergeGraphsForLabelLookup(postGraph, preGraph);
+  const sanitised = sanitiseUserFacingText(rawSummary, lookupGraph);
   let s = sanitised.text;
   if (!s || s.trim().length === 0) return SAFE_SUMMARY_FALLBACK;
 
