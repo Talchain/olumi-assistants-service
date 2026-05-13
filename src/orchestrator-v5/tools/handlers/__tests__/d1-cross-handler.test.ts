@@ -39,10 +39,12 @@
  * even when the semantic value was already the proposed one:
  *
  *   - `set_factor_value` sets `node.provenance = 'user_set'` and
- *     recomputes `display_value` (same inputs → same output, so
- *     display_value is unchanged on a value noop, but provenance flips
- *     to `user_set` even when the prior provenance was, e.g.,
- *     `brief_extracted`).
+ *     unconditionally recomputes `display_value` via the canonical
+ *     synthesiser. `display_value` may be repaired (e.g. a stale string
+ *     replaced with the canonical one, or cleared when the synthesiser
+ *     declines), but it is non-analysis-affecting. Provenance may flip
+ *     to `'user_set'` even when the prior `NodeV3.provenance` enum was
+ *     `'from_brief'` or `'ai_inferred'`.
  *   - `adjust_edge_strength` stamps `edge.provenance.source =
  *     'user_specified'` and `edge.provenance_display = 'user_set'`.
  *
