@@ -572,9 +572,9 @@ Note on "reduce by a third": maps to `operator: decrement` (subtract one-third, 
 | Handler | Phase | Status | PLoT call | Invalidates analysis | Entity kinds |
 |---|---|---|---|---|---|
 | `run_analysis` | C2 | Shipped | `/v2/run` | No (produces analysis) | N/A (global) |
-| `set_factor_value` | D1 | Planned | No | Yes, scoped | `factor` |
-| `add_constraint` | D1 | Planned | No | Yes, scoped | `goal`, `constraint` |
-| `adjust_edge_strength` | D1 | Planned | No | Yes, scoped | `edge` |
+| `set_factor_value` | D1 | Shipped | No | Yes, scoped | `factor` |
+| `add_constraint` | D1 | Shipped | No | Yes, scoped | `factor`, `outcome`, `goal`, `risk` |
+| `adjust_edge_strength` | D1 | Shipped | No | Yes, scoped | `edge` |
 | `draft_graph` | V4 re-use | Wrapped | CEE internal | Yes, full | N/A (global) |
 | `edit_graph` | V4 re-use | Wrapped | CEE internal | Yes, scoped | All kinds |
 | `explain_results` | E1 | Planned | CEE internal LLM | No | N/A (global) |
@@ -840,6 +840,8 @@ Untagged sections are operational/Shipped or self-contained design decisions.
 | §12 | Split Status into Phase + Status columns | Clarity |
 | §12 | Fixed `add_constraint` entity kinds to `goal`, `constraint` | Inconsistency with prompt |
 | §12 | Added parameter schema (Zod) reference | Missing link for §6 check #4 |
+| §12 | Marked D1 handlers (`set_factor_value`, `add_constraint`, `adjust_edge_strength`) as Shipped; previous "Planned" status was stale (slice delivered via `feat(v5/d1)` commit series, with A3.1 follow-up tasks 1–5 and two rounds of review nits; latest D1-touching commit `8f0dc939`) | Doc drift surfaced by D1 audit |
+| §12 | Expanded `add_constraint` accepted entity kinds from `goal`, `constraint` to `factor`, `outcome`, `goal`, `risk` to match live allowlist (A3.1 Task 5 added `risk` targets) | Doc drift vs `src/orchestrator-v5/tools/handlers/add-constraint.ts` |
 | §13.1 | Fixed label-tier definitions (validated = human-reviewed or GTX gold) | Overlap between tiers |
 | §13.1 | Added redaction policy | GDPR-sensitive field undefined |
 | §13.2 | Fixed logging persistence: JSONL now, Supabase Phase 4 | Contradictory statements |
