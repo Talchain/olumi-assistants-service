@@ -205,6 +205,8 @@ import {
   recordFailureContext,
   type TurnDebugFreshnessSummary,
 } from './debug/turn-debug-store.js';
+import type { V5TurnTimings, RunAnalysisTimings } from './telemetry/turn-timings.js';
+import { config } from '../config/index.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -358,7 +360,24 @@ export async function runTurnExecutor(
   const startedAt = Date.now();
   const stagesCompleted: string[] = [];
 
+  // Fix 4 (observability): per-step wall-clock accumulator. Populated at
+  // the main happy-path call sites (build context, context pack, routing
+  // LLM, handler EXECUTE, COMMIT). Recovery / chip-click / short-confirm
+  // paths populate the subset they actually exercise — missing fields are
+  // themselves a useful signal ("this path skipped routing").
+  // Surfaced in `finalizeRun` via TelemetryEvents.V5TurnStageTimings + an
+  // optional `_timings.turn` block on the response envelope (gated by
+  // `config.cee.timingDebugEnabled`).
+  const turnTimings: V5TurnTimings = {};
+  // Handler-level run_analysis PLoT timings are reported back via a
+  // dedicated `__plot_timings` slot on the HandlerOutcome. The executor
+  // copies them into `runAnalysisTimings` so they reach the response
+  // envelope alongside the per-turn timings.
+  let runAnalysisTimings: RunAnalysisTimings | undefined;
+
+  const buildContextStartedAt = Date.now();
   const context = await buildTurnContext(payload, requestId);
+  turnTimings.build_turn_context_ms = Date.now() - buildContextStartedAt;
   stagesCompleted.push('build_turn_context');
 
   // V5 alpha hardening Phase 2.5: one-query observability. v5_journey_id
@@ -796,6 +815,7 @@ export async function runTurnExecutor(
       const compactedConstraints = compactedGraph
         ? (graphStateForTurn?.goal_constraints ?? null)
         : null;
+      const contextPackStartedAt = Date.now();
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
@@ -821,6 +841,8 @@ export async function runTurnExecutor(
       });
       contextPackForLog = contextPack;
       contextPackCharsForObs = JSON.stringify(contextPack).length;
+      turnTimings.context_pack_assembly_ms = Date.now() - contextPackStartedAt;
+      turnTimings.context_pack_chars = contextPackCharsForObs;
 
       // V5 alpha hardening Phase 2.5: primary lifecycle event — carries
       // the full obs field set so one log query reveals ContextPack
@@ -2877,12 +2899,46 @@ export async function runTurnExecutor(
           recent_changes_field_present: recentChangesEvidence.field_present,
           recent_changes_hash: recentChangesEvidence.hash,
         });
+        const routingStartedAt = Date.now();
         routingResult = await routeWithToolUse(contextPack, payload.message, {
           requestId,
           sessionId: context.session_id,
           signal: turnAbort.signal,
           adapter: options.routingAdapter,
         });
+        turnTimings.routing_llm_ms = Date.now() - routingStartedAt;
+        // Fix 4: capture cache state from rawResult.usage. The routing
+        // module emits its own v5.prompt_cache event for canonical
+        // dashboards; this mirror lets the harness read cache state from
+        // the response envelope without a log join. cache_hit semantics
+        // match emitV5PromptCache: read>0 → hit, read===0 → miss,
+        // usage missing → unknown.
+        try {
+          const usage = routingResult.rawResult?.usage as
+            | {
+                cache_read_input_tokens?: number;
+                cache_creation_input_tokens?: number;
+                input_tokens?: number;
+              }
+            | undefined;
+          const cacheRead = usage?.cache_read_input_tokens;
+          const cacheCreate = usage?.cache_creation_input_tokens;
+          const inputTokens = usage?.input_tokens;
+          if (typeof cacheRead === 'number') {
+            turnTimings.routing_cache = cacheRead > 0 ? 'hit' : 'miss';
+            turnTimings.cache_read_input_tokens = cacheRead;
+          } else {
+            turnTimings.routing_cache = 'unknown';
+          }
+          if (typeof cacheCreate === 'number') {
+            turnTimings.cache_creation_input_tokens = cacheCreate;
+          }
+          if (typeof inputTokens === 'number') {
+            turnTimings.total_input_tokens = inputTokens;
+          }
+        } catch {
+          turnTimings.routing_cache = 'unknown';
+        }
         // Account for actual routing-call count (1 on first-pass success,
         // 2 when REPAIR_ONCE used). The router knows; we trust its count.
         llmCallsUsed = routingResult.llmCallCount;
@@ -3258,6 +3314,7 @@ export async function runTurnExecutor(
         if (!handlerFn) {
           throw new UnhandledTurnClassError('handler_not_registered', proposedHandlerId);
         }
+        const handlerStartedAt = Date.now();
         handlerOutcome = await handlerFn({
           context,
           payload,
@@ -3272,6 +3329,18 @@ export async function runTurnExecutor(
           graphForTurn: graphStateForTurn ?? undefined,
           analysisFreshness: routingFreshness ?? undefined,
         });
+        turnTimings.handler_execute_ms = Date.now() - handlerStartedAt;
+        turnTimings.handler_id = proposedHandlerId;
+        // Fix 4: handlers may opt into surfacing their internal timings
+        // (run_analysis exposes PLoT request time) via a non-public
+        // `__plot_timings` property on the outcome. The executor copies
+        // it to runAnalysisTimings for the response envelope; absent on
+        // handlers that don't make outbound calls (mutators, explainers).
+        const plotTimings = (handlerOutcome as unknown as { __plot_timings?: RunAnalysisTimings })
+          .__plot_timings;
+        if (plotTimings) {
+          runAnalysisTimings = plotTimings;
+        }
         llmCallsUsed += handlerOutcome.llm_calls_used;
         stagesCompleted.push('execute');
         handlerIdForCommit = proposedHandlerId;
@@ -3966,6 +4035,7 @@ export async function runTurnExecutor(
         handlerOutcome?.mutated_graph !== undefined
           ? handlerOutcome.mutated_graph
           : options.graphState;
+      const commitStartedAt = Date.now();
       const committed = await commitDirectAnswer(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
@@ -3977,6 +4047,7 @@ export async function runTurnExecutor(
         handler_facts: handlerFactsForCommit,
         graph: graphForCommit,
       });
+      turnTimings.commit_ms = Date.now() - commitStartedAt;
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
       response = committed.response;
@@ -4211,6 +4282,43 @@ export async function runTurnExecutor(
     // the contradiction list this enforces.
     enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
+    // Fix 4 (observability): finalise turn timings. total_ms matches the
+    // existing wall_clock_ms but lives in the structured timing block so
+    // downstream consumers don't have to join two fields. handler_id,
+    // llm_calls_used echo telemetry fields so a single `_timings.turn`
+    // block answers "what handler did what work in how long".
+    turnTimings.total_ms = Date.now() - startedAt;
+    turnTimings.llm_calls_used = llmCallsUsed;
+    if (!turnTimings.handler_id) {
+      turnTimings.handler_id = null;
+    }
+    emit(TelemetryEvents.V5TurnStageTimings, {
+      request_id: requestId,
+      session_id: context.session_id,
+      v5_journey_id: context.session_id,
+      ...turnTimings,
+      ...(runAnalysisTimings ? { run_analysis: runAnalysisTimings } : {}),
+    });
+    // Surface on the response envelope only when V5_TIMING_DEBUG=true so
+    // production response shape is unchanged by default. The block is
+    // additive (`_timings` prefix matches `_pipeline_outcome`) and ignored
+    // by clients that don't expect it.
+    if (config.cee.timingDebugEnabled && response && typeof response === 'object') {
+      try {
+        const existing = (response as Record<string, unknown>)._timings;
+        const block = existing && typeof existing === 'object'
+          ? { ...(existing as Record<string, unknown>) }
+          : ({} as Record<string, unknown>);
+        block.turn = turnTimings;
+        if (runAnalysisTimings) block.run_analysis = runAnalysisTimings;
+        response = {
+          ...response,
+          _timings: block,
+        } as OlumiResponse;
+      } catch {
+        // Never block the response on a timing-decoration failure.
+      }
+    }
     return {
       response,
       analysisReady: analysisReadyForTurn,

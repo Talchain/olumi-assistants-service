@@ -483,6 +483,13 @@ export const TelemetryEvents = {
   HandlerInvocation: "v5.handler_invocation",
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
+  // V5 latency observability (Fix 4 — per-stage timings).
+  // Always emitted; the matching `_timings` block on the response envelope
+  // is gated by `cee.timingDebugEnabled` (env `V5_TIMING_DEBUG=true`).
+  V5TurnStageTimings: "v5.turn_executor.stage_timings",
+  V5RunAnalysisTimings: "v5.run_analysis.timings",
+  CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
+
   // V5 pending-action lifecycle. Fired at the appropriate point in the
   // resume cycle. No raw graph / analysis / target-label values in
   // payloads; only ids and bounded enums.

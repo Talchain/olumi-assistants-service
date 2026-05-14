@@ -63,8 +63,16 @@ import {
   HandlerResultInvalidError,
 } from '../handler-errors.js';
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
+import type { RunAnalysisTimings } from '../../telemetry/turn-timings.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
+
+// Heuristic threshold for `plot_cold_likely`. Hot PLoT calls on the Render
+// staging deploy complete in ~3-6 s; cold starts (post-idle Render dyno
+// rehydration) often run 12-20 s. The 8 s line is a conservative midpoint;
+// false positives are harmless (it's a hint, not a gate) and the field is
+// reported as `boolean | null` so consumers know when it's been computed.
+const PLOT_COLD_LIKELY_MS = 8000;
 
 // Re-export handler-generic errors for backwards compatibility with test
 // modules that imported them directly from run-analysis.js. The canonical
@@ -310,14 +318,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
+    const handlerStartedAt = Date.now();
     const plotStartedAt = Date.now();
+    let plotElapsedMs: number | null = null;
     try {
       response = await deps.plotClient.run(plotPayload, invocation.requestId, {
         turnSignal: invocation.signal,
         turnStartedAt: plotStartedAt,
         turnBudgetMs: getHandlerBudgetMs(),
       });
+      plotElapsedMs = Date.now() - plotStartedAt;
     } catch (runError) {
+      plotElapsedMs = Date.now() - plotStartedAt;
       if (runError instanceof PLoTTimeoutError) {
         throw new HandlerInvocationFailedError(
           'PLoT timed out before returning a response',
@@ -474,11 +486,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     // --- 8. Emit HandlerOutcome ------------------------------------------
-    return {
+    // Fix 4 (observability): per-handler PLoT timings travel back to the
+    // turn-executor via a non-public `__plot_timings` property on the
+    // outcome. The executor copies the block into the V5 turn timings; it
+    // never reaches the wire envelope directly from here. Cold-start
+    // heuristic uses a static threshold (see PLOT_COLD_LIKELY_MS for the
+    // rationale). HandlerOutcome's TypeScript shape doesn't enumerate this
+    // field, hence the inline cast — the executor decodes it with a
+    // matching cast.
+    const plotTimings: RunAnalysisTimings = {
+      handler_total_ms: Date.now() - handlerStartedAt,
+      ...(plotElapsedMs !== null ? { plot_request_ms: plotElapsedMs } : {}),
+      plot_status: typeof analysisStatus === 'string' ? analysisStatus : null,
+      plot_cold_likely:
+        plotElapsedMs === null ? null : plotElapsedMs >= PLOT_COLD_LIKELY_MS,
+    };
+    emit(TelemetryEvents.V5RunAnalysisTimings, {
+      request_id: invocation.requestId,
+      scenario_id: args.scenario_id,
+      ...plotTimings,
+    });
+    const outcome = {
       assistant_text: template,
       handler_facts: [parsed.data],
       llm_calls_used: 0,
-    };
+      __plot_timings: plotTimings,
+    } as unknown as HandlerOutcome;
+    return outcome;
   };
 }
 

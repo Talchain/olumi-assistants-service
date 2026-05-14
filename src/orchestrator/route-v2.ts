@@ -231,13 +231,28 @@ function sendFinalised200(
   // currently hard-coded clean; scrubbing it is defence-in-depth against
   // future fallback drift. See output-safety.ts for the design rationale.
   const candidateFinalised = finaliseV5Response(candidate, ctx);
-  const candidateSanitised = sanitiseOlumiResponseForEgress(candidateFinalised, {
+  // Fix 4 (observability): pluck out the optional `_timings` block before
+  // egress validation. OlumiResponseSchema is `.strict()` — unknown keys
+  // would fail safeParse and trigger the typed-fallback path. We strip,
+  // validate the cleaned shape, and re-attach the block to the wire body
+  // after re-finalisation. The block is gated by `config.cee.timingDebugEnabled`
+  // so production responses have nothing to strip.
+  const timingsForWire = (candidateFinalised as Record<string, unknown>)._timings;
+  const candidateForValidation =
+    timingsForWire !== undefined
+      ? (() => {
+          const cloned = { ...(candidateFinalised as Record<string, unknown>) };
+          delete cloned._timings;
+          return cloned as import('@talchain/schemas/boundary').OlumiResponse;
+        })()
+      : candidateFinalised;
+  const candidateSanitised = sanitiseOlumiResponseForEgress(candidateForValidation, {
     graph: ctx.graph,
     requestId,
     exitPath,
   });
   const egress = validateEgress(candidateSanitised, requestId);
-  const wireBody = egress.ok
+  let wireBody = egress.ok
     ? finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath }),
         ctx,
@@ -250,6 +265,21 @@ function sendFinalised200(
     log.error(
       { request_id: requestId, exit_path: exitPath },
       'V5 egress validation failed — returning typed fallback envelope (post-finalised)',
+    );
+  }
+  // Re-attach `_timings` post-validation only on the success path; the
+  // fallback envelope intentionally carries no debug surface. Spreading
+  // breaks WeakSet membership (Mechanism B of the finaliser brand), so we
+  // re-finalise the augmented body so the preSerialization hook still sees
+  // a valid branded response.
+  if (egress.ok && timingsForWire !== undefined) {
+    const augmented = {
+      ...(wireBody as Record<string, unknown>),
+      _timings: timingsForWire,
+    } as unknown as import('@talchain/schemas/boundary').OlumiResponse;
+    wireBody = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      ctx,
     );
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);

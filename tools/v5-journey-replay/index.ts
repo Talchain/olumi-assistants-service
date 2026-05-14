@@ -63,6 +63,7 @@ import { writeEvidencePack, type EvidenceHeader } from './evidence-writer.js';
 import { classifyResponse, hasErrorEnvelope, isTransportError } from './classify-outcome.js';
 import { isLocalHost } from './localhost.js';
 import { createRedactor, redactString } from './redact.js';
+import { formatTimingsEvidence } from './format-timings.js';
 import type { EvidenceRow, HarnessConfig, HealthzResult, PreflightVerdict } from './types.js';
 
 const MISSING_KEY_MESSAGE =
@@ -593,23 +594,34 @@ async function run(): Promise<void> {
           ...(chip.action_type !== undefined ? { action_type: chip.action_type } : {}),
         }));
 
+        // Fix 5: surface the server-side `_timings` block on every
+        // evidence row when present. Always-on (cheap; empty string when
+        // the server didn't include the block) so V5_TIMING_DEBUG on
+        // staging is the single switch needed to get per-stage numbers
+        // into the replay markdown.
+        const timingsEvidence = formatTimingsEvidence(result.body);
+        const composeEvidence = (base: string): string => {
+          if (timingsEvidence.length === 0) return base;
+          return `${base} ${timingsEvidence}`;
+        };
+
         if (assertion.ok) {
           rows.push({
             step: step.name,
             status: 'passed',
-            evidence: redactString(assertion.evidence, cfg.apiKey),
+            evidence: redactString(composeEvidence(assertion.evidence), cfg.apiKey),
             outcome_class: outcomeClass,
             http_status: result.status,
             assistant_text: assistantTextRedacted,
             journey_id: cfg.journey,
             chips: chipsRedacted,
           });
-          console.log(`[PASS] ${step.name}: ${redact(assertion.evidence)}`);
+          console.log(`[PASS] ${step.name}: ${redact(composeEvidence(assertion.evidence))}`);
         } else {
           rows.push({
             step: step.name,
             status: 'failed',
-            evidence: redactString(assertion.evidence, cfg.apiKey),
+            evidence: redactString(composeEvidence(assertion.evidence), cfg.apiKey),
             failing_contract: redactString(assertion.failing_contract, cfg.apiKey),
             outcome_class: outcomeClass,
             http_status: result.status,
@@ -618,7 +630,7 @@ async function run(): Promise<void> {
             chips: chipsRedacted,
           });
           console.log(
-            `[FAIL] ${step.name}: ${redact(assertion.failing_contract)} | ${redact(assertion.evidence)}`,
+            `[FAIL] ${step.name}: ${redact(assertion.failing_contract)} | ${redact(composeEvidence(assertion.evidence))}`,
           );
           notPassed.add(step.name);
         }
