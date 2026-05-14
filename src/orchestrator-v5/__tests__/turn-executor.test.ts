@@ -603,7 +603,14 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       expect(telemetry.failure_type).toBeNull();
     });
 
-    it('schema repair failed after one retry → LLM_SCHEMA_VIOLATION envelope', async () => {
+    it('schema repair failed after one retry → bounded fallback 200 direct_answer (V5 P0)', async () => {
+      // V5 P0 stabilisation: model-output failures (schema_repair_failed
+      // / empty_response / unexpected_stop_reason) used to surface as
+      // a 500 BoundaryError. They now degrade to a deterministic
+      // direct_answer envelope so the user's session and prior analysis
+      // survive. The wire envelope is a success (no error block), but
+      // telemetry still records the underlying LLM_UNAVAILABLE cause
+      // for ops dashboards.
       const routingAdapter = mockRoutingAdapter(
         vi.fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
           .mockResolvedValueOnce(mkToolUseResult({ intent_class: 'execute' }))
@@ -615,11 +622,12 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       });
 
       const parsed = OlumiResponseSchema.parse(response);
-      expect(parsed.blocks[0]!.type).toBe('error');
-      if (parsed.blocks[0]!.type === 'error') {
-        expect(parsed.blocks[0]!.error_code).toBe('LLM_UNAVAILABLE');
-      }
+      // No error block — bounded fallback emits a direct_answer envelope.
+      expect(parsed.blocks.some((b) => b.type === 'error')).toBe(false);
+      expect(parsed.assistant_text).toContain("I couldn't complete that turn cleanly");
+      // Telemetry preserves the underlying failure cause.
       expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+      expect(telemetry.commit_performed).toBe(true);
       expectBI01();
     });
 

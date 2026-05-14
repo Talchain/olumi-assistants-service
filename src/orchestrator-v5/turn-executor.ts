@@ -83,6 +83,7 @@ import {
   composeStateQueryChip,
   tryStateQueryGuard,
 } from './routing/state-query-guard.js';
+import { tryPostAnalysisAdviceGate } from './routing/post-analysis-advice-gate.js';
 import { tryProposalOrdinalSelect } from './routing/proposal-ordinal-select.js';
 import {
   PROPOSAL_DISMISSAL_RESPONSE,
@@ -199,7 +200,11 @@ import type {
   IntentClass,
   ResolutionStatus,
 } from './routing/types.js';
-import { storeTurnDebug } from './debug/turn-debug-store.js';
+import {
+  storeTurnDebug,
+  recordFailureContext,
+  type TurnDebugFreshnessSummary,
+} from './debug/turn-debug-store.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -2745,6 +2750,87 @@ export async function runTurnExecutor(
         }
       }
 
+      // V5 P0 stabilisation — post-analysis advice gate.
+      //
+      // When prior analysis is available AND the user's message is an
+      // advice/coaching question AND it carries no concrete graph-
+      // mutation signal, short-circuit to a deterministic direct_answer
+      // composed from the existing analysis projection. Closes the
+      // canonical misroute class where "How do you recommend we update
+      // the decision based on this?" reaches edit_graph and surfaces
+      // the no-op denial copy. The legitimate edit path is preserved by
+      // the mutation-signal exclusion patterns inside the gate.
+      if (routingResult === undefined) {
+        const adviceOutcome = tryPostAnalysisAdviceGate({
+          message: payload.message,
+          analysis: contextPack.analysis,
+          // Freshness guard (review P1): the gate must only fire when
+          // the cached projection still matches the live graph,
+          // otherwise the deterministic "X is currently ahead" copy
+          // would mislead after an edit. `freshness` is populated by
+          // the analysis-freshness derivation earlier in the turn.
+          freshness: freshness?.freshness,
+        });
+        emit(TelemetryEvents.V5PostAnalysisAdviceGate, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: adviceOutcome.matched,
+          unmatched_reason: adviceOutcome.matched ? null : adviceOutcome.reason,
+          leading_option_present: !!contextPack.analysis?.leading_option,
+          top_driver_present: adviceOutcome.matched
+            ? adviceOutcome.top_driver_label !== null
+            : false,
+        });
+        if (adviceOutcome.matched) {
+          const adviceResponse = composeDirectAnswerResponse({
+            assistant_text: adviceOutcome.assistant_text,
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = adviceResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitDirectAnswer(adviceResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'post_analysis_advice_gate',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on post-analysis advice gate',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
       // V5 D1 golden-path closure (A3.1): when the deterministic pre-route
       // already synthesised a `routingResult` (unambiguous factor + value
       // case), skip the LLM call entirely. The synthetic result already
@@ -2802,7 +2888,7 @@ export async function runTurnExecutor(
         // failure, 2 on schema_repair_failed). Without this the failure
         // path under-reports llm_calls_used as 0.
         llmCallsUsed = error.llmCallCount;
-        return translateRoutingError(error);
+        return await translateRoutingError(error);
       }
       log.error(
         { request_id: requestId, err: serialiseError(error) },
@@ -4126,8 +4212,162 @@ export async function runTurnExecutor(
     };
   }
 
-  function translateRoutingError(err: RoutingError): TurnExecutorRunResult {
+  /**
+   * Build the safe failure-path freshness summary surfaced via the
+   * turn-debug store. Reads only closure variables that are guaranteed
+   * to be in scope at routing-error time (no raw prompt content; no
+   * user message text).
+   */
+  function buildFailureFreshnessSummary(): TurnDebugFreshnessSummary | undefined {
+    const freshnessVerdict = freshness;
+    const analysisStatus = contextPackForLog?.analysis?.status;
+    const leadingOptionPresent = !!contextPackForLog?.analysis?.leading_option;
+    if (!freshnessVerdict && !analysisStatus && !contextPackForLog) {
+      return undefined;
+    }
+    const summary: TurnDebugFreshnessSummary = {
+      ...(freshnessVerdict ? { freshness: freshnessVerdict.freshness } : {}),
+      ...(freshnessVerdict ? { freshness_reason: freshnessVerdict.reason } : {}),
+      ...(analysisStatus ? { analysis_status: analysisStatus } : {}),
+      leading_option_present: leadingOptionPresent,
+    };
+    return summary;
+  }
+
+  /**
+   * Bounded routing-failure fallback (V5 P0 stabilisation).
+   *
+   * Builds a deterministic direct_answer envelope + recovery chips and
+   * commits it via the normal direct_answer commit path. This converts
+   * model-output failures (max_tokens / empty_response / schema_repair_failed)
+   * from a 500 BoundaryError into a 200 OlumiResponse so the user's
+   * session and prior analysis stay usable. failure_type telemetry still
+   * records the underlying cause via `failureType` + `routingErrorCause`
+   * so ops can chase the upstream signal.
+   *
+   * Copy + chips are conditional on the freshness state (three-way):
+   *  - fresh analysis available → reassure "your current analysis is
+   *    still available" + offer Explain results AND Re-run analysis.
+   *  - stale or unknown analysis → stale-safe copy that does NOT
+   *    promise usable state + offer Re-run analysis only (NEVER
+   *    Explain results, which would deepen the trust hit by pointing
+   *    at a projection that no longer matches the live graph).
+   *  - no prior analysis → "try again" copy + no action chips.
+   */
+  async function commitBoundedRoutingFallback(
+    err: RoutingError,
+  ): Promise<TurnExecutorRunResult> {
+    failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
+    const hasAnalysisProjection =
+      !!contextPackForLog?.analysis &&
+      !!contextPackForLog.analysis.leading_option;
+    const isFresh = freshness?.freshness === 'fresh';
+    const analysisFreshAndAvailable = hasAnalysisProjection && isFresh;
+    const analysisStaleButPresent = hasAnalysisProjection && !isFresh;
+    // Copy contract (review P1 follow-up):
+    //   - fresh prior analysis → reassure that it is still usable
+    //   - stale prior analysis → name the staleness, invite a rerun
+    //   - no prior analysis → invite a retry without implying state
+    // No "recommendation", no raw IDs, no decimals (forbidden-phrase
+    // guard still backstops at the finaliser).
+    let assistantText: string;
+    if (analysisFreshAndAvailable) {
+      assistantText =
+        "I couldn't complete that turn cleanly, but your current analysis is still available.";
+    } else if (analysisStaleButPresent) {
+      assistantText =
+        "I couldn't complete that turn cleanly. The model has changed since the last analysis, so the cached results may be out of date — re-run analysis to see the current picture.";
+    } else {
+      assistantText =
+        "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.";
+    }
+    const runAnalysisChip: SuggestedAction = {
+      id: 'chip_action_run_analysis_retry',
+      label: 'Re-run analysis',
+      message: 'Run the analysis',
+      action_type: 'run_analysis',
+    };
+    const explainResultsChip: SuggestedAction = {
+      id: 'chip_action_explain_results',
+      label: 'Explain results',
+      message: 'Explain the result',
+      action_type: 'explain_results',
+    };
+    // Chip rule:
+    //   fresh   → Explain results + Re-run analysis (both safe)
+    //   stale   → Re-run analysis only (Explain would surface stale results)
+    //   none    → no action chips
+    let chips: SuggestedAction[];
+    if (analysisFreshAndAvailable) {
+      chips = [explainResultsChip, runAnalysisChip];
+    } else if (analysisStaleButPresent) {
+      chips = [runAnalysisChip];
+    } else {
+      chips = [];
+    }
+    const fallbackResponse = composeDirectAnswerResponse({
+      assistant_text: assistantText,
+      stage: context.stage,
+      suggested_actions: chips,
+    });
+    sonnetTextForLog = fallbackResponse.assistant_text;
+    resolvedTurnClass = 'direct_answer';
+    intentClass = 'converse';
+    responseTypeForObs = 'direct_answer';
+    stagesCompleted.push('compose');
+    emit(TelemetryEvents.V5RoutingBoundedFallback, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      routing_error_cause: err.cause,
+      llm_calls_used: llmCallsUsed,
+      analysis_ready: analysisFreshAndAvailable, // finaliser-exempt: telemetry payload field, not the response envelope analysis_ready slot
+      analysis_freshness: freshness?.freshness ?? null,
+    });
+    // recordFailureContext fires at the top of translateRoutingError for
+    // every routing-error cause, including this bounded-fallback path.
+    try {
+      const committed = await commitDirectAnswer(fallbackResponse, {
+        scenario_id: context.session_id,
+        turn_id: context.request_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: llmCallsUsed,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+      });
+      commitPerformed = committed.performed;
+      stagesCompleted.push('commit');
+      response = committed.response;
+    } catch (error) {
+      log.error(
+        {
+          event: 'v5.state_commit_failed',
+          request_id: requestId,
+          session_id: context.session_id,
+          path: 'bounded_routing_fallback',
+          err: serialiseError(error),
+        },
+        'V5 TurnExecutor commit failure on bounded routing fallback',
+      );
+      response = buildFailureResponse(
+        'LLM_SCHEMA_VIOLATION',
+        context.stage,
+        { phase: 'orient', routing_error_cause: err.cause },
+        recoveryCtx(err.cause),
+      );
+    }
+    return finalizeRun();
+  }
+
+  async function translateRoutingError(
+    err: RoutingError,
+  ): Promise<TurnExecutorRunResult> {
     routingErrorCause = err.cause;
+    recordFailureContext(requestId, context.session_id, {
+      route_failure_type: err.cause,
+      freshness_summary: buildFailureFreshnessSummary(),
+    });
     switch (err.cause) {
       case 'timeout':
         failureType = INTERNAL_TO_WIRE.LLM_TIMEOUT;
@@ -4153,14 +4393,15 @@ export async function runTurnExecutor(
       case 'schema_repair_failed':
       case 'empty_response':
       case 'unexpected_stop_reason':
-        failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
-        response = buildFailureResponse(
-          'LLM_SCHEMA_VIOLATION',
-          context.stage,
-          { phase: 'orient', routing_error_cause: err.cause },
-          recoveryCtx(err.cause),
-        );
-        return finalizeRun();
+        // V5 P0 stabilisation — bounded routing-failure fallback.
+        // Model-output failures (max_tokens, empty response, schema repair
+        // exhausted) used to surface as HTTP 500 with LLM_UNAVAILABLE,
+        // losing the user's session entirely. The recovery copy + chips
+        // below degrade to a deterministic direct_answer envelope with
+        // HTTP 200 so the prior analysis remains usable. failure_type
+        // telemetry still records LLM_SCHEMA_VIOLATION so ops can chase
+        // the underlying upstream cause.
+        return commitBoundedRoutingFallback(err);
       case 'api_error': {
         // R-004: do NOT log err.provider_message verbatim. Provider error
         // strings can include echoed prompt content (validation messages

@@ -92,6 +92,11 @@ export async function adminTurnDebugRoutes(app: FastifyInstance): Promise<void> 
         resolution_source: r.resolution_source,
         timestamp: new Date(r.timestamp).toISOString(),
       })),
+      // V5 P0 stabilisation — failure-path observability. Both fields are
+      // present only when the turn-executor's routing-error branch
+      // recorded them; absent for clean success-path turns.
+      route_failure_type: result.route_failure_type ?? null,
+      freshness_summary: result.freshness_summary ?? null,
     });
   });
 

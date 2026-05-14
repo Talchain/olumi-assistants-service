@@ -10,7 +10,7 @@ const mockConfig = {
 vi.mock('../../../config/index.js', () => ({ config: mockConfig }));
 
 // Dynamic import after mock is registered
-const { storeTurnDebug, getTurnDebug, getTurnDebugStoreSize, clearTurnDebugStore, recordModelResolution } =
+const { storeTurnDebug, getTurnDebug, getTurnDebugStoreSize, clearTurnDebugStore, recordModelResolution, recordFailureContext } =
   await import('../turn-debug-store.js');
 
 import type { TurnDebugEntry } from '../turn-debug-store.js';
@@ -181,6 +181,88 @@ describe('TurnDebugStore', () => {
       const result = getTurnDebug('turn-multi');
       if (!result || result === 'expired') throw new Error('unreachable');
       expect(result.model_resolutions?.map((r) => r.resolved_model)).toEqual(['first', 'second']);
+    });
+  });
+
+  describe('recordFailureContext (V5 P0 stabilisation)', () => {
+    it('attaches route_failure_type + freshness_summary to an existing entry', () => {
+      storeTurnDebug(makeEntry('turn-fail-a'));
+      recordFailureContext('turn-fail-a', 'sess-1', {
+        route_failure_type: 'unexpected_stop_reason',
+        freshness_summary: {
+          freshness: 'fresh',
+          freshness_reason: 'state_matches',
+          analysis_status: 'success',
+          leading_option_present: true,
+        },
+      });
+      const result = getTurnDebug('turn-fail-a');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.route_failure_type).toBe('unexpected_stop_reason');
+      expect(result.freshness_summary?.freshness).toBe('fresh');
+      expect(result.freshness_summary?.leading_option_present).toBe(true);
+    });
+
+    it('creates a minimal entry when none exists (context-pack assembly never ran)', () => {
+      recordFailureContext('turn-fail-b', 'sess-b', {
+        route_failure_type: 'timeout',
+      });
+      const result = getTurnDebug('turn-fail-b');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.route_failure_type).toBe('timeout');
+      expect(result.session_id).toBe('sess-b');
+      // CQE skeleton is empty rather than undefined so admin-endpoint
+      // consumers can still read the cqe section without conditional
+      // chaining.
+      expect(result.cqe.parsed_quantities).toHaveLength(0);
+    });
+
+    it('coexists with model_resolutions on the same turn', () => {
+      recordModelResolution('turn-fail-c', 'sess-c', {
+        task: 'orchestrator',
+        resolved_model: 'claude-sonnet-4-6',
+        resolution_source: 'task_default',
+      });
+      recordFailureContext('turn-fail-c', 'sess-c', {
+        route_failure_type: 'schema_repair_failed',
+      });
+      const result = getTurnDebug('turn-fail-c');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.model_resolutions).toHaveLength(1);
+      expect(result.route_failure_type).toBe('schema_repair_failed');
+    });
+
+    it('is a no-op when CEE_TURN_DEBUG_ENABLED is false', () => {
+      mockConfig.cee.turnDebugEnabled = false;
+      recordFailureContext('turn-fail-off', 'sess-off', {
+        route_failure_type: 'unexpected_stop_reason',
+      });
+      expect(getTurnDebugStoreSize()).toBe(0);
+    });
+
+    // P2 merge-semantics regression guard (review): when
+    // recordFailureContext writes first (creating a minimal entry)
+    // and storeTurnDebug then overwrites with a CQE-only entry, the
+    // failure fields must survive — mirrors the model_resolutions
+    // preservation contract.
+    it('preserves route_failure_type + freshness_summary across a subsequent storeTurnDebug overwrite', () => {
+      recordFailureContext('turn-fail-order', 'sess-o', {
+        route_failure_type: 'unexpected_stop_reason',
+        freshness_summary: {
+          freshness: 'fresh',
+          analysis_status: 'success',
+          leading_option_present: true,
+        },
+      });
+      storeTurnDebug(makeEntry('turn-fail-order'));
+      const result = getTurnDebug('turn-fail-order');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.route_failure_type).toBe('unexpected_stop_reason');
+      expect(result.freshness_summary?.freshness).toBe('fresh');
+      expect(result.freshness_summary?.leading_option_present).toBe(true);
+      // CQE writer's content must also remain visible — the merge
+      // preserves BOTH writers, not just one.
+      expect(result.cqe.patterns_matched).toEqual(['rule_currency', 'rule_percent']);
     });
   });
 });

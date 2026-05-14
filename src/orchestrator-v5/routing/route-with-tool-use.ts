@@ -36,6 +36,18 @@ import {
   UpstreamTimeoutError,
 } from '../../adapters/llm/errors.js';
 import { ORCHESTRATOR_TIMEOUT_MS } from '../../config/timeouts.js';
+
+/**
+ * Cap on the routing call's output budget. The routing tool-use call
+ * emits at most a single `olumi_action` tool_use plus a short leading
+ * orientation paragraph; 2048 tokens is generous headroom. The adapter
+ * default of 4096 was previously responsible for long wall-time turns
+ * (observed 36s) that ended in `stop_reason: max_tokens`. Capping here
+ * reduces the worst-case wall time AND moves max_tokens detection
+ * earlier, so the bounded-fallback path in turn-executor's
+ * `translateRoutingError` fires faster.
+ */
+export const V5_ROUTING_MAX_OUTPUT_TOKENS = 2048;
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -461,6 +473,7 @@ export async function routeWithToolUse(
     tools: [OLUMI_ACTION_TOOL],
     tool_choice: { type: 'auto' },
     temperature: 0,
+    maxTokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
   };
 
   assertAnthropicMessageProtocol(firstCallArgs.messages);

@@ -777,6 +777,43 @@ export const TelemetryEvents = {
   // recent_changes ContextPack projection if any mutations exist).
   V5StateQueryGuard: "v5.state_query_guard",
 
+  // V5 P0 stabilisation — post-analysis advice gate.
+  //
+  // Fires once per turn, AFTER the state-query guard and BEFORE the LLM
+  // routing call. Records whether the advice-gate short-circuited the
+  // turn (matched=true → deterministic direct_answer from analysisProjection)
+  // or fell through to normal routing.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - matched: boolean
+  //   - unmatched_reason: 'no_analysis' | 'no_leading_option' |
+  //     'mutation_signal' | 'no_advice_signal' | 'empty_message' | null
+  //   - leading_option_present: boolean — analysis projection had a
+  //     leading option at gate-evaluation time
+  //   - top_driver_present: boolean — top driver label was available
+  //     for the composed prose
+  V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
+
+  // V5 P0 stabilisation — bounded routing-failure fallback.
+  //
+  // Fires when the routing call returns a "model output failed" error
+  // class (max_tokens / empty_response / schema_repair_failed) and the
+  // turn executor degrades to a deterministic direct_answer envelope
+  // with recovery chips instead of a 500 BoundaryError. Allows ops to
+  // see how often the bounded fallback fires and which cause is
+  // dominant.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - routing_error_cause: 'schema_repair_failed' | 'empty_response' |
+  //     'unexpected_stop_reason'
+  //   - llm_calls_used: number — attempts before bounded-fallback
+  //   - analysis_ready: boolean — drove the chip set
+  V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
+
   // V5 WS1 / E4 — pre-LLM evidence that the curated `recent_changes`
   // projection reached the routing payload assembly. Emitted exactly
   // once per turn, immediately before the `routeWithToolUse` call,
