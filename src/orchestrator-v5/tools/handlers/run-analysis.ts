@@ -67,12 +67,16 @@ import type { RunAnalysisTimings } from '../../telemetry/turn-timings.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 
-// Heuristic threshold for `plot_cold_likely`. Hot PLoT calls on the Render
-// staging deploy complete in ~3-6 s; cold starts (post-idle Render dyno
-// rehydration) often run 12-20 s. The 8 s line is a conservative midpoint;
-// false positives are harmless (it's a hint, not a gate) and the field is
-// reported as `boolean | null` so consumers know when it's been computed.
-const PLOT_COLD_LIKELY_MS = 8000;
+// Heuristic threshold for `plot_slow_likely`. Hot PLoT calls on the Render
+// staging deploy complete in ~3-6 s; slow calls (cold-start rehydration,
+// large graphs, queueing) often run 12-20 s. The 8 s line is a conservative
+// midpoint that distinguishes "fast hot path" from "anything else"; it is
+// NOT a definitive cold-start diagnosis (hence the name change from
+// plot_cold_likely → plot_slow_likely). False positives are harmless: the
+// field is reported as `boolean | null` so consumers know when it's been
+// computed, and the heuristic is paired with `plot_request_ms` so dashboards
+// can apply their own thresholds.
+const PLOT_SLOW_LIKELY_MS = 8000;
 
 // Re-export handler-generic errors for backwards compatibility with test
 // modules that imported them directly from run-analysis.js. The canonical
@@ -321,6 +325,27 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const handlerStartedAt = Date.now();
     const plotStartedAt = Date.now();
     let plotElapsedMs: number | null = null;
+    // Fix 4 review fix: PLoT timings must be observable on EVERY exit
+    // (success, timeout, error, payload-invalid, fatal-status). Both the
+    // telemetry event and the error-details enrichment use this builder so
+    // the same shape is recorded regardless of which throw fires.
+    const buildPlotTimings = (statusOverride?: string | null): RunAnalysisTimings => ({
+      handler_total_ms: Date.now() - handlerStartedAt,
+      ...(plotElapsedMs !== null ? { plot_request_ms: plotElapsedMs } : {}),
+      plot_status:
+        statusOverride !== undefined
+          ? statusOverride
+          : null,
+      plot_slow_likely:
+        plotElapsedMs === null ? null : plotElapsedMs >= PLOT_SLOW_LIKELY_MS,
+    });
+    const emitPlotTimings = (timings: RunAnalysisTimings): void => {
+      emit(TelemetryEvents.V5RunAnalysisTimings, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        ...timings,
+      });
+    };
     try {
       response = await deps.plotClient.run(plotPayload, invocation.requestId, {
         turnSignal: invocation.signal,
@@ -330,13 +355,25 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       plotElapsedMs = Date.now() - plotStartedAt;
     } catch (runError) {
       plotElapsedMs = Date.now() - plotStartedAt;
+      // Emit timings on every PLoT-failure exit so dashboards can attribute
+      // outage latency. plot_status is null because no response was parsed.
+      const failureTimings = buildPlotTimings(null);
+      emitPlotTimings(failureTimings);
+      // Attach the timing to the error details so the executor can surface
+      // it on the recovery wire response under `_timings.run_analysis`.
+      const errorDetailsBase = {
+        handler_id: 'run_analysis',
+        ...(failureTimings.plot_request_ms !== undefined
+          ? { plot_request_ms: failureTimings.plot_request_ms }
+          : {}),
+      } as const;
       if (runError instanceof PLoTTimeoutError) {
         throw new HandlerInvocationFailedError(
           'PLoT timed out before returning a response',
           {
             cause_kind: 'plot_timeout',
             retryable: true,
-            details: { handler_id: 'run_analysis' },
+            details: { ...errorDetailsBase },
             cause: runError,
           },
         );
@@ -347,7 +384,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           {
             cause_kind: 'plot_error',
             retryable: true,
-            details: { handler_id: 'run_analysis' },
+            details: { ...errorDetailsBase },
             cause: runError,
           },
         );
@@ -368,7 +405,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             cause_kind: 'plot_payload_invalid',
             retryable: false,
             details: {
-              handler_id: 'run_analysis',
+              ...errorDetailsBase,
               ...(issueMsg ? { specific_issue: issueMsg } : {}),
             },
             cause: runError,
@@ -380,7 +417,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         {
           cause_kind: 'plot_unknown',
           retryable: true,
-          details: { handler_id: 'run_analysis' },
+          details: { ...errorDetailsBase },
           cause: runError,
         },
       );
@@ -428,12 +465,22 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       request_id: invocation.requestId,
     });
     if (statusOutcome.kind === 'fatal') {
+      // Fix 4 review fix: emit + attach plot timings on the fatal-status
+      // exit too — PLoT responded but its result is unusable, so the
+      // round-trip time is the latency-diagnosis signal we want preserved.
+      const fatalTimings = buildPlotTimings(
+        typeof analysisStatus === 'string' ? analysisStatus : null,
+      );
+      emitPlotTimings(fatalTimings);
       throw new HandlerInvocationFailedError(statusOutcome.message, {
         cause_kind: statusOutcome.cause_kind,
         retryable: statusOutcome.retryable,
         details: {
           handler_id: 'run_analysis',
           ...(analysisStatus !== null ? { analysis_status: analysisStatus } : {}),
+          ...(fatalTimings.plot_request_ms !== undefined
+            ? { plot_request_ms: fatalTimings.plot_request_ms }
+            : {}),
         },
         cause: response,
       });
@@ -487,32 +534,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 8. Emit HandlerOutcome ------------------------------------------
     // Fix 4 (observability): per-handler PLoT timings travel back to the
-    // turn-executor via a non-public `__plot_timings` property on the
-    // outcome. The executor copies the block into the V5 turn timings; it
-    // never reaches the wire envelope directly from here. Cold-start
-    // heuristic uses a static threshold (see PLOT_COLD_LIKELY_MS for the
-    // rationale). HandlerOutcome's TypeScript shape doesn't enumerate this
-    // field, hence the inline cast — the executor decodes it with a
-    // matching cast.
-    const plotTimings: RunAnalysisTimings = {
-      handler_total_ms: Date.now() - handlerStartedAt,
-      ...(plotElapsedMs !== null ? { plot_request_ms: plotElapsedMs } : {}),
-      plot_status: typeof analysisStatus === 'string' ? analysisStatus : null,
-      plot_cold_likely:
-        plotElapsedMs === null ? null : plotElapsedMs >= PLOT_COLD_LIKELY_MS,
-    };
-    emit(TelemetryEvents.V5RunAnalysisTimings, {
-      request_id: invocation.requestId,
-      scenario_id: args.scenario_id,
-      ...plotTimings,
-    });
-    const outcome = {
+    // turn-executor via the typed `__plot_timings` slot on HandlerOutcome
+    // (see ../registry.ts). The executor copies the block into the V5 turn
+    // timings; it never reaches the wire envelope directly from here. Slow-
+    // heuristic uses the PLOT_SLOW_LIKELY_MS threshold (see the constant's
+    // doc comment) — the field is reported as `boolean | null` so consumers
+    // know when it has been computed and is paired with `plot_request_ms`
+    // for downstream dashboards.
+    const plotTimings = buildPlotTimings(
+      typeof analysisStatus === 'string' ? analysisStatus : null,
+    );
+    emitPlotTimings(plotTimings);
+    return {
       assistant_text: template,
       handler_facts: [parsed.data],
       llm_calls_used: 0,
       __plot_timings: plotTimings,
-    } as unknown as HandlerOutcome;
-    return outcome;
+    };
   };
 }
 

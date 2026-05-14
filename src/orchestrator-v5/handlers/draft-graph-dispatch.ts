@@ -241,6 +241,17 @@ function draftResultToOlumiResponse(
   //   - draft failed to persist → no chips (the route returns 500 anyway)
   const suggestedActions = buildPostDraftChips({ graphPersisted, analysisReadyField });
 
+  // Fix 4 (observability): forward the unified-pipeline's per-stage
+  // timings onto the V5 wire under `_timings.draft_graph` so the replay
+  // harness sees the draft-stage breakdown alongside the per-turn block
+  // attached later by the turn-executor. Undefined here when the
+  // unified-pipeline writer gated the field off (V5_TIMING_DEBUG=false).
+  // The route-v2 egress wrapper strips/re-attaches `_timings` across the
+  // strict OlumiResponseSchema validation seam.
+  const timingsBlock = result.draftGraphTimings
+    ? { draft_graph: result.draftGraphTimings }
+    : undefined;
+
   return {
     response_version: 2,
     assistant_text: assistantText,
@@ -249,7 +260,8 @@ function draftResultToOlumiResponse(
     insights: [],
     stage_indicator: stageIndicator,
     ...(draftGraphField && { draft_graph: draftGraphField }),
-  };
+    ...(timingsBlock !== undefined && { _timings: timingsBlock }),
+  } as OlumiResponse;
 }
 
 function buildPostDraftChips(params: {

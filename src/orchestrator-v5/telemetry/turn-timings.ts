@@ -117,18 +117,22 @@ export interface DraftGraphTimings {
  *
  * Splits the handler-total time from the PLoT outbound round-trip to
  * answer "is the 4–20 s variance Sonnet, PLoT compute, or our code?".
- * Cold-start heuristic is a lightweight signal — see `markPlotColdLikely`
- * in `run-analysis.ts` for derivation.
+ * The slow-heuristic is a lightweight hint, not a definitive cold-start
+ * diagnosis — see `PLOT_SLOW_LIKELY_MS` in `run-analysis.ts`.
  */
 export interface RunAnalysisTimings {
   /** Wall clock from handler entry to outcome return. */
   handler_total_ms?: number;
   /** Wall clock for `plotClient.run(...)` only. */
   plot_request_ms?: number;
-  /** PLoT-reported analysis_status, when present. */
+  /** PLoT-reported analysis_status when present. Null on failure paths
+   *  where no response was parsed. */
   plot_status?: string | null;
-  /** Heuristic: true when plot_request_ms exceeds a likely-warm threshold. */
-  plot_cold_likely?: boolean | null;
+  /** Heuristic flag: `plot_request_ms` exceeded the slow-call threshold.
+   *  Hints at cold start / queueing / large-graph compute. Not a fact —
+   *  paired with the raw `plot_request_ms` so consumers apply their own
+   *  thresholds. `null` when timing not captured. */
+  plot_slow_likely?: boolean | null;
 }
 
 /**

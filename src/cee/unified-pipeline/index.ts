@@ -390,19 +390,24 @@ function attachPipelineOutcome(body: unknown, outcome: PipelineOutcome): unknown
 
 /**
  * Fix 4 (observability): attach `_timings.draft_graph` to a draft_graph
- * response body. Always emits the matching telemetry event regardless of
- * the response-envelope gate. Safe for non-object bodies.
+ * response body. Both the telemetry emit and the response-envelope
+ * mutation are gated by `config.cee.timingDebugEnabled` — default-OFF
+ * production runs do not emit the event or mutate the body. Safe for
+ * non-object bodies.
  */
 function attachDraftGraphTimings(
   body: unknown,
   timings: DraftGraphTimings,
   requestId: string,
 ): unknown {
+  if (!config.cee.timingDebugEnabled) {
+    return body;
+  }
   emit(TelemetryEvents.CeeUnifiedPipelineStageTimings, {
     request_id: requestId,
     ...timings,
   });
-  if (config.cee.timingDebugEnabled && body && typeof body === "object") {
+  if (body && typeof body === "object") {
     const existing = (body as Record<string, unknown>)._timings;
     const next = existing && typeof existing === "object"
       ? { ...(existing as Record<string, unknown>), draft_graph: timings }
