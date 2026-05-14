@@ -239,5 +239,30 @@ describe('TurnDebugStore', () => {
       });
       expect(getTurnDebugStoreSize()).toBe(0);
     });
+
+    // P2 merge-semantics regression guard (review): when
+    // recordFailureContext writes first (creating a minimal entry)
+    // and storeTurnDebug then overwrites with a CQE-only entry, the
+    // failure fields must survive — mirrors the model_resolutions
+    // preservation contract.
+    it('preserves route_failure_type + freshness_summary across a subsequent storeTurnDebug overwrite', () => {
+      recordFailureContext('turn-fail-order', 'sess-o', {
+        route_failure_type: 'unexpected_stop_reason',
+        freshness_summary: {
+          freshness: 'fresh',
+          analysis_status: 'success',
+          leading_option_present: true,
+        },
+      });
+      storeTurnDebug(makeEntry('turn-fail-order'));
+      const result = getTurnDebug('turn-fail-order');
+      if (!result || result === 'expired') throw new Error('unreachable');
+      expect(result.route_failure_type).toBe('unexpected_stop_reason');
+      expect(result.freshness_summary?.freshness).toBe('fresh');
+      expect(result.freshness_summary?.leading_option_present).toBe(true);
+      // CQE writer's content must also remain visible — the merge
+      // preserves BOTH writers, not just one.
+      expect(result.cqe.patterns_matched).toEqual(['rule_currency', 'rule_percent']);
+    });
   });
 });

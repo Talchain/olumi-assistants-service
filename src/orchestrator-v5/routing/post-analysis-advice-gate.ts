@@ -36,14 +36,33 @@ export interface AdviceGateAnalysis {
   readonly top_drivers: readonly AdviceGateAnalysisDriver[];
 }
 
+/**
+ * Freshness verdict shape (mirrors FreshnessDerivation.freshness from
+ * `src/orchestrator-v5/context/freshness.ts`). The gate accepts a
+ * narrow union so the module stays free of orchestrator-internal type
+ * imports.
+ */
+export type AdviceGateFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
+
 export interface AdviceGateInput {
   readonly message: string;
   readonly analysis: AdviceGateAnalysis | null | undefined;
+  /**
+   * Freshness verdict from the turn-executor's analysis-freshness
+   * derivation. The gate ONLY short-circuits when freshness is
+   * `'fresh'` — any stale/unknown/none state must fall through so the
+   * normal routing path (or the existing state-query / stale-aware
+   * recovery surfaces) can emit a stale-safe response. Without this
+   * guard the gate would happily claim "X is currently ahead" using a
+   * projection that no longer matches the live graph.
+   */
+  readonly freshness: AdviceGateFreshness | null | undefined;
 }
 
 export type AdviceGateUnmatchedReason =
   | 'no_analysis'
   | 'no_leading_option'
+  | 'not_fresh'
   | 'mutation_signal'
   | 'no_advice_signal'
   | 'empty_message';
@@ -121,6 +140,14 @@ export function tryPostAnalysisAdviceGate(
   }
   if (!analysis.leading_option) {
     return { matched: false, reason: 'no_leading_option' };
+  }
+  // Freshness gate (review correction): only short-circuit when the
+  // analysis projection actually matches the current graph. After an
+  // edit invalidates the cached run, "X is currently ahead" is
+  // misleading — fall through so the stale-aware recovery surfaces
+  // and/or normal routing can deal with the staleness.
+  if (input.freshness !== 'fresh') {
+    return { matched: false, reason: 'not_fresh' };
   }
   const message = input.message.trim();
   if (message.length === 0) {

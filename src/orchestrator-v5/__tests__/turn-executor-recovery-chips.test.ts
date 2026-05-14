@@ -262,6 +262,43 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
       // chip label itself; previous-user-message echo is the user's own text.
     }
   });
+
+  it('unexpected_stop_reason via max_tokens — bounded fallback 200, no retry (V5 P0 review-P2)', async () => {
+    // Direct repro of the live failure mode the brief targets: Sonnet
+    // returns content with `stop_reason: 'max_tokens'` before completing
+    // a tool_use. `tryInterpret` classifies that as non_repairable
+    // `unexpected_stop_reason`, which used to surface as a 500
+    // BoundaryError. The bounded fallback now degrades to a 200
+    // direct_answer envelope. Asserts: exactly one adapter call (no
+    // REPAIR_ONCE), no error block, fallback copy, fallback telemetry,
+    // and the underlying failure cause preserved in run telemetry.
+    const adapterMock = vi
+      .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'Partial answer cut off at...' }],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],
+        model: 'claude-sonnet-4-6',
+        latencyMs: 200,
+      });
+    const routingAdapter = mockRoutingAdapter(adapterMock as unknown as ChatWithToolsMock);
+
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-max-tokens', {
+      routingAdapter,
+    });
+
+    expect(adapterMock).toHaveBeenCalledTimes(1);
+
+    const parsed = OlumiResponseSchema.parse(response);
+    expect(parsed.blocks.some((b) => b.type === 'error')).toBe(false);
+    expect(parsed.assistant_text).toContain("I couldn't complete that turn cleanly");
+    expect(telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+    expect(telemetry.commit_performed).toBe(true);
+
+    const bf = events.find((e) => e.event === 'v5.routing_bounded_fallback');
+    expect(bf).toBeDefined();
+    expect(bf!.data.routing_error_cause).toBe('unexpected_stop_reason');
+  });
 });
 
 // ---------------------------------------------------------------------------

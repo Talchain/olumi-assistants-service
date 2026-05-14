@@ -283,4 +283,86 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     );
     expect(skippedEvents).toHaveLength(0);
   });
+
+  // V5 P0 review-P1: executor-level coverage for the post-analysis
+  // advice gate. Reuses this file's fresh-run_analysis fixture (the
+  // wrapper test infrastructure builds exactly what the advice gate
+  // requires: prior_facts → freshness='fresh' → leading_option).
+  it('post-analysis advice question with fresh run_analysis fact → advice gate short-circuits, zero LLM calls, no edit_graph dispatch', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+    const expectedHash = computeAnalysisAffectingGraphHash(baseGraph)!;
+    mockedPriorFacts = [buildFreshRunAnalysisFact(expectedHash)];
+
+    const adviceAdapterCall = vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValue(mkTextResult('UNREACHABLE — gate should have short-circuited.'));
+    const adapter = { chatWithTools: adviceAdapterCall };
+
+    const advicePayload = {
+      ...ANALYSE_PAYLOAD,
+      message: 'How do you recommend we update the decision based on this?',
+    };
+
+    const result = await runTurnExecutor(advicePayload, 'req-advice-gate', {
+      routingAdapter: adapter,
+      graphState: baseGraph,
+    });
+
+    // The adapter must not be called: the gate short-circuits before
+    // routeWithToolUse.
+    expect(adviceAdapterCall).not.toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.telemetry.failure_type).toBeNull();
+
+    // Deterministic prose contract: leading option + top driver, no
+    // forbidden wording, no raw IDs, no decimals.
+    expect(result.response.assistant_text).toContain('A');
+    expect(result.response.assistant_text.toLowerCase()).not.toContain('recommendation');
+    expect(result.response.assistant_text).not.toMatch(/\d+\.\d+/);
+    // No canonical edit_graph no-op denial.
+    expect(result.response.assistant_text).not.toContain("I couldn't see a concrete change");
+
+    // Telemetry signals: gate fired, bounded-fallback did NOT fire
+    // (this is the happy path, not a routing failure).
+    const adviceEv = events.find((e) => e.event === 'v5.post_analysis_advice_gate');
+    expect(adviceEv).toBeDefined();
+    expect(adviceEv!.data.matched).toBe(true);
+    expect(adviceEv!.data.leading_option_present).toBe(true);
+    expect(
+      events.find((e) => e.event === 'v5.routing_bounded_fallback'),
+    ).toBeUndefined();
+  });
+
+  // V5 P0 review-P1 stale-safety: an advice question after a graph
+  // edit that invalidates the cached analysis must NOT short-circuit
+  // through the gate. The gate falls through, normal routing handles
+  // staleness.
+  it('post-analysis advice question with STALE run_analysis fact → advice gate does NOT short-circuit', async () => {
+    // Mismatched hash → freshness derives to 'stale' (or similar
+    // non-'fresh' verdict), which gates out.
+    mockedPriorFacts = [buildFreshRunAnalysisFact('stale_hash_no_match')];
+
+    const fallbackText = 'The analysis result is now out of date.';
+    const adapter = textOnlyAdapter(fallbackText);
+
+    const advicePayload = {
+      ...ANALYSE_PAYLOAD,
+      message: 'How do you recommend we update the decision based on this?',
+    };
+
+    const result = await runTurnExecutor(advicePayload, 'req-advice-gate-stale', {
+      routingAdapter: adapter,
+      graphState: baseGraph,
+    });
+
+    // The adapter WAS called: the gate fell through.
+    expect(adapter.chatWithTools).toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBeGreaterThan(0);
+
+    const adviceEv = events.find((e) => e.event === 'v5.post_analysis_advice_gate');
+    expect(adviceEv).toBeDefined();
+    expect(adviceEv!.data.matched).toBe(false);
+    expect(adviceEv!.data.unmatched_reason).toBe('not_fresh');
+  });
 });

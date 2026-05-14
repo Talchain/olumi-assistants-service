@@ -2764,6 +2764,12 @@ export async function runTurnExecutor(
         const adviceOutcome = tryPostAnalysisAdviceGate({
           message: payload.message,
           analysis: contextPack.analysis,
+          // Freshness guard (review P1): the gate must only fire when
+          // the cached projection still matches the live graph,
+          // otherwise the deterministic "X is currently ahead" copy
+          // would mislead after an edit. `freshness` is populated by
+          // the analysis-freshness derivation earlier in the turn.
+          freshness: freshness?.freshness,
         });
         emit(TelemetryEvents.V5PostAnalysisAdviceGate, {
           request_id: requestId,

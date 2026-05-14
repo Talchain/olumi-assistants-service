@@ -39,7 +39,11 @@ describe('tryPostAnalysisAdviceGate — positive (advice) cases', () => {
 
   for (const [message, label] of positives) {
     it(`matches: ${label}`, () => {
-      const out = tryPostAnalysisAdviceGate({ message, analysis: FIXTURE_ANALYSIS });
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        freshness: 'fresh',
+      });
       expect(out.matched).toBe(true);
       if (out.matched) {
         expect(out.assistant_text).toContain('Hire two senior engineers locally');
@@ -68,7 +72,11 @@ describe('tryPostAnalysisAdviceGate — mutation-signal cases (do not match)', (
 
   for (const [message, label] of mutations) {
     it(`falls through (mutation_signal): ${label}`, () => {
-      const out = tryPostAnalysisAdviceGate({ message, analysis: FIXTURE_ANALYSIS });
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        freshness: 'fresh',
+      });
       expect(out.matched).toBe(false);
       if (!out.matched) {
         expect(out.reason).toBe('mutation_signal');
@@ -82,6 +90,7 @@ describe('tryPostAnalysisAdviceGate — pre-condition failures', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we do next?',
       analysis: null,
+      freshness: 'fresh',
     });
     expect(out.matched).toBe(false);
     if (!out.matched) expect(out.reason).toBe('no_analysis');
@@ -91,6 +100,7 @@ describe('tryPostAnalysisAdviceGate — pre-condition failures', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we do next?',
       analysis: { ...FIXTURE_ANALYSIS, leading_option: null },
+      freshness: 'fresh',
     });
     expect(out.matched).toBe(false);
     if (!out.matched) expect(out.reason).toBe('no_leading_option');
@@ -100,6 +110,7 @@ describe('tryPostAnalysisAdviceGate — pre-condition failures', () => {
     const out = tryPostAnalysisAdviceGate({
       message: '   ',
       analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
     });
     expect(out.matched).toBe(false);
     if (!out.matched) expect(out.reason).toBe('empty_message');
@@ -109,9 +120,39 @@ describe('tryPostAnalysisAdviceGate — pre-condition failures', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'Thanks, that helps.',
       analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
     });
     expect(out.matched).toBe(false);
     if (!out.matched) expect(out.reason).toBe('no_advice_signal');
+  });
+
+  // Freshness guard (review P1): the deterministic "X is currently
+  // ahead" copy must NOT fire when the analysis projection no longer
+  // matches the live graph. The stale-aware recovery surfaces handle
+  // that case; the advice gate must yield.
+  it.each([
+    ['stale', 'graph mutated since last run'],
+    ['unknown', 'freshness verdict missing'],
+    ['none', 'no successful prior run'],
+  ] as const)('falls through when freshness=%s (%s)', (freshness, label) => {
+    void label;
+    const out = tryPostAnalysisAdviceGate({
+      message: 'How do you recommend we update the decision based on this?',
+      analysis: FIXTURE_ANALYSIS,
+      freshness,
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('not_fresh');
+  });
+
+  it('falls through when freshness is undefined', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we do next?',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: undefined,
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('not_fresh');
   });
 });
 
@@ -120,6 +161,7 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we examine next?',
       analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
@@ -134,6 +176,7 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we do next?',
       analysis: { ...FIXTURE_ANALYSIS, top_drivers: [] },
+      freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
@@ -149,6 +192,7 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'How do you recommend we update the decision based on this?',
       analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
     if (out.matched) {

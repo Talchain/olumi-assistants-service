@@ -128,13 +128,20 @@ class TurnDebugStore {
         this.store.delete(oldestKey);
       }
     }
-    // Preserve model_resolutions across overwrites; the CQE writer typically
-    // runs before any resolution recorder, but in either order the union
-    // must survive.
+    // Preserve append-style fields across overwrites. The CQE writer
+    // typically runs before the resolution/failure recorders, but
+    // order is not guaranteed (recordFailureContext and
+    // recordModelResolution both create minimal entries when none
+    // exists yet). Whichever order callers use, the union must
+    // survive a subsequent storeTurnDebug overwrite.
     const merged: TurnDebugEntry = existing
       ? {
           ...entry,
           model_resolutions: entry.model_resolutions ?? existing.model_resolutions,
+          route_failure_type:
+            entry.route_failure_type ?? existing.route_failure_type,
+          freshness_summary:
+            entry.freshness_summary ?? existing.freshness_summary,
         }
       : entry;
     this.store.set(entry.turn_id, merged);
