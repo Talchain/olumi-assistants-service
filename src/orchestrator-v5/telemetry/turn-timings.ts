@@ -1,15 +1,41 @@
 /**
+ * Heuristic threshold for `plot_slow_likely` (Fix 4).
+ *
+ * Hot PLoT calls on the Render staging deploy complete in ~3-6 s; slow
+ * calls (cold-start rehydration, large graphs, queueing) often run
+ * 12-20 s. The 8 s line is a conservative midpoint that distinguishes
+ * "fast hot path" from "anything else"; it is NOT a definitive cold-
+ * start diagnosis (hence the field rename from `plot_cold_likely`).
+ * False positives are harmless — the field is `boolean | null` so
+ * consumers know when it has been computed, and is paired with the
+ * raw `plot_request_ms` for downstream dashboards to apply their own
+ * thresholds.
+ *
+ * Lives in this shared module so both the run_analysis handler (success
+ * path) and the turn-executor (error-path reconstruction from
+ * `HandlerInvocationFailedError.details`) apply the same threshold
+ * without the executor having to import from the handler — the
+ * registry-isolation pre-push hook forbids that direction.
+ */
+export const PLOT_SLOW_LIKELY_MS = 8000;
+
+/**
  * V5 latency observability — shared timing types (Fix 4).
  *
  * Surface contract:
- *   - The `_timings` block is attached to response bodies ONLY when
- *     `config.cee.timingDebugEnabled` is true. Production default: false.
- *     Staging sets `V5_TIMING_DEBUG=true` so the replay harness can read
- *     per-stage durations without scraping server logs.
- *   - Telemetry events (v5.turn_executor.stage_timings,
- *     cee.unified_pipeline.stage_timings, v5.run_analysis.timings) emit
- *     unconditionally — this module's types only describe the response-
- *     envelope shape.
+ *   - Both the response-envelope `_timings` block AND the telemetry
+ *     events (v5.turn_executor.stage_timings,
+ *     cee.unified_pipeline.stage_timings, v5.run_analysis.timings) are
+ *     gated on `config.cee.timingDebugEnabled`. Production default OFF
+ *     ⇒ zero `Date.now()` calls, zero allocations, zero log events,
+ *     unchanged response shape. Staging sets `V5_TIMING_DEBUG=true` so
+ *     the replay harness can read per-stage durations without scraping
+ *     server logs.
+ *   - The route-v2 egress wrapper (`sendFinalised200`) strips any
+ *     `_timings` field unconditionally before validating against the
+ *     strict OlumiResponseSchema, then re-attaches only when the flag
+ *     is on. This is defense-in-depth — any upstream attach with the
+ *     flag off is silently dropped at the wire seam.
  *
  * Future-compatibility note (concurrent draft candidates):
  *   `DraftGraphTimings.candidates` is an optional array reserved for a future

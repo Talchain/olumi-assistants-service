@@ -205,7 +205,11 @@ import {
   recordFailureContext,
   type TurnDebugFreshnessSummary,
 } from './debug/turn-debug-store.js';
-import type { V5TurnTimings, RunAnalysisTimings } from './telemetry/turn-timings.js';
+import {
+  type V5TurnTimings,
+  type RunAnalysisTimings,
+  PLOT_SLOW_LIKELY_MS,
+} from './telemetry/turn-timings.js';
 import { config } from '../config/index.js';
 
 export interface TurnExecutorRunResult {
@@ -2995,6 +2999,13 @@ export async function runTurnExecutor(
     intentClass = routingSummary.intentClass;
     coachingMode = routingSummary.coachingMode;
 
+    // Fix 4 review fix (round 3): anchor compose_ms here so non-handler
+    // compose branches (text_only / coach / clarify / execute-fallback)
+    // also have a value. For the handler branch, the value gets
+    // overwritten after `await handlerFn(...)` returns so compose_ms only
+    // covers the work AFTER the handler completes. Gated by timingsEnabled.
+    if (timingsEnabled) composeStartedAt = Date.now();
+
     // Buckets for the remaining steps. Populated conditionally per intent.
     let handlerOutcome: HandlerOutcome | null = null;
     let handlerIdForCommit: V5ActionType | null = null;
@@ -3381,6 +3392,36 @@ export async function runTurnExecutor(
           }),
         );
       } catch (error) {
+        // Fix 4 review fix (round 3): rebuild RunAnalysisTimings from
+        // error.details on PLoT-failure paths so the recovery / fatal
+        // wire response carries `_timings.run_analysis` alongside the
+        // existing `_timings.turn`. The run_analysis handler attaches
+        // `plot_request_ms` to HandlerInvocationFailedError.details on
+        // every failing exit (timeout / plot_error / payload_invalid /
+        // unknown / fatal-status) — gated by the same flag, so
+        // default-OFF production runs leave the field absent and this
+        // block is a no-op.
+        if (
+          timingsEnabled &&
+          proposedHandlerId === 'run_analysis' &&
+          error instanceof HandlerInvocationFailedError
+        ) {
+          const details = error.details as
+            | { plot_request_ms?: unknown; analysis_status?: unknown }
+            | undefined;
+          const reqMs = typeof details?.plot_request_ms === 'number'
+            ? details.plot_request_ms
+            : undefined;
+          const status = typeof details?.analysis_status === 'string'
+            ? details.analysis_status
+            : null;
+          runAnalysisTimings = {
+            handler_total_ms: Date.now() - startedAt,
+            ...(reqMs !== undefined ? { plot_request_ms: reqMs } : {}),
+            plot_status: status,
+            plot_slow_likely: reqMs === undefined ? null : reqMs >= PLOT_SLOW_LIKELY_MS,
+          };
+        }
         // P1.1 follow-up — budget precedence (Paul's constraint 7) for the
         // recoverable handler path. If the outer turn budget has fired
         // AND the error is a recoverable HandlerInvocationFailedError,

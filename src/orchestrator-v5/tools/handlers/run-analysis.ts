@@ -63,20 +63,15 @@ import {
   HandlerResultInvalidError,
 } from '../handler-errors.js';
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
-import type { RunAnalysisTimings } from '../../telemetry/turn-timings.js';
+import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
+import { config } from '../../../config/index.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 
-// Heuristic threshold for `plot_slow_likely`. Hot PLoT calls on the Render
-// staging deploy complete in ~3-6 s; slow calls (cold-start rehydration,
-// large graphs, queueing) often run 12-20 s. The 8 s line is a conservative
-// midpoint that distinguishes "fast hot path" from "anything else"; it is
-// NOT a definitive cold-start diagnosis (hence the name change from
-// plot_cold_likely → plot_slow_likely). False positives are harmless: the
-// field is reported as `boolean | null` so consumers know when it's been
-// computed, and the heuristic is paired with `plot_request_ms` so dashboards
-// can apply their own thresholds.
-const PLOT_SLOW_LIKELY_MS = 8000;
+// `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
+// module so the turn-executor (error-path reconstruction) can apply the
+// same threshold without importing from this handler — the registry-
+// isolation pre-push hook forbids cross-file handler imports.
 
 // Re-export handler-generic errors for backwards compatibility with test
 // modules that imported them directly from run-analysis.js. The canonical
@@ -322,24 +317,38 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
-    const handlerStartedAt = Date.now();
+    // Fix 4 review fix (round 2): every timing site is gated on the flag.
+    // Default-OFF production runs make zero `Date.now()` calls, allocate no
+    // RunAnalysisTimings object, and emit no `v5.run_analysis.timings`
+    // events; the PLoT outbound HTTP timing is provided to the client only
+    // via its existing `turnStartedAt` knob (Date.now() captured once for
+    // the budget calculation, which the client uses to compute its own
+    // remaining budget — not for observability).
+    const timingsEnabled = config.cee.timingDebugEnabled;
+    const handlerStartedAt = timingsEnabled ? Date.now() : 0;
+    // `plotStartedAt` is passed to plotClient.run as `turnStartedAt` so it
+    // can compute its remaining budget — this is a production-required
+    // input, NOT an observability timer. Always captured.
     const plotStartedAt = Date.now();
     let plotElapsedMs: number | null = null;
-    // Fix 4 review fix: PLoT timings must be observable on EVERY exit
-    // (success, timeout, error, payload-invalid, fatal-status). Both the
-    // telemetry event and the error-details enrichment use this builder so
-    // the same shape is recorded regardless of which throw fires.
-    const buildPlotTimings = (statusOverride?: string | null): RunAnalysisTimings => ({
-      handler_total_ms: Date.now() - handlerStartedAt,
-      ...(plotElapsedMs !== null ? { plot_request_ms: plotElapsedMs } : {}),
-      plot_status:
-        statusOverride !== undefined
-          ? statusOverride
-          : null,
-      plot_slow_likely:
-        plotElapsedMs === null ? null : plotElapsedMs >= PLOT_SLOW_LIKELY_MS,
-    });
+    // When timings are off, both helpers become no-ops; the build helper
+    // returns an empty object so callers don't need a second flag check
+    // for the error-details enrichment.
+    const buildPlotTimings = (statusOverride?: string | null): RunAnalysisTimings => {
+      if (!timingsEnabled) return {};
+      return {
+        handler_total_ms: Date.now() - handlerStartedAt,
+        ...(plotElapsedMs !== null ? { plot_request_ms: plotElapsedMs } : {}),
+        plot_status:
+          statusOverride !== undefined
+            ? statusOverride
+            : null,
+        plot_slow_likely:
+          plotElapsedMs === null ? null : plotElapsedMs >= PLOT_SLOW_LIKELY_MS,
+      };
+    };
     const emitPlotTimings = (timings: RunAnalysisTimings): void => {
+      if (!timingsEnabled) return;
       emit(TelemetryEvents.V5RunAnalysisTimings, {
         request_id: invocation.requestId,
         scenario_id: args.scenario_id,
@@ -352,18 +361,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         turnStartedAt: plotStartedAt,
         turnBudgetMs: getHandlerBudgetMs(),
       });
-      plotElapsedMs = Date.now() - plotStartedAt;
+      if (timingsEnabled) plotElapsedMs = Date.now() - plotStartedAt;
     } catch (runError) {
-      plotElapsedMs = Date.now() - plotStartedAt;
+      if (timingsEnabled) plotElapsedMs = Date.now() - plotStartedAt;
       // Emit timings on every PLoT-failure exit so dashboards can attribute
-      // outage latency. plot_status is null because no response was parsed.
+      // outage latency — gated so default-OFF production stays silent.
       const failureTimings = buildPlotTimings(null);
       emitPlotTimings(failureTimings);
-      // Attach the timing to the error details so the executor can surface
-      // it on the recovery wire response under `_timings.run_analysis`.
+      // Error details carry `plot_request_ms` only when timings are
+      // enabled. The executor mirrors this gate when reconstructing
+      // `_timings.run_analysis` from `HandlerInvocationFailedError.details`
+      // on the recovery wire response.
       const errorDetailsBase = {
         handler_id: 'run_analysis',
-        ...(failureTimings.plot_request_ms !== undefined
+        ...(timingsEnabled && failureTimings.plot_request_ms !== undefined
           ? { plot_request_ms: failureTimings.plot_request_ms }
           : {}),
       } as const;
@@ -545,11 +556,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       typeof analysisStatus === 'string' ? analysisStatus : null,
     );
     emitPlotTimings(plotTimings);
+    // When timingsEnabled=false, `plotTimings` is the empty object and we
+    // omit `__plot_timings` entirely so HandlerOutcome carries no debug
+    // surface in default-OFF production.
     return {
       assistant_text: template,
       handler_facts: [parsed.data],
       llm_calls_used: 0,
-      __plot_timings: plotTimings,
+      ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
     };
   };
 }

@@ -48,7 +48,7 @@ describe('formatTimingsEvidence', () => {
           handler_total_ms: 7820,
           plot_request_ms: 7805,
           plot_status: 'computed',
-          plot_cold_likely: false,
+          plot_slow_likely: false,
         },
       },
     } as never);
@@ -56,7 +56,21 @@ describe('formatTimingsEvidence', () => {
     expect(out).toContain('handler_total:7820');
     expect(out).toContain('req:7805');
     expect(out).toContain('status:computed');
-    expect(out).toContain('cold:false');
+    expect(out).toContain('slow:false');
+  });
+
+  it('reads plot_slow_likely (not legacy plot_cold_likely) and renders slow:', () => {
+    const out = formatTimingsEvidence({
+      _timings: {
+        run_analysis: {
+          plot_request_ms: 15234,
+          plot_slow_likely: true,
+        },
+      },
+    } as never);
+    expect(out).toContain('plot={');
+    expect(out).toContain('slow:true');
+    expect(out).not.toContain('cold:');
   });
 
   it('renders the draft_graph block when present', () => {

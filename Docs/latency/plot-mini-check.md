@@ -39,7 +39,7 @@ The fast samples (4.4 s, 5.8 s) cluster at the beginning of the staggered batch;
 
 Counter-evidence: canonical-3 (4.4 s) ran *after* canonical-1 and canonical-2 (both >5.8 s) — the 4.4 s isn't a first-hit cold. So the pattern is noisy, not strictly serial.
 
-Without per-call PLoT-side metrics, we cannot disambiguate (a) PLoT compute time vs. (b) Render dyno wake-up vs. (c) HTTP queueing inside Render. The observability PR adds `plot_request_ms` and a `plot_cold_likely` heuristic to the response envelope so this distinction becomes routinely visible in future replay runs.
+Without per-call PLoT-side metrics, we cannot disambiguate (a) PLoT compute time vs. (b) Render dyno wake-up vs. (c) HTTP queueing inside Render. The observability PR adds `plot_request_ms` and a `plot_slow_likely` heuristic to the response envelope so this distinction becomes routinely visible in future replay runs. (The field was originally named `plot_cold_likely` in the first draft; renamed during review to avoid implying a definitive cold-start diagnosis — the heuristic only knows "above/below 8 s".)
 
 ## Q3 — Would a keep-warm ping or plan change likely reduce the variance?
 
@@ -49,7 +49,7 @@ Without per-call PLoT-side metrics, we cannot disambiguate (a) PLoT compute time
 - **If PLoT is on Standard or higher and never sleeps:** the variance is more likely PLoT-internal (e.g. Monte Carlo iteration count varying with graph size, or a slow Supabase read inside PLoT). Keep-warm doesn't help; the fix is on the PLoT side.
 - **Plan change to Pro/Performance:** more headroom for concurrency, but only justified if observed concurrency contention is real and recurring. Phase 0's 10 parallel runs is a synthetic stress; production traffic per second is likely lower.
 
-**Recommendation:** wait until the observability PR ships and re-run Phase 0 with `V5_TIMING_DEBUG=true` on staging. Then the `_timings.run_analysis.{plot_request_ms, plot_cold_likely}` fields tell us directly whether the dominant time is the HTTP round-trip or something on this side. Only then make an infrastructure decision.
+**Recommendation:** wait until the observability PR ships and re-run Phase 0 with `V5_TIMING_DEBUG=true` on staging. Then the `_timings.run_analysis.{plot_request_ms, plot_slow_likely}` fields tell us directly whether the dominant time is the HTTP round-trip or something on this side. Only then make an infrastructure decision.
 
 ## What this audit does NOT recommend (and why)
 
@@ -64,5 +64,5 @@ Without per-call PLoT-side metrics, we cannot disambiguate (a) PLoT compute time
 
 1. Re-run Phase 0 with `V5_TIMING_DEBUG=true` on staging. Expect `_timings.run_analysis.plot_request_ms` in every evidence row.
 2. If `plot_request_ms` is consistently >70% of handler total, the variance is PLoT-side. If <30%, it's CEE-side commit/Supabase.
-3. Cross-check `plot_cold_likely:true` rate. Above ~20% → ask whether the PLoT Render service is on a sleeping tier.
+3. Cross-check `plot_slow_likely:true` rate. Above ~20% → ask whether the PLoT Render service is on a sleeping tier (cold start) or struggling with concurrency / large graphs (the heuristic doesn't disambiguate these — investigate which).
 4. Once attributed, open the appropriate brief (keep-warm cron, PLoT optimisation, or commit-deferral analysis).

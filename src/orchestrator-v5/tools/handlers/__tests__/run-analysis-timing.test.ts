@@ -17,6 +17,7 @@ import {
   setTestSink,
   TelemetryEvents,
 } from '../../../../utils/telemetry.js';
+import { config } from '../../../../config/index.js';
 
 import type {
   PLoTClient,
@@ -93,16 +94,22 @@ function makeInvocation(): HandlerInvocation {
 
 describe('run_analysis — PLoT failure path timing preservation (Fix 4)', () => {
   let telemetryEvents: Array<{ event: string; payload: Record<string, unknown> }>;
+  let originalTimingDebug: boolean;
 
   beforeEach(() => {
     telemetryEvents = [];
     setTestSink((event, payload) => {
       telemetryEvents.push({ event, payload });
     });
+    // Flag-on path: production default is OFF, so test enables it
+    // explicitly. A separate flag-OFF test below confirms the gate.
+    originalTimingDebug = config.cee.timingDebugEnabled;
+    (config.cee as { timingDebugEnabled: boolean }).timingDebugEnabled = true;
   });
 
   afterEach(() => {
     setTestSink(null);
+    (config.cee as { timingDebugEnabled: boolean }).timingDebugEnabled = originalTimingDebug;
   });
 
   it('PLoT timeout — error details carry plot_request_ms and telemetry emits', async () => {
@@ -192,5 +199,45 @@ describe('run_analysis — PLoT failure path timing preservation (Fix 4)', () =>
     expect(caught).not.toBeNull();
     expect(caught!.cause_kind).toBe('plot_payload_invalid');
     expect(typeof caught!.details?.plot_request_ms).toBe('number');
+  });
+});
+
+describe('run_analysis — flag-OFF leak guard (review fix round 3)', () => {
+  let telemetryEvents: Array<{ event: string; payload: Record<string, unknown> }>;
+  let originalTimingDebug: boolean;
+
+  beforeEach(() => {
+    telemetryEvents = [];
+    setTestSink((event, payload) => {
+      telemetryEvents.push({ event, payload });
+    });
+    originalTimingDebug = config.cee.timingDebugEnabled;
+    (config.cee as { timingDebugEnabled: boolean }).timingDebugEnabled = false;
+  });
+
+  afterEach(() => {
+    setTestSink(null);
+    (config.cee as { timingDebugEnabled: boolean }).timingDebugEnabled = originalTimingDebug;
+  });
+
+  it('flag OFF: PLoT timeout suppresses v5.run_analysis.timings event AND omits plot_request_ms from error details', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makeFailingPlotClient(() => new PLoTTimeoutError('timeout')),
+      scenarioReader: makeScenarioReader(),
+    });
+
+    let caught: HandlerInvocationFailedError | null = null;
+    try {
+      await handler(makeInvocation());
+    } catch (err) {
+      if (err instanceof HandlerInvocationFailedError) caught = err;
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught!.cause_kind).toBe('plot_timeout');
+    expect(caught!.details).not.toHaveProperty('plot_request_ms');
+    expect(
+      telemetryEvents.some((e) => e.event === TelemetryEvents.V5RunAnalysisTimings),
+    ).toBe(false);
   });
 });

@@ -85,7 +85,11 @@ function formatPlot(plot: Record<string, unknown> | undefined): string | undefin
     pair('handler_total', plot.handler_total_ms),
     pair('req', plot.plot_request_ms),
     pairString('status', plot.plot_status),
-    pairBool('cold', plot.plot_cold_likely),
+    // Renamed from `plot_cold_likely` (review fix round 2). Field rendered
+    // as `slow:` in evidence rows to match the wire schema and avoid the
+    // false-precision implication of "cold". Reading from the wire field
+    // name is the contract — the row label is a separate readability choice.
+    pairBool('slow', plot.plot_slow_likely),
   ]);
 }
 

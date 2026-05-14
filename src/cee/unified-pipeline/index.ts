@@ -436,13 +436,25 @@ export async function runUnifiedPipeline(
 ): Promise<UnifiedPipelineResult> {
   const ctx = buildInitialContext(input, rawBody, request, opts);
 
-  // Fix 4: per-stage wall clock for draft_graph. Each stage timer captures
-  // its own delta; the full `total_ms` is computed from `ctx.start` so the
-  // value matches the existing request-level latency_ms log.
-  const stageStart = (): number => Date.now();
-  const stageElapsed = (t0: number): number => Date.now() - t0;
+  // Fix 4: per-stage wall clock for draft_graph. Every timer site is
+  // gated on `config.cee.timingDebugEnabled` — default-OFF production
+  // pays zero `Date.now()` calls, no `timings` allocation, and no body
+  // mutation. When enabled, stage deltas roll up into `_timings.draft_graph`
+  // on the response body and a `cee.unified_pipeline.stage_timings`
+  // telemetry event fires once per draft. The earlier round of review
+  // fixes gated the telemetry emit + body mutation; this round eliminates
+  // the residual stage-timer overhead too so the OFF story is consistent
+  // across V5 turn + run_analysis + draft_graph.
+  const timingsEnabled = config.cee.timingDebugEnabled;
+  const stageStart: () => number = timingsEnabled
+    ? () => Date.now()
+    : () => 0;
+  const stageElapsed: (t0: number) => number = timingsEnabled
+    ? (t0) => Date.now() - t0
+    : () => 0;
   const timings: DraftGraphTimings = {};
   const finalise = (body: unknown): unknown => {
+    if (!timingsEnabled) return body;
     timings.total_ms = Date.now() - ctx.start;
     // Repair split: parse_llm_ms comes from llmMeta provider latency.
     // repair_llm_ms / repair_deterministic_ms split via the LLM-repair
