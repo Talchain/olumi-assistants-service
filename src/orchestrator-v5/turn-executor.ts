@@ -4245,42 +4245,66 @@ export async function runTurnExecutor(
    * records the underlying cause via `failureType` + `routingErrorCause`
    * so ops can chase the upstream signal.
    *
-   * Chip set is conditional on the freshness state: action chips
-   * (explain_results / run_analysis) are only emitted when a successful
-   * prior analysis exists in the ContextPack. Otherwise no action chips
-   * are surfaced — the user is left to redirect the conversation.
+   * Copy + chips are conditional on the freshness state (three-way):
+   *  - fresh analysis available → reassure "your current analysis is
+   *    still available" + offer Explain results AND Re-run analysis.
+   *  - stale or unknown analysis → stale-safe copy that does NOT
+   *    promise usable state + offer Re-run analysis only (NEVER
+   *    Explain results, which would deepen the trust hit by pointing
+   *    at a projection that no longer matches the live graph).
+   *  - no prior analysis → "try again" copy + no action chips.
    */
   async function commitBoundedRoutingFallback(
     err: RoutingError,
   ): Promise<TurnExecutorRunResult> {
     failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
-    const analysisAvailable =
+    const hasAnalysisProjection =
       !!contextPackForLog?.analysis &&
       !!contextPackForLog.analysis.leading_option;
-    // Copy contract (Paul's correction):
-    //   - prior analysis available → reassure that it is still usable
-    //   - otherwise → invite a retry without implying state we don't have.
-    // No "recommendation", no raw IDs, no decimals (forbidden-phrase guard
-    // still backstops at the finaliser).
-    const assistantText = analysisAvailable
-      ? "I couldn't complete that turn cleanly, but your current analysis is still available."
-      : "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.";
-    const chips: SuggestedAction[] = analysisAvailable
-      ? [
-          {
-            id: 'chip_action_explain_results',
-            label: 'Explain results',
-            message: 'Explain the result',
-            action_type: 'explain_results',
-          },
-          {
-            id: 'chip_action_run_analysis_retry',
-            label: 'Re-run analysis',
-            message: 'Run the analysis',
-            action_type: 'run_analysis',
-          },
-        ]
-      : [];
+    const isFresh = freshness?.freshness === 'fresh';
+    const analysisFreshAndAvailable = hasAnalysisProjection && isFresh;
+    const analysisStaleButPresent = hasAnalysisProjection && !isFresh;
+    // Copy contract (review P1 follow-up):
+    //   - fresh prior analysis → reassure that it is still usable
+    //   - stale prior analysis → name the staleness, invite a rerun
+    //   - no prior analysis → invite a retry without implying state
+    // No "recommendation", no raw IDs, no decimals (forbidden-phrase
+    // guard still backstops at the finaliser).
+    let assistantText: string;
+    if (analysisFreshAndAvailable) {
+      assistantText =
+        "I couldn't complete that turn cleanly, but your current analysis is still available.";
+    } else if (analysisStaleButPresent) {
+      assistantText =
+        "I couldn't complete that turn cleanly. The model has changed since the last analysis, so the cached results may be out of date — re-run analysis to see the current picture.";
+    } else {
+      assistantText =
+        "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.";
+    }
+    const runAnalysisChip: SuggestedAction = {
+      id: 'chip_action_run_analysis_retry',
+      label: 'Re-run analysis',
+      message: 'Run the analysis',
+      action_type: 'run_analysis',
+    };
+    const explainResultsChip: SuggestedAction = {
+      id: 'chip_action_explain_results',
+      label: 'Explain results',
+      message: 'Explain the result',
+      action_type: 'explain_results',
+    };
+    // Chip rule:
+    //   fresh   → Explain results + Re-run analysis (both safe)
+    //   stale   → Re-run analysis only (Explain would surface stale results)
+    //   none    → no action chips
+    let chips: SuggestedAction[];
+    if (analysisFreshAndAvailable) {
+      chips = [explainResultsChip, runAnalysisChip];
+    } else if (analysisStaleButPresent) {
+      chips = [runAnalysisChip];
+    } else {
+      chips = [];
+    }
     const fallbackResponse = composeDirectAnswerResponse({
       assistant_text: assistantText,
       stage: context.stage,
@@ -4296,7 +4320,8 @@ export async function runTurnExecutor(
       scenario_id: context.session_id,
       routing_error_cause: err.cause,
       llm_calls_used: llmCallsUsed,
-      analysis_ready: analysisAvailable, // finaliser-exempt: telemetry payload field, not the response envelope analysis_ready slot
+      analysis_ready: analysisFreshAndAvailable, // finaliser-exempt: telemetry payload field, not the response envelope analysis_ready slot
+      analysis_freshness: freshness?.freshness ?? null,
     });
     // recordFailureContext fires at the top of translateRoutingError for
     // every routing-error cause, including this bounded-fallback path.
