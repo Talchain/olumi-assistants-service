@@ -645,7 +645,7 @@ function generateGenericHeadline(
   // Check for mixed outcomes
   if (winner.outcome_quality === "mixed") {
     if (margin >= MARGIN_THRESHOLDS.CLEAR) {
-      return `${winnerLabel} is recommended, though outcomes are less predictable`;
+      return `${winnerLabel} is currently ahead, though outcomes are less predictable`;
     }
     return `${winnerLabel} is the stronger option with higher potential but less certainty`;
   }
@@ -653,7 +653,7 @@ function generateGenericHeadline(
   // Baseline winner
   if (winnerIsBaseline) {
     if (margin >= MARGIN_THRESHOLDS.CLEAR) {
-      return `${winnerLabel} is the recommended approach`;
+      return `${winnerLabel} is the leading approach`;
     }
     return `${winnerLabel} is advisable at this time`;
   }
@@ -827,7 +827,7 @@ function generateDriverStatement(drivers?: Driver[]): string {
   }
 
   if (topDriver.direction === "positive") {
-    return `${capitalise(driverLabel)} is the main factor favouring this recommendation.`;
+    return `${capitalise(driverLabel)} is the main factor favouring this result.`;
   }
 
   if (topDriver.direction === "negative") {
@@ -843,7 +843,7 @@ function generateDriverStatement(drivers?: Driver[]): string {
 function generateConfidenceStatement(utility: number, margin: number): string {
   // High confidence: high utility AND clear margin
   if (utility >= CONFIDENCE_THRESHOLDS.HIGH && margin >= MARGIN_THRESHOLDS.SIGNIFICANT) {
-    return "This recommendation has high confidence based on the analysis.";
+    return "This result has high confidence based on the analysis.";
   }
 
   // High utility but close race
@@ -853,11 +853,11 @@ function generateConfidenceStatement(utility: number, margin: number): string {
 
   // Medium confidence
   if (utility >= CONFIDENCE_THRESHOLDS.MEDIUM) {
-    return "This recommendation has moderate confidence and merits review.";
+    return "This result has moderate confidence and merits review.";
   }
 
   // Low confidence
-  return "This recommendation has lower confidence; consider gathering more evidence.";
+  return "This result has lower confidence; consider gathering more evidence.";
 }
 
 /**
@@ -880,7 +880,7 @@ function generateCaveat(
   }
 
   if (marginPct <= 5) {
-    return `Consider that ${runnerUpLabel} is a close second—sensitivity analysis recommended.`;
+    return `Consider that ${runnerUpLabel} is a close second—a sensitivity check would be useful here.`;
   }
 
   return `${capitalise(runnerUpLabel)} remains a viable alternative.`;
@@ -1026,9 +1026,9 @@ function generateNextSteps(
  */
 function generateNoDataInsight(): KeyInsightOutput {
   return {
-    headline: "Unable to generate recommendation",
+    headline: "Unable to generate insight",
     primary_driver: "No ranked actions were provided for analysis.",
-    confidence_statement: "Run inference on the graph to generate a recommendation.",
+    confidence_statement: "Run inference on the graph to generate an insight.",
   };
 }
 

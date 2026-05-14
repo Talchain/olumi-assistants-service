@@ -342,6 +342,56 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     ).toBeUndefined();
   });
 
+  // V5 P0 deterministic post-analysis router: readiness-class question
+  // with fresh prior analysis must short-circuit via the gate, return
+  // qualitative open-items prose (no percentage echo), and use zero
+  // LLM calls. Mirrors the advice-class test above but exercises the
+  // readiness composer path which depends on the analysis_ready
+  // projection wired into the gate from turn-executor.
+  it('readiness-class question with fresh run_analysis fact → gate short-circuits with qualitative prose, zero LLM calls', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+    const expectedHash = computeAnalysisAffectingGraphHash(baseGraph)!;
+    mockedPriorFacts = [buildFreshRunAnalysisFact(expectedHash)];
+
+    const adapterMock = vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValue(mkTextResult('UNREACHABLE — readiness gate should short-circuit.'));
+    const adapter = { chatWithTools: adapterMock };
+
+    const readinessPayload = {
+      ...ANALYSE_PAYLOAD,
+      message: 'Why is this only 35% ready?',
+    };
+
+    const result = await runTurnExecutor(readinessPayload, 'req-readiness-gate', {
+      routingAdapter: adapter,
+      graphState: baseGraph,
+    });
+
+    // The adapter must not be called: the gate short-circuits before
+    // routeWithToolUse.
+    expect(adapterMock).not.toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.telemetry.failure_type).toBeNull();
+
+    // Qualitative readiness contract:
+    //   - never echo the user's percentage
+    //   - never claim "all set" when readiness data is open
+    //   - no forbidden phrases
+    //   - no edit_graph no-op denial
+    expect(result.response.assistant_text).not.toMatch(/35\s*%/);
+    expect(result.response.assistant_text).not.toMatch(/\b\d{1,3}\s*%\s*ready\b/i);
+    expect(result.response.assistant_text.toLowerCase()).not.toContain('recommendation');
+    expect(result.response.assistant_text).not.toContain("I couldn't see a concrete change");
+
+    // Telemetry signals: gate fired AND captured the readiness class.
+    const adviceEv = events.find((e) => e.event === 'v5.post_analysis_advice_gate');
+    expect(adviceEv).toBeDefined();
+    expect(adviceEv!.data.matched).toBe(true);
+    expect(adviceEv!.data.advice_class).toBe('readiness');
+  });
+
   // V5 P0 review-P1 stale-safety: an advice question after a graph
   // edit that invalidates the cached analysis must NOT short-circuit
   // through the gate. The gate falls through, normal routing handles

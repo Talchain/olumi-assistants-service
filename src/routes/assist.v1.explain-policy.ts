@@ -9,6 +9,7 @@ import type { FastifyInstance } from "fastify";
 import { CEEExplainPolicyInput } from "../schemas/cee.js";
 import type { CEEExplainPolicyResponseV1T } from "../schemas/ceeResponses.js";
 import { explainPolicy } from "../cee/recommendation-narrative/index.js";
+import { applyNarrativeEgressGuard } from "../cee/recommendation-narrative/egress-guard.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { getCeeFeatureRateLimiter } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -135,6 +136,48 @@ export default async function route(app: FastifyInstance) {
         },
         provenance: "cee",
       };
+
+      // Egress guard (P0): apply FORBIDDEN_USER_FACING_PHRASES to every
+      // user-facing string in the response. Includes the per-step
+      // `explanation` field on steps_explained[]. Mutates in place.
+      const egressOutcome = applyNarrativeEgressGuard(
+        response,
+        [
+          {
+            path: 'policy_narrative',
+            get: (r) => r.policy_narrative,
+            set: (r, v) => { r.policy_narrative = v; },
+          },
+          {
+            path: 'dependencies_explained',
+            get: (r) => r.dependencies_explained,
+            set: (r, v) => { r.dependencies_explained = v; },
+          },
+        ],
+        // steps_explained[] is an array of objects, each with an
+        // `explanation` string. Guard each entry's `.explanation` slot
+        // by re-emitting the array with rewrites applied.
+        [
+          {
+            path: 'steps_explained.explanation',
+            get: (r) => r.steps_explained.map((s) => s.explanation),
+            set: (r, v) => {
+              for (let i = 0; i < r.steps_explained.length; i++) {
+                if (typeof v[i] === 'string') {
+                  r.steps_explained[i] = { ...r.steps_explained[i], explanation: v[i] };
+                }
+              }
+            },
+          },
+        ],
+      );
+      if (egressOutcome.rewritten) {
+        emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+          ...telemetryCtx,
+          dispatch_path: 'explain_policy',
+          rewrites: egressOutcome.rewrites,
+        });
+      }
 
       const latencyMs = Date.now() - start;
 

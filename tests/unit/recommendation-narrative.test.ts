@@ -192,7 +192,11 @@ describe("generateRecommendation", () => {
         tone: "formal",
       });
 
-      expect(result.headline).toContain("recommended");
+      // P0 surface-copy cleanup: formal tone now uses "the leading
+      // option" instead of "is recommended" — same semantic, no
+      // prescriptive verb.
+      expect(result.headline).toContain("the leading option");
+      expect(result.headline.toLowerCase()).not.toContain("recommended");
     });
 
     it("handles conversational tone", () => {

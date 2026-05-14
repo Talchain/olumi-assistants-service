@@ -343,7 +343,9 @@ describe("CEE Key Insight Generator", () => {
           ranked_actions: [],
         });
 
-        expect(result.headline).toBe("Unable to generate recommendation");
+        // P0 surface-copy cleanup: no "recommendation" in user-facing
+        // text. The no-data fallback now uses "insight".
+        expect(result.headline).toBe("Unable to generate insight");
         expect(result.primary_driver).toContain("No ranked actions");
       });
 

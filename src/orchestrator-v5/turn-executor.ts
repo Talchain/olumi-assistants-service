@@ -2764,11 +2764,17 @@ export async function runTurnExecutor(
         const adviceOutcome = tryPostAnalysisAdviceGate({
           message: payload.message,
           analysis: contextPack.analysis,
-          // Freshness guard (review P1): the gate must only fire when
-          // the cached projection still matches the live graph,
-          // otherwise the deterministic "X is currently ahead" copy
-          // would mislead after an edit. `freshness` is populated by
-          // the analysis-freshness derivation earlier in the turn.
+          // P0 deterministic post-analysis router: pass the per-turn
+          // analysis-ready payload so readiness / evidence_gap classes
+          // can compose qualitative copy from the same projection
+          // already computed earlier in the turn. The other classes
+          // ignore it.
+          analysisReady: analysisReadyForTurn,
+          // Freshness guard: the gate ONLY short-circuits when the
+          // cached projection still matches the live graph; the deterministic
+          // "X is currently ahead" copy would otherwise mislead after an
+          // edit. `freshness` is populated by the analysis-freshness
+          // derivation earlier in the turn.
           freshness: freshness?.freshness,
         });
         emit(TelemetryEvents.V5PostAnalysisAdviceGate, {
@@ -2776,6 +2782,19 @@ export async function runTurnExecutor(
           scenario_id: context.session_id,
           matched: adviceOutcome.matched,
           unmatched_reason: adviceOutcome.matched ? null : adviceOutcome.reason,
+          // P0 deterministic router: surface the class on matched OR
+          // on `data_unavailable_for_class` fall-through so dashboards
+          // see WHICH class is producing fall-throughs. Null otherwise.
+          advice_class: adviceOutcome.matched
+            ? adviceOutcome.advice_class
+            : adviceOutcome.reason === 'data_unavailable_for_class'
+              ? (adviceOutcome.advice_class ?? null)
+              : null,
+          missing_inputs:
+            !adviceOutcome.matched
+            && adviceOutcome.reason === 'data_unavailable_for_class'
+              ? (adviceOutcome.missing_inputs ?? [])
+              : null,
           leading_option_present: !!contextPack.analysis?.leading_option,
           top_driver_present: adviceOutcome.matched
             ? adviceOutcome.top_driver_label !== null
