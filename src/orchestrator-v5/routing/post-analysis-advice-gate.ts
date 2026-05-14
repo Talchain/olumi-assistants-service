@@ -186,6 +186,20 @@ function composeAdvicePrompt(
   leadingLabel: string,
   topDriverLabel: string | null,
 ): string {
+  // Composer-template invariant: the deterministic prose contains no
+  // banned tokens. Verified via the egress audit in
+  // `FORBIDDEN_USER_FACING_PHRASES` — neither `recommendation` nor
+  // `the winner` nor `winning <X>` appears in either branch.
+  //
+  // Soft edge case (deferred — review round 2): if a user-authored
+  // option / factor label itself contains a banned token (e.g. a
+  // user named their option "My Recommendation"), the finaliser-level
+  // egress guard will rewrite the whole assistant_text to the neutral
+  // fallback. The user would then see a generic acknowledgement
+  // instead of a coaching answer. Not blocking — if this surfaces in
+  // staging manual tests, layer a display-safe label transform here
+  // (strip / quote the matched token in the user label before
+  // interpolation) without changing the gate's matching logic.
   if (topDriverLabel) {
     return `Based on the analysis, ${leadingLabel} is currently ahead. The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`;
   }
