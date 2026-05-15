@@ -3392,34 +3392,50 @@ export async function runTurnExecutor(
           }),
         );
       } catch (error) {
-        // Fix 4 review fix (round 3): rebuild RunAnalysisTimings from
+        // Fix 4 review fix (round 4): rebuild RunAnalysisTimings from
         // error.details on PLoT-failure paths so the recovery / fatal
-        // wire response carries `_timings.run_analysis` alongside the
-        // existing `_timings.turn`. The run_analysis handler attaches
-        // `plot_request_ms` to HandlerInvocationFailedError.details on
-        // every failing exit (timeout / plot_error / payload_invalid /
-        // unknown / fatal-status) — gated by the same flag, so
-        // default-OFF production runs leave the field absent and this
-        // block is a no-op.
+        // wire response carries `_timings.run_analysis` shape-symmetric
+        // with the success path. The run_analysis handler attaches
+        // `plot_request_ms`, `handler_total_ms`, and `plot_slow_likely`
+        // to HandlerInvocationFailedError.details on every failing exit
+        // (all gated by the same flag), so default-OFF production runs
+        // leave the fields absent and this whole block is a no-op.
         if (
           timingsEnabled &&
           proposedHandlerId === 'run_analysis' &&
           error instanceof HandlerInvocationFailedError
         ) {
           const details = error.details as
-            | { plot_request_ms?: unknown; analysis_status?: unknown }
+            | {
+                plot_request_ms?: unknown;
+                handler_total_ms?: unknown;
+                plot_slow_likely?: unknown;
+                analysis_status?: unknown;
+              }
             | undefined;
           const reqMs = typeof details?.plot_request_ms === 'number'
             ? details.plot_request_ms
             : undefined;
+          // Handler-only wall clock from the handler's own timer; falls
+          // back to the executor's turn-relative anchor only when the
+          // handler couldn't compute it (defensive — should not happen on
+          // run_analysis exits but keeps the field always populated).
+          const totalMs = typeof details?.handler_total_ms === 'number'
+            ? details.handler_total_ms
+            : Date.now() - startedAt;
+          const slowLikely = typeof details?.plot_slow_likely === 'boolean'
+            ? details.plot_slow_likely
+            : reqMs === undefined
+              ? null
+              : reqMs >= PLOT_SLOW_LIKELY_MS;
           const status = typeof details?.analysis_status === 'string'
             ? details.analysis_status
             : null;
           runAnalysisTimings = {
-            handler_total_ms: Date.now() - startedAt,
+            handler_total_ms: totalMs,
             ...(reqMs !== undefined ? { plot_request_ms: reqMs } : {}),
             plot_status: status,
-            plot_slow_likely: reqMs === undefined ? null : reqMs >= PLOT_SLOW_LIKELY_MS,
+            plot_slow_likely: slowLikely,
           };
         }
         // P1.1 follow-up — budget precedence (Paul's constraint 7) for the

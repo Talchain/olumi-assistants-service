@@ -368,14 +368,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // outage latency — gated so default-OFF production stays silent.
       const failureTimings = buildPlotTimings(null);
       emitPlotTimings(failureTimings);
-      // Error details carry `plot_request_ms` only when timings are
-      // enabled. The executor mirrors this gate when reconstructing
-      // `_timings.run_analysis` from `HandlerInvocationFailedError.details`
-      // on the recovery wire response.
+      // Error details carry both `plot_request_ms` AND `handler_total_ms`
+      // (handler-only wall clock) so the executor can reconstruct a
+      // RunAnalysisTimings block that is shape-symmetric with the
+      // success-path value. Without `handler_total_ms`, the executor's
+      // fallback (`Date.now() - turn.startedAt`) inflates the figure with
+      // build-context + context-pack + routing time. Both fields are
+      // gated on `timingsEnabled`.
       const errorDetailsBase = {
         handler_id: 'run_analysis',
         ...(timingsEnabled && failureTimings.plot_request_ms !== undefined
           ? { plot_request_ms: failureTimings.plot_request_ms }
+          : {}),
+        ...(timingsEnabled && failureTimings.handler_total_ms !== undefined
+          ? { handler_total_ms: failureTimings.handler_total_ms }
+          : {}),
+        ...(timingsEnabled && failureTimings.plot_slow_likely !== undefined
+          ? { plot_slow_likely: failureTimings.plot_slow_likely }
           : {}),
       } as const;
       if (runError instanceof PLoTTimeoutError) {
@@ -489,8 +498,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         details: {
           handler_id: 'run_analysis',
           ...(analysisStatus !== null ? { analysis_status: analysisStatus } : {}),
-          ...(fatalTimings.plot_request_ms !== undefined
+          ...(timingsEnabled && fatalTimings.plot_request_ms !== undefined
             ? { plot_request_ms: fatalTimings.plot_request_ms }
+            : {}),
+          ...(timingsEnabled && fatalTimings.handler_total_ms !== undefined
+            ? { handler_total_ms: fatalTimings.handler_total_ms }
+            : {}),
+          ...(timingsEnabled && fatalTimings.plot_slow_likely !== undefined
+            ? { plot_slow_likely: fatalTimings.plot_slow_likely }
             : {}),
         },
         cause: response,

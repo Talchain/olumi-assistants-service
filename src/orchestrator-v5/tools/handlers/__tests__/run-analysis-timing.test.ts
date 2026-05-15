@@ -130,9 +130,14 @@ describe('run_analysis — PLoT failure path timing preservation (Fix 4)', () =>
     expect(caught!.details).toHaveProperty('handler_id', 'run_analysis');
     // The blocking-review requirement: error details must surface the
     // PLoT round-trip time so the replay harness can attribute outage
-    // latency.
+    // latency. Round-4 self-review: also `handler_total_ms` so the
+    // executor's reconstruction is shape-symmetric with the success
+    // path (without it, executor would inflate the figure using the
+    // turn-relative `startedAt` anchor).
     expect(typeof caught!.details?.plot_request_ms).toBe('number');
     expect(caught!.details?.plot_request_ms as number).toBeGreaterThanOrEqual(0);
+    expect(typeof caught!.details?.handler_total_ms).toBe('number');
+    expect(typeof caught!.details?.plot_slow_likely).toBe('boolean');
 
     // Telemetry must emit on the failure path too.
     const timingEvents = telemetryEvents.filter(
@@ -236,6 +241,8 @@ describe('run_analysis — flag-OFF leak guard (review fix round 3)', () => {
     expect(caught).not.toBeNull();
     expect(caught!.cause_kind).toBe('plot_timeout');
     expect(caught!.details).not.toHaveProperty('plot_request_ms');
+    expect(caught!.details).not.toHaveProperty('handler_total_ms');
+    expect(caught!.details).not.toHaveProperty('plot_slow_likely');
     expect(
       telemetryEvents.some((e) => e.event === TelemetryEvents.V5RunAnalysisTimings),
     ).toBe(false);
