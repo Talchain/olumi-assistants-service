@@ -777,19 +777,36 @@ export const TelemetryEvents = {
   // recent_changes ContextPack projection if any mutations exist).
   V5StateQueryGuard: "v5.state_query_guard",
 
-  // V5 P0 stabilisation — post-analysis advice gate.
+  // V5 P0 stabilisation — post-analysis advice gate / deterministic
+  // post-analysis router.
   //
   // Fires once per turn, AFTER the state-query guard and BEFORE the LLM
-  // routing call. Records whether the advice-gate short-circuited the
-  // turn (matched=true → deterministic direct_answer from analysisProjection)
-  // or fell through to normal routing.
+  // routing call. Records whether the gate short-circuited the turn
+  // (matched=true → deterministic direct_answer) or fell through to
+  // normal routing.
   //
   // Payload:
   //   - request_id: string
   //   - scenario_id: string
   //   - matched: boolean
-  //   - unmatched_reason: 'no_analysis' | 'no_leading_option' |
-  //     'mutation_signal' | 'no_advice_signal' | 'empty_message' | null
+  //   - unmatched_reason: 'no_analysis' | 'mutation_signal' |
+  //     'no_advice_signal' | 'empty_message' | 'not_fresh' |
+  //     'data_unavailable_for_class' | null
+  //     ('no_leading_option' was retired post-PR #173: missing
+  //     leading_option now surfaces uniformly as
+  //     'data_unavailable_for_class' with `missing_inputs: ['leading_option']`
+  //     so dashboards see the matched class.)
+  //   - advice_class: 'advice' | 'next_step' | 'update_advice' |
+  //     'improvement' | 'meaning' | 'readiness' | 'evidence_gap' |
+  //     'explain_results_free_text' | 'what_would_flip_free_text' | null
+  //     Surfaced on `matched=true` AND on the
+  //     `data_unavailable_for_class` fall-through so dashboards can
+  //     see which class is producing fall-throughs without re-running
+  //     the matcher.
+  //   - missing_inputs: string[] | null — only set when
+  //     `unmatched_reason === 'data_unavailable_for_class'`. Lists
+  //     which required-input keys were absent (e.g. ['top_driver'],
+  //     ['analysis_ready']).
   //   - leading_option_present: boolean — analysis projection had a
   //     leading option at gate-evaluation time
   //   - top_driver_present: boolean — top driver label was available

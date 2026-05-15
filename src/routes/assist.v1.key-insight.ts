@@ -5,6 +5,7 @@ import {
   type CEEKeyInsightResponseV1T,
 } from "../schemas/ceeResponses.js";
 import { generateKeyInsight, type RankedAction, type Driver, type GoalInfo, type Identifiability } from "../cee/key-insight/index.js";
+import { applyNarrativeEgressGuard } from "../cee/recommendation-narrative/egress-guard.js";
 import { computeQuality } from "../cee/quality/index.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -252,7 +253,35 @@ export default async function route(app: FastifyInstance) {
         provenance: "cee",
       };
 
-      // Validate response schema
+      // Egress guard (P0): apply FORBIDDEN_USER_FACING_PHRASES to every
+      // user-facing string in the response. Includes headline,
+      // primary_driver, confidence_statement, caveat, identifiability_note,
+      // evidence[], next_steps[]. Mutates in place BEFORE schema validation
+      // so the validated response is the surface-safe version.
+      const egressOutcome = applyNarrativeEgressGuard(
+        response,
+        [
+          { path: 'headline', get: (r) => r.headline, set: (r, v) => { r.headline = v; } },
+          { path: 'primary_driver', get: (r) => r.primary_driver, set: (r, v) => { r.primary_driver = v; } },
+          { path: 'confidence_statement', get: (r) => r.confidence_statement, set: (r, v) => { r.confidence_statement = v; } },
+          { path: 'caveat', get: (r) => r.caveat, set: (r, v) => { r.caveat = v; } },
+          { path: 'identifiability_note', get: (r) => r.identifiability_note, set: (r, v) => { r.identifiability_note = v; } },
+        ],
+        [
+          { path: 'evidence', get: (r) => r.evidence, set: (r, v) => { r.evidence = [...v]; } },
+          { path: 'next_steps', get: (r) => r.next_steps, set: (r, v) => { r.next_steps = [...v]; } },
+        ],
+      );
+      if (egressOutcome.rewritten) {
+        emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+          ...telemetryCtx,
+          dispatch_path: 'key_insight',
+          rewrites: egressOutcome.rewrites,
+        });
+      }
+
+      // Validate response schema (post-guard, so the validated shape is
+      // the surface-safe shape).
       const validationResult = CEEKeyInsightResponseV1Schema.safeParse(response);
       if (!validationResult.success) {
         log.error(

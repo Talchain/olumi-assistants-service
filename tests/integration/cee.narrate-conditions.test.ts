@@ -137,7 +137,7 @@ describe("POST /assist/v1/narrate-conditions (CEE v1)", () => {
     expect(body.narrative.toLowerCase()).toContain("if");
   });
 
-  it("includes primary recommendation in narrative when provided", async () => {
+  it("includes primary action in narrative when provided", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/assist/v1/narrate-conditions",
@@ -148,8 +148,13 @@ describe("POST /assist/v1/narrate-conditions (CEE v1)", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
 
-    // Primary recommendation should be mentioned
-    expect(body.narrative.toLowerCase()).toContain("recommendation");
+    // Surface uses neutral framing — the primary action label appears
+    // verbatim, prefixed by the deterministic "primary action is to"
+    // phrasing. NEVER uses "recommendation" / "recommended" (P0 cleanup).
+    expect(body.narrative.toLowerCase()).toContain("primary action");
+    expect(body.narrative.toLowerCase()).toContain("expand to eu market");
+    expect(body.narrative.toLowerCase()).not.toContain("recommendation");
+    expect(body.narrative.toLowerCase()).not.toContain("recommended");
   });
 
   it("returns CEE_VALIDATION_FAILED for missing conditions", async () => {

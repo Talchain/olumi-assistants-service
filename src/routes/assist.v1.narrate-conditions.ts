@@ -9,6 +9,7 @@ import type { FastifyInstance } from "fastify";
 import { CEENarrateConditionsInput } from "../schemas/cee.js";
 import type { CEENarrateConditionsResponseV1T } from "../schemas/ceeResponses.js";
 import { narrateConditions } from "../cee/recommendation-narrative/index.js";
+import { applyNarrativeEgressGuard } from "../cee/recommendation-narrative/egress-guard.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { getCeeFeatureRateLimiter } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -135,6 +136,30 @@ export default async function route(app: FastifyInstance) {
         },
         provenance: "cee",
       };
+
+      // Egress guard (P0): apply FORBIDDEN_USER_FACING_PHRASES to every
+      // user-facing string in the response. Mutates in place, then
+      // emits a single aggregated telemetry event if any rewrite fired.
+      const egressOutcome = applyNarrativeEgressGuard(
+        response,
+        [
+          { path: 'narrative', get: (r) => r.narrative, set: (r, v) => { r.narrative = v; } },
+        ],
+        [
+          {
+            path: 'key_decision_points',
+            get: (r) => r.key_decision_points,
+            set: (r, v) => { r.key_decision_points = [...v]; },
+          },
+        ],
+      );
+      if (egressOutcome.rewritten) {
+        emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+          ...telemetryCtx,
+          dispatch_path: 'narrate_conditions',
+          rewrites: egressOutcome.rewrites,
+        });
+      }
 
       const latencyMs = Date.now() - start;
 

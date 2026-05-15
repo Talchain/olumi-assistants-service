@@ -232,7 +232,7 @@ export function generateHeadline(
   // Standard positive/neutral outcome handling with context
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is recommended${goalPhrase}${confidencePhrase}`
+      ? `${winnerLabel} is the leading option${goalPhrase}${confidencePhrase}`
       : `${winnerLabel} is your best bet${goalPhrase}${confidencePhrase}`;
   }
 
@@ -270,7 +270,7 @@ function generateBaselineHeadline(
 ): string {
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is the recommended approach${goalPhrase}${confidencePhrase}`
+      ? `${winnerLabel} is the leading approach${goalPhrase}${confidencePhrase}`
       : `${winnerLabel} is your best move${goalPhrase}${confidencePhrase}`;
   }
 
@@ -334,7 +334,7 @@ function generateCautiousHeadline(
 ): string {
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerLabel} is recommended${goalPhrase}, though outcomes are less predictable`
+      ? `${winnerLabel} is the leading option${goalPhrase}, though outcomes are less predictable`
       : `${winnerLabel} is your best bet${goalPhrase}, but expect some ups and downs`;
   }
 
@@ -398,7 +398,7 @@ export function generateNarrative(
 
   if (scoreGap >= HIGH_SCORE_GAP) {
     return tone === "formal"
-      ? `${winnerAction} significantly outperforms ${runnerUpLabel}${goalPhrase}. The analysis indicates a substantial advantage, making this the clear recommendation.`
+      ? `${winnerAction} significantly outperforms ${runnerUpLabel}${goalPhrase}. The analysis indicates a substantial advantage, making this the clear leading choice.`
       : `${winnerAction} beats ${runnerUpLabel} by a wide margin${goalPhrase}. This one's not a close call.`;
   }
 
@@ -512,8 +512,8 @@ export function generateConfidenceStatement(
   if (gap >= HIGH_SCORE_GAP && topScore >= 70) {
     return {
       statement: tone === "formal"
-        ? "High confidence in this recommendation. The analysis shows a decisive advantage with strong supporting evidence."
-        : "This recommendation comes with high confidence. The winner stands out clearly.",
+        ? "High confidence in this analysis. The result shows a decisive advantage with strong supporting evidence."
+        : "This analysis comes with high confidence. The leading option stands out clearly.",
       confidence: "high",
     };
   }
@@ -521,7 +521,7 @@ export function generateConfidenceStatement(
   if (gap >= MEDIUM_SCORE_GAP && topScore >= 50) {
     return {
       statement: tone === "formal"
-        ? "Moderate confidence in this recommendation. The leading option shows meaningful advantages, though some uncertainty remains."
+        ? "Moderate confidence in this result. The leading option shows meaningful advantages, though some uncertainty remains."
         : "Medium confidence here. The top choice has real advantages, but it's not a slam dunk.",
       confidence: "medium",
     };
@@ -529,7 +529,7 @@ export function generateConfidenceStatement(
 
   return {
     statement: tone === "formal"
-      ? "Lower confidence in this recommendation. The alternatives are closely matched, suggesting additional analysis may be valuable."
+      ? "Lower confidence in this result. The alternatives are closely matched, suggesting additional analysis may be valuable."
       : "Lower confidence on this one. The options are pretty close together, so you might want to dig deeper.",
     confidence: "low",
   };
@@ -585,12 +585,17 @@ export function generateCaveat(
   const runnerUpLabel = labelForDisplay(runnerUp.label);
 
   return tone === "formal"
-    ? `Note: ${runnerUpLabel} remains a viable alternative. Small changes in assumptions could shift the recommendation.`
+    ? `Note: ${runnerUpLabel} remains a viable alternative. Small changes in assumptions could shift the result.`
     : `Heads up: ${runnerUpLabel} is still a solid option. Things could shift if your assumptions change.`;
 }
 
 /**
  * Generate a conditional narrative from conditions.
+ *
+ * The `primaryRecommendation` parameter name is the wire-level input field
+ * (`primary_recommendation` on the route request body). Surface copy uses
+ * neutral framing — "primary action" / "primary outcome" — so the
+ * user-facing string contains no banned token.
  */
 export function generateConditionalNarrative(
   conditions: Condition[],
@@ -598,16 +603,16 @@ export function generateConditionalNarrative(
 ): string {
   if (conditions.length === 0) {
     return primaryRecommendation
-      ? `The recommendation is to ${sanitiseLabel(primaryRecommendation)}.`
+      ? `The primary action is to ${sanitiseLabel(primaryRecommendation)}.`
       : "No conditional logic to narrate.";
   }
 
   const parts: string[] = [];
 
-  // Start with primary recommendation if provided
+  // Start with primary action if provided
   if (primaryRecommendation) {
     parts.push(
-      `The primary recommendation is to ${sanitiseLabel(primaryRecommendation)}.`,
+      `The primary action is to ${sanitiseLabel(primaryRecommendation)}.`,
     );
   }
 
