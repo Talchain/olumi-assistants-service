@@ -102,6 +102,54 @@ describe('sanitiseForUser', () => {
     expect(out).not.toMatch(/at\s+\/app/);
   });
 
+  // Phase 2a.1 regression: the previous over-broad STACK_TRACE_FRAGMENT
+  // regex matched any `" at <word>"` substring, destroying legitimate
+  // prose. Observed on staging as "I could not update th because the
+  // target or value was not valid." — the canonical D1HandlerError
+  // user-guidance phrase "I could not update that value because…" with
+  // ` at value` stripped (then whitespace collapsed). All three D1
+  // canonical phrases were affected because each contains an `at <word>`
+  // token (`at constraint`, `at value`, `at edit`). These tests pin the
+  // bug shut for every D1 user-guidance phrase + common false-positive
+  // shapes (time literals, prepositional `at risk` / `at hand`, etc).
+  it('preserves the set_factor_value canonical user-guidance phrase verbatim', () => {
+    const raw = 'I could not update that value because the target or value was not valid.';
+    expect(sanitiseForUser(raw)).toBe(raw);
+  });
+
+  it.each([
+    // The three D1 handler canonical phrases — all previously corrupted
+    // because each contains `at <word>` (`at constraint`, `at value`,
+    // `at edit`).
+    ['I could not apply that constraint because the target or constraint details were not valid.'],
+    ['I could not update that value because the target or value was not valid.'],
+    ['I could not apply that edit because it no longer matched the current model.'],
+    // Common prepositional / temporal "at" usage in legitimate prose.
+    ['The factor is currently at risk of overflow.'],
+    ['We met at the office at 10:30 to plan the launch.'],
+    ['The proposal is at hand and ready for review.'],
+    ['Tom looked at value-add closely before deciding.'],
+  ])('preserves "%s" verbatim (no false-positive stack-trace match)', (raw) => {
+    expect(sanitiseForUser(raw)).toBe(raw);
+  });
+
+  it('still strips function-with-parens stack frames', () => {
+    const raw = 'crashed at Object.<anonymous> (/app/src/foo.ts:123:45) during init';
+    const out = sanitiseForUser(raw);
+    expect(out).not.toContain('Object.<anonymous>');
+    expect(out).not.toContain('/app/src/foo.ts');
+    expect(out).toContain('crashed');
+    expect(out).toContain('during init');
+  });
+
+  it('still strips multiple direct stack-frame lines in one input', () => {
+    const raw =
+      'Error: boom at /a/b.ts:10:5 at /c/d.ts:20:8 at /e/f.ts:30:12 — bailed out';
+    const out = sanitiseForUser(raw);
+    expect(out).not.toMatch(/\/[a-z]\/[a-z]\.ts:\d+/);
+    expect(out).toContain('bailed out');
+  });
+
   it('converts arrays to comma-joined sanitised elements', () => {
     expect(sanitiseForUser(['a', 'b', 'c'])).toBe('a, b, c');
   });

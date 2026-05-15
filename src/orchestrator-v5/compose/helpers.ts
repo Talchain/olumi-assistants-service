@@ -65,7 +65,45 @@ export function safeLabel(entity: EntityLike | null | undefined): string {
 // sanitiseForUser
 // ---------------------------------------------------------------------------
 
-const STACK_TRACE_FRAGMENT = /\s*at\s+[^\s]+(?::\d+)?(?::\d+)?\)?/g;
+/**
+ * Stack-trace-fragment scrubber. Targets Node.js / V8 stack frames such
+ * as:
+ *   - `at /app/src/foo.ts:123:45`
+ *   - `at functionName (/app/src/foo.ts:123:45)`
+ *   - `at Object.<anonymous> (/path:42:5)`
+ *
+ * Phase 2a.1 — the previous form
+ *
+ *   /\s*at\s+[^\s]+(?::\d+)?(?::\d+)?\)?/g
+ *
+ * made the `:LINE` suffix optional, so any phrase containing
+ * ` at <word>` matched. The greedy scrubber then destroyed legitimate
+ * prose. Concrete production failure observed on staging:
+ *
+ *   user prompt → set_factor_value handler throws D1HandlerError with
+ *     userGuidance="I could not update that value because the target
+ *                   or value was not valid."
+ *   sanitiseForUser strips " at value" → "I could not update th  because…"
+ *   whitespace collapse → "I could not update th because the target or
+ *                          value was not valid."
+ *
+ * All three D1 handler canonical phrases were affected
+ * (`add_constraint` / `set_factor_value` / `adjust_edge_strength`)
+ * because each contains an `at <word>` token (`at constraint`,
+ * `at value`, `at edit`). The tightened form below requires EITHER:
+ *
+ *   1. a path-shaped token (containing `/`, `.`, or a letter) directly
+ *      followed by `:\d+(?::\d+)?\)?` — real direct stack-frame, or
+ *   2. `at <token>` followed by a parenthesised non-empty source
+ *      location — function-with-parens stack-frame.
+ *
+ * A look-ahead `(?=\S*[\/.a-zA-Z])` guards Alt 1 from matching pure-
+ * digit + colon tokens like time literals (`at 10:30`). Alt 2 captures
+ * the parenthesised source path so `at Object.<anonymous> (/path:42:5)`
+ * is stripped as a single unit.
+ */
+const STACK_TRACE_FRAGMENT =
+  /\s*at\s+(?:(?=\S*[/.a-zA-Z])\S+:\d+(?::\d+)?\)?|\S+\s+\([^)]*\))/g;
 const MAX_USER_STRING = 100;
 
 /**
