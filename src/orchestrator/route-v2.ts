@@ -87,6 +87,7 @@ import type { FastifyInstance } from 'fastify';
 import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { config } from '../config/index.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
@@ -231,13 +232,35 @@ function sendFinalised200(
   // currently hard-coded clean; scrubbing it is defence-in-depth against
   // future fallback drift. See output-safety.ts for the design rationale.
   const candidateFinalised = finaliseV5Response(candidate, ctx);
-  const candidateSanitised = sanitiseOlumiResponseForEgress(candidateFinalised, {
+  // Fix 4 (observability): pluck out the optional `_timings` block before
+  // egress validation. OlumiResponseSchema is `.strict()` — unknown keys
+  // would fail safeParse and trigger the typed-fallback path. We strip
+  // unconditionally (defense-in-depth: a stale upstream attach must not
+  // leak past this seam), validate the cleaned shape, then re-attach
+  // ONLY when `config.cee.timingDebugEnabled` is true. The route is the
+  // last guard — upstream callers cannot bypass the flag by attaching
+  // `_timings` themselves.
+  const stripped = ((): { timings: unknown; body: import('@talchain/schemas/boundary').OlumiResponse } => {
+    const raw = (candidateFinalised as Record<string, unknown>)._timings;
+    if (raw === undefined) {
+      return { timings: undefined, body: candidateFinalised };
+    }
+    const cloned = { ...(candidateFinalised as Record<string, unknown>) };
+    delete cloned._timings;
+    return {
+      timings: raw,
+      body: cloned as import('@talchain/schemas/boundary').OlumiResponse,
+    };
+  })();
+  const timingsForWire = stripped.timings;
+  const candidateForValidation = stripped.body;
+  const candidateSanitised = sanitiseOlumiResponseForEgress(candidateForValidation, {
     graph: ctx.graph,
     requestId,
     exitPath,
   });
   const egress = validateEgress(candidateSanitised, requestId);
-  const wireBody = egress.ok
+  let wireBody = egress.ok
     ? finaliseV5Response(
         sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath }),
         ctx,
@@ -250,6 +273,26 @@ function sendFinalised200(
     log.error(
       { request_id: requestId, exit_path: exitPath },
       'V5 egress validation failed — returning typed fallback envelope (post-finalised)',
+    );
+  }
+  // Re-attach `_timings` post-validation only on the success path AND
+  // only when the timing-debug flag is enabled. The fallback envelope
+  // never carries a debug surface; an upstream attach with the flag off
+  // is silently dropped by the strip above. Spreading breaks WeakSet
+  // membership (Mechanism B of the finaliser brand), so we re-finalise
+  // the augmented body for the preSerialization hook.
+  if (
+    egress.ok &&
+    timingsForWire !== undefined &&
+    config.cee.timingDebugEnabled
+  ) {
+    const augmented = {
+      ...(wireBody as Record<string, unknown>),
+      _timings: timingsForWire,
+    } as unknown as import('@talchain/schemas/boundary').OlumiResponse;
+    wireBody = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      ctx,
     );
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);

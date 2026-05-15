@@ -22,9 +22,10 @@ import { getRequestId, generateRequestId } from "../../utils/request-id.js";
 import { computeResponseHash } from "../../utils/response-hash.js";
 import { config } from "../../config/index.js";
 import { createCorrectionCollector } from "../corrections.js";
-import { log } from "../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
+import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-timings.js";
 
 import { runStageParse } from "./stages/parse.js";
 import { runStageNormalise } from "./stages/normalise.js";
@@ -388,6 +389,35 @@ function attachPipelineOutcome(body: unknown, outcome: PipelineOutcome): unknown
 }
 
 /**
+ * Fix 4 (observability): attach `_timings.draft_graph` to a draft_graph
+ * response body. Both the telemetry emit and the response-envelope
+ * mutation are gated by `config.cee.timingDebugEnabled` — default-OFF
+ * production runs do not emit the event or mutate the body. Safe for
+ * non-object bodies.
+ */
+function attachDraftGraphTimings(
+  body: unknown,
+  timings: DraftGraphTimings,
+  requestId: string,
+): unknown {
+  if (!config.cee.timingDebugEnabled) {
+    return body;
+  }
+  emit(TelemetryEvents.CeeUnifiedPipelineStageTimings, {
+    request_id: requestId,
+    ...timings,
+  });
+  if (body && typeof body === "object") {
+    const existing = (body as Record<string, unknown>)._timings;
+    const next = existing && typeof existing === "object"
+      ? { ...(existing as Record<string, unknown>), draft_graph: timings }
+      : { draft_graph: timings };
+    (body as Record<string, unknown>)._timings = next;
+  }
+  return body;
+}
+
+/**
  * Helper: if earlyReturn is set, attach pipeline outcome and return it.
  * Avoids TS control-flow narrowing issues with repeated earlyReturn checks.
  */
@@ -406,13 +436,51 @@ export async function runUnifiedPipeline(
 ): Promise<UnifiedPipelineResult> {
   const ctx = buildInitialContext(input, rawBody, request, opts);
 
+  // Fix 4: per-stage wall clock for draft_graph. Every timer site is
+  // gated on `config.cee.timingDebugEnabled` — default-OFF production
+  // pays zero `Date.now()` calls, no `timings` allocation, and no body
+  // mutation. When enabled, stage deltas roll up into `_timings.draft_graph`
+  // on the response body and a `cee.unified_pipeline.stage_timings`
+  // telemetry event fires once per draft. The earlier round of review
+  // fixes gated the telemetry emit + body mutation; this round eliminates
+  // the residual stage-timer overhead too so the OFF story is consistent
+  // across V5 turn + run_analysis + draft_graph.
+  const timingsEnabled = config.cee.timingDebugEnabled;
+  const stageStart: () => number = timingsEnabled
+    ? () => Date.now()
+    : () => 0;
+  const stageElapsed: (t0: number) => number = timingsEnabled
+    ? (t0) => Date.now() - t0
+    : () => 0;
+  const timings: DraftGraphTimings = {};
+  const finalise = (body: unknown): unknown => {
+    if (!timingsEnabled) return body;
+    timings.total_ms = Date.now() - ctx.start;
+    // Repair split: parse_llm_ms comes from llmMeta provider latency.
+    // repair_llm_ms / repair_deterministic_ms split via the LLM-repair
+    // flag on pipelineOutcome (set after Stage 4 finishes). The total
+    // repair_ms is captured in the stage timer below; the LLM portion is
+    // derived after the fact from the outcome.
+    const llmRepair = ctx.pipelineOutcome.llm_repair;
+    timings.repair_fired = llmRepair.triggered;
+    timings.repair_attempts = llmRepair.attempts;
+    timings.repair_reason = llmRepair.fallback_reason;
+    if (typeof ctx.llmMeta?.provider_latency_ms === "number") {
+      timings.parse_llm_ms = ctx.llmMeta.provider_latency_ms;
+    }
+    return attachDraftGraphTimings(body, timings, ctx.requestId);
+  };
+
   try {
     // Stage 1: Parse — LLM draft + adapter normalisation
+    const t1 = stageStart();
     await runStageParse(ctx);
-    { const er = drainEarlyReturn(ctx); if (er) return er; }
+    timings.parse_ms = stageElapsed(t1);
+    { const er = drainEarlyReturn(ctx); if (er) { finalise(er.body); return er; } }
     if (ctx.opts.rawOutput) {
       const rawResult = buildRawOutputResponse(ctx);
       attachPipelineOutcome(rawResult.body, ctx.pipelineOutcome);
+      finalise(rawResult.body);
       return rawResult;
     }
 
@@ -421,11 +489,14 @@ export async function runUnifiedPipeline(
     ctx.stageSnapshots = { stage_1_parse: captureStageSnapshot(ctx) };
 
     // Stage 2: Normalise — STRP + risk coefficients
+    const t2 = stageStart();
     await runStageNormalise(ctx);
+    timings.normalise_ms = stageElapsed(t2);
 
     // Stage 3: Enrich — Factor enrichment (ONCE)
     // Defensive: degenerate graphs (empty nodes/edges from nonsensical briefs)
     // can crash enrichment. Catch and return structured error instead of 500.
+    const t3 = stageStart();
     try {
       await runStageEnrich(ctx);
       ctx.pipelineOutcome.enrichment_status = 'complete';
@@ -463,14 +534,19 @@ export async function runUnifiedPipeline(
           ],
         },
       });
+      timings.enrich_ms = stageElapsed(t3);
       attachPipelineOutcome(errorBody, ctx.pipelineOutcome);
+      finalise(errorBody);
       return { statusCode: 400, body: errorBody };
     }
+    timings.enrich_ms = stageElapsed(t3);
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
     ctx.planAnnotation = capturePlanAnnotation(ctx);
 
     // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
+    const t4 = stageStart();
     await runStageRepair(ctx);
+    timings.repair_ms = stageElapsed(t4);
 
     // Update sweep violations count and diagnostic metrics from repair trace
     const sweepTrace = ctx.repairTrace?.deterministic_sweep as Record<string, unknown> | undefined;
@@ -543,7 +619,7 @@ export async function runUnifiedPipeline(
       source: inferProvenanceSource(r.code),
     }));
 
-    { const er = drainEarlyReturn(ctx); if (er) return er; }
+    { const er = drainEarlyReturn(ctx); if (er) { finalise(er.body); return er; } }
 
     // Graph survived repair — structurally valid
     ctx.pipelineOutcome.graph_structurally_valid = true;
@@ -552,6 +628,7 @@ export async function runUnifiedPipeline(
     // Validation pipeline (Pass 2) — fired immediately after Repair, runs
     // concurrently with Stage 4b. Uses catch() so Stage 4b is never blocked
     // by validation errors. Awaited before Stage 5 so metadata is ready.
+    const tValidation = stageStart();
     let validationPromise: Promise<void>;
     if (config.cee.validationPipelineEnabled) {
       validationPromise = runValidationPipeline(ctx).then(() => {
@@ -585,6 +662,7 @@ export async function runUnifiedPipeline(
 
     // Stage 4b: Threshold Sweep — deterministic goal threshold hygiene
     // Non-critical: failing to strip thresholds must not crash the pipeline.
+    const t4b = stageStart();
     try {
       await runStageThresholdSweep(ctx);
     } catch (sweepErr: any) {
@@ -600,15 +678,18 @@ export async function runUnifiedPipeline(
         degraded: true,
       });
     }
+    timings.threshold_sweep_ms = stageElapsed(t4b);
     ctx.stageSnapshots.stage_4b_threshold_sweep = captureStageSnapshot(ctx);
 
     // Await Pass 2 before Stage 5 (Package) so validation metadata is present
     // on edges when the response is assembled.
     await validationPromise;
+    timings.validation_pipeline_ms = stageElapsed(tValidation);
 
     // Stage 5: Package — Quality + warnings + caps + trace
     // Soft gate: both the verification pipeline inside Package and the
     // Package stage itself must not discard a structurally valid graph.
+    const t5 = stageStart();
     try {
       await runStagePackage(ctx);
     } catch (packageErr: any) {
@@ -624,16 +705,20 @@ export async function runUnifiedPipeline(
         degraded: true,
       });
       ctx.pipelineOutcome.coaching_status = 'failed_degraded';
+      timings.package_ms = stageElapsed(t5);
       // Return the structurally valid graph without packaging
       const fallback = { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
       attachPipelineOutcome(fallback, ctx.pipelineOutcome);
+      finalise(fallback);
       return { statusCode: 200, body: fallback };
     }
-    { const er = drainEarlyReturn(ctx); if (er) return er; }
+    timings.package_ms = stageElapsed(t5);
+    { const er = drainEarlyReturn(ctx); if (er) { finalise(er.body); return er; } }
     ctx.stageSnapshots.stage_5_package = captureStageSnapshot(ctx);
 
     // Stage 6: Boundary — V3/V2/V1 transform
     // Soft gate: boundary transform failure must not discard a packaged response.
+    const t6 = stageStart();
     try {
       await runStageBoundary(ctx);
     } catch (boundaryErr: any) {
@@ -648,13 +733,16 @@ export async function runUnifiedPipeline(
         error: boundaryErr?.message ?? 'unknown',
         degraded: true,
       });
+      timings.boundary_ms = stageElapsed(t6);
       // Return the packaged V1 response without boundary transform
       const fallback = ctx.ceeResponse ?? { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
       ctx.pipelineOutcome.coaching_status = 'complete';
       attachPipelineOutcome(fallback, ctx.pipelineOutcome);
+      finalise(fallback);
       return { statusCode: 200, body: fallback };
     }
-    { const er = drainEarlyReturn(ctx); if (er) return er; }
+    timings.boundary_ms = stageElapsed(t6);
+    { const er = drainEarlyReturn(ctx); if (er) { finalise(er.body); return er; } }
 
     // Defensive guard — all stages wired, so this should never fire
     if (ctx.finalResponse === undefined) {
@@ -664,6 +752,7 @@ export async function runUnifiedPipeline(
         reason: "incomplete_wiring",
       });
       attachPipelineOutcome(errorBody, ctx.pipelineOutcome);
+      finalise(errorBody);
       return { statusCode: 501, body: errorBody };
     }
 
@@ -671,6 +760,7 @@ export async function runUnifiedPipeline(
     ctx.pipelineOutcome.coaching_status = 'complete';
 
     attachPipelineOutcome(ctx.finalResponse, ctx.pipelineOutcome);
+    finalise(ctx.finalResponse);
     return {
       statusCode: 200,
       body: ctx.finalResponse,
@@ -680,6 +770,7 @@ export async function runUnifiedPipeline(
     // Post-sweep failures are caught by the stage-level try/catch above.
     const result = mapPipelineError(error, ctx);
     attachPipelineOutcome(result.body, ctx.pipelineOutcome);
+    finalise(result.body);
     return result;
   }
 }

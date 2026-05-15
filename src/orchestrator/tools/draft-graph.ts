@@ -102,6 +102,15 @@ export interface DraftGraphResult {
   };
   /** Pipeline outcome metadata from the CEE unified pipeline. */
   pipelineOutcome?: PipelineOutcome;
+  /**
+   * V5 latency observability (Fix 4). Per-stage timings from the CEE
+   * unified pipeline, extracted from the pipeline result body's optional
+   * `_timings.draft_graph` block. Plumbed through so the V5 dispatch can
+   * attach it to the OlumiResponse before the egress strict-validator
+   * runs. Undefined when `V5_TIMING_DEBUG=false` (the pipeline writer
+   * gates on the same flag).
+   */
+  draftGraphTimings?: import('../../orchestrator-v5/telemetry/turn-timings.js').DraftGraphTimings;
 }
 
 // ============================================================================
@@ -284,6 +293,15 @@ export async function handleDraftGraph(
   // Extract _pipeline_outcome from unified pipeline response (CEE-specific diagnostic metadata)
   const pipelineOutcome = (body._pipeline_outcome as PipelineOutcome | undefined) ?? undefined;
 
+  // Fix 4 (observability): extract `_timings.draft_graph` from the pipeline
+  // body when present. The unified pipeline gates the attach on
+  // `config.cee.timingDebugEnabled` so this field is undefined in default-
+  // OFF production runs.
+  const timingsField = (body as { _timings?: { draft_graph?: unknown } })._timings;
+  const draftGraphTimings = timingsField && typeof timingsField === 'object'
+    ? (timingsField.draft_graph as DraftGraphResult['draftGraphTimings'] | undefined)
+    : undefined;
+
   return {
     blocks: [block],
     assistantText,
@@ -298,6 +316,7 @@ export async function handleDraftGraph(
     analysisReady,
     toolLLMTelemetry,
     pipelineOutcome,
+    ...(draftGraphTimings !== undefined ? { draftGraphTimings } : {}),
   };
 }
 

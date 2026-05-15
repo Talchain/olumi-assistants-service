@@ -649,7 +649,7 @@ export function assertWhatWouldFlip(
     return {
       ok: false,
       failing_contract: 'what_would_flip_empty_text',
-      evidence: `status=200 text_len=0`,
+      evidence: `status=200 text_len=0 elapsed=${result.elapsed_ms}ms`,
     };
   }
   // Substance gate — same threshold as Step 5 explain-leader. Below
@@ -659,7 +659,7 @@ export function assertWhatWouldFlip(
     return {
       ok: false,
       failing_contract: 'what_would_flip_text_too_short',
-      evidence: `status=200 text_len=${text.length} (expected > 200)`,
+      evidence: `status=200 text_len=${text.length} (expected > 200) elapsed=${result.elapsed_ms}ms`,
     };
   }
   // Light option-label check — what_would_flip references options to
@@ -765,7 +765,7 @@ export function assertExplainLeader(
     return {
       ok: false,
       failing_contract: 'empty assistant_text on follow-up turn',
-      evidence: `text_len=0`,
+      evidence: `text_len=0 elapsed=${result.elapsed_ms}ms`,
     };
   }
   for (const pattern of STEP5_DENIAL_PHRASES) {
@@ -777,7 +777,8 @@ export function assertExplainLeader(
         evidence:
           `status=200 text_len=${text.length} ` +
           `denial_phrase="${match[0]}" ` +
-          `chip_count=${(result.body?.suggested_actions ?? []).length}`,
+          `chip_count=${(result.body?.suggested_actions ?? []).length} ` +
+          `elapsed=${result.elapsed_ms}ms`,
       };
     }
   }
@@ -793,7 +794,8 @@ export function assertExplainLeader(
       failing_contract: 'step_5_text_too_short',
       evidence:
         `status=200 text_len=${text.length} (expected > 200) ` +
-        `chip_count=${(result.body?.suggested_actions ?? []).length}`,
+        `chip_count=${(result.body?.suggested_actions ?? []).length} ` +
+        `elapsed=${result.elapsed_ms}ms`,
     };
   }
   // Option-label reference gate: a substantive explain-leader response
@@ -811,7 +813,8 @@ export function assertExplainLeader(
         failing_contract: 'step_5_no_option_label_referenced',
         evidence:
           `status=200 text_len=${text.length} ` +
-          `labels_checked=${labels.length} mentioned=0`,
+          `labels_checked=${labels.length} mentioned=0 ` +
+          `elapsed=${result.elapsed_ms}ms`,
       };
     }
   }
@@ -820,6 +823,7 @@ export function assertExplainLeader(
     evidence:
       `status=200 text_len=${text.length} ` +
       `labels_checked=${labels.length} ` +
-      `chip_count=${(result.body?.suggested_actions ?? []).length}`,
+      `chip_count=${(result.body?.suggested_actions ?? []).length} ` +
+      `elapsed=${result.elapsed_ms}ms`,
   };
 }

@@ -271,6 +271,19 @@ export interface HandlerOutcome {
    * throw, not commit.
    */
   readonly mutated_graph?: unknown;
+  /**
+   * V5 latency observability (Fix 4). Optional opt-in slot for handlers
+   * to surface internal timings to the turn-executor. Currently populated
+   * only by `run_analysis` (`plot_request_ms`, `handler_total_ms`,
+   * `plot_status`, `plot_slow_likely`). The executor copies the block
+   * into the V5 turn timings; never crosses to the wire envelope directly
+   * from here. Handlers that make no outbound calls leave this undefined.
+   *
+   * Underscore-prefixed to keep it out of the boundary contract surface
+   * — it is an internal CEE-side debug channel, not part of the handler
+   * fact / outcome contract that downstream consumers depend on.
+   */
+  readonly __plot_timings?: import('../telemetry/turn-timings.js').RunAnalysisTimings;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;
