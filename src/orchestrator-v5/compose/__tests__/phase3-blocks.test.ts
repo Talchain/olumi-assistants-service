@@ -18,9 +18,10 @@
  *        miss (no `id`-as-label fallback)
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import { log } from '../../../utils/telemetry.js';
 import {
   buildCoachingBlocks,
   buildEvidenceBlocks,
@@ -1371,5 +1372,267 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     });
     const blocks = buildEvidenceBlocks(fact, cleanLookup, cleanConf, CTX);
     expect(blocks).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Round-4 review: short-prefix entity-ID coverage + telemetry redaction
+// (P1.1 ENTITY_ID_LEAK_RE reuse, P1.2 raw-ID sample redaction)
+// ============================================================================
+
+describe('Round-4 short-prefix entity-ID prose guard', () => {
+  // Adversarial cases for the four short prefixes the round-3 regex missed:
+  // `fac_`, `opt_`, `con_`, `out_`. Each should DROP via the shared
+  // ENTITY_ID_LEAK_RE + isSlugShapedEntityId gate.
+  const lookup = buildGraphNodeLookup(
+    makeFact({ graphNodes: STANDARD_GRAPH_NODES }),
+  );
+
+  it.each([
+    ['fac_delivery_risk', 'narrative_summary'],
+    ['opt_hire_local', 'narrative_summary'],
+    ['con_budget_cap', 'narrative_summary'],
+    ['out_revenue_q3', 'narrative_summary'],
+  ])('drops narrative card when prose contains short-prefix ID %s', (rawId) => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: `Plan A leads when ${rawId} stays low.`,
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, lookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+
+  it('drops EvidenceBlock when rationale contains a short-prefix ID', () => {
+    const fact = makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'pull retention numbers',
+            rationale: 'Strengthens evidence on opt_hire_local materially.',
+            evidence_type: 'internal_data',
+            decision_hygiene: 'estimate first',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+    });
+    const blocks = buildEvidenceBlocks(
+      fact,
+      lookup,
+      new Map([['fac_delivery_risk', 'low']]),
+      CTX,
+    );
+    expect(blocks).toHaveLength(0);
+  });
+});
+
+describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => log);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('logs only the prefix suffix-form for raw_id drops; never the full token', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'Plan A leads when fac_delivery_risk stays low.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+
+    // Exactly one warn fired and its payload omits the raw token suffix.
+    const calls = warnSpy.mock.calls.filter(
+      ([payload]) =>
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).event === 'v5.phase3.block_dropped',
+    );
+    expect(calls.length).toBeGreaterThan(0);
+    const idDropCall = calls.find(
+      ([payload]) =>
+        (payload as Record<string, unknown>).drop_reason ===
+        'prose_guard_raw_id',
+    );
+    expect(idDropCall).toBeDefined();
+    const payload = idDropCall![0] as Record<string, unknown>;
+    // The sample must be prefix-only (e.g. "fac_*"), NOT the raw token.
+    expect(payload.sample).toBe('fac_*');
+    // Defensive: the entire serialised payload must not contain the
+    // raw suffix tokens. Catches any future field that accidentally
+    // re-introduces the leak.
+    const serialised = JSON.stringify(payload);
+    expect(serialised).not.toContain('delivery_risk');
+    expect(serialised).not.toContain('fac_delivery_risk');
+  });
+
+  it('logs full-token matched substring for forbidden-phrase drops (safe — generic vocabulary)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'Our recommendation is to launch.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const call = warnSpy.mock.calls.find(
+      ([payload]) =>
+        (payload as Record<string, unknown>).drop_reason ===
+        'prose_guard_forbidden_phrase',
+    );
+    expect(call).toBeDefined();
+    // Forbidden-phrase samples are generic banned vocabulary; logging
+    // them is the operator signal for what to chase.
+    expect((call![0] as Record<string, unknown>).sample).toMatch(
+      /recommendation/i,
+    );
+  });
+});
+
+// ============================================================================
+// Round-4 review: realistic graph shape — edges live under graph.edges
+// (non-blocking follow-up; restores scenario_context emission in production)
+// ============================================================================
+
+describe('Round-4 realistic graph shape — edges under graph.edges', () => {
+  // Build a fact that mirrors what the live enricher emits: edges live in
+  // `enrichment.graph.edges[]`, NOT as `kind: 'edge'` entries in
+  // `graph.nodes[]`. Without round-4's edge pass in `buildGraphNodeLookup`,
+  // every scenario_context card would drop in production.
+  function makeFactWithRealisticEdges(opts: {
+    decisionReview: Record<string, unknown>;
+    nodes: ReadonlyArray<Record<string, unknown>>;
+    edges: ReadonlyArray<Record<string, unknown>>;
+  }): RunAnalysisHandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: 'scen-test',
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        enrichment: {
+          decision_review: opts.decisionReview,
+          graph: { nodes: opts.nodes, edges: opts.edges },
+        },
+        computed_at: '2026-05-16T14:59:00.000Z',
+        graph_hash_at_run: GRAPH_HASH,
+      },
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  it('emits a scenario_context card when the edge is in graph.edges with an explicit label', () => {
+    const fact = makeFactWithRealisticEdges({
+      decisionReview: {
+        scenario_contexts: {
+          edge_delivery_goal: {
+            trigger_description: 'If delivery risk spikes during launch month',
+            consequence: 'the alternative plan overtakes the leader.',
+          },
+        },
+      },
+      nodes: [FACTOR_DELIVERY, FACTOR_COST],
+      edges: [
+        {
+          id: 'edge_delivery_goal',
+          from_node_id: 'fac_delivery_risk',
+          to_node_id: 'fac_cost_overrun',
+          label: 'Delivery risk impacts cost overrun',
+        },
+      ],
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const sc = blocks.find((b) => b.card_kind === 'scenario_context');
+    expect(sc).toBeDefined();
+    expect(sc?.target_refs[0]?.id).toBe('edge_delivery_goal');
+    expect(sc?.target_refs[0]?.kind).toBe('edge');
+    expect(sc?.target_refs[0]?.label).toBe('Delivery risk impacts cost overrun');
+  });
+
+  it('derives "from → to" label from endpoint nodes when edge has no explicit label', () => {
+    const fact = makeFactWithRealisticEdges({
+      decisionReview: {
+        scenario_contexts: {
+          edge_delivery_goal: {
+            trigger_description: 'If delivery risk spikes',
+            consequence: 'cost overrun follows.',
+          },
+        },
+      },
+      nodes: [FACTOR_DELIVERY, FACTOR_COST],
+      edges: [
+        {
+          id: 'edge_delivery_goal',
+          from_node_id: 'fac_delivery_risk',
+          to_node_id: 'fac_cost_overrun',
+          // No `label` — must be derived from endpoints.
+        },
+      ],
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    expect(lookup.get('edge_delivery_goal')?.label).toBe(
+      'Delivery risk → Cost overrun risk',
+    );
+    const blocks = buildReviewCardBlocks(fact, lookup, CTX);
+    const sc = blocks.find((b) => b.card_kind === 'scenario_context');
+    expect(sc).toBeDefined();
+    expect(sc?.target_refs[0]?.label).toBe('Delivery risk → Cost overrun risk');
+  });
+
+  it('still drops scenario_context when the edge ID is not in graph.edges either (true lookup miss)', () => {
+    const fact = makeFactWithRealisticEdges({
+      decisionReview: {
+        scenario_contexts: {
+          edge_ghost: {
+            trigger_description: 'A trigger',
+            consequence: 'A consequence.',
+          },
+        },
+      },
+      nodes: [FACTOR_DELIVERY, FACTOR_COST],
+      edges: [
+        {
+          id: 'edge_delivery_goal',
+          from_node_id: 'fac_delivery_risk',
+          to_node_id: 'fac_cost_overrun',
+        },
+      ],
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
+  });
+
+  it('skips an edge whose endpoints miss the node lookup (graph drift) — scenario_context drops downstream', () => {
+    const fact = makeFactWithRealisticEdges({
+      decisionReview: {
+        scenario_contexts: {
+          edge_drift: {
+            trigger_description: 'A trigger',
+            consequence: 'A consequence.',
+          },
+        },
+      },
+      nodes: [FACTOR_DELIVERY], // fac_cost_overrun absent → endpoint resolves to undefined
+      edges: [
+        {
+          id: 'edge_drift',
+          from_node_id: 'fac_delivery_risk',
+          to_node_id: 'fac_cost_overrun', // not in nodes[]
+          // No explicit label, so derivation requires both endpoints.
+        },
+      ],
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    expect(lookup.has('edge_drift')).toBe(false);
+    const blocks = buildReviewCardBlocks(fact, lookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
   });
 });

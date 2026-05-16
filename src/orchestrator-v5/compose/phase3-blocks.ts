@@ -82,6 +82,8 @@ import {
 } from '@talchain/schemas/boundary';
 
 import { log } from '../../utils/telemetry.js';
+import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
+import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
@@ -91,27 +93,27 @@ const BODY_MAX = 300;
 const ACTION_LABEL_MAX = 40;
 const TECHNIQUE_MAX = 300;
 
-// Round-3 review: defence-in-depth prose guard. Each Phase 3 block carries
-// LLM-authored prose in user-facing fields; the output-safety layer only
-// scrubs entity-ID-shaped tokens. These regexes catch the two remaining
-// classes of unsafe prose the v1.3 contract bans from user copy:
-//   - raw probability / sensitivity decimals (e.g. "0.73", ".42") that the
-//     wire copy must render as percentages or qualitative bands;
-//   - entity-id-shaped tokens (defence-in-depth alongside output-safety;
-//     the builder dropping here saves a wire-level scrub and the resulting
-//     telemetry noise).
+// Round-4 review: defence-in-depth prose guard. Each Phase 3 block carries
+// LLM-authored prose in user-facing fields; the output-safety layer scrubs
+// entity-ID-shaped tokens at the wire, but Phase 3 drops at the source so
+// the block never reaches the wire to be scrubbed.
+//
+// Entity-ID detection uses the SHARED ENTITY_ID_LEAK_RE
+// (`src/orchestrator/shared/entity-id-pattern.ts`) plus
+// `isSlugShapedEntityId` for the English-compound confirmation gate.
+// This keeps the Phase 3 source guard in lockstep with the egress
+// scrub — adding a prefix in one place automatically covers Phase 3
+// (`fac_`, `opt_`, `con_`, `out_`, etc. — all in scope). Reusing the
+// shared detector closes the round-4 P1 finding (local regex missed
+// the `fac_/con_/out_` short prefixes).
+//
+// `RAW_DECIMAL_RE` is intentionally narrow: leading `0.\d` or `.\d`
+// only. "v1.3", "1.5x", "10.5%" do NOT match (no leading zero/dot
+// pattern).
+//
 // Banned recommendation/winner language is sourced from the central
 // `FORBIDDEN_USER_FACING_PHRASES` list via `findForbiddenPhraseHit`.
-//
-// `RAW_DECIMAL_RE` is intentionally narrow: leading `.\d` or `0.\d` only.
-// "v1.3", "1.5x", "10.5%" do NOT match (no leading zero/dot pattern).
 const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
-// Entity-ID shapes seen on the wire: `factor_<8+hex>`, `option_<8+hex>`,
-// `node_<8+hex>`, `edge_<8+hex>`, `goal_<8+hex>`, `risk_<8+hex>`,
-// `constraint_<8+hex>`, `outcome_<8+hex>`. Match a wide alphanumeric+underscore
-// tail length to also catch labels-with-suffix shapes.
-const RAW_ID_RE =
-  /\b(?:factor|option|node|edge|goal|risk|constraint|outcome|dec|opt)_[a-z0-9_]{6,}\b/i;
 
 // ============================================================================
 // Public API
@@ -135,10 +137,17 @@ export interface GraphNodeRef {
 export type GraphNodeLookup = ReadonlyMap<string, GraphNodeRef>;
 
 /**
- * Build a lookup table from `fact.result.enrichment.graph.nodes[]` for
- * ID-to-label-and-kind resolution. Defensive: skips nodes missing any of
- * `id`, `label`, or `kind`, and skips nodes whose `kind` is outside the
- * v1.3 `TargetRefKind` union.
+ * Build a lookup table from `fact.result.enrichment.graph.{nodes,edges}[]`
+ * for ID-to-label-and-kind resolution. Defensive: skips nodes/edges missing
+ * required fields and skips nodes whose `kind` is outside the v1.3
+ * `TargetRefKind` union.
+ *
+ * Edge handling (round-4 review non-blocking follow-up): edges live under
+ * `graph.edges[]` with `id`, `from_node_id`, `to_node_id`, and optionally
+ * `label`. When `label` is missing, derive a human-readable label from
+ * the endpoint node labels as `"<from> → <to>"`. When endpoints can't be
+ * resolved (graph drift), skip the edge — the resulting scenario_context
+ * card will drop downstream rather than emit an unresolved edge reference.
  */
 export function buildGraphNodeLookup(
   fact: RunAnalysisHandlerFact,
@@ -150,18 +159,58 @@ export function buildGraphNodeLookup(
   if (enrichment === null) return lookup;
   const graph = readRecord(enrichment.graph);
   if (graph === null) return lookup;
+
+  // Pass 1: nodes. Required for both node lookups AND edge label
+  // derivation.
   const nodes = graph.nodes;
-  if (!Array.isArray(nodes)) return lookup;
-  for (const raw of nodes) {
-    const n = readRecord(raw);
-    if (n === null) continue;
-    const id = typeof n.id === 'string' ? n.id : null;
-    const label = typeof n.label === 'string' ? n.label : null;
-    const kind = typeof n.kind === 'string' ? n.kind : null;
-    if (id === null || label === null || kind === null) continue;
-    if (!isTargetRefKind(kind)) continue;
-    lookup.set(id, { id, label, kind });
+  if (Array.isArray(nodes)) {
+    for (const raw of nodes) {
+      const n = readRecord(raw);
+      if (n === null) continue;
+      const id = typeof n.id === 'string' ? n.id : null;
+      const label = typeof n.label === 'string' ? n.label : null;
+      const kind = typeof n.kind === 'string' ? n.kind : null;
+      if (id === null || label === null || kind === null) continue;
+      if (!isTargetRefKind(kind)) continue;
+      lookup.set(id, { id, label, kind });
+    }
   }
+
+  // Pass 2: edges. Round-4 non-blocking follow-up — in production
+  // `enrichment.graph` carries edges under `graph.edges[]`, not as
+  // `kind: 'edge'` entries in `graph.nodes[]`. Without this pass, every
+  // scenario_context card would drop in production (the round-3
+  // fail-closed gate is correct; the lookup just needed to be wider).
+  const edges = graph.edges;
+  if (Array.isArray(edges)) {
+    for (const raw of edges) {
+      const e = readRecord(raw);
+      if (e === null) continue;
+      const id = typeof e.id === 'string' ? e.id : null;
+      if (id === null) continue;
+      const explicitLabel = typeof e.label === 'string' && e.label.length > 0
+        ? e.label
+        : null;
+      if (explicitLabel !== null) {
+        lookup.set(id, { id, label: explicitLabel, kind: 'edge' });
+        continue;
+      }
+      // Derive `from → to` from canonical endpoint node labels. Skip if
+      // either endpoint isn't in the node lookup (graph drift).
+      const fromId = typeof e.from_node_id === 'string' ? e.from_node_id : null;
+      const toId = typeof e.to_node_id === 'string' ? e.to_node_id : null;
+      if (fromId === null || toId === null) continue;
+      const fromRef = lookup.get(fromId);
+      const toRef = lookup.get(toId);
+      if (fromRef === undefined || toRef === undefined) continue;
+      lookup.set(id, {
+        id,
+        label: `${fromRef.label} → ${toRef.label}`,
+        kind: 'edge',
+      });
+    }
+  }
+
   return lookup;
 }
 
@@ -1028,9 +1077,21 @@ function scanProse(fields: readonly ProseField[]): ProseGuardHit | null {
     if (decimalMatch !== null) {
       return { field: name, reason: 'raw_decimal', sample: decimalMatch[0].trim() };
     }
-    const idMatch = RAW_ID_RE.exec(value);
-    if (idMatch !== null) {
-      return { field: name, reason: 'raw_id', sample: idMatch[0] };
+    // Round-4 review: reuse the shared ENTITY_ID_LEAK_RE + slug-shape
+    // confirmation gate so the Phase 3 source guard stays in lockstep
+    // with the egress scrub (covers `fac_`, `opt_`, `con_`, `out_`,
+    // etc.). Walk all matches in case the first is an English-compound
+    // false positive that the slug-shape gate filters out.
+    const idMatcher = new RegExp(ENTITY_ID_LEAK_RE.source, 'gi');
+    let idMatch: RegExpExecArray | null;
+    while ((idMatch = idMatcher.exec(value)) !== null) {
+      if (isSlugShapedEntityId(idMatch[0])) {
+        // Round-4 P1: log only the prefix segment of the matched ID,
+        // never the full token. Mirrors the egress-layer privacy
+        // policy (output-safety.ts logs prefix/resolution only).
+        const prefix = idMatch[0].split(/[_:-]/, 1)[0] ?? 'entity_id';
+        return { field: name, reason: 'raw_id', sample: `${prefix.toLowerCase()}_*` };
+      }
     }
   }
   return null;
