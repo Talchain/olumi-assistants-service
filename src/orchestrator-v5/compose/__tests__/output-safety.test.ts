@@ -509,4 +509,209 @@ describe('sanitiseOlumiResponseForEgress', () => {
     );
     expect(out.assistant_text).not.toContain('fac_delivery_cost');
   });
+
+  // V5 Phase 3A — exhaustive-switch coverage for the four new block types
+  // per Analysis tab data contract v1.3 (§1.1–§1.4). Each new block type
+  // has its own per-field user-facing-prose walk; structured / enum /
+  // ID-allowed fields stay untouched.
+
+  it('Phase 3 — review_card scrubs title / body / action_label; leaves target_refs IDs', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            block_id: '550e8400-e29b-41d4-a716-446655440001',
+            signal_id: 'review:bias:gh',
+            created_at: '2026-05-16T15:00:00.000Z',
+            source_handler: 'decision_review_enricher',
+            graph_hash_at_generation: 'gh_test',
+            freshness: 'fresh',
+            type: 'review_card',
+            card_kind: 'bias',
+            title: 'See fac_delivery_cost (anchoring)',
+            body: 'The model edges cluster on fac_delivery_cost.',
+            severity: 'warning',
+            target_refs: [{ id: 'fac_delivery_cost', label: 'Delivery Cost', kind: 'factor' }],
+            priority_rank: 41,
+            action_intent: 'gather_evidence',
+            action_label: 'Investigate fac_delivery_cost',
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-r1', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('review_card');
+    if (block.type === 'review_card') {
+      expect(block.title).toBe('See Delivery Cost (anchoring)');
+      expect(block.body).toBe('The model edges cluster on Delivery Cost.');
+      expect(block.action_label).toBe('Investigate Delivery Cost');
+      // target_refs IDs are intentional machine fields per §0.1 — untouched.
+      expect(block.target_refs[0]!.id).toBe('fac_delivery_cost');
+      // Structured metadata untouched.
+      expect(block.signal_id).toBe('review:bias:gh');
+      expect(block.severity).toBe('warning');
+      expect(block.priority_rank).toBe(41);
+    }
+  });
+
+  it('Phase 3 — coaching scrubs title / body / action_label', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            block_id: '550e8400-e29b-41d4-a716-446655440002',
+            signal_id: 'coach:assumption:1:gh',
+            created_at: '2026-05-16T15:00:00.000Z',
+            source_handler: 'decision_review_enricher',
+            graph_hash_at_generation: 'gh_test',
+            freshness: 'fresh',
+            type: 'coaching',
+            coaching_kind: 'assumption_check',
+            title: 'Check fac_delivery_cost',
+            body: 'Verify fac_delivery_cost stays bounded.',
+            source: 'decision_review',
+            target_refs: [],
+            priority_rank: 101,
+            action_intent: 'confirm_factor',
+            action_label: 'Confirm fac_delivery_cost',
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-c1', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('coaching');
+    if (block.type === 'coaching') {
+      expect(block.title).toBe('Check Delivery Cost');
+      expect(block.body).toBe('Verify Delivery Cost stays bounded.');
+      expect(block.action_label).toBe('Confirm Delivery Cost');
+      expect(block.coaching_kind).toBe('assumption_check');
+      expect(block.source).toBe('decision_review');
+    }
+  });
+
+  it('Phase 3 — evidence scrubs factor_label / evidence_gap / suggested_technique / impact_if_gathered / action_label; leaves factor_ref + target_refs IDs', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            block_id: '550e8400-e29b-41d4-a716-446655440003',
+            signal_id: 'evidence:fac_delivery_cost:gh',
+            created_at: '2026-05-16T15:00:00.000Z',
+            source_handler: 'decision_review_enricher',
+            graph_hash_at_generation: 'gh_test',
+            freshness: 'fresh',
+            type: 'evidence',
+            factor_label: 'fac_delivery_cost summary',
+            factor_ref: { id: 'fac_delivery_cost', label: 'Delivery Cost', kind: 'factor' },
+            target_refs: [{ id: 'fac_delivery_cost', label: 'Delivery Cost', kind: 'factor' }],
+            current_confidence: 'low',
+            evidence_gap: 'Need data on fac_delivery_cost trends.',
+            suggested_technique: 'Internal data: pull fac_delivery_cost dashboards',
+            impact_if_gathered: 'Would lift confidence in fac_delivery_cost.',
+            priority_rank: 1,
+            severity: 'critical',
+            action_intent: 'gather_evidence',
+            action_label: 'Investigate fac_delivery_cost',
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-e1', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('evidence');
+    if (block.type === 'evidence') {
+      expect(block.factor_label).toBe('Delivery Cost summary');
+      expect(block.evidence_gap).toBe('Need data on Delivery Cost trends.');
+      expect(block.suggested_technique).toBe('Internal data: pull Delivery Cost dashboards');
+      expect(block.impact_if_gathered).toBe('Would lift confidence in Delivery Cost.');
+      expect(block.action_label).toBe('Investigate Delivery Cost');
+      // factor_ref + target_refs are structured — IDs intentional, untouched.
+      expect(block.factor_ref.id).toBe('fac_delivery_cost');
+      expect(block.target_refs[0]!.id).toBe('fac_delivery_cost');
+      // Enum / number metadata untouched.
+      expect(block.current_confidence).toBe('low');
+      expect(block.severity).toBe('critical');
+      expect(block.priority_rank).toBe(1);
+    }
+  });
+
+  it('Phase 3 — exercise scrubs all optional prose fields + each warning_signs entry; leaves target_refs IDs', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            block_id: '550e8400-e29b-41d4-a716-446655440004',
+            signal_id: 'exercise:pre_mortem:gh',
+            created_at: '2026-05-16T15:00:00.000Z',
+            source_handler: 'run_exercise',
+            freshness: 'fresh',
+            type: 'exercise',
+            exercise_kind: 'pre_mortem',
+            failure_scenario: 'Team underestimated fac_delivery_cost.',
+            warning_signs: [
+              'Velocity drops on fac_delivery_cost reports',
+              'Cost overruns trigger on fac_churn',
+            ],
+            mitigation: 'Weekly review with fac_delivery_cost owner.',
+            reference_class: 'Past launches affected by fac_delivery_cost.',
+            target_element_ref: { id: 'fac_delivery_cost', label: 'Delivery Cost', kind: 'factor' },
+            counter_case: 'When fac_delivery_cost held steady, the team shipped.',
+            review_trigger: 'Reconvene if fac_delivery_cost spikes.',
+            target_refs: [{ id: 'fac_delivery_cost', label: 'Delivery Cost', kind: 'factor' }],
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-x1', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('exercise');
+    if (block.type === 'exercise') {
+      expect(block.failure_scenario).toBe('Team underestimated Delivery Cost.');
+      expect(block.mitigation).toBe('Weekly review with Delivery Cost owner.');
+      expect(block.reference_class).toBe('Past launches affected by Delivery Cost.');
+      expect(block.counter_case).toBe('When Delivery Cost held steady, the team shipped.');
+      expect(block.review_trigger).toBe('Reconvene if Delivery Cost spikes.');
+      // warning_signs[] each entry scrubbed.
+      expect(block.warning_signs).toEqual([
+        'Velocity drops on Delivery Cost reports',
+        'Cost overruns trigger on Customer Churn',
+      ]);
+      // Structured fields untouched.
+      expect(block.exercise_kind).toBe('pre_mortem');
+      expect(block.target_element_ref?.id).toBe('fac_delivery_cost');
+      expect(block.target_refs[0]!.id).toBe('fac_delivery_cost');
+    }
+  });
+
+  it('Phase 3 — exercise leaves undefined optional prose fields undefined (no spurious empty strings)', () => {
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            block_id: '550e8400-e29b-41d4-a716-446655440005',
+            signal_id: 'exercise:consider_opposite:gh',
+            created_at: '2026-05-16T15:00:00.000Z',
+            source_handler: 'run_exercise',
+            freshness: 'fresh',
+            type: 'exercise',
+            exercise_kind: 'consider_opposite',
+            target_refs: [],
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-x2', exitPath: 'test' },
+    );
+    const block = out.blocks[0]!;
+    expect(block.type).toBe('exercise');
+    if (block.type === 'exercise') {
+      expect(block.failure_scenario).toBeUndefined();
+      expect(block.warning_signs).toBeUndefined();
+      expect(block.mitigation).toBeUndefined();
+      expect(block.reference_class).toBeUndefined();
+      expect(block.counter_case).toBeUndefined();
+      expect(block.review_trigger).toBeUndefined();
+    }
+  });
 });
