@@ -15,6 +15,14 @@ import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuggestedAction } from './compose/types.js';
+import {
+  buildCoachingBlocks,
+  buildEvidenceBlocks,
+  buildFactorConfidenceLookup,
+  buildGraphNodeLookup,
+  buildReviewCardBlocks,
+  type BlockBuildCtx,
+} from './compose/phase3-blocks.js';
 
 export interface ComposeInput {
   assistant_text: string;
@@ -134,6 +142,28 @@ function buildBlocksFromFacts(
         ...(win_probabilities !== undefined ? { win_probabilities } : {}),
         ...(enrichment !== undefined ? { enrichment } : {}),
       });
+
+      // V5 Phase 3A — emit structured ReviewCard / Coaching / Evidence
+      // blocks from `enrichment.decision_review` when it's present and
+      // the fact carries a graph hash (proof of freshness — per Codex
+      // correction #4, PR 2 only emits Phase 3 blocks on a verifiable-
+      // fresh fact; PR 3 owns persistence-by-graph-hash + stale
+      // rendering). Builders are pure; each candidate is `safeParse`-
+      // validated and dropped on failure.
+      const graphHash = fact.result.graph_hash_at_run;
+      if (typeof graphHash === 'string' && graphHash.length > 0) {
+        const ctx: BlockBuildCtx = {
+          created_at: new Date().toISOString(),
+          graph_hash_at_generation: graphHash,
+        };
+        const lookup = buildGraphNodeLookup(fact);
+        const confidenceLookup = buildFactorConfidenceLookup(fact);
+        blocks.push(...buildReviewCardBlocks(fact, lookup, ctx));
+        blocks.push(...buildCoachingBlocks(fact, lookup, ctx));
+        blocks.push(
+          ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx),
+        );
+      }
     } else if (
       fact.fact_type === 'set_factor_value' ||
       fact.fact_type === 'add_constraint' ||

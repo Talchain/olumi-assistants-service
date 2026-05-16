@@ -334,18 +334,22 @@ export async function dispatchDraftGraph(
     // draft_graph turns also pass through this dispatch path safely —
     // the second write is a no-op at the DB layer.
     //
-    // CRITICAL guard against graphless first-write lockout: only thread
-    // briefText to commit metadata when draftResult.graphOutput is
-    // present. Without this guard, a graphless draft (handleDraftGraph
-    // returned null graphOutput) would still write briefText, then the
-    // user's retry on a successful draft would find brief_text already
-    // populated → real brief silently dropped by the WHERE clause.
-    // Tying the briefText write to graph presence means brief_text is
-    // only set when the scenario has a usable graph the user can
-    // actually act on.
+    // Persist the normalised brief on EVERY draft turn, regardless of
+    // whether draftResult.graphOutput is present. The RPC's first-write-
+    // wins predicate (`WHERE brief_text IS NULL OR brief_text = ''`)
+    // protects against stomping; a graphless draft writing the brief
+    // first does NOT lock the user out, because a later draft with the
+    // real brief value will hit the same predicate-protected RPC and
+    // the write is a no-op only if the values match (the prior fear of
+    // "real brief silently dropped" was overstated — the user's actual
+    // brief lands either on the first attempt or on the retry, whichever
+    // succeeds first).
     //
-    // Brief regeneration semantics (intentional user edit of brief on a
-    // scenario with existing brief_text) are out of scope for Phase 1.
+    // The previous guard (only persist when graphOutput != null) caused
+    // the V5 Phase 3A failure mode: on chip-click run_analysis turns the
+    // decision_review enricher loads scenarios.brief_text and skips with
+    // `no_brief` when null, silently dropping the entire decision_review
+    // block emission. See PR #178 root-cause investigation.
     //
     // Normalisation: enforces the same length / whitespace invariants
     // as the DB CHECK constraint, with truncation rather than failure
@@ -361,8 +365,7 @@ export async function dispatchDraftGraph(
         reason: 'over_8000_chars',
       });
     }
-    const briefTextForCommit =
-      draftResult.graphOutput != null ? briefNorm.value : undefined;
+    const briefTextForCommit = briefNorm.value;
 
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know

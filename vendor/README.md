@@ -7,61 +7,71 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.12.0.tgz`
+### `talchain-schemas-0.13.0.tgz`
 
-**Purpose:** pre-publish consumption of `@talchain/schemas` v0.12.0.
-v0.12.0 adds the canonical `EditGraphHandlerFact` member to the
-`HandlerFact` discriminated union (DL-7 V5-integration contract).
-Companion to the deterministic D1 mutation facts (`set_factor_value`,
-`add_constraint`, `adjust_edge_strength`); covers the LLM-driven
-`edit_graph` dispatcher path. Additions:
+**Purpose:** pre-publish consumption of `@talchain/schemas` v0.13.0.
+v0.13.0 adds the four V5 Phase 3 block types per Analysis tab data
+contract v1.3 (`Docs/v5/v5-analysis-tab-data-contract-v1_3.md`),
+plus the shared schemas they depend on. Additions:
 
-- `EditGraphResultSchema` (`{ edit_kind, status, operations_count,
-  affected_entities[<=8], graph_hash_before/after, safe_summary
-  [1..80], impact, rerun_recommended }`).
-- `EditGraphHandlerFactSchema` (the new union member).
-- Sub-enums `EditGraphEditKindSchema`
-  (`'parameter_update' | 'option_configuration' | 'structural'`),
-  `EditGraphImpactSchema` (`'low' | 'moderate' | 'high'`),
-  `EditGraphAffectedEntitySchema` (`{ kind, label }`).
-- A new canonical regression-fixture file at
-  `tests/orchestrator/__fixtures__/handler-fact-fixtures.ts` with one
-  valid sample per HandlerFact variant.
+- `ReviewCardBlockSchema` (emitted by the `decision_review` enricher
+  after `run_analysis`; hero-eligible; eight `card_kind` values).
+- `CoachingBlockSchema` (coaching pass + draft_graph threading;
+  hero-eligible; six `coaching_kind` values).
+- `EvidenceBlockSchema` (evidence-ranking module; hero-eligible;
+  includes the v1.3 §1.3 `factor_ref` ↔ `target_refs` consistency
+  rule enforced via `superRefine`).
+- `ExerciseBlockSchema` (on-demand handler invocation; NOT
+  hero-eligible).
+- Shared: `ActionIntent` (15-value strict union), `TargetRefKind`
+  (7-value, adds `outcome`), `TargetRefSchema`,
+  `Phase3BlockFreshness` (`fresh | stale | pending | failed`),
+  `Phase3BlockSeverity` (`info | warning | critical`).
+- Common metadata block (§0) enforced on all four new block types:
+  `block_id` (UUID), `signal_id`, `created_at` (ISO 8601 with
+  offset), `source_handler`, `graph_hash_at_generation` (required
+  for analysis-derived blocks, optional otherwise), `freshness`.
+- Copy-length caps (§0.2): `title` ≤ 80, `body` ≤ 300,
+  `action_label` ≤ 40 — enforced at the schema boundary as
+  defence-in-depth.
 
-Purely additive: existing variants unchanged; existing consumers that
-don't reference `'edit_graph'` continue to parse and operate
-identically. CEE typecheck and tests pass cleanly after this vendor
-bump even before the corresponding CEE wiring (DL-7 PR B) lands.
+Purely additive on the discriminated `BlockSchema` union — existing
+block types (`text`, `error`, `analysis_result`, `graph_patch`,
+`explanation`, `comparison`, `flip_analysis`, `draft_graph`) and
+the existing `HandlerFact` discriminated union are unchanged. CEE
+must add four new cases to the exhaustive switch in
+`src/orchestrator-v5/compose/output-safety.ts` for the build to
+compile after this bump — that is the deliberate boundary signal.
 
-Source lives at `~/Documents/GitHub/olumi-schemas/` on
-`claude/edit-graph-handler-fact` (HEAD `50c192cb`); built via
-`npm run build && npm pack` from source. Not yet published to a
-private registry.
+Note: `BlockSchema` is now a `ZodEffects<ZodDiscriminatedUnion>`
+(the §1.3 consistency rule is applied at the union level via
+`.superRefine`). Consumers calling `.parse()` / `.safeParse()` are
+unaffected. Consumers introspecting `.options` / `.discriminator`
+on the discriminated union (none in tree today) would be reading
+through a `ZodEffects` wrapper.
 
-`affected_entities[].kind` reuses the canonical `NodeKind` enum
-from the schemas package (`src/graph.ts`: `'goal' | 'factor' |
-'outcome' | 'risk' | 'action' | 'decision' | 'option' |
-'constraint'`) PLUS the literal `'edge'` for edge-mutation
-receipts. Pinned by tests at
-`tests/orchestrator/handler-fact-edit-graph.test.ts` so any
-future NodeKind extension flows through and any drift is caught.
+Source lives at `~/Documents/GitHub/olumi-schemas/` on `main`
+(HEAD `b239d4b6` — Merge pull request #3 from
+`feat/phase-3a-block-types`); built via `npm run build && npm pack`
+from source. Not yet published to a private registry.
 
-**Checksum verification:** `vendor/talchain-schemas-0.12.0.tgz.sha256`
+**Checksum verification:** `vendor/talchain-schemas-0.13.0.tgz.sha256`
 holds the canonical sha256 hash. The pre-push hook
 (`scripts/validate-tarball-sha.sh`) verifies the tarball bytes against
 this manifest on every push.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.11.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.12.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — i.e. the entire pin returns to v0.11.0 in
+this README's prior state — i.e. the entire pin returns to v0.12.0 in
 one commit. Re-run `pnpm install` after the revert to repopulate
 `node_modules` from the restored tarball.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
-0.11.0 at coaching-amendment) are removed on each bump — only the
-currently-pinned version lives in `vendor/`.
+0.11.0 at coaching-amendment, 0.12.0 at DL-7 edit-graph fact) are
+removed on each bump — only the currently-pinned version lives in
+`vendor/`.
 
 **How to update:**
 

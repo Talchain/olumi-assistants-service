@@ -4117,6 +4117,14 @@ export async function runTurnExecutor(
           turnTimings.compose_ms = commitStartedAt - composeStartedAt;
         }
       }
+      // Defence-in-depth brief persistence (V5 Phase 3A prerequisite):
+      // re-pass the scenario brief that build-turn-context already
+      // loaded. The RPC's first-write-wins predicate makes this a no-op
+      // when brief_text is already non-null, so this is safe for every
+      // turn class. Covers the case where a draft turn somehow committed
+      // without briefText (e.g. legacy draft pre-Fix A) — subsequent
+      // non-draft turns will backfill the brief from the enriched
+      // context if it's still null.
       const committed = await commitDirectAnswer(composedOk, {
         scenario_id: context.session_id,
         turn_id: context.request_id,
@@ -4127,6 +4135,7 @@ export async function runTurnExecutor(
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
         graph: graphForCommit,
+        briefText: context.scenarioBriefText ?? undefined,
       });
       if (timingsEnabled) {
         turnTimings.commit_ms = Date.now() - commitStartedAt;

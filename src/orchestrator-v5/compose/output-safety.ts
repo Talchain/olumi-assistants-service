@@ -189,6 +189,84 @@ function sanitiseBlock(block: Block, collect: (s: string) => string): Block {
       // nodes / edges arrays of z.unknown() — opaque, untouched.
       return block;
 
+    case 'review_card':
+      // Phase 3 (Analysis tab v1.3 §1.1). User-facing prose fields:
+      //   title, body, optional action_label.
+      // Structured / enum / metadata (block_id, signal_id, created_at,
+      // source_handler, graph_hash_at_generation, freshness, card_kind,
+      // severity, priority_rank, action_intent) and target_refs (IDs
+      // allowed in structured fields per §0.1) — untouched.
+      return {
+        ...block,
+        title: collect(block.title),
+        body: collect(block.body),
+        ...(block.action_label !== undefined
+          ? { action_label: collect(block.action_label) }
+          : {}),
+      };
+
+    case 'coaching':
+      // Phase 3 (Analysis tab v1.3 §1.2). Same user-facing slots as
+      // review_card. coaching_kind / source / target_refs / priority_rank
+      // / action_intent — structured, untouched.
+      return {
+        ...block,
+        title: collect(block.title),
+        body: collect(block.body),
+        ...(block.action_label !== undefined
+          ? { action_label: collect(block.action_label) }
+          : {}),
+      };
+
+    case 'evidence':
+      // Phase 3 (Analysis tab v1.3 §1.3). User-facing prose fields:
+      //   factor_label, evidence_gap, suggested_technique,
+      //   impact_if_gathered, optional action_label.
+      // factor_ref (structured), target_refs (structured),
+      // current_confidence (enum), priority_rank (number), severity
+      // (enum), action_intent (enum) — untouched.
+      return {
+        ...block,
+        factor_label: collect(block.factor_label),
+        evidence_gap: collect(block.evidence_gap),
+        suggested_technique: collect(block.suggested_technique),
+        impact_if_gathered: collect(block.impact_if_gathered),
+        ...(block.action_label !== undefined
+          ? { action_label: collect(block.action_label) }
+          : {}),
+      };
+
+    case 'exercise':
+      // Phase 3 (Analysis tab v1.3 §1.4). User-facing prose fields (all
+      // optional in the schema):
+      //   failure_scenario, mitigation, reference_class, counter_case,
+      //   review_trigger, plus each warning_signs[] entry.
+      // exercise_kind (enum), target_element_ref / target_refs
+      // (structured) — untouched. ExerciseBlock is NOT auto-emitted by
+      // any composer in PR 2 (handler-only per v1.3 §1.4); the case
+      // exists for exhaustiveness + future on-demand handler wiring.
+      return {
+        ...block,
+        ...(block.failure_scenario !== undefined
+          ? { failure_scenario: collect(block.failure_scenario) }
+          : {}),
+        ...(block.warning_signs !== undefined
+          ? { warning_signs: block.warning_signs.map((s) => collect(s)) }
+          : {}),
+        ...(block.mitigation !== undefined
+          ? { mitigation: collect(block.mitigation) }
+          : {}),
+        ...(block.reference_class !== undefined
+          ? { reference_class: collect(block.reference_class) }
+          : {}),
+        ...(block.counter_case !== undefined
+          ? { counter_case: collect(block.counter_case) }
+          : {}),
+        ...(block.review_trigger !== undefined
+          ? { review_trigger: collect(block.review_trigger) }
+          : {}),
+      };
+
     default: {
       const _exhaustive: never = block;
       void _exhaustive;
