@@ -1066,3 +1066,310 @@ describe('empty inputs', () => {
     expect(buildEvidenceBlocks(fact, new Map(), new Map(), CTX)).toEqual([]);
   });
 });
+
+// ============================================================================
+// Round-3 review: fail-closed lookup-miss invariant tightening
+// (P1.1 flip_threshold, P1.2 pre_mortem, P1.3 scenario_context)
+// ============================================================================
+
+describe('Round-3 fail-closed lookup-miss invariants', () => {
+  it('flip_threshold: drops the card entirely when factor_id is not in the graph lookup (P1.1)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        flip_thresholds: [
+          {
+            factor_id: 'fac_not_in_graph',
+            factor_label: 'Phantom factor',
+            current_display: 'low',
+            flip_display: 'high',
+            narrative: 'A canonical-sounding narrative about the missing factor.',
+          },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    expect(blocks.filter((b) => b.card_kind === 'flip_threshold')).toHaveLength(0);
+  });
+
+  it('flip_threshold: title uses canonical graph label (not LLM-supplied factor_label) when lookup hits', () => {
+    const fact = makeFact({
+      decisionReview: {
+        flip_thresholds: [
+          {
+            factor_id: 'fac_delivery_risk',
+            // LLM-supplied label intentionally diverges from canonical label.
+            factor_label: 'Different LLM Label',
+            current_display: 'low',
+            flip_display: 'high',
+            narrative: 'A move from low to high would flip the result.',
+          },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const flip = blocks.find((b) => b.card_kind === 'flip_threshold');
+    expect(flip).toBeDefined();
+    // Canonical label wins; LLM-supplied label is not propagated.
+    expect(flip?.title).toContain('Delivery risk');
+    expect(flip?.title).not.toContain('Different LLM Label');
+  });
+
+  it('pre_mortem: emits with empty target_refs when grounded_in is absent (no claim, no harm)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        pre_mortem: {
+          failure_scenario: 'A canonical pre-mortem narrative.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const pm = blocks.find((b) => b.card_kind === 'pre_mortem');
+    expect(pm).toBeDefined();
+    expect(pm?.target_refs).toEqual([]);
+  });
+
+  it('pre_mortem: drops the card when grounded_in was provided but EVERY entry misses lookup (P1.2)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        pre_mortem: {
+          failure_scenario: 'A canonical pre-mortem narrative.',
+          grounded_in: ['fac_ghost_a', 'fac_ghost_b'],
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    expect(blocks.filter((b) => b.card_kind === 'pre_mortem')).toHaveLength(0);
+  });
+
+  it('pre_mortem: emits with the resolvable subset when grounded_in is partially valid', () => {
+    const fact = makeFact({
+      decisionReview: {
+        pre_mortem: {
+          failure_scenario: 'A canonical pre-mortem narrative.',
+          grounded_in: ['fac_delivery_risk', 'fac_ghost'],
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const pm = blocks.find((b) => b.card_kind === 'pre_mortem');
+    expect(pm).toBeDefined();
+    expect(pm?.target_refs.map((r) => r.id)).toEqual(['fac_delivery_risk']);
+  });
+
+  it('scenario_context: drops the card when the keyed edge_id is not in the graph lookup (P1.3)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        scenario_contexts: {
+          edge_ghost: {
+            trigger_description: 'A canonical-sounding trigger',
+            consequence: 'A canonical-sounding consequence.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Round-3 review: adversarial prose-guard tests (P1.4)
+// Each builder is tested against an LLM emission containing forbidden
+// phrases, raw decimals, or entity-id-shaped tokens. The block must DROP
+// rather than reach the wire.
+// ============================================================================
+
+describe('Round-3 adversarial prose-guard (P1.4)', () => {
+  // Pre-condition for adversarial assertions: clean baselines emit blocks.
+  // Each adversarial case mutates ONLY the prose field under test so the
+  // delta proves the prose guard is what dropped the block — not a
+  // structural issue.
+
+  const cleanLookup = buildGraphNodeLookup(
+    makeFact({ graphNodes: STANDARD_GRAPH_NODES }),
+  );
+  const cleanConf = new Map<string, 'high' | 'medium' | 'low'>([
+    ['fac_delivery_risk', 'low'],
+  ]);
+
+  it('narrative card drops when narrative_summary contains banned recommendation language', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'Our recommendation is to launch immediately.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+
+  it('narrative card drops when narrative_summary contains a raw decimal probability', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'Plan A leads with win probability 0.73 over Plan B.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+
+  it('narrative card drops when narrative_summary contains an entity-id-shaped token', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'The leading option is option_a1b2c3d4 by a wide margin.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+
+  it('bias card drops when description contains banned "winning option" language', () => {
+    const fact = makeFact({
+      decisionReview: {
+        bias_findings: [
+          {
+            type: 'CONFIRMATION_BIAS',
+            source: 'structural',
+            description: 'The model favours the winning option without sufficient evidence.',
+            affected_elements: ['fac_delivery_risk'],
+          },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'bias')).toHaveLength(0);
+  });
+
+  it('robustness card drops when summary contains a raw decimal sensitivity value', () => {
+    const fact = makeFact({
+      decisionReview: {
+        robustness_explanation: {
+          summary: 'The result is sensitive at the 0.42 threshold.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'robustness')).toHaveLength(0);
+  });
+
+  it('flip_threshold card drops when narrative contains banned recommendation language', () => {
+    const fact = makeFact({
+      decisionReview: {
+        flip_thresholds: [
+          {
+            factor_id: 'fac_delivery_risk',
+            factor_label: 'Delivery risk',
+            current_display: 'low',
+            flip_display: 'high',
+            narrative: 'The recommendation hinges on delivery risk staying low.',
+          },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'flip_threshold')).toHaveLength(0);
+  });
+
+  it('assumption card drops when key_assumption text contains an entity-id-shaped token', () => {
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: ['factor_xy12abcd remains stable across the window.'],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'assumption')).toHaveLength(0);
+  });
+
+  it('scenario_context card drops when trigger/consequence prose contains a banned phrase', () => {
+    const fact = makeFact({
+      decisionReview: {
+        scenario_contexts: {
+          edge_delivery_goal: {
+            trigger_description: 'If delivery risk spikes',
+            consequence: 'the recommendation flips to overseas.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
+  });
+
+  it('coaching assumption_check drops when assumption text contains banned recommendation language', () => {
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: ['Our recommendation assumes market growth continues.'],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildCoachingBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.coaching_kind === 'assumption_check')).toHaveLength(0);
+  });
+
+  it('coaching calibration_prompt drops when question prose contains a raw decimal', () => {
+    const fact = makeFact({
+      decisionReview: {
+        decision_quality_prompts: [
+          {
+            question: 'What would change your mind if win probability dropped to 0.4?',
+            principle: 'Disconfirmation',
+          },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildCoachingBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.coaching_kind === 'calibration_prompt')).toHaveLength(0);
+  });
+
+  it('evidence block drops when rationale contains banned "the winner" prescriptive phrasing', () => {
+    const fact = makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'pull retention numbers',
+            rationale: 'This evidence picks the winner cleanly.',
+            evidence_type: 'internal_data',
+            decision_hygiene: 'estimate first',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+    });
+    const blocks = buildEvidenceBlocks(fact, cleanLookup, cleanConf, CTX);
+    expect(blocks).toHaveLength(0);
+  });
+
+  it('evidence block drops when impact_if_gathered contains a raw decimal sensitivity value', () => {
+    const fact = makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'pull retention numbers',
+            rationale: 'delivery rate is the variance driver',
+            evidence_type: 'internal_data',
+            decision_hygiene: 'Reduces variance by 0.18 in our estimate.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+    });
+    const blocks = buildEvidenceBlocks(fact, cleanLookup, cleanConf, CTX);
+    expect(blocks).toHaveLength(0);
+  });
+});

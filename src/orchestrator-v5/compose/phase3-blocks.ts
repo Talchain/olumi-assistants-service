@@ -81,12 +81,37 @@ import {
   type TargetRefKindLiteral,
 } from '@talchain/schemas/boundary';
 
+import { log } from '../../utils/telemetry.js';
+import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
+
 const SOURCE_HANDLER = 'decision_review_enricher';
 
 const TITLE_MAX = 80;
 const BODY_MAX = 300;
 const ACTION_LABEL_MAX = 40;
 const TECHNIQUE_MAX = 300;
+
+// Round-3 review: defence-in-depth prose guard. Each Phase 3 block carries
+// LLM-authored prose in user-facing fields; the output-safety layer only
+// scrubs entity-ID-shaped tokens. These regexes catch the two remaining
+// classes of unsafe prose the v1.3 contract bans from user copy:
+//   - raw probability / sensitivity decimals (e.g. "0.73", ".42") that the
+//     wire copy must render as percentages or qualitative bands;
+//   - entity-id-shaped tokens (defence-in-depth alongside output-safety;
+//     the builder dropping here saves a wire-level scrub and the resulting
+//     telemetry noise).
+// Banned recommendation/winner language is sourced from the central
+// `FORBIDDEN_USER_FACING_PHRASES` list via `findForbiddenPhraseHit`.
+//
+// `RAW_DECIMAL_RE` is intentionally narrow: leading `.\d` or `0.\d` only.
+// "v1.3", "1.5x", "10.5%" do NOT match (no leading zero/dot pattern).
+const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
+// Entity-ID shapes seen on the wire: `factor_<8+hex>`, `option_<8+hex>`,
+// `node_<8+hex>`, `edge_<8+hex>`, `goal_<8+hex>`, `risk_<8+hex>`,
+// `constraint_<8+hex>`, `outcome_<8+hex>`. Match a wide alphanumeric+underscore
+// tail length to also catch labels-with-suffix shapes.
+const RAW_ID_RE =
+  /\b(?:factor|option|node|edge|goal|risk|constraint|outcome|dec|opt)_[a-z0-9_]{6,}\b/i;
 
 // ============================================================================
 // Public API
@@ -296,7 +321,15 @@ export function buildCoachingBlocks(
         action_intent: 'confirm_factor' as ActionIntentLiteral,
         action_label: truncate('Confirm this assumption', ACTION_LABEL_MAX),
       };
-      const block = validateOrDrop(CoachingBlockSchema, candidate);
+      const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
+        block_type: 'coaching',
+        kind: 'assumption_check',
+        prose: [
+          { name: 'title', value: candidate.title },
+          { name: 'body', value: candidate.body },
+          { name: 'action_label', value: candidate.action_label },
+        ],
+      });
       if (block !== null) blocks.push(block);
     }
   }
@@ -331,7 +364,15 @@ export function buildCoachingBlocks(
         action_intent: 'start_guided_chat' as ActionIntentLiteral,
         action_label: truncate('Try this prompt', ACTION_LABEL_MAX),
       };
-      const block = validateOrDrop(CoachingBlockSchema, candidate);
+      const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
+        block_type: 'coaching',
+        kind: 'calibration_prompt',
+        prose: [
+          { name: 'title', value: candidate.title },
+          { name: 'body', value: candidate.body },
+          { name: 'action_label', value: candidate.action_label },
+        ],
+      });
       if (block !== null) blocks.push(block);
     }
   }
@@ -444,7 +485,16 @@ export function buildEvidenceBlocks(
       action_intent: 'gather_evidence' as ActionIntentLiteral,
       action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
     };
-    const block = validateOrDrop(EvidenceBlockSchema, candidate);
+    const block = validateProseAndSchemaOrDrop(EvidenceBlockSchema, candidate, {
+      block_type: 'evidence',
+      prose: [
+        { name: 'factor_label', value: candidate.factor_label },
+        { name: 'evidence_gap', value: candidate.evidence_gap },
+        { name: 'suggested_technique', value: candidate.suggested_technique },
+        { name: 'impact_if_gathered', value: candidate.impact_if_gathered },
+        { name: 'action_label', value: candidate.action_label },
+      ],
+    });
     if (block !== null) blocks.push(block);
   }
   return blocks;
@@ -476,7 +526,14 @@ function buildNarrativeCard(
     target_refs: [] as readonly TargetRef[],
     priority_rank: 10,
   };
-  return validateOrDrop(ReviewCardBlockSchema, candidate);
+  return validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+    block_type: 'review_card',
+    kind: 'narrative',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+    ],
+  });
 }
 
 function buildPreMortemCard(
@@ -491,11 +548,26 @@ function buildPreMortemCard(
     : '';
   if (failure.length === 0) return null;
   const grounded = Array.isArray(pm.grounded_in) ? pm.grounded_in : [];
+  // Round-3 review correction: when `grounded_in` was provided but EVERY
+  // entry misses canonical lookup, drop the block. Emitting with
+  // `target_refs: []` would silently misrepresent the LLM's intent —
+  // the model claimed graph references that don't exist. When
+  // `grounded_in` is absent or all-empty, the LLM made no grounding
+  // claim and `target_refs: []` is honest.
+  const groundedStrings = grounded.filter((g): g is string => typeof g === 'string' && g.length > 0);
   const targetRefs: TargetRef[] = [];
-  for (const raw of grounded) {
-    if (typeof raw !== 'string') continue;
+  for (const raw of groundedStrings) {
     const ref = lookup.get(raw);
     if (ref !== undefined) targetRefs.push(ref);
+  }
+  if (groundedStrings.length > 0 && targetRefs.length === 0) {
+    emitDrop({
+      block_type: 'review_card',
+      kind: 'pre_mortem',
+      reason: 'lookup_miss',
+      field: 'grounded_in',
+    });
+    return null;
   }
   const candidate = {
     block_id: randomUUID(),
@@ -514,7 +586,15 @@ function buildPreMortemCard(
     action_intent: 'run_pre_mortem' as ActionIntentLiteral,
     action_label: truncate('Run a pre-mortem', ACTION_LABEL_MAX),
   };
-  return validateOrDrop(ReviewCardBlockSchema, candidate);
+  return validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+    block_type: 'review_card',
+    kind: 'pre_mortem',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+      { name: 'action_label', value: candidate.action_label },
+    ],
+  });
 }
 
 function buildFlipThresholdCards(
@@ -538,15 +618,24 @@ function buildFlipThresholdCards(
       ? entry.narrative.trim()
       : '';
     if (factorId.length === 0 || factorLabel.length === 0 || narrative.length === 0) continue;
-    idx++;
+    // Round-3 review correction: drop when the LLM-claimed factor isn't
+    // in the canonical graph lookup. Prior behaviour fell back to the
+    // LLM-provided factor_label, but we have no proof the LLM honoured
+    // the "use canonical labels" prompt rule, and the fallback propagated
+    // a possibly-fake factor_id into target_refs. Fail-closed restores
+    // the invariant stated in the file header (line 52-54): target ref
+    // ID-to-label resolution drops on miss.
     const ref = lookup.get(factorId);
-    const targetRefs: readonly TargetRef[] = ref !== undefined && ref.kind === 'factor'
-      ? [ref]
-      : [{ id: factorId, label: factorLabel, kind: 'factor' as const }];
-    // Note: when the factor isn't in the graph lookup, we fall back to
-    // the LLM-provided factor_label rather than dropping — flip_thresholds
-    // are sourced from PLoT-validated flip_threshold_data with the
-    // label already canonical (per defaults.ts:1411-1424 prompt spec).
+    if (ref === undefined || ref.kind !== 'factor') {
+      emitDrop({
+        block_type: 'review_card',
+        kind: 'flip_threshold',
+        reason: 'lookup_miss',
+        field: 'factor_id',
+      });
+      continue;
+    }
+    idx++;
     const candidate = {
       block_id: randomUUID(),
       signal_id: stableSignalId('review:flip', factorId, ctx),
@@ -556,15 +645,23 @@ function buildFlipThresholdCards(
       freshness: 'fresh' as const,
       type: 'review_card' as const,
       card_kind: 'flip_threshold' as const,
-      title: truncate(`What would flip the result on ${factorLabel}`, TITLE_MAX),
+      title: truncate(`What would flip the result on ${ref.label}`, TITLE_MAX),
       body: truncate(narrative, BODY_MAX),
       severity: 'warning' as Phase3BlockSeverityLiteral,
-      target_refs: targetRefs,
+      target_refs: [ref] as readonly TargetRef[],
       priority_rank: 30 + idx,
       action_intent: 'what_would_flip' as ActionIntentLiteral,
       action_label: truncate('Explore what flips this', ACTION_LABEL_MAX),
     };
-    const block = validateOrDrop(ReviewCardBlockSchema, candidate);
+    const block = validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+      block_type: 'review_card',
+      kind: 'flip_threshold',
+      prose: [
+        { name: 'title', value: candidate.title },
+        { name: 'body', value: candidate.body },
+        { name: 'action_label', value: candidate.action_label },
+      ],
+    });
     if (block !== null) out.push(block);
   }
   return out;
@@ -613,7 +710,15 @@ function buildBiasCards(
       action_intent: 'gather_evidence' as ActionIntentLiteral,
       action_label: truncate('Investigate this', ACTION_LABEL_MAX),
     };
-    const block = validateOrDrop(ReviewCardBlockSchema, candidate);
+    const block = validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+      block_type: 'review_card',
+      kind: 'bias',
+      prose: [
+        { name: 'title', value: candidate.title },
+        { name: 'body', value: candidate.body },
+        { name: 'action_label', value: candidate.action_label },
+      ],
+    });
     if (block !== null) out.push(block);
   }
   return out;
@@ -645,7 +750,14 @@ function buildRobustnessCard(
     target_refs: [] as readonly TargetRef[],
     priority_rank: 50,
   };
-  return validateOrDrop(ReviewCardBlockSchema, candidate);
+  return validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+    block_type: 'review_card',
+    kind: 'robustness',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+    ],
+  });
 }
 
 function buildEvidencePriorityCard(
@@ -684,7 +796,15 @@ function buildEvidencePriorityCard(
       action_intent: 'gather_evidence' as ActionIntentLiteral,
       action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
     };
-    return validateOrDrop(ReviewCardBlockSchema, candidate);
+    return validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+      block_type: 'review_card',
+      kind: 'evidence_priority',
+      prose: [
+        { name: 'title', value: candidate.title },
+        { name: 'body', value: candidate.body },
+        { name: 'action_label', value: candidate.action_label },
+      ],
+    });
   }
   return null;
 }
@@ -716,7 +836,14 @@ function buildAssumptionCards(
       target_refs: [] as readonly TargetRef[],
       priority_rank: 70 + idx,
     };
-    const block = validateOrDrop(ReviewCardBlockSchema, candidate);
+    const block = validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+      block_type: 'review_card',
+      kind: 'assumption',
+      prose: [
+        { name: 'title', value: candidate.title },
+        { name: 'body', value: candidate.body },
+      ],
+    });
     if (block !== null) out.push(block);
   }
   return out;
@@ -741,11 +868,21 @@ function buildScenarioContextCards(
       ? entry.consequence.trim()
       : '';
     if (trigger.length === 0 || consequence.length === 0) continue;
-    idx++;
+    // Round-3 review correction: drop when the LLM-keyed edge isn't in
+    // the canonical graph lookup. The Record key IS the edge claim;
+    // emitting with `target_refs: []` would publish a "scenario about
+    // an unknown thing" — fail-closed instead.
     const ref = lookup.get(edgeId);
-    const targetRefs: readonly TargetRef[] = (ref !== undefined && ref.kind === 'edge')
-      ? [ref]
-      : [];
+    if (ref === undefined || ref.kind !== 'edge') {
+      emitDrop({
+        block_type: 'review_card',
+        kind: 'scenario_context',
+        reason: 'lookup_miss',
+        field: 'edge_id',
+      });
+      continue;
+    }
+    idx++;
     // Compose body as trigger + consequence; sentence-case join.
     const body = trigger.endsWith('.')
       ? `${trigger} ${consequence}`
@@ -762,10 +899,17 @@ function buildScenarioContextCards(
       title: truncate('A scenario worth considering', TITLE_MAX),
       body: truncate(body, BODY_MAX),
       severity: 'info' as Phase3BlockSeverityLiteral,
-      target_refs: targetRefs,
+      target_refs: [ref] as readonly TargetRef[],
       priority_rank: 80 + idx,
     };
-    const block = validateOrDrop(ReviewCardBlockSchema, candidate);
+    const block = validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+      block_type: 'review_card',
+      kind: 'scenario_context',
+      prose: [
+        { name: 'title', value: candidate.title },
+        { name: 'body', value: candidate.body },
+      ],
+    });
     if (block !== null) out.push(block);
   }
   return out;
@@ -850,14 +994,120 @@ function isTargetRefKind(s: string): s is TargetRefKindLiteral {
 }
 
 /**
- * `safeParse` the candidate against its Zod schema; return the typed
- * block on success, null on failure. Validation failures DROP the block
- * (never weaken the schema, never emit partial/filler).
+ * Round-3 review: scan an ordered list of user-facing prose fields for
+ * banned wording (`FORBIDDEN_USER_FACING_PHRASES`), raw probability
+ * decimals, or entity-id-shaped tokens. Returns the first unsafe
+ * `{ field, reason, sample }` triple, or `null` when the block is
+ * clean. The `sample` is the matched substring, NOT the full prose —
+ * loggers can record it without leaking the entire LLM authorship.
+ *
+ * Used by every Phase 3 builder before `validateOrDrop` so unsafe LLM
+ * output drops at the source rather than riding through Zod and out
+ * to the wire (where the per-block output-safety layer would scrub
+ * IDs but not banned wording or raw decimals).
  */
-function validateOrDrop<TSchema extends z.ZodTypeAny>(
+interface ProseField {
+  readonly name: string;
+  readonly value: string | undefined;
+}
+
+interface ProseGuardHit {
+  readonly field: string;
+  readonly reason: 'forbidden_phrase' | 'raw_decimal' | 'raw_id';
+  readonly sample: string;
+}
+
+function scanProse(fields: readonly ProseField[]): ProseGuardHit | null {
+  for (const { name, value } of fields) {
+    if (typeof value !== 'string' || value.length === 0) continue;
+    const phraseHit = findForbiddenPhraseHit(value);
+    if (phraseHit !== null) {
+      return { field: name, reason: 'forbidden_phrase', sample: phraseHit };
+    }
+    const decimalMatch = RAW_DECIMAL_RE.exec(value);
+    if (decimalMatch !== null) {
+      return { field: name, reason: 'raw_decimal', sample: decimalMatch[0].trim() };
+    }
+    const idMatch = RAW_ID_RE.exec(value);
+    if (idMatch !== null) {
+      return { field: name, reason: 'raw_id', sample: idMatch[0] };
+    }
+  }
+  return null;
+}
+
+/**
+ * Round-3 review: telemetry on block drops. Logs structurally (block type,
+ * card/coaching kind, reason) WITHOUT user prose or raw IDs so dashboards
+ * can detect composer / schema drift without re-introducing the
+ * privacy/leak risks the drop was protecting against.
+ *
+ * `sample` is the matched substring from the prose guard (e.g. "0.73",
+ * "factor_abc12345", "recommendation"). For schema-validation drops,
+ * `sample` is undefined and `reason` carries the Zod issue path summary.
+ */
+interface DropReason {
+  readonly block_type: string;
+  readonly kind?: string;
+  readonly reason: string;
+  readonly field?: string;
+  readonly sample?: string;
+}
+
+function emitDrop(reason: DropReason): void {
+  log.warn(
+    {
+      event: 'v5.phase3.block_dropped',
+      block_type: reason.block_type,
+      block_kind: reason.kind,
+      drop_reason: reason.reason,
+      field: reason.field,
+      sample: reason.sample,
+    },
+    'V5 Phase 3 block dropped before egress',
+  );
+}
+
+/**
+ * Round-3 review: combined prose-guard + schema-validate gate. Returns the
+ * typed block on success, null on failure. Drops are logged with
+ * structural metadata only (no user prose / raw IDs).
+ */
+function validateProseAndSchemaOrDrop<TSchema extends z.ZodTypeAny>(
   schema: TSchema,
   candidate: unknown,
+  ctx: {
+    block_type: string;
+    kind?: string;
+    prose: readonly ProseField[];
+  },
 ): z.infer<TSchema> | null {
+  const proseHit = scanProse(ctx.prose);
+  if (proseHit !== null) {
+    emitDrop({
+      block_type: ctx.block_type,
+      kind: ctx.kind,
+      reason: `prose_guard_${proseHit.reason}`,
+      field: proseHit.field,
+      sample: proseHit.sample,
+    });
+    return null;
+  }
   const parsed = schema.safeParse(candidate);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0];
+    emitDrop({
+      block_type: ctx.block_type,
+      kind: ctx.kind,
+      reason: 'schema_validation_failed',
+      field: firstIssue?.path?.join('.') ?? undefined,
+      // Round-3: include only the Zod error code, not any data value —
+      // codes like `invalid_type`, `too_small`, `invalid_enum_value` are
+      // structural and safe to log.
+      sample: firstIssue?.code,
+    });
+    return null;
+  }
+  return parsed.data;
 }
+
