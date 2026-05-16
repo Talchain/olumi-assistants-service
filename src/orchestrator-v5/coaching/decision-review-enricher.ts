@@ -87,20 +87,46 @@ export async function enrichRunAnalysisWithDecisionReview(
     return input.handlerFacts;
   }
 
+  // Round-1 staging diagnostic (Change A): every skip / invoke / failed
+  // telemetry event carries these structural fields so a single grep on
+  // `v5.decision_review.skipped` reveals which precondition failed AND
+  // what the inputs looked like (brief presence, enrichment shape,
+  // leading_option_id presence). Booleans + length only — never the
+  // brief text itself, never a raw fact ID.
+  const briefLength = typeof input.brief === 'string' ? input.brief.length : 0;
+  const leadingOptionPresent =
+    typeof fact.result.leading_option_id === 'string' &&
+    fact.result.leading_option_id.length > 0;
+
   const enrichment = fact.result.enrichment;
   if (enrichment === undefined) {
-    skipTelemetry(input, 'no_results');
+    skipTelemetry(input, 'no_results', {
+      brief_present: briefLength > 0,
+      brief_length: briefLength,
+      has_enrichment: false,
+      leading_option_present: leadingOptionPresent,
+    });
     return input.handlerFacts;
   }
 
   if (!input.brief || input.brief.length === 0) {
-    skipTelemetry(input, 'no_brief');
+    skipTelemetry(input, 'no_brief', {
+      brief_present: false,
+      brief_length: briefLength,
+      has_enrichment: true,
+      leading_option_present: leadingOptionPresent,
+    });
     return input.handlerFacts;
   }
 
   const invokeInput = buildInvokeInput(input.brief, enrichment, fact.result.leading_option_id);
   if (!invokeInput) {
-    skipTelemetry(input, 'no_winner');
+    skipTelemetry(input, 'no_winner', {
+      brief_present: true,
+      brief_length: briefLength,
+      has_enrichment: true,
+      leading_option_present: leadingOptionPresent,
+    });
     return input.handlerFacts;
   }
 
@@ -118,6 +144,12 @@ export async function enrichRunAnalysisWithDecisionReview(
     scenario_id: input.scenarioId,
     brief_hash: invokeInput.brief_hash,
     timeout_ms: DECISION_REVIEW_TIMEOUT_MS,
+    // Change A diagnostic context: lets operators correlate an `invoked`
+    // event to the same `brief_length` they'd see on a sibling `skipped`
+    // event, without needing to grep two events for the same request_id.
+    brief_present: true,
+    brief_length: briefLength,
+    leading_option_present: leadingOptionPresent,
   });
 
   const startedAt = Date.now();
@@ -140,6 +172,9 @@ export async function enrichRunAnalysisWithDecisionReview(
         scenario_id: input.scenarioId,
         reason: 'shape_extraction_failed',
         duration_ms: Date.now() - startedAt,
+        brief_present: true,
+        brief_length: briefLength,
+        leading_option_present: leadingOptionPresent,
       });
       return input.handlerFacts;
     }
@@ -199,6 +234,9 @@ export async function enrichRunAnalysisWithDecisionReview(
       scenario_id: input.scenarioId,
       reason: err instanceof Error ? err.message : 'unknown',
       duration_ms: Date.now() - startedAt,
+      brief_present: true,
+      brief_length: briefLength,
+      leading_option_present: leadingOptionPresent,
     });
     log.warn(
       {
@@ -610,10 +648,30 @@ function sha256(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex');
 }
 
-function skipTelemetry(input: EnrichDecisionReviewInput, reason: SkipReason): void {
+/**
+ * Change A diagnostic context passed by every skipTelemetry call site.
+ * Booleans + length only — never the brief text itself, never a raw
+ * fact ID, never a user-prose excerpt. Lets a single grep on
+ * `v5.decision_review.skipped` answer "did the brief reach the
+ * enricher" + "did the precondition shape look as expected" without
+ * needing a wire-level diagnostic or admin endpoint.
+ */
+interface SkipDiagnostics {
+  readonly brief_present: boolean;
+  readonly brief_length: number;
+  readonly has_enrichment: boolean;
+  readonly leading_option_present: boolean;
+}
+
+function skipTelemetry(
+  input: EnrichDecisionReviewInput,
+  reason: SkipReason,
+  diagnostics: SkipDiagnostics,
+): void {
   emit(TelemetryEvents.V5DecisionReviewSkipped, {
     request_id: input.requestId,
     scenario_id: input.scenarioId,
     reason,
+    ...diagnostics,
   });
 }
