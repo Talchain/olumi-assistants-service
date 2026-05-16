@@ -139,20 +139,21 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
     expect(ctx.persistedGraph).toEqual({ nodes: [], edges: [] });
   });
 
-  it('first-write-wins via commit chain: a graphless commit does NOT lock out a successful follow-up brief', async () => {
-    // Mirrors the dispatch-side guard contract: graphless drafts MUST NOT
-    // populate brief_text. The stateful fake's RPC-shaped write-once
-    // predicate enforces that even if a future caller bypasses the
-    // dispatch guard. Composed end-to-end so a regression at any seam
-    // (commit, store, buildTurnContext) surfaces here.
+  it('first-write-wins via commit chain: a no-brief commit followed by a brief-bearing commit lands the latter', async () => {
+    // Defensive contract: even if a caller writes a commit without
+    // briefText (e.g. a legacy code path that pre-dates Fix A, or a
+    // turn class that has no user-facing free text), a subsequent
+    // commit with briefText still lands. The RPC's first-write-wins
+    // predicate only suppresses writes that try to OVERWRITE an
+    // already-populated brief — a never-written brief stays writable.
     const store = createStatefulFakeStore();
     const composed = composeDirectAnswerResponse({
       assistant_text: '',
       stage: 'frame',
     });
 
-    // Attempt 1: graphless. Dispatch guard would suppress briefText —
-    // we replicate that behaviour at the commit boundary.
+    // Attempt 1: no briefText threaded — simulates a legacy / non-brief
+    // commit path.
     await commitDirectAnswer(
       composed,
       {
@@ -165,7 +166,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
         duration_ms: 5,
         handler_facts: [],
         // graph absent — simulating handleDraftGraph returning null
-        // briefText absent — simulating the dispatch-side guard
+        // briefText absent — legacy / non-brief commit path
       },
       store,
     );
@@ -190,7 +191,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
     );
 
     // The retry's brief is the one that lives in canonical state —
-    // the graphless attempt did not lock it out.
+    // the no-brief attempt did not lock it out.
     const followUpPayload = makeMessagePayload({
       scenario_id: SCENARIO_ID,
       turn_id: 'follow-up',
@@ -527,5 +528,98 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
 
     const enricherCall = enricherSpy.mock.calls[enricherSpy.mock.calls.length - 1];
     expect(enricherCall[0].brief).toBeNull();
+  });
+
+  it('V5 Phase 3A Fix B: TurnExecutor main-path commit threads context.scenarioBriefText into store.append', async () => {
+    // Fix B (defence in depth): the main TurnExecutor commitDirectAnswer
+    // call site now re-passes `context.scenarioBriefText` as the
+    // `briefText` metadata field. The RPC's first-write-wins predicate
+    // makes this a no-op when brief_text is already populated, but it
+    // backfills the brief for any session where a prior turn somehow
+    // committed without one (e.g. legacy draft pre-Fix A, or an external
+    // session repair path). This test pins the contract that briefText
+    // flows through the store.append call on a normal run_analysis turn.
+    const store = createStatefulFakeStore();
+    liveStoreHolder.current = store;
+
+    // Seed canonical state: a draft turn that already persisted both
+    // the graph and the brief.
+    const PERSISTED_BRIEF = 'V5 Phase 3A Fix B verification brief';
+    await commitDirectAnswer(
+      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      {
+        scenario_id: SCENARIO_ID,
+        turn_id: 'seed-draft',
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: 'sha256:seed',
+        llm_calls_used: 1,
+        duration_ms: 10,
+        handler_facts: [],
+        graph: { nodes: [], edges: [] },
+        briefText: PERSISTED_BRIEF,
+      },
+      store,
+    );
+
+    // Wrap the stateful store's append to record every call's
+    // briefText field — the assertion target for Fix B.
+    const appendSpy = vi.spyOn(store, 'append');
+
+    // Run a follow-up run_analysis turn through the executor. The
+    // executor's buildTurnContext loads briefText from the store; Fix B
+    // re-passes it to commitDirectAnswer, which forwards it to
+    // store.append as `write.briefText`.
+    const routingAdapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () =>
+          mkToolUseResult({
+            intent_class: 'execute',
+            action: {
+              handler_id: 'run_analysis',
+              entity: {
+                id: 'opt_a',
+                kind: 'option',
+                resolution_status: 'resolved',
+                resolution_method: 'id_match',
+              },
+              parameters: [],
+              cited_context_fields: ['graph.options'],
+            },
+          }),
+        ),
+    };
+
+    const result = await runTurnExecutor(
+      makeMessagePayload({
+        turn_id: 'follow-up-fix-b',
+        scenario_id: SCENARIO_ID,
+        message: 'run analysis',
+        turn_class: 'decide',
+        stage: 'analyse',
+      }),
+      'req-fix-b',
+      {
+        routingAdapter,
+        handlerRegistry: createRegistry({
+          plotClient: makeMockPlotClient(),
+          scenarioReader: async () => makeScenarioSnapshot(),
+        }),
+      },
+    );
+
+    expect(result.telemetry.failure_type).toBeNull();
+    expect(result.telemetry.commit_performed).toBe(true);
+
+    // The follow-up turn's append call MUST carry briefText sourced from
+    // canonical state (the seeded draft turn). Pre-Fix-B this field was
+    // omitted on every non-draft commit. Note: the turn-executor commits
+    // with `turn_id: context.request_id`, so the matcher uses requestId.
+    const followUpAppendCall = appendSpy.mock.calls.find(
+      ([write]) => write.turn_id === 'req-fix-b',
+    );
+    expect(followUpAppendCall).toBeDefined();
+    expect(followUpAppendCall?.[0].briefText).toBe(PERSISTED_BRIEF);
   });
 });

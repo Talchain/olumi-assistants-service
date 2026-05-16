@@ -638,14 +638,19 @@ describe('dispatchDraftGraph', () => {
       expect(metadata.briefText).toBe('My decision');
     });
 
-    it('does NOT thread briefText when handleDraftGraph produces no graphOutput (graphless first-write lockout protection)', async () => {
-      // Critical: a graphless draft (handleDraftGraph returned null
-      // graphOutput) MUST NOT write brief_text, otherwise a successful
-      // retry on the same scenario would find brief_text already
-      // populated and the WHERE-based first-write-wins clause would
-      // silently drop the real brief. Brief is tied to graph presence:
-      // brief_text only persists alongside a usable graph the user
-      // can act on.
+    it('threads briefText even when handleDraftGraph produces no graphOutput (V5 Phase 3A prerequisite — Fix A)', async () => {
+      // V5 Phase 3A — fix folded into PR #178. Prior behaviour gated
+      // briefText threading on `draftResult.graphOutput != null` to
+      // protect against a feared "graphless first-write lockout". That
+      // gating caused decision_review enrichment to skip with `no_brief`
+      // because scenarios.brief_text stayed null on degraded draft turns.
+      //
+      // New contract: thread payload.message verbatim to briefText on
+      // EVERY draft turn. The RPC's first-write-wins predicate
+      // (`WHERE brief_text IS NULL OR brief_text = ''`) is sufficient
+      // protection — a later draft with the real brief succeeds if it
+      // hits the predicate while brief_text is still empty, and is a
+      // no-op only when an earlier write has already populated it.
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>);
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
@@ -658,16 +663,22 @@ describe('dispatchDraftGraph', () => {
       });
 
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      expect(metadata.briefText).toBeUndefined();
+      // Fix A: brief is threaded even without graphOutput.
+      expect(metadata.briefText).toBe('My decision');
+      // Graph absence is independent — still undefined when graphless.
       expect(metadata.graph).toBeUndefined();
     });
 
-    it('graphless draft retry does not lock out a later successful first-write (regression for graphless first-write bug)', async () => {
+    it('graphless-then-successful sequence: both attempts thread briefText; first-write-wins lives at the RPC, not the dispatch boundary', async () => {
       // Two-call sequence on the same scenario:
-      //   1. handleDraftGraph returns null graphOutput → MUST NOT write briefText.
-      //   2. handleDraftGraph returns a real graph → MUST write briefText.
-      // The dispatch-side guard ensures the WHERE clause never sees a
-      // graphless write that would silently lock out the retry.
+      //   1. handleDraftGraph returns null graphOutput → STILL threads briefText (Fix A).
+      //   2. handleDraftGraph returns a real graph → ALSO threads briefText.
+      // Both writes hit commitDirectAnswer; first-write-wins at the RPC
+      // (`WHERE brief_text IS NULL OR brief_text = ''`) decides which
+      // value lands in canonical state. This test verifies the dispatch
+      // contract; the actual RPC predicate behaviour is exercised by
+      // brief-persistence-composed-roundtrip.test.ts against a stateful
+      // store that mirrors the WHERE clause.
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValueOnce(makeDraftResult(null) as Awaited<ReturnType<typeof handleDraftGraph>>)
         .mockResolvedValueOnce(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
@@ -688,8 +699,8 @@ describe('dispatchDraftGraph', () => {
 
       const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
       expect(calls).toHaveLength(2);
-      // Call 1: graphless → no brief.
-      expect(calls[0][1].briefText).toBeUndefined();
+      // Call 1: graphless → brief flows (Fix A).
+      expect(calls[0][1].briefText).toBe('My decision');
       // Call 2: successful → brief flows.
       expect(calls[1][1].briefText).toBe('My decision');
     });
