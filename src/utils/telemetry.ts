@@ -710,6 +710,29 @@ export const TelemetryEvents = {
   // exceeding the 8000-char DB cap.
   V5BriefTextNormalised: "v5.brief_text.normalised",
 
+  // V5 Phase 3A PR 3 — block lifecycle: emitted once per composer call that
+  // considered Phase 3 block emission (either from the current-turn fact, a
+  // prior fact, or skipped). Payload: structural enums + booleans + counts
+  // ONLY — NEVER prose, labels, raw entity IDs, scenario text,
+  // decision_review content, or graph content.
+  //   {
+  //     request_id, scenario_id,
+  //     lifecycle_state: 'emitted_fresh' | 'emitted_stale'
+  //       | 'skipped_unknown' | 'skipped_none' | 'rebuild_failed',
+  //     selected_fact_index: number | null,
+  //     graph_hash_at_run: string | null,
+  //     current_graph_hash: string | null,
+  //     reason: FreshnessReason | 'no_current_run_analysis_fact' | …,
+  //     block_count: number,                // total Phase 3 blocks emitted
+  //                                         // (excludes analysis_result).
+  //     stale_coaching_emitted: boolean,    // true only on emitted_stale.
+  //   }
+  // The two graph_hash fields ARE safe to log (they are SHA-prefixes already
+  // logged via v5.analysis_freshness.derived). Operators can confirm a
+  // stale-vs-fresh outcome and trace which fact in prior_facts was selected
+  // without seeing any user content.
+  V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
+
   // CQE (Custom Quantity Extractor — V5 Layer 0) per CQE Design v1.1 §9 and
   // cqe-investigation-proposal.md §7.2. Emits once per turn after the
   // assembler runs extractQuantities(). Carries aggregate signals needed for

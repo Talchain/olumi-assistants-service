@@ -765,6 +765,25 @@ async function dispatchChipClickNoopExplanation(
       coaching: null,
       stage: payload.stage,
       handlerFacts: outcome.handler_facts,
+      // PR 3 — explain/flip handlers do NOT produce a run_analysis fact,
+      // so the composer's lifecycle branch 2 fires: it walks prior_facts
+      // for the canonical run_analysis fact (selected by the
+      // precondition's freshness derivation) and emits Phase 3 blocks
+      // tagged by the verdict — fresh blocks when the graph hash still
+      // matches the source fact, or a single stale-safe rerun coaching
+      // block when the graph has diverged. Without this wiring the
+      // explain/flip path emits zero Phase 3 blocks, dropping coaching
+      // the user expects after running analysis.
+      ...(projectionInputs.analysisFreshness !== undefined
+        ? {
+            lifecycle: {
+              priorFacts: context.prior_facts,
+              freshness: projectionInputs.analysisFreshness,
+              requestId,
+              scenarioId: payload.scenario_id,
+            },
+          }
+        : {}),
     });
 
     // Same finaliser-level egress guard as the run_analysis path.

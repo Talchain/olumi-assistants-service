@@ -64,8 +64,6 @@
  *     enforcement.
  */
 
-import { randomUUID } from 'node:crypto';
-
 import { z } from 'zod';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import {
@@ -84,6 +82,7 @@ import {
 import { log } from '../../utils/telemetry.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { deterministicBlockId } from './block-id.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
@@ -125,6 +124,18 @@ export interface BlockBuildCtx {
   /** Graph hash from `fact.result.graph_hash_at_run` — passes through to
    *  `graph_hash_at_generation` on every analysis-derived block. */
   readonly graph_hash_at_generation: string;
+  /**
+   * V5 Phase 3A PR 3 — block lifecycle freshness label. Defaults to
+   * `'fresh'` when omitted (PR #178/180 behaviour: only fresh blocks
+   * emitted from current-turn run_analysis facts). PR 3 sets this to
+   * `'stale'` when the source fact's graph hash differs from the
+   * current scenario graph hash, signalling to the UI that the block
+   * is reused from a prior analysis whose underlying graph has since
+   * changed. The `'pending'` and `'failed'` enum values are reserved
+   * for in-flight generation states and are not used by the
+   * deterministic composer.
+   */
+  readonly freshness?: 'fresh' | 'stale';
 }
 
 export interface GraphNodeRef {
@@ -354,12 +365,7 @@ export function buildCoachingBlocks(
       if (text.length === 0) continue;
       idx++;
       const candidate = {
-        block_id: randomUUID(),
-        signal_id: stableSignalId('coach:assumption', String(idx), ctx),
-        created_at: ctx.created_at,
-        source_handler: SOURCE_HANDLER,
-        graph_hash_at_generation: ctx.graph_hash_at_generation,
-        freshness: 'fresh' as const,
+        ...commonMetadata('coach:assumption', String(idx), ctx),
         type: 'coaching' as const,
         coaching_kind: 'assumption_check' as const,
         title: truncate('An assumption to check', TITLE_MAX),
@@ -397,12 +403,7 @@ export function buildCoachingBlocks(
         ? `${principle} prompt`
         : 'Calibration prompt';
       const candidate = {
-        block_id: randomUUID(),
-        signal_id: stableSignalId('coach:calibration', String(idx), ctx),
-        created_at: ctx.created_at,
-        source_handler: SOURCE_HANDLER,
-        graph_hash_at_generation: ctx.graph_hash_at_generation,
-        freshness: 'fresh' as const,
+        ...commonMetadata('coach:calibration', String(idx), ctx),
         type: 'coaching' as const,
         coaching_kind: 'calibration_prompt' as const,
         title: truncate(titleText, TITLE_MAX),
@@ -515,12 +516,7 @@ export function buildEvidenceBlocks(
     }
 
     const candidate = {
-      block_id: randomUUID(),
-      signal_id: stableSignalId('evidence', factorId, ctx),
-      created_at: ctx.created_at,
-      source_handler: SOURCE_HANDLER,
-      graph_hash_at_generation: ctx.graph_hash_at_generation,
-      freshness: 'fresh' as const,
+      ...commonMetadata('evidence', factorId, ctx),
       type: 'evidence' as const,
       factor_label: factorRef.label,
       factor_ref: { id: factorRef.id, label: factorRef.label, kind: 'factor' as const },
@@ -549,6 +545,54 @@ export function buildEvidenceBlocks(
   return blocks;
 }
 
+/**
+ * PR 3 — stale-safe rerun CoachingBlock.
+ *
+ * Emitted by the lifecycle composer when the source `run_analysis` fact's
+ * `graph_hash_at_run` differs from the current scenario graph hash. The
+ * block prompts the user to re-run analysis to refresh the insights; the
+ * UI surfaces it at the top of the Analysis tab because `priority_rank:1`
+ * sorts above every fresh-state Phase 3 block (which start at 10).
+ *
+ * Per the PR 3 spec, when this block is emitted, NO ReviewCardBlock /
+ * EvidenceBlock / other CoachingBlock is emitted from the source fact —
+ * the stale state is communicated by this single block alone. The
+ * `signal_id` is keyed on the SOURCE fact's `graph_hash_at_run` (the one
+ * the persisted analysis was computed against) so re-emissions across
+ * multiple stale turns share the same identity for UI dedupe.
+ */
+export function buildStaleRerunCoachingBlock(
+  ctx: BlockBuildCtx,
+): CoachingBlock | null {
+  // Source-fact graph_hash carries the stale ID — the block's
+  // `graph_hash_at_generation` is the SAME stale hash so the wire-side
+  // freshness comparator can pair the block back to its source.
+  const candidate = {
+    ...commonMetadata('coach:stale_rerun', '', { ...ctx, freshness: 'stale' as const }),
+    type: 'coaching' as const,
+    coaching_kind: 'orientation' as const,
+    title: truncate('The graph has changed since the last analysis', TITLE_MAX),
+    body: truncate(
+      'Re-run analysis to refresh the insights and explore the updated decision.',
+      BODY_MAX,
+    ),
+    source: 'decision_review' as const,
+    target_refs: [] as readonly TargetRef[],
+    priority_rank: 1,
+    action_intent: 'rerun_analysis' as ActionIntentLiteral,
+    action_label: truncate('Re-run analysis', ACTION_LABEL_MAX),
+  };
+  return validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
+    block_type: 'coaching',
+    kind: 'stale_rerun',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+      { name: 'action_label', value: candidate.action_label },
+    ],
+  });
+}
+
 // ============================================================================
 // ReviewCardBlock builders (one per card_kind)
 // ============================================================================
@@ -561,12 +605,7 @@ function buildNarrativeCard(
   const body = truncate(dr.narrative_summary.trim(), BODY_MAX);
   if (body.length === 0) return null;
   const candidate = {
-    block_id: randomUUID(),
-    signal_id: stableSignalId('review:narrative', '', ctx),
-    created_at: ctx.created_at,
-    source_handler: SOURCE_HANDLER,
-    graph_hash_at_generation: ctx.graph_hash_at_generation,
-    freshness: 'fresh' as const,
+    ...commonMetadata('review:narrative', '', ctx),
     type: 'review_card' as const,
     card_kind: 'narrative' as const,
     title: truncate('How the analysis reads', TITLE_MAX),
@@ -619,12 +658,7 @@ function buildPreMortemCard(
     return null;
   }
   const candidate = {
-    block_id: randomUUID(),
-    signal_id: stableSignalId('review:pre_mortem', '', ctx),
-    created_at: ctx.created_at,
-    source_handler: SOURCE_HANDLER,
-    graph_hash_at_generation: ctx.graph_hash_at_generation,
-    freshness: 'fresh' as const,
+    ...commonMetadata('review:pre_mortem', '', ctx),
     type: 'review_card' as const,
     card_kind: 'pre_mortem' as const,
     title: truncate('If things go wrong', TITLE_MAX),
@@ -686,12 +720,7 @@ function buildFlipThresholdCards(
     }
     idx++;
     const candidate = {
-      block_id: randomUUID(),
-      signal_id: stableSignalId('review:flip', factorId, ctx),
-      created_at: ctx.created_at,
-      source_handler: SOURCE_HANDLER,
-      graph_hash_at_generation: ctx.graph_hash_at_generation,
-      freshness: 'fresh' as const,
+      ...commonMetadata('review:flip', factorId, ctx),
       type: 'review_card' as const,
       card_kind: 'flip_threshold' as const,
       title: truncate(`What would flip the result on ${ref.label}`, TITLE_MAX),
@@ -743,12 +772,7 @@ function buildBiasCards(
       if (ref !== undefined) targetRefs.push(ref);
     }
     const candidate = {
-      block_id: randomUUID(),
-      signal_id: stableSignalId('review:bias', biasType, ctx),
-      created_at: ctx.created_at,
-      source_handler: SOURCE_HANDLER,
-      graph_hash_at_generation: ctx.graph_hash_at_generation,
-      freshness: 'fresh' as const,
+      ...commonMetadata('review:bias', biasType, ctx),
       type: 'review_card' as const,
       card_kind: 'bias' as const,
       title: truncate(`Something to check: ${humaniseBiasType(biasType)}`, TITLE_MAX),
@@ -785,12 +809,7 @@ function buildRobustnessCard(
     ? robust.primary_risk.trim()
     : '';
   const candidate = {
-    block_id: randomUUID(),
-    signal_id: stableSignalId('review:robustness', '', ctx),
-    created_at: ctx.created_at,
-    source_handler: SOURCE_HANDLER,
-    graph_hash_at_generation: ctx.graph_hash_at_generation,
-    freshness: 'fresh' as const,
+    ...commonMetadata('review:robustness', '', ctx),
     type: 'review_card' as const,
     card_kind: 'robustness' as const,
     title: truncate('How robust is this?', TITLE_MAX),
@@ -829,12 +848,7 @@ function buildEvidencePriorityCard(
     const ref = lookup.get(factorId);
     if (ref === undefined || ref.kind !== 'factor') continue;
     const candidate = {
-      block_id: randomUUID(),
-      signal_id: stableSignalId('review:evidence_priority', factorId, ctx),
-      created_at: ctx.created_at,
-      source_handler: SOURCE_HANDLER,
-      graph_hash_at_generation: ctx.graph_hash_at_generation,
-      freshness: 'fresh' as const,
+      ...commonMetadata('review:evidence_priority', factorId, ctx),
       type: 'review_card' as const,
       card_kind: 'evidence_priority' as const,
       title: truncate(`Highest-leverage evidence gap: ${ref.label}`, TITLE_MAX),
@@ -871,12 +885,7 @@ function buildAssumptionCards(
     if (text.length === 0) continue;
     idx++;
     const candidate = {
-      block_id: randomUUID(),
-      signal_id: stableSignalId('review:assumption', String(idx), ctx),
-      created_at: ctx.created_at,
-      source_handler: SOURCE_HANDLER,
-      graph_hash_at_generation: ctx.graph_hash_at_generation,
-      freshness: 'fresh' as const,
+      ...commonMetadata('review:assumption', String(idx), ctx),
       type: 'review_card' as const,
       card_kind: 'assumption' as const,
       title: truncate('A load-bearing assumption', TITLE_MAX),
@@ -937,12 +946,7 @@ function buildScenarioContextCards(
       ? `${trigger} ${consequence}`
       : `${trigger}. ${consequence}`;
     const candidate = {
-      block_id: randomUUID(),
-      signal_id: stableSignalId('review:scenario', edgeId, ctx),
-      created_at: ctx.created_at,
-      source_handler: SOURCE_HANDLER,
-      graph_hash_at_generation: ctx.graph_hash_at_generation,
-      freshness: 'fresh' as const,
+      ...commonMetadata('review:scenario', edgeId, ctx),
       type: 'review_card' as const,
       card_kind: 'scenario_context' as const,
       title: truncate('A scenario worth considering', TITLE_MAX),
@@ -1029,6 +1033,39 @@ function stableSignalId(
   return key.length > 0
     ? `${prefix}:${key}:${ctx.graph_hash_at_generation}`
     : `${prefix}:${ctx.graph_hash_at_generation}`;
+}
+
+/**
+ * PR 3 — common metadata stamped onto every Phase 3 block. Derives
+ * `signal_id` deterministically per `(prefix, key, graph_hash)` and
+ * `block_id` as a UUID v5 of that signal_id under the V5 Phase 3
+ * namespace, so re-emissions of the same logical block across turns
+ * carry identical `block_id` and `signal_id` (lets the UI dedupe
+ * cached vs newly-rebuilt blocks). `freshness` defaults to `'fresh'`
+ * when the ctx omits it (preserves PR #178/180 behaviour); the
+ * stale-emission path threads `'stale'` through `ctx.freshness`.
+ */
+function commonMetadata(
+  prefix: string,
+  key: string,
+  ctx: BlockBuildCtx,
+): {
+  readonly block_id: string;
+  readonly signal_id: string;
+  readonly created_at: string;
+  readonly source_handler: typeof SOURCE_HANDLER;
+  readonly graph_hash_at_generation: string;
+  readonly freshness: 'fresh' | 'stale';
+} {
+  const signal_id = stableSignalId(prefix, key, ctx);
+  return {
+    block_id: deterministicBlockId(signal_id),
+    signal_id,
+    created_at: ctx.created_at,
+    source_handler: SOURCE_HANDLER,
+    graph_hash_at_generation: ctx.graph_hash_at_generation,
+    freshness: ctx.freshness ?? 'fresh',
+  };
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

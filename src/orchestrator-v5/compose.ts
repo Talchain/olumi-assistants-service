@@ -12,8 +12,10 @@
  */
 
 import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import type { FreshnessDerivation } from './context/freshness.js';
+import { TelemetryEvents, emit } from '../utils/telemetry.js';
 import type { SuggestedAction } from './compose/types.js';
 import {
   buildCoachingBlocks,
@@ -21,6 +23,7 @@ import {
   buildFactorConfidenceLookup,
   buildGraphNodeLookup,
   buildReviewCardBlocks,
+  buildStaleRerunCoachingBlock,
   type BlockBuildCtx,
 } from './compose/phase3-blocks.js';
 
@@ -98,6 +101,37 @@ export interface ComposeToolCallInput {
    * V5 Task 2.1: pre-generated deterministic chips. See `ComposeInput`.
    */
   readonly suggested_actions?: readonly SuggestedAction[];
+  /**
+   * V5 Phase 3A PR 3 — block lifecycle context. When supplied AND the
+   * current turn's `handlerFacts` carries NO `run_analysis` fact, the
+   * composer walks `priorFacts` for the canonical prior fact (selected
+   * by the freshness derivation upstream) and emits Phase 3 blocks
+   * tagged by the freshness verdict:
+   *   - 'fresh' → rebuild ReviewCard / Coaching / Evidence blocks from
+   *               the prior fact (graph hash matches current → safe to
+   *               present as live insights).
+   *   - 'stale' → emit ONLY the stale-safe rerun CoachingBlock; suppress
+   *               every other Phase 3 block (graph diverged → original
+   *               insights are no longer trustworthy).
+   *   - 'unknown' / 'none' → suppress emission entirely.
+   *
+   * Required context fields:
+   *   - `priorFacts`: typically `EnrichedTurnContext.prior_facts`.
+   *   - `freshness`: the `FreshnessDerivation` already computed by the
+   *                  dispatcher's pre-handler step.
+   *   - `requestId` + `scenarioId`: telemetry-only identifiers for
+   *                                 `v5.phase3.block_lifecycle`.
+   *
+   * Omitting `lifecycle` preserves PR #178/180 behaviour: Phase 3
+   * blocks emit ONLY when the current turn's `handlerFacts` contains a
+   * run_analysis fact.
+   */
+  readonly lifecycle?: {
+    readonly priorFacts: readonly HandlerFact[];
+    readonly freshness: FreshnessDerivation;
+    readonly requestId: string;
+    readonly scenarioId: string;
+  };
 }
 
 export function composeToolCallResponse(input: ComposeToolCallInput): OlumiResponse {
@@ -108,7 +142,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
   if (trimmedConfirmation) pieces.push(trimmedConfirmation);
   if (input.coaching) pieces.push(input.coaching.trim());
 
-  const blocks = input.handlerFacts ? buildBlocksFromFacts(input.handlerFacts) : [];
+  const blocks = buildBlocksFromFacts(input.handlerFacts ?? [], input.lifecycle);
 
   return {
     response_version: 2,
@@ -122,18 +156,51 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
 
 /**
  * Map recognised handler facts to OlumiResponse blocks. Emitted shapes:
- *  - run_analysis fact → `analysis_result` block.
+ *  - run_analysis fact → `analysis_result` block + Phase 3 lifecycle blocks
+ *    (fresh review_card / coaching / evidence — see lifecycle decision tree
+ *    below).
  *  - set_factor_value / add_constraint / adjust_edge_strength facts →
  *    `graph_patch` block (status, operation, target_id, before, after).
  *    The boundary GraphPatchBlock operation enum mirrors these three D1
  *    fact_types one-for-one so the mapping is direct.
+ *
+ * Phase 3 lifecycle decision tree (PR 3 — 2026-05-17):
+ *
+ *   1. Current turn contains a run_analysis fact with `graph_hash_at_run`:
+ *      → emit `analysis_result` (existing) AND fresh Phase 3 blocks rebuilt
+ *        from the current-turn fact's `enrichment.decision_review`.
+ *        Lifecycle telemetry: `emitted_fresh`, reason='current_turn_fact'.
+ *
+ *   2. No current-turn run_analysis fact, but lifecycle context supplied
+ *      AND prior_facts contains the selected run_analysis fact at
+ *      `freshness.selected_fact_index`:
+ *      a. freshness.freshness === 'fresh' → rebuild Phase 3 blocks fresh
+ *         from the prior fact (graph hash matches current → safe).
+ *         Lifecycle: `emitted_fresh`, reason='prior_fact_fresh'.
+ *      b. freshness.freshness === 'stale' → emit ONLY the stale-safe
+ *         rerun CoachingBlock; suppress every other Phase 3 block.
+ *         Lifecycle: `emitted_stale`, stale_coaching_emitted=true.
+ *      c. freshness.freshness === 'unknown' → suppress Phase 3 entirely
+ *         (per spec: 'pending' implies in-flight generation, which is
+ *         not the case here).
+ *         Lifecycle: `skipped_unknown`.
+ *      d. freshness.freshness === 'none' → no prior fact to derive from;
+ *         skip Phase 3.
+ *         Lifecycle: `skipped_none`.
+ *
+ *   3. No current-turn run_analysis fact AND no lifecycle context →
+ *      preserve PR #178/180 behaviour: no Phase 3 emission, no telemetry.
  */
 function buildBlocksFromFacts(
   facts: readonly HandlerFact[],
+  lifecycle?: ComposeToolCallInput['lifecycle'],
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
+  let currentTurnRunAnalysisHandled = false;
+
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
+      currentTurnRunAnalysisHandled = true;
       const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
       blocks.push({
         type: 'analysis_result',
@@ -143,26 +210,22 @@ function buildBlocksFromFacts(
         ...(enrichment !== undefined ? { enrichment } : {}),
       });
 
-      // V5 Phase 3A — emit structured ReviewCard / Coaching / Evidence
-      // blocks from `enrichment.decision_review` when it's present and
-      // the fact carries a graph hash (proof of freshness — per Codex
-      // correction #4, PR 2 only emits Phase 3 blocks on a verifiable-
-      // fresh fact; PR 3 owns persistence-by-graph-hash + stale
-      // rendering). Builders are pure; each candidate is `safeParse`-
-      // validated and dropped on failure.
+      // PR 3 lifecycle branch 1 — fresh blocks from current-turn fact.
       const graphHash = fact.result.graph_hash_at_run;
       if (typeof graphHash === 'string' && graphHash.length > 0) {
-        const ctx: BlockBuildCtx = {
-          created_at: new Date().toISOString(),
-          graph_hash_at_generation: graphHash,
-        };
-        const lookup = buildGraphNodeLookup(fact);
-        const confidenceLookup = buildFactorConfidenceLookup(fact);
-        blocks.push(...buildReviewCardBlocks(fact, lookup, ctx));
-        blocks.push(...buildCoachingBlocks(fact, lookup, ctx));
-        blocks.push(
-          ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx),
-        );
+        const freshBlocks = rebuildPhase3BlocksFresh(fact, graphHash);
+        blocks.push(...freshBlocks);
+        if (lifecycle !== undefined) {
+          emitLifecycle(lifecycle, {
+            lifecycle_state: 'emitted_fresh',
+            selected_fact_index: -1,  // -1 sentinel = current-turn fact
+            graph_hash_at_run: graphHash,
+            current_graph_hash: graphHash,
+            reason: 'current_turn_fact',
+            block_count: freshBlocks.length,
+            stale_coaching_emitted: false,
+          });
+        }
       }
     } else if (
       fact.fact_type === 'set_factor_value' ||
@@ -200,5 +263,196 @@ function buildBlocksFromFacts(
       });
     }
   }
+
+  // PR 3 lifecycle branch 2 — no current-turn run_analysis fact AND
+  // lifecycle context supplied. Walk prior_facts using the freshness
+  // verdict to select the canonical source fact and decide emission.
+  if (!currentTurnRunAnalysisHandled && lifecycle !== undefined) {
+    blocks.push(...buildLifecycleBlocksFromPrior(lifecycle));
+  }
+
   return blocks;
+}
+
+/**
+ * PR 3 — pure helper: rebuild the three Phase 3 builder outputs from a
+ * single run_analysis fact at a known graph hash. Used by both the
+ * current-turn fresh path and the prior-fact fresh path so they share
+ * deterministic block construction.
+ */
+function rebuildPhase3BlocksFresh(
+  fact: RunAnalysisHandlerFact,
+  graphHash: string,
+  freshness: 'fresh' | 'stale' = 'fresh',
+): OlumiResponse['blocks'] {
+  const ctx: BlockBuildCtx = {
+    created_at: new Date().toISOString(),
+    graph_hash_at_generation: graphHash,
+    freshness,
+  };
+  const lookup = buildGraphNodeLookup(fact);
+  const confidenceLookup = buildFactorConfidenceLookup(fact);
+  return [
+    ...buildReviewCardBlocks(fact, lookup, ctx),
+    ...buildCoachingBlocks(fact, lookup, ctx),
+    ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx),
+  ];
+}
+
+/**
+ * PR 3 — branch 2 of the lifecycle decision tree. Fires only when the
+ * current turn produced no run_analysis fact. Uses the
+ * `FreshnessDerivation` already computed upstream to choose the
+ * canonical prior fact and tag the emission.
+ *
+ * Freshness verdict → emission:
+ *   fresh   → rebuild Phase 3 blocks fresh from the prior fact.
+ *   stale   → emit ONLY the stale-safe rerun CoachingBlock, suppress
+ *             everything else (per spec: stale graph means cached
+ *             insights are no longer trustworthy).
+ *   unknown → suppress; emit `skipped_unknown` telemetry.
+ *   none    → suppress; emit `skipped_none` telemetry.
+ */
+function buildLifecycleBlocksFromPrior(
+  lifecycle: NonNullable<ComposeToolCallInput['lifecycle']>,
+): OlumiResponse['blocks'] {
+  const { freshness, priorFacts } = lifecycle;
+  const verdict = freshness.freshness;
+
+  if (verdict === 'unknown') {
+    emitLifecycle(lifecycle, {
+      lifecycle_state: 'skipped_unknown',
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      reason: freshness.reason,
+      block_count: 0,
+      stale_coaching_emitted: false,
+    });
+    return [];
+  }
+  if (verdict === 'none') {
+    emitLifecycle(lifecycle, {
+      lifecycle_state: 'skipped_none',
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      reason: freshness.reason,
+      block_count: 0,
+      stale_coaching_emitted: false,
+    });
+    return [];
+  }
+
+  const priorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index);
+  if (priorFact === null) {
+    emitLifecycle(lifecycle, {
+      lifecycle_state: 'rebuild_failed',
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      reason: 'selected_fact_unavailable',
+      block_count: 0,
+      stale_coaching_emitted: false,
+    });
+    return [];
+  }
+
+  const sourceGraphHash = priorFact.result.graph_hash_at_run;
+  if (typeof sourceGraphHash !== 'string' || sourceGraphHash.length === 0) {
+    // Defensive: freshness derivation should have rejected this fact
+    // as 'unknown' or 'none' upstream. If it slipped through, do not
+    // emit blocks without a verifiable graph hash.
+    emitLifecycle(lifecycle, {
+      lifecycle_state: 'rebuild_failed',
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      reason: 'source_graph_hash_missing',
+      block_count: 0,
+      stale_coaching_emitted: false,
+    });
+    return [];
+  }
+
+  if (verdict === 'stale') {
+    const staleBlock = buildStaleRerunCoachingBlock({
+      created_at: new Date().toISOString(),
+      graph_hash_at_generation: sourceGraphHash,
+    });
+    const blocks: OlumiResponse['blocks'] = staleBlock ? [staleBlock] : [];
+    emitLifecycle(lifecycle, {
+      lifecycle_state: 'emitted_stale',
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      reason: freshness.reason,
+      block_count: blocks.length,
+      stale_coaching_emitted: staleBlock !== null,
+    });
+    return blocks;
+  }
+
+  // verdict === 'fresh' — rebuild Phase 3 blocks from the prior fact.
+  const freshBlocks = rebuildPhase3BlocksFresh(priorFact, sourceGraphHash);
+  emitLifecycle(lifecycle, {
+    lifecycle_state: 'emitted_fresh',
+    selected_fact_index: freshness.selected_fact_index,
+    graph_hash_at_run: freshness.graph_hash_at_run,
+    current_graph_hash: freshness.current_graph_hash,
+    reason: 'prior_fact_fresh',
+    block_count: freshBlocks.length,
+    stale_coaching_emitted: false,
+  });
+  return freshBlocks;
+}
+
+/**
+ * Resolve the canonical prior run_analysis fact using the index already
+ * picked by the upstream freshness derivation. Falls back to "most
+ * recent run_analysis fact in prior_facts" only when the index is null
+ * (e.g. legacy callers that did not pre-compute one).
+ */
+function selectPriorRunAnalysisFact(
+  priorFacts: readonly HandlerFact[],
+  selectedFactIndex: number | null,
+): RunAnalysisHandlerFact | null {
+  if (selectedFactIndex !== null) {
+    const fact = priorFacts[selectedFactIndex];
+    if (fact !== undefined && fact.fact_type === 'run_analysis') {
+      return fact;
+    }
+    return null;
+  }
+  // Defensive fallback — newest first per build-turn-context loader.
+  for (const fact of priorFacts) {
+    if (fact.fact_type === 'run_analysis') return fact;
+  }
+  return null;
+}
+
+interface LifecycleTelemetryPayload {
+  readonly lifecycle_state:
+    | 'emitted_fresh'
+    | 'emitted_stale'
+    | 'skipped_unknown'
+    | 'skipped_none'
+    | 'rebuild_failed';
+  readonly selected_fact_index: number | null;
+  readonly graph_hash_at_run: string | null;
+  readonly current_graph_hash: string | null;
+  readonly reason: string;
+  readonly block_count: number;
+  readonly stale_coaching_emitted: boolean;
+}
+
+function emitLifecycle(
+  lifecycle: NonNullable<ComposeToolCallInput['lifecycle']>,
+  payload: LifecycleTelemetryPayload,
+): void {
+  emit(TelemetryEvents.V5Phase3BlockLifecycle, {
+    request_id: lifecycle.requestId,
+    scenario_id: lifecycle.scenarioId,
+    ...payload,
+  });
 }
