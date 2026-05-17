@@ -1022,29 +1022,38 @@ describe('common metadata stamping (Codex corrections #3, #4, #7)', () => {
     }
   });
 
-  it('stamps block_id as a real UUID and created_at as ISO 8601 with offset', () => {
+  it('stamps block_id as a UUID v5 (deterministic from signal_id) and created_at as ISO 8601 with offset', () => {
     const fact = makeFact({
       decisionReview: { narrative_summary: 'A is ahead.' },
     });
     const blocks = buildReviewCardBlocks(fact, new Map(), CTX);
     expect(blocks.length).toBeGreaterThan(0);
     for (const b of blocks) {
-      // UUID v4 shape — 4 in 3rd block, 8/9/a/b in 4th block.
-      expect(b.block_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      // PR 3 — UUID v5 shape: version nibble = 5, variant nibble in [89ab].
+      // Deterministic per (signal_id, V5_PHASE3_BLOCK_ID_NAMESPACE) so the
+      // UI can dedupe across stale/fresh re-emissions of the same logical
+      // block. Still passes z.string().uuid() at the boundary.
+      expect(b.block_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
       // ISO 8601 with offset — Z (UTC) or ±HH:MM.
       expect(b.created_at).toMatch(/T.*(Z|[+-]\d{2}:?\d{2})$/);
     }
   });
 
-  it('stable signal_id includes graph_hash_at_generation for dedupe across reruns at same hash', () => {
+  it('stable signal_id AND stable block_id across reruns at same hash (PR 3 contract)', () => {
     const fact = makeFact({
       decisionReview: { narrative_summary: 'A is ahead.' },
     });
     const blocks1 = buildReviewCardBlocks(fact, new Map(), CTX);
     const blocks2 = buildReviewCardBlocks(fact, new Map(), CTX);
-    // Same graph_hash → same signal_id even though block_id differs.
+    // Same graph_hash → same signal_id (existing contract).
     expect(blocks1[0].signal_id).toBe(blocks2[0].signal_id);
-    expect(blocks1[0].block_id).not.toBe(blocks2[0].block_id);
+    // PR 3 contract change: block_id is ALSO stable (deterministic
+    // UUID v5 of the same signal_id). This is what lets the UI dedupe
+    // the same logical block across stale-rebuild and fresh-rebuild
+    // emissions on consecutive turns.
+    expect(blocks1[0].block_id).toBe(blocks2[0].block_id);
   });
 });
 

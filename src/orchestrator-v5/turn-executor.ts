@@ -3851,6 +3851,20 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         suggested_actions: executeChips,
+        // PR 3 — thread lifecycle context so the composer can serve
+        // Phase 3 blocks from prior_facts when the current turn produced
+        // no run_analysis fact, or emit the stale-safe rerun coaching
+        // when the graph has diverged from the source fact.
+        ...(freshness !== null
+          ? {
+              lifecycle: {
+                priorFacts: context.prior_facts,
+                freshness,
+                requestId,
+                scenarioId: context.session_id,
+              },
+            }
+          : {}),
       });
       stagesCompleted.push('compose');
     } else if (

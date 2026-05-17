@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
@@ -681,5 +682,227 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     // The explanation handlers are not consulted on the run_analysis path.
     expect(explainResultsHandlerMock).not.toHaveBeenCalled();
     expect(whatWouldFlipHandlerMock).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// PR 3 — chip-click explain/flip lifecycle wiring (tests 6 + 7 from spec).
+//
+// The pre-PR-3 chip-click explain_results / what_would_flip path emitted
+// ZERO Phase 3 blocks because the handler outcome contains no run_analysis
+// fact and the composer didn't consult prior_facts. PR 3 threads
+// `lifecycle: { priorFacts, freshness, requestId, scenarioId }` into the
+// composer call so the lifecycle decision tree fires on these paths:
+//   - fresh hash → rebuild Phase 3 from the prior fact
+//   - diverged hash → emit ONLY the stale-safe rerun coaching block
+//
+// Tests below extend the existing "explain_results / what_would_flip with
+// hydrated context" suite above with focused assertions on the composer's
+// emission (the existing tests assert what the HANDLER receives; these
+// assert what reaches the wire response).
+// ===========================================================================
+
+describe('PR 3 chip-click lifecycle — explain_results / what_would_flip emit Phase 3 from prior_facts', () => {
+  // Reuse the READY_GRAPH + canonical fact-builder pattern from the
+  // existing happy-path suite. Build a richer decision_review payload so
+  // the real Phase 3 builders fire all the way through to non-zero blocks.
+  const READY_GRAPH = {
+    nodes: [
+      { id: 'dec_launch', kind: 'decision' as const, label: 'Launch?' },
+      { id: 'goal_revenue', kind: 'goal' as const, label: 'Revenue', goal_threshold: 0.8 },
+      { id: 'fac_marketing', kind: 'factor' as const, label: 'Marketing spend' },
+      {
+        id: 'opt_launch', kind: 'option' as const, label: 'Launch now',
+        interventions: { fac_marketing: 0.7 },
+      },
+      {
+        id: 'opt_status_quo', kind: 'option' as const, label: 'Status quo',
+        interventions: { fac_marketing: 0.3 },
+      },
+    ],
+    edges: [
+      { from: 'dec_launch', to: 'opt_launch', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'dec_launch', to: 'opt_status_quo', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'opt_launch', to: 'fac_marketing', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' as const },
+      { from: 'opt_status_quo', to: 'fac_marketing', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' as const },
+      { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    ],
+  };
+
+  // decision_review subset with enough fields to make rebuildPhase3BlocksFresh
+  // emit at least one review_card AND one coaching block from the prior fact.
+  const RICH_DECISION_REVIEW: Record<string, unknown> = {
+    narrative_summary: 'Plan A leads with a comfortable margin.',
+    story_headlines: { opt_launch: 'A clear leader' },
+    robustness_explanation: { summary: 'Stable across most scenarios.', primary_risk: null },
+    readiness_rationale: 'Ready.',
+    evidence_enhancements: {},
+    scenario_contexts: {},
+    flip_thresholds: [],
+    bias_findings: [],
+    key_assumptions: ['Market conditions persist.'],
+    decision_quality_prompts: [],
+  };
+
+  async function makePriorRunAnalysisFact(
+    graphHash: string,
+  ): Promise<HandlerFact> {
+    return {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_launch',
+        win_probabilities: { opt_launch: 0.62, opt_status_quo: 0.38 },
+        summary: 'Ran analysis.',
+        enrichment: {
+          option_comparison: [
+            { option_id: 'opt_launch', option_label: 'Launch now', win_probability: 0.62 },
+            { option_id: 'opt_status_quo', option_label: 'Status quo', win_probability: 0.38 },
+          ],
+          analysis_status: 'computed',
+          graph: { nodes: [{ id: 'fac_marketing', label: 'Marketing spend', kind: 'factor' }] },
+          decision_review: RICH_DECISION_REVIEW,
+        },
+        graph_hash_at_run: graphHash,
+        computed_at: '2026-04-30T12:00:00.000Z',
+      },
+    } as unknown as HandlerFact;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getDefaultRegistryMock.mockImplementation(
+      () =>
+        new Map<string, unknown>([
+          ['run_analysis', runAnalysisHandlerMock],
+          ['explain_results', explainResultsHandlerMock],
+          ['what_would_flip', whatWouldFlipHandlerMock],
+        ]),
+    );
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
+    );
+    commitDirectAnswerMock.mockResolvedValue({
+      response: {},
+      performed: true,
+      persisted_row_id: 'row-1',
+      graphPersisted: false,
+    });
+  });
+
+  // Test 6 — chip-click explain_results / what_would_flip path reuses fresh
+  // Phase 3 blocks from a prior run_analysis fact whose graph hash matches
+  // the current persisted graph.
+  it('FRESH: explain_results on a graph that matches the prior fact hash → rebuilds Phase 3 blocks fresh from prior_facts', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const { GraphStateIngressSchema } = await import('../../boundary/request-extensions.js');
+    const parsed = GraphStateIngressSchema.safeParse(READY_GRAPH);
+    if (!parsed.success) throw new Error('test setup: graph parse failed');
+    const expectedHash = computeAnalysisAffectingGraphHash(parsed.data)!;
+    const priorFact = await makePriorRunAnalysisFact(expectedHash);
+
+    buildTurnContextMock.mockResolvedValueOnce({
+      ...DEFAULT_TURN_CONTEXT,
+      prior_facts: [priorFact],
+      persistedGraph: READY_GRAPH,
+    });
+    explainResultsHandlerMock.mockResolvedValueOnce({
+      assistant_text: 'Explanation prose.',
+      handler_facts: [
+        {
+          fact_type: 'explain_results' as const, fact_version: 1, noop: true,
+          result: {
+            precondition_unmet: false, option_count: 2,
+            answer_source: 'deterministic_fallback' as const,
+            fallback_reason: null, answer_text_length: 18,
+          },
+        },
+      ],
+      llm_calls_used: 0, suppress_orientation: true,
+    });
+
+    const out = await dispatchDeterministicChipClick('explain_results', {
+      payload: payloadFor('explain_results'),
+      requestId: 'req-explain-fresh-lifecycle',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+
+    // The composer received lifecycle context and emitted Phase 3 blocks
+    // rebuilt fresh from the prior run_analysis fact. No analysis_result
+    // (no current-turn run_analysis fact).
+    const blocks = out.response.blocks;
+    expect(blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    const reviewCards = blocks.filter((b) => b.type === 'review_card');
+    const coaching = blocks.filter((b) => b.type === 'coaching');
+    expect(reviewCards.length).toBeGreaterThan(0);
+    expect(coaching.length).toBeGreaterThan(0);
+    for (const b of [...reviewCards, ...coaching]) {
+      expect(b.freshness).toBe('fresh');
+      expect(b.graph_hash_at_generation).toBe(expectedHash);
+    }
+  });
+
+  // Test 7 — chip-click explain_results / what_would_flip after graph edit
+  // emits the stale-safe CoachingBlock.
+  it('STALE: what_would_flip on a graph whose hash diverges from the prior fact → emits exactly one stale-safe rerun coaching block', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const { GraphStateIngressSchema } = await import('../../boundary/request-extensions.js');
+    const parsed = GraphStateIngressSchema.safeParse(READY_GRAPH);
+    if (!parsed.success) throw new Error('test setup: graph parse failed');
+    const currentHash = computeAnalysisAffectingGraphHash(parsed.data)!;
+
+    // Prior fact was computed against a DIFFERENT graph_hash (simulates
+    // the user editing the graph between run_analysis and this chip click).
+    const STALE_HASH = 'gh_diverged_e5f6g7h8';
+    const priorFact = await makePriorRunAnalysisFact(STALE_HASH);
+
+    buildTurnContextMock.mockResolvedValueOnce({
+      ...DEFAULT_TURN_CONTEXT,
+      prior_facts: [priorFact],
+      persistedGraph: READY_GRAPH,
+    });
+    whatWouldFlipHandlerMock.mockResolvedValueOnce({
+      assistant_text: 'Flip summary.',
+      handler_facts: [
+        {
+          fact_type: 'what_would_flip' as const, fact_version: 1, noop: true,
+          result: {
+            precondition_unmet: false, option_count: 2,
+            answer_source: 'deterministic_fallback' as const,
+            fallback_reason: null, answer_text_length: 13,
+          },
+        },
+      ],
+      llm_calls_used: 0, suppress_orientation: true,
+    });
+
+    const out = await dispatchDeterministicChipClick('what_would_flip', {
+      payload: payloadFor('what_would_flip'),
+      requestId: 'req-flip-stale-lifecycle',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+
+    const blocks = out.response.blocks;
+    // No review_card, no evidence, no analysis_result.
+    expect(blocks.find((b) => b.type === 'analysis_result')).toBeUndefined();
+    expect(blocks.filter((b) => b.type === 'review_card')).toHaveLength(0);
+    expect(blocks.filter((b) => b.type === 'evidence')).toHaveLength(0);
+    // Exactly one coaching block — the stale-safe rerun.
+    const coaching = blocks.filter((b) => b.type === 'coaching');
+    expect(coaching).toHaveLength(1);
+    const staleBlock = coaching[0]!;
+    expect(staleBlock.freshness).toBe('stale');
+    expect(staleBlock.priority_rank).toBe(1);
+    expect(staleBlock.action_intent).toBe('rerun_analysis');
+    // graph_hash_at_generation pairs to the SOURCE fact (the stale hash),
+    // not the current hash, so the wire-side freshness comparator can
+    // pair the block back to its source.
+    expect(staleBlock.graph_hash_at_generation).toBe(STALE_HASH);
+    // current_hash (READY_GRAPH) ≠ STALE_HASH proves freshness diverged.
+    expect(currentHash).not.toBe(STALE_HASH);
   });
 });
