@@ -272,10 +272,40 @@ function buildInvokeInput(
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
 ): DecisionReviewInvokeInput | null {
-  const results = readResultsArray(enrichment);
-  const winner = selectWinner(results, leadingOptionId);
-  if (!winner) return null;
-  const runnerUp = selectRunnerUp(results, winner);
+  // Phase 3A fix (2026-05-17): walk every available results source until
+  // one can match `leading_option_id`. The previous "first non-empty
+  // source wins" shape would skip `no_winner` when (e.g.) a legacy
+  // `enrichment.results` was present but truncated, even though the
+  // current `enrichment.option_comparison` contained the declared
+  // leader. Returning at the first matching source guarantees we honour
+  // PLoT's declared winner whenever ANY source carries it.
+  //
+  // Source ordering for the null-leader case (no declared winner):
+  // pick the first non-empty source's highest-probability entry. We
+  // deliberately do NOT pool entries across sources for the null-leader
+  // case — that would mix shapes and could double-count the same option.
+  const sources = readResultsArraySources(enrichment);
+  if (sources.length === 0) return null;
+
+  let winner: DecisionReviewInvokeInput['winner'] | null = null;
+  let chosenSource: ReadonlyArray<Record<string, unknown>> | null = null;
+
+  if (typeof leadingOptionId === 'string' && leadingOptionId.length > 0) {
+    for (const source of sources) {
+      const w = selectWinner(source, leadingOptionId);
+      if (w !== null) {
+        winner = w;
+        chosenSource = source;
+        break;
+      }
+    }
+  } else {
+    chosenSource = sources[0]!;
+    winner = selectWinner(chosenSource, null);
+  }
+
+  if (winner === null || chosenSource === null) return null;
+  const runnerUp = selectRunnerUp(chosenSource, winner);
 
   // Build label/unit lookups from enrichment.graph.nodes[]. The graph is
   // opaque (Record<string, unknown>) on this path, so reads are defensive.
@@ -318,33 +348,112 @@ function buildInvokeInput(
   };
 }
 
-function readResultsArray(enrichment: Record<string, unknown>): ReadonlyArray<Record<string, unknown>> {
-  const raw = enrichment.results;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((r): r is Record<string, unknown> => r !== null && typeof r === 'object');
+/**
+ * Read all option-level results sources from the PLoT V2 enrichment payload,
+ * in priority order.
+ *
+ * The envelope shape evolved across PLoT versions and the V5 enricher must
+ * accept all three published shapes without weakening the `no_winner` skip
+ * guarantee for genuinely missing data:
+ *
+ *   1. `enrichment.results[]`         — legacy shape (kept for backwards
+ *                                       compatibility; pre-2026 envelopes).
+ *   2. `enrichment.option_comparison[]` — current PLoT V2 (verified on
+ *                                         staging build `2e6e0be`); entries
+ *                                         carry both `option_id`/`id` and
+ *                                         `option_label`/`label` + a nested
+ *                                         `outcome.{mean,p10,p50,p90,…}`.
+ *   3. `enrichment.decision_brief.options[]` — leaner brief-shape with
+ *                                              `option_id`, `label`,
+ *                                              `win_probability`, `rank`.
+ *
+ * Returns every non-empty source as a separate array; the caller
+ * (`buildInvokeInput`) walks them in order until one can match
+ * `leading_option_id`. This avoids the trap where (e.g.) a legacy
+ * `enrichment.results` is non-empty but truncated, while the current
+ * `enrichment.option_comparison` contains the declared leader — the
+ * walker honours PLoT's declared winner whenever ANY source carries it.
+ *
+ * `projectOptionAsWinner` was already shape-tolerant (`option_id || id`,
+ * `option_label || label`, nested or flat `outcome.mean`), so all three
+ * source shapes feed into the same projector unchanged.
+ *
+ * Returns `[]` only when all three sources are absent or empty.
+ */
+function readResultsArraySources(
+  enrichment: Record<string, unknown>,
+): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
+  const sources: Array<ReadonlyArray<Record<string, unknown>>> = [];
+  const legacy = enrichment.results;
+  if (Array.isArray(legacy) && legacy.length > 0) {
+    const entries = filterObjectEntries(legacy);
+    if (entries.length > 0) sources.push(entries);
+  }
+  const optionComparison = enrichment.option_comparison;
+  if (Array.isArray(optionComparison) && optionComparison.length > 0) {
+    const entries = filterObjectEntries(optionComparison);
+    if (entries.length > 0) sources.push(entries);
+  }
+  const briefOptions = readRecord(enrichment.decision_brief)?.options;
+  if (Array.isArray(briefOptions) && briefOptions.length > 0) {
+    const entries = filterObjectEntries(briefOptions);
+    if (entries.length > 0) sources.push(entries);
+  }
+  return sources;
 }
 
+
+function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<string, unknown>> {
+  return arr.filter(
+    (r): r is Record<string, unknown> =>
+      r !== null && typeof r === 'object' && !Array.isArray(r),
+  );
+}
+
+/**
+ * Select the winner option, preferring an exact `leading_option_id` match
+ * when PLoT has declared one.
+ *
+ * Tightening (Phase 3A fix, 2026-05-17): when `leadingOptionId` is
+ * provided but none of the results carry a matching `option_id` / `id`,
+ * return `null` rather than falling back to "highest probability in the
+ * envelope". The previous fallback would invent a winner whenever the
+ * declared leader was missing from the envelope, masking real
+ * data-integrity issues; the enricher's `no_winner` skip is the honest
+ * outcome for that case.
+ *
+ * When `leadingOptionId` is null or empty, the behaviour is unchanged:
+ * fall back to the highest-probability entry (returns null if none of
+ * the entries carry a usable win_probability).
+ */
 function selectWinner(
   results: ReadonlyArray<Record<string, unknown>>,
   leadingOptionId: string | null,
 ): DecisionReviewInvokeInput['winner'] | null {
   if (results.length === 0) return null;
-  const byId = leadingOptionId
-    ? results.find((r) => r.option_id === leadingOptionId)
-    : undefined;
-  const top = byId ?? highestWinProbability(results);
-  if (!top) return null;
-  return projectOptionAsWinner(top);
+  if (typeof leadingOptionId === 'string' && leadingOptionId.length > 0) {
+    const byId = results.find(
+      (r) => r.option_id === leadingOptionId || r.id === leadingOptionId,
+    );
+    return byId ? projectOptionAsWinner(byId) : null;
+  }
+  const top = highestWinProbability(results);
+  return top ? projectOptionAsWinner(top) : null;
 }
 
 function selectRunnerUp(
   results: ReadonlyArray<Record<string, unknown>>,
   winner: DecisionReviewInvokeInput['winner'],
 ): DecisionReviewInvokeInput['runner_up'] {
-  const others = results.filter((r) => r.option_id !== winner.id);
+  // Filter against BOTH `option_id` and `id` so entries from the
+  // `option_comparison` shape (which populates both) and the
+  // `decision_brief.options` shape (which only populates `option_id`)
+  // are both excluded correctly from the runner-up candidate set.
+  const others = results.filter(
+    (r) => r.option_id !== winner.id && r.id !== winner.id,
+  );
   const top = highestWinProbability(others);
-  if (!top) return null;
-  return projectOptionAsWinner(top);
+  return top ? projectOptionAsWinner(top) : null;
 }
 
 function highestWinProbability(
