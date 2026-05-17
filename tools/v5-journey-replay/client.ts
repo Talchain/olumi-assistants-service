@@ -64,6 +64,15 @@ function buildAuthHeaders(apiKey: string | undefined): Record<string, string> {
     // `src/plugins/auth.ts`. Do not send the key via any other header.
     headers['x-olumi-assist-key'] = apiKey;
   }
+  // PR #182 boundary-hardening: `_timings` is now gated by BOTH the
+  // server env (`V5_TIMING_DEBUG=true`) AND the per-request header
+  // `X-Olumi-Debug: timings`. Without this header the route strips
+  // `_timings` from every response, including replay-harness calls.
+  // The harness always opts in — its evidence markdown depends on the
+  // server-side timings block being present whenever the env flag is
+  // on. Normal browser traffic does NOT send this header so DGAI's
+  // strict OlumiResponseSchema parser never sees the debug surface.
+  headers['x-olumi-debug'] = 'timings';
   return headers;
 }
 

@@ -22,20 +22,42 @@ export const PLOT_SLOW_LIKELY_MS = 8000;
 /**
  * V5 latency observability — shared timing types (Fix 4).
  *
- * Surface contract:
- *   - Both the response-envelope `_timings` block AND the telemetry
- *     events (v5.turn_executor.stage_timings,
- *     cee.unified_pipeline.stage_timings, v5.run_analysis.timings) are
- *     gated on `config.cee.timingDebugEnabled`. Production default OFF
- *     ⇒ zero `Date.now()` calls, zero allocations, zero log events,
- *     unchanged response shape. Staging sets `V5_TIMING_DEBUG=true` so
- *     the replay harness can read per-stage durations without scraping
- *     server logs.
- *   - The route-v2 egress wrapper (`sendFinalised200`) strips any
- *     `_timings` field unconditionally before validating against the
- *     strict OlumiResponseSchema, then re-attaches only when the flag
- *     is on. This is defense-in-depth — any upstream attach with the
- *     flag off is silently dropped at the wire seam.
+ * Surface contract (post PR #182 two-gate model):
+ *
+ *   - UPSTREAM CAPTURE — `config.cee.timingDebugEnabled` (env
+ *     `V5_TIMING_DEBUG=true`) is the SERVER PERMISSION gate. When OFF
+ *     (production default) every capture site short-circuits: zero
+ *     `Date.now()` calls, zero allocations, zero log events,
+ *     unchanged response shape. When ON, capture sites allocate the
+ *     timing objects, telemetry events
+ *     (v5.turn_executor.stage_timings,
+ *     cee.unified_pipeline.stage_timings, v5.run_analysis.timings)
+ *     fire to logs, and the dispatch result MAY carry a `_timings`
+ *     field — but that is NOT yet the wire surface.
+ *
+ *   - WIRE EMISSION — the route-v2 egress wrapper
+ *     (`sendFinalised200`) strips any `_timings` field
+ *     UNCONDITIONALLY before validating against the strict
+ *     OlumiResponseSchema, then re-attaches it ONLY when BOTH gates
+ *     pass:
+ *       (a) `config.cee.timingDebugEnabled === true` (the server
+ *           permission flag above), AND
+ *       (b) the request carries `X-Olumi-Debug: timings` (or a
+ *           comma-separated token list containing `timings`).
+ *     This is the post-PR-182 contract — env-only emission leaked
+ *     `_timings` to every authenticated request and tripped DGAI's
+ *     strict parser; the per-request opt-in keeps the surface
+ *     accessible to the replay harness and explicit debug tooling
+ *     while normal browser traffic never receives it.
+ *
+ *   - DEFENCE IN DEPTH — the strip step is unconditional. Any
+ *     upstream attach with either gate off is silently dropped at
+ *     the wire seam.
+ *
+ *   - Replay harness invocations against staging must send
+ *     `X-Olumi-Debug: timings` explicitly; setting
+ *     `V5_TIMING_DEBUG=true` alone is insufficient to receive
+ *     `_timings` on the wire.
  *
  * Future-compatibility note (concurrent draft candidates):
  *   `DraftGraphTimings.candidates` is an optional array reserved for a future

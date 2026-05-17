@@ -504,13 +504,22 @@ const ConfigSchema = z.object({
     debugLoggingEnabled: booleanString.default(false), // If true, emit V3-CAT diagnostic logs
     // Pipeline checkpoint settings
     pipelineCheckpointsEnabled: booleanString.default(false), // If true, capture edge field presence snapshots at 5 pipeline stages
-    // V5 latency observability (Fix 4). When true, attach a `_timings` block
-    // to V5 turn / draft_graph response bodies so the replay harness can read
-    // per-stage durations without scraping server logs. Telemetry events
+    // V5 latency observability (Fix 4). Server permission gate (deployment-
+    // wide) for the `_timings` response-envelope surface. PR #182 made wire
+    // emission additionally require a per-request `X-Olumi-Debug: timings`
+    // header so normal browser traffic does NOT receive `_timings` even
+    // when this flag is on. The two-gate model is enforced at the route
+    // (see `src/orchestrator/route-v2.ts` :: re-attach block + helper at
+    // `src/orchestrator/debug-fields.ts`).
+    //
+    // This flag still gates upstream CAPTURE (timing-object allocation +
+    // `_timings` field on dispatch results) so production with the flag
+    // OFF pays no allocation cost. Telemetry events
     // (v5.turn_executor.stage_timings, cee.unified_pipeline.stage_timings,
-    // v5.run_analysis.timings) emit unconditionally — this gates only the
-    // response-envelope surfacing. Default OFF in production; staging sets
-    // V5_TIMING_DEBUG=true to expose for the replay harness.
+    // v5.run_analysis.timings) emit unconditionally.
+    //
+    // Default OFF in production; staging sets V5_TIMING_DEBUG=true so the
+    // replay harness can request `_timings` via the debug header.
     timingDebugEnabled: booleanString.default(false),
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
