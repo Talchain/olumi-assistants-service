@@ -484,8 +484,11 @@ export const TelemetryEvents = {
   TurnExecutorContaminationNarrate: "turn_executor.contamination_narrate",
 
   // V5 latency observability (Fix 4 — per-stage timings).
-  // Always emitted; the matching `_timings` block on the response envelope
-  // is gated by `cee.timingDebugEnabled` (env `V5_TIMING_DEBUG=true`).
+  // Always emitted to logs. The matching `_timings` block on the wire
+  // response envelope is gated by TWO conditions (PR #182): the server
+  // permission flag `cee.timingDebugEnabled` (env `V5_TIMING_DEBUG=true`)
+  // AND the per-request header `X-Olumi-Debug: timings`. Normal browser
+  // traffic without the header does not receive `_timings`.
   V5TurnStageTimings: "v5.turn_executor.stage_timings",
   V5RunAnalysisTimings: "v5.run_analysis.timings",
   CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",

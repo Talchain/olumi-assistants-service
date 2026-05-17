@@ -88,6 +88,8 @@ import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/b
 
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
+import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-fields.js';
+import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
 import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
@@ -237,8 +239,10 @@ function sendFinalised200(
   // would fail safeParse and trigger the typed-fallback path. We strip
   // unconditionally (defense-in-depth: a stale upstream attach must not
   // leak past this seam), validate the cleaned shape, then re-attach
-  // ONLY when `config.cee.timingDebugEnabled` is true. The route is the
-  // last guard — upstream callers cannot bypass the flag by attaching
+  // ONLY when the two-gate model passes — see the re-attach block below
+  // for the gate (server permission `config.cee.timingDebugEnabled` AND
+  // per-request `X-Olumi-Debug: timings` header). The route is the last
+  // guard — upstream callers cannot bypass either gate by attaching
   // `_timings` themselves.
   const stripped = ((): { timings: unknown; body: import('@talchain/schemas/boundary').OlumiResponse } => {
     const raw = (candidateFinalised as Record<string, unknown>)._timings;
@@ -276,20 +280,45 @@ function sendFinalised200(
     );
   }
   // Re-attach `_timings` post-validation only on the success path AND
-  // only when the timing-debug flag is enabled. The fallback envelope
-  // never carries a debug surface; an upstream attach with the flag off
-  // is silently dropped by the strip above. Spreading breaks WeakSet
-  // membership (Mechanism B of the finaliser brand), so we re-finalise
-  // the augmented body for the preSerialization hook.
+  // only when BOTH gates pass:
+  //   (a) the server permission flag `config.cee.timingDebugEnabled`
+  //       (env var `V5_TIMING_DEBUG=true`) — operator opt-in for the
+  //       deployment as a whole, AND
+  //   (b) the per-request opt-in header `X-Olumi-Debug: timings`
+  //       (or a comma-separated token list including `timings`).
+  // This two-gate design is the post-PR-181 boundary-hardening fix:
+  // the env flag alone leaked `_timings` to ALL authenticated traffic
+  // and tripped DGAI's strict `OlumiResponseSchema` parser for normal
+  // browser requests. Both gates ON ⇒ replay harness + explicit debug
+  // tooling get `_timings`; normal browser traffic does NOT.
+  // The fallback envelope never carries a debug surface; an upstream
+  // attach with either gate off is silently dropped by the strip
+  // above. Spreading breaks WeakSet membership (Mechanism B of the
+  // finaliser brand), so we re-finalise the augmented body for the
+  // preSerialization hook.
+  const timingsBlock = coerceTurnTimingsBlock(timingsForWire);
   if (
     egress.ok &&
-    timingsForWire !== undefined &&
-    config.cee.timingDebugEnabled
+    timingsBlock !== null &&
+    config.cee.timingDebugEnabled &&
+    debugFieldRequested(reply.request.headers, 'timings')
   ) {
-    const augmented = {
-      ...(wireBody as Record<string, unknown>),
-      _timings: timingsForWire,
-    } as unknown as import('@talchain/schemas/boundary').OlumiResponse;
+    // PR #182 round-2: typed augmentation via `OlumiResponseWithDebugFields`
+    // intersection — `OlumiResponse` extended with the optional `_timings`
+    // surface. Replaces the prior `as unknown as OlumiResponse` double-
+    // cast so tsc catches drift if the boundary schema changes shape.
+    //
+    // PR #182 round-3: `timingsBlock` is the result of
+    // `coerceTurnTimingsBlock(timingsForWire)` — a runtime guard that
+    // returns null if the upstream-attached `_timings` is not a plain
+    // object. Malformed internal `_timings` is therefore DROPPED at
+    // this seam rather than being silently typed as valid and shipped
+    // to the wire. The empty-object case `{}` is preserved (a turn that
+    // ran no timed stage still emits an empty top-level container).
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _timings: timingsBlock,
+    };
     wireBody = finaliseV5Response(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
       ctx,
@@ -297,6 +326,40 @@ function sendFinalised200(
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);
   return reply.code(200).send(wireBody);
+}
+
+/**
+ * Runtime guard for the upstream-attached `_timings` block.
+ *
+ * Returns the input as a `TurnTimingsBlock` when it is a PLAIN object
+ * (the only shape upstream sites legitimately emit — see
+ * `src/orchestrator-v5/telemetry/turn-timings.ts`); returns `null`
+ * otherwise. Wrapping a malformed `_timings` (string, number, array,
+ * function, Date, Map, class instance, …) in the typed envelope would
+ * silently leak garbage to the wire — drop instead. The empty-object
+ * case `{}` is preserved so a turn with no timed stages can still emit
+ * an empty container.
+ *
+ * Plain-object check is by prototype: the value must be a literal
+ * `{...}` (whose prototype is `Object.prototype`) or
+ * `Object.create(null)`. Class instances, Date, Map, Set, Buffer,
+ * Promise, etc. are rejected. The upstream writers always emit object
+ * literals, so this only ever rejects shapes the type system would
+ * already have flagged at compile time — this guard exists for
+ * defence in depth against a future regression that bypasses the
+ * `TurnTimingsBlock` type at the writer site.
+ *
+ * Note: structural field-level validation (e.g. `turn.compose_ms` is a
+ * number) is the upstream writer's responsibility. This guard checks
+ * the shape only.
+ */
+function coerceTurnTimingsBlock(raw: unknown): TurnTimingsBlock | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'object') return null;
+  if (Array.isArray(raw)) return null;
+  const proto = Object.getPrototypeOf(raw);
+  if (proto !== Object.prototype && proto !== null) return null;
+  return raw as TurnTimingsBlock;
 }
 
 /**

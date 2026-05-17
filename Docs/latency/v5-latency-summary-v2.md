@@ -20,7 +20,7 @@ contributors do not re-open settled questions:
 | **Defer "add `_timings` to chip-click dispatch paths" as nice-to-have.** | Useful for future cold-start diagnostics on PLoT, but the present chip-click wall-clock + the inferred PLoT request time (Q4 below) gives a serviceable signal without it. |
 
 **Workstreams that did ship while the latency lane was open** (no further latency action required):
-- **PR #174** — V5 observability (per-stage timings on V5 turn + unified-pipeline + run_analysis, all gated on `V5_TIMING_DEBUG`). Live on staging build `45028b8`.
+- **PR #174** — V5 observability (per-stage timings on V5 turn + unified-pipeline + run_analysis). Live on staging build `45028b8`. **Originally gated on `V5_TIMING_DEBUG` only**; PR #182 added a second gate so wire emission of `_timings` now also requires the per-request `X-Olumi-Debug: timings` header. Replay-harness invocations must send the header to receive `_timings`; the env flag alone is insufficient post-PR-182.
 - **PR #175** — Deterministic post-analysis router. Confirmed working: `what_would_flip` / `what_changed` / chip-click mutators all execute with **0 Sonnet calls** and complete in 700–900 ms.
 
 ---
