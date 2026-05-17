@@ -542,3 +542,438 @@ describe('Defect B mutual-exclusion: brief present ⇒ no `no_brief` skip', () =
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3A fix (2026-05-17): input adapter accepts current PLoT V2 shapes.
+//
+// `enrichment.results` was the only source the enricher knew how to read.
+// The current PLoT V2 envelope (verified on staging scenario
+// `22c9e91b-6200-40fc-9556-16a5e643294a` against build `2e6e0be`) does NOT
+// populate `enrichment.results`; option-level data lives under
+// `enrichment.option_comparison` and `enrichment.decision_brief.options`.
+//
+// The fallback order is: `results` → `option_comparison` → `decision_brief.options`.
+// All three cases must select the winner by `leading_option_id`. When that
+// ID is absent from the chosen source, the enricher MUST skip `no_winner`
+// rather than fall back to "highest probability in the envelope" (which
+// would invent a winner whenever the declared leader is mismatched).
+// ---------------------------------------------------------------------------
+
+describe('readResultsArray + selectWinner — input adapter fallback chain', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Realistic option_comparison fixture mirroring staging shape: entries
+   * carry BOTH `id` and `option_id`, BOTH `label` and `option_label`, plus
+   * nested `outcome.{mean,p10,p50,p90,std,n_samples,validity_ratio,
+   * n_valid_samples}` and a flat `win_probability`. `projectOptionAsWinner`
+   * is already shape-tolerant so any subset of these fields is enough.
+   */
+  function staging_option_comparison(): Array<Record<string, unknown>> {
+    return [
+      {
+        id: 'opt_local_hire',
+        option_id: 'opt_local_hire',
+        label: 'Hire Two Senior Engineers Locally',
+        option_label: 'Hire Two Senior Engineers Locally',
+        status: 'computed',
+        outcome: { mean: 0.04, p10: -0.17, p50: 0.05, p90: 0.23 },
+        win_probability: 0.163,
+      },
+      {
+        id: 'opt_offshore',
+        option_id: 'opt_offshore',
+        label: 'Engage Offshore Partner',
+        option_label: 'Engage Offshore Partner',
+        status: 'computed',
+        outcome: { mean: 0.10, p10: -0.06, p50: 0.11, p90: 0.23 },
+        win_probability: 0.722,
+      },
+      {
+        id: 'opt_status_quo',
+        option_id: 'opt_status_quo',
+        label: 'Continue with Current Team (Status Quo)',
+        option_label: 'Continue with Current Team (Status Quo)',
+        status: 'computed',
+        outcome: { mean: 0.02, p10: -0.06, p50: 0.03, p90: 0.09 },
+        win_probability: 0.114,
+      },
+    ];
+  }
+
+  /**
+   * Realistic decision_brief.options fixture mirroring staging shape:
+   * leaner than option_comparison — just `option_id`, `label`,
+   * `win_probability`, and `rank`. No nested `outcome`. `selectWinner`
+   * + `projectOptionAsWinner` must still produce a winner.
+   */
+  function staging_decision_brief_options(): Array<Record<string, unknown>> {
+    return [
+      { rank: 1, option_id: 'opt_offshore', label: 'Engage Offshore Partner', win_probability: 0.722 },
+      { rank: 2, option_id: 'opt_local_hire', label: 'Hire Two Senior Engineers Locally', win_probability: 0.163 },
+      { rank: 3, option_id: 'opt_status_quo', label: 'Continue with Current Team (Status Quo)', win_probability: 0.114 },
+    ];
+  }
+
+  // Test 1: legacy enrichment.results shape still works (regression guard).
+  it('source 1: enrichment.results — legacy shape still selects the leading_option_id winner', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: { narrative_summary: 'ok' },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+    });
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt-2',
+      enrichment: {
+        results: [
+          { option_id: 'opt-1', option_label: 'A', win_probability: 0.3 },
+          { option_id: 'opt-2', option_label: 'B', win_probability: 0.7 },
+        ],
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [fact],
+      requestId: 'req-legacy',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const callArg = spy.mock.calls[0]![0];
+    expect(callArg.winner.id).toBe('opt-2');
+    expect(callArg.winner.label).toBe('B');
+    expect(callArg.winner.win_probability).toBeCloseTo(0.7);
+  });
+
+  // Test 2: enrichment.option_comparison fallback.
+  it('source 2: enrichment.option_comparison — selects the leading_option_id winner with full label + win_probability', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: { narrative_summary: 'ok' },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+    });
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_offshore',
+      enrichment: {
+        // NO enrichment.results — pure option_comparison source.
+        option_comparison: staging_option_comparison(),
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [fact],
+      requestId: 'req-option-comparison',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const callArg = spy.mock.calls[0]![0];
+    expect(callArg.winner.id).toBe('opt_offshore');
+    expect(callArg.winner.label).toBe('Engage Offshore Partner');
+    expect(callArg.winner.win_probability).toBeCloseTo(0.722);
+    // outcome.mean nested path is also picked up.
+    expect(callArg.winner.outcome_mean).toBeCloseTo(0.10);
+    // Runner-up resolves correctly (next-highest after the winner is filtered out).
+    expect(callArg.runner_up?.id).toBe('opt_local_hire');
+  });
+
+  // Test 3: enrichment.decision_brief.options fallback.
+  it('source 3: enrichment.decision_brief.options — leaner shape still selects the leading_option_id winner', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: { narrative_summary: 'ok' },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+    });
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_offshore',
+      enrichment: {
+        // NO results, NO option_comparison — last-fallback source only.
+        decision_brief: { options: staging_decision_brief_options() },
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [fact],
+      requestId: 'req-brief-options',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const callArg = spy.mock.calls[0]![0];
+    expect(callArg.winner.id).toBe('opt_offshore');
+    expect(callArg.winner.label).toBe('Engage Offshore Partner');
+    expect(callArg.winner.win_probability).toBeCloseTo(0.722);
+    // No outcome.mean in this shape — adapter must not invent one.
+    expect(callArg.winner.outcome_mean).toBeUndefined();
+  });
+
+  // Test 4: all three sources missing → skip `no_winner`.
+  it('skip path: all three result sources missing → enricher returns input unchanged and emits no_winner', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_offshore',
+      enrichment: {
+        // None of results / option_comparison / decision_brief.options present.
+        factor_sensitivity: [],
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    const facts: readonly HandlerFact[] = [fact];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-all-missing',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(out).toBe(facts);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  // Test 5: tightening — sources exist but don't contain leading_option_id.
+  it('skip path: sources exist but leading_option_id mismatches every entry → skip no_winner (no winner inventing)', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    const fact = runAnalysisFact({
+      // Declared leader is NOT in the option_comparison list.
+      leading_option_id: 'opt_ghost',
+      enrichment: {
+        option_comparison: staging_option_comparison(),
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    const facts: readonly HandlerFact[] = [fact];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-mismatch',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(out).toBe(facts);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  // Test 5b (review feedback 2026-05-17): cross-source walker — the
+  // adapter must NOT stop at the first non-empty source. If
+  // `enrichment.results` is non-empty but does not contain the
+  // declared leader, the adapter must continue to
+  // `enrichment.option_comparison` (and then to
+  // `decision_brief.options`) and honour PLoT's declared winner from
+  // whichever source carries it. Catches the regression "stale legacy
+  // `results` arrays silently mask the live envelope's correct data".
+  it('cross-source walker: leader missing from results but present in option_comparison → adapter walks to it', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: { narrative_summary: 'ok' },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+    });
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_offshore',
+      enrichment: {
+        // results is non-empty but does NOT contain the declared leader.
+        results: [
+          { option_id: 'opt_stale_a', option_label: 'Stale A', win_probability: 0.6 },
+          { option_id: 'opt_stale_b', option_label: 'Stale B', win_probability: 0.4 },
+        ],
+        // option_comparison DOES contain the declared leader.
+        option_comparison: staging_option_comparison(),
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [fact],
+      requestId: 'req-cross-walk',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const callArg = spy.mock.calls[0]![0];
+    // Winner came from option_comparison (matched by ID), not from
+    // results (which contained different IDs).
+    expect(callArg.winner.id).toBe('opt_offshore');
+    expect(callArg.winner.label).toBe('Engage Offshore Partner');
+    expect(callArg.winner.win_probability).toBeCloseTo(0.722);
+    // Runner-up is selected from the SAME source as the winner
+    // (option_comparison) — never from the rejected `results` source —
+    // so margin calculation stays consistent within a single shape.
+    expect(callArg.runner_up?.id).toBe('opt_local_hire');
+  });
+
+  // Test 5c: cross-source walker — leader only present in
+  // decision_brief.options (skipped through both prior sources).
+  it('cross-source walker: leader missing from results AND option_comparison but present in decision_brief.options → adapter walks to it', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: { narrative_summary: 'ok' },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+    });
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_offshore',
+      enrichment: {
+        // Neither results nor option_comparison contain the declared leader.
+        results: [
+          { option_id: 'opt_stale', option_label: 'Stale', win_probability: 0.5 },
+        ],
+        option_comparison: [
+          {
+            id: 'opt_unrelated', option_id: 'opt_unrelated',
+            label: 'Unrelated', option_label: 'Unrelated',
+            status: 'computed', outcome: { mean: 0.1 }, win_probability: 0.5,
+          },
+        ],
+        // Only decision_brief.options contains the declared leader.
+        decision_brief: { options: staging_decision_brief_options() },
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [fact],
+      requestId: 'req-cross-walk-final',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const callArg = spy.mock.calls[0]![0];
+    expect(callArg.winner.id).toBe('opt_offshore');
+    expect(callArg.winner.label).toBe('Engage Offshore Partner');
+    expect(callArg.winner.win_probability).toBeCloseTo(0.722);
+  });
+
+  // Test 5d: cross-source walker — declared leader is in `results`
+  // first, so the walker stops there (priority-order preserved).
+  it('cross-source walker: leader present in results → adapter uses it without consulting later sources', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: { narrative_summary: 'ok' },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
+      input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+    });
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_legacy_match',
+      enrichment: {
+        results: [
+          { option_id: 'opt_legacy_match', option_label: 'Legacy Match', win_probability: 0.6 },
+          { option_id: 'opt_legacy_other', option_label: 'Legacy Other', win_probability: 0.4 },
+        ],
+        // option_comparison also contains an entry with the same ID but a
+        // DIFFERENT label. Priority must win → label from results, not
+        // from option_comparison.
+        option_comparison: [
+          {
+            id: 'opt_legacy_match', option_id: 'opt_legacy_match',
+            label: 'WRONG: should NOT be picked from here',
+            option_label: 'WRONG: should NOT be picked from here',
+            status: 'computed', outcome: { mean: 0.1 }, win_probability: 0.99,
+          },
+        ],
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [fact],
+      requestId: 'req-priority',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const callArg = spy.mock.calls[0]![0];
+    // Winner came from `results` (priority) — label proves it; the
+    // option_comparison entry with a deliberately-wrong label was NOT
+    // consulted because the priority source matched first.
+    expect(callArg.winner.id).toBe('opt_legacy_match');
+    expect(callArg.winner.label).toBe('Legacy Match');
+    expect(callArg.winner.win_probability).toBeCloseTo(0.6);
+  });
+
+  // Test 5e: hardened "all-sources mismatch" — verify the
+  // `no_winner` skip ONLY fires when no source carries the leader.
+  it('cross-source walker: leader missing from ALL three sources → skip no_winner', async () => {
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_ghost',
+      enrichment: {
+        results: [{ option_id: 'opt_a', option_label: 'A', win_probability: 0.5 }],
+        option_comparison: staging_option_comparison(),
+        decision_brief: { options: staging_decision_brief_options() },
+        graph: { nodes: [], edges: [] },
+      },
+    });
+    const facts: readonly HandlerFact[] = [fact];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-all-mismatch',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(out).toBe(facts);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  // Test 6: realistic staging-shaped fact (mirrors scenario 22c9e91b…)
+  // attaches decision_review when the LLM/invoke layer is mocked.
+  it('staging-shape fixture (scenario 22c9e91b…) attaches decision_review when LLM is mocked', async () => {
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output: {
+        narrative_summary: 'Engage Offshore Partner leads on the current evidence.',
+        story_headlines: { opt_offshore: 'A clear leader' },
+        robustness_explanation: { summary: 'stable', primary_risk: null },
+        readiness_rationale: 'ready',
+        evidence_enhancements: {},
+        bias_findings: [],
+        key_assumptions: [],
+        decision_quality_prompts: [],
+      },
+      raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 50,
+      input_tokens: 100, output_tokens: 200, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
+    });
+    const fact = runAnalysisFact({
+      leading_option_id: 'opt_offshore',
+      enrichment: {
+        // Mirrors what we observed on staging:
+        //   - NO `results` key
+        //   - option_comparison + decision_brief.options both populated
+        //   - graph_hash_at_run is on fact.result, not in enrichment
+        option_comparison: staging_option_comparison(),
+        decision_brief: { options: staging_decision_brief_options() },
+        graph: { nodes: [], edges: [] },
+        factor_sensitivity: [
+          { factor_id: 'fac_team_size', confidence: 0.375 },
+        ],
+        robustness: { level: 'moderate', fragile_edges: [] },
+      },
+    });
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [fact],
+      requestId: 'req-staging-shape',
+      scenarioId: 'scen-22c9e91b',
+      signal: notAbortedSignal(),
+      brief: 'We are weighing three options for scaling delivery.',
+    });
+    expect(out).not.toBe([fact]);
+    expect(out).toHaveLength(1);
+    const patched = out[0];
+    if (patched.fact_type !== 'run_analysis') throw new Error('narrowing');
+    const enrichment = patched.result.enrichment as Record<string, unknown>;
+    const dr = enrichment.decision_review as Record<string, unknown>;
+    expect(dr).toBeDefined();
+    expect(dr.narrative_summary).toBe(
+      'Engage Offshore Partner leads on the current evidence.',
+    );
+    // Round-trip integrity: option_comparison source was preserved verbatim
+    // (enricher is a pure passthrough other than attaching decision_review).
+    expect((enrichment.option_comparison as unknown[]).length).toBe(3);
+    // The decision_brief subtree also preserved.
+    expect(((enrichment.decision_brief as Record<string, unknown>).options as unknown[]).length).toBe(3);
+  });
+});

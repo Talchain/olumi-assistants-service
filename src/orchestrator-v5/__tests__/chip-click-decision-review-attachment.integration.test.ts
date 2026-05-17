@@ -205,10 +205,40 @@ function makeRunAnalysisFact(): HandlerFact {
           { factor_id: 'fac_delivery_risk', confidence: 0.2 },
           { factor_id: 'fac_cost_overrun', confidence: 0.5 },
         ],
-        results: [
-          { option_id: 'opt_a', option_label: 'Plan A', win_probability: 0.7 },
-          { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.3 },
+        // Phase 3A fix (2026-05-17): canonical PLoT V2 staging shape.
+        // No `results` key — option-level data lives under
+        // `option_comparison` + `decision_brief.options`, as captured on
+        // staging scenario 22c9e91b-6200-40fc-9556-16a5e643294a against
+        // build 2e6e0be. The input-adapter fallback chain
+        // (decision-review-enricher.ts:readResultsArray) walks all three
+        // sources in priority order so the chip-click integration test
+        // exercises the production envelope shape end-to-end.
+        option_comparison: [
+          {
+            id: 'opt_a',
+            option_id: 'opt_a',
+            label: 'Plan A',
+            option_label: 'Plan A',
+            status: 'computed',
+            outcome: { mean: 0.05, p10: -0.1, p50: 0.05, p90: 0.2 },
+            win_probability: 0.7,
+          },
+          {
+            id: 'opt_b',
+            option_id: 'opt_b',
+            label: 'Plan B',
+            option_label: 'Plan B',
+            status: 'computed',
+            outcome: { mean: 0.02, p10: -0.05, p50: 0.02, p90: 0.1 },
+            win_probability: 0.3,
+          },
         ],
+        decision_brief: {
+          options: [
+            { rank: 1, option_id: 'opt_a', label: 'Plan A', win_probability: 0.7 },
+            { rank: 2, option_id: 'opt_b', label: 'Plan B', win_probability: 0.3 },
+          ],
+        },
       },
     },
   } as unknown as HandlerFact;
