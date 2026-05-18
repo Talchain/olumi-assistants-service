@@ -977,3 +977,652 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     expect(((enrichment.decision_brief as Record<string, unknown>).options as unknown[]).length).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3A content-thinness diagnostic (F1, 2026-05-18).
+//
+// The V5DecisionReviewCompleted event lets operators discriminate between
+// (a) sparse PLoT envelope → empty Phase 3 blocks (input-side gap) vs
+// (b) dense PLoT envelope → over-filtered LLM output (output-side gap).
+//
+// Contract (privacy-critical):
+//  - `request_id` and `scenario_id` are strings (routing keys, present
+//    on every decision_review event for correlation).
+//  - Every NON-ROUTING field in the event payload is a finite number or
+//    boolean. No other strings, no arrays, no nested objects.
+//  - No prose, no graph labels, no raw IDs (beyond routing), no scenario
+//    text, no decision_review content of any kind.
+//
+// These tests pin every part of that contract so a future regression
+// (e.g. someone adding `narrative_summary` to the payload "for debugging")
+// fails immediately.
+// ---------------------------------------------------------------------------
+
+describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
+  let events: Array<{ name: string; data: Record<string, unknown> }>;
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    events = [];
+    setTestSink((name, data) => events.push({ name, data }));
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.restoreAllMocks();
+  });
+
+  function findCompleted(requestId: string): Record<string, unknown> | null {
+    const match = events.find(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewCompleted &&
+        e.data.request_id === requestId,
+    );
+    return match ? match.data : null;
+  }
+
+  /**
+   * Realistic envelope that exercises every input-density field at non-zero:
+   * a 2-node / 1-edge graph; factor_sensitivity with one entry that has
+   * confidence and one that doesn't; one fragile edge; populated results,
+   * option_comparison, and decision_brief.options.
+   */
+  function denseEnrichment(): Record<string, unknown> {
+    return {
+      results: [
+        { option_id: 'opt-1', option_label: 'Option A', win_probability: 0.7 },
+      ],
+      option_comparison: [
+        { option_id: 'opt-1', label: 'Option A', win_probability: 0.7 },
+        { option_id: 'opt-2', label: 'Option B', win_probability: 0.3 },
+      ],
+      decision_brief: {
+        options: [
+          { option_id: 'opt-1', label: 'Option A', win_probability: 0.7, rank: 1 },
+          { option_id: 'opt-2', label: 'Option B', win_probability: 0.3, rank: 2 },
+          { option_id: 'opt-3', label: 'Option C', win_probability: 0.0, rank: 3 },
+        ],
+      },
+      factor_sensitivity: [
+        { factor_id: 'f1', elasticity: 0.4, confidence: 0.8 },
+        { factor_id: 'f2', elasticity: 0.2 }, // no confidence
+      ],
+      robustness: {
+        level: 'stable',
+        fragile_edges: [{ from_node_id: 'a', to_node_id: 'b', switch_probability: 0.1 }],
+      },
+      graph: {
+        nodes: [
+          { id: 'a', label: 'A', kind: 'factor' },
+          { id: 'b', label: 'B', kind: 'option' },
+        ],
+        edges: [{ id: 'e1', from_node_id: 'a', to_node_id: 'b' }],
+      },
+    };
+  }
+
+  /**
+   * Realistic dense LLM output mirroring the v11 prompt's documented shape.
+   * Includes strings (which must be reported as `.length` only — never
+   * exfiltrated as prose), object maps, and arrays.
+   */
+  function denseOutput(): Record<string, unknown> {
+    return {
+      winner: { option_id: 'opt-1', option_label: 'Option A' },
+      runner_up: { option_id: 'opt-2', option_label: 'Option B' },
+      narrative_summary: 'Option A leads with a 70% win probability driven by factor A.',
+      story_headlines: ['Headline one', 'Headline two'],
+      robustness_explanation: {
+        summary: 'The result is reasonably stable but watch factor B.',
+        primary_risk: 'Factor B reversal',
+        stability_factors: ['Factor A momentum', 'Strong market timing'],
+        fragility_factors: ['Factor B reversal'],
+      },
+      readiness_rationale: 'Adequate evidence on top drivers.',
+      evidence_enhancements: {
+        f1: {
+          specific_action: 'Run customer survey on factor A.',
+          rationale: 'Confidence still bounded.',
+          evidence_type: 'customer_research',
+          decision_hygiene: 'Estimate the answer before looking at data.',
+        },
+        f2: {
+          specific_action: 'Pull historical conversion data.',
+          rationale: 'Sparse historical baseline.',
+          evidence_type: 'internal_data',
+          decision_hygiene: 'Assign someone to argue the opposite assumption.',
+        },
+      },
+      scenario_contexts: {
+        e1: {
+          trigger_description: 'If factor A weakens...',
+          consequence: '...then Option B overtakes Option A.',
+        },
+      },
+      flip_thresholds: [
+        {
+          factor_id: 'f1',
+          factor_label: 'Factor A',
+          current_display: '0.4',
+          flip_display: '0.2',
+          narrative: 'If Factor A moves from 0.4 to 0.2 the result changes.',
+        },
+      ],
+      bias_findings: [
+        {
+          bias_type: 'anchoring',
+          description: 'Anchored on first estimate.',
+          grounding: 'critique 1',
+        },
+      ],
+      key_assumptions: ['Market growth holds.', 'Capacity scales linearly.'],
+      decision_quality_prompts: ['What would change your mind?'],
+      pre_mortem: { summary: 'If this fails...', grounded_in: [] },
+      framing_check: { issue: null },
+    };
+  }
+
+  function mockInvokeReturning(output: Record<string, unknown> | null): void {
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      output,
+      raw: '{}',
+      model: 'gpt-4.1',
+      provider: 'openai',
+      llm_latency_ms: 10,
+      input_tokens: 1,
+      output_tokens: 1,
+      prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
+    });
+  }
+
+  it('emits V5DecisionReviewCompleted on successful invocation with input + output density', async () => {
+    mockInvokeReturning(denseOutput());
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-completed-dense',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-completed-dense');
+    expect(data).not.toBeNull();
+    // Input density assertions
+    expect(data!.enrichment_has_graph).toBe(true);
+    expect(data!.enrichment_graph_node_count).toBe(2);
+    expect(data!.enrichment_graph_edge_count).toBe(1);
+    expect(data!.enrichment_factor_sensitivity_count).toBe(2);
+    expect(data!.enrichment_factor_sensitivity_with_confidence_count).toBe(1);
+    expect(data!.enrichment_robustness_fragile_edges_count).toBe(1);
+    expect(data!.enrichment_results_count).toBe(1);
+    expect(data!.enrichment_option_comparison_count).toBe(2);
+    expect(data!.enrichment_decision_brief_options_count).toBe(3);
+    // Output density assertions
+    expect(data!.output_narrative_summary_length).toBeGreaterThan(0);
+    expect(data!.output_robustness_explanation_summary_length).toBeGreaterThan(0);
+    expect(data!.output_robustness_stability_factors_count).toBe(2);
+    expect(data!.output_robustness_fragility_factors_count).toBe(1);
+    expect(data!.output_evidence_enhancements_count).toBe(2);
+    // Both entries in denseOutput() have non-empty specific_action,
+    // rationale, AND decision_hygiene, so both are composer-usable.
+    expect(data!.output_evidence_enhancements_usable_count).toBe(2);
+    expect(data!.output_scenario_contexts_count).toBe(1);
+    expect(data!.output_flip_thresholds_count).toBe(1);
+    expect(data!.output_bias_findings_count).toBe(1);
+    expect(data!.output_key_assumptions_count).toBe(2);
+    expect(data!.output_story_headlines_count).toBe(2);
+    expect(data!.output_decision_quality_prompts_count).toBe(1);
+    expect(data!.output_has_pre_mortem).toBe(true);
+    expect(data!.output_has_framing_check).toBe(true);
+    // duration_ms must be present and a finite number
+    expect(typeof data!.duration_ms).toBe('number');
+    expect(Number.isFinite(data!.duration_ms as number)).toBe(true);
+  });
+
+  it('safely reports zero for every missing / empty input + output field', async () => {
+    mockInvokeReturning({
+      winner: { option_id: 'opt-1', option_label: 'Option A' },
+      // No narrative_summary, no robustness_explanation, no evidence_enhancements,
+      // no scenario_contexts, no flip_thresholds, no bias_findings,
+      // no key_assumptions, no story_headlines, no decision_quality_prompts,
+      // no pre_mortem, no framing_check.
+    });
+
+    // Minimal enrichment: only the results array needed to clear `no_winner`
+    // — every other field absent.
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({
+        enrichment: {
+          results: [{ option_id: 'opt-1', option_label: 'Option A', win_probability: 1 }],
+        },
+        leading_option_id: 'opt-1',
+      }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-completed-empty',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-completed-empty');
+    expect(data).not.toBeNull();
+    expect(data!.enrichment_has_graph).toBe(false);
+    expect(data!.enrichment_graph_node_count).toBe(0);
+    expect(data!.enrichment_graph_edge_count).toBe(0);
+    expect(data!.enrichment_factor_sensitivity_count).toBe(0);
+    expect(data!.enrichment_factor_sensitivity_with_confidence_count).toBe(0);
+    expect(data!.enrichment_robustness_fragile_edges_count).toBe(0);
+    expect(data!.enrichment_results_count).toBe(1);
+    expect(data!.enrichment_option_comparison_count).toBe(0);
+    expect(data!.enrichment_decision_brief_options_count).toBe(0);
+    expect(data!.output_narrative_summary_length).toBe(0);
+    expect(data!.output_robustness_explanation_summary_length).toBe(0);
+    expect(data!.output_robustness_stability_factors_count).toBe(0);
+    expect(data!.output_robustness_fragility_factors_count).toBe(0);
+    expect(data!.output_evidence_enhancements_count).toBe(0);
+    expect(data!.output_evidence_enhancements_usable_count).toBe(0);
+    expect(data!.output_scenario_contexts_count).toBe(0);
+    expect(data!.output_flip_thresholds_count).toBe(0);
+    expect(data!.output_bias_findings_count).toBe(0);
+    expect(data!.output_key_assumptions_count).toBe(0);
+    expect(data!.output_story_headlines_count).toBe(0);
+    expect(data!.output_decision_quality_prompts_count).toBe(0);
+    expect(data!.output_has_pre_mortem).toBe(false);
+    expect(data!.output_has_framing_check).toBe(false);
+  });
+
+  it('never includes prose, labels, raw IDs, or any string content in the payload', async () => {
+    // Output and enrichment carry obvious user-prose / label / ID markers
+    // we can pattern-match for. If any of these strings appears anywhere
+    // in the event payload (recursively serialised), the privacy contract
+    // is broken.
+    const proseMarker = 'SENSITIVE_USER_PROSE_DO_NOT_LOG';
+    const labelMarker = 'NODE_LABEL_DO_NOT_LOG';
+    const idMarker = 'FACTOR_ID_DO_NOT_LOG';
+    const briefMarker = 'BRIEF_TEXT_DO_NOT_LOG';
+
+    mockInvokeReturning({
+      winner: { option_id: idMarker, option_label: labelMarker },
+      narrative_summary: proseMarker,
+      robustness_explanation: { summary: proseMarker },
+      evidence_enhancements: {
+        [idMarker]: {
+          specific_action: proseMarker,
+          rationale: proseMarker,
+          decision_hygiene: proseMarker,
+        },
+      },
+      scenario_contexts: { [idMarker]: { trigger_description: proseMarker } },
+      key_assumptions: [proseMarker],
+      story_headlines: [proseMarker],
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({
+        enrichment: {
+          results: [{ option_id: idMarker, option_label: labelMarker, win_probability: 1 }],
+          graph: {
+            nodes: [{ id: idMarker, label: labelMarker, kind: 'factor' }],
+            edges: [],
+          },
+          factor_sensitivity: [{ factor_id: idMarker, confidence: 0.5 }],
+        },
+        leading_option_id: idMarker,
+      }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-completed-privacy',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: briefMarker,
+    });
+
+    const data = findCompleted('req-completed-privacy');
+    expect(data).not.toBeNull();
+    const serialised = JSON.stringify(data);
+    expect(serialised).not.toContain(proseMarker);
+    expect(serialised).not.toContain(labelMarker);
+    expect(serialised).not.toContain(idMarker);
+    expect(serialised).not.toContain(briefMarker);
+
+    // Defence-in-depth: every non-{request_id, scenario_id} value MUST be a
+    // finite number or boolean. The two ID fields are routing-only and were
+    // already present on the existing skipped/failed/invoked events.
+    for (const [key, value] of Object.entries(data!)) {
+      if (key === 'request_id' || key === 'scenario_id') continue;
+      const isNumber = typeof value === 'number' && Number.isFinite(value);
+      const isBoolean = typeof value === 'boolean';
+      expect(isNumber || isBoolean, `field ${key} must be a finite number or boolean, got ${typeof value}`).toBe(true);
+    }
+  });
+
+  it('enrichment_has_graph reports false for an object missing nodes[]/edges[] arrays', async () => {
+    // Tightened predicate (post-review): `has_graph` reports the
+    // consumer-usable shape, not just "graph is an object". A
+    // `{nodes: 'oops', edges: null}` shape — structurally an object but
+    // not what buildGraphNodeLookup can consume — reports false, matching
+    // the composer fail-closed semantic. Without this tightening,
+    // operators would see `has_graph: true` on a turn where every
+    // graph-ref block dropped anyway, masking the real Gap 1 signal.
+    mockInvokeReturning(denseOutput());
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({
+        enrichment: {
+          results: [{ option_id: 'opt-1', option_label: 'Option A', win_probability: 1 }],
+          // Pathological graph: object present, but nodes is a string and
+          // edges is null. buildGraphNodeLookup cannot consume this.
+          graph: { nodes: 'oops', edges: null },
+        },
+        leading_option_id: 'opt-1',
+      }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-has-graph-strict',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-has-graph-strict');
+    expect(data).not.toBeNull();
+    expect(data!.enrichment_has_graph).toBe(false);
+    expect(data!.enrichment_graph_node_count).toBe(0);
+    expect(data!.enrichment_graph_edge_count).toBe(0);
+  });
+
+  it('evidence_enhancements_usable_count drops stub entries the composer would reject (including whitespace-only)', async () => {
+    // The composer's prose-validation gate at phase3-blocks.ts:469-486
+    // calls `.trim()` on `specific_action`, `rationale`, and
+    // `decision_hygiene` before length-checking, so a whitespace-only
+    // string like "   " is treated as empty. The usable count must
+    // apply the SAME trim — without it, dashboards would report
+    // composer-droppable stubs as usable. This fixture covers every
+    // drop mode the composer recognises:
+    //   - empty string
+    //   - missing field entirely
+    //   - whitespace-only string (the trim-mirror case)
+    //   - non-record value
+    mockInvokeReturning({
+      winner: { option_id: 'opt-1', option_label: 'Option A' },
+      evidence_enhancements: {
+        good: {
+          specific_action: 'Run customer survey.',
+          rationale: 'Confidence still bounded.',
+          decision_hygiene: 'Estimate first.',
+        },
+        // Stub 1: empty specific_action
+        stub_specific_empty: {
+          specific_action: '',
+          rationale: 'has rationale',
+          decision_hygiene: 'has hygiene',
+        },
+        // Stub 2: missing rationale entirely
+        stub_rationale_missing: {
+          specific_action: 'has action',
+          decision_hygiene: 'has hygiene',
+        },
+        // Stub 3: empty decision_hygiene
+        stub_hygiene_empty: {
+          specific_action: 'has action',
+          rationale: 'has rationale',
+          decision_hygiene: '',
+        },
+        // Stub 4: whitespace-only specific_action — the composer trims
+        // before length-checking, so the block drops. The usable count
+        // MUST match this behaviour or it will over-report.
+        stub_whitespace_specific: {
+          specific_action: '   ',
+          rationale: 'has rationale',
+          decision_hygiene: 'has hygiene',
+        },
+        // Stub 5: whitespace-only rationale (tabs + newlines + spaces)
+        stub_whitespace_rationale: {
+          specific_action: 'has action',
+          rationale: '\t\n  \r\n',
+          decision_hygiene: 'has hygiene',
+        },
+        // Stub 6: whitespace-only decision_hygiene
+        stub_whitespace_hygiene: {
+          specific_action: 'has action',
+          rationale: 'has rationale',
+          decision_hygiene: ' ',
+        },
+        // Stub 7: not even a record
+        stub_garbage: 'not an object',
+      },
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({
+        enrichment: {
+          results: [{ option_id: 'opt-1', option_label: 'Option A', win_probability: 1 }],
+        },
+        leading_option_id: 'opt-1',
+      }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-usable-count',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-usable-count');
+    expect(data).not.toBeNull();
+    // Raw count counts every key including all 7 stubs and the good one.
+    expect(data!.output_evidence_enhancements_count).toBe(8);
+    // Usable count picks out only the single fully-populated entry.
+    // Every whitespace-only and empty/missing-field case is excluded,
+    // matching the composer's trim-then-length-check gate.
+    expect(data!.output_evidence_enhancements_usable_count).toBe(1);
+  });
+
+  it('duration_ms reflects time through attach, not shape extraction (regression for emit-ordering fix)', async () => {
+    // Pairs with the emit-ordering fix and the doc clarification that
+    // duration_ms measures the full invoked → emit window. If a future
+    // refactor moves the duration computation back to payload-
+    // construction time (i.e. before sanitiseEnrichment), sanitise +
+    // attach latency would be silently excluded from the figure and
+    // latency dashboards would understate true success-path cost.
+    //
+    // We control Date.now() so the test is deterministic: startedAt is
+    // captured at the first call, the sanitise spy advances the clock by
+    // a known amount, and duration_ms must reflect that advance.
+    mockInvokeReturning(denseOutput());
+
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+    const sanitiseMod = await import('../../compose/sanitise-enrichment.js');
+    const originalSanitise = sanitiseMod.sanitiseEnrichment;
+    vi.spyOn(sanitiseMod, 'sanitiseEnrichment').mockImplementation((arg) => {
+      // Simulate 42ms of sanitise + attach work between startedAt and
+      // the deferred emit site below.
+      now += 42;
+      return originalSanitise(arg);
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-duration-through-attach',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-duration-through-attach');
+    expect(data).not.toBeNull();
+    // The 42ms sanitise advance MUST be visible in the reported figure.
+    // A pre-fix implementation would report 0 (or a value strictly less
+    // than 42) because duration was computed before the sanitise spy
+    // ran.
+    expect(data!.duration_ms).toBeGreaterThanOrEqual(42);
+  });
+
+  it('completed payload contains no string values except request_id and scenario_id (type contract)', async () => {
+    // Narrow regression assertion: the privacy test above checks for
+    // marker leakage in a poisoned-input scenario, but it would not catch
+    // a "benign-looking" regression such as someone adding a literal
+    // `status: 'ok'` or `model: 'gpt-4.1'` to the payload. This test runs
+    // against the realistic dense fixture and asserts the type contract
+    // exhaustively: every field is either the request_id / scenario_id
+    // routing pair (strings, allowed) OR a finite number / boolean. No
+    // other string values are permitted, ever.
+    mockInvokeReturning(denseOutput());
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-completed-type-contract',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-completed-type-contract');
+    expect(data).not.toBeNull();
+
+    const stringFields: string[] = [];
+    for (const [key, value] of Object.entries(data!)) {
+      if (typeof value === 'string') stringFields.push(key);
+    }
+    expect(stringFields.sort()).toEqual(['request_id', 'scenario_id']);
+  });
+
+  it('does not fire when the enricher skips (no_brief)', async () => {
+    // Skip-path safety: the completed event is strictly a success-path
+    // signal. A precondition skip MUST NOT emit it — otherwise dashboards
+    // would double-count attempts.
+    const spy = vi.spyOn(invokeMod, 'invokeDecisionReview');
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-completed-noskip-on-skip',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: null,
+    });
+
+    expect(spy).not.toHaveBeenCalled();
+    const completed = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewCompleted &&
+        e.data.request_id === 'req-completed-noskip-on-skip',
+    );
+    expect(completed).toHaveLength(0);
+
+    // The existing skip event should still fire — proving the skip path
+    // contract is preserved.
+    const skipped = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewSkipped &&
+        e.data.request_id === 'req-completed-noskip-on-skip',
+    );
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].data.reason).toBe('no_brief');
+  });
+
+  it('mutual exclusion: a post-extraction throw produces `failed` but NOT `completed`', async () => {
+    // Regression guard for the emit-ordering fix. Before the move,
+    // V5DecisionReviewCompleted was emitted immediately after shape
+    // extraction succeeded — if `sanitiseEnrichment` (or anything between
+    // extraction and `return next;`) threw, the catch block would also
+    // fire `V5DecisionReviewFailed`, producing both events for one
+    // invocation. The emit is now deferred until after the attach, so
+    // the two events MUST be mutually exclusive on every code path.
+    mockInvokeReturning(denseOutput());
+
+    // Force sanitiseEnrichment to throw after the LLM call returns. We
+    // re-import the module dynamically and overwrite the export so the
+    // enricher's bound reference picks it up via the module object.
+    const sanitiseMod = await import('../../compose/sanitise-enrichment.js');
+    const spy = vi
+      .spyOn(sanitiseMod, 'sanitiseEnrichment')
+      .mockImplementation(() => {
+        throw new Error('induced sanitise failure');
+      });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-completed-mutex',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const completed = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewCompleted &&
+        e.data.request_id === 'req-completed-mutex',
+    );
+    const failed = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewFailed &&
+        e.data.request_id === 'req-completed-mutex',
+    );
+    expect(completed).toHaveLength(0);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].data.reason).toBe('induced sanitise failure');
+  });
+
+  it('does not fire when the enricher fails (shape_extraction_failed)', async () => {
+    // Failure-path safety: the completed event is strictly a success-path
+    // signal. A shape-failure MUST emit `failed` but NOT `completed`.
+    mockInvokeReturning(null);
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-completed-noemit-on-fail',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const completed = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewCompleted &&
+        e.data.request_id === 'req-completed-noemit-on-fail',
+    );
+    expect(completed).toHaveLength(0);
+
+    const failed = events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewFailed &&
+        e.data.request_id === 'req-completed-noemit-on-fail',
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0].data.reason).toBe('shape_extraction_failed');
+  });
+});

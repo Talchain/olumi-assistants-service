@@ -598,6 +598,35 @@ export const TelemetryEvents = {
   V5DecisionReviewSkipped: "v5.decision_review.skipped",
   V5DecisionReviewFailed: "v5.decision_review.failed",
 
+  // Phase 3A content-thinness diagnostic (F1, 2026-05-18). Fires once the
+  // decision_review LLM call returned a non-null parsed output AND the
+  // enrichment has been successfully sanitised and attached to the
+  // handler fact. Mutually exclusive with V5DecisionReviewFailed for any
+  // given request_id — a throw between shape extraction and attach lands
+  // in the catch block and emits `failed`, not `completed`.
+  //
+  // Carries counts, lengths, and presence-booleans only — never any
+  // prose, graph labels, raw IDs, brief text, or decision_review content.
+  // Pairs an `input_*` snapshot (read from the raw PLoT V2 envelope) with
+  // an `output_*` snapshot (read from the LLM output verbatim).
+  //
+  // Purpose: discriminate between (a) sparse PLoT envelope → empty Phase 3
+  // blocks (RC-1/RC-2 from the content-thinness investigation) vs (b)
+  // dense PLoT envelope → over-filtered LLM output (RC-3). Without this
+  // event, both look identical at the wire — Phase 3 blocks just don't
+  // appear, and operators can't tell which side owns the fix.
+  //
+  // `duration_ms` measures the full invoked → emit window (LLM round-trip
+  // + shape extraction + sanitise + attach), so dashboards see the true
+  // success-path latency, not just the LLM call.
+  //
+  // Privacy contract: every NON-ROUTING field MUST be a finite number or
+  // boolean. `request_id` and `scenario_id` are strings (routing keys,
+  // also present on `invoked` / `skipped` / `failed`). No other strings,
+  // no arrays, no nested objects. Adding a non-routing string field to
+  // this event is a regression and the contract test should fail.
+  V5DecisionReviewCompleted: "v5.decision_review.completed",
+
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,
   // so the routing-contract invariant (edit intent → mutation OR clarification
