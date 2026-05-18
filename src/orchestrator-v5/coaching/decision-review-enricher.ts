@@ -179,6 +179,28 @@ export async function enrichRunAnalysisWithDecisionReview(
       return input.handlerFacts;
     }
 
+    // Phase 3A content-thinness diagnostic (F1, 2026-05-18). Compute the
+    // density snapshot here (cheap, deterministic, never throws) but DO
+    // NOT emit until after the attach succeeds at `return next;` below.
+    // Emitting earlier would let a downstream throw (e.g. inside
+    // sanitiseEnrichment) reach the catch block and fire
+    // V5DecisionReviewFailed for the same invocation — operators would see
+    // BOTH `completed` and `failed` events with the same request_id.
+    // Mutually-exclusive event semantics depend on emitting only once the
+    // attach has actually happened.
+    //
+    // `duration_ms` is intentionally NOT pre-computed here — it is
+    // calculated inline at the emit site below, so the reported figure
+    // includes sanitise + attach time (the full invoked → emit window).
+    // Computing it now would understate latency dashboards by the
+    // sanitise/attach budget.
+    const completedDensityPayload = {
+      request_id: input.requestId,
+      scenario_id: input.scenarioId,
+      ...computeDecisionReviewInputDensity(enrichment as Record<string, unknown>),
+      ...computeDecisionReviewOutputDensity(result.output),
+    };
+
     // F.6: verbatim pass-through of the LLM output with a V5-added
     // produced_at timestamp. No field renaming, flattening, or filtering;
     // consumers read required fields defensively. Review feedback P1.2.
@@ -227,6 +249,16 @@ export async function enrichRunAnalysisWithDecisionReview(
     };
     const next = input.handlerFacts.slice();
     next[idx] = patched;
+    // F1 emit deferred to here so `completed` and `failed` are strictly
+    // mutually exclusive: a sanitise or attach throw above would have
+    // landed in the catch block and fired V5DecisionReviewFailed instead.
+    // `duration_ms` is computed AT this point (not at payload
+    // construction) so it includes sanitise + attach time — operators see
+    // the full invoked → emit latency, not just the LLM call.
+    emit(TelemetryEvents.V5DecisionReviewCompleted, {
+      ...completedDensityPayload,
+      duration_ms: Date.now() - startedAt,
+    });
     return next;
   } catch (err) {
     emit(TelemetryEvents.V5DecisionReviewFailed, {
@@ -784,3 +816,229 @@ function skipTelemetry(
     ...diagnostics,
   });
 }
+
+/**
+ * Phase 3A content-thinness diagnostic (F1). Reads count/length/presence
+ * signals off the raw PLoT V2 enrichment envelope. Every returned field is
+ * a finite number or boolean — never a string, array, or nested object.
+ * Adding a string field here is a privacy regression (this event is
+ * promised to operators as content-free) and the contract test in
+ * decision-review-enricher.test.ts will fail.
+ *
+ * Field-by-field rationale (paired with the Phase 3 builders that consume
+ * the corresponding source field):
+ *  - enrichment_has_graph / *_graph_node_count / *_graph_edge_count:
+ *    Phase 3 graph-ref blocks (scenario_context, flip_threshold,
+ *    pre_mortem.grounded_in, bias.affected_elements, evidence_priority,
+ *    EvidenceBlock label resolution) all depend on `enrichment.graph`.
+ *    `has_graph` is **true** only when `enrichment.graph` is an object
+ *    AND `graph.nodes` AND `graph.edges` are arrays — i.e. the shape
+ *    `buildGraphNodeLookup` can actually consume. A degenerate shape
+ *    like `{nodes: 'oops', edges: null}` reports `false`, matching
+ *    composer fail-closed semantics. When `has_graph=false`, every
+ *    graph-ref block drops at the lookup gate in phase3-blocks.ts.
+ *  - enrichment_factor_sensitivity_count / *_with_confidence_count:
+ *    EvidenceBlock severity is gated on calibrated confidence sourced
+ *    only from `factor_sensitivity[].confidence`. The delta between the
+ *    two counts is the EvidenceBlock drop rate from RC-2.
+ *  - enrichment_robustness_fragile_edges_count: feeds the prompt's
+ *    `fragile_edges` input, which the v11 prompt uses to select
+ *    `scenario_contexts` entries. Zero → empty `scenario_contexts: {}`
+ *    is the prompt's correct behaviour.
+ *  - enrichment_results_count / _option_comparison_count /
+ *    _decision_brief_options_count: option-source presence per the
+ *    PR #180 fallback chain. Whichever is non-empty drives narrative
+ *    grounding.
+ */
+interface InputDensity {
+  readonly enrichment_has_graph: boolean;
+  readonly enrichment_graph_node_count: number;
+  readonly enrichment_graph_edge_count: number;
+  readonly enrichment_factor_sensitivity_count: number;
+  readonly enrichment_factor_sensitivity_with_confidence_count: number;
+  readonly enrichment_robustness_fragile_edges_count: number;
+  readonly enrichment_results_count: number;
+  readonly enrichment_option_comparison_count: number;
+  readonly enrichment_decision_brief_options_count: number;
+}
+
+function computeDecisionReviewInputDensity(
+  enrichment: Record<string, unknown>,
+): InputDensity {
+  const graph = readRecord(enrichment.graph);
+  const graphNodesArr = graph !== null && Array.isArray(graph.nodes) ? graph.nodes : null;
+  const graphEdgesArr = graph !== null && Array.isArray(graph.edges) ? graph.edges : null;
+  // `has_graph` reports the consumer-usable shape, not just "is an
+  // object": both nodes[] and edges[] must be arrays for
+  // `buildGraphNodeLookup` to read them. A `{nodes: 'oops'}` shape
+  // reports false, matching the composer fail-closed gate.
+  const hasUsableGraph = graphNodesArr !== null && graphEdgesArr !== null;
+  const factorSens = Array.isArray(enrichment.factor_sensitivity)
+    ? enrichment.factor_sensitivity
+    : [];
+  const rob = readRecord(enrichment.robustness);
+  const fragileEdges = rob !== null && Array.isArray(rob.fragile_edges)
+    ? rob.fragile_edges
+    : [];
+  const results = Array.isArray(enrichment.results) ? enrichment.results : [];
+  const optionComparison = Array.isArray(enrichment.option_comparison)
+    ? enrichment.option_comparison
+    : [];
+  const decisionBrief = readRecord(enrichment.decision_brief);
+  const briefOptions = decisionBrief !== null && Array.isArray(decisionBrief.options)
+    ? decisionBrief.options
+    : [];
+
+  let factorSensWithConfidence = 0;
+  for (const raw of factorSens) {
+    const e = readRecord(raw);
+    if (e === null) continue;
+    if (typeof e.confidence === 'number' && Number.isFinite(e.confidence)) {
+      factorSensWithConfidence++;
+    }
+  }
+
+  return {
+    enrichment_has_graph: hasUsableGraph,
+    enrichment_graph_node_count: graphNodesArr !== null ? graphNodesArr.length : 0,
+    enrichment_graph_edge_count: graphEdgesArr !== null ? graphEdgesArr.length : 0,
+    enrichment_factor_sensitivity_count: factorSens.length,
+    enrichment_factor_sensitivity_with_confidence_count: factorSensWithConfidence,
+    enrichment_robustness_fragile_edges_count: fragileEdges.length,
+    enrichment_results_count: results.length,
+    enrichment_option_comparison_count: optionComparison.length,
+    enrichment_decision_brief_options_count: briefOptions.length,
+  };
+}
+
+/**
+ * Phase 3A content-thinness diagnostic (F1). Reads count/length/presence
+ * signals off the parsed LLM output BEFORE it is sanitised or attached.
+ * Every returned field is a finite number or boolean — never a string,
+ * array, or nested object. Strings are reported by `.length` only.
+ *
+ * Field-by-field rationale (paired with the Phase 3 ReviewCardBlock that
+ * consumes the corresponding source field):
+ *  - output_narrative_summary_length: drops at phase3-blocks.ts:606 when
+ *    empty. Length zero → no narrative card.
+ *  - output_robustness_explanation_summary_length / _stability_factors_count
+ *    / _fragility_factors_count: robustness card drops at
+ *    phase3-blocks.ts:807 when summary is empty.
+ *  - output_evidence_enhancements_count: raw count of keys in the
+ *    `evidence_enhancements` map — exactly what the LLM emitted.
+ *  - output_evidence_enhancements_usable_count: count of entries where
+ *    `specific_action`, `rationale`, AND `decision_hygiene` are all
+ *    non-empty AFTER TRIMMING. Mirrors the composer's prose-validation
+ *    gate at phase3-blocks.ts:469-486, which calls `.trim()` on each
+ *    field before length-checking. A `"   "` (whitespace-only) entry is
+ *    treated as empty and does NOT count as usable. The delta against
+ *    `*_count` exposes stub entries the LLM emitted but the composer
+ *    would drop on prose grounds — independent of the RC-2 confidence-
+ *    lookup gate, which is observable separately via the input-density
+ *    confidence delta.
+ *  - output_scenario_contexts_count / _flip_thresholds_count: drop at
+ *    the graph-ref lookup gate when `enrichment.graph` is absent.
+ *  - output_bias_findings_count / _key_assumptions_count
+ *    / _decision_quality_prompts_count / _story_headlines_count: count
+ *    drives card emission count.
+ *  - output_has_pre_mortem / _has_framing_check: optional sub-objects;
+ *    presence drives whether the corresponding card considers emission.
+ */
+interface OutputDensity {
+  readonly output_narrative_summary_length: number;
+  readonly output_robustness_explanation_summary_length: number;
+  readonly output_robustness_stability_factors_count: number;
+  readonly output_robustness_fragility_factors_count: number;
+  readonly output_evidence_enhancements_count: number;
+  readonly output_evidence_enhancements_usable_count: number;
+  readonly output_scenario_contexts_count: number;
+  readonly output_flip_thresholds_count: number;
+  readonly output_bias_findings_count: number;
+  readonly output_key_assumptions_count: number;
+  readonly output_story_headlines_count: number;
+  readonly output_decision_quality_prompts_count: number;
+  readonly output_has_pre_mortem: boolean;
+  readonly output_has_framing_check: boolean;
+}
+
+function computeDecisionReviewOutputDensity(
+  output: Record<string, unknown>,
+): OutputDensity {
+  const narrative = typeof output.narrative_summary === 'string'
+    ? output.narrative_summary
+    : '';
+  const robustness = readRecord(output.robustness_explanation);
+  const robSummary = robustness !== null && typeof robustness.summary === 'string'
+    ? robustness.summary
+    : '';
+  const stabilityFactors = robustness !== null && Array.isArray(robustness.stability_factors)
+    ? robustness.stability_factors
+    : [];
+  const fragilityFactors = robustness !== null && Array.isArray(robustness.fragility_factors)
+    ? robustness.fragility_factors
+    : [];
+  const evidenceEnh = readRecord(output.evidence_enhancements);
+  // Mirror the composer's prose-validation gate at phase3-blocks.ts:469-486:
+  // the composer trims `specific_action`, `rationale`, AND
+  // `decision_hygiene` before checking length, so a whitespace-only field
+  // like "   " is treated as empty and the block is dropped. The usable
+  // count must apply the SAME trim to stay aligned — without it the
+  // count over-reports composer emit potential. Independent of the RC-2
+  // confidence lookup, which gates EvidenceBlock emission separately.
+  let evidenceUsable = 0;
+  if (evidenceEnh !== null) {
+    for (const raw of Object.values(evidenceEnh)) {
+      const e = readRecord(raw);
+      if (e === null) continue;
+      const specific = typeof e.specific_action === 'string' ? e.specific_action.trim() : '';
+      const rationale = typeof e.rationale === 'string' ? e.rationale.trim() : '';
+      const hygiene = typeof e.decision_hygiene === 'string' ? e.decision_hygiene.trim() : '';
+      if (specific.length > 0 && rationale.length > 0 && hygiene.length > 0) {
+        evidenceUsable++;
+      }
+    }
+  }
+  const scenarioCtx = readRecord(output.scenario_contexts);
+  const flipThresholds = Array.isArray(output.flip_thresholds)
+    ? output.flip_thresholds
+    : [];
+  const biasFindings = Array.isArray(output.bias_findings)
+    ? output.bias_findings
+    : [];
+  const keyAssumptions = Array.isArray(output.key_assumptions)
+    ? output.key_assumptions
+    : [];
+  const storyHeadlines = Array.isArray(output.story_headlines)
+    ? output.story_headlines
+    : [];
+  const dqPrompts = Array.isArray(output.decision_quality_prompts)
+    ? output.decision_quality_prompts
+    : [];
+
+  return {
+    output_narrative_summary_length: narrative.length,
+    output_robustness_explanation_summary_length: robSummary.length,
+    output_robustness_stability_factors_count: stabilityFactors.length,
+    output_robustness_fragility_factors_count: fragilityFactors.length,
+    output_evidence_enhancements_count: evidenceEnh !== null ? Object.keys(evidenceEnh).length : 0,
+    output_evidence_enhancements_usable_count: evidenceUsable,
+    output_scenario_contexts_count: scenarioCtx !== null ? Object.keys(scenarioCtx).length : 0,
+    output_flip_thresholds_count: flipThresholds.length,
+    output_bias_findings_count: biasFindings.length,
+    output_key_assumptions_count: keyAssumptions.length,
+    output_story_headlines_count: storyHeadlines.length,
+    output_decision_quality_prompts_count: dqPrompts.length,
+    output_has_pre_mortem: readRecord(output.pre_mortem) !== null,
+    output_has_framing_check: readRecord(output.framing_check) !== null,
+  };
+}
+
+/**
+ * Exported for contract testing only. Mirrors the private helper used by
+ * the success-path emit site. Lets tests prove the payload shape without
+ * round-tripping through the LLM mock.
+ */
+export const __testing__ = {
+  computeDecisionReviewInputDensity,
+  computeDecisionReviewOutputDensity,
+};
