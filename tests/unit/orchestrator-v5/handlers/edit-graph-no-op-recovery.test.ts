@@ -48,7 +48,10 @@ describe('decideNoOpRecovery', () => {
         expect(result.assistantText).not.toBeNull();
         expect(result.assistantText).toContain("haven't changed the model");
         expect(result.suggestedActions).toHaveLength(1);
-        expect(result.suggestedActions[0]?.action_type).toBe('explain_result');
+        // Plural — matches the registered V5 handler and the
+        // deterministic chip-click whitelist. Singular would fall
+        // through as a deprecated alias.
+        expect(result.suggestedActions[0]?.action_type).toBe('explain_results');
       });
     }
   });
@@ -129,6 +132,13 @@ describe('decideNoOpRecovery', () => {
         'Something needs to change here.', // no imperative edit verb pattern + abstract object
         'That is interesting.',
         'I see.',
+        // Concrete-but-value-less target: a factor name is given, so
+        // the message is NOT vague — falls through to ambiguous and
+        // preserves the existing safe fallback rather than asking
+        // "which factor?" when the user has already named one.
+        'Change pricing factor',
+        'Update the demand driver',
+        'Adjust the supply chain edge',
       ];
       for (const msg of conversational) {
         const result = decideNoOpRecovery({
@@ -168,16 +178,24 @@ describe('decideNoOpRecovery', () => {
   });
 
   describe('chip merging at call-site (dispatch-level semantics)', () => {
-    // dispatchEditGraph spreads recovery.suggestedActions onto the
-    // existing response.suggested_actions:
-    //   suggested_actions: [...(existing ?? []), ...recovery]
-    // These tests simulate that merge and assert the two invariants
-    // P1 #1 asks for: chip preservation + suppression when not ready.
+    // dispatchEditGraph merges recovery chips into the existing
+    // response.suggested_actions and dedupes by action_type:
+    //   - filter recovery chips whose action_type already appears in
+    //     existing
+    //   - append the survivors
+    // These tests simulate that merge.
     function mergeRecoveryChips(
       existing: ReadonlyArray<{ readonly id: string; readonly action_type?: string }>,
       recovery: readonly { readonly id: string; readonly action_type?: string }[],
     ): ReadonlyArray<{ readonly id: string; readonly action_type?: string }> {
-      return [...existing, ...recovery];
+      const existingIntents = new Set<string>();
+      for (const a of existing) {
+        if (a.action_type) existingIntents.add(a.action_type);
+      }
+      const filtered = recovery.filter(
+        (a) => !a.action_type || !existingIntents.has(a.action_type),
+      );
+      return [...existing, ...filtered];
     }
 
     it('preserves existing response actions when recovery appends a chip', () => {
@@ -195,7 +213,7 @@ describe('decideNoOpRecovery', () => {
       expect(merged).toHaveLength(3);
       expect(merged[0]?.id).toBe('existing_chip_1');
       expect(merged[1]?.id).toBe('existing_chip_2');
-      expect(merged[2]?.action_type).toBe('explain_result');
+      expect(merged[2]?.action_type).toBe('explain_results');
     });
 
     it('suppresses run_analysis chip when graph is not ready (analytical_none)', () => {
@@ -211,7 +229,7 @@ describe('decideNoOpRecovery', () => {
       expect(merged.some((a) => a.action_type === 'run_analysis')).toBe(false);
     });
 
-    it('appends run_analysis chip exactly once when graph is ready (no duplicates)', () => {
+    it('dedupes by action_type: recovery chip is dropped when existing already has the same intent', () => {
       const existing = [
         { id: 'pre_existing_run', action_type: 'run_analysis' },
       ];
@@ -221,14 +239,30 @@ describe('decideNoOpRecovery', () => {
         freshness: 'none',
         graphReady: true,
       });
+      // Recovery's chip action_type === 'run_analysis' which already
+      // exists in `existing`. Dedupe drops the recovery chip; merged
+      // length stays at 1.
       const merged = mergeRecoveryChips(existing, recovery.suggestedActions);
-      // The recovery layer does not deduplicate (UI/wire layer handles
-      // ID uniqueness); two run_analysis chips with distinct IDs is
-      // the expected merged shape. Assert by ID, not by count over
-      // action_type, so the contract is unambiguous.
-      expect(merged).toHaveLength(2);
+      expect(merged).toHaveLength(1);
       expect(merged[0]?.id).toBe('pre_existing_run');
-      expect(merged[1]?.id).toBe('chip_action_run_analysis');
+    });
+
+    it('does not dedupe across different action_types', () => {
+      const existing = [
+        { id: 'pre_existing_factor', action_type: 'set_factor_value' },
+      ];
+      const recovery = decideNoOpRecovery({
+        message: 'Walk me through the analysis.',
+        priorFacts: [makeRunAnalysisFact()] as readonly HandlerFact[],
+        freshness: 'fresh',
+        graphReady: true,
+      });
+      // Recovery's chip action_type === 'explain_results' which does
+      // NOT clash with 'set_factor_value'. Both chips survive.
+      const merged = mergeRecoveryChips(existing, recovery.suggestedActions);
+      expect(merged).toHaveLength(2);
+      expect(merged[0]?.action_type).toBe('set_factor_value');
+      expect(merged[1]?.action_type).toBe('explain_results');
     });
 
     it('preserves response untouched on ambiguous branch (no chips appended)', () => {

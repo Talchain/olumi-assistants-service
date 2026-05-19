@@ -144,10 +144,14 @@ const NO_OP_VAGUE_EDIT_TEXT =
   + 'want to adjust and how.';
 
 const EXPLAIN_RESULTS_CHIP: BoundaryAction = Object.freeze({
-  id: 'chip_action_explain_result',
+  id: 'chip_action_explain_results',
   label: 'Walk me through the analysis',
   message: 'Walk me through the analysis.',
-  action_type: 'explain_result' as const,
+  // Plural — matches the registered V5 handler in `tools/registry.ts`
+  // and the deterministic chip-click whitelist. Using the singular
+  // `'explain_result'` would fall through as a deprecated alias and
+  // miss the fast chip-click dispatch.
+  action_type: 'explain_results' as const,
 });
 
 const RERUN_ANALYSIS_CHIP: BoundaryAction = Object.freeze({
@@ -986,6 +990,36 @@ export async function dispatchEditGraph(
         freshness: freshness.freshness,
         graphReady: graphReadyForRecovery,
       });
+      if (recoveryOutcome.assistantText !== null) {
+        response = { ...response, assistant_text: recoveryOutcome.assistantText };
+      }
+      // Dedupe by action_type: if the existing response already has a
+      // chip with the same action_type as a recovery chip, suppress
+      // the recovery one. Two chips with identical intent in the same
+      // response are bad UX. Chips without an `action_type` (no
+      // wire-level handler binding) are never deduped against because
+      // their click semantics are message-replay only.
+      let appendedActions = 0;
+      if (recoveryOutcome.suggestedActions.length > 0) {
+        const existing = response.suggested_actions ?? [];
+        const existingIntents = new Set<string>();
+        for (const a of existing) {
+          if (a.action_type) existingIntents.add(a.action_type);
+        }
+        const recoveryFiltered = recoveryOutcome.suggestedActions.filter(
+          (a) => !a.action_type || !existingIntents.has(a.action_type),
+        );
+        appendedActions = recoveryFiltered.length;
+        if (recoveryFiltered.length > 0) {
+          response = {
+            ...response,
+            suggested_actions: [...existing, ...recoveryFiltered],
+          };
+        }
+      }
+      // Emit AFTER dedupe so `appended_actions` honestly reports what
+      // landed on the response, not what the recovery would have
+      // appended in isolation.
       emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
         request_id: requestId,
         scenario_id: payload.scenario_id,
@@ -994,18 +1028,8 @@ export async function dispatchEditGraph(
         freshness: freshness.freshness,
         branch_taken: recoveryOutcome.branch,
         rewrote_text: recoveryOutcome.assistantText !== null,
-        appended_actions: recoveryOutcome.suggestedActions.length,
+        appended_actions: appendedActions,
       });
-      if (recoveryOutcome.assistantText !== null) {
-        response = { ...response, assistant_text: recoveryOutcome.assistantText };
-      }
-      if (recoveryOutcome.suggestedActions.length > 0) {
-        const existing = response.suggested_actions ?? [];
-        response = {
-          ...response,
-          suggested_actions: [...existing, ...recoveryOutcome.suggestedActions],
-        };
-      }
     }
   }
 

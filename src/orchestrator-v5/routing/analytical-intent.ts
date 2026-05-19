@@ -157,9 +157,15 @@ const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
   /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|stuff|anything|this|that|it|the\s+(?:model|graph|decision|setup|analysis))\b/i,
   // "Make/do a change/update/adjustment/edit".
   /\b(?:make|do)\s+(?:a|an|some)\s+(?:change|changes|update|updates|adjustment|adjustments|edit|edits|tweak|tweaks)\b/i,
-  // Bare imperative edit verb at start of message: "Update the model
-  // please.", "Change this.", "Adjust." (very short imperative).
-  /^\s*(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\b[^.?!\n]{0,40}[.?!]?\s*$/i,
+  // Bare imperative edit verb alone, optionally with trailing
+  // punctuation. "Update.", "Change.", "Adjust". A previous version
+  // of this pattern also matched `verb + up to 40 chars` (e.g.
+  // "Change pricing factor"), which mis-classified concrete-target
+  // imperatives as vague-edit even when they had a named factor.
+  // Tightened: a concrete or value-less target ("Change pricing
+  // factor") falls through to ambiguous and preserves the existing
+  // safe fallback rather than asking for a different factor.
+  /^\s*(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s*\.?\s*$/i,
   // "Can you change/update/adjust …" without a concrete factor/value.
   /\bcan\s+you\s+(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|this|that|it|the\s+(?:model|graph|decision))\b/i,
 ];

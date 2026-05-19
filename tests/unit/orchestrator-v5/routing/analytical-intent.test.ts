@@ -127,6 +127,13 @@ describe('looksLikeVagueEdit', () => {
     'Set Pricing to 0.7.',
     'Add a new risk for supply chain.',
     'Remove the demand node.',
+    // Concrete-target imperative with no value: not vague (the target
+    // is named). Must fall through to ambiguous so we do not ask
+    // "which factor?" when the user has already named one.
+    'Change pricing factor',
+    'Change pricing factor.',
+    'Update the demand driver',
+    'Adjust the supply chain edge',
     // Analytical questions
     'Walk me through the analysis.',
     'What drove this result?',
