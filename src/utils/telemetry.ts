@@ -820,6 +820,49 @@ export const TelemetryEvents = {
   //   cqe_quantity_count }.
   V5DeterministicValueUpdate: "v5.deterministic_value_update",
 
+  // V5 Context Management v1 — context-readiness snapshot. Emitted once
+  // per turn, immediately after context-pack assembly + analysis-freshness
+  // derivation, so operators can see at a glance what CEE knew when
+  // routing fired (graph/brief presence, prior fact counts,
+  // successful-run-analysis presence, freshness verdict + graph hashes,
+  // pending action count, recent_changes count, Phase 3 block context
+  // availability, context_pack size).
+  //
+  // Privacy contract: every NON-ROUTING field is a number, boolean, the
+  // freshness enum, or a graph hash. `request_id` and `scenario_id` are
+  // the two allowed routing strings; the two graph_hash fields are
+  // SHA-prefix strings already emitted by `v5.analysis_freshness.derived`
+  // (safe). No user prose, no labels, no raw entity / node / edge /
+  // option / fact IDs, no decision_review content.
+  V5ContextReadiness: "v5.context_readiness",
+
+  // V5 Context Management v1 — sibling stale-rerun guard. Fires for the
+  // narrow case where prior analysis is stale (graph hash diverged) AND
+  // the user is asking an analytical question (explain / what_drove /
+  // what_would_flip / rerun_question) AND there is no concrete
+  // mutation signal. Short-circuits to a deterministic direct_answer
+  // that nudges re-run, mirroring the Phase 3 stale-safe coaching block
+  // copy + action shape. Payload: structural enums + booleans only.
+  V5StaleRerunGuard: "v5.stale_rerun_guard",
+
+  // V5 Context Management v1 — sibling no-analysis guard. Fires when no
+  // successful run_analysis fact exists AND the user is asking an
+  // analytical question. Short-circuits to a deterministic direct_answer
+  // that nudges the user to run analysis first. Payload: structural
+  // enums + booleans only.
+  V5NoAnalysisGuard: "v5.no_analysis_guard",
+
+  // V5 Context Management v1 — edit_graph no-op recovery. Emitted from
+  // the dispatchEditGraph no-op branch when the recovery decision is
+  // computed. Replaces the bland fallback with context-aware copy when
+  // the message is analytical (and analysis exists) or with a concise
+  // clarification when the message looks edit-like but vague. Payload:
+  // structural enums + booleans only. `intent_class` is the
+  // AnalyticalIntentClass enum or null; `branch_taken` is the recovery
+  // branch enum (analytical_fresh / analytical_stale / analytical_none /
+  // vague_edit / ambiguous).
+  V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
+
   // V5 product-state continuity (foamy-bee tranche) — emitted by the
   // deterministic state-query guard. Closes the named misroute class
   // where "what update did you make?" routes to legacy edit_graph and

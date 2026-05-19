@@ -55,8 +55,15 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import {
+  classifyAnalyticalIntent,
+  hasMutationSignal,
+  looksLikeVagueEdit,
+} from '../routing/analytical-intent.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
 // V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
@@ -64,6 +71,183 @@ import {
 // DecisionStage. Unmapped values fall back to 'frame' — edit_graph is a
 // structural operation that doesn't branch on stage, so a broad default is
 // safe here.
+/**
+ * V5 Context Management v1 — no-op recovery decision.
+ *
+ * Pure function. Given the user's message, the prior fact chain, and
+ * the post-edit freshness verdict, decide whether to upgrade a bland
+ * no-op response into context-aware copy. Returns either a non-null
+ * `assistantText` to overwrite + optional suggested-action chips, or
+ * `assistantText: null` to leave the existing response unchanged.
+ *
+ * Branches:
+ *   - `analytical_fresh`  — analytical intent + fresh run_analysis fact.
+ *   - `analytical_stale`  — analytical intent + stale run_analysis fact.
+ *   - `analytical_none`   — analytical intent + no run_analysis fact.
+ *   - `vague_edit`        — no analytical intent, no concrete mutation
+ *                            signal (message looks edit-like but vague).
+ *   - `ambiguous`         — anything else; preserve existing copy.
+ *
+ * Copy contract: British English, calm, concise. No emoji, no em dashes,
+ * no raw IDs, no internal terms ("validator", "patch", "schema",
+ * "operation", "dispatcher", "tool call"), no "winner" / "winning" /
+ * "recommendation".
+ */
+type NoOpRecoveryBranch =
+  | 'analytical_fresh'
+  | 'analytical_stale'
+  | 'analytical_none'
+  | 'vague_edit'
+  | 'ambiguous';
+
+interface NoOpRecoveryDecision {
+  readonly branch: NoOpRecoveryBranch;
+  readonly intent_class: ReturnType<typeof classifyAnalyticalIntent>;
+  readonly has_run_analysis_fact: boolean;
+  readonly assistantText: string | null;
+  readonly suggestedActions: readonly BoundaryAction[];
+}
+
+interface DecideNoOpRecoveryInput {
+  readonly message: string;
+  readonly priorFacts: readonly HandlerFact[];
+  readonly freshness: 'fresh' | 'stale' | 'unknown' | 'none';
+  /**
+   * Whether the current graph is ready for analysis (has nodes and
+   * edges). Mirrors the predicate used by `tryNoAnalysisGuard` so the
+   * `analytical_none` branch only offers a `run_analysis` chip when
+   * clicking it would actually work. When false, the chip is
+   * suppressed and the copy nudges getting the model ready first.
+   */
+  readonly graphReady: boolean;
+}
+
+const NO_OP_FRESH_TEXT =
+  "I haven't changed the model. This looks like an analysis question. "
+  + "I can walk you through the latest result.";
+
+const NO_OP_STALE_TEXT =
+  "I haven't changed the model. The analysis is based on an earlier "
+  + "version of the graph. Re-run analysis and I'll walk you through "
+  + 'the latest result.';
+
+const NO_OP_NONE_GRAPH_READY_TEXT =
+  "I haven't changed the model. Run analysis first and I'll walk you "
+  + 'through the result.';
+
+const NO_OP_NONE_GRAPH_NOT_READY_TEXT =
+  "I haven't changed the model. Once the model is ready, run analysis "
+  + "and I'll explain what drove the outcome.";
+
+const NO_OP_VAGUE_EDIT_TEXT =
+  "I haven't changed the model yet. Tell me which factor or edge you "
+  + 'want to adjust and how.';
+
+const EXPLAIN_RESULTS_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_explain_results',
+  label: 'Walk me through the analysis',
+  message: 'Walk me through the analysis.',
+  // Plural — matches the registered V5 handler in `tools/registry.ts`
+  // and the deterministic chip-click whitelist. Using the singular
+  // `'explain_result'` would fall through as a deprecated alias and
+  // miss the fast chip-click dispatch.
+  action_type: 'explain_results' as const,
+});
+
+const RERUN_ANALYSIS_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_rerun_analysis',
+  label: 'Re-run analysis',
+  message: 'Re-run the analysis.',
+  action_type: 'run_analysis' as const,
+});
+
+const RUN_ANALYSIS_CHIP: BoundaryAction = Object.freeze({
+  id: 'chip_action_run_analysis',
+  label: 'Run analysis',
+  message: 'Run analysis.',
+  action_type: 'run_analysis' as const,
+});
+
+export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecoveryDecision {
+  const hasRunAnalysisFact = input.priorFacts.some(
+    (f) => f.fact_type === 'run_analysis' && isSuccessfulRunAnalysisFact(f),
+  );
+  const intentClass = classifyAnalyticalIntent(input.message);
+  const mutationSignal = hasMutationSignal(input.message);
+
+  if (intentClass !== null && !mutationSignal) {
+    if (hasRunAnalysisFact && input.freshness === 'fresh') {
+      return {
+        branch: 'analytical_fresh',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_FRESH_TEXT,
+        suggestedActions: [EXPLAIN_RESULTS_CHIP],
+      };
+    }
+    if (hasRunAnalysisFact && input.freshness === 'stale') {
+      return {
+        branch: 'analytical_stale',
+        intent_class: intentClass,
+        has_run_analysis_fact: true,
+        assistantText: NO_OP_STALE_TEXT,
+        suggestedActions: [RERUN_ANALYSIS_CHIP],
+      };
+    }
+    if (!hasRunAnalysisFact) {
+      // Mirror `tryNoAnalysisGuard`'s graph-readiness gating: suppress
+      // the `run_analysis` chip when the graph is not ready (clicking
+      // it would fail), and use the matching copy variant.
+      return {
+        branch: 'analytical_none',
+        intent_class: intentClass,
+        has_run_analysis_fact: false,
+        assistantText: input.graphReady
+          ? NO_OP_NONE_GRAPH_READY_TEXT
+          : NO_OP_NONE_GRAPH_NOT_READY_TEXT,
+        suggestedActions: input.graphReady ? [RUN_ANALYSIS_CHIP] : [],
+      };
+    }
+    // analytical intent + (unknown freshness or has_run_analysis_fact
+    // with non-fresh/stale verdict): treat as ambiguous and preserve
+    // existing copy. The freshness verdict ladder is exhaustive
+    // (fresh/stale/unknown/none); `unknown` falls here.
+    return {
+      branch: 'ambiguous',
+      intent_class: intentClass,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
+  if (intentClass === null && !mutationSignal && looksLikeVagueEdit(input.message)) {
+    // Message carries a positive vague-edit signal (imperative edit
+    // verb with an abstract target). Ask a calm clarification.
+    return {
+      branch: 'vague_edit',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: NO_OP_VAGUE_EDIT_TEXT,
+      suggestedActions: [],
+    };
+  }
+
+  // Everything else (analytical intent + mutation signal, or no
+  // analytical intent + mutation signal): preserve existing copy.
+  // The mutation signal means the user genuinely wanted to edit; if
+  // V4 produced a no-op, the response already explains why or asks for
+  // clarification. Better to leave it than to rewrite from too little
+  // signal.
+  return {
+    branch: 'ambiguous',
+    intent_class: intentClass,
+    has_run_analysis_fact: hasRunAnalysisFact,
+    assistantText: null,
+    suggestedActions: [],
+  };
+}
+
 function mapStageToDecisionStage(stage: MessageTurnPayload['stage']): DecisionStage {
   switch (stage) {
     case 'frame':
@@ -646,115 +830,24 @@ export async function dispatchEditGraph(
   // route-v2).
   const successfulAppliedMutation = isSuccessfulAppliedMutation(editResult);
 
-  // V5 H5 — false-success invariant (defence-in-depth).
-  // Runs BEFORE the forbidden-phrase guard. Two distinct sub-cases
-  // both gated on `!wasRejected && !successfulAppliedMutation`:
+  // V5 Context Management v1 — derive freshness + load prior facts
+  // EARLIER than the original (Codex round-2 P1) position, so the no-op
+  // recovery layer below can read `freshness` and `priorFactsForRecovery`
+  // without re-loading state. The block's I/O surface and telemetry are
+  // unchanged from the original position; only the order moved.
   //
-  //   A. Structural mismatch — operations exist but appliedGraph is
-  //      missing. The prose cannot be trusted regardless of phrasing
-  //      because no graph state was persisted to commit. This is the
-  //      shape the staging Layer-B replay surfaced (PR #164 round-3
-  //      follow-up): V4 returns operations + appliedChanges + LLM-
-  //      authored success-style coaching prose, but `appliedGraph`
-  //      stayed null because PLoT wasn't wired into V5 dispatch. The
-  //      regex-based `findSuccessClaimHit` can't enumerate every
-  //      phrasing the LLM produces ("Strengthened the X edge from Y
-  //      to Z..." doesn't match the existing pattern set). Rewrite
-  //      UNCONDITIONALLY whenever the structural signature fires.
-  //      The V4 source fix below (Step 2) makes this case impossible
-  //      in normal operation; this backstop catches future
-  //      regressions in the source.
-  //
-  //   B. No-operations no-op with success-claim language. Mode B
-  //      regression backstop — V4 already drops both warnings and
-  //      coaching on no-op paths (PR #164 round-1 P0), so this only
-  //      fires if a future emit path re-introduces LLM prose on the
-  //      no-op branch. Uses the regex set because operations=[] is
-  //      the legitimate no-op shape and the prose IS the only signal
-  //      that something inappropriate slipped through.
-  if (!editResult.wasRejected && !successfulAppliedMutation) {
-    const operationsCount = editResult.operations?.length ?? 0;
-    const hasAppliedGraph = editResult.appliedGraph !== null
-      && editResult.appliedGraph !== undefined;
-
-    if (operationsCount > 0 && !hasAppliedGraph) {
-      // Sub-case A — structural mismatch. Unconditional rewrite.
-      emit(TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations, {
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        operations_count: operationsCount,
-        dispatch_path: 'edit_graph_finalise',
-      });
-      response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
-    } else {
-      // Sub-case B — regex-based no-op + success-claim backstop.
-      const successHit = findSuccessClaimHit(response.assistant_text ?? '');
-      if (successHit !== null) {
-        emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          original_phrase: successHit,
-          dispatch_path: 'edit_graph_finalise',
-        });
-        response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
-      }
-    }
-  }
-
-  // V5 stale-aware explain recovery — finaliser-level egress guard.
-  // Runs as the LAST step before the response is committed and
-  // returned, so it backstops EVERY edit_graph emit path: V4
-  // confirmation text, clarification copy, recovery copy, the
-  // generic "Proposed graph edit." fallback. An upstream hook would
-  // miss new emit paths added later; the finaliser hook cannot.
-  {
-    const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
-    if (guarded.rewritten) {
-      emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        phrase: guarded.hit,
-        dispatch_path: 'edit_graph_finalise',
-      });
-      response = { ...response, assistant_text: guarded.text };
-    }
-  }
-
-  // V5 finaliser contract: compute structural readiness from the post-edit
-  // graph here so route-v2.ts can stamp it onto the wire envelope.
-  // computeStructuralReadiness is intervention-shape-tolerant
-  // (mergeInterventionSources handles the V3 shape that the UI legacy
-  // fallback could not read). Undefined when no successful mutation
-  // committed — gated by `successfulAppliedMutation` (Codex round-2
-  // P1) so an impossible appliedGraph+empty-operations shape cannot
-  // stamp analysis_ready from an unpersisted graph.
-  const analysisReady: AnalysisReadyPayload | undefined = successfulAppliedMutation
-    ? computeStructuralReadiness(editResult.appliedGraph!)
-    : undefined;
-
-  // V5 state-trust: load the prior fact chain and derive freshness against
-  // the POST-edit graph hash. Expected behaviour: an accepted substantive
-  // edit produces freshness === 'stale' because the graph hash recorded
-  // on the prior run_analysis fact diverges from the new graph hash.
-  // Rejected edits produce 'fresh' (graph unchanged).
-  //
-  // On failure: fall back to a synthetic `unknown / derivation_failed`
-  // verdict rather than dropping the freshness fields. This honours the
-  // brief's "every CEE dispatch path emits freshness" contract and
-  // surfaces the failure as observable wire data rather than silent
-  // absence.
-  // V5 H5 (Codex round-2 P1) — freshness must derive against the
-  // graph that was actually persisted, not whatever `editResult`
-  // claims. If `successfulAppliedMutation` is true the new graph
-  // committed and freshness uses it; otherwise the pre-edit graph
-  // (graphState) is what the user's storage still holds.
+  // On error the catch branch synthesises a `derivation_failed` verdict
+  // and leaves `priorFactsForRecovery` empty so the no-op recovery falls
+  // back to the bland fallback rather than re-throwing.
   const persistedPostEditGraph = successfulAppliedMutation
     ? editResult.appliedGraph
     : graphState;
 
   let freshness: FreshnessDerivation;
+  let priorFactsForRecovery: readonly HandlerFact[] = [];
   try {
     const turnContext = await buildTurnContext(payload, requestId);
+    priorFactsForRecovery = turnContext.prior_facts;
     const currentGraphHash = computeAnalysisAffectingGraphHash(
       persistedPostEditGraph as GraphStateIngress | null | undefined,
     );
@@ -813,6 +906,193 @@ export async function dispatchEditGraph(
       },
     );
   }
+
+  // V5 H5 — false-success invariant (defence-in-depth).
+  // Runs BEFORE the forbidden-phrase guard. Two distinct sub-cases
+  // both gated on `!wasRejected && !successfulAppliedMutation`:
+  //
+  //   A. Structural mismatch — operations exist but appliedGraph is
+  //      missing. The prose cannot be trusted regardless of phrasing
+  //      because no graph state was persisted to commit. This is the
+  //      shape the staging Layer-B replay surfaced (PR #164 round-3
+  //      follow-up): V4 returns operations + appliedChanges + LLM-
+  //      authored success-style coaching prose, but `appliedGraph`
+  //      stayed null because PLoT wasn't wired into V5 dispatch. The
+  //      regex-based `findSuccessClaimHit` can't enumerate every
+  //      phrasing the LLM produces ("Strengthened the X edge from Y
+  //      to Z..." doesn't match the existing pattern set). Rewrite
+  //      UNCONDITIONALLY whenever the structural signature fires.
+  //      The V4 source fix below (Step 2) makes this case impossible
+  //      in normal operation; this backstop catches future
+  //      regressions in the source.
+  //
+  //   B. No-operations no-op with success-claim language. Mode B
+  //      regression backstop — V4 already drops both warnings and
+  //      coaching on no-op paths (PR #164 round-1 P0), so this only
+  //      fires if a future emit path re-introduces LLM prose on the
+  //      no-op branch. Uses the regex set because operations=[] is
+  //      the legitimate no-op shape and the prose IS the only signal
+  //      that something inappropriate slipped through.
+  if (!editResult.wasRejected && !successfulAppliedMutation) {
+    const operationsCount = editResult.operations?.length ?? 0;
+    const hasAppliedGraph = editResult.appliedGraph !== null
+      && editResult.appliedGraph !== undefined;
+
+    if (operationsCount > 0 && !hasAppliedGraph) {
+      // Sub-case A — structural mismatch. Unconditional rewrite.
+      emit(TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        operations_count: operationsCount,
+        dispatch_path: 'edit_graph_finalise',
+      });
+      response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+    } else {
+      // Sub-case B — regex-based no-op + success-claim backstop.
+      const successHit = findSuccessClaimHit(response.assistant_text ?? '');
+      if (successHit !== null) {
+        emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          original_phrase: successHit,
+          dispatch_path: 'edit_graph_finalise',
+        });
+        response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+      }
+
+      // V5 Context Management v1 — no-op recovery layer.
+      //
+      // Sub-case B is a legitimate no-op (zero operations, no applied
+      // graph, no false-success language). The default response copy
+      // is bland or echoes V4 confirmation framing that drops useful
+      // context. Upgrade it when we can do better:
+      //
+      //   - Message is analytical AND a successful run_analysis fact
+      //     exists → acknowledge no change + redirect to the analysis.
+      //   - Message is analytical AND no run_analysis fact exists →
+      //     nudge the user to run analysis first; chip is gated on
+      //     graph-readiness (matches tryNoAnalysisGuard).
+      //   - Message carries a positive vague-edit signal (imperative
+      //     edit verb with an abstract target) → ask a concise
+      //     clarification instead of leaving bland fallback copy.
+      //   - Anything else (including general conversational messages
+      //     with no edit signal) → leave existing copy. Safer than
+      //     rewriting from too little signal.
+      //
+      // Preserves existing response blocks, suggested actions, and
+      // safe coaching payloads where present. Does not introduce
+      // internal terms or claim a change happened.
+      const graphReadyForRecovery =
+        parsedGraph.nodes.length > 0 && parsedGraph.edges.length > 0;
+      const recoveryOutcome = decideNoOpRecovery({
+        message: payload.message,
+        priorFacts: priorFactsForRecovery,
+        freshness: freshness.freshness,
+        graphReady: graphReadyForRecovery,
+      });
+      if (recoveryOutcome.assistantText !== null) {
+        response = { ...response, assistant_text: recoveryOutcome.assistantText };
+      }
+      // Strip existing chips whose intent is incompatible with the
+      // recovery decision BEFORE the dedupe-and-append step. The only
+      // case in v1 is `analytical_none` with `graphReady=false`: a
+      // pre-existing V4 `run_analysis` chip would fail when clicked,
+      // so it must be removed. Without this strip the recovery would
+      // suppress its own chip (correct) but the V4 chip would survive
+      // (wrong) and the user would still see an actionable
+      // run_analysis affordance that cannot succeed.
+      let strippedActions = 0;
+      if (
+        recoveryOutcome.branch === 'analytical_none'
+        && !graphReadyForRecovery
+        && response.suggested_actions
+        && response.suggested_actions.length > 0
+      ) {
+        const before = response.suggested_actions;
+        const after = before.filter((a) => a.action_type !== 'run_analysis');
+        if (after.length !== before.length) {
+          strippedActions = before.length - after.length;
+          response = { ...response, suggested_actions: after };
+        }
+      }
+      // Dedupe by action_type: if the existing response already has a
+      // chip with the same action_type as a recovery chip, suppress
+      // the recovery one. Two chips with identical intent in the same
+      // response are bad UX. Chips without an `action_type` (no
+      // wire-level handler binding) are never deduped against because
+      // their click semantics are message-replay only.
+      let appendedActions = 0;
+      if (recoveryOutcome.suggestedActions.length > 0) {
+        const existing = response.suggested_actions ?? [];
+        const existingIntents = new Set<string>();
+        for (const a of existing) {
+          if (a.action_type) existingIntents.add(a.action_type);
+        }
+        const recoveryFiltered = recoveryOutcome.suggestedActions.filter(
+          (a) => !a.action_type || !existingIntents.has(a.action_type),
+        );
+        appendedActions = recoveryFiltered.length;
+        if (recoveryFiltered.length > 0) {
+          response = {
+            ...response,
+            suggested_actions: [...existing, ...recoveryFiltered],
+          };
+        }
+      }
+      // Emit AFTER strip + dedupe so `appended_actions` honestly
+      // reports what landed on the response, not what the recovery
+      // would have appended in isolation. `stripped_actions` reports
+      // existing-chip removals so observability covers both edges of
+      // the merge logic.
+      emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        intent_class: recoveryOutcome.intent_class,
+        has_run_analysis_fact: recoveryOutcome.has_run_analysis_fact,
+        freshness: freshness.freshness,
+        branch_taken: recoveryOutcome.branch,
+        rewrote_text: recoveryOutcome.assistantText !== null,
+        appended_actions: appendedActions,
+        stripped_actions: strippedActions,
+      });
+    }
+  }
+
+  // V5 stale-aware explain recovery — finaliser-level egress guard.
+  // Runs as the LAST step before the response is committed and
+  // returned, so it backstops EVERY edit_graph emit path: V4
+  // confirmation text, clarification copy, recovery copy, the
+  // generic "Proposed graph edit." fallback. An upstream hook would
+  // miss new emit paths added later; the finaliser hook cannot.
+  {
+    const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
+    if (guarded.rewritten) {
+      emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        phrase: guarded.hit,
+        dispatch_path: 'edit_graph_finalise',
+      });
+      response = { ...response, assistant_text: guarded.text };
+    }
+  }
+
+  // V5 finaliser contract: compute structural readiness from the post-edit
+  // graph here so route-v2.ts can stamp it onto the wire envelope.
+  // computeStructuralReadiness is intervention-shape-tolerant
+  // (mergeInterventionSources handles the V3 shape that the UI legacy
+  // fallback could not read). Undefined when no successful mutation
+  // committed — gated by `successfulAppliedMutation` (Codex round-2
+  // P1) so an impossible appliedGraph+empty-operations shape cannot
+  // stamp analysis_ready from an unpersisted graph.
+  const analysisReady: AnalysisReadyPayload | undefined = successfulAppliedMutation
+    ? computeStructuralReadiness(editResult.appliedGraph!)
+    : undefined;
+
+  // V5 state-trust freshness derivation moved earlier in this function
+  // (just after `successfulAppliedMutation` is computed) so the no-op
+  // recovery layer can read it. The behaviour, telemetry, and
+  // dispatch_path are unchanged from the original position.
 
   try {
     // llm_calls_used: handleEditGraph makes at least one LLM call for the

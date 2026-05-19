@@ -84,6 +84,12 @@ import {
   tryStateQueryGuard,
 } from './routing/state-query-guard.js';
 import { tryPostAnalysisAdviceGate } from './routing/post-analysis-advice-gate.js';
+import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
+import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
+import {
+  deriveContextReadiness,
+  type ContextReadiness,
+} from './context/readiness.js';
 import { tryProposalOrdinalSelect } from './routing/proposal-ordinal-select.js';
 import {
   PROPOSAL_DISMISSAL_RESPONSE,
@@ -507,6 +513,7 @@ export async function runTurnExecutor(
   let sonnetTextForLog = '';
   let contextPackForLog: ContextPack | null = null;
   let cqeSummaryForLog: CqeExtractionSummary | null = null;
+  let contextReadiness: ContextReadiness | null = null;
 
   // Phase 1.5: graph lookup + drift detection. Initialised inside the try
   // block so any failure during telemetry emit still lands in the top-level
@@ -873,6 +880,42 @@ export async function runTurnExecutor(
           analysis_freshness_reason: freshness.reason,
         }),
       );
+
+      // V5 Context Management v1 — emit context readiness snapshot.
+      // Compact structural picture of what the turn executor loaded for
+      // this turn (graph/brief presence, prior fact counts, freshness
+      // verdict + hashes, pending actions, recent_changes count, Phase 3
+      // block context availability, context_pack size). Fires once per
+      // turn, here, so operators can see at a glance what shaped routing.
+      //
+      // Privacy: all non-routing fields are numbers, booleans, the
+      // freshness enum, or graph hashes (the same SHA-prefixes already
+      // emitted by v5.analysis_freshness.derived). No user prose, no
+      // labels, no raw entity / node / edge / option / fact IDs.
+      contextReadiness = deriveContextReadiness({
+        context,
+        freshness,
+        recentChangeCount: contextPack.recent_changes.length,
+        contextPackChars: contextPackCharsForObs,
+      });
+      emit(TelemetryEvents.V5ContextReadiness, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        graph_present: contextReadiness.graph_present,
+        graph_node_count: contextReadiness.graph_node_count,
+        graph_edge_count: contextReadiness.graph_edge_count,
+        brief_present: contextReadiness.brief_present,
+        prior_fact_count: contextReadiness.prior_fact_count,
+        has_run_analysis_fact: contextReadiness.has_run_analysis_fact,
+        latest_analysis_freshness: contextReadiness.latest_analysis_freshness,
+        latest_analysis_graph_hash: contextReadiness.latest_analysis_graph_hash,
+        current_graph_hash: contextReadiness.current_graph_hash,
+        pending_action_count: contextReadiness.pending_action_count,
+        recent_change_count: contextReadiness.recent_change_count,
+        phase3_block_context_available:
+          contextReadiness.phase3_block_context_available,
+        context_pack_chars: contextReadiness.context_pack_chars,
+      });
 
       // V5 Task 3.2: keep the existing debug log for local dev visibility.
       // Primary event above is the queryable signal; this is extra noise
@@ -2785,6 +2828,82 @@ export async function runTurnExecutor(
         }
       }
 
+      // V5 Context Management v1 — stale-rerun sibling guard.
+      //
+      // Fires when prior analysis exists but is `stale` (graph hash
+      // diverged) AND the user is asking an analytical question
+      // (explain / what_drove / what_would_flip / rerun_question) AND
+      // there is no concrete mutation signal. Routes to a deterministic
+      // direct_answer that nudges re-run, mirroring the Phase 3
+      // stale-safe coaching block copy + action shape.
+      //
+      // Runs BEFORE `tryPostAnalysisAdviceGate` so the fresh-path gate
+      // sees the same input shape it always has — the gate continues
+      // to fast-fail on `not_fresh` for everything this guard does
+      // not match, so behaviour is additive.
+      if (routingResult === undefined) {
+        const staleOutcome = tryStaleRerunGuard({
+          message: payload.message,
+          freshness: freshness?.freshness,
+        });
+        emit(TelemetryEvents.V5StaleRerunGuard, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: staleOutcome.matched,
+          unmatched_reason: staleOutcome.matched ? null : staleOutcome.reason,
+          intent_class: staleOutcome.matched ? staleOutcome.intent_class : null,
+          freshness: freshness?.freshness ?? null,
+        });
+        if (staleOutcome.matched) {
+          const staleResponse = composeDirectAnswerResponse({
+            assistant_text: staleOutcome.assistant_text,
+            stage: context.stage,
+            suggested_actions: [...staleOutcome.suggested_actions],
+          });
+          sonnetTextForLog = staleResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitDirectAnswer(staleResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'stale_rerun_guard',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on stale-rerun guard',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
       // V5 P0 stabilisation — post-analysis advice gate.
       //
       // When prior analysis is available AND the user's message is an
@@ -2872,6 +2991,87 @@ export async function runTurnExecutor(
                 err: serialiseError(error),
               },
               'V5 TurnExecutor commit failure on post-analysis advice gate',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
+      // V5 Context Management v1 — no-analysis sibling guard.
+      //
+      // Fires when no successful run_analysis fact exists for the
+      // scenario AND the user is asking an analytical question AND
+      // there is no concrete mutation signal. Routes to a calm direct
+      // answer that nudges the user to run analysis first. Closes the
+      // misroute class where "walk me through the analysis" lands on
+      // edit_graph and produces a no-op denial because Sonnet has
+      // nothing analytical to ground a reply.
+      //
+      // Reuses the readiness snapshot emitted earlier in the turn so
+      // the predicate is a single field read, not a re-derivation.
+      if (routingResult === undefined && contextReadiness !== null) {
+        const noAnalysisOutcome = tryNoAnalysisGuard({
+          message: payload.message,
+          readiness: contextReadiness,
+        });
+        emit(TelemetryEvents.V5NoAnalysisGuard, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: noAnalysisOutcome.matched,
+          unmatched_reason: noAnalysisOutcome.matched
+            ? null
+            : noAnalysisOutcome.reason,
+          intent_class: noAnalysisOutcome.matched
+            ? noAnalysisOutcome.intent_class
+            : null,
+          graph_ready: noAnalysisOutcome.matched
+            ? noAnalysisOutcome.graph_ready
+            : null,
+        });
+        if (noAnalysisOutcome.matched) {
+          const noAnalysisResponse = composeDirectAnswerResponse({
+            assistant_text: noAnalysisOutcome.assistant_text,
+            stage: context.stage,
+            suggested_actions: [...noAnalysisOutcome.suggested_actions],
+          });
+          sonnetTextForLog = noAnalysisResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitDirectAnswer(noAnalysisResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'no_analysis_guard',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on no-analysis guard',
             );
             failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
             response = buildFailureResponse(
