@@ -993,6 +993,28 @@ export async function dispatchEditGraph(
       if (recoveryOutcome.assistantText !== null) {
         response = { ...response, assistant_text: recoveryOutcome.assistantText };
       }
+      // Strip existing chips whose intent is incompatible with the
+      // recovery decision BEFORE the dedupe-and-append step. The only
+      // case in v1 is `analytical_none` with `graphReady=false`: a
+      // pre-existing V4 `run_analysis` chip would fail when clicked,
+      // so it must be removed. Without this strip the recovery would
+      // suppress its own chip (correct) but the V4 chip would survive
+      // (wrong) and the user would still see an actionable
+      // run_analysis affordance that cannot succeed.
+      let strippedActions = 0;
+      if (
+        recoveryOutcome.branch === 'analytical_none'
+        && !graphReadyForRecovery
+        && response.suggested_actions
+        && response.suggested_actions.length > 0
+      ) {
+        const before = response.suggested_actions;
+        const after = before.filter((a) => a.action_type !== 'run_analysis');
+        if (after.length !== before.length) {
+          strippedActions = before.length - after.length;
+          response = { ...response, suggested_actions: after };
+        }
+      }
       // Dedupe by action_type: if the existing response already has a
       // chip with the same action_type as a recovery chip, suppress
       // the recovery one. Two chips with identical intent in the same
@@ -1017,9 +1039,11 @@ export async function dispatchEditGraph(
           };
         }
       }
-      // Emit AFTER dedupe so `appended_actions` honestly reports what
-      // landed on the response, not what the recovery would have
-      // appended in isolation.
+      // Emit AFTER strip + dedupe so `appended_actions` honestly
+      // reports what landed on the response, not what the recovery
+      // would have appended in isolation. `stripped_actions` reports
+      // existing-chip removals so observability covers both edges of
+      // the merge logic.
       emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
         request_id: requestId,
         scenario_id: payload.scenario_id,
@@ -1029,6 +1053,7 @@ export async function dispatchEditGraph(
         branch_taken: recoveryOutcome.branch,
         rewrote_text: recoveryOutcome.assistantText !== null,
         appended_actions: appendedActions,
+        stripped_actions: strippedActions,
       });
     }
   }

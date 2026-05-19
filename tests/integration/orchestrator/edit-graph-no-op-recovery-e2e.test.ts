@@ -16,7 +16,7 @@
  * Mirrors the dispatcher mocking pattern used by
  * `edit-graph-dispatch-add-risk-e2e.test.ts`.
  */
-import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 
 // ────────────────────────────────────────────────────────────────────
@@ -79,6 +79,7 @@ import { dispatchEditGraph } from '../../../src/orchestrator-v5/handlers/edit-gr
 import { commitDirectAnswer } from '../../../src/orchestrator-v5/commit.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import type { GraphStateIngress } from '../../../src/orchestrator-v5/boundary/request-extensions.js';
+import { setTestSink, TelemetryEvents } from '../../../src/utils/telemetry.js';
 
 // ────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -141,6 +142,13 @@ function makeCommitResult() {
   };
 }
 
+// Telemetry capture: setTestSink installs a function the central
+// emit() calls in addition to the pino log line. Each `emit(event,
+// data)` call appends `{ event, data }` to the test-scoped buffer so
+// individual tests can assert on the post-strip/post-dedupe payload of
+// `v5.edit_graph.no_op_recovery`.
+const captured: Array<{ event: string; data: Record<string, unknown> }> = [];
+
 beforeEach(() => {
   llmChatMock.mockReset();
   handleEditGraphMock.mockReset();
@@ -148,7 +156,21 @@ beforeEach(() => {
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockReset();
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
     .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+  captured.length = 0;
+  setTestSink((event, data) => {
+    captured.push({ event, data: data as Record<string, unknown> });
+  });
 });
+
+afterEach(() => {
+  setTestSink(null);
+});
+
+function findRecoveryEvent(): Record<string, unknown> | undefined {
+  return captured.find(
+    (c) => c.event === TelemetryEvents.V5EditGraphNoOpRecovery,
+  )?.data;
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Tests
@@ -254,5 +276,100 @@ describe('dispatchEditGraph e2e — no-op recovery layer', () => {
     const runAnalysisChips = chips.filter((c) => c.action_type === 'run_analysis');
     expect(runAnalysisChips).toHaveLength(1);
     expect(runAnalysisChips[0]?.label).toBe('Pre-existing run analysis');
+
+    // Telemetry contract — `appended_actions` is the POST-dedupe count
+    // (recovery's run_analysis chip was dropped because the existing
+    // response already had that intent), and `stripped_actions` is 0
+    // because the graph IS ready in this case.
+    const ev = findRecoveryEvent();
+    expect(ev).toBeDefined();
+    expect(ev?.branch_taken).toBe('analytical_none');
+    expect(ev?.appended_actions).toBe(0);
+    expect(ev?.stripped_actions).toBe(0);
+  });
+
+  it('analytical_none + graph not ready: strips a pre-existing V4 run_analysis chip', async () => {
+    // The V4 no-op response already carries a run_analysis chip. The
+    // graph has zero edges, so the chip cannot succeed if clicked.
+    // Recovery must STRIP the existing chip, not just suppress its own.
+    priorFactsOverrideRef.current = [];
+    const NODES_ONLY_GRAPH: GraphStateIngress = {
+      nodes: PRICING_GRAPH.nodes,
+      edges: [],
+    } as unknown as GraphStateIngress;
+    handleEditGraphMock.mockResolvedValue(
+      makeNoOpEditResult({
+        suggestedActions: [
+          {
+            label: 'V4 attached this',
+            prompt: 'Run analysis.',
+            role: 'facilitator',
+            action_type: 'run_analysis',
+          },
+          {
+            label: 'V4 attached this too',
+            prompt: 'Try a simpler change.',
+            role: 'facilitator',
+            action_type: 'set_factor_value',
+          },
+        ],
+      }),
+    );
+
+    const result = await dispatchEditGraph({
+      payload: makePayload({ turn_id: '99999999-9999-4999-8999-999999999999' }),
+      requestId: 'req-no-op-strip',
+      request: STUB_REQUEST,
+      graphState: NODES_ONLY_GRAPH,
+      analysisState: null,
+    });
+
+    const chips = result.response.suggested_actions ?? [];
+    // No run_analysis chip survives — neither the V4 one (stripped)
+    // nor a recovery one (suppressed by graphReady=false).
+    expect(chips.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    // The unrelated V4 chip survives.
+    expect(chips.some((c) => c.action_type === 'set_factor_value')).toBe(true);
+
+    // Telemetry: `stripped_actions` reports the V4 chip removal,
+    // `appended_actions` is 0 because the recovery's chip was already
+    // suppressed at the decideNoOpRecovery layer (graphReady=false).
+    const ev = findRecoveryEvent();
+    expect(ev).toBeDefined();
+    expect(ev?.branch_taken).toBe('analytical_none');
+    expect(ev?.appended_actions).toBe(0);
+    expect(ev?.stripped_actions).toBe(1);
+  });
+
+  it('analytical_fresh telemetry: appended_actions reports the post-dedupe count', async () => {
+    const currentGraphHash = computeAnalysisAffectingGraphHash(PRICING_GRAPH);
+    priorFactsOverrideRef.current = [
+      {
+        fact_type: 'run_analysis',
+        noop: false,
+        result: {
+          graph_hash_at_run: currentGraphHash,
+          computed_at: '2025-01-01T00:00:00.000Z',
+          enrichment: { analysis_status: 'computed' },
+        },
+      },
+    ];
+    handleEditGraphMock.mockResolvedValue(makeNoOpEditResult());
+
+    await dispatchEditGraph({
+      payload: makePayload({ turn_id: '77777777-7777-4777-8777-777777777777' }),
+      requestId: 'req-no-op-fresh-telemetry',
+      request: STUB_REQUEST,
+      graphState: PRICING_GRAPH,
+      analysisState: null,
+    });
+
+    // No existing chips → recovery's explain_results chip is appended,
+    // not deduped. appended_actions === 1, stripped_actions === 0.
+    const ev = findRecoveryEvent();
+    expect(ev).toBeDefined();
+    expect(ev?.branch_taken).toBe('analytical_fresh');
+    expect(ev?.appended_actions).toBe(1);
+    expect(ev?.stripped_actions).toBe(0);
   });
 });

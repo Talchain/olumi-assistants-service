@@ -170,9 +170,35 @@ const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
   /\bcan\s+you\s+(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|this|that|it|the\s+(?:model|graph|decision))\b/i,
 ];
 
+/**
+ * Negation-prefix patterns. If any fires, the message is rejecting an
+ * edit ("Don't change anything", "I don't want to update", "Won't make
+ * a change", "No need to update the model") rather than asking for one.
+ * `looksLikeVagueEdit` consults these BEFORE the positive
+ * `VAGUE_EDIT_PATTERNS` so negated statements never trigger the
+ * clarification ask.
+ *
+ * The verb list at the tail mirrors the verbs in `VAGUE_EDIT_PATTERNS`
+ * plus `make` and `do` (which appear as auxiliaries in the
+ * "make a change" / "do an update" branch), so every shape the
+ * positive patterns recognise is paired with a negated rejection.
+ */
+const NEGATED_EDIT_PATTERNS: readonly RegExp[] = [
+  // "don't change", "I don't want to change", "won't update",
+  // "can't change", "shouldn't update", "please don't change", etc.
+  /\b(?:don['']?t|dont|do\s+not|doesn['']?t|does\s+not|won['']?t|wont|will\s+not|can['']?t|cant|cannot|shouldn['']?t|should\s+not|wouldn['']?t|would\s+not|never|please\s+don['']?t)\b[^.?!\n]{0,40}\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune|make|do)\b/i,
+  // "no need to change", "no point making an update", "no reason to adjust".
+  /\bno\s+(?:need|point|reason)\b[^.?!\n]{0,40}\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune|make|do)\b/i,
+];
+
 export function looksLikeVagueEdit(message: string): boolean {
   const trimmed = message.trim();
   if (trimmed.length === 0) return false;
+  // Negations are rejected before positive matching: "Don't change
+  // anything" must not trigger the clarification ask.
+  for (const re of NEGATED_EDIT_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
   for (const re of VAGUE_EDIT_PATTERNS) {
     if (re.test(trimmed)) return true;
   }
