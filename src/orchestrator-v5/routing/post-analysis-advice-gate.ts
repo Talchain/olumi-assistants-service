@@ -48,6 +48,7 @@ import {
   summariseReadiness,
   type ReadinessSummary,
 } from './readiness-summary.js';
+import { MUTATION_SIGNAL_PATTERNS } from './analytical-intent.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
@@ -149,24 +150,13 @@ export interface AdviceGateUnmatched {
 export type AdviceGateResult = AdviceGateMatched | AdviceGateUnmatched;
 
 /**
- * Mutation-signal patterns. If ANY pattern fires, the gate yields control
+ * Mutation-signal patterns: if ANY pattern fires, the gate yields control
  * to normal routing (which validates and dispatches edit_graph for real
- * mutations). Patterns are written narrowly so coaching questions that
- * happen to use a mutation verb without a concrete target ("What should
- * we update based on this?") still pass through to the advice path.
- *
- * Unchanged from PR #173. Mutation-signal precedence is preserved across
- * the expanded class set — concrete edits MUST NOT be intercepted by
- * any of the new advice / readiness / meaning paths.
+ * mutations). The pattern array now lives in `./analytical-intent.ts` so
+ * sibling guards (stale-rerun, no-analysis, edit_graph no-op recovery)
+ * share the same negative gate. Behaviour is identical to PR #173 — the
+ * patterns themselves are unchanged.
  */
-const MUTATION_SIGNAL_PATTERNS: readonly RegExp[] = [
-  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\bto\s+\S+/i,
-  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\b\d+(?:\.\d+)?%?\b/i,
-  /\b(?:add|insert|create)\s+(?:a|an|new|another)\s+\S+/i,
-  /\b(?:remove|delete|drop)\s+(?:the|that|this|my|our)\s+\S+/i,
-  /\bfrom\s+\S+\s+to\s+\S+/i,
-  /^\s*(?:set|remove|delete|drop|add|create|insert)\b/im,
-];
 
 interface ClassPattern {
   readonly advice_class: AdviceClass;

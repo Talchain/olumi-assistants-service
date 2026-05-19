@@ -485,6 +485,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // PR #149 (cee-ws1-continuity-actions) — state-query guard + recent_changes pre-LLM.
         V5RecentChangesPreLlm: "v5.recent_changes.pre_llm",
         V5StateQueryGuard: "v5.state_query_guard",
+        // V5 Context Management v1 — readiness snapshot + sibling guards + no-op recovery.
+        V5ContextReadiness: "v5.context_readiness",
+        V5StaleRerunGuard: "v5.stale_rerun_guard",
+        V5NoAnalysisGuard: "v5.no_analysis_guard",
+        V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites.
         EditGraphNoOperations: "edit_graph.no_operations",
         StreamingGeneratorPreflightFailure: "streaming.generator_preflight_failure",
@@ -1096,6 +1101,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // PR #149 (cee-ws1-continuity-actions) — diagnostic-only events.
         TelemetryEvents.V5RecentChangesPreLlm,
         TelemetryEvents.V5StateQueryGuard,
+        // V5 Context Management v1 — readiness + sibling guards + no-op recovery.
+        TelemetryEvents.V5ContextReadiness,
+        TelemetryEvents.V5StaleRerunGuard,
+        TelemetryEvents.V5NoAnalysisGuard,
+        TelemetryEvents.V5EditGraphNoOpRecovery,
         // CI hygiene baseline (Tranche B) — pre-existing live emit() sites
         // registered to unblock telemetry validation. All diagnostic-only;
         // structured logs are the operational signal until Datadog mappings
@@ -1567,6 +1577,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // PR #149 (cee-ws1-continuity-actions) — state-query guard + recent_changes pre-LLM
         "v5.recent_changes.pre_llm",
         "v5.state_query_guard",
+        // V5 Context Management v1
+        "v5.context_readiness",
+        "v5.stale_rerun_guard",
+        "v5.no_analysis_guard",
+        "v5.edit_graph.no_op_recovery",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites
         "edit_graph.no_operations",
         "streaming.generator_preflight_failure",
