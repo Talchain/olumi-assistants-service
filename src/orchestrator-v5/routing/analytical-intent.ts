@@ -138,3 +138,37 @@ export function classifyAnalyticalIntent(
   }
   return null;
 }
+
+/**
+ * Positive vague-edit signal. True when the message is shaped like an
+ * edit request that lacks a specific target — typical phrasings: "Update
+ * something", "Change this", "Make a change", "Adjust the model",
+ * "Fix the model". The `hasMutationSignal` patterns above catch
+ * concrete edits with explicit targets/values; this predicate catches
+ * the abstract-target shape that warrants a clarification ask rather
+ * than the generic safe fallback.
+ *
+ * Must remain narrow: any general conversational message that does NOT
+ * match this predicate falls back to ambiguous (preserve existing copy).
+ */
+const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
+  // Imperative edit verb + abstract object: "Change something",
+  // "Update things", "Adjust this", "Modify the model", "Fix the graph".
+  /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|stuff|anything|this|that|it|the\s+(?:model|graph|decision|setup|analysis))\b/i,
+  // "Make/do a change/update/adjustment/edit".
+  /\b(?:make|do)\s+(?:a|an|some)\s+(?:change|changes|update|updates|adjustment|adjustments|edit|edits|tweak|tweaks)\b/i,
+  // Bare imperative edit verb at start of message: "Update the model
+  // please.", "Change this.", "Adjust." (very short imperative).
+  /^\s*(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\b[^.?!\n]{0,40}[.?!]?\s*$/i,
+  // "Can you change/update/adjust …" without a concrete factor/value.
+  /\bcan\s+you\s+(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|this|that|it|the\s+(?:model|graph|decision))\b/i,
+];
+
+export function looksLikeVagueEdit(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  for (const re of VAGUE_EDIT_PATTERNS) {
+    if (re.test(trimmed)) return true;
+  }
+  return false;
+}

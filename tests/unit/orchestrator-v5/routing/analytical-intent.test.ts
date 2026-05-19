@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyAnalyticalIntent,
   hasMutationSignal,
+  looksLikeVagueEdit,
 } from '../../../../src/orchestrator-v5/routing/analytical-intent.js';
 
 describe('classifyAnalyticalIntent', () => {
@@ -96,6 +97,55 @@ describe('classifyAnalyticalIntent', () => {
       classifyAnalyticalIntent('Should I rerun analysis before I explain the results?'),
     ).toBe('rerun_question');
   });
+});
+
+describe('looksLikeVagueEdit', () => {
+  const positives = [
+    'Update something.',
+    'Change something please.',
+    'Adjust this.',
+    'Modify the model.',
+    'Fix the graph.',
+    'Improve this.',
+    'Tweak something.',
+    'Make a change.',
+    'Make an adjustment.',
+    'Do an update.',
+    'Can you change something?',
+    'Can you adjust the model?',
+    'Update.',
+    'Adjust.',
+  ];
+  for (const msg of positives) {
+    it(`flags "${msg}" as vague edit`, () => {
+      expect(looksLikeVagueEdit(msg)).toBe(true);
+    });
+  }
+
+  const negatives = [
+    // Concrete edits — caught by hasMutationSignal, not vague-edit
+    'Set Pricing to 0.7.',
+    'Add a new risk for supply chain.',
+    'Remove the demand node.',
+    // Analytical questions
+    'Walk me through the analysis.',
+    'What drove this result?',
+    'What would flip this?',
+    // General conversation — must NOT be flagged as vague edit
+    'Hi.',
+    'OK, thanks.',
+    'That is interesting.',
+    'I see.',
+    'Something needs to change here.',
+    'Why is this happening?',
+    '',
+    '   ',
+  ];
+  for (const msg of negatives) {
+    it(`does not flag "${msg}" as vague edit`, () => {
+      expect(looksLikeVagueEdit(msg)).toBe(false);
+    });
+  }
 });
 
 describe('hasMutationSignal', () => {

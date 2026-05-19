@@ -62,6 +62,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import {
   classifyAnalyticalIntent,
   hasMutationSignal,
+  looksLikeVagueEdit,
 } from '../routing/analytical-intent.js';
 
 // v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
@@ -111,6 +112,14 @@ interface DecideNoOpRecoveryInput {
   readonly message: string;
   readonly priorFacts: readonly HandlerFact[];
   readonly freshness: 'fresh' | 'stale' | 'unknown' | 'none';
+  /**
+   * Whether the current graph is ready for analysis (has nodes and
+   * edges). Mirrors the predicate used by `tryNoAnalysisGuard` so the
+   * `analytical_none` branch only offers a `run_analysis` chip when
+   * clicking it would actually work. When false, the chip is
+   * suppressed and the copy nudges getting the model ready first.
+   */
+  readonly graphReady: boolean;
 }
 
 const NO_OP_FRESH_TEXT =
@@ -122,9 +131,13 @@ const NO_OP_STALE_TEXT =
   + "version of the graph. Re-run analysis and I'll walk you through "
   + 'the latest result.';
 
-const NO_OP_NONE_TEXT =
+const NO_OP_NONE_GRAPH_READY_TEXT =
   "I haven't changed the model. Run analysis first and I'll walk you "
   + 'through the result.';
+
+const NO_OP_NONE_GRAPH_NOT_READY_TEXT =
+  "I haven't changed the model. Once the model is ready, run analysis "
+  + "and I'll explain what drove the outcome.";
 
 const NO_OP_VAGUE_EDIT_TEXT =
   "I haven't changed the model yet. Tell me which factor or edge you "
@@ -178,12 +191,17 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
       };
     }
     if (!hasRunAnalysisFact) {
+      // Mirror `tryNoAnalysisGuard`'s graph-readiness gating: suppress
+      // the `run_analysis` chip when the graph is not ready (clicking
+      // it would fail), and use the matching copy variant.
       return {
         branch: 'analytical_none',
         intent_class: intentClass,
         has_run_analysis_fact: false,
-        assistantText: NO_OP_NONE_TEXT,
-        suggestedActions: [RUN_ANALYSIS_CHIP],
+        assistantText: input.graphReady
+          ? NO_OP_NONE_GRAPH_READY_TEXT
+          : NO_OP_NONE_GRAPH_NOT_READY_TEXT,
+        suggestedActions: input.graphReady ? [RUN_ANALYSIS_CHIP] : [],
       };
     }
     // analytical intent + (unknown freshness or has_run_analysis_fact
@@ -199,9 +217,9 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
     };
   }
 
-  if (intentClass === null && !mutationSignal) {
-    // Message has no analytical intent and no concrete mutation signal.
-    // Treat as a vague edit-like utterance and ask a calm clarification.
+  if (intentClass === null && !mutationSignal && looksLikeVagueEdit(input.message)) {
+    // Message carries a positive vague-edit signal (imperative edit
+    // verb with an abstract target). Ask a calm clarification.
     return {
       branch: 'vague_edit',
       intent_class: null,
@@ -948,20 +966,25 @@ export async function dispatchEditGraph(
       //   - Message is analytical AND a successful run_analysis fact
       //     exists → acknowledge no change + redirect to the analysis.
       //   - Message is analytical AND no run_analysis fact exists →
-      //     nudge the user to run analysis first.
-      //   - Message looks edit-like but vague (no analytical intent
-      //     and no concrete mutation signal) → ask a concise
+      //     nudge the user to run analysis first; chip is gated on
+      //     graph-readiness (matches tryNoAnalysisGuard).
+      //   - Message carries a positive vague-edit signal (imperative
+      //     edit verb with an abstract target) → ask a concise
       //     clarification instead of leaving bland fallback copy.
-      //   - Anything else → leave existing copy (still safer than
-      //     rewriting from too little signal).
+      //   - Anything else (including general conversational messages
+      //     with no edit signal) → leave existing copy. Safer than
+      //     rewriting from too little signal.
       //
       // Preserves existing response blocks, suggested actions, and
       // safe coaching payloads where present. Does not introduce
       // internal terms or claim a change happened.
+      const graphReadyForRecovery =
+        parsedGraph.nodes.length > 0 && parsedGraph.edges.length > 0;
       const recoveryOutcome = decideNoOpRecovery({
         message: payload.message,
         priorFacts: priorFactsForRecovery,
         freshness: freshness.freshness,
+        graphReady: graphReadyForRecovery,
       });
       emit(TelemetryEvents.V5EditGraphNoOpRecovery, {
         request_id: requestId,
