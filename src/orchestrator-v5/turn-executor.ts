@@ -2622,10 +2622,14 @@ export async function runTurnExecutor(
         //     non-factor candidate, multi-quantity skip, etc.)
         //   'ok'          — predicate ran and accepted the proposal
         //   <ProposalRejectionReason> — predicate rejected; the value
-        //     is the granular reason (non_finite, cap_non_positive,
-        //     bare_number_outside_cap, value_exceeds_cap,
-        //     delta_no_existing_value, delta_no_cap_and_no_unit,
-        //     missing_value).
+        //     is the granular reason. Current vocabulary (see
+        //     `d1-shared/evaluate-factor-value-proposal.ts`):
+        //       missing_value, invalid_operator, non_finite,
+        //       cap_non_positive, unit_mismatch,
+        //       bare_number_outside_cap, value_exceeds_cap,
+        //       delta_no_existing_value, delta_no_cap_and_no_unit.
+        //     Additions require a plan amendment AND a matching
+        //     update to the telemetry-enum-shape test allowed set.
         //
         // When precheck rejected, the proposal still synthesised
         // (validator catches it via the same predicate → recoverable
