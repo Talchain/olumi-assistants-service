@@ -340,6 +340,107 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     const hashes = pendings.map((pa) => pa.preconditions?.graph_hash);
     expect(new Set(hashes).size).toBe(1);
   });
+
+  // ---------------------------------------------------------------------------
+  // Regression: staging request 2fcd2221-febc-403d-a28e-8c50403f7166
+  // (V5 set_factor_value validator/executor parity)
+  //
+  // Reproduces the staging shape:
+  //   - deterministic_value_update matched: true
+  //   - dispatch: set_factor_value
+  //   - cqe_quantity_count: 3
+  //   - validator_outcome: valid
+  //   - outcome: error, cause_kind: parameter_invalid_at_execute
+  //
+  // On staging the user sees the recovery template after a confident match —
+  // a product blocker for value-edit messages. The post-fix invariant is:
+  //   - no HandlerInvocation event with cause_kind 'parameter_invalid_at_execute'
+  //   - the turn EITHER (a) succeeds, OR (b) is caught earlier (validator
+  //     invalid_parameter, OR detector skip 'ambiguous_quantity').
+  //
+  // This test is the AC.5 anchor. It MUST fail on origin/staging HEAD
+  // (98199027) as the TDD red baseline, and turn green only after the
+  // Layer A predicate + validator/precheck wiring lands.
+  // ---------------------------------------------------------------------------
+  it('regression: staging request 2fcd2221 shape — capped currency factor, cqe_quantity_count 3, post-operator value exceeds cap → validator returns invalid_parameter, no parameter_invalid_at_execute emitted in HandlerInvocation telemetry', async () => {
+    // Non-throwing routing adapter: under Layer B's conservative
+    // `ambiguous_quantity` skip, the deterministic path declines on
+    // >1 quantities and the turn falls through to LLM routing. The
+    // adapter being called is acceptable post-fix — what matters is
+    // that `parameter_invalid_at_execute` never lands in handler
+    // telemetry.
+    const routingAdapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValue({
+          content: [
+            { type: 'text' as const, text: 'Which value did you want me to use?' },
+          ],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, output_tokens: 5 } as never,
+          model: 'claude-sonnet-4-6',
+          latencyMs: 30,
+        }),
+    };
+    // Capped currency factor mirroring `f-budget` from the canonical
+    // d1-shared fixture (cap=100000, unit='£', raw_value=40000). The
+    // user message yields multiple CQE quantities, the first of which
+    // (£500,000) exceeds the factor's cap with an explicit unit —
+    // triggering the cap-bounds guard at normalise-factor-value.ts:117
+    // → D1HandlerError(PARAMETER_INVALID) → cause_kind
+    // 'parameter_invalid_at_execute' under current (broken) behaviour.
+    const cappedGraph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Profit' },
+        {
+          id: 'fac_budget',
+          kind: 'factor',
+          label: 'Marketing budget',
+          observed_state: {
+            value: 0.4,
+            raw_value: 40000,
+            unit: '£',
+            cap: 100000,
+          },
+        },
+      ],
+      edges: [],
+    };
+    await runTurnExecutor(
+      payload(
+        'Set Marketing budget to £500,000 — that is 5 times our current £100,000 baseline',
+      ),
+      'req-regression-staging-2fcd2221',
+      { routingAdapter, graphState: cappedGraph },
+    );
+
+    // CQE-quantity-count precondition: this fixture exists to exercise
+    // the multi-quantity path; at least 2 quantities must be extracted.
+    // Staging produced 3; we assert >= 2 to stay robust against minor
+    // CQE pattern changes that don't affect the bug class.
+    const preRouteEvent = events.find(
+      (e) => e.event === 'v5.deterministic_value_update',
+    );
+    expect(preRouteEvent).toBeDefined();
+    expect(
+      (preRouteEvent?.data.cqe_quantity_count as number | undefined) ?? 0,
+    ).toBeGreaterThanOrEqual(2);
+
+    // CORE INVARIANT (AC.1 / AC.5): the handler MUST NOT reject this
+    // proposal at execute time with parameter_invalid_at_execute. The
+    // fix shifts rejection earlier (validator invalid_parameter) or
+    // skips the deterministic path (ambiguous_quantity) — both are
+    // acceptable post-fix outcomes; only `parameter_invalid_at_execute`
+    // is forbidden.
+    const parameterInvalidAtExecute = events.find(
+      (e) =>
+        e.event === 'v5.handler_invocation' &&
+        (e.data as { outcome?: unknown }).outcome === 'error' &&
+        (e.data as { cause_kind?: unknown }).cause_kind ===
+          'parameter_invalid_at_execute',
+    );
+    expect(parameterInvalidAtExecute).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

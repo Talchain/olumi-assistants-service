@@ -102,6 +102,18 @@ export interface ValueUpdateCandidate {
   readonly label: string;
   readonly score: number;
   readonly source: CandidateSource;
+  /**
+   * 0-based character index in `message` where this candidate's label
+   * matched (substring matches only; Dice matches set this to null
+   * because Dice has no anchored match span). Used by the CQE
+   * quantity-attribution step to score proximity between the matched
+   * label and each extracted quantity's `raw_text` index.
+   *
+   * Null when the candidate came from Dice OR when the substring match
+   * is unanchored (defensive — should not happen in practice but the
+   * attribution logic treats null as "not attributable").
+   */
+  readonly labelMatchIndex: number | null;
 }
 
 export type ValueUpdateDispatch =
@@ -141,7 +153,24 @@ export type SkipReason =
   | 'no_quantity'
   | 'no_graph'
   | 'hypothetical_gate'
-  | 'no_candidate_match';
+  | 'no_candidate_match'
+  /**
+   * AC.2 — multiple non-null CQE quantities were extracted but
+   * attribution cannot resolve confidently to a unique quantity for
+   * the matched factor. The detector skips rather than guessing the
+   * "first non-null" quantity (which the staging 2fcd2221 bug class
+   * exposed as unsafe). Caller falls through to LLM routing, which
+   * produces a clarification chip.
+   */
+  | 'ambiguous_quantity';
+
+// (Earlier draft of this file declared a `QUANTITY_PROXIMITY_WINDOW`
+// constant for span-based attribution; that approach was abandoned at
+// implementation time because CQE's `raw_text` is post-normalised and
+// can't be located via `indexOf` reliably — see the inline comment
+// above the multi-quantity skip. The constant was removed; a future
+// Layer-B refinement that exposes stable CQE spans can reintroduce
+// proximity attribution.)
 
 /**
  * P0 V5 golden-path repair (Wave 2): UI-side selection context, narrowed
@@ -168,10 +197,20 @@ export function tryDeterministicValueUpdate(
   // F.6: code computes, LLM doesn't. CQE is the canonical numeric
   // extractor — if it found nothing, fall through to the LLM rather than
   // re-running a regex here.
-  const quantity = parsedQuantities.find((q) => q.value !== null);
-  if (!quantity) {
+  //
+  // We collect ALL non-null quantities (not just the first) because
+  // attribution to the matched factor (below, after candidates are
+  // resolved) needs the full set. Selection from this set happens via
+  // `selectAttributedQuantity` once we know the matched label's
+  // position. Until that step we hold a provisional `quantity` that
+  // covers the single-quantity case unchanged.
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length === 0) {
     return { matched: false, skip_reason: 'no_quantity' };
   }
+  // Provisional selection for the single-quantity case; replaced below
+  // when attribution runs over multiple quantities.
+  let quantity: QuantityExtractionResult = nonNullQuantities[0]!;
 
   if (graphLookup === undefined) {
     return { matched: false, skip_reason: 'no_graph' };
@@ -214,7 +253,19 @@ export function tryDeterministicValueUpdate(
     const normLabel = f.label.trim().toLowerCase();
     if (normLabel.length === 0) continue;
     if (normMessage.includes(normLabel)) {
-      substringMatches.push({ id: f.id, label: f.label, score: 1, source: 'substring' });
+      // Capture the lowercased-message index of the label match —
+      // used by the CQE quantity-attribution step (AC.2). The index
+      // corresponds 1:1 with the original-cased message index since
+      // `toLowerCase()` is character-preserving for the alphabets the
+      // detector targets.
+      const labelMatchIndex = normMessage.indexOf(normLabel);
+      substringMatches.push({
+        id: f.id,
+        label: f.label,
+        score: 1,
+        source: 'substring',
+        labelMatchIndex,
+      });
     } else {
       remaining.push(f);
     }
@@ -225,7 +276,16 @@ export function tryDeterministicValueUpdate(
     if (f.label == null) continue;
     const score = bigramDice(message, f.label);
     if (score >= DICE_FLOOR) {
-      diceMatches.push({ id: f.id, label: f.label, score, source: 'dice' });
+      // Dice matches have no anchored index — proximity attribution
+      // cannot use them and treats `labelMatchIndex: null` as
+      // "not attributable" (skips with `ambiguous_quantity`).
+      diceMatches.push({
+        id: f.id,
+        label: f.label,
+        score,
+        source: 'dice',
+        labelMatchIndex: null,
+      });
     }
   }
   diceMatches.sort((a, b) => b.score - a.score);
@@ -241,6 +301,30 @@ export function tryDeterministicValueUpdate(
     // been observed to misroute. A robust fix needs either a curated
     // synonym layer or LLM understanding — deferred.
     return { matched: false, skip_reason: 'no_candidate_match' };
+  }
+
+  // AC.2 — multi-quantity ambiguity guard. Plan-locked rule: silently
+  // applying the wrong quantity is worse than asking the user. The
+  // single-quantity case is unchanged (uses the provisional `quantity`
+  // from the gate above).
+  //
+  // Implementation note (workstream 2026-05-20 stop condition): CQE's
+  // `raw_text` is post-normalised (commas stripped from numerals, P12
+  // pattern captures the whole leading phrase, etc.) so proximity
+  // attribution by `indexOf(raw_text)` is unreliable in practice. We
+  // therefore take the conservative path the plan documents as the
+  // fallback: when >1 non-null quantity is extracted, return
+  // `ambiguous_quantity` and let normal LLM routing produce a
+  // clarification. Layer A.2 (validator parity) is the safety net for
+  // anything the LLM later proposes.
+  //
+  // Future Layer B refinement (out of scope here, pending plan
+  // amendment): expose stable per-quantity spans from CQE so
+  // proximity-based attribution can run. The `labelMatchIndex` field
+  // on `ValueUpdateCandidate` is added in this PR so the future
+  // refinement does not need a downstream contract change.
+  if (nonNullQuantities.length > 1) {
+    return { matched: false, skip_reason: 'ambiguous_quantity' };
   }
 
   // V5 D1 golden-path closure (A3.1): exactly ONE substring match (and
@@ -315,6 +399,7 @@ export type DeicticDispatch =
   | { readonly matched: false; readonly skip_reason: 'no_quantity' }
   | { readonly matched: false; readonly skip_reason: 'no_graph' }
   | { readonly matched: false; readonly skip_reason: 'hypothetical_gate' }
+  | { readonly matched: false; readonly skip_reason: 'ambiguous_quantity' }
   | {
       readonly matched: true;
       readonly dispatch: 'clarify_deictic';
@@ -360,10 +445,20 @@ export function tryDeicticValueUpdate(
       return { matched: false, skip_reason: 'hypothetical_gate' };
     }
   }
-  const quantity = parsedQuantities.find((q) => q.value !== null);
-  if (!quantity) {
+  // AC.2 — same conservative quantity policy as the main detector:
+  // when >1 non-null quantities are extracted, skip the deterministic
+  // deictic path with `ambiguous_quantity` rather than picking the
+  // first non-null. CQE `raw_text` is post-normalised so proximity
+  // attribution against the deictic phrase ("that factor") is
+  // unreliable; the LLM clarifies more safely.
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length === 0) {
     return { matched: false, skip_reason: 'no_quantity' };
   }
+  if (nonNullQuantities.length > 1) {
+    return { matched: false, skip_reason: 'ambiguous_quantity' };
+  }
+  const quantity = nonNullQuantities[0]!;
   if (graphLookup === undefined) {
     return { matched: false, skip_reason: 'no_graph' };
   }
@@ -398,10 +493,11 @@ export function tryDeicticValueUpdate(
   return {
     matched: true,
     dispatch: 'set_factor_value',
-    candidate: { id, label, score: 1, source: 'substring' },
+    candidate: { id, label, score: 1, source: 'substring', labelMatchIndex: null },
     quantity,
   };
 }
+
 
 /**
  * User-facing clarification copy for the deictic-but-ambiguous path.

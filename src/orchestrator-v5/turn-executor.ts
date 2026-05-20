@@ -77,6 +77,11 @@ import {
   mapCqeQuantityToProposalValue,
   deriveOperator,
 } from './routing/deterministic-value-update.js';
+import {
+  evaluateFactorValueProposal,
+  type FactorValueOperator,
+  type ProposalRejectionReason,
+} from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { tryShortConfirmResume } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
 import {
@@ -2375,7 +2380,14 @@ export async function runTurnExecutor(
       let downgradeReason:
         | 'non_factor_kind'
         | 'handler_not_executable'
+        | 'value_invalid_at_proposal'
         | null = null;
+      // Granular precheck rejection reason — populated when the
+      // pre-synthesis evaluator catches a cap/range/unit/delta problem
+      // before the proposal is even built. Feeds the V5DeterministicValueUpdate
+      // telemetry payload (Layer C) so dashboards can distinguish the
+      // specific rejection cause beyond `downgrade_reason`.
+      let precheckRejectionReason: ProposalRejectionReason | null = null;
       if (
         deterministicValueUpdate.matched &&
         deterministicValueUpdate.dispatch === 'set_factor_value'
@@ -2432,6 +2444,68 @@ export async function runTurnExecutor(
             deterministicValueUpdate.quantity,
           );
           const operator = deriveOperator(payload.message, deterministicValueUpdate.quantity);
+
+          // Pre-synthesis evaluator check (Layer A.3 of the parity
+          // workstream). The validator-side check (Layer A.2) is the
+          // canonical safety net, but running the predicate here too
+          // means a deterministic proposal that would fail at execute
+          // never gets synthesised in the first place. Two benefits:
+          //   (a) avoids creating a doomed RoutingToolCallResult only
+          //       to have the validator reject it three steps later;
+          //   (b) gives us granular telemetry (`precheck_rejection_reason`)
+          //       distinguishing detector-time rejection from
+          //       validator-time rejection.
+          // The check uses the same shared predicate as Layer A.2 and
+          // the handler, so divergence is structurally impossible
+          // (AC.1 parity invariant).
+          const observedState = (nodeKind ?? {}) as {
+            observed_state?: {
+              value?: unknown;
+              raw_value?: unknown;
+              unit?: unknown;
+              cap?: unknown;
+            };
+          };
+          const obs = observedState.observed_state;
+          const factorCap = typeof obs?.cap === 'number' ? obs.cap : undefined;
+          const factorUnit = typeof obs?.unit === 'string' ? obs.unit : undefined;
+          // Match `set-factor-value.ts` precedence: raw_value when
+          // present, then value, then undefined. The predicate's
+          // `delta_no_existing_value` guard then catches "neither
+          // present" for delta operators (AC.3).
+          const factorExistingRaw =
+            typeof obs?.raw_value === 'number'
+              ? obs.raw_value
+              : typeof obs?.value === 'number'
+                ? obs.value
+                : undefined;
+          const inputHasUnit = unit !== undefined && unit.length > 0;
+          const evaluation = evaluateFactorValueProposal({
+            rawInput: userUnitValue,
+            operator: operator as FactorValueOperator,
+            ...(unit !== undefined ? { unit } : {}),
+            ...(factorCap !== undefined ? { factorCap } : {}),
+            ...(factorUnit !== undefined ? { factorUnit } : {}),
+            ...(factorExistingRaw !== undefined ? { factorExistingRaw } : {}),
+            inputHasUnit,
+          });
+          if (!evaluation.ok) {
+            // Downgrade to clarify with the granular reason in
+            // telemetry. The user sees the canonical
+            // SET_FACTOR_VALUE_USER_GUIDANCE copy via the
+            // clarify-path composer — no new user-facing strings.
+            downgradeReason = 'value_invalid_at_proposal';
+            precheckRejectionReason = evaluation.reason;
+            deterministicValueUpdate = {
+              matched: true,
+              dispatch: 'clarify',
+              candidates: [candidate],
+              quantity: deterministicValueUpdate.quantity,
+            };
+            // Falls through to the existing clarify branch below
+            // (line ~2562) which composes the chip + commits the
+            // direct_answer turn. No further setup needed here.
+          } else {
           const proposal: ProposalAction = {
             handler_id: 'set_factor_value',
             entity: {
@@ -2481,6 +2555,7 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           // Skip the routeWithToolUse call below; control falls through
           // to STEP 2 (validate) → STEP 3 (execute) → STEP 7 (commit).
+          }
         } else {
           // Either the candidate is non-factor (outcome, risk,
           // decision, action — the kind gate per brief correction #3),
@@ -2531,6 +2606,31 @@ export async function runTurnExecutor(
           ? null
           : deterministicValueUpdate.skip_reason,
         cqe_quantity_count: contextPack.parsed_quantities.length,
+        // Layer C telemetry (AC.4) — enum-only fields tracking the
+        // pre-execute evaluator outcome. Locked vocab per plan
+        // "Locked telemetry enums" section.
+        //
+        // `execution_precheck_result`:
+        //   'not_checked' — predicate did not run (no match, no graph,
+        //     non-factor candidate, multi-quantity skip, etc.)
+        //   'ok'          — predicate ran and accepted the proposal
+        //   <ProposalRejectionReason> — predicate rejected; the value
+        //     is the granular reason (non_finite, cap_non_positive,
+        //     bare_number_outside_cap, value_exceeds_cap,
+        //     delta_no_existing_value, delta_no_cap_and_no_unit).
+        execution_precheck_result: precheckRejectionReason
+          ? precheckRejectionReason
+          : downgradeReason === 'value_invalid_at_proposal'
+            ? 'unknown' // defensive — should never land here
+            : deterministicValueUpdate.matched &&
+                deterministicValueUpdate.dispatch === 'set_factor_value'
+              ? 'ok'
+              : 'not_checked',
+        // `failure_reason`: ProposalRejectionReason | null — mirrors
+        // `execution_precheck_result` but drops the 'ok' / 'not_checked'
+        // sentinels so dashboards can filter "rejected proposals only"
+        // without an additional clause.
+        failure_reason: precheckRejectionReason,
       });
 
       // P0 V5 golden-path repair (Wave 2, Path B clarify) — deictic
