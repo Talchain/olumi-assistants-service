@@ -462,30 +462,16 @@ function detectSuspiciousLabelMatch(
 }
 
 /**
- * `set_factor_value` value precheck. Mirrors the handler's
- * `normaliseFactorValue` cap/range/unit guards via the shared
- * `evaluateFactorValueProposal` predicate, so a proposal that would be
- * rejected at execute time is rejected here with `PARAMETER_INVALID`
- * and routed through the existing recoverable-validator path.
- *
- * Returns null when the proposal passes (the validator continues to
- * the rest of the graph-dependent checks). Returns a ValidationError
- * when the predicate rejects.
- *
- * Caller has already established that `graph.findFactorObservedState`
- * exists and that the entity kind is `'node'`.
- */
-/**
  * Graph-independent structural checks for `set_factor_value` (review
  * feedback 2026-05-20, Blocking #2): missing or malformed `value`
  * parameter MUST be rejected regardless of whether a graph lookup is
  * available. Returns null when the proposal carries a parseable
- * `value` parameter; the graph-dependent precheck below then runs
- * the cap/unit/existing-value guards.
+ * `value` parameter and a known operator; the graph-dependent
+ * precheck below then runs the cap/unit/existing-value guards.
  *
  * Operator validity is also a structural concern — a stray operator
  * the predicate doesn't understand is a malformed proposal, not
- * something to silently coerce (review feedback NB #2).
+ * something to silently coerce (review feedback NB #2, NB #1).
  */
 function preexecuteSetFactorValueStructural(
   proposal: ProposalAction,
@@ -545,7 +531,11 @@ function preexecuteSetFactorValueStructural(
       message: 'set_factor_value operator must be set, increase, decrease, or multiply.',
       details: {
         parameter: 'value',
-        rejection_reason: 'missing_value',
+        // NB #1 (review 2026-05-20): distinct enum for operator-shape
+        // rejection so dashboards can distinguish "no value parameter"
+        // from "value parameter present but operator is invalid". The
+        // overloaded `missing_value` made the two indistinguishable.
+        rejection_reason: 'invalid_operator',
         issue: `unknown operator: ${String(rawOperator)}`,
         handler_id: 'set_factor_value',
       },
@@ -555,14 +545,28 @@ function preexecuteSetFactorValueStructural(
   return null;
 }
 
+/**
+ * Graph-dependent cap / unit / existing-value precheck for
+ * `set_factor_value`. Mirrors the handler's `normaliseFactorValue`
+ * via the shared `evaluateFactorValueProposal` predicate, so a
+ * proposal that would be rejected at execute time is rejected here
+ * with `PARAMETER_INVALID` and routed through the existing
+ * recoverable-validator path.
+ *
+ * Caller has already run `preexecuteSetFactorValueStructural` above
+ * AND established that `graph.findFactorObservedState` exists and
+ * that the entity kind is `'node'`. Defensive null returns inside
+ * this function are type-safety guards only — by construction the
+ * `value` param is present and parseable when we get here.
+ */
 function preexecuteSetFactorValue(
   proposal: ProposalAction,
   graph: GraphLookup,
 ): ValidationError | null {
   const valueParam = proposal.parameters.find((p) => p.name === 'value');
-  // Caller (validateToolCall) already ran the structural check above;
-  // valueParam and its shape are guaranteed here. Defensive guards
-  // for type safety only.
+  // Defensive — the structural precheck above guarantees the value
+  // parameter is present and parseable; these early-returns are for
+  // type narrowing only.
   if (!valueParam) return null;
   const parsed = parseValueParameter(valueParam.value);
   if (parsed === null) return null;

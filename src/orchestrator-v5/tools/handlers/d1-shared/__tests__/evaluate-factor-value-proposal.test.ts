@@ -101,6 +101,77 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
     if (!r.ok) expect(r.reason).toBe<ProposalRejectionReason>('value_exceeds_cap');
   });
 
+  // Blocking #1 (review round 3, 2026-05-20) — unit mismatch must
+  // reject BEFORE any cap/range check fires. The handler's old
+  // behaviour was to silently overwrite the factor's stored unit
+  // with the proposal's unit; the predicate now blocks that path
+  // upstream so a percent factor cannot become a currency factor.
+  describe('unit_mismatch', () => {
+    it('rejects when proposal carries £ but factor is %', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 50,
+        operator: 'set',
+        unit: '£',
+        factorUnit: '%',
+        factorCap: 100,
+        inputHasUnit: true,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe<ProposalRejectionReason>('unit_mismatch');
+    });
+
+    it('rejects when proposal carries % but factor is £', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 5,
+        operator: 'set',
+        unit: '%',
+        factorUnit: '£',
+        factorCap: 100000,
+        inputHasUnit: true,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe<ProposalRejectionReason>('unit_mismatch');
+    });
+
+    it('accepts when proposal carries a unit and factor has no stored unit', () => {
+      // No factorUnit recorded → the proposal's unit becomes the
+      // factor's unit on first write. This is acceptable historical
+      // behaviour; only mismatch between two defined units is unsafe.
+      const r = evaluateFactorValueProposal({
+        rawInput: 5,
+        operator: 'set',
+        unit: '%',
+        factorCap: 100,
+        inputHasUnit: true,
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('accepts when factor has a stored unit and proposal omits unit (bare number in range)', () => {
+      // Caller is asking to reuse the existing unit. Not a mismatch.
+      const r = evaluateFactorValueProposal({
+        rawInput: 50,
+        operator: 'set',
+        factorUnit: '%',
+        factorCap: 100,
+        inputHasUnit: false,
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    it('accepts when both units agree', () => {
+      const r = evaluateFactorValueProposal({
+        rawInput: 50,
+        operator: 'set',
+        unit: '%',
+        factorUnit: '%',
+        factorCap: 100,
+        inputHasUnit: true,
+      });
+      expect(r.ok).toBe(true);
+    });
+  });
+
   // AC.3 — DELTA GUARD ORDERING
   // The predicate MUST return `delta_no_existing_value` before
   // `applyFactorValueOperator` runs. We assert this by feeding inputs

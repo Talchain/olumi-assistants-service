@@ -192,6 +192,34 @@ const CASES: readonly PropertyCase[] = [
     operator: 'increase',
     expected: { kind: 'reject', reason: 'value_exceeds_cap' },
   },
+  // ---- unit_mismatch (Blocking #1 fix, 2026-05-20 round-3) ----
+  // Brief requirement: "If the unit is incompatible, ask a concise
+  // clarification." Pre-fix, the predicate computed effectiveUnit
+  // only for formatting and never rejected mismatches; the handler
+  // then persisted the proposal's unit over the factor's, so a
+  // percent factor could silently become a currency factor.
+  {
+    label: 'unit_mismatch — currency value on a percent factor',
+    entityId: 'f-churn', // cap=100, unit='%'
+    value: { value: 5000, unit: '£' },
+    operator: 'set',
+    expected: { kind: 'reject', reason: 'unit_mismatch' },
+  },
+  {
+    label: 'unit_mismatch — percent value on a currency factor',
+    entityId: 'f-budget', // cap=100000, unit='£'
+    value: { value: 50, unit: '%' },
+    operator: 'set',
+    expected: { kind: 'reject', reason: 'unit_mismatch' },
+  },
+  {
+    label: 'unit_mismatch — symmetric across operator (delta on mismatched units)',
+    entityId: 'f-budget', // cap=100000, unit='£'
+    value: { value: 10, unit: '%' },
+    operator: 'increase',
+    expected: { kind: 'reject', reason: 'unit_mismatch' },
+  },
+
   // ---- missing / malformed value parameter (Blocking #1 fix, 2026-05-20) ----
   // Review surfaced that a proposal with no `value` parameter slipped
   // through the precheck → handler threw `parameter_invalid_at_execute`.
@@ -261,6 +289,43 @@ describe('AC.1 — validator/executor parity property table', () => {
     // Handler MUST NOT be invoked — the test asserts the routing
     // outcome of the validator alone, since the validator-recoverable
     // path is what produces the user-visible chip.
+  });
+
+  it('proposal with unknown operator → validator rejects with invalid_operator (NB #1 round-3, 2026-05-20)', async () => {
+    // Previously the operator was silently coerced to 'set' if it
+    // wasn't a known FactorValueOperator. Now rejected as
+    // PARAMETER_INVALID with the distinct `invalid_operator` enum so
+    // dashboards can tell it apart from `missing_value`.
+    const proposalBadOperator: ProposalAction = {
+      handler_id: 'set_factor_value',
+      entity: {
+        id: 'f-budget',
+        kind: 'node',
+        resolution_status: 'resolved',
+        resolution_method: 'id_match',
+      },
+      parameters: [
+        {
+          name: 'value',
+          value: 20000,
+          // Bypass schema type — simulate a future caller that emits
+          // a stale operator name.
+          operator: 'noop' as unknown as 'set',
+          source: 'user_explicit',
+        },
+      ],
+      cited_context_fields: [],
+    };
+    const validation = validateToolCall(
+      proposalBadOperator,
+      graphLookup,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) {
+      expect(validation.error.code).toBe('PARAMETER_INVALID');
+      expect(validation.error.details?.rejection_reason).toBe('invalid_operator');
+    }
   });
 
   it('proposal with malformed value parameter (string) → validator rejects with missing_value (Blocking #1)', async () => {

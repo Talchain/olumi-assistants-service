@@ -52,8 +52,10 @@ export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
  */
 export type ProposalRejectionReason =
   | 'missing_value' // value parameter absent or wrong shape on the proposal
+  | 'invalid_operator' // operator is not in the FactorValueOperator union
   | 'non_finite' // rawInput is NaN / Infinity / -Infinity
   | 'cap_non_positive' // cap <= 0 (nonsensical)
+  | 'unit_mismatch' // proposal.unit and factor.unit both defined and differ
   | 'delta_no_existing_value' // operator !== 'set' AND factor has no finite raw_value
   | 'delta_no_cap_and_no_unit' // operator !== 'set' AND no cap AND no unit (ambiguous)
   | 'bare_number_outside_cap' // !inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
@@ -192,6 +194,26 @@ export function evaluateFactorValueProposal(
       ok: false,
       reason: 'cap_non_positive',
       specific_issue: `Cap must be positive (received ${cap}).`,
+    };
+  }
+
+  // 2b. unit_mismatch. When BOTH the proposal carries a unit AND the
+  //     factor has a stored unit, they must match. Otherwise the
+  //     handler would persist the proposal's unit over the existing
+  //     one — e.g. a `%` factor accepting a `£` value would silently
+  //     become a currency factor downstream. Brief: "If the unit is
+  //     incompatible, ask a concise clarification."
+  //
+  //     Strict string equality is sufficient: CQE's `mapCqeQuantityToProposalValue`
+  //     already canonicalises units (GBP→'£', percentage→'%', etc.) so
+  //     equivalent forms have already been normalised by the time the
+  //     proposal reaches this predicate. The factor's stored unit is
+  //     written by previous handler turns through the same mapping.
+  if (unit !== undefined && factorUnit !== undefined && unit !== factorUnit) {
+    return {
+      ok: false,
+      reason: 'unit_mismatch',
+      specific_issue: `This factor uses ${factorUnit}; the value provided is in ${unit}.`,
     };
   }
 

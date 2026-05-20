@@ -69,8 +69,10 @@ function noopRoutingAdapter() {
 // new value must be added here AND in the predicate's union.
 const PROPOSAL_REJECTION_REASONS = new Set<string>([
   'missing_value',
+  'invalid_operator',
   'non_finite',
   'cap_non_positive',
+  'unit_mismatch',
   'bare_number_outside_cap',
   'value_exceeds_cap',
   'delta_no_existing_value',

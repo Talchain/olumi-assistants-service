@@ -606,8 +606,14 @@ export function mapCqeQuantityToProposalValue(
       return { value: quantity.value, unit: undefined };
     default:
       // Best-effort passthrough for time / metric / colloquial units.
-      // The handler validates the unit string against the factor's
-      // stored unit; mismatches surface as PARAMETER_INVALID.
+      // The shared `evaluateFactorValueProposal` predicate (called by
+      // both validator and handler) rejects with
+      // `rejection_reason: 'unit_mismatch'` when this proposal unit
+      // differs from the factor's stored unit. Production-canonical
+      // units (`%`, `£`, `$`, `€`) are mapped explicitly above; this
+      // default path therefore only fires for unmapped CQE units,
+      // which the unit_mismatch guard will catch if the factor has a
+      // stored unit at all.
       return { value: quantity.value, unit: quantity.unit };
   }
 }
