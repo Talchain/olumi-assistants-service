@@ -364,6 +364,80 @@ describe('tryFreshAnalysisFollowupGuard', () => {
     if (result.matched) expect(result.intent_class).toBe('what_would_flip');
   });
 
+  // 11h1-11h3 — round-4 regressions: independent textual edits and
+  // `from X to Y` edits paired with what_would_flip. The round-3 helper
+  // only flagged numeric edits, add-a-new, remove-the, and bare
+  // imperatives — it missed independent verb+to<textual_target> and
+  // from-X-to-Y edits. `hasIndependentMutationSignal` now handles these
+  // via strip-then-recheck of flip-pattern spans.
+
+  it('11h1. "Change marketing channel to TikTok then what would need to change..." — textual edit wins', () => {
+    // "Change marketing channel to TikTok" is a real edit but has no
+    // numeric target, no add/remove/insert verb, and isn't at line
+    // start. The previous concrete-only helper would have missed it.
+    // After stripping the trailing "what would need to change" flip
+    // span, the verb-to-X pattern still fires on the leading edit
+    // clause → independent edit confirmed.
+    const result = tryFreshAnalysisFollowupGuard({
+      message:
+        'Change marketing channel to TikTok then what would need to change for another option to look better?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11h2. "Update strategy to premium then how could another option win?" — textual edit wins', () => {
+    // Another textual verb+to<X> edit. The "how could another option
+    // win" flip phrase contains no edit verbs, so after stripping it,
+    // "Update strategy to premium" still fires verb-to-X → independent.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Update strategy to premium then how could another option win?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11h3. "Change conversion from low to high then what would flip?" — from-X-to-Y edit wins', () => {
+    // `from X to Y` is an always-independent pattern (no flip pattern
+    // uses "from ... to ..."). Edit fires immediately without needing
+    // the strip-then-recheck path.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Change conversion from low to high then what would flip?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11h4. "Adjust the funnel to mobile-first then how could another option win?" — textual edit wins', () => {
+    // Belt-and-braces case: a textual edit using a different verb
+    // (`adjust`) with a multi-word target. Confirms the strip path
+    // works across all verbs in the verb-to-X mutation regex set.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Adjust the funnel to mobile-first then how could another option win?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11h5. Pure flip overlap WITHOUT independent edit — exception still applies', () => {
+    // Stripping the flip span must not over-fire. "What would need to
+    // change for another option to look better?" has `change ... to
+    // look better` triggering verb-to-X, but the entire match falls
+    // INSIDE the stripped "what would need to change" span (only the
+    // " ... to look better" tail remains, and it carries no edit verb).
+    // Exception applies → matches.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'What would need to change for another option to look better?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(true);
+    if (result.matched) expect(result.intent_class).toBe('what_would_flip');
+  });
+
   // 11h-11j — non-mutating multi-clause messages still match
   // -------------------------------------------------------
 

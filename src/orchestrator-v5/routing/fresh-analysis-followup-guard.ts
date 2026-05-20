@@ -23,7 +23,7 @@
  *   - `classifyAnalyticalIntent(message) !== null`
  *   - `hasMutationSignal(message) === false`
  *     **OR** (`classifyAnalyticalIntent(message) === 'what_would_flip'`
- *     **AND** `hasConcreteMutationSignal(message) === false`)
+ *     **AND** `hasIndependentMutationSignal(message) === false`)
  *     (narrow exception — see "Mutation-precedence" below)
  *
  * Mutation-precedence
@@ -38,23 +38,33 @@
  *      the mutation regex set; their mutation matches are always real
  *      edits.
  *
- *   2. The mutation signal must come ONLY from the flip overlap, not
- *      from an independent concrete-edit clause. `hasConcreteMutationSignal`
- *      detects the four unambiguous edit shapes (verb+number,
- *      add-a-new, remove-the, bare-imperative-at-line-start) that
- *      cannot be confused with analytical phrasing. If any of those
- *      fires, mutation wins regardless of the analytical class.
+ *   2. `hasIndependentMutationSignal(message)` must return false. The
+ *      helper returns true when the message carries an edit clause
+ *      that is NOT explained by flip-pattern overlap:
+ *        - any "always-independent" mutation pattern fires (verb+number,
+ *          add-a-new, remove-the, from-X-to-Y, bare-imperative); OR
+ *        - the verb-to-X mutation pattern still fires after stripping
+ *          every `what_would_flip` pattern span from the message —
+ *          proving a textual edit like "Change channel to TikTok"
+ *          exists outside the flip phrasing.
  *
  * Concretely:
  *
  *   "What would need to change for another option to look better?"
- *     → cls=what_would_flip, mutation=true (change...to look),
- *       concrete-mutation=false → exception applies, matches.
+ *     → cls=what_would_flip, mutation=true (`change ... to look`),
+ *       independent=false (the `verb...to X` match falls fully inside
+ *       the stripped flip span) → exception applies, matches.
  *
  *   "Set Pricing to 0.7 then what would need to change?"
- *     → cls=what_would_flip, mutation=true (Set...to 0.7),
- *       concrete-mutation=TRUE (verb+number) → mutation wins,
- *       rejects with `mutation_signal`.
+ *     → cls=what_would_flip, mutation=true,
+ *       independent=TRUE (verb+number "Set...0.7" is always-independent)
+ *       → mutation wins, rejects with `mutation_signal`.
+ *
+ *   "Change marketing channel to TikTok then what would need to change?"
+ *     → cls=what_would_flip, mutation=true (verb-to-X fires twice),
+ *       independent=TRUE (after stripping "what would need to change",
+ *       "Change marketing channel to TikTok" still fires verb-to-X) →
+ *       mutation wins.
  *
  * Matched response is a deterministic direct_answer that points the user
  * at the analysis surface and offers an existing chip. The chip carries
@@ -105,7 +115,7 @@
 
 import {
   classifyAnalyticalIntent,
-  hasConcreteMutationSignal,
+  hasIndependentMutationSignal,
   hasMutationSignal,
   type AnalyticalIntentClass,
 } from './analytical-intent.js';
@@ -223,22 +233,30 @@ export function tryFreshAnalysisFollowupGuard(
   if (
     mutation
     && cls === 'what_would_flip'
-    && hasConcreteMutationSignal(message)
+    && hasIndependentMutationSignal(message)
   ) {
-    // `what_would_flip` + mutation, but the mutation signal includes an
-    // INDEPENDENT concrete edit clause (verb+number, add-a-new,
-    // remove-the, or bare imperative). Examples that hit this branch:
+    // `what_would_flip` + mutation, but the mutation signal includes a
+    // clause that is INDEPENDENT of the flip phrasing. This covers:
     //
-    //   "Set Pricing to 0.7 then what would need to change for another
-    //    option to look better?"
-    //   "Increase budget to 200 then how could another option win?"
-    //   "Remove the demand factor, then what would flip the result?"
+    //   - unambiguous concrete edits regardless of position:
+    //       "Set Pricing to 0.7 then what would need to change..."
+    //       "Increase budget to 200 then how could another option win?"
+    //       "Remove the demand factor, then what would flip the result?"
+    //       "Add a new constraint then what would flip the outcome?"
+    //       "Change conversion from low to high then what would flip?"
+    //   - textual verb-to-X edits separate from the flip span:
+    //       "Change marketing channel to TikTok then what would
+    //        need to change for another option to look better?"
+    //       "Update strategy to premium then how could another option
+    //        win?"
     //
     // The narrow flip-overlap exception only applies when the mutation
-    // regex's match came from analytical phrasing itself
-    // (`change ... to look better`). When the message ALSO carries a
-    // separate concrete edit, that edit must reach the edit-graph
-    // dispatch path. Mutation wins.
+    // regex's match falls FULLY INSIDE a what_would_flip pattern span
+    // (e.g. "change ... to look better" inside the "what would need to
+    // change ... look better" pattern). `hasIndependentMutationSignal`
+    // strips flip pattern spans before re-checking the verb-to-X
+    // mutation pattern, so a separate edit clause survives the strip
+    // and forces mutation precedence.
     return { matched: false, reason: 'mutation_signal' };
   }
 

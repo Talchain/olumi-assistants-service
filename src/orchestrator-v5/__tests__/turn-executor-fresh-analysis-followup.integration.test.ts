@@ -442,4 +442,46 @@ describe('V5 fresh-analysis follow-up guard — turn-executor integration', () =
       "Here's the latest analysis recap.",
     );
   });
+
+  it('"Change marketing channel to TikTok then what would need to change..." (round-4 textual-edit case) → mutation wins, no recap', async () => {
+    // Round-4 review regression case. The round-3 helper only flagged
+    // concrete edits via numeric value, add-a-new, remove-the, or bare
+    // imperative — it missed independent textual verb-to-X edits like
+    // "Change marketing channel to TikTok". The round-4 fix replaces
+    // that helper with `hasIndependentMutationSignal`, which strips
+    // what_would_flip pattern spans and re-checks verb-to-X on the
+    // remainder. The leading edit clause survives the strip and proves
+    // an independent edit exists.
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn' as const,
+          usage: { input_tokens: 5, output_tokens: 5 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+    const result = await runTurnExecutor(
+      mkPayload(
+        'Change marketing channel to TikTok then what would need to change for another option to look better?',
+      ),
+      'req-fresh-followup-overlap-textual-edit',
+      { routingAdapter: adapter, graphState: READY_GRAPH as never },
+    );
+
+    const guardEvent = events.find(
+      (e) => e.event === 'v5.fresh_analysis_followup_guard',
+    );
+    if (guardEvent !== undefined) {
+      expect(guardEvent.data.matched).toBe(false);
+      expect(guardEvent.data.unmatched_reason).toBe('mutation_signal');
+      expect(guardEvent.data.selected_path).toBeNull();
+      expect(guardEvent.data.selected_action_type).toBeNull();
+    }
+    expect(result.response.assistant_text ?? '').not.toContain(
+      "Here's the latest analysis recap.",
+    );
+  });
 });
