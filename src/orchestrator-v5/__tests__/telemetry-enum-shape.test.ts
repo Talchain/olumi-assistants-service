@@ -68,6 +68,7 @@ function noopRoutingAdapter() {
 // `turn-executor.ts` V5DeterministicValueUpdate payload builder. Any
 // new value must be added here AND in the predicate's union.
 const PROPOSAL_REJECTION_REASONS = new Set<string>([
+  'missing_value',
   'non_finite',
   'cap_non_positive',
   'bare_number_outside_cap',
@@ -80,18 +81,12 @@ const EXECUTION_PRECHECK_RESULT_VALUES = new Set<string>([
   ...PROPOSAL_REJECTION_REASONS,
   'ok',
   'not_checked',
-  // Defensive sentinel used only when downgradeReason ===
-  // 'value_invalid_at_proposal' but precheckRejectionReason is null —
-  // should never appear in practice; declared here to avoid the test
-  // failing if it ever does.
-  'unknown',
 ]);
 
 const DOWNGRADE_REASONS = new Set<string | null>([
   null,
   'non_factor_kind',
   'handler_not_executable',
-  'value_invalid_at_proposal',
 ]);
 
 const SKIP_REASONS = new Set<string | null>([

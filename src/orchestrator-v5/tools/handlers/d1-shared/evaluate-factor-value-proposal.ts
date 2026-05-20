@@ -51,6 +51,7 @@ export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
  * structural → delta-guards → range-guards.
  */
 export type ProposalRejectionReason =
+  | 'missing_value' // value parameter absent or wrong shape on the proposal
   | 'non_finite' // rawInput is NaN / Infinity / -Infinity
   | 'cap_non_positive' // cap <= 0 (nonsensical)
   | 'delta_no_existing_value' // operator !== 'set' AND factor has no finite raw_value

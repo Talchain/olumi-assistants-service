@@ -103,17 +103,20 @@ export interface ValueUpdateCandidate {
   readonly score: number;
   readonly source: CandidateSource;
   /**
-   * 0-based character index in `message` where this candidate's label
-   * matched (substring matches only; Dice matches set this to null
-   * because Dice has no anchored match span). Used by the CQE
-   * quantity-attribution step to score proximity between the matched
-   * label and each extracted quantity's `raw_text` index.
+   * OPTIONAL 0-based character index in `message` where this
+   * candidate's label matched (substring matches only; Dice matches
+   * have no anchored match span). Reserved for a future CQE quantity-
+   * attribution step (Layer B proximity attribution, deferred per
+   * workstream stop condition — CQE `raw_text` is post-normalised and
+   * cannot be located reliably).
    *
-   * Null when the candidate came from Dice OR when the substring match
-   * is unanchored (defensive — should not happen in practice but the
-   * attribution logic treats null as "not attributable").
+   * Optional rather than required so existing test fixtures and any
+   * future caller that doesn't need attribution continue to compile;
+   * the production substring-match site DOES set it for forward-
+   * compatibility. Reviewer feedback (2026-05-20) flagged the
+   * required-version breaking 4 pre-existing test fixtures.
    */
-  readonly labelMatchIndex: number | null;
+  readonly labelMatchIndex?: number | null;
 }
 
 export type ValueUpdateDispatch =

@@ -192,6 +192,15 @@ const CASES: readonly PropertyCase[] = [
     operator: 'increase',
     expected: { kind: 'reject', reason: 'value_exceeds_cap' },
   },
+  // ---- missing / malformed value parameter (Blocking #1 fix, 2026-05-20) ----
+  // Review surfaced that a proposal with no `value` parameter slipped
+  // through the precheck → handler threw `parameter_invalid_at_execute`.
+  // The fix rejects at the validator with `missing_value` so the
+  // recoverable invalid_parameter path fires.
+  // NOTE: the table-driven case uses entity 'f-churn' with no value
+  // parameter at all. The validator's structural Zod check does not
+  // require the value parameter to be present (a proposal with empty
+  // parameters[] still parses); the precheck closes that gap.
   // NOTE: AC.3 ordering (delta_no_existing_value before applyOperator)
   // is exercised by the dedicated predicate unit tests at
   // `evaluate-factor-value-proposal.test.ts` — that file drives the
@@ -221,6 +230,75 @@ describe('AC.1 — validator/executor parity property table', () => {
     throw new Error('Test fixture failed to build a GraphLookup');
   }
   const graphLookup = buildResult.lookup;
+
+  // ---- Blocking #1 fix: missing-value proposal MUST be rejected by validator ----
+  it('proposal with no value parameter → validator rejects with missing_value (Blocking #1)', async () => {
+    // Construct a proposal that targets a valid factor but carries
+    // an empty parameters array. Pre-fix this slipped through the
+    // precheck (returned null = "no objection"), validator accepted,
+    // handler threw `parameter_invalid_at_execute` at runtime.
+    const proposalNoValue: ProposalAction = {
+      handler_id: 'set_factor_value',
+      entity: {
+        id: 'f-budget',
+        kind: 'node',
+        resolution_status: 'resolved',
+        resolution_method: 'id_match',
+      },
+      parameters: [], // empty — no value parameter at all
+      cited_context_fields: [],
+    };
+    const validation = validateToolCall(
+      proposalNoValue,
+      graphLookup,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) {
+      expect(validation.error.code).toBe('PARAMETER_INVALID');
+      expect(validation.error.details?.rejection_reason).toBe('missing_value');
+    }
+    // Handler MUST NOT be invoked — the test asserts the routing
+    // outcome of the validator alone, since the validator-recoverable
+    // path is what produces the user-visible chip.
+  });
+
+  it('proposal with malformed value parameter (string) → validator rejects with missing_value (Blocking #1)', async () => {
+    // The structural Zod schema gates the union shape, but defence-
+    // in-depth: if a future code path bypasses Zod (test or codegen),
+    // the precheck rejects malformed shapes too.
+    const proposalBadShape: ProposalAction = {
+      handler_id: 'set_factor_value',
+      entity: {
+        id: 'f-budget',
+        kind: 'node',
+        resolution_status: 'resolved',
+        resolution_method: 'id_match',
+      },
+      parameters: [
+        {
+          name: 'value',
+          // Wrong type — string. parseValueParameter returns null,
+          // precheck rejects.
+          value: 'twenty thousand' as unknown as number,
+          source: 'user_explicit',
+        },
+      ],
+      cited_context_fields: [],
+    };
+    const validation = validateToolCall(
+      proposalBadShape,
+      graphLookup,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) {
+      // The structural Zod schema may catch this first (also
+      // PARAMETER_INVALID), or the precheck does — either path
+      // surfaces PARAMETER_INVALID, which is the invariant.
+      expect(validation.error.code).toBe('PARAMETER_INVALID');
+    }
+  });
 
   for (const c of CASES) {
     it(`${c.label} — validator + predicate + handler agree`, async () => {

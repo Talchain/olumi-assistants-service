@@ -2380,7 +2380,6 @@ export async function runTurnExecutor(
       let downgradeReason:
         | 'non_factor_kind'
         | 'handler_not_executable'
-        | 'value_invalid_at_proposal'
         | null = null;
       // Granular precheck rejection reason — populated when the
       // pre-synthesis evaluator catches a cap/range/unit/delta problem
@@ -2490,22 +2489,29 @@ export async function runTurnExecutor(
             inputHasUnit,
           });
           if (!evaluation.ok) {
-            // Downgrade to clarify with the granular reason in
-            // telemetry. The user sees the canonical
-            // SET_FACTOR_VALUE_USER_GUIDANCE copy via the
-            // clarify-path composer — no new user-facing strings.
-            downgradeReason = 'value_invalid_at_proposal';
+            // Record the granular reason in telemetry, but do NOT
+            // downgrade to the clarify dispatch. The earlier draft
+            // of this code path downgraded here and the clarify
+            // branch persisted a pending `set_factor_value` action
+            // carrying the SAME invalid quantity — the user would
+            // get a chip whose later resumption would fail
+            // validation. Review feedback (2026-05-20, Blocking #2)
+            // flagged this as silently persisting an invalid
+            // pending action.
+            //
+            // Correct routing: synthesise the proposal normally;
+            // STEP 2 validation runs the SAME shared predicate
+            // (Layer A.2) and rejects with PARAMETER_INVALID via
+            // the existing recoverable-validator path, which
+            // produces the canonical SET_FACTOR_VALUE_USER_GUIDANCE
+            // chip WITHOUT persisting a pending action. Single
+            // source of truth — both gates call
+            // `evaluateFactorValueProposal`, so they cannot
+            // disagree.
             precheckRejectionReason = evaluation.reason;
-            deterministicValueUpdate = {
-              matched: true,
-              dispatch: 'clarify',
-              candidates: [candidate],
-              quantity: deterministicValueUpdate.quantity,
-            };
-            // Falls through to the existing clarify branch below
-            // (line ~2562) which composes the chip + commits the
-            // direct_answer turn. No further setup needed here.
-          } else {
+            // Fall through to the synthesis block below — the
+            // validator handles the rejection.
+          }
           const proposal: ProposalAction = {
             handler_id: 'set_factor_value',
             entity: {
@@ -2555,7 +2561,8 @@ export async function runTurnExecutor(
           stagesCompleted.push('orient');
           // Skip the routeWithToolUse call below; control falls through
           // to STEP 2 (validate) → STEP 3 (execute) → STEP 7 (commit).
-          }
+          // If precheck rejected above, STEP 2 returns PARAMETER_INVALID
+          // and the validator-recoverable path produces the chip.
         } else {
           // Either the candidate is non-factor (outcome, risk,
           // decision, action — the kind gate per brief correction #3),
@@ -2617,15 +2624,21 @@ export async function runTurnExecutor(
         //   <ProposalRejectionReason> — predicate rejected; the value
         //     is the granular reason (non_finite, cap_non_positive,
         //     bare_number_outside_cap, value_exceeds_cap,
-        //     delta_no_existing_value, delta_no_cap_and_no_unit).
+        //     delta_no_existing_value, delta_no_cap_and_no_unit,
+        //     missing_value).
+        //
+        // When precheck rejected, the proposal still synthesised
+        // (validator catches it via the same predicate → recoverable
+        // invalid_parameter path). `downgrade_reason` therefore
+        // stays null for value-invalid precheck rejections — it only
+        // fires for kind / registry guards. See review feedback
+        // 2026-05-20 (Blocking #2).
         execution_precheck_result: precheckRejectionReason
           ? precheckRejectionReason
-          : downgradeReason === 'value_invalid_at_proposal'
-            ? 'unknown' // defensive — should never land here
-            : deterministicValueUpdate.matched &&
-                deterministicValueUpdate.dispatch === 'set_factor_value'
-              ? 'ok'
-              : 'not_checked',
+          : deterministicValueUpdate.matched &&
+              deterministicValueUpdate.dispatch === 'set_factor_value'
+            ? 'ok'
+            : 'not_checked',
         // `failure_reason`: ProposalRejectionReason | null — mirrors
         // `execution_precheck_result` but drops the 'ok' / 'not_checked'
         // sentinels so dashboards can filter "rejected proposals only"

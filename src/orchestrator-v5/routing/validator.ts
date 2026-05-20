@@ -470,12 +470,58 @@ function preexecuteSetFactorValue(
   graph: GraphLookup,
 ): ValidationError | null {
   const valueParam = proposal.parameters.find((p) => p.name === 'value');
-  if (!valueParam) return null;
+  if (!valueParam) {
+    // Review feedback (2026-05-20, Blocking #1): a proposal with no
+    // `value` parameter previously slipped through here (returning
+    // null = "no objection") and was caught by the handler with
+    // `parameter_invalid_at_execute` — the same staging bug class
+    // this PR fixes. Reject at the validator instead so the
+    // recoverable invalid_parameter path fires.
+    return {
+      code: 'PARAMETER_INVALID',
+      message: 'set_factor_value requires a "value" parameter.',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        issue: 'value parameter is missing',
+        handler_id: 'set_factor_value',
+      },
+    };
+  }
 
   const parsed = parseValueParameter(valueParam.value);
-  if (parsed === null) return null;
+  if (parsed === null) {
+    // Same class as missing: the `value` parameter is present but
+    // its shape is neither `number` nor `{ value: number, ... }`.
+    // The structural Zod schema on `value` should already gate this,
+    // but defence-in-depth — reject explicitly via the same
+    // `missing_value` enum so dashboards see the cause.
+    return {
+      code: 'PARAMETER_INVALID',
+      message: 'set_factor_value value parameter has an unsupported shape.',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        issue: 'value parameter shape is not number or { value, unit?, cap? }',
+        handler_id: 'set_factor_value',
+        actual_value: valueParam.value,
+      },
+    };
+  }
 
-  const operator = (valueParam.operator ?? 'set') as FactorValueOperator;
+  // NB 3 — runtime operator guard. The wire `ProposalParameterSchema`
+  // already constrains `operator` to the FactorValueOperator union,
+  // but a direct validator caller (test or future codegen) could
+  // pass an unknown value; default unknown / missing operators to
+  // 'set' rather than casting and silently breaking the predicate.
+  const rawOperator = valueParam.operator;
+  const operator: FactorValueOperator =
+    rawOperator === 'set' ||
+    rawOperator === 'increase' ||
+    rawOperator === 'decrease' ||
+    rawOperator === 'multiply'
+      ? rawOperator
+      : 'set';
 
   // `findFactorObservedState` is defined per the caller's guard, but
   // narrow defensively in case the adapter widening drifts.
