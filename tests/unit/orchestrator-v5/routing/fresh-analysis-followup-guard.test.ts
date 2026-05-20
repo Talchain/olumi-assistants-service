@@ -198,11 +198,81 @@ describe('tryFreshAnalysisFollowupGuard', () => {
   // or block a real analytical follow-up.
   // ------------------------------------------------------------------------
 
-  it('11a. "What would need to change to bring cost down to £30k?" — analytical wins (what_would_flip)', () => {
-    // "change ... to £30k" looks like a mutation signal, but "what would
-    // need to change" is a textbook what_would_flip phrase. Documented
-    // precedence: when classifyAnalyticalIntent matches, that wins over
-    // the broader mutation regex.
+  // 11a-11d — concrete-edit-clause + matching-analytical-phrase
+  // -----------------------------------------------------------
+  // These are the cases the reviewer flagged as regressions in round-1.
+  // Each message has BOTH a hard mutation pattern AND a classifyAnalyticalIntent
+  // pattern that does match (i.e. they would have been intercepted by the
+  // previous analytical-first ordering). Mutation must win for every
+  // class EXCEPT `what_would_flip`. The reasons reported here pin the
+  // narrow exception's scope.
+
+  it('11a. "Set Pricing to 0.7 then explain the results" — mutation wins over explain class', () => {
+    // classifyAnalyticalIntent matches "explain the results" → 'explain'.
+    // hasMutationSignal matches "Set Pricing to 0.7" → true.
+    // Outcome: mutation wins (only what_would_flip gets the exception).
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Set Pricing to 0.7 then explain the results.',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11b. "Remove the demand factor and explain the analysis" — mutation wins over explain class', () => {
+    // classifyAnalyticalIntent matches "explain the analysis" → 'explain'.
+    // hasMutationSignal matches "Remove the demand factor" → true.
+    // Mutation must reach the edit path.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Remove the demand factor and explain the analysis.',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11c. "Add a new constraint then explain the results" — mutation wins over explain class', () => {
+    // classifyAnalyticalIntent matches "explain the results" → 'explain'.
+    // hasMutationSignal matches "Add a new constraint" → true.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Add a new constraint then explain the results.',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11d. "Increase budget to 200 then walk me through the analysis" — mutation wins over explain', () => {
+    // classifyAnalyticalIntent matches "walk me through" → 'explain'.
+    // hasMutationSignal matches "Increase budget to 200" → true.
+    // The "explain" class never gets the exception.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Increase budget to 200 then walk me through the analysis.',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11e. "Set Pricing to 0.7 then walk me through what drove this" — mutation wins over what_drove', () => {
+    // classifyAnalyticalIntent matches "walk me through" → 'explain'
+    // (the explain pattern wins precedence over what_drove inside the
+    // classifier). Either way, no exception → mutation wins.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Set Pricing to 0.7 then walk me through what drove this.',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  // 11f-11g — narrow what_would_flip exception is preserved
+  // ------------------------------------------------------
+
+  it('11f. "What would need to change to bring cost down to £30k?" — what_would_flip exception applies', () => {
+    // "change ... to £30k" matches the mutation regex, but the analytical
+    // class is `what_would_flip`. Narrow exception: this is genuine
+    // sensitivity phrasing, not an edit. Guard matches.
     const result = tryFreshAnalysisFollowupGuard({
       message: 'What would need to change to bring cost down to £30k?',
       readiness: makeReadiness(),
@@ -214,52 +284,27 @@ describe('tryFreshAnalysisFollowupGuard', () => {
     }
   });
 
-  it('11b. "Set Pricing to 0.7 then explain why" — concrete edit wins (mutation_signal)', () => {
-    // The bare verb "explain" followed by "why" does NOT match any
-    // analytical-intent class (the explain patterns require object phrases
-    // like "explain the results / this"). The mutation regex DOES match
-    // "Set Pricing to 0.7". Guard must reject → mutation_signal, preserving
-    // the edit-graph dispatch path.
+  it('11g. "How could another option win after changing to a different mix?" — what_would_flip exception applies', () => {
+    // `what_would_flip` pattern "how could another option win" matches.
+    // The mutation regex also matches "changing to a different mix" via
+    // `change ... to <X>`. Exception keeps the analytical handling.
     const result = tryFreshAnalysisFollowupGuard({
-      message: 'Set Pricing to 0.7 then explain why.',
+      message: 'How could another option win after changing to a different mix?',
       readiness: makeReadiness(),
     });
-    expect(result.matched).toBe(false);
-    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.intent_class).toBe('what_would_flip');
+    }
   });
 
-  it('11c. "Add a new constraint for budget" — concrete add wins (mutation_signal)', () => {
-    // Bare imperative "add a new <noun>" is in MUTATION_SIGNAL_PATTERNS.
-    // No analytical classifier pattern matches. Guard rejects with
-    // mutation_signal — edit_graph dispatch path is preserved.
-    const result = tryFreshAnalysisFollowupGuard({
-      message: 'Add a new constraint for budget.',
-      readiness: makeReadiness(),
-    });
-    expect(result.matched).toBe(false);
-    if (!result.matched) expect(result.reason).toBe('mutation_signal');
-  });
+  // 11h-11j — non-mutating multi-clause messages still match
+  // -------------------------------------------------------
 
-  it('11d. "Remove the demand factor and explain the impact" — concrete remove wins', () => {
-    // The mutation patterns include "remove the <noun>". The trailing
-    // "explain the impact" doesn't match the analytical explain class
-    // (which requires "the results / analysis / outcomes / findings").
-    // Reason: mutation_signal.
-    const result = tryFreshAnalysisFollowupGuard({
-      message: 'Remove the demand factor and explain the impact.',
-      readiness: makeReadiness(),
-    });
-    expect(result.matched).toBe(false);
-    if (!result.matched) expect(result.reason).toBe('mutation_signal');
-  });
-
-  it('11e. "Why is option A ahead, and should I change the budget?" — analytical wins (what_drove)', () => {
-    // The "why is X ahead" pattern (added in this PR) matches → analytical
-    // wins under the documented precedence rule. The trailing "change the
-    // budget" clause does not carry a concrete value, so even if mutation
-    // were checked first, no pattern would fire. Pins the rule that a
-    // multi-clause message with an analytical lead routes to the chip
-    // path rather than dropping to LLM routing.
+  it('11h. "Why is option A ahead, and should I change the budget?" — analytical wins (no mutation signal)', () => {
+    // "change the budget" has NO concrete value, so the mutation regex
+    // (requiring "to <X>" or a number) does not match. The "why is X
+    // ahead" pattern fires → what_drove. Guard matches.
     const result = tryFreshAnalysisFollowupGuard({
       message: 'Why is option A ahead, and should I change the budget?',
       readiness: makeReadiness(),
@@ -269,6 +314,27 @@ describe('tryFreshAnalysisFollowupGuard', () => {
       expect(result.intent_class).toBe('what_drove');
       expect(result.selected_action_type).toBe('explain_results');
     }
+  });
+
+  it('11i. "Walk me through the analysis and tell me what to focus on" — analytical, no mutation', () => {
+    // No concrete edit verbs at all. classifyAnalyticalIntent matches
+    // "walk me through" → explain.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Walk me through the analysis and tell me what to focus on.',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(true);
+    if (result.matched) expect(result.intent_class).toBe('explain');
+  });
+
+  it('11j. "Add a new constraint" — pure mutation, no analytical signal → mutation_signal', () => {
+    // Regression guard for the no-analytical-signal arm of the predicate.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Add a new constraint for budget.',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
   });
 
   it('chips are read-only / frozen — mutation does not affect future calls', () => {

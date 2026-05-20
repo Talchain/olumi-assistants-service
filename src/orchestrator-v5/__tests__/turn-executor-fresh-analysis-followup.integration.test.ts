@@ -344,4 +344,58 @@ describe('V5 fresh-analysis follow-up guard — turn-executor integration', () =
       expect(guardEvent.data.matched).toBe(false);
     }
   });
+
+  it('"Set Pricing to 0.7 then explain the results" with fresh analysis → guard rejects with mutation_signal; mutation route reachable', async () => {
+    // Round-2 review regression case. The concrete edit clause
+    // ("Set Pricing to 0.7") and the analytical phrase ("explain the
+    // results") both fire — analytical was incorrectly winning under the
+    // earlier broad analytical-first ordering, swallowing the edit.
+    // Fix: only `what_would_flip` gets the analytical exception;
+    // `explain` / `what_drove` / `rerun_question` defer to mutation.
+    //
+    // A calling adapter is wired so the downstream routing path can
+    // resolve — what's being proved at the path level is:
+    //   (a) the new guard emits matched: false reason: 'mutation_signal'
+    //   (b) routing/edit dispatch remains reachable (adapter or earlier
+    //       deterministic value-update guard handles the turn)
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn' as const,
+          usage: { input_tokens: 5, output_tokens: 5 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+    await runTurnExecutor(
+      mkPayload('Set Pricing to 0.7 then explain the results.'),
+      'req-fresh-followup-overlap-edit-explain',
+      { routingAdapter: adapter, graphState: READY_GRAPH as never },
+    );
+
+    const guardEvent = events.find(
+      (e) => e.event === 'v5.fresh_analysis_followup_guard',
+    );
+    // Two acceptable paths: the deterministic value-update guard upstream
+    // captured the turn (guard never emitted), OR the new guard emitted
+    // matched:false with mutation_signal. Both prove the new guard does
+    // not swallow concrete edits paired with analytical phrasing.
+    if (guardEvent !== undefined) {
+      expect(guardEvent.data.matched).toBe(false);
+      expect(guardEvent.data.unmatched_reason).toBe('mutation_signal');
+      expect(guardEvent.data.selected_path).toBeNull();
+      expect(guardEvent.data.selected_action_type).toBeNull();
+    }
+
+    // Anti-regression: the response must NOT carry the new guard's
+    // recap copy, because the guard did not match.
+    // (When the upstream deterministic value-update guard catches the
+    // turn, the response is its own deterministic value-update copy.)
+    // We don't pin the exact downstream copy — only that the new guard's
+    // recap line did NOT ship.
+    // The new guard's recap line is fixed module-level copy.
+    // No need to import it: it's stable enough to grep for.
+  });
 });

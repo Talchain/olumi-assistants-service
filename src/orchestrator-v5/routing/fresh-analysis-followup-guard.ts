@@ -22,6 +22,28 @@
  *   - `readiness.has_run_analysis_fact === true`
  *   - `classifyAnalyticalIntent(message) !== null`
  *   - `hasMutationSignal(message) === false`
+ *     **OR** `classifyAnalyticalIntent(message) === 'what_would_flip'`
+ *     (narrow exception — see "Mutation-precedence" below)
+ *
+ * Mutation-precedence
+ * -------------------
+ * Concrete edits MUST reach the edit-graph dispatch path. The guard
+ * therefore rejects with `reason: 'mutation_signal'` whenever
+ * `hasMutationSignal(message)` is true — with ONE explicit, narrow
+ * exception for `what_would_flip`:
+ *
+ *   `what_would_flip` patterns include `"what would need to change"` and
+ *   `"how could another option win"`. The mutation regex's
+ *   `change ... to <X>` pattern fires on phrasings like "what would
+ *   need to change for another option to look better?" — that's a
+ *   genuine sensitivity question, not an edit. So when the analytical
+ *   class is `what_would_flip`, the mutation regex is treated as a
+ *   false positive and the guard matches.
+ *
+ * For every OTHER analytical class (`explain` / `what_drove` /
+ * `rerun_question`) the mutation regex matching is taken at face value
+ * and the guard rejects, preserving edit dispatch for messages like
+ * "Set Pricing to 0.7 then explain the results".
  *
  * Matched response is a deterministic direct_answer that points the user
  * at the analysis surface and offers an existing chip. The chip carries
@@ -164,30 +186,27 @@ export function tryFreshAnalysisFollowupGuard(
     return { matched: false, reason: 'empty_message' };
   }
 
-  // Analytical-intent classification runs BEFORE the mutation-signal check.
-  // The 23 `classifyAnalyticalIntent` patterns are deliberately specific
-  // (e.g. `what would need to change`, `how could another option win`), so a
-  // positive classification is a stronger signal than the broader
-  // mutation-signal regex set, which exists to catch concrete edit phrasings.
-  //
-  // Why this ordering is safe: sibling guards (`tryStaleRerunGuard`,
-  // `tryNoAnalysisGuard`) check mutation FIRST because they fire on
-  // non-fresh states where falsely intercepting an edit is worse than
-  // missing an analytical follow-up. On the fresh path the trade-off
-  // inverts — the user just received a result and is overwhelmingly more
-  // likely to be asking ABOUT it. A message like "What would need to
-  // change for another option to look better?" classifies as
-  // `what_would_flip` and would otherwise trip the
-  // `\bchange\b...\bto\s+\S+` mutation pattern even though it is plainly
-  // a sensitivity question.
+  // Classify analytical intent first so we can apply the narrow
+  // `what_would_flip` exception. For every OTHER class, mutation wins
+  // outright — concrete edits must reach edit_graph dispatch.
   const cls = classifyAnalyticalIntent(message);
+  const mutation = hasMutationSignal(message);
+
   if (cls === null) {
-    // No analytical signal — fall through to mutation classification so
-    // edit phrasings carry the right reason for telemetry.
-    if (hasMutationSignal(message)) {
-      return { matched: false, reason: 'mutation_signal' };
-    }
+    // No analytical signal — mutation classification drives the reason.
+    if (mutation) return { matched: false, reason: 'mutation_signal' };
     return { matched: false, reason: 'no_analytical_signal' };
+  }
+
+  if (mutation && cls !== 'what_would_flip') {
+    // Concrete edit phrasing (e.g. "Set Pricing to 0.7 then explain the
+    // results") with `explain` / `what_drove` / `rerun_question`
+    // classification: mutation wins so the message reaches the edit
+    // path. Only `what_would_flip` keeps the analytical-first exception
+    // because its patterns ("what would need to change", "how could
+    // another option win") genuinely overlap with the mutation regex's
+    // `change ... to <X>` shape.
+    return { matched: false, reason: 'mutation_signal' };
   }
 
   const selected = selectActionType(cls);
