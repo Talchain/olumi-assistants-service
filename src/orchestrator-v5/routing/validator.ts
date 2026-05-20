@@ -45,6 +45,10 @@
 import { z } from 'zod';
 
 import { describeSchema } from '../compose/helpers.js';
+import {
+  evaluateFactorValueProposal,
+  type FactorValueOperator,
+} from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { EntityKind, ProposalAction, ProposalEntity, ProposalParameter } from './types.js';
 
 // Dice coefficient delta above which the closer-match is flagged as
@@ -61,6 +65,25 @@ export const SUSPICIOUS_DICE_THRESHOLD = 0.15 as const;
  * from the concrete graph representation (GraphV3T, ContextPack, etc.). A
  * thin adapter in D6 wraps whichever shape TurnExecutor has at hand.
  */
+/**
+ * Snapshot of a factor's `observed_state` fields the validator's value
+ * precheck needs. All fields optional — a factor may carry any subset
+ * depending on whether the user has set a value yet. `null` from
+ * `findFactorObservedState` means "no factor at that id" (caller should
+ * have already established factor-kind via `findEntityById`, but the
+ * null path is a defensive return for non-factor ids).
+ *
+ * The validator only reads these four fields — keeping the surface
+ * narrow so the adapter doesn't have to project the full ObservedStateV3
+ * shape into the lookup.
+ */
+export interface FactorObservedStateSnapshot {
+  readonly value?: number;
+  readonly raw_value?: number;
+  readonly unit?: string;
+  readonly cap?: number;
+}
+
 export interface GraphLookup {
   /** Find a node by id — any kind. Returns null when absent. */
   findEntityById(id: string): { id: string; kind: EntityKind; label: string | null } | null;
@@ -70,6 +93,24 @@ export interface GraphLookup {
    * because ids leak into user-visible failure chips otherwise.
    */
   listEntitiesByKind(kind: EntityKind): ReadonlyArray<{ id: string; label: string | null }>;
+  /**
+   * Optional — return the factor's stored observed_state fields (cap,
+   * unit, value, raw_value). Used by `set_factor_value` validator
+   * precheck so a proposal whose value would be rejected at execute
+   * time by `normaliseFactorValue`'s cap/range guards is rejected
+   * earlier with `PARAMETER_INVALID`, routing into the existing
+   * recoverable path.
+   *
+   * Optional because not every GraphLookup adapter implements it
+   * (older test mocks, simple synthetic graphs). When absent, the
+   * validator skips the value precheck and relies on the handler-side
+   * guard — same behaviour as before this widening. The production
+   * `buildGraphLookup` adapter does implement it.
+   *
+   * Returns null when the id does not resolve to a factor node or when
+   * the factor has no `observed_state` block at all.
+   */
+  findFactorObservedState?(id: string): FactorObservedStateSnapshot | null;
 }
 
 // -----------------------------------------------------------------------
@@ -325,6 +366,38 @@ export function validateToolCall(
     }
   }
 
+  // set_factor_value value-precheck (Layer A.2 of the validator/executor
+  // parity workstream): structural Zod is shape-only and has no access
+  // to the factor's stored cap/unit. Run the shared
+  // `evaluateFactorValueProposal` predicate here — the same predicate
+  // `normaliseFactorValue` runs at execute time — so a proposal that
+  // would be rejected by the handler with `parameter_invalid_at_execute`
+  // is rejected earlier with PARAMETER_INVALID, routing through the
+  // existing recoverable path with the canonical user guidance copy.
+  //
+  // The precheck runs in TWO phases (review feedback 2026-05-20,
+  // Blocking #2):
+  //
+  //   (a) Graph-INDEPENDENT structural rejection — missing or
+  //       malformed `value` parameter. This runs ALWAYS for
+  //       `set_factor_value` regardless of whether a graph lookup is
+  //       wired in, so a caller with no graph (test, future codegen)
+  //       cannot let a malformed proposal through to the handler.
+  //
+  //   (b) Graph-DEPENDENT range / unit / delta / existing-value
+  //       checks. These need observed_state, so they only run when
+  //       both `graph` and `findFactorObservedState` are available.
+  //       Test mocks that don't expose observed_state still
+  //       benefit from (a); they just skip the cap/unit checks.
+  if (proposal.handler_id === 'set_factor_value' && proposal.entity.kind === 'node') {
+    const structuralResult = preexecuteSetFactorValueStructural(proposal);
+    if (structuralResult) return { valid: false, error: structuralResult };
+    if (graph && typeof graph.findFactorObservedState === 'function') {
+      const precheckResult = preexecuteSetFactorValue(proposal, graph);
+      if (precheckResult) return { valid: false, error: precheckResult };
+    }
+  }
+
   // PRECONDITION_UNMET — preconditions take graph as input, so they only
   // run when graph is available. Handlers whose preconditions don't need
   // graph are still safe (the function ignores the unused arg).
@@ -385,5 +458,194 @@ function detectSuspiciousLabelMatch(
     };
   }
 
+  return null;
+}
+
+/**
+ * Graph-independent structural checks for `set_factor_value` (review
+ * feedback 2026-05-20, Blocking #2): missing or malformed `value`
+ * parameter MUST be rejected regardless of whether a graph lookup is
+ * available. Returns null when the proposal carries a parseable
+ * `value` parameter and a known operator; the graph-dependent
+ * precheck below then runs the cap/unit/existing-value guards.
+ *
+ * Operator validity is also a structural concern — a stray operator
+ * the predicate doesn't understand is a malformed proposal, not
+ * something to silently coerce (review feedback NB #2, NB #1).
+ */
+function preexecuteSetFactorValueStructural(
+  proposal: ProposalAction,
+): ValidationError | null {
+  const valueParam = proposal.parameters.find((p) => p.name === 'value');
+  if (!valueParam) {
+    // A proposal with no `value` parameter previously slipped through
+    // (returned null = "no objection" inside an optional-graph gate)
+    // and was caught by the handler with `parameter_invalid_at_execute`
+    // — the same staging bug class this PR fixes. Reject at the
+    // validator so the recoverable invalid_parameter path fires.
+    return {
+      code: 'PARAMETER_INVALID',
+      message: 'set_factor_value requires a "value" parameter.',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        issue: 'value parameter is missing',
+        handler_id: 'set_factor_value',
+      },
+    };
+  }
+
+  const parsed = parseValueParameter(valueParam.value);
+  if (parsed === null) {
+    // Same class as missing: the `value` parameter is present but
+    // its shape is neither `number` nor `{ value: number, ... }`.
+    return {
+      code: 'PARAMETER_INVALID',
+      message: 'set_factor_value value parameter has an unsupported shape.',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        issue: 'value parameter shape is not number or { value, unit?, cap? }',
+        handler_id: 'set_factor_value',
+        actual_value: valueParam.value,
+      },
+    };
+  }
+
+  // NB #2 — operator validity. The wire `ProposalParameterSchema`
+  // constrains `operator` to the FactorValueOperator union, but a
+  // direct validator caller (test or future codegen) could pass an
+  // unknown value. Reject as PARAMETER_INVALID rather than coerce —
+  // coercion would silently change the user's intent (review feedback
+  // NB #2).
+  const rawOperator = valueParam.operator;
+  if (
+    rawOperator !== undefined &&
+    rawOperator !== 'set' &&
+    rawOperator !== 'increase' &&
+    rawOperator !== 'decrease' &&
+    rawOperator !== 'multiply'
+  ) {
+    return {
+      code: 'PARAMETER_INVALID',
+      message: 'set_factor_value operator must be set, increase, decrease, or multiply.',
+      details: {
+        parameter: 'value',
+        // NB #1 (review 2026-05-20): distinct enum for operator-shape
+        // rejection so dashboards can distinguish "no value parameter"
+        // from "value parameter present but operator is invalid". The
+        // overloaded `missing_value` made the two indistinguishable.
+        rejection_reason: 'invalid_operator',
+        issue: `unknown operator: ${String(rawOperator)}`,
+        handler_id: 'set_factor_value',
+      },
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Graph-dependent cap / unit / existing-value precheck for
+ * `set_factor_value`. Mirrors the handler's `normaliseFactorValue`
+ * via the shared `evaluateFactorValueProposal` predicate, so a
+ * proposal that would be rejected at execute time is rejected here
+ * with `PARAMETER_INVALID` and routed through the existing
+ * recoverable-validator path.
+ *
+ * Caller has already run `preexecuteSetFactorValueStructural` above
+ * AND established that `graph.findFactorObservedState` exists and
+ * that the entity kind is `'node'`. Defensive null returns inside
+ * this function are type-safety guards only — by construction the
+ * `value` param is present and parseable when we get here.
+ */
+function preexecuteSetFactorValue(
+  proposal: ProposalAction,
+  graph: GraphLookup,
+): ValidationError | null {
+  const valueParam = proposal.parameters.find((p) => p.name === 'value');
+  // Defensive — the structural precheck above guarantees the value
+  // parameter is present and parseable; these early-returns are for
+  // type narrowing only.
+  if (!valueParam) return null;
+  const parsed = parseValueParameter(valueParam.value);
+  if (parsed === null) return null;
+
+  const rawOperator = valueParam.operator;
+  const operator: FactorValueOperator =
+    rawOperator === 'set' ||
+    rawOperator === 'increase' ||
+    rawOperator === 'decrease' ||
+    rawOperator === 'multiply'
+      ? rawOperator
+      : 'set';
+
+  // `findFactorObservedState` is defined per the caller's guard, but
+  // narrow defensively in case the adapter widening drifts.
+  const obs = graph.findFactorObservedState
+    ? graph.findFactorObservedState(proposal.entity.id)
+    : null;
+
+  const evaluation = evaluateFactorValueProposal({
+    rawInput: parsed.numeric,
+    operator,
+    ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
+    ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
+    ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
+    ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
+    ...(obs?.raw_value !== undefined
+      ? { factorExistingRaw: obs.raw_value }
+      : obs?.value !== undefined
+        ? { factorExistingRaw: obs.value }
+        : {}),
+    inputHasUnit: parsed.inputHasUnit,
+  });
+
+  if (evaluation.ok) return null;
+
+  return {
+    code: 'PARAMETER_INVALID',
+    message: evaluation.specific_issue,
+    details: {
+      parameter: 'value',
+      rejection_reason: evaluation.reason,
+      issue: evaluation.specific_issue,
+      handler_id: 'set_factor_value',
+    },
+  };
+}
+
+interface ParsedValueParameter {
+  readonly numeric: number;
+  readonly unit?: string;
+  readonly cap?: number;
+  readonly inputHasUnit: boolean;
+}
+
+/**
+ * Mirror of `parseProposalValue` in set-factor-value.ts. Kept narrow —
+ * the validator returns null on unparseable values rather than throwing,
+ * because the structural Zod schema check earlier in the validator
+ * already gated the union shape. A defensive null here means "structural
+ * pass + nothing for precheck to evaluate"; the handler will surface
+ * any genuine shape mismatch at execute time via its own
+ * `parseProposalValue`.
+ */
+function parseValueParameter(raw: unknown): ParsedValueParameter | null {
+  if (typeof raw === 'number') {
+    return { numeric: raw, inputHasUnit: false };
+  }
+  if (raw && typeof raw === 'object') {
+    const obj = raw as { value?: unknown; unit?: unknown; cap?: unknown };
+    if (typeof obj.value !== 'number') return null;
+    const unit = typeof obj.unit === 'string' ? obj.unit : undefined;
+    const cap = typeof obj.cap === 'number' ? obj.cap : undefined;
+    return {
+      numeric: obj.value,
+      ...(unit !== undefined ? { unit } : {}),
+      ...(cap !== undefined ? { cap } : {}),
+      inputHasUnit: unit !== undefined && unit.length > 0,
+    };
+  }
   return null;
 }

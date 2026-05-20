@@ -26,7 +26,7 @@
 
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import type { EntityKind } from './types.js';
-import type { GraphLookup } from './validator.js';
+import type { FactorObservedStateSnapshot, GraphLookup } from './validator.js';
 
 /**
  * Adapter-extended GraphLookup. Carries the raw options array from the UI
@@ -149,6 +149,13 @@ export function buildGraphLookup(
 
   const byId = new Map<string, { id: string; kind: EntityKind; label: string | null }>();
   const byKind = new Map<EntityKind, Array<{ id: string; label: string | null }>>();
+  // Factor-only side index for the validator's `set_factor_value`
+  // value precheck (Layer A.2 of the validator/executor parity
+  // workstream). Captured once during the node-mapping pass so the
+  // adapter does not have to re-scan the raw nodes on each lookup.
+  // Bounded surface: only the four fields the shared
+  // `evaluateFactorValueProposal` predicate reads.
+  const factorObservedById = new Map<string, FactorObservedStateSnapshot>();
 
   let droppedByMissingId = 0;
   let droppedByUnknownKind = 0;
@@ -181,6 +188,34 @@ export function buildGraphLookup(
     // `node.id` in as the label, which leaked id-shaped tokens into chips.
     kindList.push({ id: node.id, label });
     byKind.set(mappedKind, kindList);
+
+    // Extract factor observed_state once during the node loop. The
+    // ingress NodeContentSchema is `.passthrough()` so `observed_state`
+    // arrives untyped; narrow it field-by-field. Only factor-kind nodes
+    // contribute (per V3 schema convention — outcomes/risks/decisions
+    // don't carry observed_state with cap/raw_value).
+    if (node.kind === 'factor') {
+      const obs = (node as { observed_state?: unknown }).observed_state;
+      if (obs && typeof obs === 'object' && !Array.isArray(obs)) {
+        const o = obs as {
+          value?: unknown;
+          raw_value?: unknown;
+          unit?: unknown;
+          cap?: unknown;
+        };
+        const snapshot: FactorObservedStateSnapshot = {
+          ...(typeof o.value === 'number' ? { value: o.value } : {}),
+          ...(typeof o.raw_value === 'number' ? { raw_value: o.raw_value } : {}),
+          ...(typeof o.unit === 'string' ? { unit: o.unit } : {}),
+          ...(typeof o.cap === 'number' ? { cap: o.cap } : {}),
+        };
+        // Only index when at least one relevant field survived narrowing;
+        // an empty snapshot tells the validator precheck nothing.
+        if (Object.keys(snapshot).length > 0) {
+          factorObservedById.set(node.id, snapshot);
+        }
+      }
+    }
   }
 
   const stats: GraphLookupStats = {
@@ -221,6 +256,9 @@ export function buildGraphLookup(
     },
     listEntitiesByKind(kind: EntityKind) {
       return byKind.get(kind) ?? [];
+    },
+    findFactorObservedState(id: string) {
+      return factorObservedById.get(id) ?? null;
     },
     options: optionsList,
   };

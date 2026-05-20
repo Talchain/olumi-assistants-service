@@ -37,6 +37,7 @@ import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-v
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
+import { applyFactorValueOperator } from './d1-shared/evaluate-factor-value-proposal.js';
 import { formatFactorChange } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
@@ -133,23 +134,11 @@ function parseProposalValue(raw: unknown): ParsedValue {
   );
 }
 
-function applyOperator(
-  current: number,
-  operator: 'set' | 'increase' | 'decrease' | 'multiply' | undefined,
-  rhs: number,
-): number {
-  switch (operator) {
-    case undefined:
-    case 'set':
-      return rhs;
-    case 'increase':
-      return current + rhs;
-    case 'decrease':
-      return current - rhs;
-    case 'multiply':
-      return current * rhs;
-  }
-}
+// (Local `applyOperator` removed — single source of truth lives in
+// `d1-shared/evaluate-factor-value-proposal.ts` as
+// `applyFactorValueOperator`, imported above. This handler and the
+// shared predicate now compute identical effectiveRaw values by
+// construction, closing the review feedback NB #1.)
 
 interface ObservedSnapshot {
   readonly value?: number;
@@ -267,7 +256,7 @@ export function createSetFactorValueHandler(): HandlerFn {
           ? before.value
           : 0;
 
-    const newRaw = applyOperator(currentRaw, operator, parsed.numeric);
+    const newRaw = applyFactorValueOperator(currentRaw, operator, parsed.numeric);
 
     const normalised = normaliseFactorValue({
       rawInput: newRaw,

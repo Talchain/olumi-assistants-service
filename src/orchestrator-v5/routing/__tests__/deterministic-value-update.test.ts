@@ -108,6 +108,14 @@ describe('tryDeterministicValueUpdate — detection rules', () => {
     );
     expect(result.matched).toBe(true);
     if (!result.matched) return;
+    // Narrow on dispatch — a matched result can be either `clarify`
+    // (plural `candidates`) or `set_factor_value` (singular
+    // `candidate`). Dice-only matches are clarify by design (A3.1
+    // limits set_factor_value to single substring matches), so
+    // asserting the dispatch first both type-narrows and pins the
+    // brief contract.
+    expect(result.dispatch).toBe('clarify');
+    if (result.dispatch !== 'clarify') return;
     expect(result.candidates[0].id).toBe('fac_eng');
     expect(result.candidates[0].score).toBeGreaterThanOrEqual(0.4);
     expect(result.candidates[0].score).toBeLessThan(1);
@@ -541,6 +549,137 @@ describe('tryDeicticValueUpdate — Path B: deictic + selection', () => {
       expect(text).not.toMatch(/\bzod\b/i);
       expect(text).not.toMatch(/\bedit_graph\b/i);
       expect(text).not.toMatch(/\bnormalised\b/i);
+    }
+  });
+});
+
+// ===========================================================================
+// AC.2 — Conservative `ambiguous_quantity` skip on multi-quantity messages.
+//
+// Replaces deferred Tasks #10/#15 (proximity attribution). The plan-locked
+// behaviour: when CQE extracts >1 non-null quantity, the deterministic path
+// skips with `skip_reason: 'ambiguous_quantity'` rather than picking the
+// first non-null. No first-non-null fallback survives anywhere.
+// ===========================================================================
+
+describe('tryDeterministicValueUpdate — AC.2 conservative multi-quantity skip', () => {
+  it('multi-quantity message with one matched factor → skip_reason ambiguous_quantity (no first-non-null fallback)', () => {
+    const parsed: QuantityExtractionResult[] = [
+      quantity(500000, '£500,000'),
+      quantity(5, '5'),
+      quantity(100000, '£100,000'),
+    ];
+    const result = tryDeterministicValueUpdate(
+      'Set Hiring and Staffing Cost to £500,000 — 5x our £100,000 baseline',
+      parsed,
+      TWO_COSTS,
+    );
+    expect(result.matched).toBe(false);
+    if (!result.matched) {
+      expect(result.skip_reason).toBe('ambiguous_quantity');
+    }
+  });
+
+  it('multi-quantity message with TWO matched factors → still ambiguous_quantity (clarify path also forbidden from first-non-null)', () => {
+    // The clarify dispatch path would have used `parsedQuantities.find(...)`
+    // before the fix. AC.2 requires no first-non-null on ANY chip/pending-
+    // action-emitting path, so this case also skips.
+    const parsed: QuantityExtractionResult[] = [
+      quantity(50, '50'),
+      quantity(100, '100'),
+    ];
+    const result = tryDeterministicValueUpdate(
+      'Set Hiring and Staffing Cost and Marketing Cost to 50 and 100',
+      parsed,
+      TWO_COSTS,
+    );
+    expect(result.matched).toBe(false);
+    if (!result.matched) {
+      expect(result.skip_reason).toBe('ambiguous_quantity');
+    }
+  });
+
+  it('single non-null quantity → unchanged set_factor_value dispatch (regression guard)', () => {
+    // Single-quantity path must NOT be disturbed by the multi-quantity guard.
+    const result = tryDeterministicValueUpdate(
+      'Set Hiring and Staffing Cost to £300k',
+      PARSED_300K,
+      makeGraph([{ id: 'fac_hire', label: 'Hiring and Staffing Cost' }]),
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.dispatch).toBe('set_factor_value');
+      if (result.dispatch === 'set_factor_value') {
+        expect(result.quantity.value).toBe(300000);
+      }
+    }
+  });
+
+  it('single non-null + one null quantity → unchanged dispatch (null quantities are ignored, not counted toward ambiguity)', () => {
+    const parsed: QuantityExtractionResult[] = [
+      quantity(300000, '£300k'),
+      // A pattern that returned a result but with `value: null` (e.g. CQE
+      // saw "the budget" without a numeric anchor) — must not count.
+      {
+        raw_text: 'the budget',
+        value: null,
+        unit: null,
+        direction: null,
+        multiplier: null,
+        operator: null,
+        comparator: null,
+        range_min: null,
+        range_max: null,
+        approximate: false,
+        source: 'cqe',
+      },
+    ];
+    const result = tryDeterministicValueUpdate(
+      'Set Hiring and Staffing Cost to £300k for the budget',
+      parsed,
+      makeGraph([{ id: 'fac_hire', label: 'Hiring and Staffing Cost' }]),
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.dispatch).toBe('set_factor_value');
+    }
+  });
+});
+
+describe('tryDeicticValueUpdate — AC.2 conservative multi-quantity skip', () => {
+  it('multi-quantity on the deictic path → skip_reason ambiguous_quantity', () => {
+    // The deictic path used to apply the same first-non-null
+    // selection as the main detector. AC.2 forbids that pattern on
+    // any chip/pending-action-emitting path; deictic must skip with
+    // ambiguous_quantity too.
+    const parsed: QuantityExtractionResult[] = [
+      quantity(30000, '£30k'),
+      quantity(5, '5'),
+    ];
+    const result = tryDeicticValueUpdate(
+      'Set that factor to £30k — that is 5 times the baseline',
+      parsed,
+      makeGraph([{ id: 'fac_a', label: 'Factor A' }]),
+      ['fac_a'],
+      () => 'Factor A',
+    );
+    expect(result.matched).toBe(false);
+    if (!result.matched) {
+      expect(result.skip_reason).toBe('ambiguous_quantity');
+    }
+  });
+
+  it('single quantity on the deictic path → unchanged dispatch', () => {
+    const result = tryDeicticValueUpdate(
+      'Set that factor to £30k',
+      [quantity(30000, '£30k')],
+      makeGraph([{ id: 'fac_a', label: 'Factor A' }]),
+      ['fac_a'],
+      () => 'Factor A',
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.dispatch).toBe('set_factor_value');
     }
   });
 });

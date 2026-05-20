@@ -347,12 +347,17 @@ describe('set_factor_value — Wave 2 receipt: staleness narrative + redaction',
   it('redaction: receipt copy contains no internal terms (raw IDs, schema language, normalised values)', async () => {
     const handler = createSetFactorValueHandler();
     const graph = buildD1Fixture();
+    // Use the £-stored factor for a £-typed proposal — the original
+    // test set a £ value on the % factor `f-churn` which is now
+    // correctly rejected by the unit_mismatch predicate (review 2026-05-20
+    // Blocking #1). The intent here is redaction, not unit mismatch;
+    // `f-budget` (cap=£100k, unit=£) preserves both invariants.
     const outcome = await handler(
       buildInvocationWithPriorAnalysis(
         graph,
         makeProposal({
-          entityId: 'f-churn',
-          value: { value: 30000, unit: '£', cap: 1000000 },
+          entityId: 'f-budget',
+          value: { value: 30000, unit: '£', cap: 100000 },
           operator: 'set',
         }),
         { successful: true },
@@ -364,7 +369,7 @@ describe('set_factor_value — Wave 2 receipt: staleness narrative + redaction',
     expect(text).not.toMatch(/0\.\d{2,}/); // no 0.03 or similar
     // Forbidden internal vocabulary.
     for (const pat of [
-      /\bf-churn\b/,
+      /\bf-budget\b/,
       /\bnoop\b/i,
       /\bzod\b/i,
       /\bnormalised\b/i,

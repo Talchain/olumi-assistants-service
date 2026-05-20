@@ -515,7 +515,13 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
               resolution_status: 'resolved',
               resolution_method: 'id_match',
             },
-            parameters: [],
+            // Provide a valid `value` parameter so the validator's
+            // set_factor_value structural precheck (review feedback
+            // 2026-05-20, Blocking #2) accepts the proposal — the
+            // test's purpose is to exercise the EXECUTE-step
+            // handler_not_registered miss, not the missing-value
+            // structural rejection.
+            parameters: [{ name: 'value', value: 0.5, source: 'user_explicit' }],
             cited_context_fields: [],
           },
         }),

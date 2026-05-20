@@ -14,10 +14,20 @@
  *   - value is the model-unit number written into observed_state.value.
  *     When `cap` is defined, value = raw_value / cap (clamped to [0, cap]).
  *     When `cap` is absent, value = raw_value.
+ *
+ * The cap / range / unit guards are NOT defined inline here any more —
+ * they live in `evaluateFactorValueProposal` (the single source of
+ * truth, called from the validator and pre-synthesis sites too). This
+ * function delegates to that predicate and converts a non-ok result
+ * into the `D1HandlerError(PARAMETER_INVALID)` the handler contract
+ * already throws. See workstream plan: AC.1 parity invariant.
  */
 
 import { D1HandlerError } from './errors.js';
-import { formatValueWithUnit } from './format-confirmation.js';
+import {
+  evaluateFactorValueProposal,
+  type ProposalRejectionReason,
+} from './evaluate-factor-value-proposal.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './user-guidance.js';
 
 export interface NormaliseInput {
@@ -49,44 +59,62 @@ export interface NormaliseResult {
 
 /**
  * Normalise a factor value. Throws `D1HandlerError(PARAMETER_INVALID)` when
- * the input is ambiguous or out-of-range.
+ * the input would fail the shared `evaluateFactorValueProposal` predicate
+ * (cap / range / unit / non-finite guards) — the same predicate the
+ * validator and the deterministic-synthesis precheck call.
  *
- * Ambiguity rule: when the input is a bare number with no unit, the factor
- * has a cap, and the value could plausibly be either user-units (e.g.
- * "5", meaning 5%) or model-units (0.05) — i.e. the input falls outside
- * [0, 1] but the factor is capped at 1 — refuse rather than guess.
+ * By the time this function runs the handler has already applied the
+ * operator (see set-factor-value.ts:`applyOperator` → `newRaw` →
+ * `normaliseFactorValue({rawInput: newRaw, ...})`), so we pass
+ * `operator: 'set'` to the predicate; delta-specific guards
+ * (`delta_no_existing_value`, `delta_no_cap_and_no_unit`) fire upstream
+ * at the validator / precheck so they can produce a clarification
+ * BEFORE the handler runs at all.
  */
 export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
-  const { rawInput, unit, proposalCap, factorCap, factorUnit, inputHasUnit } = input;
+  const { rawInput, unit, proposalCap, factorCap, factorUnit, inputHasUnit } =
+    input;
 
-  if (!Number.isFinite(rawInput)) {
-    throw new D1HandlerError('PARAMETER_INVALID', 'Value must be a finite number.', {
-      details: { value: rawInput },
+  // Delegate to the shared predicate. By construction this exercises
+  // the same guards the validator + pre-synthesis paths run, so a
+  // proposal accepted by both upstream gates cannot fail here on
+  // parameter grounds (AC.1 parity invariant).
+  const evaluation = evaluateFactorValueProposal({
+    rawInput,
+    // The handler has already applied the operator into `rawInput` —
+    // pass `'set'` so the predicate treats `rawInput` as the final
+    // effectiveRaw without recomputing operator math.
+    operator: 'set',
+    ...(unit !== undefined ? { unit } : {}),
+    ...(proposalCap !== undefined ? { proposalCap } : {}),
+    ...(factorCap !== undefined ? { factorCap } : {}),
+    ...(factorUnit !== undefined ? { factorUnit } : {}),
+    inputHasUnit,
+  });
+
+  if (!evaluation.ok) {
+    // Surface the same wire shape the handler has thrown historically —
+    // `D1HandlerError(PARAMETER_INVALID)` mapped to `cause_kind:
+    // 'parameter_invalid_at_execute'`. The granular predicate reason
+    // lands in the structured `details` for telemetry triage; the user
+    // sees the canonical `SET_FACTOR_VALUE_USER_GUIDANCE` recovery
+    // template via the existing recoverable-handler-response path.
+    throw new D1HandlerError('PARAMETER_INVALID', evaluation.specific_issue, {
+      details: {
+        rawInput,
+        cap: proposalCap ?? factorCap ?? null,
+        unit: unit ?? factorUnit ?? null,
+        rejection_reason: evaluation.reason satisfies ProposalRejectionReason,
+      },
       userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
     });
   }
 
-  const cap = proposalCap ?? factorCap;
-  const effectiveUnit = unit ?? factorUnit;
+  // Past this point the predicate has guaranteed: rawInput is finite,
+  // cap (when supplied) is positive, and the value sits in the
+  // factor's expected range. Normalisation math is straightforward.
 
-  // Ambiguity guard: bare number, capped factor, value lies outside [0, cap].
-  // E.g. cap=1 (0-1 ratio) with rawInput=5 — could be "5%" or genuinely
-  // out-of-range. Better to clarify than silently mis-scale.
-  if (!inputHasUnit && cap !== undefined && (rawInput < 0 || rawInput > cap)) {
-    throw new D1HandlerError(
-      'PARAMETER_INVALID',
-      `Value ${rawInput} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
-      {
-        details: { rawInput, cap, unit: effectiveUnit ?? null },
-        // P1.2 follow-up — replaced unit-clarification guidance with the
-        // canonical handler-level phrase. The "specify the unit" hint
-        // mentioned engine vocabulary ("normalised") that should not
-        // reach the user; the canonical phrase keeps the recovery
-        // message product-voice and unit-agnostic.
-        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
-      },
-    );
-  }
+  const cap = proposalCap ?? factorCap;
 
   // No cap → store raw_value as-is in both fields. Useful for absolute
   // values like counts or unbounded scales.
@@ -94,53 +122,25 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     return { raw_value: rawInput, value: rawInput };
   }
 
-  // Capped factor: model value = raw / cap, clamped to [0, 1] when cap > 0.
-  // Negative caps are nonsensical; reject them.
-  if (cap <= 0) {
-    throw new D1HandlerError(
-      'PARAMETER_INVALID',
-      `Cap must be positive (received ${cap}).`,
-      { details: { cap }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE },
-    );
-  }
-
-  // V5 D1 (P1-5 follow-up): when a unit IS supplied and the input
-  // exceeds the cap, refuse the mutation rather than producing a
-  // model-unit value > 1. "150% on a 100% cap" is the canonical case
-  // — silently storing 1.5 would corrupt analysis assumptions
-  // downstream. Negative raw_values on a positive-cap factor are
-  // similarly nonsensical.
-  //
-  // Format both the rejected value and the cap through the shared
-  // formatter so currency-prefix units render correctly
-  // (`£150,000 exceeds the £100,000 cap`, not `150000£` suffix).
-  if (inputHasUnit && (rawInput < 0 || rawInput > cap)) {
-    const formattedInput = formatValueWithUnit(rawInput, effectiveUnit);
-    const formattedCap = formatValueWithUnit(cap, effectiveUnit);
-    throw new D1HandlerError(
-      'PARAMETER_INVALID',
-      `Value ${formattedInput} exceeds the factor's cap of ${formattedCap}.`,
-      {
-        details: { rawInput, cap, unit: effectiveUnit ?? null },
-        // P1.2 follow-up — replaced cap-specific guidance with the
-        // canonical handler-level phrase. The cap details remain in
-        // `details` for log triage.
-        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
-      },
-    );
-  }
-
-  // When the input arrives with a percentage-style unit and the factor is
-  // capped at 100, treat the raw input as a percentage on its own scale —
-  // value=raw/100. This matches the V3 convention where a "5% churn"
-  // factor stores raw_value=5, value=0.05 (cap=100).
+  // Capped factor: model value = raw / cap. When the input arrives with
+  // a percentage-style unit and the factor is capped at 100, treat the
+  // raw input as a percentage on its own scale — value=raw/100. This
+  // matches the V3 convention where a "5% churn" factor stores
+  // raw_value=5, value=0.05 (cap=100).
   const value = rawInput / cap;
 
   if (!Number.isFinite(value)) {
     throw new D1HandlerError(
       'PARAMETER_INVALID',
       'Normalised value is not finite.',
-      { details: { rawInput, cap }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE },
+      {
+        details: {
+          rawInput,
+          cap,
+          rejection_reason: 'non_finite' satisfies ProposalRejectionReason,
+        },
+        userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      },
     );
   }
 
