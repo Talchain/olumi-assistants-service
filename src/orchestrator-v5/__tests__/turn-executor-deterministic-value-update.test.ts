@@ -427,11 +427,7 @@ describe('turn-executor × deterministic value-update pre-route', () => {
     ).toBeGreaterThanOrEqual(2);
 
     // CORE INVARIANT (AC.1 / AC.5): the handler MUST NOT reject this
-    // proposal at execute time with parameter_invalid_at_execute. The
-    // fix shifts rejection earlier (validator invalid_parameter) or
-    // skips the deterministic path (ambiguous_quantity) — both are
-    // acceptable post-fix outcomes; only `parameter_invalid_at_execute`
-    // is forbidden.
+    // proposal at execute time with parameter_invalid_at_execute.
     const parameterInvalidAtExecute = events.find(
       (e) =>
         e.event === 'v5.handler_invocation' &&
@@ -440,6 +436,27 @@ describe('turn-executor × deterministic value-update pre-route', () => {
           'parameter_invalid_at_execute',
     );
     expect(parameterInvalidAtExecute).toBeUndefined();
+
+    // STRONGER INVARIANT (review feedback NB #3, 2026-05-20): assert
+    // the regression lands on EXACTLY ONE of the two intended branches
+    // — either the detector skipped with `ambiguous_quantity` (Layer B,
+    // current path for multi-quantity messages) or the validator
+    // rejected with PARAMETER_INVALID (Layer A.2). Asserting at-least-
+    // one of these makes the regression harder to accidentally weaken
+    // — e.g. a future change that lets the handler write the wrong
+    // value would bypass `parameter_invalid_at_execute` but still
+    // violate the intent.
+    const skippedAsAmbiguous = preRouteEvent?.data.skip_reason === 'ambiguous_quantity';
+    const validatorRejected = events.some(
+      (e) =>
+        e.event === 'turn_executor.failure_response' &&
+        (e.data as { failure_origin?: unknown }).failure_origin === 'validator' &&
+        (e.data as { error_code?: unknown }).error_code === 'PARAMETER_INVALID',
+    );
+    expect(
+      skippedAsAmbiguous || validatorRejected,
+      'staging regression must land in either ambiguous_quantity skip OR validator-rejected recoverable path',
+    ).toBe(true);
   });
 });
 

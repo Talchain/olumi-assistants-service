@@ -2680,6 +2680,12 @@ export async function runTurnExecutor(
           deictic_reason: deicticDispatch.reason,
           selected_factor_count: selectedFactorIds.length,
           cqe_quantity_count: contextPack.parsed_quantities.length,
+          // Layer C / NB #1 — every V5DeterministicValueUpdate event
+          // carries the same enum-only field set. The deictic-clarify
+          // path doesn't run the value predicate, so these stay at
+          // their "not run" defaults.
+          execution_precheck_result: 'not_checked',
+          failure_reason: null,
         });
         try {
           const committed = await commitDirectAnswer(clarifyResponse, {

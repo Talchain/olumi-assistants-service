@@ -108,6 +108,14 @@ describe('tryDeterministicValueUpdate — detection rules', () => {
     );
     expect(result.matched).toBe(true);
     if (!result.matched) return;
+    // Narrow on dispatch — a matched result can be either `clarify`
+    // (plural `candidates`) or `set_factor_value` (singular
+    // `candidate`). Dice-only matches are clarify by design (A3.1
+    // limits set_factor_value to single substring matches), so
+    // asserting the dispatch first both type-narrows and pins the
+    // brief contract.
+    expect(result.dispatch).toBe('clarify');
+    if (result.dispatch !== 'clarify') return;
     expect(result.candidates[0].id).toBe('fac_eng');
     expect(result.candidates[0].score).toBeGreaterThanOrEqual(0.4);
     expect(result.candidates[0].score).toBeLessThan(1);

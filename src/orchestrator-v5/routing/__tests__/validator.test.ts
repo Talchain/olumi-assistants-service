@@ -273,7 +273,14 @@ describe('validateToolCall — typed failures', () => {
     if (!result.valid) expect(result.error.code).toBe('PARAMETER_INVALID');
   });
 
-  it('silently skips unknown parameters that are not in the handler schema', () => {
+  it('silently skips unknown parameters that are not in the handler schema (when required `value` is also present)', () => {
+    // Review feedback (2026-05-20, Blocking #2): for set_factor_value,
+    // the structural precheck requires `value` to be present.
+    // Unknown parameters alongside a valid `value` are still silently
+    // skipped — that's the contract this case pins. The previous
+    // version of this test passed an empty-of-`value` parameters
+    // array, which now correctly rejects via `missing_value`; the
+    // case has been refined rather than removed.
     const graph = makeGraph([{ id: 'n-1', kind: 'node', label: 'Factor' }]);
     const proposal: ProposalAction = {
       handler_id: 'set_factor_value',
@@ -284,7 +291,10 @@ describe('validateToolCall — typed failures', () => {
         resolution_status: 'resolved',
         resolution_method: 'id_match',
       },
-      parameters: [{ name: 'bogus_param', value: 9999, source: 'inferred' }],
+      parameters: [
+        { name: 'value', value: 0.5, source: 'user_explicit' },
+        { name: 'bogus_param', value: 9999, source: 'inferred' },
+      ],
       cited_context_fields: [],
     };
     const result = validateToolCall(proposal, graph, SET_FACTOR_VALUE_DECL);

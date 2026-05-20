@@ -375,17 +375,27 @@ export function validateToolCall(
   // is rejected earlier with PARAMETER_INVALID, routing through the
   // existing recoverable path with the canonical user guidance copy.
   //
-  // Optional `findFactorObservedState` keeps test mocks that don't
-  // expose observed_state working — the precheck simply does not fire
-  // there. Production graph-lookup-adapter does expose it.
-  if (
-    graph &&
-    proposal.handler_id === 'set_factor_value' &&
-    proposal.entity.kind === 'node' &&
-    typeof graph.findFactorObservedState === 'function'
-  ) {
-    const precheckResult = preexecuteSetFactorValue(proposal, graph);
-    if (precheckResult) return { valid: false, error: precheckResult };
+  // The precheck runs in TWO phases (review feedback 2026-05-20,
+  // Blocking #2):
+  //
+  //   (a) Graph-INDEPENDENT structural rejection — missing or
+  //       malformed `value` parameter. This runs ALWAYS for
+  //       `set_factor_value` regardless of whether a graph lookup is
+  //       wired in, so a caller with no graph (test, future codegen)
+  //       cannot let a malformed proposal through to the handler.
+  //
+  //   (b) Graph-DEPENDENT range / unit / delta / existing-value
+  //       checks. These need observed_state, so they only run when
+  //       both `graph` and `findFactorObservedState` are available.
+  //       Test mocks that don't expose observed_state still
+  //       benefit from (a); they just skip the cap/unit checks.
+  if (proposal.handler_id === 'set_factor_value' && proposal.entity.kind === 'node') {
+    const structuralResult = preexecuteSetFactorValueStructural(proposal);
+    if (structuralResult) return { valid: false, error: structuralResult };
+    if (graph && typeof graph.findFactorObservedState === 'function') {
+      const precheckResult = preexecuteSetFactorValue(proposal, graph);
+      if (precheckResult) return { valid: false, error: precheckResult };
+    }
   }
 
   // PRECONDITION_UNMET — preconditions take graph as input, so they only
@@ -465,18 +475,28 @@ function detectSuspiciousLabelMatch(
  * Caller has already established that `graph.findFactorObservedState`
  * exists and that the entity kind is `'node'`.
  */
-function preexecuteSetFactorValue(
+/**
+ * Graph-independent structural checks for `set_factor_value` (review
+ * feedback 2026-05-20, Blocking #2): missing or malformed `value`
+ * parameter MUST be rejected regardless of whether a graph lookup is
+ * available. Returns null when the proposal carries a parseable
+ * `value` parameter; the graph-dependent precheck below then runs
+ * the cap/unit/existing-value guards.
+ *
+ * Operator validity is also a structural concern — a stray operator
+ * the predicate doesn't understand is a malformed proposal, not
+ * something to silently coerce (review feedback NB #2).
+ */
+function preexecuteSetFactorValueStructural(
   proposal: ProposalAction,
-  graph: GraphLookup,
 ): ValidationError | null {
   const valueParam = proposal.parameters.find((p) => p.name === 'value');
   if (!valueParam) {
-    // Review feedback (2026-05-20, Blocking #1): a proposal with no
-    // `value` parameter previously slipped through here (returning
-    // null = "no objection") and was caught by the handler with
-    // `parameter_invalid_at_execute` — the same staging bug class
-    // this PR fixes. Reject at the validator instead so the
-    // recoverable invalid_parameter path fires.
+    // A proposal with no `value` parameter previously slipped through
+    // (returned null = "no objection" inside an optional-graph gate)
+    // and was caught by the handler with `parameter_invalid_at_execute`
+    // — the same staging bug class this PR fixes. Reject at the
+    // validator so the recoverable invalid_parameter path fires.
     return {
       code: 'PARAMETER_INVALID',
       message: 'set_factor_value requires a "value" parameter.',
@@ -493,9 +513,6 @@ function preexecuteSetFactorValue(
   if (parsed === null) {
     // Same class as missing: the `value` parameter is present but
     // its shape is neither `number` nor `{ value: number, ... }`.
-    // The structural Zod schema on `value` should already gate this,
-    // but defence-in-depth — reject explicitly via the same
-    // `missing_value` enum so dashboards see the cause.
     return {
       code: 'PARAMETER_INVALID',
       message: 'set_factor_value value parameter has an unsupported shape.',
@@ -509,11 +526,47 @@ function preexecuteSetFactorValue(
     };
   }
 
-  // NB 3 — runtime operator guard. The wire `ProposalParameterSchema`
-  // already constrains `operator` to the FactorValueOperator union,
-  // but a direct validator caller (test or future codegen) could
-  // pass an unknown value; default unknown / missing operators to
-  // 'set' rather than casting and silently breaking the predicate.
+  // NB #2 — operator validity. The wire `ProposalParameterSchema`
+  // constrains `operator` to the FactorValueOperator union, but a
+  // direct validator caller (test or future codegen) could pass an
+  // unknown value. Reject as PARAMETER_INVALID rather than coerce —
+  // coercion would silently change the user's intent (review feedback
+  // NB #2).
+  const rawOperator = valueParam.operator;
+  if (
+    rawOperator !== undefined &&
+    rawOperator !== 'set' &&
+    rawOperator !== 'increase' &&
+    rawOperator !== 'decrease' &&
+    rawOperator !== 'multiply'
+  ) {
+    return {
+      code: 'PARAMETER_INVALID',
+      message: 'set_factor_value operator must be set, increase, decrease, or multiply.',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        issue: `unknown operator: ${String(rawOperator)}`,
+        handler_id: 'set_factor_value',
+      },
+    };
+  }
+
+  return null;
+}
+
+function preexecuteSetFactorValue(
+  proposal: ProposalAction,
+  graph: GraphLookup,
+): ValidationError | null {
+  const valueParam = proposal.parameters.find((p) => p.name === 'value');
+  // Caller (validateToolCall) already ran the structural check above;
+  // valueParam and its shape are guaranteed here. Defensive guards
+  // for type safety only.
+  if (!valueParam) return null;
+  const parsed = parseValueParameter(valueParam.value);
+  if (parsed === null) return null;
+
   const rawOperator = valueParam.operator;
   const operator: FactorValueOperator =
     rawOperator === 'set' ||
