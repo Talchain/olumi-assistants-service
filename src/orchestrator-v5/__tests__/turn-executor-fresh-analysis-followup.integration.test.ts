@@ -369,7 +369,7 @@ describe('V5 fresh-analysis follow-up guard — turn-executor integration', () =
           latencyMs: 0,
         })),
     };
-    await runTurnExecutor(
+    const result = await runTurnExecutor(
       mkPayload('Set Pricing to 0.7 then explain the results.'),
       'req-fresh-followup-overlap-edit-explain',
       { routingAdapter: adapter, graphState: READY_GRAPH as never },
@@ -390,12 +390,56 @@ describe('V5 fresh-analysis follow-up guard — turn-executor integration', () =
     }
 
     // Anti-regression: the response must NOT carry the new guard's
-    // recap copy, because the guard did not match.
-    // (When the upstream deterministic value-update guard catches the
-    // turn, the response is its own deterministic value-update copy.)
-    // We don't pin the exact downstream copy — only that the new guard's
-    // recap line did NOT ship.
-    // The new guard's recap line is fixed module-level copy.
-    // No need to import it: it's stable enough to grep for.
+    // recap copy, because the guard did not match. (When the upstream
+    // deterministic value-update guard catches the turn, the response is
+    // its own deterministic value-update copy.) We don't pin the exact
+    // downstream copy — only that the new guard's recap line did NOT ship.
+    expect(result.response.assistant_text ?? '').not.toContain(
+      "Here's the latest analysis recap.",
+    );
+  });
+
+  it('"Set Pricing to 0.7 then what would need to change..." (round-3 case) → mutation wins, no recap', async () => {
+    // Round-3 review regression case. The earlier `what_would_flip`
+    // exception was too broad — it accepted any what_would_flip
+    // classification regardless of whether the message also carried an
+    // independent concrete edit clause. Fix:
+    // `hasConcreteMutationSignal` disqualifies the exception when an
+    // unambiguous edit (verb+number / add-a-new / remove-the / bare
+    // imperative) is also present.
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+        .mockImplementation(async () => ({
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn' as const,
+          usage: { input_tokens: 5, output_tokens: 5 },
+          model: 'mock',
+          latencyMs: 0,
+        })),
+    };
+    const result = await runTurnExecutor(
+      mkPayload(
+        'Set Pricing to 0.7 then what would need to change for another option to look better?',
+      ),
+      'req-fresh-followup-overlap-flip',
+      { routingAdapter: adapter, graphState: READY_GRAPH as never },
+    );
+
+    const guardEvent = events.find(
+      (e) => e.event === 'v5.fresh_analysis_followup_guard',
+    );
+    if (guardEvent !== undefined) {
+      // The new guard reached and explicitly rejected with mutation_signal,
+      // OR an upstream deterministic value-update guard captured the
+      // turn first. Either way the new guard must NOT report matched:true.
+      expect(guardEvent.data.matched).toBe(false);
+      expect(guardEvent.data.unmatched_reason).toBe('mutation_signal');
+      expect(guardEvent.data.selected_path).toBeNull();
+      expect(guardEvent.data.selected_action_type).toBeNull();
+    }
+    expect(result.response.assistant_text ?? '').not.toContain(
+      "Here's the latest analysis recap.",
+    );
   });
 });

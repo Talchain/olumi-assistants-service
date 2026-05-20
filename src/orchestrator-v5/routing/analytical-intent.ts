@@ -59,6 +59,60 @@ export function hasMutationSignal(message: string): boolean {
 }
 
 /**
+ * Concrete-edit subset of `MUTATION_SIGNAL_PATTERNS` — patterns whose
+ * matches cannot be a false positive from analytical sensitivity /
+ * "what would flip" phrasing. Used by the fresh-analysis follow-up
+ * guard so its narrow `what_would_flip` exception applies ONLY when
+ * the mutation signal is from the flip-overlap alone.
+ *
+ * Excluded from this set:
+ *   - `verb [...] to <X>` (the original `set/change/.../adjust ... to`
+ *      pattern) — fires on `change ... to look better`,
+ *      `change ... to a different mix`, etc. when the analytical
+ *      sentence happens to use those verbs.
+ *   - `from <X> to <Y>` — fires on phrasing like "from the current
+ *      ranking to a tie" inside flip questions.
+ *
+ * Patterns kept here all require either a numeric quantity, a fresh
+ * noun being added/inserted/created, a deictic noun being
+ * removed/deleted/dropped, or a bare imperative verb at line start —
+ * each of which is a concrete edit regardless of surrounding analytical
+ * phrasing.
+ */
+const CONCRETE_MUTATION_SIGNAL_PATTERNS: readonly RegExp[] = [
+  // verb + numeric value (e.g. "Set Pricing to 0.7", "Increase budget to 200")
+  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\b\d+(?:\.\d+)?%?\b/i,
+  // add / insert / create + determiner (e.g. "Add a new constraint")
+  /\b(?:add|insert|create)\s+(?:a|an|new|another)\s+\S+/i,
+  // remove / delete / drop + deictic noun (e.g. "Remove the demand factor")
+  /\b(?:remove|delete|drop)\s+(?:the|that|this|my|our)\s+\S+/i,
+  // bare imperative edit verb at line start (e.g. "Set", "Add", "Remove")
+  /^\s*(?:set|remove|delete|drop|add|create|insert)\b/im,
+];
+
+/**
+ * Does the message carry an UNAMBIGUOUS concrete-edit signal —
+ * independent of any analytical sensitivity phrasing?
+ *
+ * Returns true when at least one of `CONCRETE_MUTATION_SIGNAL_PATTERNS`
+ * fires. Distinct from `hasMutationSignal`: this excludes the
+ * `verb [...] to <X>` and `from <X> to <Y>` patterns that legitimately
+ * overlap with `what_would_flip` phrasing (e.g.
+ * "what would need to change for another option to look better").
+ *
+ * Used by the fresh-analysis follow-up guard to scope its narrow
+ * `what_would_flip` exception correctly: the exception only applies
+ * when the mutation signal is the false-positive flip overlap; an
+ * independent concrete-edit clause still wins.
+ */
+export function hasConcreteMutationSignal(message: string): boolean {
+  for (const re of CONCRETE_MUTATION_SIGNAL_PATTERNS) {
+    if (re.test(message)) return true;
+  }
+  return false;
+}
+
+/**
  * Broad analytical-intent classes used by the stale-rerun guard, the
  * no-analysis guard, and the edit_graph no-op recovery branch.
  *

@@ -22,28 +22,39 @@
  *   - `readiness.has_run_analysis_fact === true`
  *   - `classifyAnalyticalIntent(message) !== null`
  *   - `hasMutationSignal(message) === false`
- *     **OR** `classifyAnalyticalIntent(message) === 'what_would_flip'`
+ *     **OR** (`classifyAnalyticalIntent(message) === 'what_would_flip'`
+ *     **AND** `hasConcreteMutationSignal(message) === false`)
  *     (narrow exception — see "Mutation-precedence" below)
  *
  * Mutation-precedence
  * -------------------
  * Concrete edits MUST reach the edit-graph dispatch path. The guard
  * therefore rejects with `reason: 'mutation_signal'` whenever
- * `hasMutationSignal(message)` is true — with ONE explicit, narrow
- * exception for `what_would_flip`:
+ * `hasMutationSignal(message)` is true, with ONE doubly-scoped
+ * exception:
  *
- *   `what_would_flip` patterns include `"what would need to change"` and
- *   `"how could another option win"`. The mutation regex's
- *   `change ... to <X>` pattern fires on phrasings like "what would
- *   need to change for another option to look better?" — that's a
- *   genuine sensitivity question, not an edit. So when the analytical
- *   class is `what_would_flip`, the mutation regex is treated as a
- *   false positive and the guard matches.
+ *   1. The analytical class must be `what_would_flip` — `explain` /
+ *      `what_drove` / `rerun_question` have no phrasing overlap with
+ *      the mutation regex set; their mutation matches are always real
+ *      edits.
  *
- * For every OTHER analytical class (`explain` / `what_drove` /
- * `rerun_question`) the mutation regex matching is taken at face value
- * and the guard rejects, preserving edit dispatch for messages like
- * "Set Pricing to 0.7 then explain the results".
+ *   2. The mutation signal must come ONLY from the flip overlap, not
+ *      from an independent concrete-edit clause. `hasConcreteMutationSignal`
+ *      detects the four unambiguous edit shapes (verb+number,
+ *      add-a-new, remove-the, bare-imperative-at-line-start) that
+ *      cannot be confused with analytical phrasing. If any of those
+ *      fires, mutation wins regardless of the analytical class.
+ *
+ * Concretely:
+ *
+ *   "What would need to change for another option to look better?"
+ *     → cls=what_would_flip, mutation=true (change...to look),
+ *       concrete-mutation=false → exception applies, matches.
+ *
+ *   "Set Pricing to 0.7 then what would need to change?"
+ *     → cls=what_would_flip, mutation=true (Set...to 0.7),
+ *       concrete-mutation=TRUE (verb+number) → mutation wins,
+ *       rejects with `mutation_signal`.
  *
  * Matched response is a deterministic direct_answer that points the user
  * at the analysis surface and offers an existing chip. The chip carries
@@ -94,6 +105,7 @@
 
 import {
   classifyAnalyticalIntent,
+  hasConcreteMutationSignal,
   hasMutationSignal,
   type AnalyticalIntentClass,
 } from './analytical-intent.js';
@@ -202,10 +214,31 @@ export function tryFreshAnalysisFollowupGuard(
     // Concrete edit phrasing (e.g. "Set Pricing to 0.7 then explain the
     // results") with `explain` / `what_drove` / `rerun_question`
     // classification: mutation wins so the message reaches the edit
-    // path. Only `what_would_flip` keeps the analytical-first exception
-    // because its patterns ("what would need to change", "how could
-    // another option win") genuinely overlap with the mutation regex's
-    // `change ... to <X>` shape.
+    // path. Only `what_would_flip` keeps the analytical-first
+    // exception, and even then only when the mutation signal is from
+    // the flip-phrasing overlap alone (see the next branch).
+    return { matched: false, reason: 'mutation_signal' };
+  }
+
+  if (
+    mutation
+    && cls === 'what_would_flip'
+    && hasConcreteMutationSignal(message)
+  ) {
+    // `what_would_flip` + mutation, but the mutation signal includes an
+    // INDEPENDENT concrete edit clause (verb+number, add-a-new,
+    // remove-the, or bare imperative). Examples that hit this branch:
+    //
+    //   "Set Pricing to 0.7 then what would need to change for another
+    //    option to look better?"
+    //   "Increase budget to 200 then how could another option win?"
+    //   "Remove the demand factor, then what would flip the result?"
+    //
+    // The narrow flip-overlap exception only applies when the mutation
+    // regex's match came from analytical phrasing itself
+    // (`change ... to look better`). When the message ALSO carries a
+    // separate concrete edit, that edit must reach the edit-graph
+    // dispatch path. Mutation wins.
     return { matched: false, reason: 'mutation_signal' };
   }
 

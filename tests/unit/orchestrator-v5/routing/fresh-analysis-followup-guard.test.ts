@@ -298,6 +298,72 @@ describe('tryFreshAnalysisFollowupGuard', () => {
     }
   });
 
+  // 11g1-11g3 — what_would_flip exception is NOW doubly-scoped: only
+  // applies when the mutation signal is from flip-overlap phrasing
+  // alone, NOT when the message also contains an independent concrete
+  // edit clause. Round-3 review caught these as regressions of the
+  // earlier broad exception.
+
+  it('11g1. "Set Pricing to 0.7 then what would need to change for another option to look better?" — concrete edit wins', () => {
+    // cls=what_would_flip, mutation=true, but the mutation signal includes
+    // an unambiguous "Set ... to 0.7" (verb+number) clause that is NOT a
+    // flip-overlap false positive. Mutation must win.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Set Pricing to 0.7 then what would need to change for another option to look better?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11g2. "Increase budget to 200 then how could another option win?" — concrete edit wins', () => {
+    // "Increase budget to 200" is the verb+number unambiguous-edit
+    // pattern. Even though `how could another option win` would
+    // normally trigger the flip exception, the independent edit clause
+    // disqualifies it.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Increase budget to 200 then how could another option win?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11g3. "Remove the demand factor, then what would flip the result?" — concrete edit wins', () => {
+    // "Remove the demand factor" is the remove+deictic-noun unambiguous
+    // edit pattern. Mutation wins over the trailing flip question.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Remove the demand factor, then what would flip the result?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11g4. "Add a new constraint then what would flip the outcome?" — concrete edit wins', () => {
+    // "Add a new constraint" is the add+determiner unambiguous edit
+    // pattern. Mutation wins.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'Add a new constraint then what would flip the outcome?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(false);
+    if (!result.matched) expect(result.reason).toBe('mutation_signal');
+  });
+
+  it('11g5. "What would need to change?" (no concrete edit alongside) — still matches what_would_flip', () => {
+    // Regression guard: stripping the false-positive exception too
+    // aggressively must not break the pure flip-question case (where
+    // the mutation signal does not even fire because there is no
+    // `to <X>` suffix). Sanity check.
+    const result = tryFreshAnalysisFollowupGuard({
+      message: 'What would need to change?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(true);
+    if (result.matched) expect(result.intent_class).toBe('what_would_flip');
+  });
+
   // 11h-11j — non-mutating multi-clause messages still match
   // -------------------------------------------------------
 
