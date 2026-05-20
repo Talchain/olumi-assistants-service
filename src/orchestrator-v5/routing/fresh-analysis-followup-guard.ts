@@ -31,14 +31,43 @@
  *   - `explain` / `what_drove` / `rerun_question` → `explain_results`
  *   - `what_would_flip`                           → `what_would_flip`
  *
- * The brief allows this chip-led catch-net as the deterministic fallback
- * shape. A future refinement could short-circuit the handler invocation
- * inline so the user receives the synthesised answer without a click —
- * tracked in the PR body's follow-ups section.
+ * Why chip-led rather than inline handler dispatch
+ * -----------------------------------------------
+ * The brief preferred direct handler dispatch when "safely available".
+ * Two candidate execution shapes were rejected as wider-change:
  *
- * Privacy: copy is fixed strings; the guard reads only structural fields
- * off `ContextReadiness`. No graph content, factor labels, raw messages,
- * or internal IDs are emitted.
+ *   1. Calling `dispatchDeterministicChipClick` (chip-click-dispatch.ts)
+ *      from turn-executor's matched branch — that function calls
+ *      `buildTurnContext` internally (redundant scenario read), commits
+ *      with `turn_class: 'handler'` and `handler_id: actionType` (the
+ *      message-path guards commit as `turn_class: 'direct_answer'`,
+ *      `handler_id: null`), and emits `dispatch_path: 'chip_click_*'`
+ *      freshness telemetry (which would be a lie for a message-path
+ *      invocation). Reusing it cleanly needs `preBuiltContext` and
+ *      `dispatchPath` override params — a refactor of a different
+ *      module.
+ *
+ *   2. Inlining the handler-invocation pattern from
+ *      `dispatchChipClickNoopExplanation` directly in turn-executor —
+ *      doable but ~100 lines: build `analysisProjection` from
+ *      `prior_facts`, resolve handler via registry, invoke with no
+ *      `explanation` (triggers deterministic fallback), compose via
+ *      `composeToolCallResponse` (handler shape, not direct_answer),
+ *      plumb Phase 3 lifecycle blocks, commit as `turn_class: 'handler'`.
+ *
+ * The chip-led fallback ships in this PR; the user receives an instant
+ * deterministic recap and the chip dispatches the real handler on click
+ * via `dispatchDeterministicChipClick` with zero LLM calls. The "no
+ * click" variant is a follow-up tracked in the PR body.
+ *
+ * Privacy of telemetry emitted from the wiring site
+ * -------------------------------------------------
+ * The guard module itself emits nothing — turn-executor emits one
+ * structural event (`v5.fresh_analysis_followup_guard`) carrying
+ * platform tracing IDs (`request_id`, `scenario_id`) consistent with
+ * sibling guards, plus the structural fields documented in
+ * `TelemetryEvents.V5FreshAnalysisFollowupGuard`. No user prose, no
+ * factor labels, no raw message, no graph content.
  */
 
 import {
