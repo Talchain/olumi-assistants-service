@@ -640,6 +640,7 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
     { message: 'What drove the outcome?', expectedClass: 'explain_results_free_text', label: 'what drove the outcome' },
     { message: 'What drove the analysis?', expectedClass: 'explain_results_free_text', label: 'what drove the analysis' },
     { message: 'Why is this option ahead?', expectedClass: 'explain_results_free_text', label: 'why is this option ahead' },
+    { message: 'Why is Option A leading?', expectedClass: 'explain_results_free_text', label: 'why is Option A leading' },
     { message: 'Why is Option A in front?', expectedClass: 'explain_results_free_text', label: 'why is Option A in front' },
     { message: 'Why is the result on top?', expectedClass: 'explain_results_free_text', label: 'why is the result on top' },
     { message: 'Why is this the favourite?', expectedClass: 'explain_results_free_text', label: 'why is this the favourite (en-GB)' },
@@ -674,24 +675,6 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
       }
     });
   }
-
-  // "Why is X leading?" intentionally stays OUTSIDE the new pattern
-  // (the predicate mirrors PR #187's classifier exactly: ahead / in front
-  // / on top / the leader / the favourite — no "leading" / "winning").
-  // This pattern still falls through to the fresh-followup catch-net via
-  // `no_advice_signal`.
-  it('"Why is Option A leading?" falls through (advice gate does NOT capture "leading")', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'Why is Option A leading?',
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
-      freshness: 'fresh',
-    });
-    expect(out.matched).toBe(false);
-    if (!out.matched) {
-      expect(out.reason).toBe('no_advice_signal');
-    }
-  });
 
   // Mutation precedence regression — concrete edits combined with any of
   // the new analytical patterns must still fall through with

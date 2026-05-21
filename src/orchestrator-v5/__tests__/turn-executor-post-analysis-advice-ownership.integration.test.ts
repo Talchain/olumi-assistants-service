@@ -278,6 +278,7 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
   const newlyOwned: ReadonlyArray<readonly [string, string]> = [
     ['What drove this result?', 'explain_results_free_text'],
     ['Why is this option ahead?', 'explain_results_free_text'],
+    ['Why is Option A leading?', 'explain_results_free_text'],
     [
       'What would need to change for another option to look better?',
       'what_would_flip_free_text',

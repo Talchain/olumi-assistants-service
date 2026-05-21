@@ -282,16 +282,17 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'explain_results_free_text',
     pattern: /\bwhat\s+drove\s+(?:this|that|the)\s+(?:result|outcome|analysis|finding|answer)\b/i,
   },
-  // "why is <X> ahead / in front / on top / the leader / the favourite"
-  // New: mirrors the analytical-intent classifier's predicate added in
-  // PR #187 (line 204 of analytical-intent.ts) exactly so vocabulary
-  // stays aligned. Intentionally narrow — broader synonyms like
-  // "leading" / "winning" stay outside this predicate so existing
-  // explain_results integration tests that rely on Sonnet routing
-  // those phrasings continue to behave as they do today.
+  // "why is <X> ahead / leading / in front / on top / the leader / the favourite"
+  // The brief lists "Why is Option A leading?" as a target phrase the
+  // advice gate must own, so "leading" sits in the predicate alongside
+  // PR #187's narrower set. Surviving "leading" call sites at this
+  // PR's open are either handler-direct (no advice-gate routing) or
+  // runTurnExecutor paths without a fresh `run_analysis` fact — both
+  // unaffected because the advice gate still rejects them on
+  // `freshness !== 'fresh'` before any pattern match.
   {
     advice_class: 'explain_results_free_text',
-    pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i,
+    pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|leading|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i,
   },
 
   // ── meaning ──────────────────────────────────────────────────────
@@ -873,6 +874,12 @@ function composeMeaning(
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
 ): string {
+  // Vocabulary aligns with the workstream brief — "currently favours"
+  // opener and "appears to be driven by" attribution avoid the
+  // winner/leader-adjacent framing the previous wording carried
+  // ("doing most of the work to make it the leader"). The downstream
+  // "reflects the model you've built so far" sentence is preserved so
+  // existing regression tests continue to match.
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
@@ -881,9 +888,9 @@ function composeMeaning(
       ? ` It sits ahead of ${runnerLabel} by ${margin}.`
       : '';
   if (topDriverLabel) {
-    return `Based on this model, the analysis is saying that ${leadingLabel} is currently the leading option${probability}, with ${topDriverLabel} doing most of the work to make it the leader.${marginSentence} The result reflects the model you've built so far, not a forecast.`;
+    return `Based on this model, the analysis currently favours ${leadingLabel}${probability}, and the result appears to be driven by ${topDriverLabel}.${marginSentence} The result reflects the model you've built so far, not a forecast.`;
   }
-  return `Based on this model, the analysis is saying that ${leadingLabel} is currently the leading option${probability}, given the model you've built so far.${marginSentence} The result reflects your current setup, not a forecast.`;
+  return `Based on this model, the analysis currently favours ${leadingLabel}${probability}, given the model you've built so far.${marginSentence} The result reflects your current setup, not a forecast.`;
 }
 
 function composeReadiness(

@@ -27,6 +27,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   tryPostAnalysisAdviceGate,
+  type AdviceClass,
   type AdviceGateAnalysis,
 } from '../../../../src/orchestrator-v5/routing/post-analysis-advice-gate.js';
 
@@ -43,12 +44,23 @@ const ENRICHED_ANALYSIS: AdviceGateAnalysis = {
   fragile_edges: [{ from_label: 'Delivery risk', to_label: 'Successful launch' }],
 };
 
-const TARGET_PHRASES: readonly string[] = [
-  'Walk me through the analysis',
-  'What drove this result?',
-  'Why is this option ahead?',
-  'What would need to change for another option to look better?',
-  'What should I pay attention to?',
+/**
+ * Each row pairs a target phrase with the advice-gate class it must
+ * resolve to. Asserting BOTH matched=true AND the expected class is the
+ * critical loop-budget guarantee: a regression that broke the patterns
+ * (e.g. accidental class-precedence shuffle) would make the gate
+ * fast-fail, and a timing test that only checked `lastResult).toBeDefined()`
+ * would silently pass on the fast-fail path. The structural assertion +
+ * class assertion + wall-clock bound together prove the matched
+ * guard+composition path stays synchronous and fast.
+ */
+const TARGET_PHRASES: ReadonlyArray<readonly [string, AdviceClass]> = [
+  ['Walk me through the analysis', 'explain_results_free_text'],
+  ['What drove this result?', 'explain_results_free_text'],
+  ['Why is this option ahead?', 'explain_results_free_text'],
+  ['Why is Option A leading?', 'explain_results_free_text'],
+  ['What would need to change for another option to look better?', 'what_would_flip_free_text'],
+  ['What should I pay attention to?', 'advice'],
 ];
 
 const LOOP_ITERATIONS = 100;
@@ -71,10 +83,10 @@ describe('post-analysis-advice-gate — timing + structural performance', () => 
     expect(result.matched).toBe(true);
   });
 
-  for (const phrase of TARGET_PHRASES) {
-    it(`loop mean < ${MEAN_BUDGET_MS}ms over ${LOOP_ITERATIONS} iterations: "${phrase}"`, () => {
+  for (const [phrase, expectedClass] of TARGET_PHRASES) {
+    it(`matched ${expectedClass} + loop mean < ${MEAN_BUDGET_MS}ms over ${LOOP_ITERATIONS} iterations: "${phrase}"`, () => {
       const start = performance.now();
-      let lastResult;
+      let lastResult: ReturnType<typeof tryPostAnalysisAdviceGate> | undefined;
       for (let i = 0; i < LOOP_ITERATIONS; i += 1) {
         lastResult = tryPostAnalysisAdviceGate({
           message: phrase,
@@ -84,9 +96,15 @@ describe('post-analysis-advice-gate — timing + structural performance', () => 
       }
       const elapsedMs = performance.now() - start;
       const meanMs = elapsedMs / LOOP_ITERATIONS;
-      // Sanity: the gate must have actually matched (otherwise the timing
-      // covers only the fast-fail path and tells us nothing useful).
+      // The gate MUST have matched the expected class — otherwise the
+      // timing measurement covers only the fast-fail path and tells us
+      // nothing about guard+composition latency. This is what the test
+      // is here to prove.
       expect(lastResult).toBeDefined();
+      expect(lastResult!.matched).toBe(true);
+      if (lastResult!.matched) {
+        expect(lastResult!.advice_class).toBe(expectedClass);
+      }
       expect(meanMs).toBeLessThan(MEAN_BUDGET_MS);
     });
   }
