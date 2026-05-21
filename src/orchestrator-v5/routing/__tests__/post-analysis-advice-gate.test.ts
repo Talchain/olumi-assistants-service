@@ -626,7 +626,9 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
 
 // =========================================================================
 // New patterns added by the grounded-fresh-analysis workstream — give the
-// advice gate primary ownership of three phrases that the fresh-followup
+// advice gate primary ownership of four target phrase families ("what
+// drove", "why is X ahead", "why is X leading", "what would need to
+// change for another option to look better") that the fresh-followup
 // catch-net (PR #187) previously handled with a static recap + chip.
 // =========================================================================
 describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis workstream)', () => {

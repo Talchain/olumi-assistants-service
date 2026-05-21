@@ -3139,18 +3139,15 @@ export async function runTurnExecutor(
       // V5 fresh-analysis follow-up guard — catch-net AFTER
       // `tryPostAnalysisAdviceGate`. The advice gate keeps first refusal
       // and produces its richer synthesis whenever its per-class data
-      // requirements hold. This guard runs only when the advice gate
-      // returned `matched: false`, and intercepts two recurring
-      // fall-through classes that would otherwise reach the LLM router
-      // (~11s) and then misroute to `edit_graph`:
-      //
-      //   - `data_unavailable_for_class` — message matched an
-      //     advice-gate class but the projection lacked
-      //     `top_driver` / `leading_option`.
-      //   - Pattern gap — questions like "Why is this option ahead?" /
-      //     "What would need to change for another option to look
-      //     better?" sit outside the advice gate's 9-class taxonomy
-      //     but ARE recognised by `classifyAnalyticalIntent`.
+      // requirements hold. After the grounded-fresh-analysis workstream
+      // broadened the advice gate's pattern set to own the brief's
+      // canonical phrasings ("what drove", "why is X ahead/leading/...",
+      // "what would need to change..."), this guard's primary role is
+      // the `data_unavailable_for_class` fall-through plus any residual
+      // classifier-only phrasing the advice gate's stricter per-class
+      // patterns do not cover. It still intercepts cases that would
+      // otherwise reach the LLM router (~11s) and misroute to
+      // `edit_graph`.
       //
       // Matched response is a deterministic direct_answer that points
       // at the analysis surface and offers an existing chip

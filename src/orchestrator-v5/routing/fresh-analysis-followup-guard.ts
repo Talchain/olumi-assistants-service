@@ -5,16 +5,22 @@
  * Sits AFTER `tryPostAnalysisAdviceGate` so the existing rich classifier
  * keeps first refusal. Fires only when the advice gate already returned
  * `matched: false` AND the readiness snapshot confirms analysis is fresh.
- * Closes two recurring fall-through classes:
+ *
+ * After the grounded-fresh-analysis workstream broadened the advice gate
+ * to own the brief's canonical phrasings ("what drove this result",
+ * "why is X ahead/leading/...", "what would need to change..."), the
+ * remaining recurring fall-through class is:
  *
  *   - `data_unavailable_for_class` — message matched an advice-gate class
  *     pattern but the projection lacked `top_driver` / `leading_option`,
  *     so the strict per-class requirements failed and control fell
  *     through to the LLM router.
- *   - Pattern gap — questions like "Why is this option ahead?" or
- *     "What would need to change for another option to look better?"
- *     are not part of the advice gate's 9-class taxonomy but ARE
- *     recognised by `classifyAnalyticalIntent`.
+ *
+ * Plus any residual classifier-only phrasings — `classifyAnalyticalIntent`
+ * is broader than the advice gate's per-class pattern set, so a future
+ * phrase recognised by the classifier but absent from the advice gate
+ * (or one that survives the advice gate's stricter per-class data
+ * checks) still lands here. This guard is the catch-net for both.
  *
  * Predicate (all four must hold):
  *

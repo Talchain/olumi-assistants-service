@@ -235,6 +235,14 @@ describe('turn-executor × explanation precondition-fail — wire-level chip sur
     OlumiResponseSchema.parse(response);
     expect(telemetry.failure_type).toBeNull();
 
+    // Routing adapter must have been called — guarantees the carrier
+    // message reached Sonnet rather than being intercepted by a
+    // deterministic guard upstream. If a future classifier broadening
+    // accidentally swallows the BASE_PAYLOAD message, this assertion
+    // catches it instead of the test silently passing on unrelated
+    // chip-related assertions.
+    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
+
     // The headline assertion: the chip survives all the way to the wire.
     const runAnalysisChip = response.suggested_actions.find(
       (a: { action_type?: string }) => a.action_type === 'run_analysis',

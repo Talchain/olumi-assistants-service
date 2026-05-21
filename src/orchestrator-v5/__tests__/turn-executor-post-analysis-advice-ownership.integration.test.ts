@@ -17,9 +17,10 @@
  *   - Telemetry is captured via `setTestSink`.
  *
  * Coverage:
- *   - Each of the three new patterns ("What drove this result?",
- *     "Why is this option ahead?", "What would need to change for
- *     another option to look better?") → advice gate matched=true.
+ *   - Each of the four newly-owned target phrases ("What drove this
+ *     result?", "Why is this option ahead?", "Why is Option A leading?",
+ *     "What would need to change for another option to look better?")
+ *     → advice gate matched=true.
  *   - Mutation precedence preserved — concrete-edit phrasing combined
  *     with an analytical phrase falls through advice gate with
  *     `mutation_signal` and reaches the downstream edit/routing path.

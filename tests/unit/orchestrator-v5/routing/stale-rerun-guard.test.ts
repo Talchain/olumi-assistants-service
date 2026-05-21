@@ -28,6 +28,25 @@ describe('tryStaleRerunGuard', () => {
     }
   });
 
+  // Grounded-fresh-analysis workstream broadened `classifyAnalyticalIntent`
+  // to include "leading". This guard-level test pins that the stale-rerun
+  // guard now owns "Why is Option A leading?" on stale analyses — proving
+  // the integration (not just the classifier) routes the phrase to the
+  // re-run nudge instead of falling through to the LLM router.
+  it('matches what_drove for "Why is Option A leading?" when stale', () => {
+    const result = tryStaleRerunGuard({
+      message: 'Why is Option A leading?',
+      freshness: 'stale',
+    });
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.intent_class).toBe('what_drove');
+      expect(result.assistant_text).toContain('graph has changed');
+      expect(result.suggested_actions).toHaveLength(1);
+      expect(result.suggested_actions[0]?.action_type).toBe('run_analysis');
+    }
+  });
+
   it('does not match when freshness is fresh', () => {
     const result = tryStaleRerunGuard({
       message: 'Walk me through the analysis.',
