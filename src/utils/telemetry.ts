@@ -918,6 +918,26 @@ export const TelemetryEvents = {
   //     for the composed prose
   V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
 
+  // V5 fresh-analysis follow-up guard — catch-net for analytical questions
+  // the post-analysis advice gate could not synthesise (data_unavailable_for_class
+  // fall-through OR pattern gap between the 9-class advice taxonomy and
+  // analytical-intent.ts). Fires once per turn, AFTER the advice gate and
+  // BEFORE the LLM router. Records whether the new guard intercepted the
+  // turn and which existing handler the chip points at.
+  //
+  // Payload:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - matched: boolean
+  //   - unmatched_reason: 'not_fresh' | 'no_analysis_fact' | 'empty_message'
+  //     | 'mutation_signal' | 'no_analytical_signal' | null
+  //   - intent_class: 'explain' | 'what_drove' | 'what_would_flip'
+  //     | 'rerun_question' | null
+  //   - analysis_freshness: 'fresh' | 'stale' | 'unknown' | 'none' | null
+  //   - selected_path: 'fresh_analysis_followup' | null
+  //   - selected_action_type: 'explain_results' | 'what_would_flip' | null
+  V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
+
   // V5 P0 stabilisation — bounded routing-failure fallback.
   //
   // Fires when the routing call returns a "model output failed" error

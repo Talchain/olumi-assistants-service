@@ -46,6 +46,17 @@ describe('classifyAnalyticalIntent', () => {
       'What made the result go this way?',
       "What's driving the outcome?",
       'Which factors drove the analysis?',
+      // Present-state ranking questions — added so the fresh-analysis
+      // follow-up guard can route "Why is X ahead?" to explain_results
+      // rather than letting it fall to edit_graph. Pattern is narrow
+      // (only "ahead" / "in front" / "the leader" / "the favourite" /
+      // "on top") so messages like "Why is option A winning?" stay
+      // outside this class and existing explain_results integration
+      // tests that use "winning" / "leading" remain unaffected.
+      'Why is this option ahead?',
+      'Why is the recommendation in front?',
+      'Why is this on top?',
+      'Why is this the leader?',
     ];
     for (const msg of positives) {
       it(`matches "${msg}"`, () => {

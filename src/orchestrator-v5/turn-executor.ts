@@ -91,6 +91,7 @@ import {
 import { tryPostAnalysisAdviceGate } from './routing/post-analysis-advice-gate.js';
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
+import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
 import {
   deriveContextReadiness,
   type ContextReadiness,
@@ -3114,6 +3115,103 @@ export async function runTurnExecutor(
                 err: serialiseError(error),
               },
               'V5 TurnExecutor commit failure on post-analysis advice gate',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
+      // V5 fresh-analysis follow-up guard — catch-net AFTER
+      // `tryPostAnalysisAdviceGate`. The advice gate keeps first refusal
+      // and produces its richer synthesis whenever its per-class data
+      // requirements hold. This guard runs only when the advice gate
+      // returned `matched: false`, and intercepts two recurring
+      // fall-through classes that would otherwise reach the LLM router
+      // (~11s) and then misroute to `edit_graph`:
+      //
+      //   - `data_unavailable_for_class` — message matched an
+      //     advice-gate class but the projection lacked
+      //     `top_driver` / `leading_option`.
+      //   - Pattern gap — questions like "Why is this option ahead?" /
+      //     "What would need to change for another option to look
+      //     better?" sit outside the advice gate's 9-class taxonomy
+      //     but ARE recognised by `classifyAnalyticalIntent`.
+      //
+      // Matched response is a deterministic direct_answer that points
+      // at the analysis surface and offers an existing chip
+      // (`action_type: 'explain_results'` or `'what_would_flip'`). The
+      // chip, when clicked, dispatches the real explanation handler via
+      // `dispatchDeterministicChipClick` with no LLM call. The fresh
+      // path of `tryPostAnalysisAdviceGate` is NOT modified — PR #184
+      // preserved it bit-for-bit and this guard preserves that
+      // guarantee.
+      if (routingResult === undefined && contextReadiness !== null) {
+        const freshFollowupOutcome = tryFreshAnalysisFollowupGuard({
+          message: payload.message,
+          readiness: contextReadiness,
+        });
+        emit(TelemetryEvents.V5FreshAnalysisFollowupGuard, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: freshFollowupOutcome.matched,
+          unmatched_reason: freshFollowupOutcome.matched
+            ? null
+            : freshFollowupOutcome.reason,
+          intent_class: freshFollowupOutcome.matched
+            ? freshFollowupOutcome.intent_class
+            : null,
+          analysis_freshness: contextReadiness.latest_analysis_freshness,
+          selected_path: freshFollowupOutcome.matched
+            ? 'fresh_analysis_followup'
+            : null,
+          selected_action_type: freshFollowupOutcome.matched
+            ? freshFollowupOutcome.selected_action_type
+            : null,
+        });
+        if (freshFollowupOutcome.matched) {
+          const freshFollowupResponse = composeDirectAnswerResponse({
+            assistant_text: freshFollowupOutcome.assistant_text,
+            stage: context.stage,
+            suggested_actions: [...freshFollowupOutcome.suggested_actions],
+          });
+          sonnetTextForLog = freshFollowupResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitDirectAnswer(freshFollowupResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'fresh_analysis_followup_guard',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on fresh-analysis follow-up guard',
             );
             failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
             response = buildFailureResponse(

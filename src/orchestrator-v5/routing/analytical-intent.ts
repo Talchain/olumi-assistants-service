@@ -59,6 +59,95 @@ export function hasMutationSignal(message: string): boolean {
 }
 
 /**
+ * Mutation patterns split into two groups for the fresh-analysis
+ * follow-up guard's `what_would_flip` exception:
+ *
+ *   1. `ALWAYS_INDEPENDENT_MUTATION_PATTERNS` — patterns whose matches
+ *      cannot be false positives from analytical-flip phrasing. A hit
+ *      proves an independent concrete-edit clause exists somewhere in
+ *      the message:
+ *        - verb + numeric value          ("Set Pricing to 0.7")
+ *        - add / insert / create + det   ("Add a new constraint")
+ *        - remove / delete / drop + the  ("Remove the demand factor")
+ *        - from <X> to <Y>               ("Change from low to high")
+ *        - bare imperative at line start ("Set ...", "Add ...")
+ *
+ *   2. `VERB_TO_X_MUTATION_PATTERN` — the only mutation regex that can
+ *      false-positive on `what_would_flip` phrasing. Fires on
+ *      `<verb> [...] to <X>` shape. Real edits use it ("Change
+ *      marketing channel to TikTok"), but it ALSO fires inside
+ *      sensitivity questions ("what would need to change for another
+ *      option to look better").
+ *
+ * `hasIndependentMutationSignal` resolves the ambiguity by stripping
+ * the matched `what_would_flip` span from the message and re-testing
+ * only `VERB_TO_X_MUTATION_PATTERN` on the remainder. If it still
+ * fires, the message carries an independent edit clause separate from
+ * the flip phrasing.
+ */
+const ALWAYS_INDEPENDENT_MUTATION_PATTERNS: readonly RegExp[] = [
+  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\b\d+(?:\.\d+)?%?\b/i,
+  /\b(?:add|insert|create)\s+(?:a|an|new|another)\s+\S+/i,
+  /\b(?:remove|delete|drop)\s+(?:the|that|this|my|our)\s+\S+/i,
+  /\bfrom\s+\S+\s+to\s+\S+/i,
+  /^\s*(?:set|remove|delete|drop|add|create|insert)\b/im,
+];
+
+const VERB_TO_X_MUTATION_PATTERN =
+  /\b(?:set|change|update|adjust|modify|raise|lower|increase|decrease|bump)\b[^.?!\n]{0,80}\bto\s+\S+/i;
+
+/**
+ * `what_would_flip` patterns mirrored here so the strip-and-recheck in
+ * `hasIndependentMutationSignal` can reference them without depending
+ * on the order of `INTENT_PATTERNS` declarations later in the module.
+ * Keep in sync with the `cls: 'what_would_flip'` entries in
+ * `INTENT_PATTERNS`; the analytical-intent unit tests pin the
+ * canonical list so drift between the two surfaces shows up as a test
+ * failure rather than silently degrading the guard.
+ */
+const WHAT_WOULD_FLIP_STRIP_PATTERNS: readonly RegExp[] = [
+  /\bwhat\s+would\s+flip\b/i,
+  /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
+  /\bwhat\s+would\s+tip\b/i,
+  /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
+  /\bwhat\s+would\s+need\s+to\s+change\b/i,
+  /\bhow\s+(?:could|can|would)\s+(?:another\s+)?option\s+(?:win|look\s+better|come\s+(?:out\s+)?ahead)\b/i,
+];
+
+/**
+ * Does the message carry a mutation signal from a clause that is
+ * independent of `what_would_flip` analytical phrasing?
+ *
+ * Returns true iff:
+ *
+ *   - any pattern in `ALWAYS_INDEPENDENT_MUTATION_PATTERNS` fires
+ *     (these are unambiguous concrete edits regardless of any
+ *     surrounding analytical phrasing), OR
+ *
+ *   - the `verb [...] to <X>` mutation pattern still fires AFTER all
+ *     `what_would_flip` pattern spans are removed from the message
+ *     (proving the verb-to-X edit clause is separate from any flip
+ *     phrasing).
+ *
+ * Used by the fresh-analysis follow-up guard so its narrow
+ * `what_would_flip` exception applies ONLY when the mutation signal
+ * is fully explained by flip-pattern overlap. An independent textual
+ * edit such as `"Change marketing channel to TikTok then what would
+ * need to change ..."` is detected even though it has no numeric value
+ * or imperative-at-line-start.
+ */
+export function hasIndependentMutationSignal(message: string): boolean {
+  for (const re of ALWAYS_INDEPENDENT_MUTATION_PATTERNS) {
+    if (re.test(message)) return true;
+  }
+  let stripped = message;
+  for (const re of WHAT_WOULD_FLIP_STRIP_PATTERNS) {
+    stripped = stripped.replace(re, (matchText) => ' '.repeat(matchText.length));
+  }
+  return VERB_TO_X_MUTATION_PATTERN.test(stripped);
+}
+
+/**
  * Broad analytical-intent classes used by the stale-rerun guard, the
  * no-analysis guard, and the edit_graph no-op recovery branch.
  *
@@ -105,6 +194,16 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   { cls: 'what_drove', pattern: /\bwhat\s+made\s+(?:this|that|the\s+(?:result|analysis|outcome))\b/i },
   { cls: 'what_drove', pattern: /\bwhat[''']?s\s+driving\b/i },
   { cls: 'what_drove', pattern: /\bwhich\s+(?:factor|driver)s?\s+(?:drove|drive|pushed)\b/i },
+  // Why is X ahead / in front — present-state reason questions about
+  // the current ranking. The "why did" patterns above match past-tense
+  // forms ("why did this win"); this matches the present-state form
+  // ("why is this option ahead?"). Deliberately narrow: only "ahead"
+  // and "in front" plus close phrasings ("the leader", "the favourite",
+  // "on top"). Broader synonyms like "winning" / "leading" stay outside
+  // this predicate so existing explain_results integration tests that
+  // use those words continue to drive Sonnet routing unchanged. Adding
+  // more synonyms is a follow-up that should land alongside test updates.
+  { cls: 'what_drove', pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i },
 
   // ── explain (broadest, evaluated last) ───────────────────────────
   { cls: 'explain', pattern: /\bexplain\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i },
