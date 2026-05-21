@@ -637,7 +637,9 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
     readonly expectedClass: AdviceClass;
     readonly label: string;
   }> = [
-    // explain_results_free_text (3 new + 2 regressions for context)
+    // explain_results_free_text (4 newly-owned phrase families: what-drove,
+    // why-X-ahead, why-X-leading, why-X-on-top/in-front/the-leader/the-favourite,
+    // plus en-GB / en-US favourite variants)
     { message: 'What drove this result?', expectedClass: 'explain_results_free_text', label: 'what drove this result' },
     { message: 'What drove the outcome?', expectedClass: 'explain_results_free_text', label: 'what drove the outcome' },
     { message: 'What drove the analysis?', expectedClass: 'explain_results_free_text', label: 'what drove the analysis' },
