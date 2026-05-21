@@ -59,7 +59,7 @@ describe('generateChips', () => {
     expect(chips).toEqual([]);
   });
 
-  it('after run_analysis → emits TWO executable action chips (explain_results + what_would_flip)', () => {
+  it('after run_analysis → emits THREE chips (explain_results + what_would_flip + validate_assumptions prompt)', () => {
     // Phase 2b round-2 reviewer finding: previously the "Explain the
     // result" chip had no `action_type`, so chip-clicks silently routed
     // through Sonnet (ORIENT, ~12s) even though the deterministic
@@ -67,20 +67,42 @@ describe('generateChips', () => {
     // `chip-click-dispatch.ts`'s whitelist. The chip now emits
     // `action_type: 'explain_results'` (plural — matches the registered
     // handler) so the click hits the bypass and saves the latency.
+    //
+    // V5 coaching orchestration (workstream-cee-v5-coaching-robust-scott):
+    // a third chip — "Validate assumptions" — is a PROMPT chip (no
+    // `action_type`). On click it submits the chip `message` as user text
+    // which routes through `tryPostAnalysisAdviceGate` → `evidence_gap`
+    // validation-aware composer next turn. MAX_CHIPS = 3 unchanged.
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [runAnalysisFact()],
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
     });
-    expect(chips).toHaveLength(2);
-    // Both chips now executable.
+    expect(chips).toHaveLength(3);
+    // 1: executable explain chip
     expect(chips[0].label).toBe('Explain the result');
     expect(chips[0].action_type).toBe('explain_results');
     expect(chips[0].id).toBe('chip_action_explain_results');
+    // 2: executable flip chip
     expect(chips[1].label).toBe('What could change the outcome?');
     expect(chips[1].action_type).toBe('what_would_flip');
     expect(chips[1].id).toBe('chip_action_what_would_flip');
+    // 3: validation prompt chip — no action_type
+    expect(chips[2].label).toBe('Validate assumptions');
+    expect(chips[2].id).toBe('chip_prompt_validate_assumptions');
+    expect(chips[2].message).toBe(
+      'What should we validate or research to build confidence in this decision?',
+    );
+    expect('action_type' in chips[2]).toBe(false);
+    // Contract: every chip safeParses against the boundary Action schema.
+    for (const chip of chips) {
+      const parsed = ActionSchema.safeParse(chip);
+      expect(parsed.success).toBe(true);
+    }
+    // No duplicate ids across the three chips.
+    const ids = chips.map((c) => c.id);
+    expect(new Set(ids).size).toBe(3);
   });
 
   it('analyse stage with analysisReady=ready → executable run_analysis chip', () => {

@@ -223,6 +223,13 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // so a typed "yes" on the next turn can resume via the short-confirm
   // pre-route.
   if (handlerJustRan === 'run_analysis') {
+    // Third chip is a PROMPT chip (no `action_type`): the click submits
+    // the `message` as user text, which the next turn routes through
+    // `tryPostAnalysisAdviceGate` → `evidence_gap` (validation-aware
+    // composer branch in post-analysis-advice-gate.ts). No new handler
+    // is implied; the chip-egress validator skips registry checks for
+    // chips without `action_type`. Keeps `MAX_CHIPS = 3` so the
+    // boundary contract is unchanged.
     return cap([
       {
         id: 'chip_action_explain_results',
@@ -235,6 +242,12 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         label: 'What could change the outcome?',
         message: 'What could change the outcome of this analysis?',
         action_type: 'what_would_flip',
+      },
+      {
+        id: 'chip_prompt_validate_assumptions',
+        label: 'Validate assumptions',
+        message:
+          'What should we validate or research to build confidence in this decision?',
       },
     ]);
   }

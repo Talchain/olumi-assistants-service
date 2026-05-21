@@ -386,6 +386,61 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'evidence_gap',
     pattern: /\bwhat\s+(?:haven['’]?t|didn['’]?t|hasn['’]?t)\s+(?:we|i)\b[^.?!\n]{0,40}\b(?:cover|consider|include|account)\w*\b/i,
   },
+  // Validation/research family. The workstream's analysis-complete moment
+  // asks the user to plan confidence-building work after a fresh analysis:
+  // "what should we validate / research / test", "how do we build
+  // confidence", "what evidence should we gather". These sit in
+  // `evidence_gap` rather than a sibling class because the available
+  // grounding signals are the same (fragile_edges + top_drivers), and the
+  // class-requirement table already accepts either readiness data OR
+  // top_drivers via the mixed predicate below. Subject/verb word-order
+  // alternation handles "what should we validate" and "what we should
+  // validate"; the bare "to" branch covers "what to validate".
+  //
+  // "what (should|would|could|can|do|might) we|i|you|us validate"
+  // "what we|i|you|us (should|would|could|can|do|might) validate"
+  // "what to validate"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+(?:(?:should|would|could|can|do|might)\s+(?:we|i|you|us)|(?:we|i|you|us)\s+(?:should|would|could|can|do|might)|to)\s+validate\b/i,
+  },
+  // "what (should|would|could|can|do|might) we|i|you|us research"
+  // "what we|i|you|us (should|would|could|can|do|might) research"
+  // "what to research"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+(?:(?:should|would|could|can|do|might)\s+(?:we|i|you|us)|(?:we|i|you|us)\s+(?:should|would|could|can|do|might)|to)\s+research\b/i,
+  },
+  // "validate further" / "research further" — catches the spec's
+  // "validate or research further" idiom even without a leading "what".
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:validate|research)\s+further\b/i,
+  },
+  // "how (do|can|should|would|might) we|i|you|us build confidence"
+  // "how to build confidence"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bhow\s+(?:(?:do|can|should|would|might)\s+(?:we|i|you|us)?\s*|to\s+)build\s+confidence\b/i,
+  },
+  // "what assumptions should we test" / "what should we test"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+(?:assumptions?\s+)?(?:should|would|could|do|might)\s+(?:we|i|you|us)\s+test\b/i,
+  },
+  // "what evidence should we gather" / "what evidence would help|change|matter"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+evidence\s+(?:(?:should|would|could|might)\s+(?:we|i|you|us)\s+gather|would\s+(?:help|change|matter))\b/i,
+  },
+  // Disjunction safety net: catches the spec's long-form composite
+  // ("recommendations for what we should validate or research further to
+  // build confidence in our decision") via the literal disjunction even
+  // when no other pattern in the family fires.
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:validate\s+or\s+research|research\s+or\s+validate)\b/i,
+  },
 
   // ── improvement (must precede the broader 'how should we' advice pattern) ─
   // "what should we improve" / "what can we improve" / "what could be improved"
@@ -723,6 +778,7 @@ export function tryPostAnalysisAdviceGate(
     topDriverLabel,
     analysis,
     analysisReady: input.analysisReady ?? undefined,
+    message,
   });
 
   return {
@@ -771,6 +827,15 @@ interface ComposeInput {
   readonly topDriverLabel: string | null;
   readonly analysis: AdviceGateAnalysis;
   readonly analysisReady: AnalysisReadyPayload | undefined;
+  /**
+   * Trimmed user message. Only `composeEvidenceGap` consults it today: it
+   * re-classifies the matched `evidence_gap` message into a validation-
+   * aware sub-flavour (validate / research / confidence / test /
+   * assumption tokens) and leads with a validation recommendation
+   * grounded in `top_drivers` + `fragile_edges`. No new advice class —
+   * the dispatch surface stays single-source-of-truth.
+   */
+  readonly message: string;
 }
 
 function composeForClass(cls: AdviceClass, input: ComposeInput): string {
@@ -786,7 +851,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
     case 'readiness':
       return composeReadiness(input.analysisReady);
     case 'evidence_gap':
-      return composeEvidenceGap(input.analysis, input.analysisReady);
+      return composeEvidenceGap(input.message, input.analysis, input.analysisReady);
     case 'explain_results_free_text':
       return composeExplainResults(
         input.leadingLabel,
@@ -907,10 +972,52 @@ function composeReadiness(
   return "Looking at the model structure here, the core pieces are in place. If the readiness score you're seeing is still low, it's likely picking up something outside the structural checks — let me know which factor you'd like to dig into.";
 }
 
+/**
+ * Validation-flavour detector. Returns true when the matched message
+ * carries a confidence-building intent — i.e. the user is asking which
+ * evidence / assumptions to validate, research, or test, rather than
+ * which evidence is missing. The two sub-flavours share class
+ * (`evidence_gap`) and grounding data (`top_drivers`, `fragile_edges`,
+ * `analysisReady`); only the composer lead differs.
+ *
+ * Token set deliberately narrow: tokens that already steer the family's
+ * patterns above (validate / research / test / confidence / assumption).
+ * "Test" is anchored to a word boundary so noise like "fastest" or
+ * "latest" can't trip the flavour.
+ */
+const VALIDATION_FLAVOUR_RE = /\b(?:validate|research|confidence|test|assumptions?)\b/i;
+
 function composeEvidenceGap(
+  message: string,
   analysis: AdviceGateAnalysis,
   analysisReady: AnalysisReadyPayload | undefined,
 ): string {
+  // Validation-aware lead. When the matched message asks about
+  // validation / research / confidence-building, lead with the
+  // recommendation grounded in `top_drivers[0]` and (if present) the
+  // first fragile edge. Re-uses the gate's existing inputs; no new
+  // dispatch surface, no new advice class. Falls through to the
+  // existing gap-list behaviour when neither grounding signal is
+  // available, so degrade-gracefully matches the rest of the file.
+  if (VALIDATION_FLAVOUR_RE.test(message)) {
+    const parts: string[] = [];
+    const topDriverLabel = analysis.top_drivers[0]?.factor_label;
+    const fragileEdge = analysis.fragile_edges?.[0];
+    if (topDriverLabel && topDriverLabel.trim().length > 0) {
+      parts.push(
+        `The most useful place to gather evidence is ${topDriverLabel}. That's where new data would change the analysis the most.`,
+      );
+    }
+    if (fragileEdge) {
+      parts.push(
+        `It's also worth validating the link from "${fragileEdge.from_label}" to "${fragileEdge.to_label}", which the analysis is most sensitive to.`,
+      );
+    }
+    if (parts.length > 0) return parts.join(' ');
+    // Neither lead applies — fall through to the gap-list behaviour
+    // below so the response remains grounded.
+  }
+
   const gaps: string[] = [];
   if (analysisReady && hasSufficientReadinessData(analysisReady)) {
     const summary = summariseReadiness(analysisReady);

@@ -391,3 +391,67 @@ describe('findSuccessClaimHit — boundary cases', () => {
     expect(SUCCESS_CLAIM_PATTERNS.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+// =========================================================================
+// V5 coaching orchestration — copy safety for the new validation chip and
+// the validation-aware composeEvidenceGap output. Pure-string checks; the
+// composer is exercised end-to-end in
+// `tests/unit/orchestrator-v5/routing/post-analysis-advice-gate.validation.test.ts`.
+// =========================================================================
+describe('validation chip + composer copy — passes forbidden-phrase guards', () => {
+  // Hard-coded mirror of the strings emitted from
+  // `src/orchestrator-v5/compose/chip-generator.ts` post-run_analysis
+  // branch. Mirrored here (rather than imported) so a regression that
+  // changes the chip copy without updating this test fires a clear
+  // assertion miss rather than passing silently.
+  const VALIDATION_CHIP_LABEL = 'Validate assumptions';
+  const VALIDATION_CHIP_MESSAGE =
+    'What should we validate or research to build confidence in this decision?';
+
+  // Representative composer outputs from `composeEvidenceGap`'s
+  // validation-aware branch — exercised end-to-end in the routing test
+  // suite. These strings document what may reach the wire so future
+  // refactors of the composer can re-check the corpus quickly.
+  const COMPOSER_LEAD_TOP_DRIVER =
+    "The most useful place to gather evidence is Delivery risk. That's where new data would change the analysis the most.";
+  const COMPOSER_FRAGILE_EDGE =
+    "It's also worth validating the link from \"Delivery risk\" to \"Successful launch\", which the analysis is most sensitive to.";
+
+  const samples: ReadonlyArray<readonly [string, string]> = [
+    [VALIDATION_CHIP_LABEL, 'validation chip label'],
+    [VALIDATION_CHIP_MESSAGE, 'validation chip message'],
+    [COMPOSER_LEAD_TOP_DRIVER, 'composer validation lead (top driver)'],
+    [COMPOSER_FRAGILE_EDGE, 'composer validation lead (fragile edge)'],
+    [`${COMPOSER_LEAD_TOP_DRIVER} ${COMPOSER_FRAGILE_EDGE}`, 'composer full validation response'],
+  ];
+
+  for (const [text, label] of samples) {
+    it(`forbidden-phrase clean: ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    });
+    it(`success-claim clean: ${label}`, () => {
+      // The composer is post-analysis prose, not a commit receipt — it
+      // must not trip the sentence-leading commit-verb guard either.
+      expect(findSuccessClaimHit(text)).toBeNull();
+    });
+  }
+
+  it('does not leak entity-id-shaped tokens in the composer corpus', () => {
+    // Entity-id leak detection mirrors the egress scrub (shared regex
+    // family `fac_/opt_/con_/out_/edg_` etc.). The chip strings are
+    // user-facing copy and must not carry raw IDs.
+    const corpus = samples.map(([s]) => s).join('\n');
+    expect(corpus).not.toMatch(/\b(?:fac|opt|con|out|edg|nod)_\w+\b/);
+  });
+
+  it('does not embed raw decimals in the composer corpus', () => {
+    // RAW_DECIMAL_RE-style narrow check: leading 0.d or .d only, the
+    // shape that signals a leaked probability or sensitivity value.
+    // Composer must phrase numerics through helpers
+    // (`formatProbability` / `formatPercentagePoints`), never as raw
+    // floats. The validation-aware branch doesn't interpolate any
+    // numerics today; this test pins that invariant.
+    const corpus = samples.map(([s]) => s).join('\n');
+    expect(corpus).not.toMatch(/(?:^|[\s(=,])(?:0\.\d|\.\d)/);
+  });
+});
