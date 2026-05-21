@@ -131,6 +131,20 @@ export interface AdviceGateInput {
    * stale-aware recovery surfaces can emit a stale-safe response.
    */
   readonly freshness: AdviceGateFreshness | null | undefined;
+  /**
+   * V5 coaching — verbatim `decision_review` enrichment from the latest
+   * successful run_analysis fact (as stored under
+   * `result.enrichment.decision_review`). When present, `evidence_gap`
+   * prefers `evidence_enhancements[].specific_action` strings and the
+   * first `key_assumptions[]` entry as content sources for richer,
+   * grounded validation/research advice. Caller threads this from
+   * `context.prior_facts` at gate time; current-turn run_analysis facts
+   * are not yet in prior_facts when the gate fires (the gate only matches
+   * when freshness === 'fresh', which requires a prior fact). Optional /
+   * undefined / null is safe — composers fall back to projection-only
+   * behaviour.
+   */
+  readonly decisionReview?: Record<string, unknown> | null | undefined;
 }
 
 export type AdviceGateUnmatchedReason =
@@ -385,6 +399,52 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
   {
     advice_class: 'evidence_gap',
     pattern: /\bwhat\s+(?:haven['’]?t|didn['’]?t|hasn['’]?t)\s+(?:we|i)\b[^.?!\n]{0,40}\b(?:cover|consider|include|account)\w*\b/i,
+  },
+  // V5 coaching — validation / research / confidence-building / assumption-
+  // testing. Closes the gap where questions like "What should we validate?",
+  // "How do we build confidence?", "What assumptions should we test?" fell
+  // through every guard to the LLM router (~11s) with edit_graph misroute
+  // risk. Patterns are intentionally narrow: validation verbs (validate,
+  // verify, confirm, etc.) are required, so generic "What should I change?"
+  // continues to route to the broader `advice` class. Concrete mutations
+  // ("Set/Change X to Y") are rejected by MUTATION_SIGNAL_PATTERNS before
+  // reaching the classifier.
+
+  // "what should we validate" — modal-first order
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:what|anything)\s+(?:should|could|can|might|do|would)\s+(?:we|i|you)\s+(?:validate|verify|confirm|de[-\s]?risk)\b/i,
+  },
+  // "anything we should validate" — pronoun-first order
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:what|anything)\s+(?:we|i|you)\s+(?:should|could|can|might|need\s+to|have\s+to)\s+(?:validate|verify|confirm|de[-\s]?risk)\b/i,
+  },
+  // "what should we research" / "how should we investigate"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:what|how)\s+(?:should|do|can|could|might|would)\s+(?:we|i|you)\s+(?:research|investigate|explore|look\s+into)\b/i,
+  },
+  // "how do we build confidence" / "how can we increase confidence"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:how|what)\s+(?:do|can|should|could|might|would)\s+(?:we|i|you)\s+(?:build|increase|raise|strengthen|grow|improve)\s+(?:our\s+|the\s+|more\s+)?confidence\b/i,
+  },
+  // "what evidence should we gather" / "what data could we collect"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+(?:evidence|data|information|info|signal|signals|proof)\s+(?:should|could|can|might|would|do)\s+(?:we|i|you)\s+(?:gather|collect|seek|pull|find|look\s+for|need|want)\b/i,
+  },
+  // "what assumptions should we test" / "what assumptions do we need to verify"
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\bwhat\s+assumptions?\s+(?:should|could|can|might|do|would)\s+(?:we|i|you)\s+(?:need\s+to\s+|have\s+to\s+|want\s+to\s+|like\s+to\s+)?(?:test|verify|check|question|challenge|tested|verified)\b/i,
+  },
+  // "Do you have any recommendations on what we should validate or research..."
+  // — exact target phrasing from the workstream brief.
+  {
+    advice_class: 'evidence_gap',
+    pattern: /\b(?:any\s+)?recommendations?\s+(?:on|for|to|about)\s+(?:what|how)\b[^.?!\n]{0,60}\b(?:validate|research|verify|test|investigate|confirm|gather)\b/i,
   },
 
   // ── improvement (must precede the broader 'how should we' advice pattern) ─
@@ -723,6 +783,7 @@ export function tryPostAnalysisAdviceGate(
     topDriverLabel,
     analysis,
     analysisReady: input.analysisReady ?? undefined,
+    decisionReview: input.decisionReview ?? undefined,
   });
 
   return {
@@ -771,6 +832,7 @@ interface ComposeInput {
   readonly topDriverLabel: string | null;
   readonly analysis: AdviceGateAnalysis;
   readonly analysisReady: AnalysisReadyPayload | undefined;
+  readonly decisionReview: Record<string, unknown> | undefined;
 }
 
 function composeForClass(cls: AdviceClass, input: ComposeInput): string {
@@ -786,7 +848,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
     case 'readiness':
       return composeReadiness(input.analysisReady);
     case 'evidence_gap':
-      return composeEvidenceGap(input.analysis, input.analysisReady);
+      return composeEvidenceGap(input.analysis, input.analysisReady, input.decisionReview);
     case 'explain_results_free_text':
       return composeExplainResults(
         input.leadingLabel,
@@ -910,7 +972,18 @@ function composeReadiness(
 function composeEvidenceGap(
   analysis: AdviceGateAnalysis,
   analysisReady: AnalysisReadyPayload | undefined,
+  decisionReview: Record<string, unknown> | undefined,
 ): string {
+  // V5 coaching: prefer decision_review.evidence_enhancements when the
+  // enricher has attached usable content. evidence_enhancements carries
+  // grounded `specific_action` strings keyed by factor; key_assumptions
+  // surfaces an assumption worth testing. Both are passthrough from the
+  // LLM v11 schema; treat the payload as `unknown` and validate shape
+  // defensively so a malformed or partial enrichment falls back cleanly
+  // to the projection-only behaviour below.
+  const fromDR = extractValidationGuidanceFromDecisionReview(decisionReview);
+  if (fromDR != null) return fromDR;
+
   const gaps: string[] = [];
   if (analysisReady && hasSufficientReadinessData(analysisReady)) {
     const summary = summariseReadiness(analysisReady);
@@ -940,6 +1013,78 @@ function composeEvidenceGap(
   }
   const bullets = gaps.map((g) => `• ${g}`).join('\n');
   return `The biggest open gaps right now are:\n${bullets}`;
+}
+
+/**
+ * V5 coaching — extract validation/research guidance from a
+ * `decision_review` enrichment payload. Returns deterministic prose when
+ * at least one `evidence_enhancements[].specific_action` is a non-empty
+ * string; otherwise returns `null` so `composeEvidenceGap` falls back to
+ * projection-only behaviour.
+ *
+ * Copy-safety:
+ *   - opener: "To build confidence in this analysis, the most useful
+ *     things to check are:" — no `recommend*` / no `winner*` / no
+ *     sentence-leading instructional `Set/Updated/...` verbs (would trip
+ *     the false-success guard per feedback_success_claim_regex_instructional_set).
+ *   - per-item prose is sourced verbatim from the LLM `specific_action`
+ *     string (already sanitised by the decision_review enricher's
+ *     egress filter); we do NOT reword it.
+ *   - one optional `key_assumptions[0]` line, appended only when the
+ *     first entry is a non-empty string.
+ *
+ * Defensive shape parsing: the enrichment is a `Record<string, unknown>`
+ * passthrough, so every field is validated with `readRecord` / `isNonEmpty
+ * String` before use. A malformed enrichment returns `null` and never
+ * leaks raw payloads.
+ */
+function extractValidationGuidanceFromDecisionReview(
+  decisionReview: Record<string, unknown> | undefined,
+): string | null {
+  if (decisionReview == null) return null;
+  const enhancements = readRecord(decisionReview['evidence_enhancements']);
+  const actions: string[] = [];
+  if (enhancements != null) {
+    for (const key of Object.keys(enhancements)) {
+      const entry = readRecord(enhancements[key]);
+      if (entry == null) continue;
+      const action = entry['specific_action'];
+      if (isNonEmptyString(action)) {
+        actions.push(action.trim());
+      }
+      if (actions.length >= 2) break;
+    }
+  }
+  const assumptionsRaw = decisionReview['key_assumptions'];
+  const firstAssumption = Array.isArray(assumptionsRaw)
+    ? assumptionsRaw.find(isNonEmptyString)?.trim() ?? null
+    : null;
+  if (actions.length === 0 && firstAssumption == null) return null;
+
+  const lines: string[] = [];
+  if (actions.length > 0) {
+    lines.push('To build confidence in this analysis, the most useful things to check are:');
+    for (const a of actions) {
+      lines.push(`• ${a}`);
+    }
+  }
+  if (firstAssumption != null) {
+    const intro = actions.length === 0
+      ? 'One assumption worth testing first: '
+      : 'One assumption worth testing alongside this: ';
+    lines.push(`${intro}${firstAssumption}`);
+  }
+  return lines.join('\n');
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (value == null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function composeExplainResults(

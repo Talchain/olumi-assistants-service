@@ -119,6 +119,20 @@ describe('tryPostAnalysisAdviceGate — classification matrix', () => {
     { message: "Anything I'm missing?", expectedClass: 'evidence_gap', label: "anything I'm missing" },
     { message: "What haven't we covered?", expectedClass: 'evidence_gap', label: "what haven't we covered" },
 
+    // ── evidence_gap (V5 coaching — validation / research / confidence) ─
+    { message: 'What should we validate?', expectedClass: 'evidence_gap', label: 'what should we validate' },
+    { message: 'What can we verify here?', expectedClass: 'evidence_gap', label: 'what can we verify' },
+    { message: 'Anything we should confirm?', expectedClass: 'evidence_gap', label: 'anything we should confirm' },
+    { message: 'What should we research?', expectedClass: 'evidence_gap', label: 'what should we research' },
+    { message: 'How should we investigate this further?', expectedClass: 'evidence_gap', label: 'how should we investigate' },
+    { message: 'How do we build confidence in this?', expectedClass: 'evidence_gap', label: 'how do we build confidence' },
+    { message: 'How can we increase our confidence?', expectedClass: 'evidence_gap', label: 'how can we increase confidence' },
+    { message: 'What evidence should we gather?', expectedClass: 'evidence_gap', label: 'what evidence should we gather' },
+    { message: 'What data could we collect to confirm this?', expectedClass: 'evidence_gap', label: 'what data could we collect' },
+    { message: 'What assumptions should we test?', expectedClass: 'evidence_gap', label: 'what assumptions should we test' },
+    { message: 'What assumptions do we need to verify?', expectedClass: 'evidence_gap', label: 'what assumptions to verify' },
+    { message: 'Do you have any recommendations on what we should validate or research further to build confidence in our decision?', expectedClass: 'evidence_gap', label: 'exact long workstream-brief prompt' },
+
     // ── explain_results_free_text (latency Fix 2) ───────────────────
     { message: 'Explain the results.', expectedClass: 'explain_results_free_text', label: 'explain the results' },
     { message: 'Walk me through the analysis.', expectedClass: 'explain_results_free_text', label: 'walk me through the analysis' },
@@ -191,6 +205,14 @@ describe('tryPostAnalysisAdviceGate — mutation-signal precedence', () => {
     ['Remove the cost factor — what would flip the outcome?', 'mutation then what_would_flip_free_text'],
     ['What does this mean? Also set risk to 0.5.', 'meaning then mutation (mutation still wins)'],
     ['What is missing? Set the budget to £200k.', 'evidence_gap then mutation'],
+    // V5 coaching — validation phrasing paired with a concrete bare-verb
+    // edit. The bare-verb mutation pattern (`\bset\b ... \bto\s+\S+`) fires
+    // and the gate returns mutation_signal even though the message also
+    // looks like a validation/assumption question. Gerund mutations like
+    // "by setting X to Y" don't trigger this pattern and are exercised
+    // separately in the V5 coaching describe block below — there the
+    // requirement is only "not classified as evidence_gap".
+    ['Test this assumption — set the cost factor to high', 'assumption-test then mutation (V5 coaching)'],
   ];
 
   for (const [message, label] of mutations) {
@@ -1068,4 +1090,250 @@ describe('tryPostAnalysisAdviceGate — suggested_actions per class', () => {
       }
     });
   }
+});
+
+// =========================================================================
+// V5 coaching workstream — validation/research advice grounded in
+// decision_review enrichment. The new evidence_gap patterns route the
+// brief's canonical phrasings ("What should we validate?", "How do we
+// build confidence?", "What assumptions should we test?", and the exact
+// long workstream prompt) deterministically. composeEvidenceGap prefers
+// `evidence_enhancements[].specific_action` + `key_assumptions[0]` when a
+// decision_review record is threaded through; otherwise falls back to the
+// projection-only behaviour preserved from PR #178.
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)', () => {
+  const SAMPLE_DECISION_REVIEW: Record<string, unknown> = Object.freeze({
+    produced_at: '2026-05-21T10:00:00.000Z',
+    evidence_enhancements: Object.freeze({
+      fac_delivery_risk: Object.freeze({
+        specific_action: 'Pull on-time delivery rates from the last two releases and check the variance.',
+        rationale: 'Delivery risk is the highest-sensitivity factor.',
+        evidence_type: 'historical_data',
+      }),
+      fac_cost_overrun_risk: Object.freeze({
+        specific_action: 'Talk to the finance team about historical overruns on similar engagements.',
+        rationale: 'Cost overrun is the second-highest driver.',
+        evidence_type: 'expert_judgement',
+      }),
+    }),
+    key_assumptions: Object.freeze([
+      'The local senior hiring market will remain as competitive as it is today.',
+      'Salary bands stay flat for the next two quarters.',
+    ]),
+  });
+
+  it('"Validate this by setting budget to £30k" is NOT classified as evidence_gap', () => {
+    // Workstream-brief requirement: validation phrasing wrapped around a
+    // concrete edit must NOT be swallowed by the new evidence_gap
+    // patterns. The new patterns require a `(?:what|anything)` lead plus
+    // a pronoun, so the imperative "Validate this by ..." doesn't match
+    // them. The bare-verb mutation pattern doesn't fire on the gerund
+    // "setting", so the gate falls through with `no_advice_signal` and
+    // the LLM router decides (likely → edit_graph for this phrasing).
+    // The contract this test enforces is the narrow one: NOT evidence_gap.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Validate this by setting budget to £30k',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    if (out.matched) {
+      expect(out.advice_class).not.toBe('evidence_gap');
+    } else {
+      // Fall-through is also acceptable — the requirement is only that
+      // this phrasing not be intercepted as a coaching answer.
+      expect(['mutation_signal', 'no_advice_signal']).toContain(out.reason);
+    }
+  });
+
+  it('"Verify the model by changing delivery risk to 0.4" is NOT classified as evidence_gap', () => {
+    // Companion case: gerund verbs ("changing") in the same mould.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Verify the model by changing delivery risk to 0.4',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    if (out.matched) {
+      expect(out.advice_class).not.toBe('evidence_gap');
+    } else {
+      expect(['mutation_signal', 'no_advice_signal']).toContain(out.reason);
+    }
+  });
+
+  it('misclassification guard — "What should I change?" routes to advice, NOT evidence_gap', () => {
+    // The new evidence_gap patterns require a specific verb after the
+    // pronoun (validate|verify|confirm|de-risk, research|investigate, etc.).
+    // Generic "what should I/we/you change?" must continue to land on the
+    // broader `advice` class so it answers in advice prose (leverage
+    // point + next examine target), not in evidence-gap prose.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should I change?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('advice');
+      expect(out.advice_class).not.toBe('evidence_gap');
+    }
+  });
+
+  it('exact long workstream prompt routes to evidence_gap', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message:
+        'Do you have any recommendations on what we should validate or research further to build confidence in our decision?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) expect(out.advice_class).toBe('evidence_gap');
+  });
+
+  it('composeEvidenceGap uses decision_review.evidence_enhancements when present', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // Opener
+      expect(out.assistant_text).toContain('To build confidence in this analysis');
+      // Pulls the first two specific_action strings verbatim
+      expect(out.assistant_text).toContain(
+        'Pull on-time delivery rates from the last two releases and check the variance.',
+      );
+      expect(out.assistant_text).toContain(
+        'Talk to the finance team about historical overruns on similar engagements.',
+      );
+      // First key_assumption surfaces as a follow-up line
+      expect(out.assistant_text).toContain('One assumption worth testing alongside this');
+      expect(out.assistant_text).toContain(
+        'The local senior hiring market will remain as competitive as it is today.',
+      );
+      // Does NOT fall through to the projection-only "biggest open gap"
+      // sentence when enrichment is the source of truth
+      expect(out.assistant_text).not.toMatch(/^The biggest open gap/);
+    }
+  });
+
+  it('composeEvidenceGap falls back to projection when decision_review is absent', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      // decisionReview deliberately omitted
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // Projection-only fallback: surfaces either an open-readiness item
+      // or the fragile-edge / top-driver narrative
+      expect(out.assistant_text).toMatch(/biggest open gap/i);
+      // Should NOT contain enrichment-only opener
+      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+    }
+  });
+
+  it('composeEvidenceGap falls back when decision_review is empty (no usable enhancements)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: {
+        produced_at: '2026-05-21T10:00:00.000Z',
+        evidence_enhancements: {},
+        key_assumptions: [],
+      },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // No enhancements + no assumptions → enrichment helper returns null,
+      // composer falls back to projection-only behaviour.
+      expect(out.assistant_text).toMatch(/biggest open gap/i);
+      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+    }
+  });
+
+  it('composeEvidenceGap tolerates malformed enrichment (defensive parsing)', () => {
+    // Enrichment is a passthrough `Record<string, unknown>`; the helper
+    // must reject array shapes / non-string actions / nullish entries
+    // without throwing and fall back cleanly.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: {
+        produced_at: '2026-05-21T10:00:00.000Z',
+        evidence_enhancements: {
+          fac_a: null,
+          fac_b: ['not an object'],
+          fac_c: { specific_action: '   ' },
+          fac_d: { specific_action: 42 },
+        },
+        key_assumptions: [null, 42, ''],
+      },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toMatch(/biggest open gap/i);
+      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+    }
+  });
+
+  it('composeEvidenceGap copy is safe (no recommendation/winner vocabulary, no false-success leads)', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      const lower = out.assistant_text.toLowerCase();
+      // Forbidden vocabulary
+      expect(lower).not.toContain('recommendation');
+      expect(lower).not.toContain('recommended');
+      expect(lower).not.toMatch(/\bthe\s+winners?\b/);
+      expect(lower).not.toMatch(/\bwinning\s+(option|probability|side|choice|outcome)\b/);
+      // No raw IDs / decimals
+      expect(out.assistant_text).not.toMatch(/\boption_\w+\b/);
+      expect(out.assistant_text).not.toMatch(/\bfac_\w+\b/);
+      // False-success guard: sentence-leading instructional verbs that
+      // could trip downstream "Set/Updated/Added at line start" detection
+      // (feedback_success_claim_regex_instructional_set). The deterministic
+      // wrapper avoids these openers.
+      expect(out.assistant_text.split('\n')[0]).not.toMatch(/^(?:Set|Updated|Added|Changed|Removed|Adjusted)\b/);
+    }
+  });
+
+  it('evidence_gap class still emits NO chip even with decision_review enrichment present', () => {
+    // The chip set is class-driven, not content-driven: evidence_gap
+    // continues to emit zero chips so the response stays focused on the
+    // grounded answer. The post-run_analysis prompt chip lives in the
+    // chip-generator, not on the gate's own suggested_actions output.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.suggested_actions).toHaveLength(0);
+    }
+  });
 });

@@ -214,7 +214,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   );
 
   // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
-  // require a new handler. Both chips emit executable `action_type` so the
+  // require a new handler. Both executable chips emit `action_type` so the
   // chip-click path resolves deterministically via `dispatchDeterministicChipClick`
   // (saves ~12s ORIENT Sonnet call per click — see Phase 2b round-2 reviewer
   // finding: the prior `promptChip` for "Explain the result" had no
@@ -222,8 +222,20 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // never hit the deterministic bypass). Both also seed a pending action
   // so a typed "yes" on the next turn can resume via the short-confirm
   // pre-route.
+  //
+  // V5 coaching — a third prompt chip ("What should we validate?") is
+  // appended ONLY when the run_analysis fact carries non-empty
+  // decision_review.evidence_enhancements (honesty gate: never offer the
+  // chip when the advice answer would be empty). The chip has no
+  // `action_type` — on click, the message text routes through the
+  // post-analysis advice gate's evidence_gap class and is answered
+  // deterministically. Reads current-turn handlerFacts first, then
+  // priorFacts as a defensive fallback (the validation guidance check is
+  // turn-bound; the chip itself only emits when run_analysis just ran).
+  // `cap` caps at MAX_CHIPS so this chip is suppressed if the slot
+  // budget is already full — protecting existing UX.
   if (handlerJustRan === 'run_analysis') {
-    return cap([
+    const chips: SuggestedAction[] = [
       {
         id: 'chip_action_explain_results',
         label: 'Explain the result',
@@ -236,7 +248,15 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         message: 'What could change the outcome of this analysis?',
         action_type: 'what_would_flip',
       },
-    ]);
+    ];
+    if (hasUsableValidationGuidance(input.handlerFacts, input.priorFacts)) {
+      chips.push({
+        id: 'chip_prompt_validate_decision',
+        label: 'What should we validate?',
+        message: 'What should we validate or research to build confidence in this decision?',
+      });
+    }
+    return cap(chips);
   }
 
   // V5 product-state continuity (foamy-bee tranche) — post-mutation
@@ -732,6 +752,66 @@ export function deriveProjectionStatus(
 
 function cap(chips: readonly SuggestedAction[]): readonly SuggestedAction[] {
   return chips.slice(0, MAX_CHIPS);
+}
+
+/**
+ * V5 coaching — true when one of the supplied fact arrays carries a
+ * successful run_analysis fact whose
+ * `result.enrichment.decision_review.evidence_enhancements` contains at
+ * least one entry with a non-empty `specific_action` string.
+ *
+ * Honesty gate for the post-run_analysis "What should we validate?"
+ * prompt chip: the chip routes through the advice gate's evidence_gap
+ * class, which sources its prose from these same fields. Emitting the
+ * chip when the gate would have no content to return would surface a
+ * dead prompt — so the chip is only offered when the answer will be
+ * non-empty.
+ *
+ * Source order (per V5 coaching brief): current-turn handlerFacts
+ * first, then priorFacts. In practice the chip only fires on the
+ * run_analysis success turn, so current-turn is the active source —
+ * the priorFacts walk is a defensive fallback for any future caller
+ * that surfaces the chip on subsequent turns. Returns false when no
+ * usable enrichment exists in either array (defensive shape parsing —
+ * the enrichment is a passthrough `Record<string, unknown>`).
+ */
+function hasUsableValidationGuidance(
+  handlerFacts: readonly HandlerFact[] | undefined,
+  priorFacts: readonly HandlerFact[] | undefined,
+): boolean {
+  return (
+    factsCarryUsableEvidenceEnhancements(handlerFacts) ||
+    factsCarryUsableEvidenceEnhancements(priorFacts)
+  );
+}
+
+function factsCarryUsableEvidenceEnhancements(
+  facts: readonly HandlerFact[] | undefined,
+): boolean {
+  if (!facts || facts.length === 0) return false;
+  for (const fact of facts) {
+    if (!isSuccessfulRunAnalysisFact(fact)) continue;
+    if (fact.fact_type !== 'run_analysis') continue;
+    const enrichment = fact.result.enrichment;
+    if (enrichment == null || typeof enrichment !== 'object') continue;
+    const dr = (enrichment as Record<string, unknown>)['decision_review'];
+    if (dr == null || typeof dr !== 'object' || Array.isArray(dr)) continue;
+    const enhancements = (dr as Record<string, unknown>)['evidence_enhancements'];
+    if (
+      enhancements == null ||
+      typeof enhancements !== 'object' ||
+      Array.isArray(enhancements)
+    ) continue;
+    for (const key of Object.keys(enhancements)) {
+      const entry = (enhancements as Record<string, unknown>)[key];
+      if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const action = (entry as Record<string, unknown>)['specific_action'];
+      if (typeof action === 'string' && action.trim().length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function chipId(scope: 'action' | 'prompt', discriminator: string): string {
