@@ -688,12 +688,15 @@ function normaliseDeterministicCoachingFromM1(
   const m1 = readRecord(enrichment.m1_coaching);
   // Trim whitespace defensively; an upstream value of "  ready  " is
   // semantically "ready" and should not be treated as "unusable, fall back."
-  // We deliberately do NOT enum-allowlist the strings (e.g. restrict to a
-  // fixed set like ["ready","not_ready","unknown"]): if PLoT introduces a
-  // new valid value in the future, a strict gate would silently fall back
-  // to "unknown"/"neutral" and starve the prompt of valid data — recreating
-  // the exact starvation symptom adapter v1 fixes. The prompt's tone
-  // alignment table handles unrecognised enums gracefully today.
+  // Any non-empty trimmed string is forwarded verbatim — this is an
+  // intentional upstream-contract-trust decision, NOT a claim about v11's
+  // behaviour on unknown enums. PLoT owns the readiness/headline_type
+  // enum vocabulary; the adapter trusts whatever PLoT publishes. We
+  // deliberately do NOT enum-allowlist the strings: a fixed gate (e.g.
+  // ["ready","not_ready","unknown"]) would silently fall back when PLoT
+  // introduces a new valid value, recreating the exact starvation symptom
+  // adapter v1 fixes. If v11 ever mishandles an unknown enum the right
+  // response is prompt-side (v13 enum-handling), not adapter strictness.
   const rawReadiness =
     m1 && typeof m1.readiness === 'string' ? m1.readiness.trim() : '';
   const readiness = rawReadiness.length > 0 ? rawReadiness : 'unknown';
@@ -781,8 +784,8 @@ function normaliseEvidenceGap(e: Record<string, unknown>): Record<string, unknow
  * Allowlisted additive passthrough: attribution_stability, rank_flip_rate,
  * evpi_percentage_points, direction, sensitivity_score,
  * confidence_components, confidence_source, confidence_provenance. Unknown
- * upstream fields are NOT auto-forwarded — this guards v11 against
- * surfacing fields it doesn't know how to interpret.
+ * upstream fields are NOT auto-forwarded *at the top level of the entry* —
+ * this guards v11 against surfacing fields it doesn't know how to interpret.
  *
  * Nested-object passthrough is intentionally NOT recursively allowlisted:
  * `confidence_components` and `confidence_provenance` are forwarded as

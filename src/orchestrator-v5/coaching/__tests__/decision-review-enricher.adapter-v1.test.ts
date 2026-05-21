@@ -191,55 +191,6 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     expect(f.another_unknown).toBeUndefined();
   });
 
-  it('7. whitespace/empty readiness/headline_type are trimmed; empty-after-trim falls back to defaults', () => {
-    // Codex follow-up (2026-05-22): explicit coverage for the trim() defence.
-    // Upstream " ready " → "ready"; " " → "" → fallback "unknown".
-    const enrichment = baseEnrichment({
-      m1_coaching: {
-        readiness: '   ready   ',
-        headline_type: '\t\nmoderate_winner\t\n',
-        evidence_gaps: [],
-        model_critiques: [],
-      },
-    });
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
-    const dc = input.deterministic_coaching;
-    expect(dc.readiness).toBe('ready');
-    expect(dc.headline_type).toBe('moderate_winner');
-    const meta = input._meta!;
-    // Trimmed values are non-default — flag should flip true.
-    expect(meta.has_deterministic_coaching).toBe(true);
-
-    // Whitespace-only / empty strings fall back to defaults.
-    const whitespaceEnrichment = baseEnrichment({
-      m1_coaching: {
-        readiness: '   ',
-        headline_type: '',
-        evidence_gaps: [],
-        model_critiques: [],
-      },
-    });
-    const wsInput = buildInvokeInputForTests(BRIEF, whitespaceEnrichment, 'opt-1')!;
-    const wsDc = wsInput.deterministic_coaching;
-    expect(wsDc.readiness).toBe('unknown');
-    expect(wsDc.headline_type).toBe('neutral');
-    expect(wsInput._meta!.has_deterministic_coaching).toBe(false);
-
-    // Non-string types fall back to defaults (defensive against PLoT shape drift).
-    const wrongTypeEnrichment = baseEnrichment({
-      m1_coaching: {
-        readiness: 42,
-        headline_type: null,
-        evidence_gaps: [],
-        model_critiques: [],
-      },
-    });
-    const wtInput = buildInvokeInputForTests(BRIEF, wrongTypeEnrichment, 'opt-1')!;
-    expect(wtInput.deterministic_coaching.readiness).toBe('unknown');
-    expect(wtInput.deterministic_coaching.headline_type).toBe('neutral');
-    expect(wtInput._meta!.has_deterministic_coaching).toBe(false);
-  });
-
   it('6. malformed evidence_gaps: object-shaped but missing required fields are dropped and counted; user-facing output unaffected', () => {
     // Partial-malformed sub-case: valid + 2 malformed
     const partialEnrichment = baseEnrichment({
@@ -287,5 +238,74 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     const allBadMeta = allBadInput._meta!;
     expect(allBadMeta.evidence_gaps_dropped_count).toBe(3);
     expect(allBadMeta.has_deterministic_coaching).toBe(false);
+  });
+
+  it('7. whitespace and wrong-type readiness/headline_type fall back to defaults; padded canonical values are trimmed', () => {
+    // Padded canonical values trim cleanly to canonical form.
+    const paddedEnrichment = baseEnrichment({
+      m1_coaching: {
+        readiness: '   ready   ',
+        headline_type: '\t\nmoderate_winner\t\n',
+        evidence_gaps: [],
+        model_critiques: [],
+      },
+    });
+    const paddedInput = buildInvokeInputForTests(BRIEF, paddedEnrichment, 'opt-1')!;
+    const paddedDc = paddedInput.deterministic_coaching;
+    expect(paddedDc.readiness).toBe('ready');
+    expect(paddedDc.headline_type).toBe('moderate_winner');
+    expect(paddedInput._meta!.has_deterministic_coaching).toBe(true);
+
+    // Whitespace-only / empty strings fall back to defaults.
+    const whitespaceEnrichment = baseEnrichment({
+      m1_coaching: {
+        readiness: '   ',
+        headline_type: '',
+        evidence_gaps: [],
+        model_critiques: [],
+      },
+    });
+    const wsInput = buildInvokeInputForTests(BRIEF, whitespaceEnrichment, 'opt-1')!;
+    expect(wsInput.deterministic_coaching.readiness).toBe('unknown');
+    expect(wsInput.deterministic_coaching.headline_type).toBe('neutral');
+    expect(wsInput._meta!.has_deterministic_coaching).toBe(false);
+
+    // Non-string types fall back to defaults (defensive against PLoT shape drift).
+    const wrongTypeEnrichment = baseEnrichment({
+      m1_coaching: {
+        readiness: 42,
+        headline_type: null,
+        evidence_gaps: [],
+        model_critiques: [],
+      },
+    });
+    const wtInput = buildInvokeInputForTests(BRIEF, wrongTypeEnrichment, 'opt-1')!;
+    expect(wtInput.deterministic_coaching.readiness).toBe('unknown');
+    expect(wtInput.deterministic_coaching.headline_type).toBe('neutral');
+    expect(wtInput._meta!.has_deterministic_coaching).toBe(false);
+  });
+
+  it('8. unknown non-empty readiness/headline_type values are preserved verbatim and flip has_deterministic_coaching=true', () => {
+    // Documents the deliberate upstream-contract-trust policy: any non-empty
+    // trimmed string (including values outside the today-canonical set) is
+    // forwarded as-is, on the rationale that PLoT owns the enum vocabulary
+    // and may extend it. The adapter does NOT enum-allowlist. If a future
+    // runtime issue surfaces from unknown enums reaching v11, the fix lives
+    // in the prompt (v13 enum-handling), not in adapter strictness.
+    const unknownEnrichment = baseEnrichment({
+      m1_coaching: {
+        readiness: 'ready-with-gaps', // not in today's canonical set
+        headline_type: 'edge_case_winner', // also non-canonical
+        evidence_gaps: [],
+        model_critiques: [],
+      },
+    });
+    const input = buildInvokeInputForTests(BRIEF, unknownEnrichment, 'opt-1')!;
+    const dc = input.deterministic_coaching;
+    // Preserved verbatim — NOT replaced with "unknown"/"neutral".
+    expect(dc.readiness).toBe('ready-with-gaps');
+    expect(dc.headline_type).toBe('edge_case_winner');
+    // Non-default values count as real upstream data.
+    expect(input._meta!.has_deterministic_coaching).toBe(true);
   });
 });
