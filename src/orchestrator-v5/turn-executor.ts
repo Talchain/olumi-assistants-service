@@ -2708,6 +2708,13 @@ export async function runTurnExecutor(
           candidate_count: 0,
           top_score: null,
           candidate_sources: [],
+          // Row-7 from/to attribution carries here too so the
+          // V5DeterministicValueUpdate schema is consistent across
+          // every emit site (PR #192 reviewer feedback round 3).
+          // The clarify_deictic path can carry attribution when the
+          // user's deictic message included a from/to anchor but the
+          // selection narrowing failed.
+          attribution: deicticDispatch.attribution ?? null,
           skip_reason: null,
           deictic_reason: deicticDispatch.reason,
           selected_factor_count: selectedFactorIds.length,

@@ -41,6 +41,7 @@
  *   - No candidate qualifies → `{ matched: false }` (LLM falls through).
  */
 
+import { NUMERIC_SUFFIX_SOURCE } from '../context/cqe/rules.js';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
@@ -71,38 +72,50 @@ const DEICTIC_REFERENCE_PATTERN =
 /**
  * V5 Golden Journey row 7 — strict "from <numeric> to <numeric>" anchor.
  *
- * Reviewer feedback on PR #192 (2026-05-21): the earlier draft used
- * `/\bfrom\b[^.]*?\bto\b/i`, which only proved the two words appeared
- * in the message but did not bind them to numeric tokens. A message
- * like
+ * History:
+ *   - Original draft used `/\bfrom\b[^.]*?\bto\b/i` (PR #192). Reviewer
+ *     showed a counterexample where this matched "from Q1 to Q2 by £20k
+ *     and headcount by 3" — the words appeared but did not bind the two
+ *     CQE quantities. Branch then mis-attributed `3` as the target.
+ *   - Second draft tightened the suffix grammar locally to `(?:k|m|bn?)?`.
+ *     Reviewer (2026-05-22) showed THAT was wrong too: `bn?` accepts
+ *     bare `b` while CQE's grammar does not. For "increase Market Size
+ *     from £1b to £2b" the regex matched (`1b` / `2b`), CQE extracted
+ *     only `1` and `2` (bare numbers, no billion multiplier), and the
+ *     branch silently set the factor to `£2`, not `£2bn`.
  *
- *   "change annual budget from Q1 to Q2 by £20k and headcount by 3"
+ * Both regressions came from a divergent local copy of CQE's numeric
+ * grammar. Fix: share the source. CQE owns the suffix grammar
+ * (`NUMERIC_SUFFIX_SOURCE` exported from `context/cqe/rules.ts`); this
+ * anchor pattern reuses it verbatim so the two grammars cannot drift
+ * again. New suffix words ("trillion", future colloquial forms) added
+ * to CQE flow here automatically.
  *
- * matched that anchor (the words "from Q1 to Q2" satisfied it) and then
- * blindly attributed the second CQE quantity (`3`) as the target —
- * silently setting the budget to 3. The brief required the from/to
- * words to BIND the two extracted quantities.
- *
- * The tightened pattern requires DIGITS (optionally preceded by a
- * currency symbol and optionally followed by a `k`/`m`/`bn` suffix)
- * immediately at BOTH anchors. The reviewer's counterexample now fails
- * the regex (after `from ` is "Q" — neither currency nor digit) and
- * falls through to the conservative `ambiguous_quantity` skip.
- *
- * Defence in depth: this anchor verifies POSITION (the two anchors
- * carry numeric tokens). CQE document order remains the trust
- * assumption for VALUE attribution — per AC.2 commentary, `raw_text`
- * is post-normalised so an indexOf-based re-locate is unreliable.
- * Combined, the worst-case misattribution collapses to "CQE merged or
- * split quantities to a different count than the regex captured" —
- * which the strict `nonNullQuantities.length === 2` gate rules out.
+ * The pattern requires DIGITS (optionally preceded by a currency
+ * symbol and optionally followed by the CQE-canonical suffix grammar)
+ * immediately at BOTH anchors. Two side-by-side guarantees:
+ *   1. POSITION: the regex match proves the two anchors carry numeric
+ *      tokens with a CQE-recognised shape.
+ *   2. VALUE: CQE document-order trust — `nonNullQuantities[0]` is the
+ *      from-value, `nonNullQuantities[1]` is the to-value. Per AC.2
+ *      commentary, `raw_text` is post-normalised so an indexOf-based
+ *      re-locate is unreliable; the strict 2-quantity gate prevents
+ *      CQE-vs-regex count drift.
  *
  * Negative cases the AC.2 conservative skip still catches without
  * change: range ("between X and Y"), disjunction ("by X or Y"), 3+
- * quantities, and any from/to where either side is non-numeric.
+ * quantities, any from/to where either side is non-numeric in
+ * CQE-recognised shape (including the bare-`b` case above — "1b"
+ * fails the suffix rule, so the trailing `\b` boundary fails too).
  */
-const FROM_TO_NUMERIC_ANCHOR_PATTERN =
-  /\bfrom\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn?)?\b[^.]*?\bto\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn?)?\b/i;
+const FROM_TO_NUMERIC_ANCHOR_PATTERN = new RegExp(
+  String.raw`\bfrom\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?\b[^.]*?\bto\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?\b`,
+  'i',
+);
 
 // Case-insensitive substring matches; some are anchored on word boundary
 // so "fastest" doesn't trigger `\btest\b` and "iframe" doesn't trigger

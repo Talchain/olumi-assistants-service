@@ -22,6 +22,7 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { extractQuantities } from '../../context/cqe/extract-quantities.js';
 import type { QuantityExtractionResult } from '../../context/cqe/schema-types.js';
 import type { GraphLookup } from '../validator.js';
 import {
@@ -296,6 +297,164 @@ describe('Fix A — negative gates (keep existing skips)', () => {
     expect(result.matched).toBe(false);
     if (result.matched) return;
     expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
+
+  it('reviewer counterexample (PR #192 round 2): "from £1b to £2b" → falls through (bare `b` is NOT a CQE suffix; regex must NOT accept it)', () => {
+    // Synthetic CQE quantities mirror what CQE actually emits when the
+    // user writes "£1b" / "£2b" with the bare-b form: bare numbers 1 and
+    // 2, because `b` is NOT in CQE's suffix grammar
+    // `(?:k|m|bn|million|billion|thousand)`. The earlier regex
+    // `(?:k|m|bn?)?` accepted `b` and would have attributed `2` as the
+    // target value — silently setting the factor to £2 instead of £2bn.
+    // The fix shares CQE's exact suffix source so the regex rejects
+    // bare-`b` exactly the way CQE does.
+    const result = tryDeterministicValueUpdate(
+      'increase Market Size from £1b to £2b',
+      [
+        quantity(1, '£1', { unit: 'GBP' }),
+        quantity(2, '£2', { unit: 'GBP' }),
+      ],
+      makeGraph([{ id: 'fac_mkt', label: 'Market Size' }]),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
+
+  it('"from £1bn to £2bn" with real `bn` suffix → set_factor_value, value=2_000_000_000 (suffix-grammar positive case)', () => {
+    const result = tryDeterministicValueUpdate(
+      'increase Market Size from £1bn to £2bn',
+      [
+        quantity(1_000_000_000, '£1bn', { unit: 'GBP' }),
+        quantity(2_000_000_000, '£2bn', { unit: 'GBP' }),
+      ],
+      makeGraph([{ id: 'fac_mkt', label: 'Market Size' }]),
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.quantity.value).toBe(2_000_000_000);
+    expect(result.attribution).toBe('from_to');
+  });
+
+  it('"from 1 million to 2 million" with the word-form suffix → set_factor_value, value=2_000_000 (long-form suffix-grammar positive case)', () => {
+    const result = tryDeterministicValueUpdate(
+      'increase Market Size from 1 million to 2 million',
+      [
+        quantity(1_000_000, '1 million'),
+        quantity(2_000_000, '2 million'),
+      ],
+      makeGraph([{ id: 'fac_mkt', label: 'Market Size' }]),
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.quantity.value).toBe(2_000_000);
+    expect(result.attribution).toBe('from_to');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix A — CQE integration: exercise the real `extractQuantities()` so
+// regressions in CQE-vs-regex grammar drift surface immediately rather
+// than only when the synthetic-quantity tests stop reflecting reality.
+// PR #192 reviewer feedback (2026-05-22) made this case explicit.
+// ---------------------------------------------------------------------------
+
+describe('Fix A — real-CQE integration (no synthetic quantities)', () => {
+  // Probing real CQE (2026-05-22) shows it MERGES well-formed
+  // "from <X> to <Y>" phrases into ONE quantity with operator='set' and
+  // value=Y. The deterministic detector's from/to branch only fires
+  // when CQE emits 2 separate quantities — which happens when CQE
+  // didn't recognise the from/to pattern (e.g. an unsupported suffix
+  // like bare-`b`). The branch is therefore a safety net for the
+  // exact edge case the reviewer was worried about, not the common
+  // path. These integration tests pin the contract end-to-end.
+
+  it('"increase Market Size from £1bn to £2bn" via real CQE → CQE collapses to ONE quantity (value=2bn); detector dispatches via single-quantity path', () => {
+    const message = 'increase Market Size from £1bn to £2bn';
+    const cqe = extractQuantities(message);
+    const nonNull = cqe.filter((q) => q.value !== null);
+    // Real CQE behaviour: ONE quantity with the to-value. If CQE
+    // ever changes to emit two separate quantities, this assertion
+    // fails first — proves a human review caught the drift before
+    // the deterministic branch quietly took over.
+    expect(nonNull.length).toBe(1);
+    expect(nonNull[0]!.value).toBe(2_000_000_000);
+    expect(nonNull[0]!.operator).toBe('set');
+
+    const result = tryDeterministicValueUpdate(
+      message,
+      cqe,
+      makeGraph([{ id: 'fac_mkt', label: 'Market Size' }]),
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.quantity.value).toBe(2_000_000_000);
+    // Single-quantity path — from/to branch did NOT fire because
+    // CQE already merged. `attribution` is therefore unset.
+    expect(result.attribution).toBeUndefined();
+  });
+
+  it('"increase Market Size from £1b to £2b" via real CQE → 2 quantities (1, 2) → tightened regex rejects bare-`b` → ambiguous_quantity (no silent mis-mutation)', () => {
+    // This is the reviewer's specific safety check. CQE does NOT
+    // recognise bare-`b` as a billion suffix (its grammar is
+    // `k|m|bn|million|billion|thousand`), so its from/to merger does
+    // not fire. CQE falls back to two separate bare-currency
+    // quantities (1 and 2). With the first-draft `bn?` regex the
+    // detector would have matched and attributed `2` as the target —
+    // silently setting Market Size to £2 instead of the user's
+    // intended £2bn. The fix (sharing CQE's exact suffix source) makes
+    // the regex reject bare-`b` exactly the way CQE does.
+    const message = 'increase Market Size from £1b to £2b';
+    const cqe = extractQuantities(message);
+    const nonNull = cqe.filter((q) => q.value !== null);
+    // Real CQE behaviour (locked): 2 quantities, bare values (no
+    // billion multiplier). If CQE ever starts handling bare-`b`, this
+    // pins the change for human review before the detector's regex
+    // diverges.
+    expect(nonNull.length).toBe(2);
+    expect(nonNull[0]!.value).toBe(1);
+    expect(nonNull[1]!.value).toBe(2);
+
+    const result = tryDeterministicValueUpdate(
+      message,
+      cqe,
+      makeGraph([{ id: 'fac_mkt', label: 'Market Size' }]),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
+
+  it('"increase Hiring and Salary Cost from £80,000 to £100,000" via real CQE → single quantity (£100,000, operator=set) → set_factor_value with value=100000', () => {
+    // The Golden Journey row 7 phrasing routed end-to-end through real
+    // CQE: CQE merges the from/to into one quantity (100000), the
+    // detector substring-matches the factor label, single-quantity
+    // path dispatches set_factor_value. This is the deterministic
+    // happy path the row-7 workstream targeted; the from/to branch
+    // is the safety net for cases where this merger does not fire.
+    const message = 'increase Hiring and Salary Cost from £80,000 to £100,000';
+    const cqe = extractQuantities(message);
+    const nonNull = cqe.filter((q) => q.value !== null);
+    expect(nonNull.length).toBe(1);
+    expect(nonNull[0]!.value).toBe(100000);
+
+    const result = tryDeterministicValueUpdate(
+      message,
+      cqe,
+      makeGraph([{ id: 'fac_hire', label: 'Hiring and Salary Cost' }]),
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('fac_hire');
+    expect(result.quantity.value).toBe(100000);
   });
 });
 
