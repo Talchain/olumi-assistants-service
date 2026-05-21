@@ -308,4 +308,46 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     // Non-default values count as real upstream data.
     expect(input._meta!.has_deterministic_coaching).toBe(true);
   });
+
+  it('9. populated model_critiques: count flows through to _meta.model_critique_count and flips has_deterministic_coaching=true', () => {
+    // Locks behaviour for the (currently empty in staging captures)
+    // model_critiques path. Without this test, the only signal that
+    // dcResult.model_critique_count is wired into _meta is the captured
+    // value of 0 — indistinguishable from the previous hardcoded 0.
+    const enrichment = baseEnrichment({
+      m1_coaching: {
+        // Default-like readiness/headline_type — flag must flip via critiques alone.
+        readiness: 'unknown',
+        headline_type: 'neutral',
+        evidence_gaps: [],
+        model_critiques: [
+          { code: 'BIAS_FRAMING', message: 'Critique A' },
+          { code: 'MISSING_BASELINE', message: 'Critique B' },
+        ],
+      },
+    });
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const dc = input.deterministic_coaching;
+    expect((dc.model_critiques as ReadonlyArray<unknown>).length).toBe(2);
+    const meta = input._meta!;
+    expect(meta.model_critique_count).toBe(2);
+    expect(meta.has_deterministic_coaching).toBe(true);
+
+    // Non-object critiques (string / null / array) are filtered out by
+    // filterObjectEntries — locks the defensive behaviour for shape drift.
+    const mixedEnrichment = baseEnrichment({
+      m1_coaching: {
+        evidence_gaps: [],
+        model_critiques: [
+          { code: 'VALID', message: 'ok' },
+          'not-an-object',
+          null,
+          [{ nested: 'array' }],
+        ],
+      },
+    });
+    const mixedInput = buildInvokeInputForTests(BRIEF, mixedEnrichment, 'opt-1')!;
+    expect((mixedInput.deterministic_coaching.model_critiques as unknown[]).length).toBe(1);
+    expect(mixedInput._meta!.model_critique_count).toBe(1);
+  });
 });
