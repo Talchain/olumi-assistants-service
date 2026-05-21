@@ -54,6 +54,12 @@ export interface DecisionReviewMeta {
   /** Number of model_critiques carried by deterministic_coaching. 0 until the
    *  M1 deterministic-coaching pipeline ships. */
   readonly model_critique_count: number;
+  /** Number of upstream m1_coaching.evidence_gaps entries that were object-
+   *  shaped but missing one of the four required fields (factor_id,
+   *  factor_label, voi_score, confidence). Internal observability only —
+   *  the contract test at decision-review-enricher.contract.test.ts §"_meta
+   *  is adapter-only" asserts this key never reaches the user message. */
+  readonly evidence_gaps_dropped_count: number;
   /** Whether the deterministic_coaching block is the M1 fully-derived shape.
    *  False until M1 ships — v12 uses this to decide whether to fall back to
    *  raw signals (margin, robustness_level) instead of trusting headline_type

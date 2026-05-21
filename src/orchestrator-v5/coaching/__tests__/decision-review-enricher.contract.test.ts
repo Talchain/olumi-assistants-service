@@ -205,13 +205,17 @@ describe('decision-review-enricher — Tier 3 contract', () => {
     expect(rob.level).toBe('moderate');
   });
 
-  it('no-semantic-invention: deterministic_coaching keeps current safe defaults; no fabrication', () => {
+  it('no-semantic-invention: deterministic_coaching keeps safe defaults when m1_coaching is absent', () => {
+    // Adapter v1 (2026-05-21): when enrichment.m1_coaching is absent, the
+    // adapter still emits v11-compatible safe defaults. When m1_coaching IS
+    // present (live staging behaviour), the populated branch is covered by
+    // decision-review-enricher.adapter-v1.test.ts. makePopulatedEnrichment()
+    // has no m1_coaching field, so this test exercises the fallback path
+    // and asserts no fabrication.
     const input = buildInvokeInputForTests(BRIEF, makePopulatedEnrichment(), 'opt_partner')!;
     const dc = input.deterministic_coaching;
-    // v11-compatible safe defaults; the post-v12 follow-up will flip these to null.
     expect(dc.headline_type).toBe('neutral');
     expect(dc.readiness).toBe('unknown');
-    // The adapter must NOT fabricate critiques or gaps.
     expect(dc.model_critiques).toEqual([]);
     expect(dc.evidence_gaps).toEqual([]);
   });
@@ -248,6 +252,7 @@ describe('decision-review-enricher — Tier 3 contract', () => {
     expect(userMessage).not.toContain('flip_threshold_count');
     expect(userMessage).not.toContain('fragile_edge_count');
     expect(userMessage).not.toContain('model_critique_count');
+    expect(userMessage).not.toContain('evidence_gaps_dropped_count');
     // Sanity: the user message *is* still populated — proves we didn't accidentally
     // strip everything in the assertion above.
     expect(userMessage).toContain('Engage Offshore Partner');

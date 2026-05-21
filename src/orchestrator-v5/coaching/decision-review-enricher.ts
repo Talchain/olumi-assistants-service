@@ -349,7 +349,8 @@ function buildInvokeInput(
 
   const flipThresholdData = readFlipThresholdData(enrichment, labelMap, unitMap);
   const islResults = readIslResults(enrichment, labelMap);
-  const deterministicCoaching = readDeterministicCoaching(enrichment);
+  const dcResult = normaliseDeterministicCoachingFromM1(enrichment);
+  const deterministicCoaching = dcResult.value;
 
   const margin = runnerUp !== null
     ? winner.win_probability - runnerUp.win_probability
@@ -361,8 +362,9 @@ function buildInvokeInput(
     flip_threshold_count: flipThresholdData?.length ?? 0,
     factor_sensitivity_count: countArray(islResults.factor_sensitivity),
     fragile_edge_count: countArray(islResults.fragile_edges),
-    model_critique_count: 0, // 0 until the M1 deterministic-coaching pipeline ships
-    has_deterministic_coaching: false,
+    model_critique_count: dcResult.model_critique_count,
+    has_deterministic_coaching: dcResult.has_real_data,
+    evidence_gaps_dropped_count: dcResult.evidence_gaps_dropped_count,
     margin,
     robustness_level: robustnessLevel,
   };
@@ -550,25 +552,16 @@ function readIslResults(
 
   // factor_sensitivity: rename id → factor_id and label → factor_label;
   // pin elasticity / confidence to numbers (or null — never invent).
+  // Allowlisted additive fields (attribution_stability, rank_flip_rate,
+  // evpi_percentage_points, direction, sensitivity_score, confidence_components,
+  // confidence_source, confidence_provenance) are forwarded when upstream
+  // supplies them — see normaliseFactorSensitivity. Unknown PLoT fields are
+  // NOT auto-forwarded.
   const factorSensitivity: Record<string, unknown>[] = [];
   if (Array.isArray(enrichment.factor_sensitivity)) {
     for (const raw of enrichment.factor_sensitivity) {
-      const e = readRecord(raw);
-      if (!e) continue;
-      const factorId = (typeof e.factor_id === 'string' ? e.factor_id : null)
-        ?? (typeof e.id === 'string' ? e.id : null);
-      if (!factorId) continue;
-      const factorLabel = (typeof e.factor_label === 'string' && e.factor_label)
-        ? e.factor_label
-        : (typeof e.label === 'string' && e.label)
-          ? e.label
-          : labelMap.get(factorId) ?? factorId;
-      factorSensitivity.push({
-        factor_id: factorId,
-        factor_label: factorLabel,
-        elasticity: typeof e.elasticity === 'number' && Number.isFinite(e.elasticity) ? e.elasticity : null,
-        confidence: typeof e.confidence === 'number' && Number.isFinite(e.confidence) ? e.confidence : null,
-      });
+      const n = normaliseFactorSensitivity(raw, labelMap);
+      if (n) factorSensitivity.push(n);
     }
   }
 
@@ -660,23 +653,177 @@ function readIslResults(
   };
 }
 
-function readDeterministicCoaching(_enrichment: Record<string, unknown>): Record<string, unknown> {
-  // PLoT envelope does not ship an M1-shaped deterministic_coaching payload.
-  // We return the minimum required shape so the prompt v11 shape check
-  // passes — `readiness: 'unknown'` and `headline_type: 'neutral'` are
-  // **intentional safe defaults** kept for v11 compatibility (its tone
-  // alignment table at defaults.ts:1320 keys on these enums and would
-  // produce miscalibrated tone if we shipped null today).
-  //
-  // Prompt v12 (drafted separately) will fall back to `_meta.margin` /
-  // `_meta.robustness_level` and ignore these defaults. After v12 ships,
-  // a follow-up branch will flip these to null. See plan §"Tier 3 timing".
+/**
+ * Adapter v1 (2026-05-21) — map `enrichment.m1_coaching` into the
+ * `deterministic_coaching` block that v11 prompts read. PLoT supplies this
+ * subtree today; previously this function returned a hardcoded default and
+ * starved the prompt of evidence. See
+ * Docs/v5/captures/decision_review_envelope_audit_2026-05-21.md §7.
+ *
+ * `_meta.has_deterministic_coaching` is true ONLY when at least one mapped
+ * field carries real upstream data:
+ *   - readiness present and not 'unknown', OR
+ *   - headline_type present and not 'neutral', OR
+ *   - evidence_gaps mapped (non-empty after malformed-entry filtering), OR
+ *   - model_critiques present (non-empty).
+ *
+ * Malformed evidence_gaps entries (object-shaped but missing one of the
+ * four required fields: factor_id, factor_label, voi_score, confidence)
+ * are dropped, counted in `_meta.evidence_gaps_dropped_count`, and the
+ * turn continues — the production path is "never throw, never fail the
+ * turn." If ALL upstream gaps are malformed, the resulting empty array is
+ * treated as "no evidence_gaps supplied" for has_deterministic_coaching
+ * purposes (the flag may still flip true via other signals).
+ */
+interface DeterministicCoachingResult {
+  readonly value: Record<string, unknown>;
+  readonly has_real_data: boolean;
+  readonly model_critique_count: number;
+  readonly evidence_gaps_dropped_count: number;
+}
+
+function normaliseDeterministicCoachingFromM1(
+  enrichment: Record<string, unknown>,
+): DeterministicCoachingResult {
+  const m1 = readRecord(enrichment.m1_coaching);
+  const readiness =
+    m1 && typeof m1.readiness === 'string' && m1.readiness.length > 0
+      ? m1.readiness
+      : 'unknown';
+  const headline_type =
+    m1 && typeof m1.headline_type === 'string' && m1.headline_type.length > 0
+      ? m1.headline_type
+      : 'neutral';
+  const rawGaps = m1 && Array.isArray(m1.evidence_gaps) ? m1.evidence_gaps : [];
+  const evidence_gaps: Record<string, unknown>[] = [];
+  let dropped = 0;
+  for (const g of rawGaps) {
+    // Non-object entries aren't "populated but malformed" — skip silently
+    // without counting (matches the filter-object-entries convention).
+    if (g === null || typeof g !== 'object' || Array.isArray(g)) continue;
+    const n = normaliseEvidenceGap(g as Record<string, unknown>);
+    if (n) {
+      evidence_gaps.push(n);
+    } else {
+      dropped++;
+    }
+  }
+  const rawCrits = m1 && Array.isArray(m1.model_critiques) ? m1.model_critiques : [];
+  const model_critiques = filterObjectEntries(rawCrits);
+
+  const has_real_data =
+    readiness !== 'unknown' ||
+    headline_type !== 'neutral' ||
+    evidence_gaps.length > 0 ||
+    model_critiques.length > 0;
+
   return {
-    readiness: 'unknown',
-    headline_type: 'neutral',
-    evidence_gaps: [],
-    model_critiques: [],
+    value: { readiness, headline_type, evidence_gaps, model_critiques },
+    has_real_data,
+    model_critique_count: model_critiques.length,
+    evidence_gaps_dropped_count: dropped,
   };
+}
+
+/**
+ * Map a single upstream m1_coaching.evidence_gaps[] entry into the
+ * adapter-output shape. Returns null when ANY of the four required fields
+ * is missing or wrong-typed — caller increments the dropped count.
+ *
+ * Required: factor_id (string), factor_label (string), voi_score (finite
+ * number, renamed to `voi`), confidence (finite number).
+ *
+ * Optional additive passthrough (allowlist only): suggestion,
+ * confidence_display, confidence_defaulted, influence, influence_display,
+ * evpi_percentage_points, evpi_method. Unknown upstream fields are NOT
+ * forwarded.
+ */
+function normaliseEvidenceGap(e: Record<string, unknown>): Record<string, unknown> | null {
+  const factor_id = typeof e.factor_id === 'string' && e.factor_id.length > 0 ? e.factor_id : null;
+  const factor_label =
+    typeof e.factor_label === 'string' && e.factor_label.length > 0 ? e.factor_label : null;
+  const voi =
+    typeof e.voi_score === 'number' && Number.isFinite(e.voi_score) ? e.voi_score : null;
+  const confidence =
+    typeof e.confidence === 'number' && Number.isFinite(e.confidence) ? e.confidence : null;
+  if (factor_id === null || factor_label === null || voi === null || confidence === null) {
+    return null;
+  }
+  const out: Record<string, unknown> = { factor_id, factor_label, voi, confidence };
+  if (typeof e.suggestion === 'string') out.suggestion = e.suggestion;
+  if (typeof e.confidence_display === 'string') out.confidence_display = e.confidence_display;
+  if (typeof e.confidence_defaulted === 'boolean') out.confidence_defaulted = e.confidence_defaulted;
+  if (typeof e.influence === 'number' && Number.isFinite(e.influence)) out.influence = e.influence;
+  if (typeof e.influence_display === 'string') out.influence_display = e.influence_display;
+  if (
+    typeof e.evpi_percentage_points === 'number' &&
+    Number.isFinite(e.evpi_percentage_points)
+  ) {
+    out.evpi_percentage_points = e.evpi_percentage_points;
+  }
+  if (typeof e.evpi_method === 'string') out.evpi_method = e.evpi_method;
+  return out;
+}
+
+/**
+ * Map a single upstream factor_sensitivity entry into the adapter-output
+ * shape. Returns null when factor_id can't be resolved.
+ *
+ * Required fields always emitted: factor_id, factor_label, elasticity
+ * (number|null), confidence (number|null).
+ *
+ * Allowlisted additive passthrough: attribution_stability, rank_flip_rate,
+ * evpi_percentage_points, direction, sensitivity_score,
+ * confidence_components, confidence_source, confidence_provenance. Unknown
+ * upstream fields are NOT auto-forwarded — this guards v11 against
+ * surfacing fields it doesn't know how to interpret.
+ */
+function normaliseFactorSensitivity(
+  raw: unknown,
+  labelMap: Map<string, string>,
+): Record<string, unknown> | null {
+  const e = readRecord(raw);
+  if (!e) return null;
+  const factorId =
+    (typeof e.factor_id === 'string' ? e.factor_id : null) ??
+    (typeof e.id === 'string' ? e.id : null);
+  if (!factorId) return null;
+  const factorLabel =
+    typeof e.factor_label === 'string' && e.factor_label
+      ? e.factor_label
+      : typeof e.label === 'string' && e.label
+        ? e.label
+        : labelMap.get(factorId) ?? factorId;
+  const out: Record<string, unknown> = {
+    factor_id: factorId,
+    factor_label: factorLabel,
+    elasticity:
+      typeof e.elasticity === 'number' && Number.isFinite(e.elasticity) ? e.elasticity : null,
+    confidence:
+      typeof e.confidence === 'number' && Number.isFinite(e.confidence) ? e.confidence : null,
+  };
+  if (typeof e.attribution_stability === 'string') {
+    out.attribution_stability = e.attribution_stability;
+  }
+  if (typeof e.rank_flip_rate === 'number' && Number.isFinite(e.rank_flip_rate)) {
+    out.rank_flip_rate = e.rank_flip_rate;
+  }
+  if (
+    typeof e.evpi_percentage_points === 'number' &&
+    Number.isFinite(e.evpi_percentage_points)
+  ) {
+    out.evpi_percentage_points = e.evpi_percentage_points;
+  }
+  if (typeof e.direction === 'string') out.direction = e.direction;
+  if (typeof e.sensitivity_score === 'number' && Number.isFinite(e.sensitivity_score)) {
+    out.sensitivity_score = e.sensitivity_score;
+  }
+  const cc = readRecord(e.confidence_components);
+  if (cc) out.confidence_components = cc;
+  if (typeof e.confidence_source === 'string') out.confidence_source = e.confidence_source;
+  const cp = readRecord(e.confidence_provenance);
+  if (cp) out.confidence_provenance = cp;
+  return out;
 }
 
 /**
