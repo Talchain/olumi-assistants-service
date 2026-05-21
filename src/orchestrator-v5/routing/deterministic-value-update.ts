@@ -69,19 +69,40 @@ const DEICTIC_REFERENCE_PATTERN =
   /\b(?:(?:that|this) (?:factor|node|one)|(?:the (?:selected|highlighted|chosen)) (?:factor|node|one))\b/i;
 
 /**
- * V5 Golden Journey row 7 — narrow "from X to Y" anchor.
+ * V5 Golden Journey row 7 — strict "from <numeric> to <numeric>" anchor.
  *
- * Matches a literal "from <...> to <...>" within the original message,
- * case-insensitive, with a lazy gap so the two anchors only span one
- * clause-ish stretch. Used as a precondition before attributing the
- * SECOND non-null CQE quantity as the user's target value.
+ * Reviewer feedback on PR #192 (2026-05-21): the earlier draft used
+ * `/\bfrom\b[^.]*?\bto\b/i`, which only proved the two words appeared
+ * in the message but did not bind them to numeric tokens. A message
+ * like
  *
- * Negative cases the AC.2 conservative skip already handles (range
- * "between X and Y", disjunction "by X or Y", 3+ quantities) remain on
- * the existing `ambiguous_quantity` skip path — this anchor only fires
- * for the explicit from/to pattern.
+ *   "change annual budget from Q1 to Q2 by £20k and headcount by 3"
+ *
+ * matched that anchor (the words "from Q1 to Q2" satisfied it) and then
+ * blindly attributed the second CQE quantity (`3`) as the target —
+ * silently setting the budget to 3. The brief required the from/to
+ * words to BIND the two extracted quantities.
+ *
+ * The tightened pattern requires DIGITS (optionally preceded by a
+ * currency symbol and optionally followed by a `k`/`m`/`bn` suffix)
+ * immediately at BOTH anchors. The reviewer's counterexample now fails
+ * the regex (after `from ` is "Q" — neither currency nor digit) and
+ * falls through to the conservative `ambiguous_quantity` skip.
+ *
+ * Defence in depth: this anchor verifies POSITION (the two anchors
+ * carry numeric tokens). CQE document order remains the trust
+ * assumption for VALUE attribution — per AC.2 commentary, `raw_text`
+ * is post-normalised so an indexOf-based re-locate is unreliable.
+ * Combined, the worst-case misattribution collapses to "CQE merged or
+ * split quantities to a different count than the regex captured" —
+ * which the strict `nonNullQuantities.length === 2` gate rules out.
+ *
+ * Negative cases the AC.2 conservative skip still catches without
+ * change: range ("between X and Y"), disjunction ("by X or Y"), 3+
+ * quantities, and any from/to where either side is non-numeric.
  */
-const FROM_TO_ANCHOR_PATTERN = /\bfrom\b[^.]*?\bto\b/i;
+const FROM_TO_NUMERIC_ANCHOR_PATTERN =
+  /\bfrom\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn?)?\b[^.]*?\bto\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn?)?\b/i;
 
 // Case-insensitive substring matches; some are anchored on word boundary
 // so "fastest" doesn't trigger `\btest\b` and "iframe" doesn't trigger
@@ -365,7 +386,7 @@ export function tryDeterministicValueUpdate(
   // produce a clarification. Layer A.2 (validator parity) is the safety
   // net for anything the LLM later proposes.
   let attribution: QuantityAttribution | undefined = undefined;
-  if (nonNullQuantities.length === 2 && FROM_TO_ANCHOR_PATTERN.test(message)) {
+  if (nonNullQuantities.length === 2 && FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)) {
     quantity = {
       ...nonNullQuantities[1]!,
       operator: 'set',
@@ -514,7 +535,7 @@ export function tryDeicticValueUpdate(
   }
   let quantity: QuantityExtractionResult;
   let attribution: QuantityAttribution | undefined = undefined;
-  if (nonNullQuantities.length === 2 && FROM_TO_ANCHOR_PATTERN.test(message)) {
+  if (nonNullQuantities.length === 2 && FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)) {
     quantity = {
       ...nonNullQuantities[1]!,
       operator: 'set',

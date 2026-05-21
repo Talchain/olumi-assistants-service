@@ -245,6 +245,58 @@ describe('Fix A — negative gates (keep existing skips)', () => {
     if (result.matched) return;
     expect(result.skip_reason).toBe('hypothetical_gate');
   });
+
+  it('reviewer counterexample (PR #192): "from Q1 to Q2 by £20k and headcount by 3" → ambiguous_quantity (anchors not bound to numeric tokens)', () => {
+    // The first-draft FROM_TO_ANCHOR_PATTERN matched the words from/to
+    // anywhere in the message and would have attributed the SECOND CQE
+    // quantity (3) as the target — silently setting "annual budget" to
+    // 3. The tightened FROM_TO_NUMERIC_ANCHOR_PATTERN requires digits at
+    // both anchors; "from Q1" fails because "Q" is neither currency nor
+    // a digit, so the message falls through to the conservative
+    // multi-quantity guard.
+    const result = tryDeterministicValueUpdate(
+      'change annual budget from Q1 to Q2 by £20k and headcount by 3',
+      [
+        quantity(20000, '£20k', { unit: 'GBP' }),
+        quantity(3, '3'),
+      ],
+      makeGraph([
+        { id: 'fac_budget', label: 'annual budget' },
+        { id: 'fac_head', label: 'headcount' },
+      ]),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
+
+  it('non-numeric from-side: "from January to £100k by £20k" → ambiguous_quantity (from-anchor not bound to a number)', () => {
+    const result = tryDeterministicValueUpdate(
+      'increase Hiring and Salary Cost from January to £100,000 by £20,000',
+      [
+        quantity(100000, '£100,000', { unit: 'GBP' }),
+        quantity(20000, '£20,000', { unit: 'GBP' }),
+      ],
+      makeGraph([{ id: 'fac_hire', label: 'Hiring and Salary Cost' }]),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
+
+  it('non-numeric to-side: "from £80k to next quarter by £20k" → ambiguous_quantity (to-anchor not bound to a number)', () => {
+    const result = tryDeterministicValueUpdate(
+      'increase Hiring and Salary Cost from £80,000 to next quarter by £20,000',
+      [
+        quantity(80000, '£80,000', { unit: 'GBP' }),
+        quantity(20000, '£20,000', { unit: 'GBP' }),
+      ],
+      makeGraph([{ id: 'fac_hire', label: 'Hiring and Salary Cost' }]),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
 });
 
 // ---------------------------------------------------------------------------
