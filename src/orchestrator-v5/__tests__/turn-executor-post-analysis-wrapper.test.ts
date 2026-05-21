@@ -316,16 +316,17 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     expect(result.telemetry.failure_type).toBeNull();
 
     // Deterministic prose contract: leading option label appears,
-    // gate's "currently ahead" framing fires, no forbidden wording,
-    // no raw IDs, no decimals. The composer's top-driver branch is
+    // gate's enriched "currently favours" framing fires, no forbidden
+    // wording, no raw decimals. The composer's top-driver branch is
     // covered exhaustively at the unit-test level (FIXTURE_ANALYSIS
     // there carries explicit top_drivers); this executor fixture
     // exercises the no-driver fallback prose path because the
     // run_analysis fact builder doesn't carry factor_sensitivity —
-    // both prose branches end in "currently ahead", so the assertion
-    // holds regardless of which fires.
+    // the enriched composer (grounded fresh-analysis workstream)
+    // opens with "Based on this model, the analysis currently favours
+    // <leading>" regardless of which branch fires.
     expect(result.response.assistant_text).toContain('A');
-    expect(result.response.assistant_text).toContain('currently ahead');
+    expect(result.response.assistant_text).toContain('currently favours');
     expect(result.response.assistant_text.toLowerCase()).not.toContain('recommendation');
     expect(result.response.assistant_text).not.toMatch(/\d+\.\d+/);
     // No canonical edit_graph no-op denial.

@@ -916,6 +916,12 @@ export const TelemetryEvents = {
   //     leading option at gate-evaluation time
   //   - top_driver_present: boolean — top driver label was available
   //     for the composed prose
+  //   - suggested_action_count: number — count of chips threaded into
+  //     the direct_answer response. Zero on unmatched turns; per-class
+  //     on matched turns (1 for explain/meaning/advice/next_step/
+  //     update_advice/improvement; 0 for what_would_flip_free_text /
+  //     readiness / evidence_gap). Structural-only — chip labels and
+  //     message strings are not emitted.
   V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
 
   // V5 fresh-analysis follow-up guard — catch-net for analytical questions

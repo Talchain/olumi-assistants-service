@@ -3077,12 +3077,20 @@ export async function runTurnExecutor(
           top_driver_present: adviceOutcome.matched
             ? adviceOutcome.top_driver_label !== null
             : false,
+          // Structural-only count of chips threaded to the user (no
+          // labels, no message strings). Dashboards can verify that
+          // the per-class chip set (1 for explain/meaning/advice
+          // classes, 0 for what_would_flip / readiness / evidence_gap)
+          // matches the matched advice_class.
+          suggested_action_count: adviceOutcome.matched
+            ? adviceOutcome.suggested_actions.length
+            : 0,
         });
         if (adviceOutcome.matched) {
           const adviceResponse = composeDirectAnswerResponse({
             assistant_text: adviceOutcome.assistant_text,
             stage: context.stage,
-            suggested_actions: [],
+            suggested_actions: [...adviceOutcome.suggested_actions],
           });
           sonnetTextForLog = adviceResponse.assistant_text;
           resolvedTurnClass = 'direct_answer';

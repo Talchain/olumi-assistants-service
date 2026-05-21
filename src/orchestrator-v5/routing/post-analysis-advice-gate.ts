@@ -48,13 +48,28 @@ import {
   summariseReadiness,
   type ReadinessSummary,
 } from './readiness-summary.js';
-import { MUTATION_SIGNAL_PATTERNS } from './analytical-intent.js';
+import {
+  hasIndependentMutationSignal,
+  MUTATION_SIGNAL_PATTERNS,
+} from './analytical-intent.js';
+import {
+  formatPercentagePoints,
+  formatProbability,
+} from '../format/format-analysis-value.js';
+import { formatSensitivityDirection } from '../format/sensitivity-phrases.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 export interface AdviceGateAnalysisOption {
   readonly label: string;
+  /**
+   * Probability pass-through from the upstream `ContextPackAnalysis`.
+   * Optional so existing test fixtures and minimal callers stay valid;
+   * the enriched composers omit the probability fragment when this is
+   * absent or non-finite. Never recomputed — F.6 invariant.
+   */
+  readonly probability?: number;
 }
 
 export interface AdviceGateAnalysisDriver {
@@ -126,12 +141,40 @@ export type AdviceGateUnmatchedReason =
   | 'empty_message'
   | 'data_unavailable_for_class';
 
+/**
+ * Action chip emitted alongside a matched advice-gate response. Shape
+ * mirrors `FreshAnalysisFollowupSuggestedAction` in
+ * `fresh-analysis-followup-guard.ts` exactly so the turn-executor's
+ * `composeDirectAnswerResponse` call site consumes both surfaces with
+ * identical spread semantics. `action_type` is constrained to chips
+ * whose handlers run deterministically via `dispatchDeterministicChipClick`
+ * (no LLM call); no new action types are introduced here.
+ */
+export interface AdviceGateSuggestedAction {
+  readonly id: string;
+  readonly label: string;
+  readonly message: string;
+  readonly action_type: 'explain_results' | 'what_would_flip';
+}
+
 export interface AdviceGateMatched {
   readonly matched: true;
   readonly advice_class: AdviceClass;
   readonly assistant_text: string;
   readonly leading_option_label: string;
   readonly top_driver_label: string | null;
+  /**
+   * Per-class chip set computed at composition time. Always present
+   * (possibly empty). Per-class behaviour:
+   *   - `explain_results_free_text` / `meaning` / `advice` /
+   *     `next_step` / `update_advice` / `improvement` → one
+   *     `what_would_flip` chip (natural follow-up).
+   *   - `what_would_flip_free_text` → empty (prose already nudges the
+   *     user toward changing a factor and re-running).
+   *   - `readiness` / `evidence_gap` → empty (preserve PR #173 / PR #178
+   *     behaviour).
+   */
+  readonly suggested_actions: readonly AdviceGateSuggestedAction[];
 }
 
 export interface AdviceGateUnmatched {
@@ -231,6 +274,25 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'explain_results_free_text',
     pattern: /\btell\s+me\s+about\s+(?:the|these|those|this|that)\s+(?:results?|analysis|outcomes?|findings?)\b/i,
   },
+  // "what drove (this|that|the) (result|outcome|analysis|finding|answer)"
+  // New: gives the advice gate primary ownership of the present-tense
+  // "what drove" phrasing so the answer is composed inline rather than
+  // deferred to the fresh-followup catch-net's recap-and-chip.
+  {
+    advice_class: 'explain_results_free_text',
+    pattern: /\bwhat\s+drove\s+(?:this|that|the)\s+(?:result|outcome|analysis|finding|answer)\b/i,
+  },
+  // "why is <X> ahead / in front / on top / the leader / the favourite"
+  // New: mirrors the analytical-intent classifier's predicate added in
+  // PR #187 (line 204 of analytical-intent.ts) exactly so vocabulary
+  // stays aligned. Intentionally narrow — broader synonyms like
+  // "leading" / "winning" stay outside this predicate so existing
+  // explain_results integration tests that rely on Sonnet routing
+  // those phrasings continue to behave as they do today.
+  {
+    advice_class: 'explain_results_free_text',
+    pattern: /\bwhy\s+is\b[^.?!\n]{1,40}\b(?:ahead|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i,
+  },
 
   // ── meaning ──────────────────────────────────────────────────────
   // "what does this mean" / "what does that mean" / "what does the analysis mean"
@@ -281,6 +343,16 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
   {
     advice_class: 'what_would_flip_free_text',
     pattern: /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
+  },
+  // "what would/does/might need/have to change/happen/move/shift/differ"
+  // New: mirrors a `WHAT_WOULD_FLIP_STRIP_PATTERNS` entry in
+  // analytical-intent.ts so the advice gate's mutation-precedence
+  // strip-and-recheck logic continues to align. Captures the canonical
+  // "what would need to change for another option to look better?"
+  // phrasing the fresh-followup guard currently catches.
+  {
+    advice_class: 'what_would_flip_free_text',
+    pattern: /\bwhat\s+(?:would|do(?:es)?|might)\s+(?:need|have)\s+to\s+(?:change|happen|move|shift|differ)\b/i,
   },
 
   // ── evidence_gap ─────────────────────────────────────────────────
@@ -582,14 +654,8 @@ export function tryPostAnalysisAdviceGate(
     return { matched: false, reason: 'empty_message' };
   }
 
-  // Mutation signal takes precedence across ALL classes — never short-
-  // circuit a real edit.
-  for (const re of MUTATION_SIGNAL_PATTERNS) {
-    if (re.test(message)) {
-      return { matched: false, reason: 'mutation_signal' };
-    }
-  }
-
+  // Classify first so the narrow `what_would_flip_free_text` mutation-
+  // overlap exception (mirroring PR #187 fresh-followup guard) can apply.
   let matchedClass: AdviceClass | null = null;
   for (const cp of CLASS_PATTERNS) {
     if (cp.pattern.test(message)) {
@@ -597,6 +663,33 @@ export function tryPostAnalysisAdviceGate(
       break;
     }
   }
+
+  // Mutation precedence: concrete edits MUST reach edit_graph dispatch.
+  // The broad MUTATION_SIGNAL_PATTERNS rejection applies to every class
+  // EXCEPT `what_would_flip_free_text`, which keeps the analytical
+  // capture when the mutation signal is fully explained by flip-pattern
+  // overlap (e.g. "change ... to look better" inside the canonical
+  // "what would need to change ... look better" phrasing).
+  // `hasIndependentMutationSignal` (PR #187) strips every
+  // `what_would_flip` pattern span before re-checking the verb-to-X
+  // mutation pattern, so a separate edit clause survives the strip and
+  // forces mutation precedence even within the exception. Net result:
+  // mutation precedence is preserved bit-for-bit for every existing
+  // test, AND the new "what would need to change for another option to
+  // look better?" phrasing falls correctly through to the advice gate
+  // composer rather than being misread as an edit.
+  for (const re of MUTATION_SIGNAL_PATTERNS) {
+    if (re.test(message)) {
+      const allowFlipException =
+        matchedClass === 'what_would_flip_free_text'
+        && !hasIndependentMutationSignal(message);
+      if (!allowFlipException) {
+        return { matched: false, reason: 'mutation_signal' };
+      }
+      break;
+    }
+  }
+
   if (matchedClass === null) {
     return { matched: false, reason: 'no_advice_signal' };
   }
@@ -636,7 +729,39 @@ export function tryPostAnalysisAdviceGate(
     assistant_text: assistantText,
     leading_option_label: leadingLabel,
     top_driver_label: topDriverLabel,
+    suggested_actions: suggestedActionsForClass(matchedClass),
   };
+}
+
+/**
+ * Per-class chip set. Reuses the existing `what_would_flip` chip the
+ * fresh-followup guard already emits (PR #187) so DGAI rendering and
+ * the deterministic chip-click dispatch path stay aligned. No new
+ * action types.
+ */
+const WHAT_WOULD_FLIP_CHIP: AdviceGateSuggestedAction = Object.freeze({
+  id: 'chip_action_what_would_flip',
+  label: 'What could change the outcome?',
+  message: 'What could change the outcome of this analysis?',
+  action_type: 'what_would_flip' as const,
+});
+
+function suggestedActionsForClass(
+  cls: AdviceClass,
+): readonly AdviceGateSuggestedAction[] {
+  switch (cls) {
+    case 'explain_results_free_text':
+    case 'meaning':
+    case 'advice':
+    case 'next_step':
+    case 'update_advice':
+    case 'improvement':
+      return [WHAT_WOULD_FLIP_CHIP];
+    case 'what_would_flip_free_text':
+    case 'readiness':
+    case 'evidence_gap':
+      return [];
+  }
 }
 
 interface ComposeInput {
@@ -651,11 +776,11 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
     case 'advice':
     case 'next_step':
     case 'update_advice':
-      return composeAdvice(input.leadingLabel, input.topDriverLabel);
+      return composeAdvice(input.leadingLabel, input.topDriverLabel, input.analysis);
     case 'improvement':
-      return composeImprovement(input.leadingLabel, input.topDriverLabel);
+      return composeImprovement(input.leadingLabel, input.topDriverLabel, input.analysis);
     case 'meaning':
-      return composeMeaning(input.leadingLabel, input.topDriverLabel);
+      return composeMeaning(input.leadingLabel, input.topDriverLabel, input.analysis);
     case 'readiness':
       return composeReadiness(input.analysisReady);
     case 'evidence_gap':
@@ -673,36 +798,92 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
   }
 }
 
+/**
+ * Probability-fragment helper. Returns a trailing comma-prefixed clause
+ * (", with a probability of NN%") when the value is finite and in the
+ * `[0, 1]` range, empty string otherwise. Centralising the guard here
+ * keeps every enriched composer aligned on the same degrade-gracefully
+ * contract: if the upstream projection does not carry probability, the
+ * fragment is silently omitted rather than rendering "Not available".
+ */
+function probabilityFragment(p: number | undefined): string {
+  if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1) return '';
+  return `, with a probability of ${formatProbability(p)}`;
+}
+
+/**
+ * Margin-fragment helper. Returns a formatted percentage-points string
+ * only when the value is finite; null otherwise so callers decide how
+ * to phrase the surrounding sentence.
+ */
+function marginPpString(margin: number | null | undefined): string | null {
+  if (typeof margin !== 'number' || !Number.isFinite(margin)) return null;
+  return formatPercentagePoints(margin);
+}
+
+/**
+ * Driver sensitivity-direction fragment. Returns the prose phrase only
+ * when sensitivity_value is finite; otherwise empty string so the
+ * surrounding sentence drops the clause cleanly.
+ */
+function driverDirectionFragment(d: AdviceGateAnalysisDriver): string {
+  if (typeof d.sensitivity_value !== 'number' || !Number.isFinite(d.sensitivity_value)) return '';
+  return `, which ${formatSensitivityDirection(d.sensitivity_value)}`;
+}
+
 function composeAdvice(
   leadingLabel: string,
   topDriverLabel: string | null,
+  analysis: AdviceGateAnalysis,
 ): string {
+  const probability = probabilityFragment(analysis.leading_option?.probability);
+  const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
+  const margin = marginPpString(analysis.margin_pp);
+  const runnerLabel = analysis.runner_up?.label;
+  const marginClause =
+    margin && runnerLabel
+      ? ` It sits ahead of ${runnerLabel} by ${margin}.`
+      : '';
   if (topDriverLabel) {
-    return `Based on the analysis, ${leadingLabel} is currently ahead. The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`;
+    return `${opener}${marginClause} The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`;
   }
-  return `Based on the analysis, ${leadingLabel} is currently ahead. Let me know which factor you'd like to look at next.`;
+  return `${opener}${marginClause} Let me know which factor you'd like to look at next.`;
 }
 
 function composeImprovement(
   leadingLabel: string,
   topDriverLabel: string | null,
+  analysis: AdviceGateAnalysis,
 ): string {
+  const probability = probabilityFragment(analysis.leading_option?.probability);
+  const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
+  const robustness = analysis.robustness_band
+    ? ` The robustness band is ${analysis.robustness_band}, so smaller adjustments may not move the picture much.`
+    : '';
   if (topDriverLabel) {
-    return `Based on the analysis, ${leadingLabel} is currently ahead. To improve confidence here, the most useful thing to examine is ${topDriverLabel} — that's the factor with the most influence on the result.`;
+    return `${opener} To improve confidence here, the most useful thing to examine is ${topDriverLabel}, because it has the most influence on the result.${robustness}`;
   }
   // `improvement` requires a top driver per CLASS_REQUIREMENTS, so this
   // branch is unreachable in normal flow. Kept as a defensive default.
-  return `Based on the analysis, ${leadingLabel} is currently ahead. To improve confidence, look at the most influential factor for this decision.`;
+  return `${opener} To improve confidence, look at the most influential factor for this decision.${robustness}`;
 }
 
 function composeMeaning(
   leadingLabel: string,
   topDriverLabel: string | null,
+  analysis: AdviceGateAnalysis,
 ): string {
+  const probability = probabilityFragment(analysis.leading_option?.probability);
+  const margin = marginPpString(analysis.margin_pp);
+  const runnerLabel = analysis.runner_up?.label;
+  const marginSentence =
+    margin && runnerLabel
+      ? ` It sits ahead of ${runnerLabel} by ${margin}.`
+      : '';
   if (topDriverLabel) {
-    return `The analysis is saying that ${leadingLabel} is currently the leading option, with ${topDriverLabel} doing most of the work to make it the leader. The result reflects the model you've built so far — not a forecast.`;
+    return `Based on this model, the analysis is saying that ${leadingLabel} is currently the leading option${probability}, with ${topDriverLabel} doing most of the work to make it the leader.${marginSentence} The result reflects the model you've built so far, not a forecast.`;
   }
-  return `The analysis is saying that ${leadingLabel} is currently the leading option, given the model you've built so far. The result reflects your current setup, not a forecast.`;
+  return `Based on this model, the analysis is saying that ${leadingLabel} is currently the leading option${probability}, given the model you've built so far.${marginSentence} The result reflects your current setup, not a forecast.`;
 }
 
 function composeReadiness(
@@ -757,22 +938,101 @@ function composeExplainResults(
   leadingLabel: string,
   analysis: AdviceGateAnalysis,
 ): string {
-  const driver = analysis.top_drivers[0]?.factor_label;
-  const runnerUp = analysis.runner_up?.label;
-  // Driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up is
-  // optional.
-  const driverLine = `The biggest factor pushing the result that way is ${driver}.`;
-  const runnerUpLine = runnerUp
-    ? ` The closest alternative is ${runnerUp}.`
-    : '';
-  return `Based on the analysis, ${leadingLabel} is currently ahead. ${driverLine}${runnerUpLine} The result reflects the model you've built so far — small changes to the strongest factor can shift it.`;
+  // Driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
+  // margin, robustness and per-driver sensitivity are all optional and
+  // degrade gracefully (composer omits the surrounding clause when
+  // missing). Numerics are pass-through only — F.6 invariant.
+  const driverA = analysis.top_drivers[0];
+  const driverB = analysis.top_drivers[1];
+  const runnerLabel = analysis.runner_up?.label;
+  const margin = marginPpString(analysis.margin_pp);
+  const sentences: string[] = [];
+  sentences.push(
+    `Based on this model, the analysis currently favours ${leadingLabel}${probabilityFragment(analysis.leading_option?.probability)}.`,
+  );
+  if (runnerLabel && margin) {
+    sentences.push(
+      `That sits ahead of ${runnerLabel} by ${margin}, so the lead is meaningful rather than marginal.`,
+    );
+  } else if (runnerLabel) {
+    sentences.push(
+      `${runnerLabel} sits in second place${probabilityFragment(analysis.runner_up?.probability)}.`,
+    );
+  }
+  if (driverA && driverB) {
+    sentences.push(
+      `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}, and ${driverB.factor_label}${driverDirectionFragment(driverB)}.`,
+    );
+  } else if (driverA) {
+    sentences.push(
+      `The result appears to be driven by ${driverA.factor_label}${driverDirectionFragment(driverA)}.`,
+    );
+  }
+  if (analysis.robustness_band) {
+    sentences.push(
+      `The robustness band is ${analysis.robustness_band}, so this view should hold under reasonable variation.`,
+    );
+  }
+  sentences.push('Small changes to the strongest factor can shift the picture.');
+  return sentences.join(' ');
 }
 
 function composeWhatWouldFlip(
   leadingLabel: string,
   analysis: AdviceGateAnalysis,
 ): string {
-  const driver = analysis.top_drivers[0]?.factor_label;
-  // Guaranteed present by CLASS_REQUIREMENTS.
-  return `Right now ${leadingLabel} is ahead. The factor most likely to flip the analysis is ${driver} — that's where the result is most sensitive. Try changing its value or strength and re-running to see where the leading option moves.`;
+  // Top driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
+  // margin, robustness and per-driver sensitivity are optional and
+  // degrade gracefully. Numerics pass-through only — F.6 invariant.
+  const driverA = analysis.top_drivers[0];
+  const driverB = analysis.top_drivers[1];
+  const runnerLabel = analysis.runner_up?.label;
+  const margin = marginPpString(analysis.margin_pp);
+  const sentences: string[] = [];
+  sentences.push(
+    `Based on this model, ${leadingLabel} currently appears to be the favoured option${probabilityFragment(analysis.leading_option?.probability)}.`,
+  );
+  if (runnerLabel && margin) {
+    sentences.push(
+      `For ${runnerLabel} to overtake it, the lead of ${margin} would need to close.`,
+    );
+  } else if (runnerLabel) {
+    sentences.push(
+      `${runnerLabel} is the most likely contender to overtake it.`,
+    );
+  }
+  if (driverA && driverB) {
+    // 2-driver branch: name both as the highest-leverage levers; the per-
+    // driver sensitivity-direction clauses are appended individually so
+    // a missing sensitivity_value drops cleanly rather than rendering
+    // "has little effect on the lead" when the value is unknown.
+    const directionA = driverDirectionFragment(driverA);
+    const directionB = driverDirectionFragment(driverB);
+    const directionSentence =
+      directionA && directionB
+        ? ` Today ${driverA.factor_label}${directionA}; ${driverB.factor_label}${directionB}.`
+        : directionA
+          ? ` Today ${driverA.factor_label}${directionA}.`
+          : directionB
+            ? ` Today ${driverB.factor_label}${directionB}.`
+            : '';
+    sentences.push(
+      `Movement on ${driverA.factor_label} or ${driverB.factor_label} would shift this result the most.${directionSentence}`,
+    );
+  } else if (driverA) {
+    // Single-driver branch keeps "the factor most likely to flip" phrasing
+    // so the existing `most\s+(likely|sensitive)` regression test stays green.
+    sentences.push(
+      `The factor most likely to flip the analysis is ${driverA.factor_label}${driverDirectionFragment(driverA)}.`,
+    );
+  }
+  if (analysis.robustness_band) {
+    sentences.push(
+      `The robustness band is currently ${analysis.robustness_band}, so smaller changes are unlikely to flip the outcome on their own.`,
+    );
+  }
+  sentences.push(
+    'Try changing its value or strength and re-running to see where the leading option moves.',
+  );
+  return sentences.join(' ');
 }
