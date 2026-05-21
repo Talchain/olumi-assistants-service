@@ -686,6 +686,319 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
 });
 
 // ===========================================================================
+// chip-click post-analysis suggested_actions parity
+//
+// Why this exists: the Sonnet-routed `run_analysis` path emits the post-
+// `run_analysis` chip set via `generateChips` at turn-executor.ts:4274
+// (executable explain_results + executable what_would_flip + conditional
+// prompt-chip "What should we validate?"). The chip-click bypass goes
+// through `dispatchDeterministicChipClick` and historically composed
+// without calling `generateChips` — so the chip set never reached the
+// user on the dominant Golden Journey path (clicking the post-draft
+// "Run analysis" chip), per the PR #190 staging smoke (turn
+// `e940f7e3-cbfc-4b02-b99e-406ae17a6f2c` returned 0 suggested_actions).
+//
+// These regression tests pin the parity contract:
+//   - chip-click run_analysis emits the same baseline 2 chips that the
+//     routed path emits.
+//   - The "What should we validate?" prompt chip appears iff the
+//     CURRENT-turn decision_review enrichment carries a non-empty
+//     `evidence_enhancements[].specific_action` string.
+//   - No prior-fact rescue: a missing/empty/malformed current-turn
+//     enrichment suppresses the chip even when priorFacts has usable
+//     enrichment (preserves the PR #190 honesty rule from
+//     chip-generator's `currentTurnCarriesUsableValidationGuidance`).
+//   - MAX_CHIPS respected; chip IDs unique.
+// ===========================================================================
+
+describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emission (parity with routed path)', () => {
+  // Build a run_analysis handler-fact factory so per-test enrichment shapes
+  // can be injected via `enrichRunAnalysisMock.mockImplementation(...)`.
+  function makeRunAnalysisFact(
+    enrichment: Record<string, unknown> = {},
+  ): HandlerFact {
+    return {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        summary: 'Done.',
+        enrichment,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue({
+      graph: {
+        nodes: [
+          { id: 'goal_x', kind: 'goal', label: 'Outcome', goal_threshold: 0.8 },
+          { id: 'opt_a', kind: 'option', label: 'Option A', interventions: {} },
+          { id: 'opt_b', kind: 'option', label: 'Option B', interventions: {} },
+        ],
+        edges: [],
+      },
+      options: [],
+      goal_node_id: 'goal_x',
+      rawPersistedGraph: null,
+    });
+    runAnalysisHandlerMock.mockResolvedValue({
+      assistant_text: 'Ran analysis.',
+      handler_facts: [makeRunAnalysisFact({})],
+      llm_calls_used: 0,
+    });
+    // Default: enricher passes through unchanged (no decision_review attached).
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) => handlerFacts,
+    );
+    commitDirectAnswerMock.mockResolvedValue({
+      response: {},
+      performed: true,
+      persisted_row_id: 'row-1',
+      graphPersisted: false,
+    });
+  });
+
+  it('emits the executable explain_results + what_would_flip chips after successful run_analysis (parity with routed path)', async () => {
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-parity-baseline',
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+
+    const chips = out.response.suggested_actions ?? [];
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.id).toBe('chip_action_explain_results');
+    expect((chips[0] as { action_type?: string }).action_type).toBe('explain_results');
+    expect(chips[1]!.id).toBe('chip_action_what_would_flip');
+    expect((chips[1] as { action_type?: string }).action_type).toBe('what_would_flip');
+  });
+
+  it('emits the "What should we validate?" prompt chip when current-turn decision_review.evidence_enhancements has a usable specific_action', async () => {
+    // Replace the enricher's pass-through with one that attaches
+    // decision_review.evidence_enhancements with a usable specific_action
+    // — the exact contract PR #190's `currentTurnCarriesUsableValidationGuidance`
+    // gates on.
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) => {
+        const enriched: HandlerFact[] = handlerFacts.map((f) => {
+          if (f.fact_type !== 'run_analysis') return f;
+          return {
+            ...f,
+            result: {
+              ...f.result,
+              enrichment: {
+                decision_review: {
+                  produced_at: '2026-05-21T17:00:00.000Z',
+                  evidence_enhancements: {
+                    fac_delivery: {
+                      specific_action: 'Pull on-time delivery rates from the last two releases.',
+                      rationale: 'top sensitivity',
+                    },
+                  },
+                  key_assumptions: ['The talent market stays competitive.'],
+                },
+              },
+            },
+          } as HandlerFact;
+        });
+        return enriched;
+      },
+    );
+
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-parity-validation',
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+
+    const chips = out.response.suggested_actions ?? [];
+    expect(chips).toHaveLength(3);
+    expect(chips.map((c) => c.id)).toEqual([
+      'chip_action_explain_results',
+      'chip_action_what_would_flip',
+      'chip_prompt_validate_decision',
+    ]);
+    const validationChip = chips[2]!;
+    expect(validationChip.label).toBe('What should we validate?');
+    expect(validationChip.message).toBe(
+      'What should we validate or research to build confidence in this decision?',
+    );
+    // Prompt chip — `action_type` must be absent so the click routes
+    // through the post-analysis advice gate's evidence_gap class.
+    expect((validationChip as { action_type?: string }).action_type).toBeUndefined();
+  });
+
+  it('suppresses the validation chip when current-turn decision_review is absent (no priorFacts rescue — PR #190 honesty rule)', async () => {
+    // Default enricher mock is a pass-through (no decision_review attached
+    // to the current-turn fact). priorFacts could in principle carry an
+    // older successful fact with usable enrichment; PR #190's chip-
+    // honesty rule (`currentTurnCarriesUsableValidationGuidance`) reads
+    // current-turn handlerFacts ONLY, so the chip must still be suppressed.
+    const PRIOR_FACT_WITH_USABLE_ENRICHMENT: HandlerFact = {
+      fact_type: 'run_analysis' as const,
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        summary: 'Older run.',
+        enrichment: {
+          decision_review: {
+            produced_at: '2026-05-21T15:00:00.000Z',
+            evidence_enhancements: {
+              fac_old: {
+                specific_action: 'OLDER stale advice that must NOT rescue the chip.',
+              },
+            },
+            key_assumptions: [],
+          },
+        },
+      },
+    };
+    // Override the turn-context mock to thread a stale prior fact through.
+    buildTurnContextMock.mockResolvedValueOnce({
+      ...DEFAULT_TURN_CONTEXT,
+      prior_facts: [PRIOR_FACT_WITH_USABLE_ENRICHMENT],
+    });
+
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-parity-no-rescue',
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+
+    const chips = out.response.suggested_actions ?? [];
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('suppresses the validation chip when decision_review.evidence_enhancements entries lack specific_action (defensive parsing)', async () => {
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) => {
+        return handlerFacts.map((f) => {
+          if (f.fact_type !== 'run_analysis') return f;
+          return {
+            ...f,
+            result: {
+              ...f.result,
+              enrichment: {
+                decision_review: {
+                  produced_at: '2026-05-21T17:00:00.000Z',
+                  evidence_enhancements: {
+                    fac_a: { rationale: 'no action attached' },
+                    fac_b: { specific_action: '   ' }, // whitespace-only
+                    fac_c: { specific_action: 42 }, // wrong type
+                  },
+                  key_assumptions: [],
+                },
+              },
+            },
+          } as HandlerFact;
+        });
+      },
+    );
+
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-parity-malformed',
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+
+    const chips = out.response.suggested_actions ?? [];
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('MAX_CHIPS=3 cap respected — never more than 3 suggested_actions on the chip-click run_analysis path', async () => {
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) => {
+        return handlerFacts.map((f) => {
+          if (f.fact_type !== 'run_analysis') return f;
+          return {
+            ...f,
+            result: {
+              ...f.result,
+              enrichment: {
+                decision_review: {
+                  produced_at: '2026-05-21T17:00:00.000Z',
+                  evidence_enhancements: {
+                    fac_a: { specific_action: 'A' },
+                  },
+                  key_assumptions: [],
+                },
+              },
+            },
+          } as HandlerFact;
+        });
+      },
+    );
+
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-parity-cap',
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+
+    const chips = out.response.suggested_actions ?? [];
+    expect(chips.length).toBeLessThanOrEqual(3);
+  });
+
+  it('chip IDs are unique within the chip-click run_analysis emission set', async () => {
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) => {
+        return handlerFacts.map((f) => {
+          if (f.fact_type !== 'run_analysis') return f;
+          return {
+            ...f,
+            result: {
+              ...f.result,
+              enrichment: {
+                decision_review: {
+                  produced_at: '2026-05-21T17:00:00.000Z',
+                  evidence_enhancements: {
+                    fac_a: { specific_action: 'A' },
+                  },
+                  key_assumptions: [],
+                },
+              },
+            },
+          } as HandlerFact;
+        });
+      },
+    );
+
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-parity-unique-ids',
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+
+    const chips = out.response.suggested_actions ?? [];
+    const ids = chips.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+// ===========================================================================
 // PR 3 — chip-click explain/flip lifecycle wiring (tests 6 + 7 from spec).
 //
 // The pre-PR-3 chip-click explain_results / what_would_flip path emitted

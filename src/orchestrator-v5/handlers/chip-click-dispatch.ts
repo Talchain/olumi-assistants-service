@@ -84,6 +84,7 @@ import {
 } from '../tools/registry.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import { generateChips } from '../compose/chip-generator.js';
 import {
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
@@ -441,6 +442,40 @@ export async function dispatchChipClickRunAnalysis(
       brief: context.scenarioBriefText,
     });
 
+    // V5 coaching parity — emit the same post-analysis suggested_actions
+    // the Sonnet-routed run_analysis path emits. Reuses the existing
+    // `generateChips` rule so chip-click and routed turns produce
+    // identical chip sets, including (when the current-turn
+    // decision_review enrichment carries a usable `specific_action`) the
+    // "What should we validate?" prompt chip.
+    //
+    // Honesty contract preserved from PR #190: `handlerFacts` is the
+    // current turn's `enrichedFacts` ONLY — no `priorFacts` rescue. If
+    // the current run_analysis has no usable
+    // decision_review.evidence_enhancements[].specific_action, the
+    // validation chip is suppressed.
+    //
+    // Other inputs:
+    //   - `analysis: null` — the post-run_analysis branch in
+    //     `generateChipsRaw` does not read this field; chip-click does
+    //     not build a `ContextPackAnalysis` projection. Passing null is
+    //     safe and matches the production-rule chip the post-run_analysis
+    //     branch emits (executable explain_results + what_would_flip).
+    //   - `priorFacts` — threaded so any future cross-turn rules in the
+    //     chip generator stay consistent with the routed path.
+    //   - `analysisReady` — omitted; the post-run_analysis branch does
+    //     not consult readiness. The `analysisReady` derived after
+    //     commit below remains the authoritative wire-emit source.
+    //   - `validationRegistry` — required for executable-chip
+    //     registry-presence validation (existing chip-generator contract).
+    const chipClickSuggestedActions = generateChips({
+      stage: payload.stage,
+      handlerFacts: enrichedFacts,
+      priorFacts: context.prior_facts,
+      analysis: null,
+      validationRegistry: HANDLER_VALIDATION_REGISTRY,
+    });
+
     // Compose the response using the same composer TurnExecutor uses. The
     // chip-click confirmation template comes from the handler's registered
     // validation-registry declaration.
@@ -454,6 +489,7 @@ export async function dispatchChipClickRunAnalysis(
       coaching: null,
       stage: payload.stage,
       handlerFacts: enrichedFacts,
+      suggested_actions: chipClickSuggestedActions,
     });
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
