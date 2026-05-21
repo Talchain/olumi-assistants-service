@@ -41,7 +41,10 @@
  *   - No candidate qualifies → `{ matched: false }` (LLM falls through).
  */
 
-import { NUMERIC_SUFFIX_SOURCE } from '../context/cqe/rules.js';
+import {
+  CURRENCY_SYMBOL_SOURCE,
+  NUMERIC_SUFFIX_SOURCE,
+} from '../context/cqe/rules.js';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
@@ -72,28 +75,26 @@ const DEICTIC_REFERENCE_PATTERN =
 /**
  * V5 Golden Journey row 7 — strict "from <numeric> to <numeric>" anchor.
  *
- * History:
- *   - Original draft used `/\bfrom\b[^.]*?\bto\b/i` (PR #192). Reviewer
- *     showed a counterexample where this matched "from Q1 to Q2 by £20k
- *     and headcount by 3" — the words appeared but did not bind the two
- *     CQE quantities. Branch then mis-attributed `3` as the target.
- *   - Second draft tightened the suffix grammar locally to `(?:k|m|bn?)?`.
- *     Reviewer (2026-05-22) showed THAT was wrong too: `bn?` accepts
- *     bare `b` while CQE's grammar does not. For "increase Market Size
- *     from £1b to £2b" the regex matched (`1b` / `2b`), CQE extracted
- *     only `1` and `2` (bare numbers, no billion multiplier), and the
- *     branch silently set the factor to `£2`, not `£2bn`.
+ * History (PR #192 reviewer iteration log):
+ *   - Round 1: `/\bfrom\b[^.]*?\bto\b/i`. Failed on "from Q1 to Q2 by
+ *     £20k and headcount by 3" — anchors not bound to numeric tokens.
+ *   - Round 2: tightened suffix locally to `(?:k|m|bn?)?`. Failed on
+ *     "from £1b to £2b" — bare-`b` accepted locally but rejected by
+ *     CQE, so CQE emitted bare `1, 2` and the branch silently set the
+ *     factor to `£2`.
+ *   - Round 3: tightened currency locally as `[£$€¥]?`. Failed on
+ *     "from ¥1 to ¥2" — `¥` accepted locally but rejected by CQE
+ *     (`CURRENCY_SYMBOL = £|\$|€`). Same drift class as the suffix bug.
+ *   - Round 4 (current): the anchor reuses BOTH CQE source strings
+ *     verbatim — `CURRENCY_SYMBOL_SOURCE` for the optional prefix and
+ *     `NUMERIC_SUFFIX_SOURCE` for the optional multiplier. The two
+ *     grammars cannot drift again because there is no second copy.
+ *     Adding a new currency symbol or suffix word to CQE propagates
+ *     into routing automatically.
  *
- * Both regressions came from a divergent local copy of CQE's numeric
- * grammar. Fix: share the source. CQE owns the suffix grammar
- * (`NUMERIC_SUFFIX_SOURCE` exported from `context/cqe/rules.ts`); this
- * anchor pattern reuses it verbatim so the two grammars cannot drift
- * again. New suffix words ("trillion", future colloquial forms) added
- * to CQE flow here automatically.
- *
- * The pattern requires DIGITS (optionally preceded by a currency
- * symbol and optionally followed by the CQE-canonical suffix grammar)
- * immediately at BOTH anchors. Two side-by-side guarantees:
+ * The pattern requires DIGITS (optionally preceded by a CQE-recognised
+ * currency symbol and optionally followed by the CQE-canonical suffix
+ * grammar) immediately at BOTH anchors. Two side-by-side guarantees:
  *   1. POSITION: the regex match proves the two anchors carry numeric
  *      tokens with a CQE-recognised shape.
  *   2. VALUE: CQE document-order trust — `nonNullQuantities[0]` is the
@@ -102,16 +103,26 @@ const DEICTIC_REFERENCE_PATTERN =
  *      re-locate is unreliable; the strict 2-quantity gate prevents
  *      CQE-vs-regex count drift.
  *
+ * Scope reminder: real CQE already MERGES well-formed "from <X> to <Y>"
+ * into ONE quantity with `operator='set'`, value=Y. This branch only
+ * fires when CQE did NOT merge — i.e. edge cases CQE didn't recognise
+ * (unsupported suffix, unsupported currency, malformed input). The
+ * branch is therefore an end-of-pipeline safety net for those exact
+ * cases, not the common path.
+ *
  * Negative cases the AC.2 conservative skip still catches without
  * change: range ("between X and Y"), disjunction ("by X or Y"), 3+
  * quantities, any from/to where either side is non-numeric in
- * CQE-recognised shape (including the bare-`b` case above — "1b"
- * fails the suffix rule, so the trailing `\b` boundary fails too).
+ * CQE-recognised shape.
  */
 const FROM_TO_NUMERIC_ANCHOR_PATTERN = new RegExp(
-  String.raw`\bfrom\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+  String.raw`\bfrom\s+(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
     NUMERIC_SUFFIX_SOURCE +
-    String.raw`)?\b[^.]*?\bto\s+[£$€¥]?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    String.raw`)?\b[^.]*?\bto\s+(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
     NUMERIC_SUFFIX_SOURCE +
     String.raw`)?\b`,
   'i',

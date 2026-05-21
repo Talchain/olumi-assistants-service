@@ -28,7 +28,14 @@ const DIRECTION_UP_VERB = String.raw`increas(?:e|ing|es|ed)|rais(?:e|ing|es|ed)|
 const DIRECTION_DOWN_VERB = String.raw`reduc(?:e|ing|es|ed)|cut(?:ting|s)?|lower(?:ing|s|ed)?|decreas(?:e|ing|es|ed)|drop(?:ping|s|ped)?|bring(?:ing|s)?(?:\s+(?:down|it\s+down))?`;
 const DIRECTION_SET_VERB = String.raw`set(?:ting|s)?|change(?:s|d)?|changing|updat(?:e|ing|es|ed)|mak(?:e|ing|es)|made`;
 const DIRECTION_VERB = `(?:${DIRECTION_UP_VERB}|${DIRECTION_DOWN_VERB}|${DIRECTION_SET_VERB})`;
-const CURRENCY_SYMBOL = String.raw`£|\$|€`;
+// Exported as `CURRENCY_SYMBOL_SOURCE` so consumers outside CQE (e.g.
+// the V5 routing `FROM_TO_NUMERIC_ANCHOR_PATTERN`) can share the exact
+// same grammar without re-implementing it. PR #192 review feedback
+// (round 4, 2026-05-22) identified a ¥ accept bug in the local copy of
+// this grammar — same drift class as the bare-`b` suffix bug closed in
+// round 3. Sharing the source eliminates this class of bug.
+export const CURRENCY_SYMBOL_SOURCE = String.raw`£|\$|€`;
+const CURRENCY_SYMBOL = CURRENCY_SYMBOL_SOURCE;
 const CURRENCY_CODE = String.raw`GBP|USD|EUR`;
 const CURRENCY_COLLOQUIAL = String.raw`grand|quid`;
 const TIME_UNIT = String.raw`months?|weeks?|days?|years?|hours?|minutes?`;

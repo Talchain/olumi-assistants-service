@@ -299,6 +299,29 @@ describe('Fix A — negative gates (keep existing skips)', () => {
     expect(result.skip_reason).toBe('ambiguous_quantity');
   });
 
+  it('reviewer counterexample (PR #192 round 3): "from ¥1 to ¥2" with synthetic 2-quantity fixture → ambiguous_quantity (¥ is NOT in CQE CURRENCY_SYMBOL; regex must NOT accept it)', () => {
+    // Same drift class as bare-`b`: the round-3 regex `[£$€¥]?`
+    // accepted ¥ locally, but CQE's `CURRENCY_SYMBOL = £|\$|€` does
+    // not. If CQE were to emit two bare numeric quantities for a ¥
+    // message, the deterministic branch would have silently set the
+    // factor to the bare second number. Real CQE emits 0 quantities
+    // for ¥ today (see the integration test below), so the actual
+    // hazard is zero today — but the grammar drift is the bug. The
+    // fix shares CQE's `CURRENCY_SYMBOL_SOURCE` so the regex rejects
+    // ¥ for the same reason CQE does.
+    const result = tryDeterministicValueUpdate(
+      'increase Japan Cost from ¥1 to ¥2',
+      [
+        quantity(1, '¥1'),
+        quantity(2, '¥2'),
+      ],
+      makeGraph([{ id: 'fac_japan', label: 'Japan Cost' }]),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
+
   it('reviewer counterexample (PR #192 round 2): "from £1b to £2b" → falls through (bare `b` is NOT a CQE suffix; regex must NOT accept it)', () => {
     // Synthetic CQE quantities mirror what CQE actually emits when the
     // user writes "£1b" / "£2b" with the bare-b form: bare numbers 1 and
@@ -429,6 +452,29 @@ describe('Fix A — real-CQE integration (no synthetic quantities)', () => {
     expect(result.matched).toBe(false);
     if (result.matched) return;
     expect(result.skip_reason).toBe('ambiguous_quantity');
+  });
+
+  it('"increase Japan Cost from ¥1 to ¥2" via real CQE → 0 quantities (CQE rejects ¥) → no_quantity skip (no silent mis-mutation today)', () => {
+    // Locks the real-CQE behaviour for ¥: zero quantities extracted.
+    // The deterministic detector therefore skips at the
+    // nonNullQuantities.length === 0 gate, well before the from/to
+    // branch can fire. If CQE ever adds ¥ to `CURRENCY_SYMBOL`, the
+    // shared `CURRENCY_SYMBOL_SOURCE` import means the anchor pattern
+    // updates automatically AND this test pins the change for human
+    // review.
+    const message = 'increase Japan Cost from ¥1 to ¥2';
+    const cqe = extractQuantities(message);
+    const nonNull = cqe.filter((q) => q.value !== null);
+    expect(nonNull.length).toBe(0);
+
+    const result = tryDeterministicValueUpdate(
+      message,
+      cqe,
+      makeGraph([{ id: 'fac_japan', label: 'Japan Cost' }]),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('no_quantity');
   });
 
   it('"increase Hiring and Salary Cost from £80,000 to £100,000" via real CQE → single quantity (£100,000, operator=set) → set_factor_value with value=100000', () => {
