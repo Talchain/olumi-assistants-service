@@ -491,6 +491,10 @@ function preexecuteSetFactorValueStructural(
         rejection_reason: 'missing_value',
         issue: 'value parameter is missing',
         handler_id: 'set_factor_value',
+        // Explicit `null` (not omitted) so the composer can branch on
+        // the rejection_reason without ever rendering the "unknown"
+        // sentinel from `sanitiseForUser(undefined)`. V5 row-7 fix B.
+        actual_value: null,
       },
     };
   }

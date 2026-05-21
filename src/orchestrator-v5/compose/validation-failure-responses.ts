@@ -272,6 +272,35 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
   // `parameter` is a free-string field from the proposal; sanitise before
   // interpolating. constraint/actual are already sanitised.
   const parameter = sanitiseForUser(readString(details.parameter) ?? 'that value');
+
+  // V5 Golden Journey row 7 — Fix B. The `missing_value` rejection
+  // branch is for proposals where the `value` parameter was either
+  // absent from the proposal or shaped wrong (e.g. LLM emitted
+  // operator without a paired value on a "from X to Y" turn). The
+  // previous path rendered `sanitiseForUser(undefined) === 'unknown'`,
+  // producing "You gave unknown." — a useless leak of an internal
+  // sentinel. The new branch renders a help message that guides the
+  // user toward supplying a value, without changing the existing
+  // "You gave X" template for real invalid scalars.
+  if (readString(details.rejection_reason) === 'missing_value') {
+    return {
+      body: {
+        assistant_text:
+          `I couldn't tell what value to use. Please tell me the number ` +
+          `you want, for example £100,000.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-supply-value'),
+            label: 'Tell me the value',
+            message: `Use a specific value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_missing_value',
+      chip_type: 'text_prompt',
+    };
+  }
+
   const constraint = sanitiseForUser(details.constraint_description ?? 'a valid value');
   const actual = sanitiseForUser(details.actual_value);
   return {

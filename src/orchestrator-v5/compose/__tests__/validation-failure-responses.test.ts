@@ -316,6 +316,68 @@ describe('composeValidationFailure — PARAMETER_INVALID', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Fix B — missing-value copy hardening (CEE V5 Golden Journey row 7
+// workstream). The validator's `missing_value` branch must produce a
+// helpful, user-readable message — never the "unknown" sentinel that
+// previously leaked from `sanitiseForUser(undefined)`.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID missing_value (Fix B)', () => {
+  it('rejection_reason=missing_value with no actual_value → helpful copy, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'value parameter is missing',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_missing_value');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.assistant_text).not.toContain('You gave');
+    // Must guide the user toward supplying a value.
+    expect(response.assistant_text.toLowerCase()).toContain("couldn't tell what value");
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+    assertStyle(response.assistant_text);
+  });
+
+  it('rejection_reason=missing_value with actual_value=null → helpful copy, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'value parameter is missing',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        actual_value: null,
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_missing_value');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.assistant_text.toLowerCase()).toContain("couldn't tell what value");
+    assertStyle(response.assistant_text);
+  });
+
+  it('real invalid scalar value (1.5 with constraint 0–1) keeps the existing "You gave" copy unchanged', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Number must be less than or equal to 1',
+        actual_value: 1.5,
+        constraint_description: 'a number between 0 and 1',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain('1.5');
+    expect(response.assistant_text).toContain('You gave');
+    assertStyle(response.assistant_text);
+  });
+});
+
 describe('composeValidationFailure — response shape', () => {
   // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND is now the ONE
   // validation-error branch that surfaces with a different wire code —
