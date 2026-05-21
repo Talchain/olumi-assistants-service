@@ -162,6 +162,7 @@ import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from './context/freshness.js';
+import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { deriveRecentChangesEvidence } from './context/recent-changes.js';
 import type { TurnOutcome } from './turn-outcome.js';
 import {
@@ -3054,6 +3055,16 @@ export async function runTurnExecutor(
           // edit. `freshness` is populated by the analysis-freshness
           // derivation earlier in the turn.
           freshness: freshness?.freshness,
+          // V5 coaching: thread the latest successful run_analysis
+          // fact's `decision_review` enrichment so `evidence_gap` can
+          // answer validation/research questions grounded in
+          // `evidence_enhancements` + `key_assumptions`. The helper
+          // delegates to `selectRunAnalysisFact` — the SAME canonical
+          // selector freshness/projection use — so every layer is
+          // aligned on the same single fact (no stale pre-edit drift).
+          // Returns null when no enrichment is available; the gate
+          // falls back to its projection-only behaviour.
+          decisionReview: pickLatestDecisionReview(context.prior_facts),
         });
         emit(TelemetryEvents.V5PostAnalysisAdviceGate, {
           request_id: requestId,

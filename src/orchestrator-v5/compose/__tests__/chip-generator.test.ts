@@ -874,3 +874,228 @@ describe('generateChips — V5 state-trust stale-rerun rule', () => {
     expect(runAnalysisChips).toHaveLength(1);
   });
 });
+
+// =========================================================================
+// V5 coaching — post-run_analysis validation prompt chip. Surfaces only
+// when the current-turn run_analysis fact's decision_review enrichment
+// contains usable evidence_enhancements (at least one entry has a
+// non-empty `specific_action` string). The chip has no `action_type` —
+// on click, the message text routes through the post-analysis advice
+// gate's evidence_gap class for a deterministic, grounded answer.
+// =========================================================================
+describe('generateChips — V5 coaching post-run_analysis validation chip', () => {
+  function runAnalysisFactWithDecisionReview(
+    evidenceEnhancements: Record<string, unknown>,
+    keyAssumptions: readonly unknown[] = [],
+  ): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        summary: 'Prior run',
+        win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
+        enrichment: {
+          decision_review: {
+            produced_at: '2026-05-21T10:00:00.000Z',
+            evidence_enhancements: evidenceEnhancements,
+            key_assumptions: keyAssumptions,
+          },
+        },
+      },
+    };
+  }
+
+  const USABLE_ENHANCEMENTS: Record<string, unknown> = Object.freeze({
+    fac_delivery: Object.freeze({
+      specific_action: 'Pull on-time delivery rates from the last two releases.',
+      rationale: 'top sensitivity',
+    }),
+    fac_cost: Object.freeze({
+      specific_action: 'Talk to the finance team about historical overruns.',
+    }),
+  });
+
+  it('emits validation prompt chip when evidence_enhancements is non-empty', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toHaveLength(3);
+    // Order: explain_results → what_would_flip → validation prompt
+    expect(chips[0].id).toBe('chip_action_explain_results');
+    expect(chips[1].id).toBe('chip_action_what_would_flip');
+    expect(chips[2].id).toBe('chip_prompt_validate_decision');
+    expect(chips[2].label).toBe('What should we validate?');
+    expect(chips[2].message).toBe(
+      'What should we validate or research to build confidence in this decision?',
+    );
+  });
+
+  it('validation chip label is at most 30 characters', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    const validationChip = chips.find((c) => c.id === 'chip_prompt_validate_decision');
+    expect(validationChip).toBeDefined();
+    expect(validationChip!.label.length).toBeLessThanOrEqual(30);
+  });
+
+  it('validation chip has NO action_type (prompt chip routes through advice gate)', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    const validationChip = chips.find((c) => c.id === 'chip_prompt_validate_decision');
+    expect(validationChip).toBeDefined();
+    expect(validationChip!.action_type).toBeUndefined();
+  });
+
+  it('suppresses validation chip when run_analysis fact has no enrichment', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFact()],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('suppresses validation chip when decision_review.evidence_enhancements is empty', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview({})],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('suppresses validation chip when evidence_enhancements entries lack specific_action', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [
+        runAnalysisFactWithDecisionReview({
+          fac_a: { rationale: 'top sensitivity' }, // missing specific_action
+          fac_b: { specific_action: '   ' }, // whitespace-only
+          fac_c: { specific_action: 42 }, // wrong type
+        }),
+      ],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('CODEX BLOCKER FIX — suppresses validation chip when current-turn fact has no enrichment, EVEN IF priorFacts is usable', () => {
+    // Chip honesty contract: current-turn handler facts are authoritative.
+    // If the current run_analysis fact has no usable
+    // decision_review.evidence_enhancements[].specific_action, the chip
+    // must be suppressed. We must NOT fall back to older priorFacts to
+    // emit the chip — doing so would point the user at stale pre-edit
+    // evidence right after a soft-failed enricher on this turn.
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFact()], // no enrichment on current turn
+      priorFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)], // older usable
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('suppresses validation chip on malformed enrichment shapes (defensive parsing)', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [
+        {
+          fact_type: 'run_analysis',
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: '00000000-0000-4000-8000-000000000001',
+            leading_option_id: 'opt-a',
+            summary: 'Prior',
+            enrichment: {
+              decision_review: 'not an object',
+            },
+          },
+        } as HandlerFact,
+      ],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips).toHaveLength(2);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('chip IDs are unique within the post-run_analysis chip set', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    const ids = chips.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('respects MAX_CHIPS=3 cap', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips.length).toBeLessThanOrEqual(3);
+  });
+
+  it('validation chip passes ActionSchema validation', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    for (const chip of chips) {
+      expect(ActionSchema.safeParse(chip).success).toBe(true);
+    }
+  });
+
+  it('chip text avoids developer/internal terminology', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    const forbidden = [
+      'handler_id',
+      'run_analysis',
+      'explain_result',
+      'evidence_enhancements',
+      'decision_review',
+      'enrichment',
+      'context_pack',
+    ];
+    for (const chip of chips) {
+      const blob = `${chip.label} ${chip.message}`.toLowerCase();
+      for (const bad of forbidden) {
+        expect(blob).not.toContain(bad);
+      }
+    }
+  });
+});

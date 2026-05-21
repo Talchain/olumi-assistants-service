@@ -391,3 +391,82 @@ describe('findSuccessClaimHit — boundary cases', () => {
     expect(SUCCESS_CLAIM_PATTERNS.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+// =========================================================================
+// V5 coaching — copy safety for the post-run_analysis validation prompt
+// chip + the enrichment-grounded composeEvidenceGap output. Pure-string
+// checks; the gate is exercised end-to-end in
+// `src/orchestrator-v5/routing/__tests__/post-analysis-advice-gate.test.ts`.
+// =========================================================================
+describe('V5 coaching — validation chip + composer copy passes forbidden-phrase guards', () => {
+  // Hard-coded mirror of the strings emitted from
+  // `src/orchestrator-v5/compose/chip-generator.ts` post-run_analysis
+  // branch. Mirrored here (rather than imported) so a regression that
+  // changes the chip copy without updating this test fires a clear
+  // assertion miss rather than passing silently.
+  const VALIDATION_CHIP_LABEL = 'What should we validate?';
+  const VALIDATION_CHIP_MESSAGE =
+    'What should we validate or research to build confidence in this decision?';
+
+  // Representative composer outputs from `composeEvidenceGap`'s
+  // enrichment-grounded branch (PR #190) and its projection-only
+  // fall-through. The full corpus stays under the same guards so
+  // future refactors of the composer can re-check it quickly.
+  const COMPOSER_OPENER = 'To build confidence in this analysis, the most useful things to check are:';
+  const COMPOSER_ASSUMPTION_LEAD = 'One assumption worth testing alongside this:';
+  const COMPOSER_ASSUMPTION_SOLO = 'One assumption worth testing first:';
+  const COMPOSER_FALLBACK_GAP = 'The biggest open gap right now is:';
+
+  const samples: ReadonlyArray<readonly [string, string]> = [
+    [VALIDATION_CHIP_LABEL, 'validation chip label'],
+    [VALIDATION_CHIP_MESSAGE, 'validation chip message'],
+    [COMPOSER_OPENER, 'enrichment-grounded opener'],
+    [COMPOSER_ASSUMPTION_LEAD, 'assumption follow-up lead'],
+    [COMPOSER_ASSUMPTION_SOLO, 'assumption-only lead'],
+    [COMPOSER_FALLBACK_GAP, 'projection-only fallback opener'],
+    [
+      `${COMPOSER_OPENER}\n• Pull on-time delivery rates from the last two releases and check the variance.\n${COMPOSER_ASSUMPTION_LEAD} The local senior hiring market will remain as competitive as it is today.`,
+      'full enrichment-grounded response',
+    ],
+  ];
+
+  for (const [text, label] of samples) {
+    it(`forbidden-phrase clean: ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    });
+    it(`success-claim clean: ${label}`, () => {
+      // The composer is post-analysis prose, not a commit receipt — it
+      // must not trip the sentence-leading commit-verb guard either.
+      expect(findSuccessClaimHit(text)).toBeNull();
+    });
+  }
+
+  it('does not leak entity-id-shaped tokens in the validation corpus', () => {
+    // Entity-id leak detection mirrors the egress scrub (shared regex
+    // family `fac_/opt_/con_/out_/edg_` etc.). The chip strings and
+    // composer prose are user-facing copy and must not carry raw IDs.
+    const corpus = samples.map(([s]) => s).join('\n');
+    expect(corpus).not.toMatch(/\b(?:fac|opt|con|out|edg|nod)_\w+\b/);
+  });
+
+  it('chip label respects the ≤30-character cap', () => {
+    expect(VALIDATION_CHIP_LABEL.length).toBeLessThanOrEqual(30);
+  });
+
+  it('does not embed raw decimals in deterministic composer wrappers', () => {
+    // The deterministic wrapper strings (openers, follow-ups, fallbacks)
+    // must never interpolate raw floats. LLM-passthrough strings
+    // (specific_action, key_assumptions) are sanitised by the
+    // decision_review enricher's own egress filter, but the wrapper
+    // shell here is purely deterministic.
+    const wrappers = [
+      VALIDATION_CHIP_LABEL,
+      VALIDATION_CHIP_MESSAGE,
+      COMPOSER_OPENER,
+      COMPOSER_ASSUMPTION_LEAD,
+      COMPOSER_ASSUMPTION_SOLO,
+      COMPOSER_FALLBACK_GAP,
+    ].join('\n');
+    expect(wrappers).not.toMatch(/(?:^|[\s(=,])(?:0\.\d|\.\d)/);
+  });
+});

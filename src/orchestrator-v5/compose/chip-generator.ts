@@ -214,7 +214,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   );
 
   // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
-  // require a new handler. Both chips emit executable `action_type` so the
+  // require a new handler. Both executable chips emit `action_type` so the
   // chip-click path resolves deterministically via `dispatchDeterministicChipClick`
   // (saves ~12s ORIENT Sonnet call per click — see Phase 2b round-2 reviewer
   // finding: the prior `promptChip` for "Explain the result" had no
@@ -222,8 +222,28 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // never hit the deterministic bypass). Both also seed a pending action
   // so a typed "yes" on the next turn can resume via the short-confirm
   // pre-route.
+  //
+  // V5 coaching — a third prompt chip ("What should we validate?") is
+  // appended ONLY when the CURRENT-turn run_analysis fact carries
+  // non-empty decision_review.evidence_enhancements with at least one
+  // entry having a non-empty `specific_action` string. Honesty gate:
+  // never offer the chip when the advice answer would be empty.
+  //
+  // **Current-turn handler facts are authoritative.** The chip only
+  // fires on the run_analysis success turn (`handlerJustRan ===
+  // 'run_analysis'`), so the freshly-attached enrichment on THIS turn
+  // is the right source. Falling back to priorFacts would surface a
+  // chip pointing at stale pre-edit evidence whenever the current
+  // run_analysis's enricher soft-failed — exactly the dishonesty
+  // Codex flagged on the original PR #190. If current-turn has no
+  // usable enhancements, the chip is suppressed.
+  //
+  // The chip has no `action_type` — on click, the message text routes
+  // through the post-analysis advice gate's evidence_gap class and is
+  // answered deterministically (0 LLM calls). `cap` caps at MAX_CHIPS
+  // so the new chip is suppressed if the slot budget is already full.
   if (handlerJustRan === 'run_analysis') {
-    return cap([
+    const chips: SuggestedAction[] = [
       {
         id: 'chip_action_explain_results',
         label: 'Explain the result',
@@ -236,7 +256,15 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         message: 'What could change the outcome of this analysis?',
         action_type: 'what_would_flip',
       },
-    ]);
+    ];
+    if (currentTurnCarriesUsableValidationGuidance(input.handlerFacts)) {
+      chips.push({
+        id: 'chip_prompt_validate_decision',
+        label: 'What should we validate?',
+        message: 'What should we validate or research to build confidence in this decision?',
+      });
+    }
+    return cap(chips);
   }
 
   // V5 product-state continuity (foamy-bee tranche) — post-mutation
@@ -732,6 +760,65 @@ export function deriveProjectionStatus(
 
 function cap(chips: readonly SuggestedAction[]): readonly SuggestedAction[] {
   return chips.slice(0, MAX_CHIPS);
+}
+
+/**
+ * V5 coaching — honesty gate for the post-run_analysis
+ * "What should we validate?" prompt chip.
+ *
+ * Returns `true` when `handlerFacts` (the CURRENT turn's facts) carries
+ * a successful `run_analysis` fact whose
+ * `result.enrichment.decision_review.evidence_enhancements` map has at
+ * least one entry with a non-empty `specific_action` string.
+ *
+ * **Current-turn authoritative.** No priorFacts fallback: the chip only
+ * fires on the run_analysis success turn, so the freshly-attached
+ * enrichment on THIS turn is the only honest source. If the current
+ * run_analysis's enricher soft-failed (no usable specific_action),
+ * suppress the chip — surfacing it via a stale prior fact would point
+ * the user at pre-edit evidence, which is exactly what Codex flagged
+ * on the original PR #190 walk.
+ *
+ * The chip-click answer is composed by `composeEvidenceGap` in
+ * post-analysis-advice-gate.ts. That composer is wired (via
+ * `pickLatestDecisionReview`) to the freshness-aligned selector, so
+ * once the chip is offered, the deterministic answer it points at uses
+ * the SAME fact this check inspected.
+ *
+ * Defensive shape parsing throughout: the `decision_review` payload is
+ * a passthrough `Record<string, unknown>`.
+ */
+function currentTurnCarriesUsableValidationGuidance(
+  handlerFacts: readonly HandlerFact[] | undefined,
+): boolean {
+  if (!handlerFacts || handlerFacts.length === 0) return false;
+  for (const fact of handlerFacts) {
+    if (!isSuccessfulRunAnalysisFact(fact)) continue;
+    // `isSuccessfulRunAnalysisFact` already filters `fact_type ===
+    // 'run_analysis'` and noop=false at runtime; the extra narrow here
+    // is for TypeScript only — the helper is not a type predicate so
+    // the discriminated-union member isn't narrowed otherwise.
+    if (fact.fact_type !== 'run_analysis') continue;
+    const enrichment = fact.result.enrichment;
+    if (enrichment == null || typeof enrichment !== 'object') continue;
+    const dr = (enrichment as Record<string, unknown>)['decision_review'];
+    if (dr == null || typeof dr !== 'object' || Array.isArray(dr)) continue;
+    const enhancements = (dr as Record<string, unknown>)['evidence_enhancements'];
+    if (
+      enhancements == null ||
+      typeof enhancements !== 'object' ||
+      Array.isArray(enhancements)
+    ) continue;
+    for (const key of Object.keys(enhancements)) {
+      const entry = (enhancements as Record<string, unknown>)[key];
+      if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const action = (entry as Record<string, unknown>)['specific_action'];
+      if (typeof action === 'string' && action.trim().length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function chipId(scope: 'action' | 'prompt', discriminator: string): string {
