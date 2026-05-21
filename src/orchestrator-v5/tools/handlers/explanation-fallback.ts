@@ -31,54 +31,10 @@ import {
   formatPercentagePoints,
   formatProbability,
 } from '../../format/format-analysis-value.js';
-import {
-  bandFromMagnitude,
-  NEAR_ZERO_INFLUENCE_THRESHOLD,
-} from '../../format/influence-bands.js';
+import { bandFromMagnitude } from '../../format/influence-bands.js';
+import { formatSensitivityDirection } from '../../format/sensitivity-phrases.js';
 
-/**
- * Convert a raw sensitivity coefficient into a sentence-fragment that
- * keeps the leading-option frame the rest of the deterministic
- * fallback prose uses. The fragment composes after a driver label —
- * "..., which {fragment}." or "Today it {fragment}." — so the result
- * reads as "Cost moderately weakens the lead." rather than the more
- * abstract "Cost has a moderate negative influence."
- *
- * Bands (single source of truth: `format/influence-bands.ts`):
- *   |v| < 0.05         → "has little effect on the lead"      (NEAR_ZERO)
- *   |v| in [0.05, 0.3) → "slightly {strengthens|weakens} the lead"
- *   |v| in [0.3, 0.7)  → "moderately ..."
- *   |v| in [0.7, 0.95) → "strongly ..."
- *   |v| ≥ 0.95         → "very strongly ..."
- *
- * Thresholds delegate to `bandFromMagnitude` so the deterministic
- * fallback and the display-safe projection (`influencePhrase`) share
- * one source of truth for band boundaries. Vocabulary differs by
- * design: the projection composes nouns ("moderate positive
- * influence"), while this fallback composes adverbs paired with the
- * lead-framing verbs the surrounding prose already uses ("moderately
- * strengthens the lead"). The lowest band uses "slightly" rather than
- * "weakly" — "weakly weakens" reads awkwardly in English.
- *
- * Telemetry (where it exists) retains the raw number; this helper only
- * governs USER-FACING prose.
- */
-export function formatSensitivityDirection(value: number): string {
-  if (!Number.isFinite(value)) return 'has little effect on the lead';
-  const absV = Math.abs(value);
-  if (absV < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'has little effect on the lead';
-  const band = bandFromMagnitude(absV);
-  const adverb =
-    band === 'weak'
-      ? 'slightly'
-      : band === 'moderate'
-        ? 'moderately'
-        : band === 'strong'
-          ? 'strongly'
-          : 'very strongly';
-  const direction = value < 0 ? 'weakens' : 'strengthens';
-  return `${adverb} ${direction} the lead`;
-}
+export { formatSensitivityDirection };
 
 function formatDriver(d: AnalysisProjectionDriver): string {
   return d.factor_label;

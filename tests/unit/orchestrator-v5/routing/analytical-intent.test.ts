@@ -48,15 +48,18 @@ describe('classifyAnalyticalIntent', () => {
       'Which factors drove the analysis?',
       // Present-state ranking questions — added so the fresh-analysis
       // follow-up guard can route "Why is X ahead?" to explain_results
-      // rather than letting it fall to edit_graph. Pattern is narrow
-      // (only "ahead" / "in front" / "the leader" / "the favourite" /
-      // "on top") so messages like "Why is option A winning?" stay
-      // outside this class and existing explain_results integration
-      // tests that use "winning" / "leading" remain unaffected.
+      // rather than letting it fall to edit_graph. The grounded-fresh-
+      // analysis workstream broadened this predicate to include "leading"
+      // so the sibling guards (stale-rerun, no-analysis, advice-gate
+      // data-unavailable fallback) all classify the brief's canonical
+      // "Why is Option A leading?" phrasing consistently. "winning"
+      // intentionally stays out — its surviving call sites are handler-
+      // direct and don't route through this classifier.
       'Why is this option ahead?',
       'Why is the recommendation in front?',
       'Why is this on top?',
       'Why is this the leader?',
+      'Why is Option A leading?',
     ];
     for (const msg of positives) {
       it(`matches "${msg}"`, () => {

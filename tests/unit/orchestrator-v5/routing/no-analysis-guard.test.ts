@@ -50,6 +50,26 @@ describe('tryNoAnalysisGuard', () => {
     }
   });
 
+  // Grounded-fresh-analysis workstream broadened `classifyAnalyticalIntent`
+  // to include "leading". This guard-level test pins that the no-analysis
+  // guard now owns "Why is Option A leading?" — proving the integration
+  // (not just the classifier) routes the phrase to the "run analysis
+  // first" nudge instead of falling through to the LLM router.
+  it('matches what_drove for "Why is Option A leading?" when no fact exists', () => {
+    const result = tryNoAnalysisGuard({
+      message: 'Why is Option A leading?',
+      readiness: makeReadiness(),
+    });
+    expect(result.matched).toBe(true);
+    if (result.matched) {
+      expect(result.intent_class).toBe('what_drove');
+      expect(result.graph_ready).toBe(true);
+      expect(result.assistant_text).toContain('Run analysis first');
+      expect(result.suggested_actions).toHaveLength(1);
+      expect(result.suggested_actions[0]?.action_type).toBe('run_analysis');
+    }
+  });
+
   it('uses graph-not-ready copy when nodes/edges are absent', () => {
     const result = tryNoAnalysisGuard({
       message: 'Walk me through the analysis.',

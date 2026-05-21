@@ -63,10 +63,22 @@ const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
+// Message must NOT match the analytical-intent classifier or any
+// advice-gate pattern — otherwise the no-analysis-guard / advice gate
+// would intercept the turn before Sonnet's tool_use mock fires and the
+// precondition-fail chip-surfacing path under test would never execute.
+// The grounded-fresh-analysis workstream broadened the classifier's
+// `what_drove` predicate to include "leading", so the previous message
+// "Why is the leading option winning?" is no longer a safe carrier here.
+// "Tell me about the model" deliberately stays outside both the advice
+// gate's CLASS_PATTERNS and the classifier's INTENT_PATTERNS so the turn
+// reaches Sonnet, which the routing adapter mock then steers into the
+// explain_results / what_would_flip tool_use proposal that this test
+// exercises.
 const BASE_PAYLOAD = makeMessagePayload({
   turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   scenario_id: TEST_SCENARIO_ID,
-  message: 'Why is the leading option winning?',
+  message: 'Tell me about the model',
   turn_class: 'decide',
   stage: 'analyse',
 });
@@ -222,6 +234,14 @@ describe('turn-executor × explanation precondition-fail — wire-level chip sur
     // Wire-shape sanity: response is a valid OlumiResponse.
     OlumiResponseSchema.parse(response);
     expect(telemetry.failure_type).toBeNull();
+
+    // Routing adapter must have been called — guarantees the carrier
+    // message reached Sonnet rather than being intercepted by a
+    // deterministic guard upstream. If a future classifier broadening
+    // accidentally swallows the BASE_PAYLOAD message, this assertion
+    // catches it instead of the test silently passing on unrelated
+    // chip-related assertions.
+    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
 
     // The headline assertion: the chip survives all the way to the wire.
     const runAnalysisChip = response.suggested_actions.find(

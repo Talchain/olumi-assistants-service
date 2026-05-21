@@ -477,6 +477,12 @@ describe('tryPostAnalysisAdviceGate — pre-condition failures', () => {
 // =========================================================================
 describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
   it('advice composer template (top driver present)', () => {
+    // Enriched composers (this workstream) no longer match a single
+    // hard-coded string — they include optional probability / margin /
+    // robustness fragments that degrade gracefully when fields are
+    // absent. The structural contract is: the opener uses the new
+    // "currently favours" vocabulary, the leading option is named,
+    // and the top driver is referenced as the next-examine point.
     const out = tryPostAnalysisAdviceGate({
       message: 'What would you recommend?',
       analysis: FIXTURE_ANALYSIS,
@@ -484,10 +490,9 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toBe(
-        'Based on the analysis, Hire two senior engineers locally is currently ahead. ' +
-          'The biggest thing to examine next is Delivery risk, because it could change the result.',
-      );
+      expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
+      expect(out.assistant_text).toContain('The biggest thing to examine next is Delivery risk');
+      expect(out.assistant_text).toContain('it could change the result');
     }
   });
 
@@ -617,4 +622,450 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
       }
     }
   });
+});
+
+// =========================================================================
+// New patterns added by the grounded-fresh-analysis workstream — give the
+// advice gate primary ownership of four target phrase families ("what
+// drove", "why is X ahead", "why is X leading", "what would need to
+// change for another option to look better") that the fresh-followup
+// catch-net (PR #187) previously handled with a static recap + chip.
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis workstream)', () => {
+  const newPatternRows: ReadonlyArray<{
+    readonly message: string;
+    readonly expectedClass: AdviceClass;
+    readonly label: string;
+  }> = [
+    // explain_results_free_text (4 newly-owned phrase families: what-drove,
+    // why-X-ahead, why-X-leading, why-X-on-top/in-front/the-leader/the-favourite,
+    // plus en-GB / en-US favourite variants)
+    { message: 'What drove this result?', expectedClass: 'explain_results_free_text', label: 'what drove this result' },
+    { message: 'What drove the outcome?', expectedClass: 'explain_results_free_text', label: 'what drove the outcome' },
+    { message: 'What drove the analysis?', expectedClass: 'explain_results_free_text', label: 'what drove the analysis' },
+    { message: 'Why is this option ahead?', expectedClass: 'explain_results_free_text', label: 'why is this option ahead' },
+    { message: 'Why is Option A leading?', expectedClass: 'explain_results_free_text', label: 'why is Option A leading' },
+    { message: 'Why is Option A in front?', expectedClass: 'explain_results_free_text', label: 'why is Option A in front' },
+    { message: 'Why is the result on top?', expectedClass: 'explain_results_free_text', label: 'why is the result on top' },
+    { message: 'Why is this the favourite?', expectedClass: 'explain_results_free_text', label: 'why is this the favourite (en-GB)' },
+    { message: 'Why is this the favorite?', expectedClass: 'explain_results_free_text', label: 'why is this the favorite (en-US)' },
+
+    // what_would_flip_free_text (4 new variants of "need to change")
+    { message: 'What would need to change for another option to look better?', expectedClass: 'what_would_flip_free_text', label: 'what would need to change for another option' },
+    { message: 'What does need to change here?', expectedClass: 'what_would_flip_free_text', label: 'what does need to change' },
+    { message: 'What might need to happen to flip things?', expectedClass: 'what_would_flip_free_text', label: 'what might need to happen' },
+    { message: 'What would need to shift in this?', expectedClass: 'what_would_flip_free_text', label: 'what would need to shift' },
+
+    // Existing advice-class regression — "what should I pay attention to"
+    // continues to route to `advice` per the brief's preserve-precedence
+    // instruction. Pinning this case proves the precedence is not
+    // accidentally pre-empted by a more specific pattern this workstream
+    // added.
+    { message: 'What should I pay attention to?', expectedClass: 'advice', label: 'what should I pay attention to (regression)' },
+  ];
+
+  for (const { message, expectedClass, label } of newPatternRows) {
+    it(`classifies as ${expectedClass}: ${label}`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.advice_class).toBe(expectedClass);
+        expect(out.assistant_text.length).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  // Mutation precedence regression — concrete edits combined with any of
+  // the new analytical patterns must still fall through with
+  // `mutation_signal`. Reuses the existing MUTATION_SIGNAL_PATTERNS path;
+  // adding patterns does not weaken the precedence rule.
+  const mutationPairs: ReadonlyArray<readonly [string, string]> = [
+    ['What drove this result, change the cost factor to 0.7?', 'what drove + set-to-numeric'],
+    ['Why is this option ahead — set risk to 0.5?', 'why is X ahead + set-to-numeric'],
+    ['Why is Option A leading? Set risk to 0.5.', 'why is X leading + set-to-numeric'],
+    ['What would need to change? Set Pricing to 0.7.', 'what would need to change + numeric edit'],
+    ['What drove the result then add a new option for staffing?', 'what drove + add-new'],
+  ];
+  for (const [message, label] of mutationPairs) {
+    it(`falls through (mutation_signal): ${label}`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(false);
+      if (!out.matched) {
+        expect(out.reason).toBe('mutation_signal');
+      }
+    });
+  }
+
+  // Freshness gate regression — each newly-owned pattern must still fall
+  // through `not_fresh` so the stale-rerun guard upstream owns those turns.
+  // "Why is Option A leading?" is included because the analytical-intent
+  // classifier broadening (this workstream) makes the stale-rerun guard
+  // and no-analysis guard responsible for that phrasing when the advice
+  // gate falls through.
+  const newPatternMessages = [
+    'What drove this result?',
+    'Why is this option ahead?',
+    'Why is Option A leading?',
+    'What would need to change for another option to look better?',
+  ];
+  for (const message of newPatternMessages) {
+    it.each([['stale'], ['unknown'], ['none']] as const)(
+      `falls through (not_fresh, freshness=%s): "${message}"`,
+      (freshness) => {
+        const out = tryPostAnalysisAdviceGate({
+          message,
+          analysis: FIXTURE_ANALYSIS,
+          analysisReady: READY_PAYLOAD_OPEN,
+          freshness,
+        });
+        expect(out.matched).toBe(false);
+        if (!out.matched) {
+          expect(out.reason).toBe('not_fresh');
+        }
+      },
+    );
+  }
+});
+
+// =========================================================================
+// Enriched composer fingerprints — the grounded-fresh-analysis workstream
+// extends composeExplainResults / composeWhatWouldFlip / composeMeaning /
+// composeAdvice / composeImprovement to use the optional probability /
+// margin / robustness / sensitivity fields already on ContextPackAnalysis
+// when present. Each test pins both the "full data" path AND the
+// degrade-gracefully behaviour when individual fields are missing.
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', () => {
+  const ENRICHED_ANALYSIS: AdviceGateAnalysis = {
+    status: 'success',
+    leading_option: { label: 'Hire two senior engineers locally', probability: 0.62 },
+    runner_up: { label: 'Hire one senior engineer overseas', probability: 0.38 },
+    margin_pp: 24,
+    robustness_band: 'moderate',
+    top_drivers: [
+      { factor_label: 'Delivery risk', sensitivity_value: 0.45 },
+      { factor_label: 'Cost overrun risk', sensitivity_value: -0.32 },
+    ],
+    fragile_edges: [
+      { from_label: 'Delivery risk', to_label: 'Successful launch' },
+    ],
+  };
+
+  it('composeExplainResults: includes probability, margin, two drivers with direction, and robustness', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: ENRICHED_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
+      expect(out.assistant_text).toContain('with a probability of 62%');
+      expect(out.assistant_text).toContain('That sits ahead of Hire one senior engineer overseas by 24 percentage points');
+      expect(out.assistant_text).toContain('Delivery risk');
+      expect(out.assistant_text).toContain('Cost overrun risk');
+      // sensitivity-direction phrases from formatSensitivityDirection
+      expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
+      expect(out.assistant_text).toMatch(/moderately weakens the lead/);
+      expect(out.assistant_text).toContain('The robustness band is moderate');
+    }
+  });
+
+  it('composeWhatWouldFlip: includes probability, margin, drivers with direction, and robustness', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What would flip this?',
+      analysis: ENRICHED_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Based on this model, Hire two senior engineers locally currently appears to be the favoured option');
+      expect(out.assistant_text).toContain('with a probability of 62%');
+      expect(out.assistant_text).toContain('For Hire one senior engineer overseas to overtake it, the lead of 24 percentage points would need to close');
+      expect(out.assistant_text).toContain('Movement on Delivery risk or Cost overrun risk would shift this result the most');
+      expect(out.assistant_text).toMatch(/moderately strengthens the lead/);
+      expect(out.assistant_text).toMatch(/moderately weakens the lead/);
+      expect(out.assistant_text).toContain('The robustness band is currently moderate');
+    }
+  });
+
+  it('composeMeaning: includes probability and margin sentence when both present', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What does this mean?',
+      analysis: ENRICHED_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Hire two senior engineers locally');
+      expect(out.assistant_text).toContain('with a probability of 62%');
+      expect(out.assistant_text).toContain('It sits ahead of Hire one senior engineer overseas by 24 percentage points');
+      expect(out.assistant_text).toMatch(/reflects (?:your current setup|the model you've built so far)/);
+    }
+  });
+
+  it('composeAdvice: includes margin sentence when runner_up + margin present', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we do?',
+      analysis: ENRICHED_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
+      expect(out.assistant_text).toContain('with a probability of 62%');
+      expect(out.assistant_text).toContain('It sits ahead of Hire one senior engineer overseas by 24 percentage points');
+      expect(out.assistant_text).toContain('The biggest thing to examine next is Delivery risk');
+    }
+  });
+
+  it('composeImprovement: includes robustness band sentence when present', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we improve?',
+      analysis: ENRICHED_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('To improve confidence');
+      expect(out.assistant_text).toContain('Delivery risk');
+      expect(out.assistant_text).toContain('The robustness band is moderate');
+    }
+  });
+
+  it('vocabulary guard: enriched copy never contains "winner" / "winning option" / "recommended"', () => {
+    const messages = [
+      'Explain the results.',
+      'What would flip this?',
+      'What does this mean?',
+      'What should we do?',
+      'What should we improve?',
+      'What drove this result?',
+      'Why is this option ahead?',
+      'What would need to change for another option to look better?',
+    ];
+    for (const message of messages) {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: ENRICHED_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      if (out.matched) {
+        const lower = out.assistant_text.toLowerCase();
+        expect(lower).not.toContain('recommendation');
+        expect(lower).not.toContain('recommended');
+        expect(lower).not.toMatch(/\bthe\s+winners?\b/);
+        expect(lower).not.toMatch(/\bwinning\s+(option|probability|side|choice|outcome)\b/);
+      }
+    }
+  });
+});
+
+// =========================================================================
+// Degrade-gracefully behaviour — when probability / margin / robustness /
+// sensitivity are absent, the enriched composers must omit the
+// surrounding clause silently rather than rendering "Not available" or
+// raw decimals. F.6 invariant: format only; never invent missing values.
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () => {
+  it('explain_results: missing probability → no probability fragment, still names leading option', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        ...FIXTURE_ANALYSIS, // leading_option has no probability field
+        top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Hire two senior engineers locally');
+      // Probability fragment is omitted entirely
+      expect(out.assistant_text).not.toContain('probability of');
+      expect(out.assistant_text).not.toContain('Not available');
+    }
+  });
+
+  it('explain_results: missing margin → no margin fragment, runner-up still mentioned without pp', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        leading_option: { label: 'Hire two senior engineers locally', probability: 0.62 },
+        runner_up: { label: 'Hire one senior engineer overseas', probability: 0.38 },
+        // margin_pp omitted
+        top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Hire one senior engineer overseas sits in second place');
+      // Don't claim a margin we don't have
+      expect(out.assistant_text).not.toContain('percentage points');
+    }
+  });
+
+  it('explain_results: missing robustness band → no robustness sentence', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        leading_option: { label: 'Hire two senior engineers locally', probability: 0.62 },
+        top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
+        // robustness_band omitted
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).not.toContain('robustness band');
+    }
+  });
+
+  it('explain_results: single driver with no sensitivity → no direction clause', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'Explain the results.',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        leading_option: { label: 'Hire two senior engineers locally' },
+        top_drivers: [{ factor_label: 'Delivery risk' }], // no sensitivity_value
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Delivery risk');
+      // Sensitivity-direction clause omitted entirely
+      expect(out.assistant_text).not.toContain('strengthens the lead');
+      expect(out.assistant_text).not.toContain('weakens the lead');
+    }
+  });
+
+  it('what_would_flip: missing margin + missing sensitivity → still names drivers without invented direction', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What would flip this?',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        // Both drivers lack sensitivity_value
+        top_drivers: [
+          { factor_label: 'Delivery risk' },
+          { factor_label: 'Cost overrun risk' },
+        ],
+      },
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Movement on Delivery risk or Cost overrun risk');
+      // No fabricated "Today X has little effect on the lead" when sensitivity is absent
+      expect(out.assistant_text).not.toContain('has little effect on the lead');
+    }
+  });
+
+  it('no raw decimals anywhere in enriched composer output (no Not available leakage)', () => {
+    // Sweep every advice class against a fixture with `leading_option` but
+    // no probability/margin/robustness — guarantees the format helpers
+    // never render "Not available" into prose and never leak raw decimals.
+    const partialAnalysis: AdviceGateAnalysis = {
+      ...FIXTURE_ANALYSIS,
+      leading_option: { label: 'Hire two senior engineers locally' },
+    };
+    const messages = [
+      'Explain the results.',
+      'What would flip this?',
+      'What does this mean?',
+      'What should we do?',
+      'What should we improve?',
+      'What drove this result?',
+      'Why is this option ahead?',
+      'What would need to change for another option to look better?',
+    ];
+    for (const message of messages) {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: partialAnalysis,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      if (out.matched) {
+        expect(out.assistant_text).not.toContain('Not available');
+        expect(out.assistant_text).not.toMatch(/\d+\.\d+/);
+      }
+    }
+  });
+});
+
+// =========================================================================
+// Per-class suggested-action chips. The grounded-fresh-analysis workstream
+// threads one `what_would_flip` chip onto matched explain/meaning/advice/
+// next_step/update_advice/improvement turns, leaves `what_would_flip_free_text`
+// chipless (its prose already nudges toward the change action), and
+// preserves the existing chipless behaviour for readiness / evidence_gap.
+// =========================================================================
+describe('tryPostAnalysisAdviceGate — suggested_actions per class', () => {
+  const oneChipClasses: ReadonlyArray<readonly [string, AdviceClass]> = [
+    ['Explain the results.', 'explain_results_free_text'],
+    ['What drove this result?', 'explain_results_free_text'],
+    ['Why is this option ahead?', 'explain_results_free_text'],
+    ['What does this mean?', 'meaning'],
+    ['What should we do?', 'advice'],
+    ['What should I pay attention to?', 'advice'],
+    ['What is the next step?', 'next_step'],
+    ['How should we update this decision?', 'update_advice'],
+    ['What should we improve?', 'improvement'],
+  ];
+  for (const [message, expectedClass] of oneChipClasses) {
+    it(`${expectedClass} ("${message}") emits exactly one what_would_flip chip`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.advice_class).toBe(expectedClass);
+        expect(out.suggested_actions).toHaveLength(1);
+        const chip = out.suggested_actions[0]!;
+        expect(chip.action_type).toBe('what_would_flip');
+        expect(chip.id).toBe('chip_action_what_would_flip');
+        expect(chip.label).toBe('What could change the outcome?');
+        expect(chip.message).toBe('What could change the outcome of this analysis?');
+      }
+    });
+  }
+
+  const chiplessClasses: ReadonlyArray<readonly [string, AdviceClass]> = [
+    ['What would flip this?', 'what_would_flip_free_text'],
+    ['What would need to change for another option to look better?', 'what_would_flip_free_text'],
+    ["What's blocking the analysis?", 'readiness'],
+    ["What's missing?", 'evidence_gap'],
+  ];
+  for (const [message, expectedClass] of chiplessClasses) {
+    it(`${expectedClass} ("${message}") emits no chip`, () => {
+      const out = tryPostAnalysisAdviceGate({
+        message,
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(out.matched).toBe(true);
+      if (out.matched) {
+        expect(out.advice_class).toBe(expectedClass);
+        expect(out.suggested_actions).toHaveLength(0);
+      }
+    });
+  }
 });
