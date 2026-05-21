@@ -51,8 +51,11 @@ export interface DecisionReviewMeta {
   readonly factor_sensitivity_count: number;
   /** Number of populated entries on isl_results.fragile_edges. */
   readonly fragile_edge_count: number;
-  /** Number of model_critiques carried by deterministic_coaching. 0 until the
-   *  M1 deterministic-coaching pipeline ships. */
+  /** Number of model_critiques carried by deterministic_coaching after
+   *  adapter v1 wiring (2026-05-21). Sourced from
+   *  `enrichment.m1_coaching.model_critiques` when present; 0 when absent
+   *  or when upstream supplies an empty array. May still be 0 in practice
+   *  while PLoT's m1_coaching critiques pipeline matures. */
   readonly model_critique_count: number;
   /** Number of upstream m1_coaching.evidence_gaps entries that were object-
    *  shaped but missing one of the four required fields (factor_id,
@@ -60,10 +63,13 @@ export interface DecisionReviewMeta {
    *  the contract test at decision-review-enricher.contract.test.ts §"_meta
    *  is adapter-only" asserts this key never reaches the user message. */
   readonly evidence_gaps_dropped_count: number;
-  /** Whether the deterministic_coaching block is the M1 fully-derived shape.
-   *  False until M1 ships — v12 uses this to decide whether to fall back to
-   *  raw signals (margin, robustness_level) instead of trusting headline_type
-   *  / readiness. */
+  /** True when at least one real upstream m1_coaching signal was mapped:
+   *  non-default `readiness` or `headline_type`, non-empty `evidence_gaps`,
+   *  or non-empty `model_critiques`. False when adapter fell back entirely
+   *  to safe defaults (no m1_coaching subtree, or every field defaulted /
+   *  was dropped). v13 will branch on this to decide whether to trust the
+   *  `<DETERMINISTIC_COACHING>` block or derive from raw signals (margin,
+   *  robustness_level, factor_sensitivity). */
   readonly has_deterministic_coaching: boolean;
   /** winner.win_probability minus runner_up.win_probability. Null when no
    *  runner-up exists. */

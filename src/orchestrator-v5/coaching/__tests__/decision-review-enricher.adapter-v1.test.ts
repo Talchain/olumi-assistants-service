@@ -191,6 +191,55 @@ describe('adapter v1: m1_coaching → deterministic_coaching mapping', () => {
     expect(f.another_unknown).toBeUndefined();
   });
 
+  it('7. whitespace/empty readiness/headline_type are trimmed; empty-after-trim falls back to defaults', () => {
+    // Codex follow-up (2026-05-22): explicit coverage for the trim() defence.
+    // Upstream " ready " → "ready"; " " → "" → fallback "unknown".
+    const enrichment = baseEnrichment({
+      m1_coaching: {
+        readiness: '   ready   ',
+        headline_type: '\t\nmoderate_winner\t\n',
+        evidence_gaps: [],
+        model_critiques: [],
+      },
+    });
+    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt-1')!;
+    const dc = input.deterministic_coaching;
+    expect(dc.readiness).toBe('ready');
+    expect(dc.headline_type).toBe('moderate_winner');
+    const meta = input._meta!;
+    // Trimmed values are non-default — flag should flip true.
+    expect(meta.has_deterministic_coaching).toBe(true);
+
+    // Whitespace-only / empty strings fall back to defaults.
+    const whitespaceEnrichment = baseEnrichment({
+      m1_coaching: {
+        readiness: '   ',
+        headline_type: '',
+        evidence_gaps: [],
+        model_critiques: [],
+      },
+    });
+    const wsInput = buildInvokeInputForTests(BRIEF, whitespaceEnrichment, 'opt-1')!;
+    const wsDc = wsInput.deterministic_coaching;
+    expect(wsDc.readiness).toBe('unknown');
+    expect(wsDc.headline_type).toBe('neutral');
+    expect(wsInput._meta!.has_deterministic_coaching).toBe(false);
+
+    // Non-string types fall back to defaults (defensive against PLoT shape drift).
+    const wrongTypeEnrichment = baseEnrichment({
+      m1_coaching: {
+        readiness: 42,
+        headline_type: null,
+        evidence_gaps: [],
+        model_critiques: [],
+      },
+    });
+    const wtInput = buildInvokeInputForTests(BRIEF, wrongTypeEnrichment, 'opt-1')!;
+    expect(wtInput.deterministic_coaching.readiness).toBe('unknown');
+    expect(wtInput.deterministic_coaching.headline_type).toBe('neutral');
+    expect(wtInput._meta!.has_deterministic_coaching).toBe(false);
+  });
+
   it('6. malformed evidence_gaps: object-shaped but missing required fields are dropped and counted; user-facing output unaffected', () => {
     // Partial-malformed sub-case: valid + 2 malformed
     const partialEnrichment = baseEnrichment({

@@ -686,14 +686,20 @@ function normaliseDeterministicCoachingFromM1(
   enrichment: Record<string, unknown>,
 ): DeterministicCoachingResult {
   const m1 = readRecord(enrichment.m1_coaching);
-  const readiness =
-    m1 && typeof m1.readiness === 'string' && m1.readiness.length > 0
-      ? m1.readiness
-      : 'unknown';
-  const headline_type =
-    m1 && typeof m1.headline_type === 'string' && m1.headline_type.length > 0
-      ? m1.headline_type
-      : 'neutral';
+  // Trim whitespace defensively; an upstream value of "  ready  " is
+  // semantically "ready" and should not be treated as "unusable, fall back."
+  // We deliberately do NOT enum-allowlist the strings (e.g. restrict to a
+  // fixed set like ["ready","not_ready","unknown"]): if PLoT introduces a
+  // new valid value in the future, a strict gate would silently fall back
+  // to "unknown"/"neutral" and starve the prompt of valid data — recreating
+  // the exact starvation symptom adapter v1 fixes. The prompt's tone
+  // alignment table handles unrecognised enums gracefully today.
+  const rawReadiness =
+    m1 && typeof m1.readiness === 'string' ? m1.readiness.trim() : '';
+  const readiness = rawReadiness.length > 0 ? rawReadiness : 'unknown';
+  const rawHeadline =
+    m1 && typeof m1.headline_type === 'string' ? m1.headline_type.trim() : '';
+  const headline_type = rawHeadline.length > 0 ? rawHeadline : 'neutral';
   const rawGaps = m1 && Array.isArray(m1.evidence_gaps) ? m1.evidence_gaps : [];
   const evidence_gaps: Record<string, unknown>[] = [];
   let dropped = 0;
@@ -777,6 +783,16 @@ function normaliseEvidenceGap(e: Record<string, unknown>): Record<string, unknow
  * confidence_components, confidence_source, confidence_provenance. Unknown
  * upstream fields are NOT auto-forwarded — this guards v11 against
  * surfacing fields it doesn't know how to interpret.
+ *
+ * Nested-object passthrough is intentionally NOT recursively allowlisted:
+ * `confidence_components` and `confidence_provenance` are forwarded as
+ * whole objects. These are bounded provenance subtrees (~2 and ~5 keys
+ * respectively on the captured staging shape) whose purpose is audit /
+ * traceability for the LLM (e.g. `is_provisional: true` lets the model
+ * hedge appropriately). Recursive nested allowlisting would add brittle
+ * maintenance burden without proportional value — accepting the upstream
+ * shape verbatim within these two sub-objects is the deliberate choice.
+ * If PLoT adds new keys here, they will reach v11; that is intended.
  */
 function normaliseFactorSensitivity(
   raw: unknown,
