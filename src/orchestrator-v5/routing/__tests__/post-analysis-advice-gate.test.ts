@@ -274,10 +274,15 @@ describe('tryPostAnalysisAdviceGate — data-availability fallback', () => {
     }
   });
 
-  it('evidence_gap with no readiness AND no drivers → data_unavailable_for_class', () => {
+  it('evidence_gap with no readiness AND no drivers AND no fragile edges → data_unavailable_for_class', () => {
+    // V5 coaching orchestration: `evidence_gap` now accepts ANY of three
+    // grounding signals (readiness data, renderable top driver, renderable
+    // fragile edge). All three must be absent for the gate to refuse.
+    // FIXTURE_ANALYSIS carries a fragile edge by default; clear it here
+    // so this test exercises the truly-empty branch.
     const out = tryPostAnalysisAdviceGate({
       message: "What's missing?",
-      analysis: { ...FIXTURE_ANALYSIS, top_drivers: [] },
+      analysis: { ...FIXTURE_ANALYSIS, top_drivers: [], fragile_edges: [] },
       analysisReady: null,
       freshness: 'fresh',
     });
@@ -285,19 +290,62 @@ describe('tryPostAnalysisAdviceGate — data-availability fallback', () => {
     if (!out.matched) {
       expect(out.reason).toBe('data_unavailable_for_class');
       expect(out.advice_class).toBe('evidence_gap');
-      expect(out.missing_inputs).toContain('analysis_ready_or_top_drivers');
+      expect(out.missing_inputs).toContain('analysis_ready_or_top_drivers_or_fragile_edge');
     }
   });
 
-  it('evidence_gap with drivers OR readiness → still matches (either is sufficient)', () => {
+  it('evidence_gap with drivers OR readiness OR fragile edge → still matches (any is sufficient)', () => {
+    // FIXTURE_ANALYSIS has both top_drivers and fragile_edges; the gate
+    // must match when even a single signal is present (drivers here).
     const out = tryPostAnalysisAdviceGate({
       message: "What's missing?",
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: null, // drivers alone are enough
+      analysisReady: null,
       freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
     if (out.matched) expect(out.advice_class).toBe('evidence_gap');
+  });
+
+  it('evidence_gap with ONLY a renderable fragile edge → still matches', () => {
+    // Regression guard for the renderability fix: previously a
+    // fragile-edge-only analysis was rejected via
+    // `analysis_ready_or_top_drivers` even though the composer can
+    // emit grounded prose from just the fragile edge.
+    const out = tryPostAnalysisAdviceGate({
+      message: "What's missing?",
+      analysis: { ...FIXTURE_ANALYSIS, top_drivers: [] },
+      analysisReady: null,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.assistant_text).toContain('"Delivery risk" to "Successful launch"');
+    }
+  });
+
+  it('evidence_gap with whitespace-only top driver AND no other signal → data_unavailable_for_class', () => {
+    // Renderability gate: a non-empty `top_drivers` array whose only
+    // entry has a whitespace `factor_label` is NOT a renderable signal.
+    // Previously the bare `length > 0` check would pass the gate and
+    // the gap-list fall-through would emit "sensitivity is on   ".
+    const out = tryPostAnalysisAdviceGate({
+      message: "What's missing?",
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        top_drivers: [{ factor_label: '   ', sensitivity_value: 0.45 }],
+        fragile_edges: [],
+      },
+      analysisReady: null,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) {
+      expect(out.reason).toBe('data_unavailable_for_class');
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.missing_inputs).toContain('analysis_ready_or_top_drivers_or_fragile_edge');
+    }
   });
 
   it('advice without leading option → data_unavailable_for_class (uniform contract)', () => {

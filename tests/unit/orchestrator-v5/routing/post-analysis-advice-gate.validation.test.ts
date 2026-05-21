@@ -268,7 +268,7 @@ describe('advice-gate — validation phrasings under data-availability', () => {
     }
   });
 
-  it('evidence_gap with no readiness AND no drivers → data_unavailable_for_class even on validation phrasing', () => {
+  it('evidence_gap with no readiness AND no drivers AND no fragile edges → data_unavailable_for_class even on validation phrasing', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: { ...FIXTURE_ANALYSIS, top_drivers: [], fragile_edges: [] },
@@ -279,7 +279,60 @@ describe('advice-gate — validation phrasings under data-availability', () => {
     if (!out.matched) {
       expect(out.reason).toBe('data_unavailable_for_class');
       expect(out.advice_class).toBe('evidence_gap');
-      expect(out.missing_inputs).toContain('analysis_ready_or_top_drivers');
+      expect(out.missing_inputs).toContain('analysis_ready_or_top_drivers_or_fragile_edge');
+    }
+  });
+
+  it('whitespace-only driver + no fragile edges + no readiness → data_unavailable_for_class (renderability gate)', () => {
+    // Renderability fix: a whitespace-only `factor_label` is NOT a
+    // sufficient grounding signal even though `top_drivers.length > 0`.
+    // Previously this combination would match the gate, then the
+    // gap-list fall-through inside composeEvidenceGap would emit
+    // "sensitivity is on   ". The gate now rejects the match upfront.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        top_drivers: [{ factor_label: '   ', sensitivity_value: 0.45 }],
+        fragile_edges: [],
+      },
+      analysisReady: null,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) {
+      expect(out.reason).toBe('data_unavailable_for_class');
+      expect(out.advice_class).toBe('evidence_gap');
+      expect(out.missing_inputs).toContain('analysis_ready_or_top_drivers_or_fragile_edge');
+    }
+  });
+
+  it('renderable fragile-edge ONLY (no drivers, no readiness) → match with fragile-edge-only validation lead', () => {
+    // Regression guard: previously this analysis shape was rejected
+    // even though the composer can produce grounded prose from just
+    // the fragile edge. The renderability fix accepts fragile_edges as
+    // a first-class grounding signal on its own.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: {
+        ...FIXTURE_ANALYSIS,
+        top_drivers: [],
+        // fragile_edges from FIXTURE_ANALYSIS is preserved.
+      },
+      analysisReady: null,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // No top-driver lead.
+      expect(out.assistant_text).not.toContain('The most useful place to gather evidence is');
+      // Fragile-edge sentence is the sole validation lead.
+      expect(out.assistant_text).toContain('worth validating the link');
+      expect(out.assistant_text).toContain('"Delivery risk" to "Successful launch"');
+      // Gap-list fall-through MUST NOT have fired (composer returned
+      // early with the fragile-edge lead).
+      expect(out.assistant_text).not.toContain('biggest open gap');
     }
   });
 
@@ -298,6 +351,73 @@ describe('advice-gate — validation phrasings under data-availability', () => {
       message: 'What should we research?',
       analysis: FIXTURE_ANALYSIS,
       freshness: 'unknown',
+    });
+    expect(out.matched).toBe(false);
+    if (!out.matched) expect(out.reason).toBe('not_fresh');
+  });
+});
+
+// =========================================================================
+// Chip-click routing — the prompt chip emitted by chip-generator.ts after a
+// successful run_analysis has NO `action_type`. On click, DGAI submits the
+// chip's `message` as the next turn's user text. That message MUST route
+// to `evidence_gap` (validation-aware composer) through the same
+// deterministic, synchronous, no-LLM path tested elsewhere.
+//
+// `tryPostAnalysisAdviceGate` is structurally synchronous — see
+// `post-analysis-advice-gate.timing.test.ts` for the "no Promise" /
+// loop-budget proof. Combined with the routing assertion below, the chip-
+// click flow has end-to-end coverage with zero LLM calls.
+// =========================================================================
+describe('advice-gate — chip-click routing (chip_prompt_validate_assumptions)', () => {
+  // Mirror of the exact `message` string from
+  // src/orchestrator-v5/compose/chip-generator.ts (post-run_analysis
+  // branch). Hard-coded here so a regression that changes the chip copy
+  // surfaces as a clean assertion miss.
+  const CHIP_MESSAGE =
+    'What should we validate or research to build confidence in this decision?';
+
+  it('chip message routes to evidence_gap with validation-aware lead', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: CHIP_MESSAGE,
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.advice_class).toBe('evidence_gap');
+      // Validation-aware lead fires (top_driver lead + fragile-edge
+      // sentence). Verifies the chip click reaches the same deterministic
+      // composer the catch-net free-text tests above cover.
+      expect(out.assistant_text).toContain('The most useful place to gather evidence is');
+      expect(out.assistant_text).toContain('Delivery risk');
+      expect(out.assistant_text).toContain('worth validating the link');
+    }
+  });
+
+  it('chip message is structurally synchronous (no Promise)', () => {
+    // Defence-in-depth: even though the timing test asserts this for
+    // multiple phrasings, the exact chip message must NEVER become
+    // async in isolation either. A Promise here would indicate a
+    // regression that broke the deterministic chip-click path.
+    const result = tryPostAnalysisAdviceGate({
+      message: CHIP_MESSAGE,
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(result).not.toHaveProperty('then');
+  });
+
+  it('chip message is rejected when freshness is stale (chip should not have been emitted)', () => {
+    // The chip itself is gated on a successful run_analysis fact on
+    // the current turn (chip-generator's `handlerJustRan ===
+    // 'run_analysis'` branch). If a stale follow-up turn somehow
+    // replays the chip text, the gate must still suppress so the user
+    // sees the stale-rerun path instead of a stale coaching answer.
+    const out = tryPostAnalysisAdviceGate({
+      message: CHIP_MESSAGE,
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'stale',
     });
     expect(out.matched).toBe(false);
     if (!out.matched) expect(out.reason).toBe('not_fresh');

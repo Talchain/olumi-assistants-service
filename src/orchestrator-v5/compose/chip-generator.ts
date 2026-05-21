@@ -213,23 +213,30 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     input.handlerFacts,
   );
 
-  // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
-  // require a new handler. Both chips emit executable `action_type` so the
-  // chip-click path resolves deterministically via `dispatchDeterministicChipClick`
-  // (saves ~12s ORIENT Sonnet call per click — see Phase 2b round-2 reviewer
-  // finding: the prior `promptChip` for "Explain the result" had no
-  // `action_type`, so the chip click silently routed through Sonnet and
-  // never hit the deterministic bypass). Both also seed a pending action
-  // so a typed "yes" on the next turn can resume via the short-confirm
-  // pre-route.
+  // Rule: after run_analysis succeeds, prompt for the follow-ups the user
+  // is most likely to want next. Two executable chips + one prompt chip:
+  //
+  //   1. `explain_results`   (executable) — deterministic chip-click bypass
+  //   2. `what_would_flip`   (executable) — deterministic chip-click bypass
+  //   3. `validate_assumptions` (prompt) — no `action_type`; the click
+  //      submits `message` as user text and the next turn routes through
+  //      `tryPostAnalysisAdviceGate` → `evidence_gap` (validation-aware
+  //      composer in post-analysis-advice-gate.ts). No handler is implied;
+  //      the chip-egress validator skips registry checks for chips
+  //      without `action_type`.
+  //
+  // Phase 2b round-2 reviewer finding: previously the "Explain the result"
+  // chip had no `action_type`, so chip-clicks silently routed through
+  // Sonnet (ORIENT, ~12s) even though the deterministic dispatcher exists
+  // in `chip-click-dispatch.ts`'s whitelist. Both executable chips emit
+  // `action_type` (plural — matches the registered handler) so the click
+  // hits the bypass and saves the latency. They also seed a pending
+  // action so a typed "yes" on the next turn can resume via the short-
+  // confirm pre-route.
+  //
+  // `MAX_CHIPS = 3` is preserved so the v1.1 boundary contract is
+  // unchanged.
   if (handlerJustRan === 'run_analysis') {
-    // Third chip is a PROMPT chip (no `action_type`): the click submits
-    // the `message` as user text, which the next turn routes through
-    // `tryPostAnalysisAdviceGate` → `evidence_gap` (validation-aware
-    // composer branch in post-analysis-advice-gate.ts). No new handler
-    // is implied; the chip-egress validator skips registry checks for
-    // chips without `action_type`. Keeps `MAX_CHIPS = 3` so the
-    // boundary contract is unchanged.
     return cap([
       {
         id: 'chip_action_explain_results',
